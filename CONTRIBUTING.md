@@ -23,6 +23,11 @@ This project is AGPL-3.0. By contributing, you agree your work is licensed under
 | `main` | Stable beta only — merge from `alpha` when CI is green for the beta slice |
 | `feat/...` | Short-lived; merge into `alpha` first |
 
+## Commit messages
+
+See [docs/commit-conventions.md](docs/commit-conventions.md): one coherent idea, tests in the same
+commit, author **5zorro** + noreply. Zulip-level PR theater is not required for solo work.
+
 ## Pull requests from outside
 
 Open a PR if you like; **do not expect a merge** until **5zorro** has reviewed (often with Cursor). Random drive-by refactors of scope outside the beta slice will be closed.

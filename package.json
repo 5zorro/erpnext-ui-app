@@ -1,15 +1,24 @@
 {
   "name": "erpnext-ui-app",
-  "version": "0.0.0",
+  "version": "0.1.0-m0",
   "private": true,
   "description": "Standalone Electron UI + tools over unmodified ERPNext (Doc / Vanilla skins). AGPL-3.0.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
+  "main": "electron/main.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test tests/**/*.test.js",
+    "start": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
+    "start:linux": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage"
   },
-  "_architecture_note": "Shell talks to ERPNext over HTTP/API only. Vanilla Desk remains available for troubleshooting in a stock browser. Clean Core: never edit vendor apps/frappe or apps/erpnext."
+  "devDependencies": {
+    "electron": "^43.1.1"
+  },
+  "_architecture_note": "Shell talks to ERPNext over HTTP/API only. Vanilla Desk remains available for troubleshooting in a stock browser. Clean Core: never edit vendor apps/frappe or apps/erpnext.",
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
 }

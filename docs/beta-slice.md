@@ -1,39 +1,40 @@
 # Beta slice (locked until the maintainer revises)
 
-Public / `main` only advances when this limited surface is green.
+Public / `main` only advances when a **milestone** is green (see [implementation-plan.md](implementation-plan.md)).
 
-1. Shell opens and reaches sandbox ERPNext over HTTP.
-2. Vanilla skin works (stock Desk in the shell).
-3. One Doc path (prefer **Bill**): read + save; child rows via ERPNext `set_value` discipline, covered by tests.
-4. Offline unit suite always green (`npm test`) with **no** live server.
-5. Smoke e2e (when added) may skip if ERP is down — never the only gate.
+## Current public `main`
 
-## Post-beta (stay on `alpha` until promoted)
+Scaffold + docs. **M0 chrome lives on `alpha` until promoted.**
 
-History multi-window/tabs/tint, AP bowtie view, nickel rounding UI, 5-digit SO/PO series, date fat-finger filter — see museum `open_items.md` OI-040…044.
+## Next promotes (first “real” beta)
 
-## Architecture (unchanged from decision log)
+| Promote | Milestone | Must have |
+|---------|-----------|-----------|
+| **1** | **M0 — Chrome + live ERP** | Home, Vanilla → real Desk/login, DB health; unit tests for health + chrome-state + nav-guard |
+| **2** | **M1 — History flyout** | Deduped doctype history (pure `pushHistory` + UI); unit tests for route parse / dedupe / cap |
 
-```
-erpnext-ui-app (Electron + shortcuts + Doc skin)
-        |  HTTP / API only
-        v
-Unmodified ERPNext  <—— also openable in a stock browser for troubleshooting
-```
+M0 and M1 may ship as **one** `main` release or two — both are “ready for push” only after offline units pass.
 
-Clean Core: never edit `apps/frappe` / `apps/erpnext`. Customize via fixtures / `doc_compat` / this shell.
+## Then (tests may reorder)
+
+3. **M2** — ERP WebContents + real Home (shell reaches sandbox; Vanilla Desk).
+4. **M3** — Doc skin **Bill** read+save (`set_value` discipline); offline units + optional smoke skip-OK.
+5. **M4+** — More doctypes / tools; then OI-040…044 (tint, bowtie, nickel UI, series, date filter).
+
+## Hard rules
+
+- Offline unit suite always green (`npm test`) with **no** live server required for merge.
+- Smoke e2e (when added) may skip if ERP is down — never the only gate.
+- Architecture: shell → HTTP → **unmodified** ERPNext; stock browser still used for troubleshooting.
 
 ## Process
 
 | Branch | Role |
 |--------|------|
-| `alpha` | Day-to-day work; may be ahead of stable |
-| `main` | Stable / publishable beta only |
+| `alpha` | Day-to-day work |
+| `main` | Stable / publishable milestones only |
 
-**5zorro** alone pushes to GitHub. Outside PRs: maintainer consults before merge.
+**5zorro** alone pushes to GitHub.
 
-Canonical process ADR (harness tree):  
-`/home/pi/agent-harness/docs/adr-0002-docflow-rebuild-agpl-alpha-stable.md`
-
-Museum (frozen reference):  
-`/home/pi/agent-harness/erpnext/doc-shell/`
+Museum (frozen): `~/agent-harness/erpnext/doc-shell/`  
+Process ADR: `~/agent-harness/docs/adr-0002-docflow-rebuild-agpl-alpha-stable.md`

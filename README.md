@@ -14,20 +14,23 @@ Standalone **desktop UI + tools** for [ERPNext](https://erpnext.com/) / Frappe �
 
 Language for this tree: **plain JavaScript** (same as the frozen museum shell). That is a tooling choice, not an architecture change.
 
-## Status
-
-Scaffold / process repo (ADR-0002). **Beta slice** is documented in [docs/beta-slice.md](docs/beta-slice.md). Electron chrome is **not** ported yet — unit CI first.
-
-Frozen museum (reference only): `~/agent-harness/erpnext/doc-shell/`
+**Status:** Scaffold + **M0 on `alpha`** (chrome + live ERPNext). Promote M0 when ready.
 
 ## Develop
 
 ```bash
 cd ~/erpnext-ui-app
-npm test          # offline; no Docker / ERPNext required
+npm install
+npm test
+# ERPNext should answer :8080 (ping was verified separately)
+npm start
+# or: ERP_URL=http://localhost:8080 npm start
 ```
 
-Branches: work on `alpha`; promote to `main` only when the beta slice is green. **5zorro** pushes GitHub.
+In the app: **Open Desk / Login** on Home (or click **Vanilla skin**). Log in with your sandbox user.
+**Home** in the toolbar returns to the local Home pane without logging you out.
+
+**Plan:** [docs/implementation-plan.md](docs/implementation-plan.md) · **Beta:** [docs/beta-slice.md](docs/beta-slice.md) · **Commits:** [docs/commit-conventions.md](docs/commit-conventions.md)
 
 ## Related
 

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; height: 46px; overflow: hidden; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #2c3e50; }
+    .bar { display: flex; align-items: center; height: 46px; padding: 0 8px; gap: 8px; }
+    .brand { color: #fff; font-weight: 700; font-size: 14px; padding-left: 6px; }
+    .btn { color: #cbd5e1; background: transparent; border: none; padding: 7px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+    .btn:hover { background: #34495e; color: #fff; }
+    .lbl { color: #6b8299; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    .seg { display: flex; background: #1f2d3d; border-radius: 8px; padding: 2px; }
+    .seg .opt { color: #9fb3c8; background: transparent; border: none; padding: 6px 14px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+    .seg .opt.active { background: #f7fafc; color: #2c3e50; font-weight: 600; }
+    .seg .opt:disabled { opacity: 0.4; cursor: not-allowed; }
+    .spacer { flex: 1; }
+    .health { display: flex; align-items: center; gap: 6px; color: #9fb3c8; font-size: 12px; padding: 0 8px; }
+    .health .dot { width: 9px; height: 9px; border-radius: 50%; background: #7f8c8d; }
+    .health.ok .dot { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+    .health.bad .dot { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
+    .health.ok { color: #d5f5e3; }
+    .health.bad { color: #f9d4cf; }
+    .src { color: #8fa6bd; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="bar" role="navigation" aria-label="Shell toolbar">
+    <span class="brand">Books</span>
+    <button type="button" class="btn" id="btn-home">Home</button>
+    <span class="lbl">View this page as:</span>
+    <div class="seg" role="tablist">
+      <button type="button" class="opt active" id="lens-vanilla" role="tab">Vanilla skin</button>
+      <button type="button" class="opt" id="lens-doc" disabled title="Doc skin arrives in milestone M3" role="tab">Doc skin</button>
+    </div>
+    <span class="spacer"></span>
+    <span class="health" id="health" title="ERPNext /api/method/ping">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="htext">DB …</span>
+    </span>
+    <button type="button" class="btn src" id="btn-source">Source code</button>
+  </div>
+  <script>
+    const api = window.erpUi;
+    const healthEl = document.getElementById("health");
+    const htext = healthEl.querySelector(".htext");
+    const lensVanilla = document.getElementById("lens-vanilla");
+
+    function setHealth(status) {
+      healthEl.classList.toggle("ok", status === "ok");
+      healthEl.classList.toggle("bad", status === "bad");
+      htext.textContent = status === "ok" ? "DB ✓" : status === "bad" ? "DB ✗" : "DB …";
+    }
+
+    function setShowingHome(showingHome) {
+      // On Home, Vanilla is not "active page lens"; highlight Vanilla when ERP is showing
+      lensVanilla.classList.toggle("active", !showingHome);
+    }
+
+    document.getElementById("btn-home").onclick = () => api && api.goHome();
+    lensVanilla.onclick = () => api && api.openErp("/desk");
+    document.getElementById("btn-source").onclick = () => {
+      api && api.getConfig().then((c) => api.openExternal(c.repo));
+    };
+
+    if (api) {
+      api.onHealth(setHealth);
+      api.onState((s) => setShowingHome(!!s.showingHome));
+    }
+  </script>
+</body>
+</html>

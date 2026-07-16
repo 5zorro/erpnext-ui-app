@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Home</title>
+  <style>
+    body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
+    main { max-width: 36rem; padding: 32px; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+    p { line-height: 1.5; color: #546e7a; }
+    code { background: #dfe6e9; padding: 0.1em 0.35em; border-radius: 4px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 1.25rem; }
+    button {
+      background: #2c3e50; color: #fff; border: none; border-radius: 8px;
+      padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #1a252f; }
+    button.secondary { background: #fff; color: #2c3e50; border: 1px solid #cbd5e1; }
+    .hint { margin-top: 1.5rem; font-size: 13px; padding: 12px 14px; background: #fff; border-radius: 8px; border: 1px solid #d6dee6; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Home</h1>
+    <p>
+      This shell talks to <strong>unmodified ERPNext</strong> over HTTP.
+      Log in with your sandbox user, then use the toolbar <strong>Home</strong> / <strong>Vanilla skin</strong> to switch.
+    </p>
+    <p>Server: <code id="erp-base">…</code></p>
+    <div class="actions">
+      <button type="button" id="btn-desk">Open Desk / Login</button>
+      <button type="button" class="secondary" id="btn-login">Open /login</button>
+    </div>
+    <div class="hint">
+      If <strong>DB ✗</strong> in the toolbar, bring the stack up first
+      (<code>~/erpnext/frappe_docker/start-shell.sh</code> or compose), then click Open Desk again.
+      Doc skin arrives in milestone M3.
+    </div>
+  </main>
+  <script>
+    const api = window.erpHome;
+    if (api) {
+      api.getConfig().then((c) => {
+        document.getElementById("erp-base").textContent = c.erpBase || "";
+      });
+      document.getElementById("btn-desk").onclick = () => api.openErp("/desk");
+      document.getElementById("btn-login").onclick = () => api.openErp("/login");
+    }
+  </script>
+</body>
+</html>
