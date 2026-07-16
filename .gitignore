@@ -1,0 +1,22 @@
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+*.swp
+*~
+
+# Local secrets / sandbox credentials — never commit
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
