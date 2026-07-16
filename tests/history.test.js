@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { pushHistory, HISTORY_CAP } from "../src/history.js";
+import { pushHistory, splitHistory, HISTORY_CAP, RECENT_MAX } from "../src/history.js";
 
 describe("pushHistory", () => {
   it("dedupes by doctype and keeps most recent first", () => {
@@ -41,5 +41,31 @@ describe("pushHistory", () => {
     const next = pushHistory(prev, "/desk/item/1");
     assert.equal(prev.length, 0);
     assert.equal(next.length, 1);
+  });
+});
+
+describe("splitHistory", () => {
+  const entry = (dt) => ({ route: `/desk/${dt}/x`, dt, label: dt });
+
+  it("defaults to RECENT_MAX (7) in recent", () => {
+    const list = Array.from({ length: 10 }, (_, i) => entry(`dt-${i}`));
+    const { recent, older } = splitHistory(list);
+    assert.equal(recent.length, RECENT_MAX);
+    assert.equal(older.length, 3);
+    assert.equal(recent[0].dt, "dt-0");
+    assert.equal(older[0].dt, "dt-7");
+  });
+
+  it("puts everything in recent when under cap", () => {
+    const list = [entry("a"), entry("b")];
+    const { recent, older } = splitHistory(list);
+    assert.equal(recent.length, 2);
+    assert.equal(older.length, 0);
+  });
+
+  it("does not mutate input", () => {
+    const list = [entry("a")];
+    splitHistory(list);
+    assert.equal(list.length, 1);
   });
 });

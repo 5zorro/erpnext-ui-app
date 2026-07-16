@@ -97,6 +97,17 @@ When unit tests complain, **fix the design or the code before adding features** 
 
 **Landed on `alpha` (2026-07-16).**
 
+### M1.5 — Recent 7 + Older dropdown
+
+- **Recent** shows at most **7** doctypes; overflow under collapsible **Older (N)**.
+- Pure `splitHistory()` + unit tests; still in-memory (OI-035 session archive deferred).
+
+### Exit → `main` (M1.5)
+
+- [x] `splitHistory` + `RECENT_MAX` unit tests
+- [x] Flyout: Recent ≤7, Older collapsible for remainder
+- [x] M0/M1 still green
+
 **Museum refs:** `main.js` `pushHistory` / `routeInfo` / `hist` view.
 
 ---
