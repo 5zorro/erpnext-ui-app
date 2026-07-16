@@ -14,7 +14,7 @@ Standalone **desktop UI + tools** for [ERPNext](https://erpnext.com/) / Frappe â
 
 Language for this tree: **plain JavaScript** (same as the frozen museum shell). That is a tooling choice, not an architecture change.
 
-**Status:** Scaffold + **M0/M1 on `alpha`** (chrome, live ERPNext, deduped history). Promote when ready.
+**Status:** Scaffold + **M0/M1/M1.5 on `alpha`** (chrome, live ERPNext, Recent 7 + Older history). Promote when ready.
 
 ## Develop
 
