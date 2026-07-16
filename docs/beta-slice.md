@@ -2,16 +2,16 @@
 
 Public / `main` only advances when a **milestone** is green (see [implementation-plan.md](implementation-plan.md)).
 
-## Current public `main`
+## Current public tip (local `alpha`)
 
-Scaffold + docs. **M0 chrome lives on `alpha` until promoted.**
+**M0** chrome + live ERP · **M1** deduped Recent history — ready to promote when you push.
 
-## Next promotes (first “real” beta)
+## Next promotes
 
 | Promote | Milestone | Must have |
 |---------|-----------|-----------|
-| **1** | **M0 — Chrome + live ERP** | Home, Vanilla → real Desk/login, DB health; unit tests for health + chrome-state + nav-guard |
-| **2** | **M1 — History flyout** | Deduped doctype history (pure `pushHistory` + UI); unit tests for route parse / dedupe / cap |
+| **1** | **M0+M1** (this bundle) | Home, Vanilla Desk/login, DB health, left Recent history |
+| **next** | **M2** | Richer Home tiles + nav polish |
 
 M0 and M1 may ship as **one** `main` release or two — both are “ready for push” only after offline units pass.
 
