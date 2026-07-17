@@ -73,29 +73,42 @@ When unit tests complain, **fix the design or the code before adding features** 
 
 ## Milestone 1 — Deduplicated history flyout (second `main` candidate)
 
-**Intent:** Left (or flyout) nav of recent doctypes, **one entry per doctype**, most-recent first (museum `pushHistory`).
+**Intent:** Left nav of recent doctypes, **one entry per doctype**, most-recent first (museum `pushHistory`).
 
 ### Pure units
 
 | Module | Tests |
 |--------|-------|
-| `src/history.js` | `pushHistory(list, route)`: parse doctype from `/desk|app/...` route; dedupe by doctype; cap length (e.g. 12); label via injectable map (stub map in tests; later `doc-anchors`) |
-| `src/route-info.js` | SSoT route parser (doctype + record) — shared with later Doc binding |
+| `src/history.js` | `pushHistory`: dedupe by doctype; cap; labels |
+| `src/route-info.js` | Parse `/desk|app/...` (+ strip `erpBase`) |
+| `src/doctype-labels.js` | Friendly labels (Bill, Item Receipt, …) |
 
 ### UI
 
-- History panel lists labels; click emits navigate intent (stub OK until M2 has a real ERP view).
-- Persist optional later (OI-035 session-by-date is **out of scope** for M1).
+- Left **Recent** panel; click opens that route in the ERP view.
+- Fed by ERP `did-navigate` / in-page navigations.
+- Persist / session-by-date (OI-035) and tint/multi-window (OI-040) **out of scope**.
 
 ### Exit → `main`
 
-- [ ] History dedupe/cap/parser fully covered by unit tests
-- [ ] Flyout renders and updates from navigation events (can be driven by fake routes in a tiny harness)
-- [ ] M0 still green
+- [x] History dedupe/cap/parser covered by unit tests
+- [x] Flyout renders and updates from navigation; click navigates
+- [x] M0 still green
 
-**Museum refs:** `main.js` `pushHistory` / `routeInfo` / `hist` view; OI-040 tint/multi-window **deferred**.
+**Landed on `alpha` (2026-07-16).**
 
-**Together, M0+M1 = first “ready for public `main`” story** if you prefer one promote: chrome + history as a single release. Splitting two promotes is also fine (M0 then M1).
+### M1.5 — Recent 7 + Older dropdown
+
+- **Recent** shows at most **7** doctypes; overflow under collapsible **Older (N)**.
+- Pure `splitHistory()` + unit tests; still in-memory (OI-035 session archive deferred).
+
+### Exit → `main` (M1.5)
+
+- [x] `splitHistory` + `RECENT_MAX` unit tests
+- [x] Flyout: Recent ≤7, Older collapsible for remainder
+- [x] M0/M1 still green
+
+**Museum refs:** `main.js` `pushHistory` / `routeInfo` / `hist` view.
 
 ---
 

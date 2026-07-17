@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>History</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #1a252f; color: #cbd5e1; font-family: system-ui, "Segoe UI", Roboto, sans-serif; overflow-y: auto; }
+    .head {
+      padding: 10px 12px 6px; font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
+      color: #6b8299; border-bottom: 1px solid #2c3e50;
+    }
+    ul { list-style: none; margin: 0; padding: 6px; }
+    li button {
+      width: 100%; text-align: left; border: none; background: transparent; color: #cbd5e1;
+      padding: 8px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    }
+    li button:hover { background: #2c3e50; color: #fff; }
+    .empty { padding: 14px 12px; font-size: 12px; color: #6b8299; line-height: 1.4; }
+    .older-toggle {
+      display: block; width: calc(100% - 12px); margin: 4px 6px 0; text-align: left;
+      border: none; background: #243140; color: #9fb3c8; padding: 8px 10px; border-radius: 6px;
+      font-size: 11px; cursor: pointer; letter-spacing: .3px;
+    }
+    .older-toggle:hover { background: #2c3e50; color: #fff; }
+    .older-toggle[hidden] { display: none; }
+    .older-panel { border-top: 1px solid #2c3e50; margin-top: 4px; }
+    .older-panel[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div class="head">Recent</div>
+  <div class="empty" id="empty">Open Desk and visit forms — each doctype appears once here.</div>
+  <ul id="list-recent" hidden></ul>
+  <button type="button" class="older-toggle" id="older-toggle" hidden aria-expanded="false">▼ Older</button>
+  <div class="older-panel" id="older-panel" hidden>
+    <ul id="list-older"></ul>
+  </div>
+  <script type="module">
+    import { splitHistory } from "../src/history.js";
+
+    const listRecent = document.getElementById("list-recent");
+    const listOlder = document.getElementById("list-older");
+    const emptyEl = document.getElementById("empty");
+    const olderToggle = document.getElementById("older-toggle");
+    const olderPanel = document.getElementById("older-panel");
+    const api = window.erpHist;
+    let olderOpen = false;
+
+    function fillList(ul, rows) {
+      ul.innerHTML = "";
+      rows.forEach((h) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = h.label || h.dt;
+        b.title = h.route || "";
+        b.onclick = () => api && api.openErp(h.route);
+        li.appendChild(b);
+        ul.appendChild(li);
+      });
+    }
+
+    function setOlderOpen(open) {
+      olderOpen = open;
+      olderPanel.hidden = !open;
+      olderToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      const n = listOlder.querySelectorAll("li").length;
+      olderToggle.textContent = open ? `▲ Older (${n})` : `▼ Older (${n})`;
+    }
+
+    olderToggle.onclick = () => setOlderOpen(!olderOpen);
+
+    function render(items) {
+      const rows = Array.isArray(items) ? items : [];
+      const { recent, older } = splitHistory(rows);
+
+      if (!rows.length) {
+        emptyEl.hidden = false;
+        listRecent.hidden = true;
+        olderToggle.hidden = true;
+        olderPanel.hidden = true;
+        return;
+      }
+
+      emptyEl.hidden = true;
+      listRecent.hidden = false;
+      fillList(listRecent, recent);
+
+      if (older.length) {
+        fillList(listOlder, older);
+        olderToggle.hidden = false;
+        setOlderOpen(olderOpen);
+      } else {
+        olderToggle.hidden = true;
+        olderPanel.hidden = true;
+        olderOpen = false;
+      }
+    }
+
+    if (api) api.onHistory(render);
+    render([]);
+  </script>
+</body>
+</html>
