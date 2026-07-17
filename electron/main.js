@@ -1,5 +1,5 @@
 /**
- * Electron main — M0 chrome + live ERPNext; M1 deduped history flyout.
+ * Electron main — M0 chrome + live ERPNext; M1 history; M2 launcher tiles + DevTools.
  */
 import { app, BrowserWindow, WebContentsView, ipcMain, shell } from "electron";
 import path from "node:path";
@@ -27,10 +27,68 @@ let erp = null;
 let hist = null;
 let showingHome = true;
 let healthTimer = null;
+/** @type {"ok"|"bad"|"unknown"} */
+let lastHealth = "unknown";
 /** @type {import("../src/history.js").HistoryEntry[]} */
 let history = [];
 
+const OFF_SENTINEL_X = -20000;
+
+/**
+ * E2E=1 only: Playwright cannot reliably drive WebContentsView as Pages
+ * (see e2e/GOTCHAS.md). Expose a main-process test surface instead.
+ */
+function syncE2eApi() {
+  if (process.env.E2E !== "1") return;
+  globalThis.__erpE2e = {
+    lastHealth,
+    showingHome,
+    erpBase: ERP_BASE,
+    getErpUrl: () =>
+      erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
+    getHistory: () => history.map((h) => ({ ...h })),
+    isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
+    trackNav: (url) => {
+      trackNav(url);
+      return history.map((h) => ({ ...h }));
+    },
+    showLauncher: () => {
+      showHome();
+      return { showingHome };
+    },
+    goHome: () => {
+      showErp("/", { forceLoad: true });
+      return { showingHome };
+    },
+    openErp: (route) => {
+      showErp(route || "/desk", { forceLoad: true });
+      return { showingHome };
+    },
+    viewBounds: () => ({
+      showingHome,
+      chrome: chrome ? chrome.getBounds() : null,
+      hist: hist ? hist.getBounds() : null,
+      home: home ? home.getBounds() : null,
+      erp: erp ? erp.getBounds() : null,
+    }),
+    /** Run JS in a named WebContentsView (chrome|home|hist|erp). */
+    execInView: (name, js) => {
+      const map = { chrome, home, hist, erp };
+      const view = map[name];
+      if (!view || view.webContents.isDestroyed()) {
+        return Promise.reject(new Error(`view not ready: ${name}`));
+      }
+      return view.webContents.executeJavaScript(js);
+    },
+  };
+  if (win && !win.isDestroyed()) {
+    win.setTitle(`erpnext-ui-app [health=${lastHealth}]`);
+  }
+}
+
 function sendHealth(status) {
+  lastHealth = status;
+  syncE2eApi();
   if (chrome && !chrome.webContents.isDestroyed()) {
     chrome.webContents.send("health", status);
   }
@@ -55,6 +113,7 @@ function trackNav(url) {
     labels: DOCTYPE_LABELS,
   });
   sendHistory();
+  syncE2eApi();
 }
 
 async function tickHealth() {
@@ -87,6 +146,7 @@ function showHome() {
   showingHome = true;
   place();
   sendUiState();
+  syncE2eApi();
 }
 
 function showErp(route = "/desk", opts = {}) {
@@ -101,6 +161,7 @@ function showErp(route = "/desk", opts = {}) {
     erp.webContents.loadURL(target);
   }
   sendUiState();
+  syncE2eApi();
 }
 
 function createWindow() {
@@ -152,6 +213,12 @@ function createWindow() {
   hist.webContents.loadFile(path.join(__dirname, "history.html"));
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
 
+  // Playwright Electron attaches to BrowserWindow pages; our UI is WebContentsView-only.
+  // E2E=1 loads a tiny probe so launch can complete; health still comes from real ping → __erpE2e.
+  if (process.env.E2E === "1") {
+    win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
+  }
+
   erp.webContents.setWindowOpenHandler(({ url }) =>
     isAllowedErpUrl(ERP_BASE, url) ? { action: "allow" } : { action: "deny" },
   );
@@ -185,6 +252,7 @@ function createWindow() {
 
   showHome();
   healthTimer = setInterval(tickHealth, HEALTH_PING_MS);
+  syncE2eApi();
 }
 
 ipcMain.handle("get-config", () => ({
@@ -192,13 +260,23 @@ ipcMain.handle("get-config", () => ({
   repo: "https://github.com/5zorro/erpnext-ui-app",
 }));
 
-ipcMain.on("go-home", () => showHome());
+// Toolbar Home → ERP site root (same as opening localhost:8080/), not the splash page.
+ipcMain.on("go-home", () => showErp("/", { forceLoad: true }));
+ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-erp", (_e, route) => {
   const r = typeof route === "string" && route ? route : "/desk";
   showErp(r, { forceLoad: r !== "/desk" });
 });
 ipcMain.on("open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);
+});
+ipcMain.on("open-devtools", (_e, target) => {
+  const map = { erp, chrome, home, hist };
+  const key = typeof target === "string" && map[target] ? target : "erp";
+  const view = map[key];
+  if (view && !view.webContents.isDestroyed()) {
+    view.webContents.openDevTools({ mode: "detach" });
+  }
 });
 
 app.whenReady().then(createWindow);
