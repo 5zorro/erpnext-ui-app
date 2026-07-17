@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>e2e-probe</title>
+</head>
+<body data-testid="e2e-probe">
+  <!--
+    Playwright Electron needs a BrowserWindow Page. Our real chrome is a WebContentsView
+    (often not exposed as a Page). Under E2E=1 main loads this probe so launch can attach;
+    health assertions use globalThis.__erpE2e / window title from the real ping path.
+  -->
+  E2E probe — real toolbar is the WebContentsView above; health mirrored for tests.
+</body>
+</html>
