@@ -1,17 +1,21 @@
 # Beta slice (locked until the maintainer revises)
 
-Public / `main` only advances when a **milestone** is green (see [implementation-plan.md](implementation-plan.md)).
+Public / `main` only advances when a **milestone** is green (see the current dated
+[implementation-plan-2026-07-15.md](implementation-plan-2026-07-15.md); plans are temporary — see
+[../HANDOFF.md](../HANDOFF.md)).
 
 ## Current public tip (local `alpha`)
 
-**M0** chrome + live ERP · **M1** deduped Recent history — ready to promote when you push.
+**M0** chrome + live ERP · **M1/M1.5** Recent history · **M2** launcher tiles + ERP console — ready to promote when you push.
 
 ## Next promotes
 
 | Promote | Milestone | Must have |
 |---------|-----------|-----------|
-| **1** | **M0+M1** (this bundle) | Home, Vanilla Desk/login, DB health, left Recent history |
-| **next** | **M2** | Richer Home tiles + nav polish |
+| **1** | **M0+M1+M1.5** (this bundle) | Home→`/`, Vanilla Desk/login, DB health, Recent 7 + Older |
+| **next** | **M3** | Bill Doc binder pattern + dirty-gate units |
+
+How / scaffold POC matrix: [implementation-plan-2026-07-15.md](implementation-plan-2026-07-15.md).
 
 M0 and M1 may ship as **one** `main` release or two — both are “ready for push” only after offline units pass.
 
@@ -24,7 +28,9 @@ M0 and M1 may ship as **one** `main` release or two — both are “ready for pu
 ## Hard rules
 
 - Offline unit suite always green (`npm test`) with **no** live server required for merge.
-- Smoke e2e (when added) may skip if ERP is down — never the only gate.
+- Full automated confidence (when built): units + Playwright browser→ERP workflows + sparse
+  Playwright Electron shell smoke — see `HANDOFF.md` Test strategy (OI-049). Smoke/e2e may skip if
+  ERP or display is down — never the only gate.
 - Architecture: shell → HTTP → **unmodified** ERPNext; stock browser still used for troubleshooting.
 
 ## Process

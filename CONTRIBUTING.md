@@ -5,7 +5,10 @@ This project is AGPL-3.0. By contributing, you agree your work is licensed under
 ## Before you write code
 
 1. Read [docs/beta-slice.md](docs/beta-slice.md) — what belongs on `main` vs `alpha`.
-2. Prefer **unit tests** for pure logic. Live ERPNext / Electron e2e is optional and may skip when the server is down; it is **never** a substitute for unit CI.
+2. Prefer **unit tests** for pure logic (`npm test`). See [HANDOFF.md](HANDOFF.md) **Test strategy**:
+   full confidence = units + optional Playwright browser→ERP + sparse Playwright Electron smoke.
+   Live ERP / Electron e2e may skip when the server or display is down; they are **never** a
+   substitute for unit CI.
 3. **Clean Core:** do not patch vendor Frappe/ERPNext. Troubleshoot the server in a stock browser against unmodified ERPNext.
 
 ## Commit discipline (Zulip-inspired)
