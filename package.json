@@ -10,7 +10,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/**/*.test.js",
+    "test": "node --test tests/*.test.js",
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
     "start:linux": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage"
   },
