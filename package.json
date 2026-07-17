@@ -11,10 +11,13 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:xvfb": "xvfb-run -a playwright test",
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
     "start:linux": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "electron": "^43.1.1"
   },
   "_architecture_note": "Shell talks to ERPNext over HTTP/API only. Vanilla Desk remains available for troubleshooting in a stock browser. Clean Core: never edit vendor apps/frappe or apps/erpnext.",

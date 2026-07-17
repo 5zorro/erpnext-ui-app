@@ -10,9 +10,11 @@ yarn-error.log*
 .env.*
 !.env.example
 
-# Test / coverage
-coverage/
-.nyc_output/
+# Playwright / Electron artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
 
 # Editor
 .vscode/
