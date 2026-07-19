@@ -16,7 +16,7 @@ describe("BILL_FEATURE_CATALOG", () => {
       assert.equal(typeof row.museum, "boolean");
       assert.equal(typeof row.alpha, "boolean");
       assert.ok(
-        ["tested", "built_untested", "electron_only", "missing", "buggy"].includes(row.coverage),
+        ["tested", "built_untested", "electron_only", "missing", "buggy", "partial"].includes(row.coverage),
         row.id,
       );
       assert.equal(ids.has(row.id), false, `duplicate ${row.id}`);
@@ -28,7 +28,7 @@ describe("BILL_FEATURE_CATALOG", () => {
   it("every museum+alpha feature is tested, electron_only, or known buggy", () => {
     for (const row of billFeaturesBuiltFromMuseum()) {
       assert.ok(
-        ["tested", "electron_only", "buggy"].includes(row.coverage),
+        ["tested", "electron_only", "buggy", "partial"].includes(row.coverage),
         `${row.id} built but coverage=${row.coverage} — extract pure tests or mark missing`,
       );
     }

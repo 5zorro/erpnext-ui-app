@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("erpBill", {
   addItem: () => ipcRenderer.invoke("bill-add-item"),
   deleteItem: (rowIndex) => ipcRenderer.invoke("bill-delete-item", rowIndex),
   clearAllQty: () => ipcRenderer.invoke("bill-clear-all-qty"),
+  attachFile: () => ipcRenderer.invoke("bill-attach-file"),
   save: (opts) => ipcRenderer.invoke("bill-save", opts || {}),
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),
   listSources: (supplier) => ipcRenderer.invoke("bill-list-sources", supplier || ""),
