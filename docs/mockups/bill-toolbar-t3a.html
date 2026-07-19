@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bill toolbar pattern — T3a (mockup, not wired)</title>
+  <style>
+    :root {
+      --ink: #1f2d3d;
+      --muted: #64748b;
+      --line: #cbd5e1;
+      --bg: #eef2f5;
+      --card: #fff;
+      --accent: #2c3e50;
+      --warn: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink);
+      background: var(--bg); padding: 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .lede { color: var(--muted); font-size: 14px; max-width: 52rem; margin: 0 0 20px; line-height: 1.45; }
+    .note {
+      background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
+      padding: 10px 12px; font-size: 13px; color: #9a3412; max-width: 52rem; margin-bottom: 18px;
+    }
+    .shell {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+      max-width: 52rem; overflow: hidden;
+    }
+    .zone { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .zone:last-child { border-bottom: none; }
+    .zone-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button {
+      border: 1px solid var(--line); background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.ghost { background: #f8fafc; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .dirty-pill {
+      font-size: 11px; padding: 3px 8px; border-radius: 999px;
+      background: #fef3c7; color: var(--warn); border: 1px solid #fcd34d;
+    }
+    .clean-pill {
+      font-size: 11px; padding: 3px 8px; border-radius: 999px;
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+    }
+    .popover {
+      margin-top: 8px; padding: 10px; background: #f8fafc; border: 1px dashed var(--line);
+      border-radius: 8px; font-size: 13px;
+    }
+    .popover strong { display: block; margin-bottom: 6px; }
+    .popover .row { margin-top: 6px; }
+    .mini { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+    .alt {
+      margin-top: 28px; max-width: 52rem;
+    }
+    .alt h2 { font-size: 16px; margin: 0 0 8px; }
+    table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    table.cmp th, table.cmp td { border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+    table.cmp th { background: #f8fafc; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); }
+    .good { color: #047857; }
+    .bad { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <h1>Proposed Bill chrome (T3a) — review mockup</h1>
+  <p class="lede">
+    Goal: Find / New / Print need a <em>commit choice</em> when the Bill is dirty
+    (discard · save draft · save &amp; submit), without a 3×N button matrix.
+    Print stays at the top. Attach stays with Memo. New = clear this page after the commit choice.
+  </p>
+  <div class="note">
+    <strong>Not wired.</strong> Open this file in a browser to review. No git commit for this mockup.
+    Path: <code>docs/mockups/bill-toolbar-t3a.html</code>
+  </div>
+
+  <div class="shell" aria-label="Recommended pattern">
+    <div class="zone">
+      <div class="zone-label">1 · Always available (top)</div>
+      <div class="row">
+        <button type="button" class="ghost" id="demo-print">Print</button>
+        <span class="dirty-pill" id="dirty-flag">Unsaved changes</span>
+        <span style="flex:1"></span>
+        <button type="button" class="ghost">Open in Vanilla</button>
+      </div>
+      <p class="mini">Print is a document action, not a nav action — keep it here. If dirty, Print opens the same commit popover (must save before print).</p>
+    </div>
+
+    <div class="zone">
+      <div class="zone-label">2 · Where am I going? (find / new)</div>
+      <div class="row">
+        <button type="button" id="demo-find">Find Bill…</button>
+        <button type="button" id="demo-new">New Bill</button>
+        <button type="button" class="ghost">Select PO / source</button>
+        <button type="button" class="ghost">Refresh</button>
+      </div>
+      <div class="popover" id="gate" hidden>
+        <strong id="gate-title">Unsaved changes — before Find Bill…</strong>
+        Choose how to leave this draft, then the action runs:
+        <div class="row">
+          <button type="button" data-gate="discard">Discard, then continue</button>
+          <button type="button" class="primary" data-gate="save">Save draft, then continue</button>
+          <button type="button" data-gate="submit">Save &amp; submit, then continue</button>
+          <button type="button" class="ghost" data-gate="cancel">Cancel</button>
+        </div>
+      </div>
+      <p class="mini">
+        <strong>Empty-field shortcut (dogfood idea):</strong> focus Vendor, press Tab with nothing typed
+        → same as <em>Find Bill…</em> (or “Find vendor or bill” chooser). Click-away on blank Vendor could offer the same.
+        Not shown as extra buttons — one Find entry point.
+      </p>
+    </div>
+
+    <div class="zone">
+      <div class="zone-label">3 · Commit this Bill (save bar)</div>
+      <div class="row">
+        <button type="button" class="primary">Save draft</button>
+        <button type="button">Save draft &amp; submit</button>
+        <button type="button" class="ghost">Revert unsaved changes</button>
+      </div>
+      <p class="mini">
+        Revert = T3b (museum): reload from ERP, or if still <code>new-…</code> wipe to a fresh Bill on this page.
+        These three stay visible; they do not multiply Find/New/Print.
+      </p>
+    </div>
+
+    <div class="zone">
+      <div class="zone-label">4 · Memo row (already shipped)</div>
+      <div class="row">
+        <span style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">Memo</span>
+        <span style="flex:1;border:1px solid var(--line);border-radius:6px;padding:8px;color:var(--muted);font-size:13px;">(textarea under items)</span>
+        <button type="button">Attach file to this bill</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="alt">
+    <h2>Why not three rows of every action?</h2>
+    <table class="cmp">
+      <thead>
+        <tr>
+          <th>Pattern</th>
+          <th>Pros</th>
+          <th>Cons</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3×N grid<br/><span class="bad">(Discard×Find, Save×Find, Submit×Find, …)</span></td>
+          <td>Every combo one click</td>
+          <td>Noise; clerks hunt; duplicates Save bar</td>
+        </tr>
+        <tr>
+          <td><strong>Action + commit popover</strong><br/><span class="good">(recommended above)</span></td>
+          <td>One Find / New / Print; choice only when dirty; matches existing dirty-gate dialogs</td>
+          <td>Extra click when dirty (acceptable)</td>
+        </tr>
+        <tr>
+          <td>Always prompt Save / Discard / Stay (OS dialog)</td>
+          <td>Familiar</td>
+          <td>No “Save &amp; submit then Find” without a fourth button; feels heavier than in-page popover</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="mini" style="margin-top:12px;">
+      Recommended default when <em>clean</em>: Find / New / Print run immediately.
+      When <em>dirty</em>: show the in-toolbar popover (or the existing message box) with the three continue paths + Cancel.
+    </p>
+  </div>
+
+  <script>
+    const dirtyFlag = document.getElementById("dirty-flag");
+    const gate = document.getElementById("gate");
+    const gateTitle = document.getElementById("gate-title");
+    let dirty = true;
+    let pending = null;
+
+    function syncDirty() {
+      dirtyFlag.textContent = dirty ? "Unsaved changes" : "All saved";
+      dirtyFlag.className = dirty ? "dirty-pill" : "clean-pill";
+    }
+    syncDirty();
+
+    function requestAction(name) {
+      pending = name;
+      if (!dirty) {
+        alert("Demo: would run “" + name + "” immediately (clean).");
+        pending = null;
+        return;
+      }
+      gate.hidden = false;
+      gateTitle.textContent = "Unsaved changes — before " + name;
+    }
+
+    document.getElementById("demo-print").onclick = () => requestAction("Print");
+    document.getElementById("demo-find").onclick = () => requestAction("Find Bill…");
+    document.getElementById("demo-new").onclick = () => requestAction("New Bill");
+
+    gate.querySelectorAll("[data-gate]").forEach((btn) => {
+      btn.onclick = () => {
+        const mode = btn.getAttribute("data-gate");
+        if (mode === "cancel") {
+          gate.hidden = true;
+          pending = null;
+          return;
+        }
+        if (mode === "discard") dirty = false;
+        if (mode === "save" || mode === "submit") dirty = false;
+        syncDirty();
+        gate.hidden = true;
+        alert("Demo: " + mode + " → then “" + pending + "”");
+        pending = null;
+      };
+    });
+  </script>
+</body>
+</html>

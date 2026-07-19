@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 3;
+  var VERSION = 5;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   function stripHtml(s) {
@@ -67,6 +67,34 @@
       }
       setTimeout(finish, maxWaitMs);
     });
+  }
+
+  /** Run ERPNext taxes_and_totals so net_total / grand_total match items (+ taxes). */
+  function refreshTaxesAndTotals(f) {
+    try {
+      f.refresh_field("items");
+    } catch (eItems) {}
+    try {
+      f.refresh_field("taxes");
+    } catch (e0) {}
+    try {
+      if (f.cscript && typeof f.cscript.calculate_taxes_and_totals === "function") {
+        f.cscript.calculate_taxes_and_totals();
+      } else if (typeof f.calculate_taxes_and_totals === "function") {
+        f.calculate_taxes_and_totals();
+      }
+    } catch (e1) {}
+    try {
+      f.refresh_fields([
+        "items",
+        "taxes",
+        "total",
+        "net_total",
+        "total_taxes_and_charges",
+        "grand_total",
+        "rounded_total",
+      ]);
+    } catch (e2) {}
   }
 
   function setValueAsync(doctype, name, field, value) {
@@ -293,6 +321,8 @@
         try {
           f.refresh_field("items");
         } catch (e4) {}
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
         return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -381,6 +411,8 @@
         try {
           f.refresh_field("items");
         } catch (e3) {}
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
         return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -405,6 +437,95 @@
         try {
           f.refresh_field("items");
         } catch (e1) {}
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
+  var TAX_EDIT_FIELDS = {
+    account_head: true,
+    description: true,
+    rate: true,
+    tax_amount: true,
+    add_deduct_tax: true,
+  };
+
+  function setTaxRow(rowIndex, field, value) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        if (!TAX_EDIT_FIELDS[field]) {
+          return { ok: false, reason: "Tax field not editable: " + field };
+        }
+        var row = (f.doc.taxes || [])[rowIndex];
+        if (!row || !row.name || !row.doctype) {
+          return { ok: false, reason: "Tax row missing — refresh and retry." };
+        }
+        await setValueAsync(row.doctype, row.name, field, value);
+        await afterAjaxQuiet();
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
+  /** Thin cut: add Actual tax/charge row (account + amount). */
+  function addTaxRow(accountHead, taxAmount, description) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        var acct = accountHead != null ? String(accountHead).trim() : "";
+        if (!acct) return { ok: false, reason: "Account required." };
+        var amt = Number(taxAmount);
+        if (!Number.isFinite(amt)) return { ok: false, reason: "Tax amount required." };
+        var row = f.add_child("taxes");
+        row.charge_type = "Actual";
+        row.account_head = acct;
+        row.description = description != null && String(description).trim()
+          ? String(description).trim()
+          : acct;
+        row.tax_amount = amt;
+        row.add_deduct_tax = "Add";
+        row.category = "Total";
+        f.refresh_field("taxes");
+        await afterAjaxQuiet();
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
+  function deleteTaxRow(rowIndex) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        var row = (f.doc.taxes || [])[rowIndex];
+        if (!row) return { ok: false, reason: "Tax row not found." };
+        var grid = f.get_field("taxes") && f.get_field("taxes").grid;
+        if (grid && row.name && grid.grid_rows_by_docname && grid.grid_rows_by_docname[row.name]) {
+          grid.grid_rows_by_docname[row.name].remove();
+        } else if (grid && grid.delete_row) {
+          grid.delete_row(rowIndex);
+        } else {
+          (f.doc.taxes || []).splice(rowIndex, 1);
+          f.refresh_field("taxes");
+        }
+        await afterAjaxQuiet();
+        refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
         return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -420,6 +541,9 @@
     setRow: setRow,
     mergeFromMapped: mergeFromMapped,
     zeroAllQty: zeroAllQty,
+    setTaxRow: setTaxRow,
+    addTaxRow: addTaxRow,
+    deleteTaxRow: deleteTaxRow,
     afterAjaxQuiet: afterAjaxQuiet,
   };
 })();

@@ -11,8 +11,14 @@ contextBridge.exposeInMainWorld("erpBill", {
   addItem: () => ipcRenderer.invoke("bill-add-item"),
   deleteItem: (rowIndex) => ipcRenderer.invoke("bill-delete-item", rowIndex),
   clearAllQty: () => ipcRenderer.invoke("bill-clear-all-qty"),
+  setTax: (rowIndex, field, value) =>
+    ipcRenderer.invoke("bill-set-tax", rowIndex, field, value),
+  addTax: (accountHead, taxAmount, description) =>
+    ipcRenderer.invoke("bill-add-tax", accountHead, taxAmount, description || ""),
+  deleteTax: (rowIndex) => ipcRenderer.invoke("bill-delete-tax", rowIndex),
   attachFile: () => ipcRenderer.invoke("bill-attach-file"),
   save: (opts) => ipcRenderer.invoke("bill-save", opts || {}),
+  revertUnsaved: () => ipcRenderer.invoke("bill-revert-unsaved"),
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),
   listSources: (supplier) => ipcRenderer.invoke("bill-list-sources", supplier || ""),
   mergeSource: (kind, name) => ipcRenderer.invoke("bill-merge-source", kind, name),

@@ -83,7 +83,9 @@ export function valuesMeaningfullyEqual(before, after, opts = {}) {
  * @returns {"text" | "number" | "date"}
  */
 export function dirtyCompareKindForField(field) {
-  if (field === "qty" || field === "rate" || field === "__amount_due") return "number";
+  if (field === "qty" || field === "rate" || field === "tax_amount" || field === "__amount_due") {
+    return "number";
+  }
   if (field === "posting_date" || field === "due_date") return "date";
   return "text";
 }

@@ -114,6 +114,7 @@ export const BILL_LINK_DOCTYPES = {
   payment_terms_template: "Payment Terms Template",
   item_code: "Item",
   project: "Project",
+  account_head: "Account",
 };
 
 /**

@@ -29,11 +29,19 @@ export const MUSEUM_BILL_TOOLBAR = Object.freeze([
 export const ALPHA_BILL_TOOLBAR = Object.freeze([
   { id: "btn-save", label: "Save draft", museumEquivalent: "Save" },
   { id: "btn-submit", label: "Save draft & submit", museumEquivalent: "Save" },
+  { id: "btn-revert", label: "Revert unsaved changes", museumEquivalent: null },
   { id: "btn-select-po", label: "Select PO / source", museumEquivalent: "Select PO" },
   { id: "btn-refresh", label: "Refresh", museumEquivalent: null },
   { id: "btn-vanilla", label: "Open in Vanilla", museumEquivalent: null },
 ]);
 
+/**
+ * Museum footer "Revert Changes Since Last Save" — alpha ships as toolbar Revert.
+ * @returns {FeatureStatus}
+ */
+export function revertUnsavedStatus() {
+  return "present";
+}
 /**
  * @param {string} museumLabel
  * @returns {FeatureStatus}
