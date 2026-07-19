@@ -5,6 +5,7 @@ import {
   nextLinkHighlightIndex,
   resolveLinkPickIndex,
   linkPickerKeyAction,
+  nextFieldAfterLinkPick,
 } from "../src/link-picker-policy.js";
 
 describe("initialLinkHighlightIndex", () => {
@@ -41,5 +42,13 @@ describe("linkPickerKeyAction", () => {
     assert.equal(linkPickerKeyAction("Escape", { dropdownOpen: true, optionCount: 2 }), "close");
     assert.equal(linkPickerKeyAction("ArrowDown", { dropdownOpen: false, optionCount: 0 }), "search");
     assert.equal(linkPickerKeyAction("ArrowDown", { dropdownOpen: true, optionCount: 3 }), "move_down");
+  });
+});
+
+describe("nextFieldAfterLinkPick", () => {
+  it("sends focus to description after item_code", () => {
+    assert.equal(nextFieldAfterLinkPick("item_code"), "description");
+    assert.equal(nextFieldAfterLinkPick("project"), null);
+    assert.equal(nextFieldAfterLinkPick("qty"), null);
   });
 });

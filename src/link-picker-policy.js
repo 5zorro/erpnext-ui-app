@@ -69,3 +69,14 @@ export function linkPickerKeyAction(key, state) {
   }
   return "none";
 }
+
+/**
+ * After a Link pick on a line field, which field should receive focus?
+ * Item → Description (paint rebuilds the row; without this, focus jumps to table start).
+ * @param {string} field
+ * @returns {string|null}
+ */
+export function nextFieldAfterLinkPick(field) {
+  if (field === "item_code") return "description";
+  return null;
+}

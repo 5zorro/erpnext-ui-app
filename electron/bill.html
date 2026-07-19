@@ -77,6 +77,21 @@
     .money-cents { text-decoration: underline; text-underline-offset: 2px; }
     input.money-cost { text-align: right; }
     .ro.money-cost { display: block; text-align: right; }
+    .amount-due-row { align-items: stretch; }
+    .amount-due-stack {
+      position: relative; flex: 1; min-width: 0;
+    }
+    .money-due-disp {
+      display: block; width: 100%; box-sizing: border-box;
+      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 10px;
+      background: #fff; cursor: text; min-height: 36px; line-height: 1.35;
+    }
+    .money-due-disp:focus { outline: 2px solid #93c5fd; outline-offset: 1px; }
+    .money-due-disp.is-empty { color: #94a3b8; }
+    .money-due-input {
+      width: 100%; box-sizing: border-box; text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
     .hint { margin-top: 10px; font-size: 12px; color: #64748b; }
     details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
     details.assumptions summary { cursor: pointer; font-weight: 600; }
@@ -175,8 +190,11 @@
           <div class="field"><label>Ref No. (Supplier Invoice No.)</label><input id="f-billno" data-field="bill_no" data-testid="bill-ref" /></div>
           <div class="field">
             <label>Amount Due</label>
-            <div class="row">
-              <input id="f-amountdue" data-testid="bill-amount-due" />
+            <div class="row amount-due-row">
+              <div class="amount-due-stack">
+                <span id="f-amountdue-disp" class="money-amt money-due-disp" data-testid="bill-amount-due-disp" tabindex="0" title="Click or Tab to edit"></span>
+                <input id="f-amountdue" class="money-due-input" data-testid="bill-amount-due" inputmode="decimal" autocomplete="off" hidden />
+              </div>
               <span class="chip idle" id="due-chip" data-testid="bill-due-chip" title="Checksum vs item totals">·</span>
             </div>
           </div>
@@ -259,6 +277,7 @@
       nextLinkHighlightIndex,
       resolveLinkPickIndex,
       linkPickerKeyAction,
+      nextFieldAfterLinkPick,
     } from "../src/link-picker-policy.js";
     import {
       shouldOpenSourceModalAfterVendorPick,
@@ -295,6 +314,7 @@
       date: document.getElementById("f-date"),
       billno: document.getElementById("f-billno"),
       amountdue: document.getElementById("f-amountdue"),
+      amountdueDisp: document.getElementById("f-amountdue-disp"),
       duedate: document.getElementById("f-duedate"),
       memo: document.getElementById("f-memo"),
       items: document.getElementById("items-body"),
@@ -478,6 +498,70 @@
       el.submit.disabled = block;
     }
 
+    /** Show $#,###.__ (underlined cents) when not editing Amount Due. */
+    function paintAmountDueDisplay() {
+      if (!el.amountdueDisp) return;
+      const html = formatUsdAmountHtml(amountDue);
+      if (html) {
+        el.amountdueDisp.innerHTML = html;
+        el.amountdueDisp.classList.remove("is-empty");
+      } else {
+        el.amountdueDisp.textContent = "—";
+        el.amountdueDisp.classList.add("is-empty");
+      }
+    }
+
+    function beginAmountDueEdit() {
+      if (!editable() || el.amountdue.readOnly) return;
+      const n = parseMoney(amountDue);
+      el.amountdue.value = n != null ? String(n) : "";
+      amountDueAtFocus = el.amountdue.value;
+      el.amountdue.hidden = false;
+      if (el.amountdueDisp) el.amountdueDisp.hidden = true;
+      try {
+        el.amountdue.focus();
+        el.amountdue.select();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function endAmountDueEdit() {
+      const n = parseMoney(el.amountdue.value);
+      amountDue = n != null ? String(n) : "";
+      const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
+      if (api) api.setAmountDue(amountDue, changed);
+      el.amountdue.hidden = true;
+      if (el.amountdueDisp) el.amountdueDisp.hidden = false;
+      paintAmountDueDisplay();
+      paintChip();
+    }
+
+    function focusItemCell(rowIndex, field) {
+      const tryFocus = () => {
+        const inp = el.items.querySelector(
+          `input[data-row="${rowIndex}"][data-field="${field}"]`,
+        );
+        if (!inp) return false;
+        try {
+          inp.focus({ preventScroll: false });
+          if (typeof inp.select === "function") inp.select();
+        } catch {
+          try {
+            inp.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+        return true;
+      };
+      if (tryFocus()) return;
+      requestAnimationFrame(() => {
+        tryFocus();
+        setTimeout(tryFocus, 50);
+      });
+    }
+
     function editable() {
       return isDraftBillDoc(lastDoc);
     }
@@ -541,6 +625,8 @@
           if (res && res.ok) {
             paint(res.doc, amountDue);
             setStatus("Line updated.");
+            const nextField = nextFieldAfterLinkPick(field);
+            if (nextField) focusItemCell(ri, nextField);
           } else {
             setStatus((res && res.reason) || "Line update failed.", "err");
             await refresh();
@@ -892,6 +978,10 @@
       if (amountDue === "" && h["Amount Due"] !== "" && h["Amount Due"] != null) {
         amountDue = String(h["Amount Due"]);
       }
+      paintAmountDueDisplay();
+      if (el.amountdueDisp) {
+        el.amountdueDisp.hidden = !el.amountdue.hidden;
+      }
       el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
       el.memo.value = h.Memo ?? "";
       const canEdit = isDraftBillDoc(doc);
@@ -902,6 +992,10 @@
       el.duedate.readOnly = !canEdit;
       el.memo.readOnly = !canEdit;
       el.amountdue.readOnly = !canEdit;
+      if (el.amountdueDisp) {
+        el.amountdueDisp.tabIndex = canEdit ? 0 : -1;
+        el.amountdueDisp.style.pointerEvents = canEdit ? "" : "none";
+      }
       el.address.readOnly = true;
       el.addLine.disabled = !canEdit;
       if (el.clearQty) el.clearQty.disabled = !canEdit;
@@ -1040,19 +1134,35 @@
     wireDateField(el.date);
     wireDateField(el.duedate);
 
+    el.amountdueDisp &&
+      el.amountdueDisp.addEventListener("click", () => beginAmountDueEdit());
+    el.amountdueDisp &&
+      el.amountdueDisp.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " " || ev.key === "F2") {
+          ev.preventDefault();
+          beginAmountDueEdit();
+        }
+      });
     el.amountdue.addEventListener("focus", () => {
       amountDueAtFocus = el.amountdue.value;
     });
     el.amountdue.addEventListener("input", () => {
-      amountDue = el.amountdue.value;
+      const n = parseMoney(el.amountdue.value);
+      amountDue = n != null ? String(n) : el.amountdue.value;
       paintChip();
       if (api) api.setAmountDue(amountDue);
     });
-    el.amountdue.addEventListener("change", () => {
-      amountDue = el.amountdue.value;
-      const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
-      if (api) api.setAmountDue(amountDue, changed);
-      paintChip();
+    el.amountdue.addEventListener("blur", () => endAmountDueEdit());
+    el.amountdue.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        el.amountdue.blur();
+      }
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        el.amountdue.value = amountDueAtFocus;
+        el.amountdue.blur();
+      }
     });
 
     document.getElementById("btn-refresh").onclick = () => refresh();

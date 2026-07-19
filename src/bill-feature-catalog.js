@@ -102,9 +102,10 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     id: "amount-due-usd-blur",
     name: "Amount Due USD $ blur format",
     museum: true,
-    alpha: false,
-    coverage: "missing",
-    pureModule: "bill-map.js (formatUsdAmount stub)",
+    alpha: true,
+    coverage: "tested",
+    pureModule: "money.js",
+    notes: "Same $#,###.__ underline as line Amount; click/Tab display to edit",
   },
   {
     id: "reconciliation-report",
