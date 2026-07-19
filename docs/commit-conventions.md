@@ -3,11 +3,17 @@
 We are a small AGPL app with one maintainer. Borrow **discipline** from Zulip, not the full
 contributor gauntlet.
 
+## Commit vs push
+
+- **Agents commit** locally whenever useful (including dogfood `checkpoint:` commits).
+- **Only 5zorro pushes** to GitHub. Commits stay on the machine until a maintainer push.
+- Before a public push: tidy history if needed (`rebase`/`squash`); keep promote-ready commits coherent.
+
 ## Do
 
-- **One coherent idea per commit** (Zulip / Git project rule).
+- **One coherent idea per commit** for promote-ready work (Zulip / Git project rule). Checkpoints may be looser.
 - Imperative subject, ~50 chars: `Add DB health ping helpers` not `Added stuff`.
-- Put **tests in the same commit** as the code they cover (`npm test` green).
+- Put **tests in the same commit** as the code they cover when shipping a feature (`npm test` green).
 - Optional body for *why*; link milestone (`M0`, `M1`) when useful.
 - Author as **5zorro** + GitHub noreply (already set in this clone’s local config).
 

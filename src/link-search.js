@@ -4,8 +4,11 @@
  */
 
 /**
- * @typedef {{ value: string, description: string }} LinkOption
+ * @typedef {{ value: string, description: string, action?: string }} LinkOption
  */
+
+/** Sentinel value: empty Supplier search → open Vanilla “new Supplier”. */
+export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
 
 /**
  * Normalize frappe.desk.search.search_link (or list-like) payloads.
@@ -35,6 +38,37 @@ export function normalizeSearchLinkResults(message) {
 }
 
 /**
+ * When Supplier search has no rows, offer a single “Go to Vendor add…” action.
+ * @param {LinkOption[]} rows
+ * @param {string} doctype
+ * @returns {LinkOption[]}
+ */
+export function withEmptySearchActions(rows, doctype) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length) return list;
+  if (doctype === "Supplier") {
+    return [
+      {
+        value: LINK_ACTION_CREATE_SUPPLIER,
+        description: "Go to Vendor add…",
+        action: "create_supplier",
+      },
+    ];
+  }
+  return list;
+}
+
+/**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreateSupplierLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_SUPPLIER;
+  return optOrValue.value === LINK_ACTION_CREATE_SUPPLIER || optOrValue.action === "create_supplier";
+}
+
+/**
  * Client-side refine (when ERP returns a broad list or for offline fixtures).
  * @param {LinkOption[]} options
  * @param {string} query
@@ -51,6 +85,7 @@ export function filterLinkOptions(options, query, opts = {}) {
   const scored = [];
   for (const o of list) {
     if (!o || !o.value) continue;
+    if (isCreateSupplierLinkAction(o)) continue;
     const hay = `${o.value} ${o.description || ""}`.toLowerCase();
     if (!hay.includes(q)) continue;
     const starts = o.value.toLowerCase().startsWith(q) || (o.description || "").toLowerCase().startsWith(q);
@@ -66,6 +101,7 @@ export function filterLinkOptions(options, query, opts = {}) {
  */
 export function linkOptionLabel(opt) {
   if (!opt || !opt.value) return "";
+  if (isCreateSupplierLinkAction(opt)) return opt.description || "Go to Vendor add…";
   if (opt.description && opt.description !== opt.value) {
     return `${opt.description} (${opt.value})`;
   }

@@ -76,6 +76,7 @@
     .link-opt:hover, .link-opt:focus { background: #eaf4ff; outline: none; }
     .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
     .link-opt.active { background: #eaf4ff; }
+    .link-opt.link-action { font-style: italic; color: #1d4ed8; }
     .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
     .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
@@ -210,6 +211,8 @@
     import {
       linkDoctypeForBillField,
       linkOptionLabel,
+      withEmptySearchActions,
+      isCreateSupplierLinkAction,
     } from "../src/link-search.js";
     import {
       valuesMeaningfullyEqual,
@@ -231,6 +234,8 @@
     let painting = false;
     /** @type {WeakMap<HTMLElement, true>} */
     const linkMounted = new WeakMap();
+    /** Prevent stacking multiple source modals. */
+    let sourceModalOpen = false;
 
     const el = {
       status: document.getElementById("status"),
@@ -307,6 +312,17 @@
       }
 
       async function pickValue(v) {
+        if (isCreateSupplierLinkAction(v)) {
+          dd.hidden = true;
+          hi = -1;
+          if (api && api.openVendorAdd) {
+            setStatus("Opening Vendor add in Vanilla…");
+            api.openVendorAdd();
+          } else {
+            setStatus("Vendor add API missing — restart the shell.", "err");
+          }
+          return;
+        }
         input.value = v;
         dd.hidden = true;
         hi = -1;
@@ -327,7 +343,7 @@
           opts = [];
           return;
         }
-        const rows = res.results || [];
+        const rows = withEmptySearchActions(res.results || [], doctype);
         if (!rows.length) {
           dd.innerHTML = `<div class="link-muted">No matches${q ? ` for “${escapeHtml(q)}”` : ""}</div>`;
           opts = [];
@@ -336,11 +352,12 @@
         dd.innerHTML = rows
           .map(
             (o) =>
-              `<button type="button" class="link-opt" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
+              `<button type="button" class="link-opt${isCreateSupplierLinkAction(o) ? " link-action" : ""}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
           )
           .join("");
         opts = [...dd.querySelectorAll(".link-opt")];
-        hi = opts.length === 1 ? 0 : -1;
+        // Always highlight first row so Tab/Enter work without an arrow key.
+        hi = opts.length ? 0 : -1;
         if (hi === 0) opts[0].classList.add("active");
         opts.forEach((b) => {
           b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
@@ -365,8 +382,8 @@
           return;
         }
         if (ev.key === "Tab") {
-          // Sole or highlighted → commit + close (Enter also works). Do not cycle the list.
-          const pick = hi >= 0 ? opts[hi] : opts.length === 1 ? opts[0] : null;
+          // Highlighted (or first) → commit + close. Do not cycle the list.
+          const pick = hi >= 0 ? opts[hi] : opts[0];
           if (pick) {
             ev.preventDefault();
             await pickValue(pick.getAttribute("data-value") || "");
@@ -378,7 +395,7 @@
         }
         if (ev.key === "Enter") {
           ev.preventDefault();
-          const pick = hi >= 0 ? opts[hi] : opts.length === 1 ? opts[0] : null;
+          const pick = hi >= 0 ? opts[hi] : opts[0];
           if (pick) await pickValue(pick.getAttribute("data-value") || "");
           return;
         }
@@ -508,17 +525,18 @@
     function ensureHeaderLinkPickers() {
       mountLinkPicker(el.vendor, "Supplier", async (v) => {
         if (!api || !editable()) return;
+        // Open source modal immediately (museum: don't wait on set_value / ajax quiet).
+        // setHeader runs in parallel so address/terms can refresh while the modal is up.
         setStatus("Setting vendor…");
+        const modalPromise = openSourcePicker(v);
         const res = await api.setHeader("supplier", v);
         if (res && res.ok) {
           paint(res.doc || lastDoc, amountDue);
-          if (res.openSourcePicker) {
-            await openSourcePicker(v || res.supplier || (res.doc && res.doc.supplier));
-          }
+          setStatus("Choose a source (or NIC).");
         } else {
           setStatus((res && res.reason) || "Vendor update failed.", "err");
-          await refresh();
         }
+        await modalPromise;
       });
       mountLinkPicker(el.terms, "Payment Terms Template", async (v) => {
         if (!api || !editable()) return;
@@ -536,6 +554,7 @@
         setStatus("Source picker API missing — restart the shell.", "err");
         return;
       }
+      if (sourceModalOpen) return;
       const sup =
         normalizeEditableText(supplier) ||
         normalizeEditableText(lastDoc && lastDoc.supplier) ||
@@ -554,6 +573,7 @@
       showSourceModal(groups, async (it) => {
         if (!it || it.kind === "nic") {
           setStatus("No source — enter lines manually.");
+          focusTermsField();
           return;
         }
         setStatus(`Pulling from ${it.name}…`);
@@ -565,7 +585,30 @@
           setStatus((merged && merged.reason) || "Could not pull source.", "err");
           await refresh();
         }
+        focusTermsField();
       });
+    }
+
+    function focusTermsField() {
+      try {
+        if (api && api.focusBillSurface) api.focusBillSurface();
+      } catch {
+        /* ignore */
+      }
+      const tryFocus = () => {
+        try {
+          el.terms.focus({ preventScroll: false });
+          el.terms.select();
+        } catch {
+          try {
+            el.terms.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+      tryFocus();
+      setTimeout(tryFocus, 50);
     }
 
     /**
@@ -573,6 +616,8 @@
      * @param {(it: import("../src/source-modal.js").SourceItem) => void|Promise<void>} onChoose
      */
     function showSourceModal(groups, onChoose) {
+      if (sourceModalOpen) return;
+      sourceModalOpen = true;
       let gi = 0;
       let ii = 0;
       const back = document.createElement("div");
@@ -580,6 +625,10 @@
       back.dataset.testid = "bill-source-modal";
       const box = document.createElement("div");
       box.className = "src-box";
+      box.tabIndex = -1;
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+      box.setAttribute("aria-label", "Source Selection");
       box.innerHTML = `<div class="src-title">Source Selection — Tab: group · ↑/↓: item · Enter: select</div>
         <div class="src-body"></div>
         <div class="src-foot">
@@ -589,6 +638,7 @@
       back.appendChild(box);
       document.body.appendChild(back);
       const body = box.querySelector(".src-body");
+      const pickBtn = box.querySelector('[data-act="pick"]');
 
       function activeItem() {
         return groups[gi] && groups[gi].items[ii];
@@ -626,6 +676,7 @@
       }
 
       function close() {
+        sourceModalOpen = false;
         document.removeEventListener("keydown", onKey, true);
         if (back.parentNode) back.parentNode.removeChild(back);
       }
@@ -666,12 +717,33 @@
       }
 
       document.addEventListener("keydown", onKey, true);
-      box.querySelector('[data-act="pick"]').onclick = () => choose();
+      pickBtn.onclick = () => choose();
       box.querySelector('[data-act="cancel"]').onclick = () => close();
       back.addEventListener("click", (ev) => {
         if (ev.target === back) close();
       });
       draw();
+
+      // Focus Bill surface (Electron) + modal control (DOM). No input lockdowns.
+      try {
+        if (api && api.focusBillSurface) api.focusBillSurface();
+      } catch {
+        /* ignore */
+      }
+      const focusModal = () => {
+        try {
+          pickBtn.focus();
+        } catch {
+          try {
+            box.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+      focusModal();
+      setTimeout(focusModal, 30);
+      setStatus("Choose a source (or NIC).");
     }
 
     function setFormBlocked(blocked, reason) {
@@ -802,12 +874,12 @@
         return;
       }
       const res = await api.setHeader(field, next);
-      if (res && res.skipped) return;
       if (res && res.openSourcePicker) {
-        paint(res.doc, amountDue);
-        await openSourcePicker(next);
+        paint(res.doc || lastDoc, amountDue);
+        await openSourcePicker(next || res.supplier);
         return;
       }
+      if (res && res.skipped) return;
       await refresh();
     }
 

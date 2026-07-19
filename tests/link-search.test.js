@@ -5,6 +5,9 @@ import {
   filterLinkOptions,
   linkOptionLabel,
   linkDoctypeForBillField,
+  withEmptySearchActions,
+  isCreateSupplierLinkAction,
+  LINK_ACTION_CREATE_SUPPLIER,
 } from "../src/link-search.js";
 
 describe("normalizeSearchLinkResults", () => {
@@ -66,5 +69,21 @@ describe("linkDoctypeForBillField", () => {
     assert.equal(linkDoctypeForBillField("supplier"), "Supplier");
     assert.equal(linkDoctypeForBillField("item_code"), "Item");
     assert.equal(linkDoctypeForBillField("qty"), null);
+  });
+});
+
+describe("withEmptySearchActions", () => {
+  it("adds Go to Vendor add when Supplier search is empty", () => {
+    const out = withEmptySearchActions([], "Supplier");
+    assert.equal(out.length, 1);
+    assert.equal(out[0].value, LINK_ACTION_CREATE_SUPPLIER);
+    assert.match(out[0].description, /Vendor add/i);
+    assert.equal(isCreateSupplierLinkAction(out[0]), true);
+  });
+
+  it("leaves non-empty and other doctypes alone", () => {
+    const rows = [{ value: "A", description: "A" }];
+    assert.equal(withEmptySearchActions(rows, "Supplier"), rows);
+    assert.deepEqual(withEmptySearchActions([], "Item"), []);
   });
 });

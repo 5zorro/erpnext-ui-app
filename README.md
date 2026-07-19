@@ -48,5 +48,5 @@ that ERP route. **Vanilla skin** → Desk; **ERP console** → DevTools for dogf
 
 ## Related
 
-- Process: unit tests first; `alpha` → `main` when a milestone is green; only the maintainer pushes GitHub.
+- Process: unit tests first; `alpha` → `main` when a milestone is green; agents may **commit** freely — only the maintainer **pushes** GitHub.
 - Clean Core: never edit vendor ERPNext/Frappe in place — customize via fixtures / HTTP shell only.

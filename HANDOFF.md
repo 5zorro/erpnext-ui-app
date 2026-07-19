@@ -60,7 +60,7 @@ flowchart LR
 2. **HTTP only** — shell talks to ERP over the network; vanilla browser remains a valid fallback.
 3. **Pure first** — new behavior lands in `src/` + `tests/` before Electron wiring.
 4. **One configured ERP base** — `src/config.js` / env; panels must not invent a second server URL.
-5. **AGPL public tree** — process/license in ADR-0002; 5zorro (5zorro) alone pushes GitHub.
+5. **AGPL public tree** — process/license in ADR-0002. **Commits:** agents/harness may commit freely on local branches (checkpoints OK). **Pushes:** only 5zorro (5zorro) pushes to GitHub.
 
 ### Extension points (where new work plugs in)
 
@@ -192,4 +192,4 @@ Rules:
 cd ~/erpnext-ui-app && npm test && npm start
 ```
 
-GitHub: only **5zorro** pushes. Fix CI locally (`npm test`) before asking for a push.
+**Git workflow:** Cursor/agents **commit** as often as useful (local checkpoints on `wip/…` or `alpha`). Only **5zorro** **pushes** to GitHub. Fix CI locally (`npm test`) before asking for a push.
