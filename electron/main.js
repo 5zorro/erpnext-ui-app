@@ -957,12 +957,18 @@ ipcMain.handle("bill-list-sources", async (_e, supplier) => {
       var prsD = res[3] || [];
       var prNames = prs.concat(prsD).map(function (r) { return r.name; }).filter(Boolean);
       var prItems = [];
+      // Best-effort: child-table get_list often 403s for clerks (HAR 2026-07-18).
+      // Must not fail the whole source modal — PR rows just omit PO# labels.
       if (prNames.length) {
-        prItems = await frappe.db.get_list("Purchase Receipt Item", {
-          filters: { parent: ["in", prNames] },
-          fields: ["parent", "purchase_order"],
-          limit: 500,
-        }) || [];
+        try {
+          prItems = await frappe.db.get_list("Purchase Receipt Item", {
+            filters: { parent: ["in", prNames] },
+            fields: ["parent", "purchase_order"],
+            limit: 500,
+          }) || [];
+        } catch (ePr) {
+          prItems = [];
+        }
       }
       return {
         ok: true,

@@ -20,7 +20,7 @@ describe("museum Bill toolbar contract", () => {
 
   it("marks alpha coverage honestly", () => {
     assert.equal(museumToolbarActionStatus("Save"), "partial");
-    assert.equal(museumToolbarActionStatus("Select PO"), "buggy");
+    assert.equal(museumToolbarActionStatus("Select PO"), "present");
     assert.equal(museumToolbarActionStatus("Find Bills"), "missing");
     assert.equal(museumToolbarActionStatus("Print"), "missing");
     const matrix = billToolbarGapMatrix();

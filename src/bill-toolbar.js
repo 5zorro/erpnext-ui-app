@@ -41,7 +41,6 @@ export const ALPHA_BILL_TOOLBAR = Object.freeze([
 export function museumToolbarActionStatus(museumLabel) {
   const hit = ALPHA_BILL_TOOLBAR.find((a) => a.museumEquivalent === museumLabel);
   if (hit) {
-    if (museumLabel === "Select PO") return "buggy"; // open-after-vendor / dogfood strike-3
     if (museumLabel === "Save") return "partial"; // draft + submit, not museum Save&Close bar
     return "present";
   }

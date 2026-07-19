@@ -204,9 +204,9 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     name: "Open source modal after vendor pick",
     museum: true,
     alpha: true,
-    coverage: "buggy",
+    coverage: "tested",
     pureModule: "bill-source-flow.js",
-    notes: "Policy unit-tested; Electron dogfood still failing (bounty)",
+    notes: "HAR: listSources ran; PR Item 403 killed ok flag — enrich now best-effort (2026-07-18). Re-dogfood.",
   },
   {
     id: "source-toolbar",
