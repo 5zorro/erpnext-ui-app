@@ -48,3 +48,8 @@ Open a PR if you like; **do not expect a merge** until **5zorro** has reviewed (
 ## Publishing
 
 Only **5zorro** pushes the public GitHub remote. Agents **may commit** freely; they **must not push** `main`/`alpha`/`wip/*` to origin unless 5zorro explicitly asks.
+
+## Maintainer identity
+
+In docs and comments, refer to the maintainer as **5zorro** (GitHub username), not a personal first name.
+
