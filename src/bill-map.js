@@ -59,6 +59,23 @@ export const BILL_ASSUMPTIONS = [
   "This ERP is items-based — enter expenses as Chart-of-Accounts-mapped items, not direct GL lines here.",
 ];
 
+/** Museum Expenses-tab disclaimer (SPECS tabNotes / EXPENSE_NOTE). */
+export const BILL_EXPENSE_NOTE =
+  "This ERP is an items-based ERP — enter expenses as Chart-of-Accounts-mapped items, not as direct GL lines here.";
+
+/**
+ * Museum SPECS assumptions (bind.js) — longer wording; alpha list is the short form shown in Doc Bill.
+ * Tests assert alpha covers the same topics (not character-identical).
+ */
+export const MUSEUM_BILL_ASSUMPTION_TOPICS = Object.freeze([
+  "draft_then_submit",
+  "warehouse_finished_goods",
+  "from_po_posts_bill_and_receipt",
+  "from_pr_posts_bill_only",
+  "amount_due_must_match",
+  "items_based_not_direct_gl",
+]);
+
 export function getBillAnchor() {
   return {
     conceptId: "bill",
@@ -198,4 +215,109 @@ export function amountDueMatchesGrandTotal(amountDue, grandTotal, eps = 0.005) {
 /** Writable header fields (for Doc form wiring later). */
 export function writableBillHeaderFields() {
   return BILL_HEADER_FIELDS.filter((f) => f.field && !f.readOnly);
+}
+
+/**
+ * Draft Bill? ERP may send docstatus as number or string.
+ * @param {object|null|undefined} doc
+ */
+export function isDraftBillDoc(doc) {
+  if (!doc || typeof doc !== "object") return false;
+  return Number(doc.docstatus) === 0;
+}
+
+/**
+ * Project items with every qty zeroed (OI-026 Clear all qty) — pure, no ERP write.
+ * @param {object|null|undefined} doc
+ * @returns {object[]}
+ */
+export function projectClearedQtyItems(doc) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  return items.map((it) => {
+    const row = { ...(it || {}) };
+    row.qty = 0;
+    const rate = Number(row.rate) || 0;
+    row.amount = 0 * rate;
+    return row;
+  });
+}
+
+/**
+ * Packing-slip hash after clear: Σ qty must be 0.
+ * @param {object|null|undefined} doc
+ */
+export function packingSlipHashAfterClear(doc) {
+  const projected = { items: projectClearedQtyItems(doc) };
+  return { sumQty: sumBillLineQty(projected), ok: sumBillLineQty(projected) === 0 };
+}
+
+/**
+ * Reconciliation report (OI-002): typed Due vs grand_total vs Σ line amounts.
+ * Alpha chip enforces typed Due ↔ grand_total; Σ lines is diagnostic.
+ *
+ * @param {object|null|undefined} doc
+ * @param {string|number|null|undefined} amountDue
+ * @param {number} [eps=0.005]
+ */
+export function reconciliationReport(doc, amountDue, eps = 0.005) {
+  const grand = doc && doc.grand_total != null ? Number(doc.grand_total) : NaN;
+  const linesSum = sumBillLineAmount(doc);
+  const chip = amountDueChecksumStatus(amountDue, grand, eps);
+  const dueEmpty = amountDue == null || amountDue === "";
+  const dueNum = dueEmpty
+    ? null
+    : Number(String(amountDue).replace(/[^0-9.\-]/g, ""));
+  const linesVsGrand =
+    Number.isFinite(grand) && Number.isFinite(linesSum)
+      ? Math.abs(linesSum - grand) <= eps
+      : false;
+  return {
+    chip,
+    linesSum,
+    grandTotal: Number.isFinite(grand) ? grand : null,
+    amountDue: dueNum,
+    linesMatchGrandTotal: linesVsGrand,
+    saveAllowed: amountDueMatchesGrandTotal(amountDue, grand, eps),
+  };
+}
+
+/**
+ * UI: disable Save / Submit when checksum is mismatch (idle/match OK).
+ * @param {"idle"|"match"|"mismatch"} status
+ */
+export function saveActionsBlockedByChecksum(status) {
+  return status === "mismatch";
+}
+
+/**
+ * Museum fmtUsd — stub until Amount Due blur ships (catalog: amount-due-usd-blur).
+ * @param {string|number|null|undefined} n
+ * @returns {string}
+ */
+export function formatUsdAmount(n) {
+  if (n == null || n === "") return "";
+  const x = Number(String(n).replace(/[^0-9.\-]/g, ""));
+  if (!Number.isFinite(x)) return "";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(x);
+}
+
+/**
+ * Topic tags covered by BILL_ASSUMPTIONS (for museum parity tests).
+ * @returns {string[]}
+ */
+export function billAssumptionTopicsCovered() {
+  const text = BILL_ASSUMPTIONS.join("\n").toLowerCase();
+  /** @type {string[]} */
+  const hit = [];
+  if (/draft/.test(text) && /submit/.test(text)) hit.push("draft_then_submit");
+  if (/finished goods/.test(text)) hit.push("warehouse_finished_goods");
+  if (/purchase order/.test(text) && /item receipt/.test(text)) {
+    hit.push("from_po_posts_bill_and_receipt");
+  }
+  if (/item receipt/.test(text) && /only the bill/.test(text)) {
+    hit.push("from_pr_posts_bill_only");
+  }
+  if (/amount due/.test(text)) hit.push("amount_due_must_match");
+  if (/items-based|chart-of-accounts/.test(text)) hit.push("items_based_not_direct_gl");
+  return hit;
 }

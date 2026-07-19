@@ -14,6 +14,16 @@ import {
   writableBillHeaderFields,
   isEditableBillItemField,
   BILL_ITEM_EDIT_FIELDS,
+  BILL_ASSUMPTIONS,
+  BILL_EXPENSE_NOTE,
+  MUSEUM_BILL_ASSUMPTION_TOPICS,
+  billAssumptionTopicsCovered,
+  isDraftBillDoc,
+  projectClearedQtyItems,
+  packingSlipHashAfterClear,
+  reconciliationReport,
+  saveActionsBlockedByChecksum,
+  formatUsdAmount,
 } from "../src/bill-map.js";
 
 const sampleDoc = {
@@ -125,5 +135,55 @@ describe("isEditableBillItemField", () => {
     assert.equal(isEditableBillItemField("qty"), true);
     assert.equal(isEditableBillItemField("amount"), false);
     assert.equal(isEditableBillItemField(""), false);
+  });
+});
+
+describe("BILL_ASSUMPTIONS museum topic parity", () => {
+  it("covers all museum SPECS topics", () => {
+    assert.equal(BILL_ASSUMPTIONS.length, 6);
+    const covered = billAssumptionTopicsCovered();
+    for (const topic of MUSEUM_BILL_ASSUMPTION_TOPICS) {
+      assert.ok(covered.includes(topic), `missing topic ${topic}`);
+    }
+    assert.match(BILL_EXPENSE_NOTE, /items-based/i);
+  });
+});
+
+describe("isDraftBillDoc", () => {
+  it("accepts numeric or string docstatus 0", () => {
+    assert.equal(isDraftBillDoc({ docstatus: 0 }), true);
+    assert.equal(isDraftBillDoc({ docstatus: "0" }), true);
+    assert.equal(isDraftBillDoc({ docstatus: 1 }), false);
+    assert.equal(isDraftBillDoc(null), false);
+  });
+});
+
+describe("projectClearedQtyItems / packingSlipHashAfterClear", () => {
+  it("zeros qty and hash is 0 (OI-026)", () => {
+    const cleared = projectClearedQtyItems(sampleDoc);
+    assert.equal(cleared[0].qty, 0);
+    assert.equal(cleared[0].item_code, "SKU-1");
+    const hash = packingSlipHashAfterClear(sampleDoc);
+    assert.equal(hash.sumQty, 0);
+    assert.equal(hash.ok, true);
+  });
+});
+
+describe("reconciliationReport / saveActionsBlockedByChecksum", () => {
+  it("reports chip, Σ lines, and save gate", () => {
+    const r = reconciliationReport(sampleDoc, "42.50");
+    assert.equal(r.chip, "match");
+    assert.equal(r.saveAllowed, true);
+    assert.equal(r.linesSum, 20);
+    assert.equal(saveActionsBlockedByChecksum("mismatch"), true);
+    assert.equal(saveActionsBlockedByChecksum("idle"), false);
+    assert.equal(saveActionsBlockedByChecksum("match"), false);
+  });
+});
+
+describe("formatUsdAmount", () => {
+  it("formats USD like museum fmtUsd", () => {
+    assert.equal(formatUsdAmount(""), "");
+    assert.match(formatUsdAmount(12.5), /\$12\.50/);
   });
 });
