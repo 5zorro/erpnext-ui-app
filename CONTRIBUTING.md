@@ -11,11 +11,21 @@ This project is AGPL-3.0. By contributing, you agree your work is licensed under
    substitute for unit CI.
 3. **Clean Core:** do not patch vendor Frappe/ERPNext. Troubleshoot the server in a stock browser against unmodified ERPNext.
 
+## Commit vs push (who does what)
+
+| Action | Who |
+|--------|-----|
+| **`git commit`** (local checkpoints, WIP, green unit commits) | **Agents / harness / contributors** — encouraged; do not wait for a “perfect” PR |
+| **`git push`** to GitHub (`origin`) | **5zorro only** — unless 5zorro explicitly asks an agent to push |
+
+Local commits never leave the machine until someone pushes. Prefer a `wip/…` branch for dogfood checkpoints.
+
 ## Commit discipline (Zulip-inspired)
 
-- Each commit is one **minimal coherent idea** and should leave `npm test` green.
-- Do not mix unrelated features in one commit.
-- No “fix tests” follow-up commits — amend or rewrite so the fixing commit includes the tests.
+- Prefer one **minimal coherent idea** per commit and leave `npm test` green when practical.
+- Checkpoint commits during dogfood are OK (message like `checkpoint: …`); squash/rebase before a public push if history needs cleaning.
+- Do not mix unrelated features in one *promote-ready* commit.
+- No “fix tests” follow-up on promote-ready work — amend or fold so the fixing commit includes the tests.
 - No `Co-Authored-By` / promo trailers.
 
 ## Branches
@@ -37,4 +47,4 @@ Open a PR if you like; **do not expect a merge** until **5zorro** has reviewed (
 
 ## Publishing
 
-Only **5zorro** pushes the public GitHub remote. Agents and contributors do not push `main`/`alpha` to origin unless 5zorro explicitly asks.
+Only **5zorro** pushes the public GitHub remote. Agents **may commit** freely; they **must not push** `main`/`alpha`/`wip/*` to origin unless 5zorro explicitly asks.

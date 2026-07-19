@@ -1048,6 +1048,19 @@ ipcMain.on("bill-open-vanilla", () => {
   showErp(route, { forceLoad: true });
 });
 
+ipcMain.on("bill-open-vendor-add", () => {
+  showErp("/app/supplier/new", { forceLoad: true });
+});
+
+ipcMain.on("bill-focus-surface", () => {
+  try {
+    if (win && !win.isDestroyed()) win.focus();
+    if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
+  } catch {
+    /* ignore */
+  }
+});
+
 ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());

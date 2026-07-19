@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("erpBill", {
   mergeSource: (kind, name) => ipcRenderer.invoke("bill-merge-source", kind, name),
   retryLoad: () => ipcRenderer.invoke("bill-retry-load"),
   openVanilla: () => ipcRenderer.send("bill-open-vanilla"),
+  openVendorAdd: () => ipcRenderer.send("bill-open-vendor-add"),
+  focusBillSurface: () => ipcRenderer.send("bill-focus-surface"),
   onSnapshot: (cb) => {
     const handler = (_e, snap) => cb(snap);
     ipcRenderer.on("bill-snapshot", handler);

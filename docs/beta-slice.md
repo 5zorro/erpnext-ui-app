@@ -37,7 +37,7 @@ Work follows **T1→T4** in the dated plan, then deferred packets (Home OI-050/0
 | `alpha` | Day-to-day work |
 | `main` | Stable / publishable milestones only |
 
-**5zorro** alone pushes to GitHub.
+**5zorro** alone **pushes** to GitHub. Agents may **commit** locally without waiting for a push.
 
 Museum (frozen): `~/agent-harness/erpnext/doc-shell/`  
 Process ADR: `~/agent-harness/docs/adr-0002-docflow-rebuild-agpl-alpha-stable.md`
