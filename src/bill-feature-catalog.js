@@ -206,7 +206,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     alpha: true,
     coverage: "tested",
     pureModule: "bill-source-flow.js",
-    notes: "HAR: listSources ran; PR Item 403 killed ok flag — enrich now best-effort (2026-07-18). Re-dogfood.",
+    notes: "HAR: PR Item 403 killed listSources; enrich removed. Dogfood green 2026-07-18.",
   },
   {
     id: "source-toolbar",

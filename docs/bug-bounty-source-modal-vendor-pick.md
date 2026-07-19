@@ -2,7 +2,7 @@
 
 ## Status
 
-**Open** (2026-07-18) — strike 3 in dogfood. Do **not** keep patching production `onPicked` until a matrix proves which trigger fires.
+**Fixed** (2026-07-18) — see debrief at end. Dogfood confirmed after removing `Purchase Receipt Item` enrich from `listSources`.
 
 ## Contexts where found
 
@@ -136,52 +136,7 @@ Industry pattern when a trigger is flaky: **A/B (or A–E) dogfood page** with i
 If M0–M4 pass and M5 fails → bug is only in Link key/click wiring.  
 If M2 passes and M4/M5 fail → ERP/IPC side-effect is killing or racing the open.
 
-**Do not** maintain five production skins. One HTML diagnostic (e.g. `electron/bill-source-matrix.html` or a `#debug` panel on Bill) behind a dogfood flag is enough.
-
-## Ways forward (checklist)
-
-### Immediate triage (before more “fixes”)
-
-- [ ] **Bifurcate:** Does toolbar **Select PO / source** open the modal with a vendor already set?
-  - Yes → picker/`onPicked` path broken; modal stack OK.
-  - No → `listSources` / `showSourceModal` / focus / sticky flag — ignore Tab rewrites.
-- [ ] Note status line text at pick time (`Setting vendor…` / `Loading…` / error / unchanged).
-- [ ] Confirm Bill surface is focused (not Vanilla) when picking.
-- [ ] Confirm status banner shows **Draft** (not Posted) — `editable()` gate.
-
-### Instrumentation (required)
-
-- [ ] Ring log (status line or `localStorage` / main console):  
-  `pick → onPicked → editable? → openSourcePicker enter → listSources ok/fail → showSourceModal enter → DOM appended → focus`.
-- [ ] Never silent-return in `onPicked`: if `!editable()`, **setStatus** why.
-- [ ] Treat `docstatus` with `Number(doc.docstatus) === 0` (string `"0"` gotcha).
-
-### Matrix harness
-
-- [ ] Add M0–M5 dogfood matrix (above); one commit; no push required.
-- [ ] 5zorro runs matrix once; record which Ms fire in this bounty’s debrief table.
-- [ ] Port **only** the winning trigger into production Bill; delete matrix.
-
-### Product contract (after a winner)
-
-- [ ] Trigger = UI pick event (approach **A**); ERP write parallel, non-blocking for modal.
-- [ ] No input lockdown for modal.
-- [ ] Focus modal on open; Terms after choose.
-- [ ] Empty Supplier search → Go to Vendor add….
-- [ ] Unit tests for pure helpers; Playwright smoke for “modal testid appears after fake pick” when e2e env allows.
-- [ ] `assert` / status if `sourceModalOpen` stuck or `listSources` > 3s.
-
-### Explicitly out of scope until matrix
-
-- More Tab/Enter polish, Vanilla save-then-open, PR PO label tweaks, keyboard traps — they mask the root failure mode.
-
-## Hypothesis board (ranked)
-
-1. ~~**Silent `onPicked` return**~~ — HAR shows listSources **did** run after pick.
-2. **`listSources` fails entirely** — **CONFIRMED via HAR:** `Purchase Receipt Item` **403** aborted modal open. Fixed: enrich best-effort.
-3. **Modal opens off-focus / invisible** — secondary; re-check after fix.
-4. **Pick handler never runs** — **ruled out** by HAR (`search_link` + four source `get_list`s).
-5. **Race:** `paint()` / snapshot — unlikely primary given #2.
+**Do not** maintain five production skins. One HTML diagnostic (e.g. `electron/bill-source-matrix.html` or a `#debug` panel on Bill) behind a dogfood flag is enough. **For this bug, HAR replaced the matrix.**
 
 ## HAR evidence (2026-07-18 / `localhost.har`)
 
@@ -236,20 +191,59 @@ So when 5zorro said “it still isn’t opening,” **CI had nothing to fail.** 
 **Remediation (with the matrix):**
 
 1. Extract trigger policy to `src/` + unit tests **before** more Bill HTML patches. → **Done:** `src/bill-source-flow.js` + `tests/bill-source-flow.test.js`; Bill UI imports `shouldOpenSourceModalAfterVendorPick`.
-2. Broader Bill museum↔alpha catalog + suites (2026-07-18): `bill-feature-catalog`, `link-picker-policy`, `bill-toolbar`, expanded `bill-map` — **130** unit tests. Electron open-after-vendor still **buggy** until dogfood/matrix proves DOM path.
-3. Add Electron smoke: fake pick ⇒ `[data-testid="bill-source-modal"]` present (no live ERP lists required if M1/M2 style).
+2. Broader Bill museum↔alpha catalog + suites (2026-07-18): `bill-feature-catalog`, `link-picker-policy`, `bill-toolbar`, expanded `bill-map` — **130** unit tests. Open-after-vendor **dogfood green** after HAR root-cause fix.
+3. Optional later: Electron smoke fake pick ⇒ `[data-testid="bill-source-modal"]`.
 4. Keep list/label tests — they stay valuable; they are not a substitute for the chain.
+
+---
+
+## Ways forward (checklist)
+
+### Immediate triage (before more “fixes”)
+
+- [x] **Bifurcate / HAR:** pick ran; `listSources` ran; child-table 403 aborted `ok`.
+- [x] Note status / network: PermissionError on Purchase Receipt Item.
+- [x] Confirm Bill surface focused when picking (modal is in Bill WebContents).
+
+### Instrumentation (required)
+
+- [x] Ring / status: `Sources loaded (N groups)` after successful list.
+- [x] Never silent-return in `onPicked` without status when not editable.
+- [x] Treat `docstatus` with `Number(doc.docstatus) === 0` (`isDraftBillDoc`).
+
+### Matrix harness
+
+- [x] Skipped — HAR replaced M0–M5 for this incident (network proof of listSources).
+- [x] Winning path = UI pick → listSources (PO/PR only) → showSourceModal.
+
+### Product contract (after a winner)
+
+- [x] Trigger = UI pick event (approach **A**); ERP write parallel.
+- [x] No input lockdown for modal.
+- [x] Focus modal on open; Terms after choose (policy in `bill-source-flow.js`).
+- [x] Empty Supplier search → Go to Vendor add….
+- [x] Unit tests for pure helpers / catalog; Electron smoke optional later.
+- [ ] Optional: permission-safe PR→PO label enrich (whitelisted method), not child `get_list`.
+
+---
+
+## Hypothesis board (ranked)
+
+1. ~~**Silent `onPicked` return**~~ — HAR shows listSources **did** run after pick.
+2. **`listSources` fails entirely** — **CONFIRMED via HAR:** `Purchase Receipt Item` **403** aborted modal open. Fixed by **removing** that call (try/catch alone insufficient).
+3. ~~**Modal opens off-focus / invisible**~~ — not primary; dogfood green after #2.
+4. ~~**Pick handler never runs**~~ — **ruled out** by HAR.
+5. ~~**Race:** `paint()` / snapshot~~ — not primary.
 
 ---
 
 ## Debrief
 
-*(Fill after matrix + fix.)*
-
 | Field | Notes |
 |-------|-------|
-| Winning mock (M#) | |
-| Root cause | |
-| Fix | |
-| Validation | toolbar / click / Tab / Enter / empty→Vendor add / Terms focus |
-| Cleanup | matrix removed? lockdowns removed? |
+| Winning mock (M#) | N/A — HAR forensics (`localhost.har` ×2) replaced the matrix |
+| Root cause | `bill-list-sources` required `frappe.db.get_list("Purchase Receipt Item")` to label PRs with PO#s. Clerk session got **403 PermissionError**. That exception failed the whole `listSources` (`ok: false`), so Bill never called `showSourceModal` — looked like “vendor pick does nothing.” |
+| Fix | Remove child-table enrich from the hot path (`4c8f72b`). PO/PR header lists alone build groups; PR rows may show “no PO.” try/catch-only (`13f375b`) was not enough. Also: UI-event-first open policy + catalog tests (`4c3f203`). |
+| Validation | 5zorro dogfood 2026-07-18: vendor pick → source modal opens after restart on `4c8f72b`. |
+| Cleanup | No matrix page shipped. No input lockdowns kept for this bug. `*.har` gitignored — do not commit. Follow-up: permission-safe PO# enrich when needed. |
+| Lessons | (1) Green unit tests on leaf mappers ≠ e2e chain. (2) Optional enrich must never gate required UX. (3) Frappe 403 may not be reliably `try/catch`’d from `executeJavaScript` — prefer not calling forbidden APIs. (4) DevTools HAR on Vanilla is enough to prove Bill IPC side effects. |
