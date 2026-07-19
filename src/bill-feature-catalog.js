@@ -2,7 +2,7 @@
  * Bill Doc feature catalog — museum vs alpha (gap audit SSoT for unit tests).
  * Each row must stay honest: update status when features ship or break.
  *
- * @typedef {"tested"|"built_untested"|"electron_only"|"missing"|"buggy"} Coverage
+ * @typedef {"tested"|"built_untested"|"electron_only"|"missing"|"buggy"|"partial"} Coverage
  * @typedef {{
  *   id: string,
  *   name: string,
@@ -304,9 +304,18 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     id: "toolbar-attach",
     name: "Attach File (OI-005)",
     museum: true,
-    alpha: false,
-    coverage: "missing",
+    alpha: true,
+    coverage: "partial",
     pureModule: "bill-toolbar.js",
+    notes: "Memo-row button opens Vanilla FileUploader after save; in-Bill panel later",
+  },
+  {
+    id: "memo-below-items",
+    name: "Memo below items table (OI-005)",
+    museum: true,
+    alpha: true,
+    coverage: "electron_only",
+    pureModule: null,
   },
   {
     id: "toolbar-recalc",

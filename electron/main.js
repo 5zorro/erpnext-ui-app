@@ -1054,6 +1054,48 @@ ipcMain.handle("bill-clear-all-qty", async () => {
   }
   return raw;
 });
+
+/**
+ * Attach files via Vanilla FileUploader (OI-005). ERP view must be visible —
+ * Bill WebContents cannot host Frappe’s uploader DOM.
+ */
+ipcMain.handle("bill-attach-file", async () => {
+  const doc = dirtyState.doc;
+  if (!doc || !doc.name || String(doc.name).startsWith("new") || doc.name === "new") {
+    return {
+      ok: false,
+      reason: "Save the Bill draft first — Vanilla needs a document name to attach files.",
+    };
+  }
+  const route = `/app/purchase-invoice/${doc.name}`;
+  currentRoute = route;
+  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
+  savePrefs();
+  showErp(route, { forceLoad: true });
+  // Wait for form, then open attach (museum bind.js Attach).
+  await waitForPurchaseInvoice(15000);
+  const opened = await erpEval(`(async () => {
+    try {
+      var f = window.cur_frm;
+      if (!f || !f.doc) return { ok: false, reason: "Vanilla form not ready." };
+      if (f.attachments && typeof f.attachments.new_attachment === "function") {
+        f.attachments.new_attachment();
+        return { ok: true, reason: "Attach dialog opened in Vanilla." };
+      }
+      if (window.frappe && frappe.ui && frappe.ui.FileUploader) {
+        new frappe.ui.FileUploader({ doctype: f.doctype, docname: f.doc.name });
+        return { ok: true, reason: "Attach dialog opened in Vanilla." };
+      }
+      return { ok: false, reason: "No attach UI on this Desk build." };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return opened && typeof opened === "object"
+    ? opened
+    : { ok: false, reason: "Could not open attach dialog." };
+});
+
 ipcMain.handle("bill-save", async (_e, opts) =>
   saveBillFromErp(opts && typeof opts === "object" ? opts : {}),
 );

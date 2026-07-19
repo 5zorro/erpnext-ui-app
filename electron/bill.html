@@ -39,7 +39,25 @@
     .chip.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
     .chip.match { background: #dcfce7; color: #166534; border-color: #86efac; }
     .chip.mismatch { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
-    .memo { margin-top: 8px; }
+    .memo { margin-top: 12px; }
+    .memo-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-bottom: 4px; flex-wrap: wrap;
+    }
+    .memo-head label { margin: 0; }
+    .memo-head .attach {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 5px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+    }
+    .memo-head .attach:hover { background: #f1f5f9; }
+    .memo-head .attach:disabled { opacity: 0.55; cursor: not-allowed; }
+    td.tot-cell .clear-qty {
+      display: block; width: 100%; margin-top: 6px;
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 4px 6px; font-size: 11px; cursor: pointer; color: #334155;
+    }
+    td.tot-cell .clear-qty:hover { background: #f1f5f9; }
+    td.tot-cell .clear-qty:disabled { opacity: 0.55; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
     th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; }
     th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; }
@@ -168,7 +186,6 @@
           </div>
         </div>
       </div>
-      <div class="field memo"><label>Memo</label><textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea></div>
       <div>
         <label style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#64748b;">Items</label>
         <table>
@@ -181,7 +198,11 @@
           <tfoot id="line-totals" data-testid="bill-line-totals" hidden>
             <tr>
               <td colspan="2"></td>
-              <td class="tot-cell"><span class="tot-label">Σ Qty</span><b id="tot-qty">0</b></td>
+              <td class="tot-cell">
+                <span class="tot-label">Σ Qty</span><b id="tot-qty">0</b>
+                <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="bill-clear-qty"
+                  title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
+              </td>
               <td></td>
               <td class="tot-cell"><span class="tot-label">Σ Amt</span><b id="tot-amt">0.00</b></td>
               <td></td>
@@ -191,8 +212,14 @@
         </table>
         <div class="line-actions">
           <button type="button" id="btn-add-line" data-testid="bill-add-line">Add line</button>
-          <button type="button" id="btn-clear-qty" data-testid="bill-clear-qty"
-            title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
+        </div>
+        <div class="field memo" data-testid="bill-memo-block">
+          <div class="memo-head">
+            <label for="f-memo">Memo</label>
+            <button type="button" class="attach" id="btn-attach" data-testid="bill-attach"
+              title="Opens Vanilla Desk attach for this Bill (save draft first if new).">Attach file to this bill</button>
+          </div>
+          <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
         </div>
         <p class="hint">
           Use the ▾ / search on Vendor, Terms, Item, and Project (type a few letters).
@@ -279,6 +306,7 @@
       submit: document.getElementById("btn-submit"),
       addLine: document.getElementById("btn-add-line"),
       clearQty: document.getElementById("btn-clear-qty"),
+      attach: document.getElementById("btn-attach"),
     };
 
     const assumptionsUl = document.getElementById("assumptions-list");
@@ -847,12 +875,13 @@
         el.items.innerHTML = "";
         paintLineTotals(null);
         el.addLine.disabled = true;
-        if (el.clearQty) el.clearQty.disabled = true;
-        paintChip();
-        painting = false;
-        return;
-      }
-      setFormBlocked(false);
+      if (el.clearQty) el.clearQty.disabled = true;
+      if (el.attach) el.attach.disabled = true;
+      paintChip();
+      painting = false;
+      return;
+    }
+    setFormBlocked(false);
       const h = readBillHeader(doc, { amountDue: amountDue || undefined });
       el.vendor.value = h["Vendor Name"] ?? "";
       el.address.value = h.Address ?? "";
@@ -876,6 +905,7 @@
       el.address.readOnly = true;
       el.addLine.disabled = !canEdit;
       if (el.clearQty) el.clearQty.disabled = !canEdit;
+      if (el.attach) el.attach.disabled = !canEdit;
       paintItems(doc);
       ensureHeaderLinkPickers();
       const name = doc.name || "(new)";
@@ -1076,6 +1106,21 @@
           setStatus("All line quantities set to 0.");
         } else {
           setStatus((res && res.reason) || "Clear qty failed.", "err");
+        }
+      };
+    }
+    if (el.attach) {
+      el.attach.onclick = async () => {
+        if (!api || !api.attachFile) {
+          setStatus("Attach API missing — restart the shell.", "err");
+          return;
+        }
+        setStatus("Opening attach…");
+        const res = await api.attachFile();
+        if (res && res.ok) {
+          setStatus(res.reason || "Attach dialog opened in Vanilla.");
+        } else {
+          setStatus((res && res.reason) || "Could not open attach.", "err");
         }
       };
     }
