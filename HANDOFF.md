@@ -81,7 +81,7 @@ flowchart LR
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Link search (T1) | `link-search.js` | Normalize `search_link` rows; Bill field→doctype |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
-| **OPEN** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | Strike 3 — matrix before more patches |
+| **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`ce79ba6`) |
 | Bill feature catalog (museum↔alpha) | `src/bill-feature-catalog.js` + `tests/bill-*.test.js` | Pure contracts; CI fails if built features lack tests |
 
 Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
