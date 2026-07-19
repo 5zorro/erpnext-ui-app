@@ -9,7 +9,7 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Current dated working plan under `docs/implementation-plan-YYYY-MM-DD.md` (if any).
+3. Current dated working plan: `docs/implementation-plan-2026-07-18.md` (T1–T4 active; deferred packets sketched).
 4. `docs/beta-slice.md` · `CONTRIBUTING.md` · open discovery in museum `open_items.md`.
 
 ---
@@ -60,7 +60,7 @@ flowchart LR
 2. **HTTP only** — shell talks to ERP over the network; vanilla browser remains a valid fallback.
 3. **Pure first** — new behavior lands in `src/` + `tests/` before Electron wiring.
 4. **One configured ERP base** — `src/config.js` / env; panels must not invent a second server URL.
-5. **AGPL public tree** — process/license in ADR-0002; 5zorro (5zorro) alone pushes GitHub.
+5. **AGPL public tree** — process/license in ADR-0002. **Commits:** agents/harness may commit freely on local branches (checkpoints OK). **Pushes:** only 5zorro (5zorro) pushes to GitHub.
 
 ### Extension points (where new work plugs in)
 
@@ -71,12 +71,22 @@ flowchart LR
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
 | Chrome UI state | `chrome-state.js` | Toolbar highlight / home vs ERP |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
-| Launcher tiles | `home-tiles.js` | Splash `home.html` + toolbar **Launcher** |
+| Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
-| Doc skin (future) | new `src/` binders — not yet | New view / lens (M3+) |
+| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style) |
+| Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
+| Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
+| Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
+| Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc** |
+| Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
+| Link search (T1) | `link-search.js` | Normalize `search_link` rows; Bill field→doctype |
+| Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
+| **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`ce79ba6`) |
+| Bill feature catalog (museum↔alpha) | `src/bill-feature-catalog.js` + `tests/bill-*.test.js` | Pure contracts; CI fails if built features lack tests |
 
-Toolbar **Home** → ERP site root `/`. **Launcher** → splash tiles. **Vanilla skin** → `/desk`.
-Splash `home.html` is first-run + return-via-Launcher.
+Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
+**Vanilla skin** → ERP `/desk`. Site root `/` is a tile under Shell.
+ERP Desk itself is unmodified — it will not show our tiles (by design).
 
 ### Dogfood debugging (5zorro → agent)
 
@@ -105,6 +115,29 @@ and a live ERPNext dependency.
 `execInView`, not `firstWindow()` clicks. Pure logic stays in `npm test`. Details: `e2e/GOTCHAS.md`.
 
 **MVP e2e:** health + scaffolds (URL/API, chrome, pure wiring, views).
+
+### Unit ↔ e2e coverage matrix
+
+Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wiring** through Electron.
+
+| Unit suite (`tests/`) | What units prove | Covered by e2e wiring? |
+|-----------------------|------------------|------------------------|
+| `health.test.js` | URL build, classify ok/bad, injectable fetch | `scaffold-url-api` + `health-indicator` (real ping → `__erpE2e.lastHealth`) |
+| `nav-guard.test.js` | Allow ERP origin; deny external | `scaffold-url-api` + `scaffold-pure-wiring` (`isAllowed`) |
+| `config.test.js` | `ERP_BASE` from env | `scaffold-url-api` (`erpBase`) |
+| `route-info.test.js` | Parse desk/app routes | Indirect via `scaffold-pure-wiring` (`trackNav` → history entries) |
+| `history.test.js` | Dedupe, cap, `splitHistory` | `scaffold-pure-wiring` (`trackNav` / `getHistory`); split UI still best-effort in hist view |
+| `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
+| `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
+| `chrome-state.test.js` | Pure reducer | **Gap** — not required in e2e yet (main uses its own `showingHome` flag) |
+| `money.test.js` | Nickel rounding | **Gap** — no UI wire yet (OI-042) |
+| `doc-terms.test.js` | QB-style relabel / reverse | Used by Bill Doc labels |
+| `bill-map.test.js` | Header/items; amount-due checksum | Bill view (`bill.html`) |
+| `dirty-gate.test.js` | Lens dirt vs user edit nav gate | Bill leave prompts in main |
+| `lens-prefs.test.js` | Per-doctype last lens; default doc | Enter Bills + prefs file |
+| `lens-context.test.js` | Doc-skin index + readiness matrix | Doc tab visibility |
+
+When adding a `src/` module: add units first; extend an existing scaffold smoke if main wires it; only add a new e2e file for a new scaffold.
 
 **Rejected for this repo:** Spectron (dead), Cypress-as-Electron-driver, Selenium-without-WDIO,
 museum-style “Playwright Electron + live ERP as the only proof.”
@@ -161,4 +194,4 @@ Rules:
 cd ~/erpnext-ui-app && npm test && npm start
 ```
 
-GitHub: only **5zorro** pushes. Fix CI locally (`npm test`) before asking for a push.
+**Git workflow:** Cursor/agents **commit** as often as useful (local checkpoints on `wip/…` or `alpha`). Only **5zorro** **pushes** to GitHub. Fix CI locally (`npm test`) before asking for a push.
