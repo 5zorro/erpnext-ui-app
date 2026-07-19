@@ -10,7 +10,7 @@ import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import { hasDocSkin, resolveDocSkinTarget } from "../src/lens-context.js";
-import { routeInfo } from "../src/route-info.js";
+import { routeInfo, routesReferToSameDoc } from "../src/route-info.js";
 import {
   rememberLens,
   preferredLens,
@@ -476,6 +476,28 @@ async function showBill(route) {
       : currentRoute.includes("purchase-invoice")
         ? currentRoute
         : "/app/purchase-invoice/new";
+
+  // Already on this Bill — refocus only (Recent click must not reload / wipe edits).
+  if (surfaceMode === "bill" && routesReferToSameDoc(currentRoute, r, ERP_BASE)) {
+    place();
+    try {
+      if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
+      if (win && !win.isDestroyed()) win.focus();
+    } catch {
+      /* ignore */
+    }
+    sendUiState();
+    if (dirtyState.doc) {
+      pushBillSnapshot({
+        ok: true,
+        doc: dirtyState.doc,
+        amountDue: amountDueScratch,
+        focusVendor: false,
+      });
+    }
+    syncE2eApi();
+    return;
+  }
 
   const proceed = async () => {
     surfaceMode = "bill";
