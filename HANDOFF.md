@@ -81,6 +81,7 @@ flowchart LR
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Link search (T1) | `link-search.js` | Normalize `search_link` rows; Bill field→doctype |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
+| **OPEN** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | Strike 3 — matrix before more patches |
 
 Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
 **Vanilla skin** → ERP `/desk`. Site root `/` is a tile under Shell.
