@@ -177,11 +177,34 @@ If M2 passes and M4/M5 fail → ERP/IPC side-effect is killing or racing the ope
 
 ## Hypothesis board (ranked)
 
-1. **Silent `onPicked` return** (`!editable()` or missing api) — value paints, no modal, no status.
-2. **`listSources` fails or hangs** — status would show; confirm with 5zorro.
-3. **Modal opens off-focus / invisible** (wrong WebContents, z-index, sticky `sourceModalOpen`).
-4. **Pick handler never runs** (Tab moves focus without `pickValue`) — less likely if click also fails.
-5. **Race:** `paint()` / snapshot after setHeader clears or blocks UI (should not remove modal; verify).
+1. ~~**Silent `onPicked` return**~~ — HAR shows listSources **did** run after pick.
+2. **`listSources` fails entirely** — **CONFIRMED via HAR:** `Purchase Receipt Item` **403** aborted modal open. Fixed: enrich best-effort.
+3. **Modal opens off-focus / invisible** — secondary; re-check after fix.
+4. **Pick handler never runs** — **ruled out** by HAR (`search_link` + four source `get_list`s).
+5. **Race:** `paint()` / snapshot — unlikely primary given #2.
+
+## HAR evidence (2026-07-18 / `localhost.har`)
+
+5zorro captured DevTools HAR on Vanilla `localhost:8080` while picking vendor **before** later patches. Timeline (UTC):
+
+| t | Call | Result |
+|---|------|--------|
+| 02:33:13.758 | `search_link` `txt=alp` Supplier | **200** → `ALPINE SUPPLY` |
+| 02:33:15.135 | `get_list` Purchase Order submitted | **200** → `PUR-ORD-2026-00012` |
+| 02:33:15.136 | `get_list` Purchase Receipt submitted | **200** → `MAT-PRE-2026-00002` |
+| 02:33:15.136 | draft PO / draft PR lists | **200** empty |
+| 02:33:15.140 | `validate_link_and_fetch` + `get_party_details` | **200** (ERP set_value side effects) |
+| 02:33:15.232 | `get_list` **Purchase Receipt Item** (PO# enrich) | **403** `PermissionError` |
+
+**Root cause (confirmed):** `bill-list-sources` fetched PO/PR successfully, then called `frappe.db.get_list("Purchase Receipt Item", …)` to label PRs with PO numbers. That child-table list **403’d**. The `catch` around the whole eval returned `{ ok: false }`, so Bill UI never called `showSourceModal` — looked like “modal never fires” even though the pick + list path ran.
+
+**Fix:** treat PR-item enrichment as best-effort (try/catch; empty → “no PO” labels). Do not fail `listSources` on child permission errors.
+
+**Also learned:** HAR is Vanilla-only (port 8080). Doc Bill IPC itself is not in the HAR; we infer Bill called `listSources` because those four `get_list` filters match our code exactly.
+
+Do **not** commit `localhost.har` (large; session cookies). Keep local for forensics or add to `.gitignore`.
+
+---
 
 ## What the automated tests actually say (honesty check — 2026-07-18)
 

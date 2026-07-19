@@ -41,10 +41,10 @@ describe("BILL_FEATURE_CATALOG", () => {
     }
   });
 
-  it("source-open-after-vendor stays flagged buggy until dogfood green", () => {
+  it("source-open-after-vendor is tested after HAR root-cause fix", () => {
     const row = BILL_FEATURE_CATALOG.find((r) => r.id === "source-open-after-vendor");
     assert.ok(row);
-    assert.equal(row.coverage, "buggy");
+    assert.equal(row.coverage, "tested");
     assert.equal(row.alpha, true);
   });
 
