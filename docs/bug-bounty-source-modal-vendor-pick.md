@@ -183,6 +183,39 @@ If M2 passes and M4/M5 fail → ERP/IPC side-effect is killing or racing the ope
 4. **Pick handler never runs** (Tab moves focus without `pickValue`) — less likely if click also fails.
 5. **Race:** `paint()` / snapshot after setHeader clears or blocks UI (should not remove modal; verify).
 
+## What the automated tests actually say (honesty check — 2026-07-18)
+
+**Short answer:** Unit tests cover **pure data helpers**. They do **not** cover the pick → modal **chain**. Dogfood failures were invisible to CI. That was winging the Electron wiring while keeping “green” on leaf functions.
+
+| Layer | What exists | What it proves | What it does **not** prove |
+|-------|-------------|----------------|----------------------------|
+| `tests/source-modal.test.js` | `buildBillSourceGroups`, draft grey, PR↔PO labels, money format | Group **shape** if lists arrive | Modal opens; IPC; focus; vendor pick |
+| `tests/link-search.test.js` | normalize / filter / labels / **empty → Vendor add** sentinel | Search row shaping | Dropdown Tab/Enter; `onPicked`; modal |
+| `tests/erp-form-bridge.test.js` | doctype match, item enrich helpers, bridge version | Pure bridge helpers | `setHeader` / `listSources` in live ERP |
+| `tests/dirty-gate.test.js` | nav gate / normalize | Leave-Bill prompts | Source modal |
+| `e2e/scaffold-bill.spec.js` | Bill surface mounts + chip exists | Shell can show `bill.html` | Vendor pick, modal `data-testid`, Terms focus |
+| Layer-2 browser→ERP e2e | **Not built** (plan says so) | — | Full Bill workflow |
+
+**There is no unit (or e2e) test for:**
+
+- “Vendor pick event ⇒ open source modal” (approach A vs B)
+- `openSourcePicker` / `showSourceModal` / `editable()` gates in `bill.html`
+- `bill-set-header` returning `openSourcePicker` / skip paths
+- Modal DOM appears (`[data-testid="bill-source-modal"]`)
+- Focus → Terms after choose
+
+So when 5zorro said “it still isn’t opening,” **CI had nothing to fail.** Green `npm test` only meant the leaf pure modules still agreed with themselves.
+
+**Why it happened:** Project rule is *pure first* (`src/` + `tests/`). The **trigger policy** (when to open) was left inline in `bill.html` / `main.js` instead of a small pure function like `shouldOpenSourceModalAfterVendorPick({ event, setHeaderResult })` with tests. Faster locally; blind to this class of bug.
+
+**Remediation (with the matrix):**
+
+1. Extract trigger policy to `src/` + unit tests **before** more Bill HTML patches.
+2. Add Electron smoke: fake pick ⇒ `[data-testid="bill-source-modal"]` present (no live ERP lists required if M1/M2 style).
+3. Keep list/label tests — they stay valuable; they are not a substitute for the chain.
+
+---
+
 ## Debrief
 
 *(Fill after matrix + fix.)*
