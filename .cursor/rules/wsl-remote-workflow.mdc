@@ -1,1 +1,103 @@
-/mnt/c/Users/<windows-user>/Documents/CursorAI Coding/.cursor/rules/wsl-remote-workflow.mdc
+---
+description: When work targets a WSL-native repo, suggest opening it via Remote-WSL (cd ~/… && cursor .) before substantive edits or shell work.
+globs:
+alwaysApply: true
+---
+
+# WSL Remote workflow (Cursor on Windows)
+
+## When to suggest
+
+When the task involves **editing, running, git, or debugging** code that lives on the **Linux side** of WSL (not merely reading Windows-side spec/docs), **suggest once per session or topic** that 5zorro open the project in **Remote-WSL** before diving in.
+
+Do **not** repeat the suggestion after 5zorro declines or confirms he is already in Remote-WSL.
+
+## What to say (copy-friendly)
+
+Offer a one-line WSL command 5zorro can paste into a WSL terminal:
+
+```bash
+cd ~/agent-harness && cursor .
+```
+
+Swap the directory for the repo in play. Examples:
+
+| Project | Suggest |
+|---------|---------|
+| Agent harness | `cd ~/agent-harness && cursor .` |
+| Zulip dev | `cd ~/zulip && cursor .` |
+| OpenClaw workspace | `cd ~/.openclaw/workspace && cursor .` |
+
+Use `~/…` (WSL home for user `pi`), not `/mnt/c/…`.
+
+## Why (one sentence for 5zorro)
+
+Remote-WSL puts the editor, terminal, git, and agent file ops in Linux context — avoids `/mnt/c` slowness, CRLF pain, and `wsl -d Ubuntu -e bash -c "…"` sandbox friction.
+
+## Triggers — likely wrong workspace
+
+Suggest Remote-WSL when you notice any of:
+
+- Paths like `/home/pi/…` or `~/…` while the open workspace is `C:\Users\<windows-user>\Documents\CursorAI Coding\`
+- Repeated `wsl …` wrapper commands to run lint, git, or scripts in Ubuntu
+- Harness, OpenClaw, or Zulip work discussed from Windows-side planning docs only
+
+## Agent behavior after suggestion
+
+- **If 5zorro agrees:** pause substantive file edits on the WSL repo until he confirms the Remote-WSL window is open (or he says to continue from Windows anyway).
+- **If 5zorro declines or is already remote:** proceed without nagging.
+- **Windows-side spec/docs** (`Claude Spec Document.md`, plans under `local-ai-agent/`, etc.) may stay in this workspace — only Linux-native repos need Remote-WSL.
+
+## Related gotcha (mention only if WSL connect fails)
+
+Keep only Cursor’s **`anysphere.remote-wsl`** extension; remove Microsoft’s **`ms-vscode-remote.remote-wsl`** if both are installed. After bad updates: `rm -rf ~/.cursor-server` in WSL, then `wsl --shutdown` in PowerShell.
+
+## Workspace symlinks vs Cursor app data (agent-harness)
+
+`bash scripts/link-cursor-rules.sh` links **only** `.cursor/rules/*.mdc` from the Windows SSoT
+(`C:\Users\<windows-user>\Documents\CursorAI Coding\.cursor\rules\`) into WSL repos. It does **not** link
+agent chat history, user settings, or workspace SQLite state.
+
+### What is symlinked into the repo
+
+| Path in repo | Canonical source | Purpose |
+|--------------|------------------|---------|
+| `.cursor/rules/ponytail-lite.mdc` | Windows `CursorAI Coding/.cursor/rules/` | Scope discipline |
+| `.cursor/rules/wsl-remote-workflow.mdc` | same | This file |
+
+Recreate after clone: `bash scripts/link-cursor-rules.sh` (from repo root).
+
+### What is **not** symlinked (and why)
+
+| Data | Where it lives | Symlink into repo? |
+|------|----------------|--------------------|
+| **Agent / Composer chat UI** | Windows `%APPDATA%\Cursor\User\workspaceStorage\<hash>\state.vscdb` | **No** — Cursor does not read history from the project tree; DBs lock and corrupt easily |
+| **Agent transcripts** (internal) | WSL `~/.cursor/projects/home-pi-agent-harness/agent-transcripts/` | **No** — outside git; per-machine |
+| **User settings** | Windows `%APPDATA%\Cursor\User\settings.json` | **No** (global); optional future: `.vscode/settings.json` in repo for workspace-only settings |
+| **Rules** | Windows SSoT → symlink | **Yes** (above) |
+
+### One folder, multiple histories — URI matters
+
+Cursor keys workspace state (including Composer/agent sidebar history) by **how the folder was
+opened**, not just the path. The same `~/agent-harness` can get **separate** `workspaceStorage`
+buckets:
+
+| Open method | Typical URI | Effect |
+|-------------|-------------|--------|
+| **`cd ~/agent-harness && cursor .`** from WSL terminal | `vscode-remote://wsl+ubuntu/home/pi/agent-harness` | **Preferred** — Linux context + stable Remote-WSL bucket |
+| Open `\\wsl.localhost\Ubuntu\home\pi\agent-harness` from Windows Explorer | `file://wsl.localhost/Ubuntu/home/pi/agent-harness` | **Separate history** (duplicate bucket; file-watcher pain) |
+| Open `C:\Users\<windows-user>\Documents\CursorAI Coding` | Windows path | **Different project** — planning/spec docs, not the harness repo |
+
+If 5zorro sees **no agent history** after switching to `cursor .` in WSL, prior chats likely live in
+another bucket (old `wsl.localhost` open) or in the **CursorAI Coding** Windows workspace — not lost,
+just not attached to the Remote-WSL URI. There is no supported merge of `state.vscdb` buckets; pick
+one open method going forward.
+
+### Agent guidance
+
+- For harness / doc-shell / ERPNext work: assume cwd **`~/agent-harness`** opened via **`cursor .`**
+  in WSL unless 5zorro says otherwise.
+- Do **not** promise that symlinking chat DBs or `agent-transcripts` into the repo will restore
+  sidebar history.
+- Optional future: extend `link-cursor-rules.sh` (or sibling script) to symlink **`.vscode/settings.json`**
+  from Windows SSoT — workspace settings only, not chat.
