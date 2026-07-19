@@ -290,16 +290,11 @@ export function saveActionsBlockedByChecksum(status) {
 }
 
 /**
- * Museum fmtUsd — stub until Amount Due blur ships (catalog: amount-due-usd-blur).
+ * Museum fmtUsd — prefer src/money.js; kept as thin re-export for bill-map callers.
  * @param {string|number|null|undefined} n
  * @returns {string}
  */
-export function formatUsdAmount(n) {
-  if (n == null || n === "") return "";
-  const x = Number(String(n).replace(/[^0-9.\-]/g, ""));
-  if (!Number.isFinite(x)) return "";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(x);
-}
+export { formatUsdAmount } from "./money.js";
 
 /**
  * Topic tags covered by BILL_ASSUMPTIONS (for museum parity tests).
