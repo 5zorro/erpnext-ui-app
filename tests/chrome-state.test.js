@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { initialChromeState, reduceChrome } from "../src/chrome-state.js";
 
 describe("reduceChrome", () => {
-  it("starts on vanilla home with unknown health", () => {
+  it("starts on Doc Workflow Home with unknown health", () => {
     const s = initialChromeState();
-    assert.equal(s.lens, "vanilla");
+    assert.equal(s.lens, "doc");
     assert.equal(s.showingHome, true);
     assert.equal(s.health, "unknown");
   });
@@ -16,6 +16,13 @@ describe("reduceChrome", () => {
     assert.equal(s.showingHome, false);
     s = reduceChrome(s, { type: "go-home" });
     assert.equal(s.showingHome, true);
+    assert.equal(s.lens, "doc");
+  });
+
+  it("accepts simplified lens", () => {
+    let s = initialChromeState();
+    s = reduceChrome(s, { type: "set-lens", lens: "simplified" });
+    assert.equal(s.lens, "simplified");
   });
 
   it("set-health updates status", () => {

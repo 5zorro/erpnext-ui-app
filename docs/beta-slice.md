@@ -6,24 +6,21 @@ Public / `main` only advances when a **milestone** is green (see the current dat
 
 ## Current public tip (local `alpha`)
 
-**M0** chrome + live ERP · **M1/M1.5** Recent history · **M2** launcher tiles + ERP console — ready to promote when you push.
+**M0** chrome + live ERP · **M1/M1.5** Recent · **M2** Home tiles · **M3** Bill Doc —
+ready to promote when you push.
 
 ## Next promotes
 
 | Promote | Milestone | Must have |
 |---------|-----------|-----------|
-| **1** | **M0+M1+M1.5** (this bundle) | Home→`/`, Vanilla Desk/login, DB health, Recent 7 + Older |
-| **next** | **M3** | Bill Doc binder pattern + dirty-gate units |
+| **1** | M0–M3 bundle (when dogfood OK) | Bill Doc read/edit/save; units green |
+| **next** | T1–T2 from dated plan | Link pickers + Select PO (source modal) |
 
-How / scaffold POC matrix: [implementation-plan-2026-07-15.md](implementation-plan-2026-07-15.md).
-
-M0 and M1 may ship as **one** `main` release or two — both are “ready for push” only after offline units pass.
+How: [implementation-plan-2026-07-18.md](implementation-plan-2026-07-18.md) (architecture batches T1–T4; deferred packets sketched).
 
 ## Then (tests may reorder)
 
-3. **M2** — ERP WebContents + real Home (shell reaches sandbox; Vanilla Desk).
-4. **M3** — Doc skin **Bill** read+save (`set_value` discipline); offline units + optional smoke skip-OK.
-5. **M4+** — More doctypes / tools; then OI-040…044 (tint, bowtie, nickel UI, series, date filter).
+Work follows **T1→T4** in the dated plan, then deferred packets (Home OI-050/051, bowtie PoC, shell utils, etc.).
 
 ## Hard rules
 
@@ -40,7 +37,7 @@ M0 and M1 may ship as **one** `main` release or two — both are “ready for pu
 | `alpha` | Day-to-day work |
 | `main` | Stable / publishable milestones only |
 
-**5zorro** alone pushes to GitHub.
+**5zorro** alone **pushes** to GitHub. Agents may **commit** locally without waiting for a push.
 
 Museum (frozen): `~/agent-harness/erpnext/doc-shell/`  
 Process ADR: `~/agent-harness/docs/adr-0002-docflow-rebuild-agpl-alpha-stable.md`
