@@ -2,63 +2,72 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Launcher</title>
+  <title>Doc Workflow Home</title>
   <style>
     body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
-    main { max-width: 40rem; padding: 32px; }
-    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
-    p { line-height: 1.5; color: #546e7a; }
-    code { background: #dfe6e9; padding: 0.1em 0.35em; border-radius: 4px; }
-    .tiles {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-      gap: 10px; margin-top: 1.25rem;
+    h1 { font-size: 15px; margin: 16px 22px 2px; color: #2c3e50; font-weight: 600; }
+    .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 12px 20px 24px; max-width: 1120px; margin: 0 auto; }
+    .col { display: flex; flex-direction: column; gap: 18px; }
+    .box { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .box h3 { margin: 0; padding: 9px 14px; background: #2c3e50; color: #fff; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; }
+    .items { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; }
+    .item {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 98px; height: 76px; border: 1px solid #e1e8ee; border-radius: 8px;
+      background: #f8fafc; cursor: pointer; font-size: 12px; text-align: center; padding: 6px;
     }
-    .tiles button {
-      background: #2c3e50; color: #fff; border: none; border-radius: 8px;
-      padding: 14px 12px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left;
-      min-height: 3.25rem;
+    .item:hover { background: #eaf4ff; border-color: #69b1ff; }
+    .item .ic { font-size: 20px; margin-bottom: 5px; line-height: 1; }
+    .item.disabled { opacity: .42; cursor: not-allowed; }
+    @media (max-width: 720px) {
+      .wrap { grid-template-columns: 1fr; }
     }
-    .tiles button:hover { background: #1a252f; }
-    .hint { margin-top: 1.5rem; font-size: 13px; padding: 12px 14px; background: #fff; border-radius: 8px; border: 1px solid #d6dee6; line-height: 1.45; }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Launcher</h1>
-    <p>
-      Shortcuts into <strong>unmodified ERPNext</strong>. Toolbar <strong>Home</strong> opens the site root
-      (<code>/</code>); <strong>Launcher</strong> returns here. Use <strong>ERP console</strong> when
-      dogfooding to Inspect / copy console errors.
-    </p>
-    <p>Server: <code id="erp-base" data-testid="erp-base">…</code></p>
-    <div class="tiles" id="tiles" data-testid="home-tiles" role="navigation" aria-label="Workflow tiles"></div>
-    <div class="hint">
-      If <strong>DB ✗</strong> in the toolbar, start the stack first, then open Desk again.
-      Doc skin arrives in milestone M3.
-    </div>
-  </main>
+  <h1 data-testid="home-title">Doc Workflow Home</h1>
+  <div class="wrap" data-testid="home-tiles">
+    <div class="col" id="left"></div>
+    <div class="col" id="right"></div>
+  </div>
   <script type="module">
-    import { HOME_TILES } from "../src/home-tiles.js";
+    import { HOME_GROUPS } from "../src/home-tiles.js";
 
     const api = window.erpHome;
-    const root = document.getElementById("tiles");
 
-    for (const t of HOME_TILES) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = t.label;
-      b.dataset.testid = `tile-${t.id}`;
-      b.dataset.route = t.route;
-      b.title = t.route;
-      b.onclick = () => api && api.openErp(t.route);
-      root.appendChild(b);
+    function render(groups, el) {
+      for (const g of groups) {
+        const box = document.createElement("div");
+        box.className = "box";
+        box.dataset.testid = `group-${g.id}`;
+        const h = document.createElement("h3");
+        h.textContent = g.title;
+        box.appendChild(h);
+        const wrap = document.createElement("div");
+        wrap.className = "items";
+        for (const t of g.tiles) {
+          const b = document.createElement("div");
+          b.className = "item" + (t.disabled ? " disabled" : "");
+          b.dataset.testid = `tile-${t.id}`;
+          b.innerHTML = `<div class="ic">${t.icon || ""}</div>${t.label}`;
+          if (t.disabled) {
+            b.title = "Requires an ERP module that may not be installed";
+          } else if (t.id === "bill-new" && api.openEntry) {
+            b.title = "Enter Bills (last lens; default Doc)";
+            b.onclick = () => api.openEntry("purchase-invoice");
+          } else {
+            b.title = t.route;
+            b.onclick = () => api && api.openErp(t.route);
+          }
+          wrap.appendChild(b);
+        }
+        box.appendChild(wrap);
+        el.appendChild(box);
+      }
     }
 
-    if (api) {
-      api.getConfig().then((c) => {
-        document.getElementById("erp-base").textContent = c.erpBase || "";
-      });
-    }
+    render(HOME_GROUPS.left, document.getElementById("left"));
+    render(HOME_GROUPS.right, document.getElementById("right"));
   </script>
 </body>
 </html>

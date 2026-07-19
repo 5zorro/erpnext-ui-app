@@ -4,7 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("erpUi", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   goHome: () => ipcRenderer.send("go-home"),
-  showLauncher: () => ipcRenderer.send("show-launcher"),
+  openDocSkin: () => ipcRenderer.send("open-doc-skin"),
+  openVanillaSkin: () => ipcRenderer.send("open-vanilla-skin"),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
   openExternal: (url) => ipcRenderer.send("open-external", url),
   openDevtools: (target) => ipcRenderer.send("open-devtools", target || "erp"),
