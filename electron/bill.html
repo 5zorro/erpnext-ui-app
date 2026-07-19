@@ -593,6 +593,7 @@
         return;
       }
       const groups = res.groups || [];
+      setStatus(`Sources loaded (${groups.length} groups) — pick one.`);
       showSourceModal(groups, async (it) => {
         if (!it || it.kind === "nic") {
           setStatus("No source — enter lines manually.");

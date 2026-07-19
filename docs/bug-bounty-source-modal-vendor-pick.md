@@ -198,7 +198,9 @@ If M2 passes and M4/M5 fail → ERP/IPC side-effect is killing or racing the ope
 
 **Root cause (confirmed):** `bill-list-sources` fetched PO/PR successfully, then called `frappe.db.get_list("Purchase Receipt Item", …)` to label PRs with PO numbers. That child-table list **403’d**. The `catch` around the whole eval returned `{ ok: false }`, so Bill UI never called `showSourceModal` — looked like “modal never fires” even though the pick + list path ran.
 
-**Fix:** treat PR-item enrichment as best-effort (try/catch; empty → “no PO” labels). Do not fail `listSources` on child permission errors.
+**Fix attempt 1:** try/catch around PR-item enrich — **insufficient**. Second HAR (02:38 UTC) still showed the same 403; modal still failed (catch may not bind Frappe xhr reject, and/or shell not restarted).
+
+**Fix attempt 2:** **Remove** `get_list("Purchase Receipt Item")` from `listSources` entirely. PR rows show “no PO” until a permission-safe enrich exists. Next HAR must **not** contain that child-table call.
 
 **Also learned:** HAR is Vanilla-only (port 8080). Doc Bill IPC itself is not in the HAR; we infer Bill called `listSources` because those four `get_list` filters match our code exactly.
 
