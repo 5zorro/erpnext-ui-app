@@ -26,6 +26,7 @@ describe("museum Bill toolbar contract", () => {
     const matrix = billToolbarGapMatrix();
     assert.equal(matrix.length, MUSEUM_BILL_TOOLBAR.length);
     assert.ok(ALPHA_BILL_TOOLBAR.some((a) => a.id === "btn-select-po"));
+    assert.ok(ALPHA_BILL_TOOLBAR.some((a) => a.id === "btn-revert"));
   });
 
   it("records museum nav / line tabs / footer", () => {

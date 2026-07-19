@@ -6,7 +6,7 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 3;
+export const DOC_FORM_BRIDGE_VERSION = 5;
 
 /**
  * @param {object|null|undefined} frm cur_frm-like

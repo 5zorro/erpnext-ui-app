@@ -25,7 +25,7 @@ import {
   dirtyCompareKindForField,
   normalizeEditableText,
 } from "../src/dirty-gate.js";
-import { amountDueMatchesGrandTotal, isEditableBillItemField } from "../src/bill-map.js";
+import { amountDueMatchesGrandTotal, billCompareTotal, isEditableBillItemField, isEditableBillTaxField } from "../src/bill-map.js";
 import { normalizeSearchLinkResults } from "../src/link-search.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders } from "../src/source-modal.js";
 import { DOC_FORM_BRIDGE_VERSION } from "../src/erp-form-bridge.js";
@@ -547,9 +547,7 @@ async function showBill(route) {
         },
         true,
       );
-      if (!amountDueScratch && snap.doc && snap.doc.grand_total != null) {
-        amountDueScratch = String(snap.doc.grand_total);
-      }
+      // Amount Due stays blank until the user types (checksum idle / grey).
       amountDueCommitted = amountDueScratch;
       try {
         if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
@@ -604,8 +602,8 @@ function openEntry(doctypeKey) {
 
 async function saveBillFromErp(opts = {}) {
   const submit = !!opts.submit;
-  if (!amountDueMatchesGrandTotal(amountDueScratch, dirtyState.doc && dirtyState.doc.grand_total)) {
-    return { ok: false, reason: "Amount Due checksum failed." };
+  if (!amountDueMatchesGrandTotal(amountDueScratch, billCompareTotal(dirtyState.doc))) {
+    return { ok: false, reason: "Amount Due checksum failed (must match Grand total)." };
   }
   const raw = await erpEval(`(async () => {
     try {
@@ -1055,6 +1053,49 @@ ipcMain.handle("bill-clear-all-qty", async () => {
   return raw;
 });
 
+ipcMain.handle("bill-set-tax", async (_e, rowIndex, field, value) => {
+  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
+    return { ok: false, reason: "Invalid tax row" };
+  }
+  if (!isEditableBillTaxField(field)) {
+    return { ok: false, reason: "Tax field not editable on Bill" };
+  }
+  const kind = dirtyCompareKindForField(field);
+  const next =
+    kind === "number" ? (value == null ? "" : String(value)) : normalizeEditableText(value);
+  const raw = await bridgeCall("setTaxRow", rowIndex, field, next);
+  if (raw && raw.ok) {
+    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+  }
+  return raw;
+});
+
+ipcMain.handle("bill-add-tax", async (_e, accountHead, taxAmount, description) => {
+  dirtyState = markUserEdited(dirtyState);
+  const raw = await bridgeCall(
+    "addTaxRow",
+    accountHead == null ? "" : String(accountHead),
+    taxAmount,
+    description == null ? "" : String(description),
+  );
+  if (raw && raw.ok) {
+    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+  }
+  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Add tax failed." };
+});
+
+ipcMain.handle("bill-delete-tax", async (_e, rowIndex) => {
+  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
+    return { ok: false, reason: "Invalid tax row" };
+  }
+  dirtyState = markUserEdited(dirtyState);
+  const raw = await bridgeCall("deleteTaxRow", rowIndex);
+  if (raw && raw.ok) {
+    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+  }
+  return raw;
+});
+
 /**
  * Attach files via Vanilla FileUploader (OI-005). ERP view must be visible —
  * Bill WebContents cannot host Frappe’s uploader DOM.
@@ -1099,6 +1140,67 @@ ipcMain.handle("bill-attach-file", async () => {
 ipcMain.handle("bill-save", async (_e, opts) =>
   saveBillFromErp(opts && typeof opts === "object" ? opts : {}),
 );
+
+/**
+ * Museum bind.js Revert: new → frappe.new_doc; else frm.reload_doc.
+ * Resets Amount Due scratch to the compare total on the restored doc.
+ */
+ipcMain.handle("bill-revert-unsaved", async () => {
+  const raw = await erpEval(`(async () => {
+    try {
+      var f = window.cur_frm;
+      if (!f) return { ok: false, reason: "No form." };
+      if (f.is_new && f.is_new()) {
+        try { f.doc.__unsaved = 0; } catch (e) {}
+        try { frappe.model.clear_doc(f.doctype, f.doc.name); } catch (e) {}
+        frappe.new_doc(f.doctype);
+        await new Promise(function (r) { setTimeout(r, 250); });
+        f = window.cur_frm;
+        return {
+          ok: true,
+          isNew: true,
+          doc: f && f.doc ? JSON.parse(JSON.stringify(f.doc)) : null,
+        };
+      }
+      if (typeof f.reload_doc === "function") {
+        await f.reload_doc();
+        return {
+          ok: true,
+          isNew: !!(f.is_new && f.is_new()),
+          doc: JSON.parse(JSON.stringify(f.doc)),
+        };
+      }
+      return { ok: false, reason: "Cannot reload document." };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  if (!raw || !raw.ok) {
+    return raw && typeof raw === "object"
+      ? raw
+      : { ok: false, reason: "Revert failed." };
+  }
+  // Revert clears Amount Due scratch — user re-enters after reload.
+  amountDueScratch = "";
+  amountDueCommitted = "";
+  dirtyState = finishLensApply(
+    {
+      doc: raw.doc,
+      isDirty: false,
+      isNew: !!raw.isNew,
+      userEdited: false,
+      baselineJson: null,
+    },
+    true,
+  );
+  return {
+    ok: true,
+    isNew: !!raw.isNew,
+    doc: raw.doc,
+    amountDue: amountDueScratch,
+  };
+});
+
 ipcMain.handle("bill-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
 ipcMain.on("bill-open-vanilla", () => {
   const route = currentRoute.includes("purchase-invoice")

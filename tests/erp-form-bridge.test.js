@@ -54,6 +54,6 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 3);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 5);
   });
 });

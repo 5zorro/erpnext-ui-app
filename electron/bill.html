@@ -33,8 +33,9 @@
     }
     .chip {
       display: inline-flex; align-items: center; justify-content: center;
-      min-width: 28px; height: 28px; border-radius: 6px; font-size: 14px; font-weight: 700;
-      border: 1px solid transparent; flex-shrink: 0;
+      min-width: 28px; min-height: 28px; padding: 2px 8px; border-radius: 6px;
+      font-size: 12px; font-weight: 700; border: 1px solid transparent; flex-shrink: 0;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
     }
     .chip.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
     .chip.match { background: #dcfce7; color: #166534; border-color: #86efac; }
@@ -77,22 +78,95 @@
     .money-cents { text-decoration: underline; text-underline-offset: 2px; }
     input.money-cost { text-align: right; }
     .ro.money-cost { display: block; text-align: right; }
-    .amount-due-row { align-items: stretch; }
-    .amount-due-stack {
-      position: relative; flex: 1; min-width: 0;
+    .amount-due-row {
+      align-items: center;
+      gap: 8px;
+      width: 100%;
     }
-    .money-due-disp {
-      display: block; width: 100%; box-sizing: border-box;
-      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 10px;
-      background: #fff; cursor: text; min-height: 36px; line-height: 1.35;
-    }
-    .money-due-disp:focus { outline: 2px solid #93c5fd; outline-offset: 1px; }
-    .money-due-disp.is-empty { color: #94a3b8; }
-    .money-due-input {
-      width: 100%; box-sizing: border-box; text-align: right;
+    .field .amount-due-row .money-due-input {
+      flex: 0 0 60%;
+      max-width: 60%;
+      width: 60%;
+      box-sizing: border-box;
+      text-align: left;
       font-variant-numeric: tabular-nums;
     }
-    .hint { margin-top: 10px; font-size: 12px; color: #64748b; }
+    .due-status {
+      flex: 1 1 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      min-height: 28px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .due-status.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
+    .due-status.match { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .due-status.mismatch { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .due-status .due-emoji { flex: 0 0 auto; min-width: 1rem; text-align: center; }
+    .due-status .due-money { flex: 0 0 auto; text-align: left; }
+    .line-tabs {
+      display: flex; gap: 0; margin-top: 4px; border-bottom: 1px solid #e2e8f0;
+    }
+    .line-tab {
+      border: 1px solid transparent; border-bottom: none; background: transparent;
+      padding: 8px 14px; font-size: 13px; cursor: pointer; color: #64748b;
+      border-radius: 6px 6px 0 0; margin-bottom: -1px;
+    }
+    .line-tab:hover { color: #1f2d3d; background: #f8fafc; }
+    .line-tab.active {
+      color: #1f2d3d; font-weight: 600; background: #fff;
+      border-color: #e2e8f0 #e2e8f0 #fff;
+    }
+    .line-panel[hidden] { display: none !important; }
+    .expense-note {
+      margin: 14px 0 8px; padding: 12px 14px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;
+      line-height: 1.45; max-width: 42rem;
+    }
+    .expense-hint { font-size: 12px; color: #64748b; margin: 0 0 8px; }
+    .taxes-block { margin-top: 14px; }
+    .taxes-block > .taxes-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+      display: block; margin-bottom: 6px;
+    }
+    .taxes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .taxes-table th, .taxes-table td {
+      border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle;
+    }
+    .taxes-table th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b;
+    }
+    .taxes-table .num { text-align: right; }
+    .taxes-add {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px;
+    }
+    .taxes-add .field { margin-bottom: 0; flex: 1; min-width: 140px; }
+    .taxes-add button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+    }
+    .money-stack {
+      margin-top: 12px; max-width: 320px; margin-left: auto;
+      border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px 12px;
+      font-size: 13px;
+    }
+    .money-stack .ms-row {
+      display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .money-stack .ms-row.grand {
+      border-top: 1px solid #cbd5e1; margin-top: 4px; padding-top: 8px; font-weight: 700;
+    }
+    .money-stack .ms-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+    .money-stack .ms-note { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.35; }
+    .hint { margin-top: 10px; font-size: 12px; color: #64748b; line-height: 1.4; }
     details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
     details.assumptions summary { cursor: pointer; font-weight: 600; }
     details.assumptions ul { margin: 8px 0 0; padding-left: 18px; }
@@ -158,6 +232,8 @@
     <div class="toolbar">
       <button type="button" class="primary" id="btn-save" data-testid="bill-save">Save draft</button>
       <button type="button" id="btn-submit" data-testid="bill-submit">Save draft &amp; submit</button>
+      <button type="button" id="btn-revert" data-testid="bill-revert"
+        title="Discard unsaved edits (reload saved Bill, or start a fresh new Bill).">Revert unsaved changes</button>
       <button type="button" id="btn-select-po" data-testid="bill-select-po">Select PO / source</button>
       <button type="button" id="btn-refresh" data-testid="bill-refresh">Refresh</button>
       <button type="button" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
@@ -190,12 +266,14 @@
           <div class="field"><label>Ref No. (Supplier Invoice No.)</label><input id="f-billno" data-field="bill_no" data-testid="bill-ref" /></div>
           <div class="field">
             <label>Amount Due</label>
-            <div class="row amount-due-row">
-              <div class="amount-due-stack">
-                <span id="f-amountdue-disp" class="money-amt money-due-disp" data-testid="bill-amount-due-disp" tabindex="0" title="Click or Tab to edit"></span>
-                <input id="f-amountdue" class="money-due-input" data-testid="bill-amount-due" inputmode="decimal" autocomplete="off" hidden />
-              </div>
-              <span class="chip idle" id="due-chip" data-testid="bill-due-chip" title="Checksum vs item totals">·</span>
+            <div class="row amount-due-row" data-testid="bill-amount-due-row">
+              <input id="f-amountdue" class="money-due-input" data-testid="bill-amount-due"
+                inputmode="decimal" autocomplete="off" placeholder="Vendor invoice total" />
+              <span class="due-status idle" id="due-status" data-testid="bill-due-chip"
+                title="Checksum vs Bill grand total">
+                <span class="due-emoji" id="due-emoji" data-testid="bill-due-emoji">·</span>
+                <span class="due-money" id="due-money" data-testid="bill-due-money">—</span>
+              </span>
             </div>
           </div>
           <div class="field">
@@ -205,7 +283,13 @@
         </div>
       </div>
       <div>
-        <label style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#64748b;">Items</label>
+        <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
+          <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+            data-tab="items" data-testid="bill-tab-items">Items</button>
+          <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+            data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
+        </div>
+        <div class="line-panel" id="panel-items" data-testid="bill-panel-items" role="tabpanel">
         <table>
           <thead>
             <tr>
@@ -222,7 +306,7 @@
                   title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
               </td>
               <td></td>
-              <td class="tot-cell"><span class="tot-label">Σ Amt</span><b id="tot-amt">0.00</b></td>
+              <td class="tot-cell"><span class="tot-label">Item subtotal</span><b id="tot-amt">0.00</b></td>
               <td></td>
               <td></td>
             </tr>
@@ -230,6 +314,58 @@
         </table>
         <div class="line-actions">
           <button type="button" id="btn-add-line" data-testid="bill-add-line">Add line</button>
+        </div>
+        </div>
+        <div class="line-panel" id="panel-expenses" data-testid="bill-panel-expenses" role="tabpanel" hidden>
+          <p class="expense-note" data-testid="bill-expense-note"></p>
+          <p class="expense-hint">
+            Switch back to <strong>Items</strong> and pick Chart-of-Accounts-mapped items for expense lines.
+            Vendor tax/freight usually belong on <strong>Taxes and Charges</strong> below (not as Items).
+            There is no separate GL expense grid on this Bill form.
+          </p>
+        </div>
+        <div class="taxes-block" data-testid="bill-taxes-block">
+          <span class="taxes-title">Taxes and Charges</span>
+          <table class="taxes-table">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th class="num">Rate %</th>
+                <th class="num">Amount</th>
+                <th>Add/Deduct</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="taxes-body" data-testid="bill-taxes"></tbody>
+          </table>
+          <div class="taxes-add" id="taxes-add" data-testid="bill-taxes-add">
+            <div class="field">
+              <label for="f-tax-account">Account</label>
+              <input id="f-tax-account" data-testid="bill-tax-account" autocomplete="off" />
+            </div>
+            <div class="field" style="flex:0 0 120px;">
+              <label for="f-tax-amount">Amount</label>
+              <input id="f-tax-amount" data-testid="bill-tax-amount" inputmode="decimal" autocomplete="off" />
+            </div>
+            <button type="button" id="btn-add-tax" data-testid="bill-add-tax">Add tax/charge</button>
+          </div>
+          <div class="money-stack" data-testid="bill-money-stack">
+            <div class="ms-row">
+              <span class="ms-label">Item subtotal</span>
+              <span id="ms-items" data-testid="bill-ms-items">$0.00</span>
+            </div>
+            <div class="ms-row">
+              <span class="ms-label">Taxes</span>
+              <span id="ms-taxes" data-testid="bill-ms-taxes">$0.00</span>
+            </div>
+            <div class="ms-row grand">
+              <span class="ms-label">Grand total</span>
+              <span id="ms-grand" data-testid="bill-ms-grand">$0.00</span>
+            </div>
+            <p class="ms-note" id="ms-note" data-testid="bill-ms-note" hidden></p>
+          </div>
         </div>
         <div class="field memo" data-testid="bill-memo-block">
           <div class="memo-head">
@@ -240,8 +376,9 @@
           <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
         </div>
         <p class="hint">
-          Use the ▾ / search on Vendor, Terms, Item, and Project (type a few letters).
-          Σ Qty is the packing-slip hash check; Σ Amount is the sum of line extended amounts.
+          Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters).
+          Item subtotal is Σ line amounts; Taxes and Charges roll into Grand total.
+          Amount Due (header) must match Grand total — checksum chip shows $ difference.
           PO/PR source lines keep their descriptions (editable).
         </p>
       </div>
@@ -251,18 +388,23 @@
     import {
       readBillHeader,
       readBillItemRows,
-      amountDueChecksumStatus,
+      readBillTaxRows,
+      amountDueChecksumChip,
       amountDueMatchesGrandTotal,
+      billCompareTotal,
+      billMoneyStack,
       sumBillLineQty,
       sumBillLineAmount,
       formatBillLineTotal,
       BILL_ITEM_COLS,
       BILL_ASSUMPTIONS,
+      BILL_EXPENSE_NOTE,
       isDraftBillDoc,
       saveActionsBlockedByChecksum,
     } from "../src/bill-map.js";
     import {
       formatGroupedNumber,
+      formatUsdAmount,
       formatUsdAmountHtml,
       parseMoney,
     } from "../src/money.js";
@@ -314,23 +456,54 @@
       date: document.getElementById("f-date"),
       billno: document.getElementById("f-billno"),
       amountdue: document.getElementById("f-amountdue"),
-      amountdueDisp: document.getElementById("f-amountdue-disp"),
+      dueStatus: document.getElementById("due-status"),
+      dueEmoji: document.getElementById("due-emoji"),
+      dueMoney: document.getElementById("due-money"),
       duedate: document.getElementById("f-duedate"),
       memo: document.getElementById("f-memo"),
       items: document.getElementById("items-body"),
       lineTotals: document.getElementById("line-totals"),
       totQty: document.getElementById("tot-qty"),
       totAmt: document.getElementById("tot-amt"),
-      chip: document.getElementById("due-chip"),
       save: document.getElementById("btn-save"),
       submit: document.getElementById("btn-submit"),
+      revert: document.getElementById("btn-revert"),
       addLine: document.getElementById("btn-add-line"),
       clearQty: document.getElementById("btn-clear-qty"),
       attach: document.getElementById("btn-attach"),
+      taxesBody: document.getElementById("taxes-body"),
+      taxesAdd: document.getElementById("taxes-add"),
+      taxAccount: document.getElementById("f-tax-account"),
+      taxAmount: document.getElementById("f-tax-amount"),
+      addTax: document.getElementById("btn-add-tax"),
+      msItems: document.getElementById("ms-items"),
+      msTaxes: document.getElementById("ms-taxes"),
+      msGrand: document.getElementById("ms-grand"),
+      msNote: document.getElementById("ms-note"),
+      tabItems: document.getElementById("tab-items"),
+      tabExpenses: document.getElementById("tab-expenses"),
+      panelItems: document.getElementById("panel-items"),
+      panelExpenses: document.getElementById("panel-expenses"),
+      expenseNote: document.querySelector("[data-testid='bill-expense-note']"),
     };
 
     const assumptionsUl = document.getElementById("assumptions-list");
     assumptionsUl.innerHTML = BILL_ASSUMPTIONS.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
+    if (el.expenseNote) el.expenseNote.textContent = BILL_EXPENSE_NOTE;
+
+    function setLineTab(which) {
+      const expenses = which === "expenses";
+      if (el.tabItems) {
+        el.tabItems.classList.toggle("active", !expenses);
+        el.tabItems.setAttribute("aria-selected", expenses ? "false" : "true");
+      }
+      if (el.tabExpenses) {
+        el.tabExpenses.classList.toggle("active", expenses);
+        el.tabExpenses.setAttribute("aria-selected", expenses ? "true" : "false");
+      }
+      if (el.panelItems) el.panelItems.hidden = expenses;
+      if (el.panelExpenses) el.panelExpenses.hidden = !expenses;
+    }
 
     function setStatus(text, cls) {
       el.status.textContent = text;
@@ -484,57 +657,29 @@
     }
 
     function paintChip() {
-      const st = amountDueChecksumStatus(amountDue, lastDoc && lastDoc.grand_total);
-      el.chip.className = "chip " + st;
-      el.chip.textContent = st === "match" ? "✓" : st === "mismatch" ? "!" : "·";
-      el.chip.title =
-        st === "match"
-          ? "Amount Due matches item totals"
-          : st === "mismatch"
-            ? "Amount Due does not match item totals"
-            : "Enter Amount Due to activate checksum";
-      const block = saveActionsBlockedByChecksum(st);
+      const compare = billCompareTotal(lastDoc);
+      const chip = amountDueChecksumChip(amountDue, compare);
+      if (el.dueStatus) {
+        el.dueStatus.className = "due-status " + chip.status;
+        el.dueStatus.title = chip.title;
+      }
+      if (el.dueEmoji) el.dueEmoji.textContent = chip.emoji;
+      if (el.dueMoney) el.dueMoney.textContent = chip.moneyText;
+      const block = saveActionsBlockedByChecksum(chip.status);
       el.save.disabled = block;
       el.submit.disabled = block;
     }
 
-    /** Show $#,###.__ (underlined cents) when not editing Amount Due. */
-    function paintAmountDueDisplay() {
-      if (!el.amountdueDisp) return;
-      const html = formatUsdAmountHtml(amountDue);
-      if (html) {
-        el.amountdueDisp.innerHTML = html;
-        el.amountdueDisp.classList.remove("is-empty");
-      } else {
-        el.amountdueDisp.textContent = "—";
-        el.amountdueDisp.classList.add("is-empty");
+    /** Show Amount Due in the single input (USD on blur / when not focused). */
+    function paintAmountDueInput(opts = {}) {
+      const keepRaw = !!opts.keepRaw || document.activeElement === el.amountdue;
+      if (keepRaw) {
+        const n = parseMoney(amountDue);
+        el.amountdue.value = n != null ? String(n) : amountDue || "";
+        return;
       }
-    }
-
-    function beginAmountDueEdit() {
-      if (!editable() || el.amountdue.readOnly) return;
-      const n = parseMoney(amountDue);
-      el.amountdue.value = n != null ? String(n) : "";
-      amountDueAtFocus = el.amountdue.value;
-      el.amountdue.hidden = false;
-      if (el.amountdueDisp) el.amountdueDisp.hidden = true;
-      try {
-        el.amountdue.focus();
-        el.amountdue.select();
-      } catch {
-        /* ignore */
-      }
-    }
-
-    function endAmountDueEdit() {
-      const n = parseMoney(el.amountdue.value);
-      amountDue = n != null ? String(n) : "";
-      const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
-      if (api) api.setAmountDue(amountDue, changed);
-      el.amountdue.hidden = true;
-      if (el.amountdueDisp) el.amountdueDisp.hidden = false;
-      paintAmountDueDisplay();
-      paintChip();
+      const plain = formatUsdAmount(amountDue);
+      el.amountdue.value = plain || (amountDue !== "" ? String(amountDue) : "");
     }
 
     function focusItemCell(rowIndex, field) {
@@ -575,7 +720,134 @@
       }
       el.lineTotals.hidden = false;
       el.totQty.textContent = formatBillLineTotal(sumBillLineQty(doc));
-      el.totAmt.innerHTML = formatUsdAmountHtml(sumBillLineAmount(doc)) || formatBillLineTotal(sumBillLineAmount(doc));
+      el.totAmt.innerHTML =
+        formatUsdAmountHtml(sumBillLineAmount(doc)) || formatBillLineTotal(sumBillLineAmount(doc));
+    }
+
+    function paintMoneyStack(doc) {
+      const stack = billMoneyStack(doc);
+      const fmt = (n) => formatUsdAmountHtml(n) || "$0.00";
+      if (el.msItems) el.msItems.innerHTML = fmt(stack.itemSubtotal);
+      if (el.msTaxes) el.msTaxes.innerHTML = fmt(stack.taxesTotal);
+      if (el.msGrand) {
+        el.msGrand.innerHTML =
+          stack.grandTotal != null ? fmt(stack.grandTotal) : "—";
+      }
+      if (el.msNote) {
+        if (stack.note) {
+          el.msNote.hidden = false;
+          el.msNote.textContent = stack.note;
+        } else {
+          el.msNote.hidden = true;
+          el.msNote.textContent = "";
+        }
+      }
+    }
+
+    function paintTaxes(doc) {
+      if (!el.taxesBody) return;
+      const rows = readBillTaxRows(doc);
+      const canEdit = editable();
+      if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
+      if (!rows.length) {
+        el.taxesBody.innerHTML =
+          `<tr><td colspan="7" class="link-muted">No tax/charge rows yet.</td></tr>`;
+        paintMoneyStack(doc);
+        return;
+      }
+      el.taxesBody.innerHTML = rows
+        .map((r) => {
+          if (!canEdit) {
+            return `<tr>
+              <td>${escapeHtml(r.account_head)}</td>
+              <td>${escapeHtml(r.description)}</td>
+              <td>${escapeHtml(r.charge_type)}</td>
+              <td class="num">${escapeHtml(r.rate === "" ? "" : String(r.rate))}</td>
+              <td class="num">${formatUsdAmountHtml(r.tax_amount) || escapeHtml(String(r.tax_amount ?? ""))}</td>
+              <td>${escapeHtml(r.add_deduct_tax)}</td>
+              <td></td>
+            </tr>`;
+          }
+          const rateShown =
+            r.rate === "" || r.rate == null ? "" : formatGroupedNumber(r.rate);
+          const amtShown =
+            r.tax_amount === "" || r.tax_amount == null
+              ? ""
+              : formatGroupedNumber(r.tax_amount);
+          return `<tr data-taxidx="${r.idx}">
+            <td><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
+            <td><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
+            <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
+            <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
+            <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
+            <td>
+              <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="bill-tax-${r.idx}-adddeduct">
+                <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
+                <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
+              </select>
+            </td>
+            <td><button type="button" class="del" data-tax-del="${r.idx}" title="Remove tax row" data-testid="bill-tax-del-${r.idx}">×</button></td>
+          </tr>`;
+        })
+        .join("");
+
+      el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
+        const field = inp.getAttribute("data-tax-field");
+        const ri = Number(inp.getAttribute("data-tax-row"));
+        const apply = async (value) => {
+          if (!api || painting || !api.setTax) return;
+          setStatus(`Updating tax ${field}…`);
+          const res = await api.setTax(ri, field, value);
+          if (res && res.ok) {
+            paint(res.doc, amountDue);
+            setStatus("Tax row updated.");
+          } else {
+            setStatus((res && res.reason) || "Tax update failed.", "err");
+            await refresh();
+          }
+        };
+        if (field === "account_head") {
+          mountLinkPicker(inp, "Account", apply);
+        }
+        if (field === "rate" || field === "tax_amount") {
+          inp.addEventListener("focus", () => {
+            const n = parseMoney(inp.value);
+            if (n != null) inp.value = String(n);
+          });
+          inp.addEventListener("blur", () => {
+            const n = parseMoney(inp.value);
+            if (n != null) inp.value = formatGroupedNumber(n);
+          });
+        }
+        const evName = inp.tagName === "SELECT" ? "change" : "change";
+        inp.addEventListener(evName, async () => {
+          if (!api || painting) return;
+          const kind = dirtyCompareKindForField(field);
+          let next =
+            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+          if (field === "rate" || field === "tax_amount") {
+            const n = parseMoney(inp.value);
+            next = n == null ? "" : String(n);
+            if (n != null) inp.value = formatGroupedNumber(n);
+          }
+          await apply(next);
+        });
+      });
+      el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!api || !api.deleteTax) return;
+          const ri = Number(btn.getAttribute("data-tax-del"));
+          setStatus("Removing tax row…");
+          const res = await api.deleteTax(ri);
+          if (res && res.ok) {
+            paint(res.doc, amountDue);
+            setStatus("Tax row removed.");
+          } else {
+            setStatus((res && res.reason) || "Delete tax failed.", "err");
+          }
+        });
+      });
+      paintMoneyStack(doc);
     }
 
     function paintItems(doc) {
@@ -960,9 +1232,12 @@
         setFormBlocked(true, opts.reason || "No Purchase Invoice loaded in Vanilla yet.");
         el.items.innerHTML = "";
         paintLineTotals(null);
+        if (el.taxesBody) el.taxesBody.innerHTML = "";
+        paintMoneyStack(null);
         el.addLine.disabled = true;
       if (el.clearQty) el.clearQty.disabled = true;
       if (el.attach) el.attach.disabled = true;
+      if (el.addTax) el.addTax.disabled = true;
       paintChip();
       painting = false;
       return;
@@ -974,14 +1249,8 @@
       el.terms.value = h.Terms ?? "";
       el.date.value = formatDocDateDisplay(h.Date ?? "") || (h.Date ?? "");
       el.billno.value = h["Ref No. (Supplier Invoice No.)"] ?? "";
-      el.amountdue.value = amountDue !== "" ? amountDue : String(h["Amount Due"] ?? "");
-      if (amountDue === "" && h["Amount Due"] !== "" && h["Amount Due"] != null) {
-        amountDue = String(h["Amount Due"]);
-      }
-      paintAmountDueDisplay();
-      if (el.amountdueDisp) {
-        el.amountdueDisp.hidden = !el.amountdue.hidden;
-      }
+      // Amount Due is user scratch only — stay blank until they type (no grand_total seed).
+      paintAmountDueInput();
       el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
       el.memo.value = h.Memo ?? "";
       const canEdit = isDraftBillDoc(doc);
@@ -992,15 +1261,13 @@
       el.duedate.readOnly = !canEdit;
       el.memo.readOnly = !canEdit;
       el.amountdue.readOnly = !canEdit;
-      if (el.amountdueDisp) {
-        el.amountdueDisp.tabIndex = canEdit ? 0 : -1;
-        el.amountdueDisp.style.pointerEvents = canEdit ? "" : "none";
-      }
       el.address.readOnly = true;
       el.addLine.disabled = !canEdit;
       if (el.clearQty) el.clearQty.disabled = !canEdit;
       if (el.attach) el.attach.disabled = !canEdit;
+      if (el.addTax) el.addTax.disabled = !canEdit;
       paintItems(doc);
+      paintTaxes(doc);
       ensureHeaderLinkPickers();
       const name = doc.name || "(new)";
       setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
@@ -1111,8 +1378,8 @@
 
     async function doSave(submit) {
       if (!api) return;
-      if (!amountDueMatchesGrandTotal(amountDue, lastDoc && lastDoc.grand_total)) {
-        setStatus("Fix Amount Due checksum before save.", "err");
+      if (!amountDueMatchesGrandTotal(amountDue, billCompareTotal(lastDoc))) {
+        setStatus("Fix Amount Due checksum before save (must match Grand total).", "err");
         return;
       }
       setStatus(submit ? "Saving & submitting…" : "Saving…");
@@ -1134,17 +1401,15 @@
     wireDateField(el.date);
     wireDateField(el.duedate);
 
-    el.amountdueDisp &&
-      el.amountdueDisp.addEventListener("click", () => beginAmountDueEdit());
-    el.amountdueDisp &&
-      el.amountdueDisp.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" || ev.key === " " || ev.key === "F2") {
-          ev.preventDefault();
-          beginAmountDueEdit();
-        }
-      });
     el.amountdue.addEventListener("focus", () => {
+      const n = parseMoney(amountDue);
+      el.amountdue.value = n != null ? String(n) : amountDue || "";
       amountDueAtFocus = el.amountdue.value;
+      try {
+        el.amountdue.select();
+      } catch {
+        /* ignore */
+      }
     });
     el.amountdue.addEventListener("input", () => {
       const n = parseMoney(el.amountdue.value);
@@ -1152,7 +1417,14 @@
       paintChip();
       if (api) api.setAmountDue(amountDue);
     });
-    el.amountdue.addEventListener("blur", () => endAmountDueEdit());
+    el.amountdue.addEventListener("blur", () => {
+      const n = parseMoney(el.amountdue.value);
+      amountDue = n != null ? String(n) : "";
+      const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
+      if (api) api.setAmountDue(amountDue, changed);
+      paintAmountDueInput();
+      paintChip();
+    });
     el.amountdue.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
@@ -1161,12 +1433,32 @@
       if (ev.key === "Escape") {
         ev.preventDefault();
         el.amountdue.value = amountDueAtFocus;
+        const n = parseMoney(amountDueAtFocus);
+        amountDue = n != null ? String(n) : amountDueAtFocus;
         el.amountdue.blur();
       }
     });
 
     document.getElementById("btn-refresh").onclick = () => refresh();
     document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+    if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
+    if (el.tabExpenses) el.tabExpenses.onclick = () => setLineTab("expenses");
+    if (el.revert) {
+      el.revert.onclick = async () => {
+        if (!api || !api.revertUnsaved) {
+          setStatus("Revert API missing — restart the shell.", "err");
+          return;
+        }
+        setStatus("Reverting unsaved changes…");
+        const res = await api.revertUnsaved();
+        if (res && res.ok) {
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+          setStatus(res.isNew ? "Started a fresh new Bill." : "Reloaded last saved Bill.");
+        } else {
+          setStatus((res && res.reason) || "Revert failed.", "err");
+        }
+      };
+    }
     document.getElementById("btn-select-po").onclick = () => {
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "toolbar",
@@ -1195,6 +1487,35 @@
     };
     el.save.onclick = () => doSave(false);
     el.submit.onclick = () => doSave(true);
+    if (el.taxAccount) {
+      mountLinkPicker(el.taxAccount, "Account", async (v) => {
+        el.taxAccount.value = v;
+      });
+    }
+    if (el.addTax) {
+      el.addTax.onclick = async () => {
+        if (!api || !editable() || !api.addTax) return;
+        const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
+        const n = parseMoney(el.taxAmount && el.taxAmount.value);
+        if (!acct) {
+          setStatus("Pick a tax/charge Account first.", "warn");
+          return;
+        }
+        if (n == null) {
+          setStatus("Enter a tax/charge Amount.", "warn");
+          return;
+        }
+        setStatus("Adding tax/charge…");
+        const res = await api.addTax(acct, n, "");
+        if (res && res.ok) {
+          if (el.taxAmount) el.taxAmount.value = "";
+          paint(res.doc, amountDue);
+          setStatus("Tax/charge row added — check Grand total vs Amount Due.");
+        } else {
+          setStatus((res && res.reason) || "Add tax failed.", "err");
+        }
+      };
+    }
     el.addLine.onclick = async () => {
       if (!api || !editable()) return;
       setStatus("Adding line…");
