@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bill</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
+    .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .status { font-size: 12px; color: #64748b; }
+    .status.warn { color: #b45309; }
+    .status.err { color: #b91c1c; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .toolbar button, .line-actions button, .del {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer;
+    }
+    .toolbar button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .toolbar button:disabled, .line-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .card { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .field .row { display: flex; align-items: center; gap: 8px; }
+    .field input, .field textarea, td input {
+      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 9px; font-size: 14px; width: 100%;
+      box-sizing: border-box; background: #fff;
+    }
+    td input { padding: 5px 6px; font-size: 13px; }
+    .field input:read-only, .field textarea:read-only, td .ro {
+      background: #f8fafc; color: #475569; border: none; padding: 5px 2px;
+    }
+    .chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 28px; height: 28px; border-radius: 6px; font-size: 14px; font-weight: 700;
+      border: 1px solid transparent; flex-shrink: 0;
+    }
+    .chip.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
+    .chip.match { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .chip.mismatch { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .memo { margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; }
+    .del { padding: 4px 8px; color: #991b1b; }
+    .line-actions { margin-top: 8px; }
+    tfoot#line-totals td {
+      border-bottom: none; padding-top: 10px; font-size: 13px; vertical-align: middle;
+      background: #f8fafc; border-top: 1px solid #cbd5e1;
+    }
+    tfoot#line-totals .tot-cell b { font-variant-numeric: tabular-nums; }
+    tfoot#line-totals .tot-label {
+      color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; margin-right: 4px;
+    }
+    .hint { margin-top: 10px; font-size: 12px; color: #64748b; }
+    details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
+    details.assumptions summary { cursor: pointer; font-weight: 600; }
+    details.assumptions ul { margin: 8px 0 0; padding-left: 18px; }
+    .link-wrap { position: relative; display: flex; gap: 4px; align-items: stretch; }
+    .link-wrap > input { flex: 1; min-width: 0; }
+    .link-btn {
+      border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px;
+      padding: 0 10px; cursor: pointer; font-size: 12px; color: #334155; flex-shrink: 0;
+    }
+    .link-btn:hover { background: #e2e8f0; }
+    .link-dd {
+      position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 20;
+      background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+      max-height: 220px; overflow: auto; box-shadow: 0 8px 20px rgba(15,23,42,.12);
+    }
+    .link-opt {
+      display: block; width: 100%; text-align: left; border: none; background: #fff;
+      padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f1f5f9;
+    }
+    .link-opt:hover, .link-opt:focus { background: #eaf4ff; outline: none; }
+    .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
+    .link-opt.active { background: #eaf4ff; }
+    .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
+    .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
+      pointer-events: none; opacity: 0.55;
+    }
+    .src-back {
+      position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .src-box {
+      background: #fff; border-radius: 10px; width: min(560px, 100%); max-height: 80vh;
+      display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15,23,42,.25);
+    }
+    .src-title { padding: 12px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+    .src-body { overflow: auto; padding: 8px 0; flex: 1; }
+    .src-group { padding: 6px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .src-group.active { color: #0f172a; font-weight: 700; }
+    .src-item {
+      padding: 8px 14px; font-size: 13px; cursor: pointer; border: none; background: #fff;
+      width: 100%; text-align: left; display: block;
+    }
+    .src-item:hover, .src-item.active { background: #eaf4ff; }
+    .src-item.draft { color: #94a3b8; cursor: not-allowed; background: #f8fafc; }
+    .src-foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #e2e8f0; }
+    .src-foot button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+    .src-foot button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .date-hint { font-size: 10px; color: #94a3b8; }
+    @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap" data-testid="bill-root">
+    <div class="banner">
+      <h1>Bill</h1>
+      <span class="status" id="status" data-testid="bill-status">Loading…</span>
+      <span class="banner-actions">
+        <button type="button" id="btn-retry" data-testid="bill-retry" hidden>Retry load</button>
+      </span>
+    </div>
+    <div class="toolbar">
+      <button type="button" class="primary" id="btn-save" data-testid="bill-save">Save draft</button>
+      <button type="button" id="btn-submit" data-testid="bill-submit">Save draft &amp; submit</button>
+      <button type="button" id="btn-select-po" data-testid="bill-select-po">Select PO / source</button>
+      <button type="button" id="btn-refresh" data-testid="bill-refresh">Refresh</button>
+      <button type="button" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
+    </div>
+    <details class="assumptions" data-testid="bill-assumptions">
+      <summary>Assumptions this view makes</summary>
+      <ul id="assumptions-list"></ul>
+    </details>
+    <div class="card">
+      <div class="cols">
+        <div>
+          <div class="field"><label>Vendor Name</label><input id="f-vendor" data-field="supplier" data-testid="bill-vendor" autocomplete="off" /></div>
+          <div class="field">
+            <label>Address</label>
+            <input id="f-address" readonly tabindex="-1" data-testid="bill-address"
+              title="Read-only here. Edit the vendor’s address in ERPNext: Home → Buying → Supplier (Vendor) → open the vendor → Address / Contact. Then Refresh this Bill." />
+            <span class="addr-hint" id="address-hint">
+              Read-only on Bill. Edit address on the Vendor (Supplier) form:
+              <em>Home → Buying → Supplier → [vendor] → Address</em>. Then Refresh.
+            </span>
+          </div>
+          <div class="field"><label>Terms</label><input id="f-terms" data-field="payment_terms_template" data-testid="bill-terms" /></div>
+        </div>
+        <div>
+          <div class="field">
+            <label>Date</label>
+            <input id="f-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="posting_date" data-testid="bill-date" autocomplete="off" />
+            <span class="date-hint">Digits and / - . only · Tab once to leave · MM/DD fills nearest year</span>
+          </div>
+          <div class="field"><label>Ref No. (Supplier Invoice No.)</label><input id="f-billno" data-field="bill_no" data-testid="bill-ref" /></div>
+          <div class="field">
+            <label>Amount Due</label>
+            <div class="row">
+              <input id="f-amountdue" data-testid="bill-amount-due" />
+              <span class="chip idle" id="due-chip" data-testid="bill-due-chip" title="Checksum vs item totals">·</span>
+            </div>
+          </div>
+          <div class="field">
+            <label>Bill Due Date</label>
+            <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+      <div class="field memo"><label>Memo</label><textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea></div>
+      <div>
+        <label style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#64748b;">Items</label>
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th><th>Description</th><th>Qty</th><th>Cost</th><th>Amount</th><th>Customer:Job</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="items-body" data-testid="bill-items"></tbody>
+          <tfoot id="line-totals" data-testid="bill-line-totals" hidden>
+            <tr>
+              <td colspan="2"></td>
+              <td class="tot-cell"><span class="tot-label">Σ Qty</span><b id="tot-qty">0</b></td>
+              <td></td>
+              <td class="tot-cell"><span class="tot-label">Σ Amt</span><b id="tot-amt">0.00</b></td>
+              <td></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div class="line-actions">
+          <button type="button" id="btn-add-line" data-testid="bill-add-line">Add line</button>
+          <button type="button" id="btn-clear-qty" data-testid="bill-clear-qty"
+            title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
+        </div>
+        <p class="hint">
+          Use the ▾ / search on Vendor, Terms, Item, and Project (type a few letters).
+          Σ Qty is the packing-slip hash check; Σ Amount is the sum of line extended amounts.
+          PO/PR source lines keep their descriptions (editable).
+        </p>
+      </div>
+    </div>
+  </div>
+  <script type="module">
+    import {
+      readBillHeader,
+      readBillItemRows,
+      amountDueChecksumStatus,
+      amountDueMatchesGrandTotal,
+      sumBillLineQty,
+      sumBillLineAmount,
+      formatBillLineTotal,
+      BILL_ITEM_COLS,
+      BILL_ASSUMPTIONS,
+    } from "../src/bill-map.js";
+    import {
+      linkDoctypeForBillField,
+      linkOptionLabel,
+    } from "../src/link-search.js";
+    import {
+      valuesMeaningfullyEqual,
+      dirtyCompareKindForField,
+      normalizeEditableText,
+    } from "../src/dirty-gate.js";
+    import {
+      filterDateInputValue,
+      isAllowedDateInputChar,
+      parseDocDate,
+      formatDocDateDisplay,
+    } from "../src/doc-date.js";
+    import { isSelectableSourceItem } from "../src/source-modal.js";
+
+    const api = window.erpBill;
+    let lastDoc = null;
+    let amountDue = "";
+    let amountDueAtFocus = "";
+    let painting = false;
+    /** @type {WeakMap<HTMLElement, true>} */
+    const linkMounted = new WeakMap();
+
+    const el = {
+      status: document.getElementById("status"),
+      vendor: document.getElementById("f-vendor"),
+      address: document.getElementById("f-address"),
+      terms: document.getElementById("f-terms"),
+      date: document.getElementById("f-date"),
+      billno: document.getElementById("f-billno"),
+      amountdue: document.getElementById("f-amountdue"),
+      duedate: document.getElementById("f-duedate"),
+      memo: document.getElementById("f-memo"),
+      items: document.getElementById("items-body"),
+      lineTotals: document.getElementById("line-totals"),
+      totQty: document.getElementById("tot-qty"),
+      totAmt: document.getElementById("tot-amt"),
+      chip: document.getElementById("due-chip"),
+      save: document.getElementById("btn-save"),
+      submit: document.getElementById("btn-submit"),
+      addLine: document.getElementById("btn-add-line"),
+      clearQty: document.getElementById("btn-clear-qty"),
+    };
+
+    const assumptionsUl = document.getElementById("assumptions-list");
+    assumptionsUl.innerHTML = BILL_ASSUMPTIONS.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
+
+    function setStatus(text, cls) {
+      el.status.textContent = text;
+      el.status.className = "status" + (cls ? " " + cls : "");
+    }
+
+    function escapeHtml(v) {
+      return String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    /**
+     * Attach typeahead + ▾ search for an ERP Link doctype.
+     * Tab moves into the list; Enter selects highlighted (or sole) option.
+     * @param {HTMLInputElement} input
+     * @param {string} doctype
+     * @param {(value: string) => void|Promise<void>} onPicked
+     */
+    function mountLinkPicker(input, doctype, onPicked) {
+      if (!input || linkMounted.get(input)) return;
+      linkMounted.set(input, true);
+      const wrap = document.createElement("div");
+      wrap.className = "link-wrap";
+      input.parentNode.insertBefore(wrap, input);
+      wrap.appendChild(input);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "link-btn";
+      btn.textContent = "▾";
+      btn.title = `Search ${doctype}`;
+      btn.tabIndex = -1;
+      wrap.appendChild(btn);
+      const dd = document.createElement("div");
+      dd.className = "link-dd";
+      dd.hidden = true;
+      wrap.appendChild(dd);
+
+      let timer = null;
+      /** @type {HTMLButtonElement[]} */
+      let opts = [];
+      let hi = -1;
+
+      function setHi(i) {
+        opts.forEach((b) => b.classList.remove("active"));
+        hi = i;
+        if (hi >= 0 && opts[hi]) opts[hi].classList.add("active");
+      }
+
+      async function pickValue(v) {
+        input.value = v;
+        dd.hidden = true;
+        hi = -1;
+        await onPicked(v);
+      }
+
+      async function runSearch(q) {
+        if (!api || !api.searchLink) {
+          dd.hidden = false;
+          dd.innerHTML = `<div class="link-muted">Search API missing — restart the shell.</div>`;
+          return;
+        }
+        dd.hidden = false;
+        dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
+        const res = await api.searchLink(doctype, q || "");
+        if (!res || !res.ok) {
+          dd.innerHTML = `<div class="link-muted">${escapeHtml((res && res.reason) || "Search failed — is Vanilla logged in?")}</div>`;
+          opts = [];
+          return;
+        }
+        const rows = res.results || [];
+        if (!rows.length) {
+          dd.innerHTML = `<div class="link-muted">No matches${q ? ` for “${escapeHtml(q)}”` : ""}</div>`;
+          opts = [];
+          return;
+        }
+        dd.innerHTML = rows
+          .map(
+            (o) =>
+              `<button type="button" class="link-opt" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
+          )
+          .join("");
+        opts = [...dd.querySelectorAll(".link-opt")];
+        hi = opts.length === 1 ? 0 : -1;
+        if (hi === 0) opts[0].classList.add("active");
+        opts.forEach((b) => {
+          b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
+        });
+      }
+
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => runSearch(input.value), 280);
+      });
+      input.addEventListener("keydown", async (ev) => {
+        if (ev.key === "Escape") {
+          dd.hidden = true;
+          hi = -1;
+          return;
+        }
+        if (dd.hidden || !opts.length) {
+          if (ev.key === "ArrowDown") {
+            ev.preventDefault();
+            await runSearch(input.value || "");
+          }
+          return;
+        }
+        if (ev.key === "Tab") {
+          // Sole or highlighted → commit + close (Enter also works). Do not cycle the list.
+          const pick = hi >= 0 ? opts[hi] : opts.length === 1 ? opts[0] : null;
+          if (pick) {
+            ev.preventDefault();
+            await pickValue(pick.getAttribute("data-value") || "");
+          } else {
+            dd.hidden = true;
+            hi = -1;
+          }
+          return;
+        }
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          const pick = hi >= 0 ? opts[hi] : opts.length === 1 ? opts[0] : null;
+          if (pick) await pickValue(pick.getAttribute("data-value") || "");
+          return;
+        }
+        if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          setHi(hi < 0 ? 0 : Math.min(hi + 1, opts.length - 1));
+        }
+        if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          setHi(hi <= 0 ? 0 : hi - 1);
+        }
+      });
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        runSearch(input.value || "");
+      });
+      document.addEventListener("click", (ev) => {
+        if (!wrap.contains(/** @type {Node} */ (ev.target))) dd.hidden = true;
+      });
+    }
+
+    function paintChip() {
+      const st = amountDueChecksumStatus(amountDue, lastDoc && lastDoc.grand_total);
+      el.chip.className = "chip " + st;
+      el.chip.textContent = st === "match" ? "✓" : st === "mismatch" ? "!" : "·";
+      el.chip.title =
+        st === "match"
+          ? "Amount Due matches item totals"
+          : st === "mismatch"
+            ? "Amount Due does not match item totals"
+            : "Enter Amount Due to activate checksum";
+      const block = st === "mismatch";
+      el.save.disabled = block;
+      el.submit.disabled = block;
+    }
+
+    function editable() {
+      return !!(lastDoc && lastDoc.docstatus === 0);
+    }
+
+    function paintLineTotals(doc) {
+      if (!el.lineTotals) return;
+      const items = doc && Array.isArray(doc.items) ? doc.items : [];
+      if (!items.length) {
+        el.lineTotals.hidden = true;
+        return;
+      }
+      el.lineTotals.hidden = false;
+      el.totQty.textContent = formatBillLineTotal(sumBillLineQty(doc));
+      el.totAmt.textContent = formatBillLineTotal(sumBillLineAmount(doc));
+    }
+
+    function paintItems(doc) {
+      const rows = readBillItemRows(doc);
+      const canEdit = editable();
+      el.items.innerHTML = rows
+        .map((r, ri) => {
+          const cells = BILL_ITEM_COLS.map((col, ci) => {
+            const val = r[ci] ?? "";
+            if (!col.field || col.displayOnly) {
+              return `<td><span class="ro" data-testid="bill-amt-${ri}">${escapeHtml(val)}</span></td>`;
+            }
+            if (!canEdit) {
+              return `<td><span class="ro">${escapeHtml(val)}</span></td>`;
+            }
+            const type = col.field === "qty" || col.field === "rate" ? "number" : "text";
+            const step = col.field === "qty" || col.field === "rate" ? ' step="any"' : "";
+            return `<td><input type="${type}"${step} data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
+          }).join("");
+          const del = canEdit
+            ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
+            : `<td></td>`;
+          return `<tr data-rowidx="${ri}">${cells}${del}</tr>`;
+        })
+        .join("");
+
+      paintLineTotals(doc);
+
+      el.items.querySelectorAll("input[data-row]").forEach((inp) => {
+        const field = inp.getAttribute("data-field");
+        const ri = Number(inp.getAttribute("data-row"));
+        const linkDt = linkDoctypeForBillField(field);
+        const apply = async (value) => {
+          if (!api || painting) return;
+          setStatus(`Updating ${field}…`);
+          const res = await api.setItem(ri, field, value);
+          if (res && res.ok) {
+            paint(res.doc, amountDue);
+            setStatus("Line updated.");
+          } else {
+            setStatus((res && res.reason) || "Line update failed.", "err");
+            await refresh();
+          }
+        };
+        if (linkDt) {
+          mountLinkPicker(inp, linkDt, apply);
+        }
+        inp.addEventListener("change", async () => {
+          if (!api || painting) return;
+          const kind = dirtyCompareKindForField(field);
+          const next =
+            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+          const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
+          if (valuesMeaningfullyEqual(prev, next, { kind })) {
+            if (kind !== "number") inp.value = normalizeEditableText(String(prev ?? ""));
+            return;
+          }
+          await apply(next);
+        });
+      });
+      el.items.querySelectorAll("button[data-del]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!api) return;
+          const ri = Number(btn.getAttribute("data-del"));
+          setStatus("Removing line…");
+          const res = await api.deleteItem(ri);
+          if (res && res.ok) {
+            paint(res.doc, amountDue);
+            setStatus("Line removed.");
+          } else {
+            setStatus((res && res.reason) || "Delete failed.", "err");
+          }
+        });
+      });
+    }
+
+    function ensureHeaderLinkPickers() {
+      mountLinkPicker(el.vendor, "Supplier", async (v) => {
+        if (!api || !editable()) return;
+        setStatus("Setting vendor…");
+        const res = await api.setHeader("supplier", v);
+        if (res && res.ok) {
+          paint(res.doc || lastDoc, amountDue);
+          if (res.openSourcePicker) {
+            await openSourcePicker(v || res.supplier || (res.doc && res.doc.supplier));
+          }
+        } else {
+          setStatus((res && res.reason) || "Vendor update failed.", "err");
+          await refresh();
+        }
+      });
+      mountLinkPicker(el.terms, "Payment Terms Template", async (v) => {
+        if (!api || !editable()) return;
+        await api.setHeader("payment_terms_template", v);
+        await refresh();
+      });
+    }
+
+    /**
+     * Museum-parity source modal after vendor (T2).
+     * @param {string} [supplier]
+     */
+    async function openSourcePicker(supplier) {
+      if (!api || !api.listSources) {
+        setStatus("Source picker API missing — restart the shell.", "err");
+        return;
+      }
+      const sup =
+        normalizeEditableText(supplier) ||
+        normalizeEditableText(lastDoc && lastDoc.supplier) ||
+        normalizeEditableText(el.vendor.value);
+      if (!sup) {
+        setStatus("Pick a vendor before Select PO / source.", "warn");
+        return;
+      }
+      setStatus("Loading open PO / Item Receipts…");
+      const res = await api.listSources(sup);
+      if (!res || !res.ok) {
+        setStatus((res && res.reason) || "Could not load sources.", "err");
+        return;
+      }
+      const groups = res.groups || [];
+      showSourceModal(groups, async (it) => {
+        if (!it || it.kind === "nic") {
+          setStatus("No source — enter lines manually.");
+          return;
+        }
+        setStatus(`Pulling from ${it.name}…`);
+        const merged = await api.mergeSource(it.kind, it.name);
+        if (merged && merged.ok) {
+          paint(merged.doc, amountDue);
+          setStatus(`Pulled from ${it.name}.`);
+        } else {
+          setStatus((merged && merged.reason) || "Could not pull source.", "err");
+          await refresh();
+        }
+      });
+    }
+
+    /**
+     * @param {import("../src/source-modal.js").SourceGroup[]} groups
+     * @param {(it: import("../src/source-modal.js").SourceItem) => void|Promise<void>} onChoose
+     */
+    function showSourceModal(groups, onChoose) {
+      let gi = 0;
+      let ii = 0;
+      const back = document.createElement("div");
+      back.className = "src-back";
+      back.dataset.testid = "bill-source-modal";
+      const box = document.createElement("div");
+      box.className = "src-box";
+      box.innerHTML = `<div class="src-title">Source Selection — Tab: group · ↑/↓: item · Enter: select</div>
+        <div class="src-body"></div>
+        <div class="src-foot">
+          <button type="button" class="primary" data-act="pick">Select this source</button>
+          <button type="button" data-act="cancel">Cancel</button>
+        </div>`;
+      back.appendChild(box);
+      document.body.appendChild(back);
+      const body = box.querySelector(".src-body");
+
+      function activeItem() {
+        return groups[gi] && groups[gi].items[ii];
+      }
+
+      function draw() {
+        body.innerHTML = "";
+        groups.forEach((g, ggi) => {
+          const h = document.createElement("div");
+          h.className = "src-group" + (ggi === gi ? " active" : "");
+          h.textContent = g.name;
+          body.appendChild(h);
+          g.items.forEach((it, iii) => {
+            const r = document.createElement("button");
+            r.type = "button";
+            r.className =
+              "src-item" +
+              (ggi === gi && iii === ii ? " active" : "") +
+              (it.draft ? " draft" : "");
+            r.textContent = it.label;
+            r.onclick = () => {
+              if (it.draft) return;
+              gi = ggi;
+              ii = iii;
+              draw();
+            };
+            r.ondblclick = () => {
+              if (!it.draft) choose();
+            };
+            body.appendChild(r);
+          });
+        });
+        const a = body.querySelector(".src-item.active");
+        if (a && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
+      }
+
+      function close() {
+        document.removeEventListener("keydown", onKey, true);
+        if (back.parentNode) back.parentNode.removeChild(back);
+      }
+
+      async function choose() {
+        const it = activeItem();
+        if (!isSelectableSourceItem(it)) return;
+        close();
+        await onChoose(it);
+      }
+
+      function onKey(ev) {
+        if (ev.key === "Tab") {
+          ev.preventDefault();
+          gi = (gi + (ev.shiftKey ? groups.length - 1 : 1)) % groups.length;
+          ii = 0;
+          draw();
+        } else if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          const items = groups[gi].items;
+          do {
+            ii = Math.min(items.length - 1, ii + 1);
+          } while (ii < items.length - 1 && items[ii].draft);
+          draw();
+        } else if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          do {
+            ii = Math.max(0, ii - 1);
+          } while (ii > 0 && groups[gi].items[ii].draft);
+          draw();
+        } else if (ev.key === "Enter") {
+          ev.preventDefault();
+          choose();
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          close();
+        }
+      }
+
+      document.addEventListener("keydown", onKey, true);
+      box.querySelector('[data-act="pick"]').onclick = () => choose();
+      box.querySelector('[data-act="cancel"]').onclick = () => close();
+      back.addEventListener("click", (ev) => {
+        if (ev.target === back) close();
+      });
+      draw();
+    }
+
+    function setFormBlocked(blocked, reason) {
+      document.body.classList.toggle("blocked", !!blocked);
+      const retry = document.getElementById("btn-retry");
+      if (retry) retry.hidden = !blocked;
+      if (blocked && reason) setStatus(reason, "warn");
+    }
+
+    function focusVendorField() {
+      const tryFocus = () => {
+        try {
+          el.vendor.focus({ preventScroll: false });
+          el.vendor.select();
+        } catch {
+          try {
+            el.vendor.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+      tryFocus();
+      requestAnimationFrame(tryFocus);
+      setTimeout(tryFocus, 50);
+      setTimeout(tryFocus, 200);
+      setTimeout(tryFocus, 500);
+    }
+
+    function paint(doc, scratchDue, opts = {}) {
+      painting = true;
+      lastDoc = doc || null;
+      amountDue = scratchDue != null ? String(scratchDue) : amountDue;
+      if (!doc) {
+        setFormBlocked(true, opts.reason || "No Purchase Invoice loaded in Vanilla yet.");
+        el.items.innerHTML = "";
+        paintLineTotals(null);
+        el.addLine.disabled = true;
+        if (el.clearQty) el.clearQty.disabled = true;
+        paintChip();
+        painting = false;
+        return;
+      }
+      setFormBlocked(false);
+      const h = readBillHeader(doc, { amountDue: amountDue || undefined });
+      el.vendor.value = h["Vendor Name"] ?? "";
+      el.address.value = h.Address ?? "";
+      el.terms.value = h.Terms ?? "";
+      el.date.value = formatDocDateDisplay(h.Date ?? "") || (h.Date ?? "");
+      el.billno.value = h["Ref No. (Supplier Invoice No.)"] ?? "";
+      el.amountdue.value = amountDue !== "" ? amountDue : String(h["Amount Due"] ?? "");
+      if (amountDue === "" && h["Amount Due"] !== "" && h["Amount Due"] != null) {
+        amountDue = String(h["Amount Due"]);
+      }
+      el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
+      el.memo.value = h.Memo ?? "";
+      const canEdit = doc.docstatus === 0;
+      el.vendor.readOnly = !canEdit;
+      el.terms.readOnly = !canEdit;
+      el.date.readOnly = !canEdit;
+      el.billno.readOnly = !canEdit;
+      el.duedate.readOnly = !canEdit;
+      el.memo.readOnly = !canEdit;
+      el.amountdue.readOnly = !canEdit;
+      el.address.readOnly = true;
+      el.addLine.disabled = !canEdit;
+      if (el.clearQty) el.clearQty.disabled = !canEdit;
+      paintItems(doc);
+      ensureHeaderLinkPickers();
+      const name = doc.name || "(new)";
+      setStatus(`${name} · ${doc.docstatus === 0 ? "Draft" : "Posted"}`);
+      paintChip();
+      painting = false;
+      if (opts.focusVendor && canEdit) focusVendorField();
+    }
+
+    async function refresh() {
+      if (!api) return;
+      setStatus("Refreshing…");
+      const snap = await api.getSnapshot();
+      paint(snap && snap.doc, snap && snap.amountDue, {
+        reason: snap && snap.reason,
+        focusVendor: false,
+      });
+      if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
+    }
+
+    function paintedHeaderValue(field) {
+      if (!lastDoc) return "";
+      if (field === "remarks") return lastDoc.remarks ?? "";
+      if (field === "supplier") return lastDoc.supplier_name || lastDoc.supplier || "";
+      return lastDoc[field] != null ? lastDoc[field] : "";
+    }
+
+    async function onHeaderBlur(input) {
+      const field = input.getAttribute("data-field");
+      if (!field || !api || painting || !editable()) return;
+
+      if (field === "posting_date" || field === "due_date") {
+        const raw = filterDateInputValue(input.value).trim();
+        if (!raw) {
+          input.value = formatDocDateDisplay(paintedHeaderValue(field)) || "";
+          return;
+        }
+        const parsed = parseDocDate(raw);
+        if (!parsed.ok) {
+          setStatus(parsed.reason || "Invalid date — use MM/DD/YYYY", "warn");
+          input.value = formatDocDateDisplay(paintedHeaderValue(field)) || "";
+          return;
+        }
+        input.value = parsed.display;
+        if (valuesMeaningfullyEqual(paintedHeaderValue(field), parsed.iso, { kind: "date" })) {
+          return;
+        }
+        const res = await api.setHeader(field, parsed.iso);
+        if (res && res.skipped) return;
+        await refresh();
+        return;
+      }
+
+      const kind = dirtyCompareKindForField(field);
+      const next =
+        kind === "number" ? input.value : normalizeEditableText(input.value);
+      const painted = paintedHeaderValue(field);
+      if (valuesMeaningfullyEqual(painted, next, { kind })) {
+        if (field === "supplier") input.value = String(painted ?? "");
+        else if (kind !== "number") input.value = normalizeEditableText(String(painted ?? ""));
+        return;
+      }
+      const res = await api.setHeader(field, next);
+      if (res && res.skipped) return;
+      if (res && res.openSourcePicker) {
+        paint(res.doc, amountDue);
+        await openSourcePicker(next);
+        return;
+      }
+      await refresh();
+    }
+
+    function wireDateField(input) {
+      input.addEventListener("beforeinput", (ev) => {
+        if (ev.inputType && ev.inputType.startsWith("delete")) return;
+        if (ev.inputType === "insertFromPaste" || ev.inputType === "insertFromDrop") return;
+        if (ev.data && [...ev.data].some((c) => !isAllowedDateInputChar(c))) {
+          ev.preventDefault();
+        }
+      });
+      input.addEventListener("input", () => {
+        const filtered = filterDateInputValue(input.value);
+        if (filtered !== input.value) {
+          const pos = input.selectionStart;
+          input.value = filtered;
+          try {
+            input.setSelectionRange(pos - 1, pos - 1);
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+      input.addEventListener("paste", (ev) => {
+        ev.preventDefault();
+        const text = filterDateInputValue(ev.clipboardData.getData("text") || "");
+        document.execCommand("insertText", false, text);
+      });
+    }
+
+    async function doSave(submit) {
+      if (!api) return;
+      if (!amountDueMatchesGrandTotal(amountDue, lastDoc && lastDoc.grand_total)) {
+        setStatus("Fix Amount Due checksum before save.", "err");
+        return;
+      }
+      setStatus(submit ? "Saving & submitting…" : "Saving…");
+      const r = await api.save({ submit: !!submit });
+      if (r && r.ok) {
+        paint(r.doc, amountDue);
+        setStatus(submit ? "Submitted." : "Saved draft.");
+      } else {
+        setStatus((r && r.reason) || "Save failed — check Vanilla validations.", "err");
+      }
+    }
+
+    el.vendor.addEventListener("change", () => onHeaderBlur(el.vendor));
+    el.terms.addEventListener("change", () => onHeaderBlur(el.terms));
+    el.date.addEventListener("change", () => onHeaderBlur(el.date));
+    el.billno.addEventListener("change", () => onHeaderBlur(el.billno));
+    el.duedate.addEventListener("change", () => onHeaderBlur(el.duedate));
+    el.memo.addEventListener("change", () => onHeaderBlur(el.memo));
+    wireDateField(el.date);
+    wireDateField(el.duedate);
+
+    el.amountdue.addEventListener("focus", () => {
+      amountDueAtFocus = el.amountdue.value;
+    });
+    el.amountdue.addEventListener("input", () => {
+      amountDue = el.amountdue.value;
+      paintChip();
+      if (api) api.setAmountDue(amountDue);
+    });
+    el.amountdue.addEventListener("change", () => {
+      amountDue = el.amountdue.value;
+      const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
+      if (api) api.setAmountDue(amountDue, changed);
+      paintChip();
+    });
+
+    document.getElementById("btn-refresh").onclick = () => refresh();
+    document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+    document.getElementById("btn-select-po").onclick = () => openSourcePicker();
+    document.getElementById("btn-retry").onclick = async () => {
+      if (!api || !api.retryLoad) return;
+      setStatus("Retrying Vanilla Bill load…");
+      await api.retryLoad();
+    };
+    el.save.onclick = () => doSave(false);
+    el.submit.onclick = () => doSave(true);
+    el.addLine.onclick = async () => {
+      if (!api || !editable()) return;
+      setStatus("Adding line…");
+      const res = await api.addItem();
+      if (res && res.ok) {
+        paint(res.doc, amountDue);
+        setStatus("Line added.");
+      } else {
+        setStatus((res && res.reason) || "Add line failed.", "err");
+      }
+    };
+    if (el.clearQty) {
+      el.clearQty.onclick = async () => {
+        if (!api || !editable()) return;
+        setStatus("Clearing all quantities…");
+        const res = await api.clearAllQty();
+        if (res && res.ok) {
+          paint(res.doc, amountDue);
+          setStatus("All line quantities set to 0.");
+        } else {
+          setStatus((res && res.reason) || "Clear qty failed.", "err");
+        }
+      };
+    }
+
+    if (api && api.onSnapshot) {
+      api.onSnapshot((snap) =>
+        paint(snap && snap.doc, snap && snap.amountDue, {
+          reason: snap && snap.reason,
+          focusVendor: !!(snap && snap.focusVendor),
+        }),
+      );
+    }
+    ensureHeaderLinkPickers();
+    refresh();
+  </script>
+</body>
+</html>

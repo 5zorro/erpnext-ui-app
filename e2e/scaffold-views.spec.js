@@ -40,14 +40,22 @@ test.describe("scaffold: WebContentsViews", () => {
     expect(bounds.erp?.x).toBeGreaterThan(OFF_X / 2);
     expect(bounds.home?.x).toBe(OFF_X);
 
-    // Launcher HTML still loadable in its view (tiles SSoT).
+    // Museum-style grouped tiles on workflow Home
     const tileCount = await e2eCall(
       app,
       "execInView",
       "home",
       `document.querySelectorAll('[data-testid^="tile-"]').length`,
     );
-    expect(tileCount).toBeGreaterThanOrEqual(3);
+    expect(tileCount).toBeGreaterThanOrEqual(10);
+
+    const hasVendors = await e2eCall(
+      app,
+      "execInView",
+      "home",
+      `!!document.querySelector('[data-testid="group-vendors"]')`,
+    );
+    expect(hasVendors).toBe(true);
 
     const histOk = await e2eCall(
       app,

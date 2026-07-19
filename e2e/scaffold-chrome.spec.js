@@ -14,7 +14,7 @@ test.describe("scaffold: toolbar chrome", () => {
     app = undefined;
   });
 
-  test("chrome controls exist; Home / Launcher toggle shell state", async () => {
+  test("chrome controls exist; Home shows workflow tiles; Vanilla opens ERP", async () => {
     test.setTimeout(90_000);
     try {
       app = await launchShell();
@@ -52,24 +52,37 @@ test.describe("scaffold: toolbar chrome", () => {
         const htext = health && health.querySelector('.htext');
         return JSON.stringify([
           !!document.querySelector('[data-testid="btn-home"]'),
-          !!document.querySelector('[data-testid="btn-launcher"]'),
           !!health,
           !!document.querySelector('[data-testid="btn-devtools"]'),
+          !!document.querySelector('[data-testid="lens-vanilla"]'),
           htext ? htext.textContent : ""
         ]);
       })()`,
     );
-    const [hasHome, hasLauncher, hasHealth, hasDevtools, healthText] = JSON.parse(ids);
-    expect(hasHome && hasLauncher && hasHealth && hasDevtools).toBe(true);
+    const [hasHome, hasHealth, hasDevtools, hasVanilla, healthText] = JSON.parse(ids);
+    expect(hasHome && hasHealth && hasDevtools && hasVanilla).toBe(true);
     expect(healthText).toMatch(/^DB [✓✗…]/);
 
-    await e2eCall(app, "goHome");
-    expect(await e2eGet(app, "showingHome")).toBe(false);
-
-    await e2eCall(app, "showLauncher");
+    // Starts on Doc Workflow Home
     expect(await e2eGet(app, "showingHome")).toBe(true);
 
-    // Simulate toolbar button click inside chrome view (IPC path).
+    await e2eCall(app, "openErp", "/desk");
+    expect(await e2eGet(app, "showingHome")).toBe(false);
+
+    // Doc skin tab → Doc Workflow Home (same as Home button until Bill Doc form ships)
+    await e2eCall(
+      app,
+      "execInView",
+      "chrome",
+      `document.querySelector('[data-testid="lens-doc"]').click(); true`,
+    );
+    await expect
+      .poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 })
+      .toBe(true);
+
+    await e2eCall(app, "openErp", "/desk");
+    expect(await e2eGet(app, "showingHome")).toBe(false);
+
     await e2eCall(
       app,
       "execInView",
@@ -78,6 +91,14 @@ test.describe("scaffold: toolbar chrome", () => {
     );
     await expect
       .poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 })
-      .toBe(false);
+      .toBe(true);
+
+    const title = await e2eCall(
+      app,
+      "execInView",
+      "home",
+      `document.querySelector('[data-testid="home-title"]')?.textContent || ""`,
+    );
+    expect(title).toMatch(/Doc Workflow Home/);
   });
 });
