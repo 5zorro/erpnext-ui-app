@@ -955,28 +955,17 @@ ipcMain.handle("bill-list-sources", async (_e, supplier) => {
       ]);
       var prs = res[1] || [];
       var prsD = res[3] || [];
-      var prNames = prs.concat(prsD).map(function (r) { return r.name; }).filter(Boolean);
-      var prItems = [];
-      // Best-effort: child-table get_list often 403s for clerks (HAR 2026-07-18).
-      // Must not fail the whole source modal — PR rows just omit PO# labels.
-      if (prNames.length) {
-        try {
-          prItems = await frappe.db.get_list("Purchase Receipt Item", {
-            filters: { parent: ["in", prNames] },
-            fields: ["parent", "purchase_order"],
-            limit: 500,
-          }) || [];
-        } catch (ePr) {
-          prItems = [];
-        }
-      }
+      // Do NOT get_list("Purchase Receipt Item") here.
+      // Clerk roles get 403 (HAR localhost.har ×2); even a try/catch is unreliable because
+      // frappe.request may reject outside our await. PO# on PR rows stays "no PO" until we
+      // have a permission-safe enrich path (parent doc field or whitelisted method).
       return {
         ok: true,
         purchaseOrders: res[0] || [],
         purchaseReceipts: prs,
         purchaseOrdersDraft: res[2] || [],
         purchaseReceiptsDraft: prsD,
-        purchaseReceiptItems: prItems,
+        purchaseReceiptItems: [],
       };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
