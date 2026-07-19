@@ -207,6 +207,8 @@
       formatBillLineTotal,
       BILL_ITEM_COLS,
       BILL_ASSUMPTIONS,
+      isDraftBillDoc,
+      saveActionsBlockedByChecksum,
     } from "../src/bill-map.js";
     import {
       linkDoctypeForBillField,
@@ -214,6 +216,16 @@
       withEmptySearchActions,
       isCreateSupplierLinkAction,
     } from "../src/link-search.js";
+    import {
+      initialLinkHighlightIndex,
+      nextLinkHighlightIndex,
+      resolveLinkPickIndex,
+      linkPickerKeyAction,
+    } from "../src/link-picker-policy.js";
+    import {
+      shouldOpenSourceModalAfterVendorPick,
+      focusTargetAfterSourceModal,
+    } from "../src/bill-source-flow.js";
     import {
       valuesMeaningfullyEqual,
       dirtyCompareKindForField,
@@ -356,8 +368,7 @@
           )
           .join("");
         opts = [...dd.querySelectorAll(".link-opt")];
-        // Always highlight first row so Tab/Enter work without an arrow key.
-        hi = opts.length ? 0 : -1;
+        hi = initialLinkHighlightIndex(opts.length);
         if (hi === 0) opts[0].classList.add("active");
         opts.forEach((b) => {
           b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
@@ -369,43 +380,39 @@
         timer = setTimeout(() => runSearch(input.value), 280);
       });
       input.addEventListener("keydown", async (ev) => {
-        if (ev.key === "Escape") {
+        const act = linkPickerKeyAction(ev.key, {
+          dropdownOpen: !dd.hidden,
+          optionCount: opts.length,
+        });
+        if (act === "close") {
           dd.hidden = true;
           hi = -1;
           return;
         }
-        if (dd.hidden || !opts.length) {
-          if (ev.key === "ArrowDown") {
-            ev.preventDefault();
-            await runSearch(input.value || "");
-          }
+        if (act === "search") {
+          ev.preventDefault();
+          await runSearch(input.value || "");
           return;
         }
-        if (ev.key === "Tab") {
-          // Highlighted (or first) → commit + close. Do not cycle the list.
-          const pick = hi >= 0 ? opts[hi] : opts[0];
-          if (pick) {
-            ev.preventDefault();
-            await pickValue(pick.getAttribute("data-value") || "");
-          } else {
+        if (act === "none") return;
+        if (act === "pick") {
+          ev.preventDefault();
+          const idx = resolveLinkPickIndex(hi, opts.length);
+          const pick = idx >= 0 ? opts[idx] : null;
+          if (pick) await pickValue(pick.getAttribute("data-value") || "");
+          else {
             dd.hidden = true;
             hi = -1;
           }
           return;
         }
-        if (ev.key === "Enter") {
+        if (act === "move_down") {
           ev.preventDefault();
-          const pick = hi >= 0 ? opts[hi] : opts[0];
-          if (pick) await pickValue(pick.getAttribute("data-value") || "");
-          return;
+          setHi(nextLinkHighlightIndex(hi, opts.length, "down"));
         }
-        if (ev.key === "ArrowDown") {
+        if (act === "move_up") {
           ev.preventDefault();
-          setHi(hi < 0 ? 0 : Math.min(hi + 1, opts.length - 1));
-        }
-        if (ev.key === "ArrowUp") {
-          ev.preventDefault();
-          setHi(hi <= 0 ? 0 : hi - 1);
+          setHi(nextLinkHighlightIndex(hi, opts.length, "up"));
         }
       });
       btn.addEventListener("click", (ev) => {
@@ -427,13 +434,13 @@
           : st === "mismatch"
             ? "Amount Due does not match item totals"
             : "Enter Amount Due to activate checksum";
-      const block = st === "mismatch";
+      const block = saveActionsBlockedByChecksum(st);
       el.save.disabled = block;
       el.submit.disabled = block;
     }
 
     function editable() {
-      return !!(lastDoc && lastDoc.docstatus === 0);
+      return isDraftBillDoc(lastDoc);
     }
 
     function paintLineTotals(doc) {
@@ -524,15 +531,27 @@
 
     function ensureHeaderLinkPickers() {
       mountLinkPicker(el.vendor, "Supplier", async (v) => {
-        if (!api || !editable()) return;
-        // Open source modal immediately (museum: don't wait on set_value / ajax quiet).
-        // setHeader runs in parallel so address/terms can refresh while the modal is up.
+        if (!api) return;
+        if (!editable()) {
+          setStatus("Bill is not a draft — cannot set vendor.", "warn");
+          return;
+        }
+        const decision = shouldOpenSourceModalAfterVendorPick({
+          trigger: "link_pick",
+          hasSupplier: !!normalizeEditableText(v),
+          editable: true,
+          modalAlreadyOpen: sourceModalOpen,
+        });
         setStatus("Setting vendor…");
-        const modalPromise = openSourcePicker(v);
+        const modalPromise = decision.open
+          ? openSourcePicker(v)
+          : Promise.resolve().then(() => {
+              if (!decision.open) setStatus(`Source modal skipped (${decision.reason}).`, "warn");
+            });
         const res = await api.setHeader("supplier", v);
         if (res && res.ok) {
           paint(res.doc || lastDoc, amountDue);
-          setStatus("Choose a source (or NIC).");
+          if (decision.open) setStatus("Choose a source (or NIC).");
         } else {
           setStatus((res && res.reason) || "Vendor update failed.", "err");
         }
@@ -555,6 +574,10 @@
         return;
       }
       if (sourceModalOpen) return;
+      if (!editable()) {
+        setStatus("Bill is not a draft — source picker locked.", "warn");
+        return;
+      }
       const sup =
         normalizeEditableText(supplier) ||
         normalizeEditableText(lastDoc && lastDoc.supplier) ||
@@ -573,7 +596,7 @@
       showSourceModal(groups, async (it) => {
         if (!it || it.kind === "nic") {
           setStatus("No source — enter lines manually.");
-          focusTermsField();
+          if (focusTargetAfterSourceModal("choose") === "terms") focusTermsField();
           return;
         }
         setStatus(`Pulling from ${it.name}…`);
@@ -585,7 +608,7 @@
           setStatus((merged && merged.reason) || "Could not pull source.", "err");
           await refresh();
         }
-        focusTermsField();
+        if (focusTargetAfterSourceModal("choose") === "terms") focusTermsField();
       });
     }
 
@@ -800,7 +823,7 @@
       }
       el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
       el.memo.value = h.Memo ?? "";
-      const canEdit = doc.docstatus === 0;
+      const canEdit = isDraftBillDoc(doc);
       el.vendor.readOnly = !canEdit;
       el.terms.readOnly = !canEdit;
       el.date.readOnly = !canEdit;
@@ -814,7 +837,7 @@
       paintItems(doc);
       ensureHeaderLinkPickers();
       const name = doc.name || "(new)";
-      setStatus(`${name} · ${doc.docstatus === 0 ? "Draft" : "Posted"}`);
+      setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
       paintChip();
       painting = false;
       if (opts.focusVendor && canEdit) focusVendorField();
@@ -874,10 +897,20 @@
         return;
       }
       const res = await api.setHeader(field, next);
-      if (res && res.openSourcePicker) {
-        paint(res.doc || lastDoc, amountDue);
-        await openSourcePicker(next || res.supplier);
-        return;
+      if (field === "supplier") {
+        const decision = shouldOpenSourceModalAfterVendorPick({
+          trigger: "blur",
+          hasSupplier: !!normalizeEditableText(next),
+          editable: editable(),
+          modalAlreadyOpen: sourceModalOpen,
+          setHeaderOk: !!(res && res.ok),
+          setHeaderSkipped: !!(res && res.skipped),
+        });
+        if (decision.open) {
+          paint(res.doc || lastDoc, amountDue);
+          await openSourcePicker(next || (res && res.supplier));
+          return;
+        }
       }
       if (res && res.skipped) return;
       await refresh();
@@ -952,7 +985,27 @@
 
     document.getElementById("btn-refresh").onclick = () => refresh();
     document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
-    document.getElementById("btn-select-po").onclick = () => openSourcePicker();
+    document.getElementById("btn-select-po").onclick = () => {
+      const decision = shouldOpenSourceModalAfterVendorPick({
+        trigger: "toolbar",
+        hasSupplier: !!(
+          normalizeEditableText(lastDoc && lastDoc.supplier) ||
+          normalizeEditableText(el.vendor.value)
+        ),
+        editable: editable(),
+        modalAlreadyOpen: sourceModalOpen,
+      });
+      if (!decision.open) {
+        setStatus(
+          decision.reason === "no_supplier"
+            ? "Pick a vendor before Select PO / source."
+            : `Source modal skipped (${decision.reason}).`,
+          "warn",
+        );
+        return;
+      }
+      openSourcePicker();
+    };
     document.getElementById("btn-retry").onclick = async () => {
       if (!api || !api.retryLoad) return;
       setStatus("Retrying Vanilla Bill load…");

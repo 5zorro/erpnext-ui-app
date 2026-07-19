@@ -210,9 +210,10 @@ So when 5zorro said “it still isn’t opening,” **CI had nothing to fail.** 
 
 **Remediation (with the matrix):**
 
-1. Extract trigger policy to `src/` + unit tests **before** more Bill HTML patches.
-2. Add Electron smoke: fake pick ⇒ `[data-testid="bill-source-modal"]` present (no live ERP lists required if M1/M2 style).
-3. Keep list/label tests — they stay valuable; they are not a substitute for the chain.
+1. Extract trigger policy to `src/` + unit tests **before** more Bill HTML patches. → **Done:** `src/bill-source-flow.js` + `tests/bill-source-flow.test.js`; Bill UI imports `shouldOpenSourceModalAfterVendorPick`.
+2. Broader Bill museum↔alpha catalog + suites (2026-07-18): `bill-feature-catalog`, `link-picker-policy`, `bill-toolbar`, expanded `bill-map` — **130** unit tests. Electron open-after-vendor still **buggy** until dogfood/matrix proves DOM path.
+3. Add Electron smoke: fake pick ⇒ `[data-testid="bill-source-modal"]` present (no live ERP lists required if M1/M2 style).
+4. Keep list/label tests — they stay valuable; they are not a substitute for the chain.
 
 ---
 
