@@ -1,0 +1,22 @@
+name: Commit policy
+
+on:
+  pull_request:
+    branches: [main, alpha]
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    name: No co-author or Gmail attribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check incoming commit metadata and messages
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-commit-attribution.sh --range "$BASE_SHA..$HEAD_SHA"
