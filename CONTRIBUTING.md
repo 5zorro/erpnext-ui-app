@@ -41,6 +41,17 @@ Local commits never leave the machine until someone pushes. Prefer a `wip/…` b
 See [docs/commit-conventions.md](docs/commit-conventions.md): one coherent idea, tests in the same
 commit, author **5zorro** + noreply. Zulip-level PR theater is not required for solo work.
 
+### Public identity guard
+
+`scripts/check-commit-attribution.sh` rejects co-author attribution and `@gmail` markers in
+commit messages, author identity, or committer identity.
+
+- The tracked `.githooks/commit-msg` hook blocks a bad local commit. Enable it in a fresh clone with
+  `git config core.hooksPath .githooks`.
+- GitHub Actions checks every commit added by a PR to `main` or `alpha`. In the GitHub branch
+  ruleset, require **Commit policy / No co-author or Gmail attribution** before merge and restrict
+  direct pushes if the check must be unskippable.
+
 ## Pull requests from outside
 
 Open a PR if you like; **do not expect a merge** until **5zorro** has reviewed (often with Cursor). Random drive-by refactors of scope outside the beta slice will be closed.

@@ -116,7 +116,7 @@ flowchart TB
 
 | Step | What | Gaps / OI |
 |------|------|-----------|
-| T3a | Toolbar: Find Bills, New, Print, Attach | museum toolbar; OI-005 attach |
+| T3a | Toolbar: Find Bills, New, Print, Attach | **Done** (dirty commit gate); Attach partial (memo) |
 | T3b | Revert unsaved | museum revert |
 | T3c | Recalculate + Expenses tab disclaimer | museum tabNotes |
 | T3d | Amount Due USD format on blur | museum `fmtUsd` |

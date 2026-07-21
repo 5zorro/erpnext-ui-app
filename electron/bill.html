@@ -11,13 +11,28 @@
     .status { font-size: 12px; color: #64748b; }
     .status.warn { color: #b45309; }
     .status.err { color: #b91c1c; }
-    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
     .toolbar button, .line-actions button, .del {
       border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
       padding: 7px 12px; font-size: 13px; cursor: pointer;
     }
     .toolbar button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .toolbar button.ghost { background: #f8fafc; }
     .toolbar button:disabled, .line-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .dirty-pill {
+      font-size: 11px; padding: 3px 8px; border-radius: 999px;
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+    }
+    .dirty-pill.is-dirty {
+      background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
+    }
+    .commit-gate {
+      margin: 0 0 12px; padding: 10px 12px; background: #f8fafc;
+      border: 1px dashed #cbd5e1; border-radius: 8px; font-size: 13px;
+    }
+    .commit-gate[hidden] { display: none !important; }
+    .commit-gate strong { display: block; margin-bottom: 6px; }
+    .commit-gate .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
     .card { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
     .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -229,14 +244,30 @@
         <button type="button" id="btn-retry" data-testid="bill-retry" hidden>Retry load</button>
       </span>
     </div>
-    <div class="toolbar">
+    <div class="toolbar" data-testid="bill-toolbar">
+      <button type="button" class="ghost" id="btn-print" data-testid="bill-print"
+        title="Print this Bill (save first if new).">Print</button>
+      <span class="dirty-pill" id="dirty-pill" data-testid="bill-dirty-pill">All saved</span>
+      <span style="flex:1 1 8px"></span>
+      <button type="button" id="btn-find" data-testid="bill-find">Find Bill…</button>
+      <button type="button" id="btn-new" data-testid="bill-new">New Bill</button>
       <button type="button" class="primary" id="btn-save" data-testid="bill-save">Save draft</button>
       <button type="button" id="btn-submit" data-testid="bill-submit">Save draft &amp; submit</button>
       <button type="button" id="btn-revert" data-testid="bill-revert"
         title="Discard unsaved edits (reload saved Bill, or start a fresh new Bill).">Revert unsaved changes</button>
       <button type="button" id="btn-select-po" data-testid="bill-select-po">Select PO / source</button>
       <button type="button" id="btn-refresh" data-testid="bill-refresh">Refresh</button>
-      <button type="button" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
+      <button type="button" class="ghost" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
+    </div>
+    <div class="commit-gate" id="commit-gate" data-testid="bill-commit-gate" hidden>
+      <strong id="commit-gate-title">Unsaved changes</strong>
+      Choose how to leave this draft, then the action runs:
+      <div class="row">
+        <button type="button" data-gate="discard" data-testid="bill-gate-discard">Discard, then continue</button>
+        <button type="button" class="primary" data-gate="save" data-testid="bill-gate-save">Save draft, then continue</button>
+        <button type="button" data-gate="submit" data-testid="bill-gate-submit">Save &amp; submit, then continue</button>
+        <button type="button" class="ghost" data-gate="cancel" data-testid="bill-gate-cancel">Cancel</button>
+      </div>
     </div>
     <details class="assumptions" data-testid="bill-assumptions">
       <summary>Assumptions this view makes</summary>
@@ -436,6 +467,12 @@
       parseDocDate,
       formatDocDateDisplay,
     } from "../src/doc-date.js";
+    import {
+      shouldOpenCommitGate,
+      normalizeCommitGateChoice,
+      commitGateContinues,
+      commitGateAllowsAction,
+    } from "../src/bill-toolbar.js";
     import { isSelectableSourceItem } from "../src/source-modal.js";
 
     const api = window.erpBill;
@@ -443,6 +480,9 @@
     let amountDue = "";
     let amountDueAtFocus = "";
     let painting = false;
+    let userEdited = false;
+    /** @type {"find"|"new"|"print"|null} */
+    let pendingGateAction = null;
     /** @type {WeakMap<HTMLElement, true>} */
     const linkMounted = new WeakMap();
     /** Prevent stacking multiple source modals. */
@@ -468,6 +508,12 @@
       save: document.getElementById("btn-save"),
       submit: document.getElementById("btn-submit"),
       revert: document.getElementById("btn-revert"),
+      find: document.getElementById("btn-find"),
+      newBill: document.getElementById("btn-new"),
+      print: document.getElementById("btn-print"),
+      dirtyPill: document.getElementById("dirty-pill"),
+      commitGate: document.getElementById("commit-gate"),
+      commitGateTitle: document.getElementById("commit-gate-title"),
       addLine: document.getElementById("btn-add-line"),
       clearQty: document.getElementById("btn-clear-qty"),
       attach: document.getElementById("btn-attach"),
@@ -508,6 +554,113 @@
     function setStatus(text, cls) {
       el.status.textContent = text;
       el.status.className = "status" + (cls ? " " + cls : "");
+    }
+
+    function paintDirtyPill() {
+      if (!el.dirtyPill) return;
+      el.dirtyPill.textContent = userEdited ? "Unsaved changes" : "All saved";
+      el.dirtyPill.className = "dirty-pill" + (userEdited ? " is-dirty" : "");
+    }
+
+    function noteUserEdit() {
+      userEdited = true;
+      paintDirtyPill();
+    }
+
+    function hideCommitGate() {
+      pendingGateAction = null;
+      if (el.commitGate) el.commitGate.hidden = true;
+    }
+
+    function actionLabel(action) {
+      if (action === "find") return "Find Bill…";
+      if (action === "new") return "New Bill";
+      if (action === "print") return "Print";
+      return action || "continue";
+    }
+
+    async function runPendingAction(action) {
+      if (!api) return;
+      if (action === "find") {
+        setStatus("Opening Bill list…");
+        const res = await api.findBills();
+        if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
+        return;
+      }
+      if (action === "new") {
+        setStatus("Starting new Bill…");
+        const res = await api.newBill();
+        if (res && res.ok) setStatus("New Bill.");
+        else setStatus((res && res.reason) || "New Bill failed.", "err");
+        return;
+      }
+      if (action === "print") {
+        setStatus("Opening print…");
+        const res = await api.printBill();
+        if (res && res.ok) setStatus(res.reason || "Print opened.");
+        else setStatus((res && res.reason) || "Print failed.", "err");
+      }
+    }
+
+    async function requestToolbarAction(action) {
+      if (!api) return;
+      if (!shouldOpenCommitGate(userEdited)) {
+        hideCommitGate();
+        await runPendingAction(action);
+        return;
+      }
+      pendingGateAction = action;
+      if (el.commitGateTitle) {
+        el.commitGateTitle.textContent = `Unsaved changes — before ${actionLabel(action)}`;
+      }
+      if (el.commitGate) el.commitGate.hidden = false;
+    }
+
+    async function resolveCommitGate(choiceRaw) {
+      const choice = normalizeCommitGateChoice(choiceRaw);
+      if (!choice || choice === "cancel") {
+        hideCommitGate();
+        return;
+      }
+      const action = pendingGateAction;
+      if (!action) {
+        hideCommitGate();
+        return;
+      }
+      const isNew = !!(
+        lastDoc &&
+        (lastDoc.__islocal ||
+          !lastDoc.name ||
+          String(lastDoc.name).startsWith("new") ||
+          lastDoc.name === "new")
+      );
+      const allow = commitGateAllowsAction(action, choice, { isNew });
+      if (!allow.ok) {
+        setStatus(allow.reason || "Cannot continue.", "warn");
+        return;
+      }
+      if (!commitGateContinues(choice)) {
+        hideCommitGate();
+        return;
+      }
+
+      if (choice === "discard") {
+        setStatus("Discarding unsaved changes…");
+        const res = await api.revertUnsaved();
+        if (!(res && res.ok)) {
+          setStatus((res && res.reason) || "Discard failed.", "err");
+          return;
+        }
+        userEdited = false;
+        paint(res.doc, res.amountDue != null ? res.amountDue : "");
+        paintDirtyPill();
+      } else if (choice === "save" || choice === "submit") {
+        const ok = await doSave(choice === "submit");
+        if (!ok) return;
+      }
+
+      hideCommitGate();
+      await runPendingAction(action);
     }
 
     function escapeHtml(v) {
@@ -799,6 +952,7 @@
           setStatus(`Updating tax ${field}…`);
           const res = await api.setTax(ri, field, value);
           if (res && res.ok) {
+            noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Tax row updated.");
           } else {
@@ -840,6 +994,7 @@
           setStatus("Removing tax row…");
           const res = await api.deleteTax(ri);
           if (res && res.ok) {
+            noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Tax row removed.");
           } else {
@@ -895,6 +1050,7 @@
           setStatus(`Updating ${field}…`);
           const res = await api.setItem(ri, field, value);
           if (res && res.ok) {
+            noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Line updated.");
             const nextField = nextFieldAfterLinkPick(field);
@@ -947,6 +1103,7 @@
           setStatus("Removing line…");
           const res = await api.deleteItem(ri);
           if (res && res.ok) {
+            noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Line removed.");
           } else {
@@ -977,6 +1134,7 @@
             });
         const res = await api.setHeader("supplier", v);
         if (res && res.ok) {
+          noteUserEdit();
           paint(res.doc || lastDoc, amountDue);
           if (decision.open) setStatus("Choose a source (or NIC).");
         } else {
@@ -986,7 +1144,8 @@
       });
       mountLinkPicker(el.terms, "Payment Terms Template", async (v) => {
         if (!api || !editable()) return;
-        await api.setHeader("payment_terms_template", v);
+        const res = await api.setHeader("payment_terms_template", v);
+        if (res && res.ok && !res.skipped) noteUserEdit();
         await refresh();
       });
     }
@@ -1030,6 +1189,7 @@
         setStatus(`Pulling from ${it.name}…`);
         const merged = await api.mergeSource(it.kind, it.name);
         if (merged && merged.ok) {
+          noteUserEdit();
           paint(merged.doc, amountDue);
           setStatus(`Pulled from ${it.name}.`);
         } else {
@@ -1228,6 +1388,8 @@
       painting = true;
       lastDoc = doc || null;
       amountDue = scratchDue != null ? String(scratchDue) : amountDue;
+      if (opts.userEdited != null) userEdited = !!opts.userEdited;
+      paintDirtyPill();
       if (!doc) {
         setFormBlocked(true, opts.reason || "No Purchase Invoice loaded in Vanilla yet.");
         el.items.innerHTML = "";
@@ -1283,6 +1445,7 @@
       paint(snap && snap.doc, snap && snap.amountDue, {
         reason: snap && snap.reason,
         focusVendor: false,
+        userEdited: snap && snap.userEdited,
       });
       if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
     }
@@ -1316,6 +1479,7 @@
         }
         const res = await api.setHeader(field, parsed.iso);
         if (res && res.skipped) return;
+        if (res && res.ok) noteUserEdit();
         await refresh();
         return;
       }
@@ -1340,12 +1504,14 @@
           setHeaderSkipped: !!(res && res.skipped),
         });
         if (decision.open) {
+          if (res && res.ok) noteUserEdit();
           paint(res.doc || lastDoc, amountDue);
           await openSourcePicker(next || (res && res.supplier));
           return;
         }
       }
       if (res && res.skipped) return;
+      if (res && res.ok) noteUserEdit();
       await refresh();
     }
 
@@ -1377,19 +1543,22 @@
     }
 
     async function doSave(submit) {
-      if (!api) return;
+      if (!api) return false;
       if (!amountDueMatchesGrandTotal(amountDue, billCompareTotal(lastDoc))) {
         setStatus("Fix Amount Due checksum before save (must match Grand total).", "err");
-        return;
+        return false;
       }
       setStatus(submit ? "Saving & submitting…" : "Saving…");
       const r = await api.save({ submit: !!submit });
       if (r && r.ok) {
+        userEdited = false;
         paint(r.doc, amountDue);
+        paintDirtyPill();
         setStatus(submit ? "Submitted." : "Saved draft.");
-      } else {
-        setStatus((r && r.reason) || "Save failed — check Vanilla validations.", "err");
+        return true;
       }
+      setStatus((r && r.reason) || "Save failed — check Vanilla validations.", "err");
+      return false;
     }
 
     el.vendor.addEventListener("change", () => onHeaderBlur(el.vendor));
@@ -1422,6 +1591,7 @@
       amountDue = n != null ? String(n) : "";
       const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
       if (api) api.setAmountDue(amountDue, changed);
+      if (changed) noteUserEdit();
       paintAmountDueInput();
       paintChip();
     });
@@ -1441,6 +1611,14 @@
 
     document.getElementById("btn-refresh").onclick = () => refresh();
     document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+    if (el.find) el.find.onclick = () => requestToolbarAction("find");
+    if (el.newBill) el.newBill.onclick = () => requestToolbarAction("new");
+    if (el.print) el.print.onclick = () => requestToolbarAction("print");
+    if (el.commitGate) {
+      el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
+        btn.addEventListener("click", () => resolveCommitGate(btn.getAttribute("data-gate")));
+      });
+    }
     if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
     if (el.tabExpenses) el.tabExpenses.onclick = () => setLineTab("expenses");
     if (el.revert) {
@@ -1509,6 +1687,7 @@
         const res = await api.addTax(acct, n, "");
         if (res && res.ok) {
           if (el.taxAmount) el.taxAmount.value = "";
+          noteUserEdit();
           paint(res.doc, amountDue);
           setStatus("Tax/charge row added — check Grand total vs Amount Due.");
         } else {
@@ -1521,6 +1700,7 @@
       setStatus("Adding line…");
       const res = await api.addItem();
       if (res && res.ok) {
+        noteUserEdit();
         paint(res.doc, amountDue);
         setStatus("Line added.");
       } else {
@@ -1533,6 +1713,7 @@
         setStatus("Clearing all quantities…");
         const res = await api.clearAllQty();
         if (res && res.ok) {
+          noteUserEdit();
           paint(res.doc, amountDue);
           setStatus("All line quantities set to 0.");
         } else {
@@ -1561,6 +1742,7 @@
         paint(snap && snap.doc, snap && snap.amountDue, {
           reason: snap && snap.reason,
           focusVendor: !!(snap && snap.focusVendor),
+          userEdited: snap && snap.userEdited,
         }),
       );
     }

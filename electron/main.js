@@ -286,6 +286,8 @@ async function snapshotBill() {
       reason: (raw && raw.reason) || "Could not read Bill from Vanilla.",
       doc: null,
       amountDue: amountDueScratch,
+      userEdited: !!dirtyState.userEdited,
+      isNew: !!dirtyState.isNew,
     };
   }
   dirtyState = {
@@ -300,6 +302,7 @@ async function snapshotBill() {
     amountDue: amountDueScratch,
     isDirty: raw.isDirty,
     isNew: raw.isNew,
+    userEdited: !!dirtyState.userEdited,
   };
 }
 
@@ -449,7 +452,8 @@ function showHome() {
 }
 
 function showErp(route = "/desk", opts = {}) {
-  gateDirtyThen(() => {
+  const skipDirtyGate = !!opts.skipDirtyGate;
+  const go = () => {
     surfaceMode = "erp";
     const info = routeInfo(route, ERP_BASE);
     currentRoute = info.path || route;
@@ -459,17 +463,21 @@ function showErp(route = "/desk", opts = {}) {
     }
     place();
     const target = erpUrl(ERP_BASE, route);
-    const cur = erp.webContents.getURL();
+    const cur = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
     const alreadyOnErp = !!(cur && isAllowedErpUrl(ERP_BASE, cur));
     if (opts.forceLoad || route !== "/desk" || !alreadyOnErp) {
       erp.webContents.loadURL(target);
+      trackNav(target);
     }
     sendUiState();
     syncE2eApi();
-  });
+  };
+  if (skipDirtyGate) go();
+  else gateDirtyThen(go);
 }
 
-async function showBill(route) {
+async function showBill(route, opts = {}) {
+  const skipDirtyGate = !!opts.skipDirtyGate;
   const r =
     typeof route === "string" && route
       ? route
@@ -492,6 +500,8 @@ async function showBill(route) {
         ok: true,
         doc: dirtyState.doc,
         amountDue: amountDueScratch,
+        userEdited: !!dirtyState.userEdited,
+        isNew: !!dirtyState.isNew,
         focusVendor: false,
       });
     }
@@ -526,6 +536,7 @@ async function showBill(route) {
       reason: "Loading Purchase Invoice in Vanilla…",
       doc: null,
       amountDue: "",
+      userEdited: false,
     });
 
     const target = erpUrl(ERP_BASE, currentRoute);
@@ -558,6 +569,8 @@ async function showBill(route) {
         ok: true,
         doc: snap.doc,
         amountDue: amountDueScratch,
+        userEdited: false,
+        isNew: !!snap.isNew,
         focusVendor: true,
       });
     } else {
@@ -568,12 +581,12 @@ async function showBill(route) {
         baselineJson: null,
         doc: null,
       };
-      pushBillSnapshot({ ...snap, focusVendor: false });
+      pushBillSnapshot({ ...snap, userEdited: false, focusVendor: false });
     }
     syncE2eApi();
   };
 
-  if (surfaceMode === "bill") {
+  if (surfaceMode === "bill" || skipDirtyGate) {
     await proceed();
     return;
   }
@@ -1141,9 +1154,57 @@ ipcMain.handle("bill-save", async (_e, opts) =>
   saveBillFromErp(opts && typeof opts === "object" ? opts : {}),
 );
 
+/** Find Bills list in Vanilla (T3a). Caller handles dirty commit first. */
+ipcMain.handle("bill-find", async () => {
+  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  showErp("/app/purchase-invoice", { forceLoad: true, skipDirtyGate: true });
+  return { ok: true };
+});
+
+/** New Bill on Doc skin (T3a). Caller handles dirty commit first. */
+ipcMain.handle("bill-new", async () => {
+  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  await showBill("/app/purchase-invoice/new", { skipDirtyGate: true });
+  return { ok: true };
+});
+
+/**
+ * Print via Vanilla frm.print_doc (museum bind.js).
+ * Needs a saved document name — not a brand-new unsaved draft.
+ */
+ipcMain.handle("bill-print", async () => {
+  const doc = dirtyState.doc;
+  if (!doc || !doc.name || String(doc.name).startsWith("new") || doc.name === "new") {
+    return {
+      ok: false,
+      reason: "Save the Bill draft first — print needs a document name.",
+    };
+  }
+  const opened = await erpEval(`(async () => {
+    try {
+      var f = window.cur_frm;
+      if (!f) return { ok: false, reason: "No form." };
+      if (typeof f.print_doc === "function") {
+        f.print_doc();
+        return { ok: true };
+      }
+      if (window.frappe && frappe.ui && frappe.ui.get_print_settings) {
+        frappe.ui.get_print_settings(false, function () {}, f.doc.doctype);
+        return { ok: true, reason: "Opened print settings." };
+      }
+      return { ok: false, reason: "Print UI missing on this Desk build." };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return opened && typeof opened === "object"
+    ? opened
+    : { ok: false, reason: "Could not open print." };
+});
+
 /**
  * Museum bind.js Revert: new → frappe.new_doc; else frm.reload_doc.
- * Resets Amount Due scratch to the compare total on the restored doc.
+ * Resets Amount Due scratch to empty (user re-enters).
  */
 ipcMain.handle("bill-revert-unsaved", async () => {
   const raw = await erpEval(`(async () => {

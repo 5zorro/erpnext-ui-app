@@ -27,6 +27,9 @@ export const MUSEUM_BILL_TOOLBAR = Object.freeze([
  * @type {readonly { id: string, label: string, museumEquivalent: string|null }[]}
  */
 export const ALPHA_BILL_TOOLBAR = Object.freeze([
+  { id: "btn-print", label: "Print", museumEquivalent: "Print" },
+  { id: "btn-find", label: "Find Bill…", museumEquivalent: "Find Bills" },
+  { id: "btn-new", label: "New Bill", museumEquivalent: "New" },
   { id: "btn-save", label: "Save draft", museumEquivalent: "Save" },
   { id: "btn-submit", label: "Save draft & submit", museumEquivalent: "Save" },
   { id: "btn-revert", label: "Revert unsaved changes", museumEquivalent: null },
@@ -34,6 +37,51 @@ export const ALPHA_BILL_TOOLBAR = Object.freeze([
   { id: "btn-refresh", label: "Refresh", museumEquivalent: null },
   { id: "btn-vanilla", label: "Open in Vanilla", museumEquivalent: null },
 ]);
+
+/** Actions that use the dirty commit popover (T3a). */
+export const BILL_COMMIT_GATE_ACTIONS = Object.freeze(["find", "new", "print"]);
+
+/**
+ * Clean Bill → run Find/New/Print immediately; dirty → show commit popover.
+ * @param {boolean} userEdited
+ * @returns {boolean}
+ */
+export function shouldOpenCommitGate(userEdited) {
+  return !!userEdited;
+}
+
+/**
+ * @param {"discard"|"save"|"submit"|"cancel"|string} choice
+ * @returns {"discard"|"save"|"submit"|"cancel"|null}
+ */
+export function normalizeCommitGateChoice(choice) {
+  if (choice === "discard" || choice === "save" || choice === "submit" || choice === "cancel") {
+    return choice;
+  }
+  return null;
+}
+
+/**
+ * After commit choice, may the pending action run?
+ * @param {"discard"|"save"|"submit"|"cancel"|null} choice
+ */
+export function commitGateContinues(choice) {
+  return choice === "discard" || choice === "save" || choice === "submit";
+}
+
+/**
+ * Print needs a saved document name — discard on a brand-new Bill cannot print yet.
+ * @param {"find"|"new"|"print"} action
+ * @param {"discard"|"save"|"submit"} choice
+ * @param {{ isNew?: boolean }} [ctx]
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export function commitGateAllowsAction(action, choice, ctx = {}) {
+  if (action === "print" && choice === "discard" && ctx.isNew) {
+    return { ok: false, reason: "Save the Bill before printing." };
+  }
+  return { ok: true };
+}
 
 /**
  * Museum footer "Revert Changes Since Last Save" — alpha ships as toolbar Revert.
