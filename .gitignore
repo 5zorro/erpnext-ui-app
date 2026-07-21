@@ -26,3 +26,4 @@ Thumbs.db
 # DevTools captures (may contain cookies)
 *.har
 localhost.har
+.git-replace-5zorro.txt
