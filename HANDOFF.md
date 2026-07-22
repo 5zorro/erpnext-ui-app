@@ -9,8 +9,9 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Current dated working plan: `docs/implementation-plan-2026-07-18.md` (T1–T4 active; deferred packets sketched).
-4. `docs/beta-slice.md` · `CONTRIBUTING.md` · open discovery in museum `open_items.md`.
+3. Current dated working plan: `docs/implementation-plan-2026-07-18.md` (T1–T4 MVP done; deferred packets sketched).
+4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
+   `~/agent-harness/erpnext/doc-shell/open_items.md` — **not** mirrored into this public tree.
 
 ---
 

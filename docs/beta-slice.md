@@ -6,21 +6,24 @@ Public / `main` only advances when a **milestone** is green (see the current dat
 
 ## Current public tip (local `alpha`)
 
-**M0** chrome + live ERP · **M1/M1.5** Recent · **M2** Home tiles · **M3** Bill Doc —
-ready to promote when you push.
+**`0.2.0-alpha.1`** — **Accounts payable daily data entry MVP** dogfood-passed 2026-07-21:
+Bill · Purchase Order · Item Receipt Doc skins (read / edit / save / submit), plus T1–T3 Bill chrome.
+Not yet promoted to `main`.
+
+Earlier: **M0** chrome + live ERP · **M1/M1.5** Recent · **M2** Home tiles · **M3** Bill Doc.
 
 ## Next promotes
 
 | Promote | Milestone | Must have |
 |---------|-----------|-----------|
-| **1** | M0–M3 bundle (when dogfood OK) | Bill Doc read/edit/save; units green |
-| **next** | T1–T2 from dated plan | Link pickers + Select PO (source modal) |
+| **1** | AP daily-entry MVP (`0.2.0-alpha.1`) → `main` when you choose | Bill + PO + IR Doc read/edit/save/submit; units green; dogfood OK |
+| **next** | Doc chrome from D-DocChrome (OI backlog in museum `open_items.md`) | Copy / Closed / ribbons / Recalc / Pay Bill / etc. as picked |
 
-How: [implementation-plan-2026-07-18.md](implementation-plan-2026-07-18.md) (architecture batches T1–T4; deferred packets sketched).
+How: [implementation-plan-2026-07-18.md](implementation-plan-2026-07-18.md) (T1–T4 done at MVP; deferred packets). Discovery IDs live only in museum `open_items.md` (private issues list — not copied here).
 
 ## Then (tests may reorder)
 
-Work follows **T1→T4** in the dated plan, then deferred packets (Home OI-050/051, bowtie PoC, shell utils, etc.).
+Deferred packets (Home, bowtie, shell utils, Doc chrome, etc.) — pick deliberately from museum `open_items.md`; do not reopen museum *code* for layout ideas once an OI captures the intent.
 
 ## Hard rules
 
