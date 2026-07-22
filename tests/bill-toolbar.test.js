@@ -10,6 +10,7 @@ import {
   normalizeCommitGateChoice,
   commitGateContinues,
   commitGateAllowsAction,
+  commitGateChoiceEnabled,
   MUSEUM_BILL_NAV_TABS,
   MUSEUM_BILL_LINE_TABS,
   MUSEUM_BILL_FOOTER,
@@ -67,9 +68,13 @@ describe("T3a commit gate", () => {
   });
 
   it("blocks print after discard on a brand-new Bill", () => {
-    assert.equal(commitGateAllowsAction("print", "discard", { isNew: true }).ok, false);
+    const blocked = commitGateAllowsAction("print", "discard", { isNew: true });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.reason || "", /nothing to print/i);
+    assert.equal(commitGateChoiceEnabled("print", "discard", { isNew: true }), false);
     assert.equal(commitGateAllowsAction("print", "save", { isNew: true }).ok, true);
     assert.equal(commitGateAllowsAction("find", "discard", { isNew: true }).ok, true);
     assert.equal(commitGateAllowsAction("print", "discard", { isNew: false }).ok, true);
+    assert.equal(commitGateChoiceEnabled("print", "discard", { isNew: false }), true);
   });
 });

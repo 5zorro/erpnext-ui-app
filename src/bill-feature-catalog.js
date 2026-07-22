@@ -181,7 +181,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     museum: true,
     alpha: true,
     coverage: "tested",
-    pureModule: "bill-map.js (BILL_EXPENSE_NOTE)",
+    pureModule: "bill-map.js + bill-action-flow.js (Expenses→Taxes orientation)",
   },
   {
     id: "taxes-charges-table",
@@ -286,7 +286,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     alpha: true,
     coverage: "tested",
     pureModule: "bill-toolbar.js",
-    notes: "Opens Vanilla PI list; dirty commit popover before leave",
+    notes: "Waits for PI list route (not form); dirty commit popover before leave",
   },
   {
     id: "toolbar-new",
@@ -318,9 +318,9 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     name: "Print",
     museum: true,
     alpha: true,
-    coverage: "partial",
-    pureModule: "bill-toolbar.js",
-    notes: "frm.print_doc after save; discard+print blocked on brand-new doc",
+    coverage: "tested",
+    pureModule: "bill-action-flow.js",
+    notes: "Switches to Vanilla print preview route; Recent shows Print preview; waits for /print/",
   },
   {
     id: "toolbar-attach",

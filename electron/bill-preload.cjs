@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("erpBill", {
   deleteTax: (rowIndex) => ipcRenderer.invoke("bill-delete-tax", rowIndex),
   attachFile: () => ipcRenderer.invoke("bill-attach-file"),
   save: (opts) => ipcRenderer.invoke("bill-save", opts || {}),
+  listMandatory: () => ipcRenderer.invoke("bill-list-mandatory"),
   revertUnsaved: () => ipcRenderer.invoke("bill-revert-unsaved"),
   findBills: () => ipcRenderer.invoke("bill-find"),
   newBill: () => ipcRenderer.invoke("bill-new"),
@@ -34,4 +35,18 @@ contextBridge.exposeInMainWorld("erpBill", {
     ipcRenderer.on("bill-snapshot", handler);
     return () => ipcRenderer.removeListener("bill-snapshot", handler);
   },
+  // Unified dirty gate: main asks the in-page commit-gate to open for a navigation,
+  // renderer replies proceed/cancel with the token. One gate UI, no native dialog.
+  onOpenNavGate: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("bill-open-nav-gate", handler);
+    return () => ipcRenderer.removeListener("bill-open-nav-gate", handler);
+  },
+  onCancelNavGate: (cb) => {
+    const handler = (_e, token) => cb(token);
+    ipcRenderer.on("bill-cancel-nav-gate", handler);
+    return () => ipcRenderer.removeListener("bill-cancel-nav-gate", handler);
+  },
+  resolveNavGate: (token, proceed) =>
+    ipcRenderer.send("bill-resolve-nav-gate", token, !!proceed),
 });

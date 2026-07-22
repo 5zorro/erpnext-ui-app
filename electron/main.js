@@ -10,7 +10,7 @@ import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import { hasDocSkin, resolveDocSkinTarget } from "../src/lens-context.js";
-import { routeInfo, routesReferToSameDoc } from "../src/route-info.js";
+import { routeInfo, routesReferToSameDoc, isNewDocRecord } from "../src/route-info.js";
 import {
   rememberLens,
   preferredLens,
@@ -29,6 +29,17 @@ import { amountDueMatchesGrandTotal, billCompareTotal, isEditableBillItemField, 
 import { normalizeSearchLinkResults } from "../src/link-search.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders } from "../src/source-modal.js";
 import { DOC_FORM_BRIDGE_VERSION } from "../src/erp-form-bridge.js";
+import {
+  BILL_FIND_TIMEOUT_MS,
+  BILL_PRINT_TIMEOUT_MS,
+  BILL_SAVE_TIMEOUT_MS,
+  classifyFindBillResult,
+  classifyPrintNavResult,
+  isPurchaseInvoiceListRoute,
+  normalizePrintIpcResult,
+  printFormMatchesBill,
+  timeoutFailure,
+} from "../src/bill-action-flow.js";
 import {
   resolveErpBase,
   HEALTH_PING_PATH,
@@ -245,6 +256,51 @@ async function erpEval(js) {
 }
 
 /**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} what
+ * @returns {Promise<T|{ ok: false, timedOut: true, reason: string }>}
+ */
+async function raceTimeout(promise, ms, what) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(timeoutFailure(what)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Wait until Vanilla URL is the Purchase Invoice list (Find), not a form. */
+async function waitForPurchaseInvoiceList(timeoutMs = BILL_FIND_TIMEOUT_MS) {
+  const start = Date.now();
+  let last = "";
+  while (Date.now() - start < timeoutMs) {
+    if (!erp || erp.webContents.isDestroyed()) {
+      return { ok: false, reason: "ERP view not ready" };
+    }
+    last = erp.webContents.getURL() || "";
+    if (/\/login/i.test(last)) {
+      return { ok: false, reason: "Please log in on Vanilla skin, then try Find Bill again." };
+    }
+    if (isPurchaseInvoiceListRoute(last, ERP_BASE)) {
+      return classifyFindBillResult(last, ERP_BASE);
+    }
+    await sleep(150);
+  }
+  return classifyFindBillResult(last, ERP_BASE);
+}
+
+/**
  * Inject event-driven Doc↔Vanilla bridge (idempotent). Template for Bill / PO / IR.
  */
 async function ensureErpFormBridge() {
@@ -390,6 +446,11 @@ function place() {
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
 }
 
+// Single-slot pending navigation gate. The Bill renderer owns the ONE commit-gate UI;
+// main just asks it to open and waits for proceed/cancel. Last nav click wins.
+let navGateSeq = 0;
+let activeNavGate = null; // { token, settle(proceed) }
+
 async function gateDirtyThen(doNav) {
   if (surfaceMode !== "bill") {
     doNav();
@@ -408,6 +469,54 @@ async function gateDirtyThen(doNav) {
     doNav();
     return;
   }
+
+  // SSoT: drive the SAME in-page commit-gate the toolbar uses. Native dialog is only
+  // a fallback for when the Bill renderer is gone (destroyed / crashed).
+  if (!bill || bill.webContents.isDestroyed()) {
+    await nativeGateFallback(doNav);
+    return;
+  }
+
+  // Supersede any earlier pending nav gate (last click wins) — no leaks, no double gates.
+  if (activeNavGate) {
+    const prev = activeNavGate;
+    activeNavGate = null;
+    try {
+      bill.webContents.send("bill-cancel-nav-gate", prev.token);
+    } catch {
+      /* renderer gone; nothing to cancel */
+    }
+    prev.settle(false);
+  }
+
+  const token = `nav-${++navGateSeq}`;
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = (proceed) => {
+      if (settled) return;
+      settled = true;
+      if (activeNavGate && activeNavGate.token === token) activeNavGate = null;
+      if (proceed) {
+        dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+        amountDueCommitted = amountDueScratch;
+        doNav();
+      }
+      resolve();
+    };
+    activeNavGate = { token, settle: finish };
+    try {
+      bill.webContents.send("bill-open-nav-gate", { token, label: "leaving this Bill" });
+    } catch {
+      activeNavGate = null;
+      settled = true;
+      resolve();
+      nativeGateFallback(doNav);
+    }
+  });
+}
+
+// Fallback dirty prompt when the in-page gate can't be reached (renderer destroyed).
+async function nativeGateFallback(doNav) {
   let response = 2;
   try {
     const r = await dialog.showMessageBox(win, {
@@ -618,22 +727,13 @@ async function saveBillFromErp(opts = {}) {
   if (!amountDueMatchesGrandTotal(amountDueScratch, billCompareTotal(dirtyState.doc))) {
     return { ok: false, reason: "Amount Due checksum failed (must match Grand total)." };
   }
-  const raw = await erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      if (!f) return { ok: false, reason: "No form." };
-      if (f.doc.docstatus !== 0) return { ok: false, reason: "Document is not a draft." };
-      try { f.refresh_field("items"); } catch (e) {}
-      if (${submit ? "true" : "false"}) {
-        await f.save("Submit");
-      } else {
-        await f.save();
-      }
-      return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)), submitted: ${submit ? "true" : "false"} };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
+  // Bridge saveDoc always settles (preflight + savedocs). Bare f.save() hangs 45s when
+  // Vanilla finds mandatory gaps (msgprint, no callback).
+  const raw = await raceTimeout(
+    bridgeCall("saveDoc", submit ? "Submit" : "Save"),
+    BILL_SAVE_TIMEOUT_MS,
+    submit ? "Save & submit" : "Save draft",
+  );
   if (raw && raw.ok) {
     dirtyState = {
       ...dirtyState,
@@ -645,6 +745,18 @@ async function saveBillFromErp(opts = {}) {
     amountDueCommitted = amountDueScratch;
   }
   return raw && typeof raw === "object" ? raw : { ok: false, reason: "Save failed." };
+}
+
+async function listBillMandatoryMissing() {
+  const raw = await bridgeCall("listMandatoryMissing", "Purchase Invoice");
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, blockers: [], reason: "Could not read ERP mandatory fields." };
+  }
+  return {
+    ok: raw.ok !== false,
+    blockers: Array.isArray(raw.blockers) ? raw.blockers : [],
+    reason: raw.reason,
+  };
 }
 
 async function setBillItemField(rowIndex, field, value) {
@@ -1154,10 +1266,29 @@ ipcMain.handle("bill-save", async (_e, opts) =>
   saveBillFromErp(opts && typeof opts === "object" ? opts : {}),
 );
 
-/** Find Bills list in Vanilla (T3a). Caller handles dirty commit first. */
+ipcMain.handle("bill-list-mandatory", async () => listBillMandatoryMissing());
+
+/** Find Bills list in Vanilla (T3a / OI-056). Caller handles dirty commit first. */
 ipcMain.handle("bill-find", async () => {
   dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
-  showErp("/app/purchase-invoice", { forceLoad: true, skipDirtyGate: true });
+  const route = "/app/purchase-invoice";
+  surfaceMode = "erp";
+  currentRoute = route;
+  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
+  savePrefs();
+  place();
+  const target = erpUrl(ERP_BASE, route);
+  await loadErpUrl(target);
+  trackNav(target);
+  const confirm = await waitForPurchaseInvoiceList(BILL_FIND_TIMEOUT_MS);
+  sendUiState();
+  syncE2eApi();
+  if (!(confirm && confirm.ok)) {
+    return {
+      ok: false,
+      reason: (confirm && confirm.reason) || "Could not open Bill list.",
+    };
+  }
   return { ok: true };
 });
 
@@ -1168,25 +1299,81 @@ ipcMain.handle("bill-new", async () => {
   return { ok: true };
 });
 
+/** Wait until Vanilla URL is the print preview for this Bill. */
+async function waitForPrintPreview(expectedName, timeoutMs = BILL_PRINT_TIMEOUT_MS) {
+  const start = Date.now();
+  let last = "";
+  while (Date.now() - start < timeoutMs) {
+    if (!erp || erp.webContents.isDestroyed()) {
+      return { ok: false, reason: "ERP view not ready" };
+    }
+    last = erp.webContents.getURL() || "";
+    if (/\/login/i.test(last)) {
+      return { ok: false, reason: "Please log in on Vanilla skin, then try Print again." };
+    }
+    const classified = classifyPrintNavResult(last, expectedName, ERP_BASE);
+    if (classified.ok) return classified;
+    await sleep(150);
+  }
+  return classifyPrintNavResult(last, expectedName, ERP_BASE);
+}
+
 /**
- * Print via Vanilla frm.print_doc (museum bind.js).
- * Needs a saved document name — not a brand-new unsaved draft.
+ * Print: open Vanilla print preview as a real navigation (visible ERP surface + Recent).
+ * Matches clerk expectation of "new tab" → print page (OI-058 dogfood 2026-07-21).
  */
 ipcMain.handle("bill-print", async () => {
   const doc = dirtyState.doc;
-  if (!doc || !doc.name || String(doc.name).startsWith("new") || doc.name === "new") {
+  const name = doc && doc.name != null ? String(doc.name) : "";
+  if (!name || isNewDocRecord(name)) {
     return {
       ok: false,
       reason: "Save the Bill draft first — print needs a document name.",
     };
   }
-  const opened = await erpEval(`(async () => {
+
+  const route = `/app/purchase-invoice/${encodeURIComponent(name)}`;
+  const curUrl = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
+  const cur = routeInfo(curUrl, ERP_BASE);
+  const alreadyOnBill =
+    cur.doctype === "purchase-invoice" && cur.record === name && !isNewDocRecord(cur.record);
+
+  if (!alreadyOnBill) {
+    const target = erpUrl(ERP_BASE, route);
+    await loadErpUrl(target);
+  }
+
+  const snap = await raceTimeout(
+    waitForPurchaseInvoice(BILL_PRINT_TIMEOUT_MS),
+    BILL_PRINT_TIMEOUT_MS + 1000,
+    "Print form load",
+  );
+  if (!(snap && snap.ok && snap.doc)) {
+    return {
+      ok: false,
+      reason: (snap && snap.reason) || "No form loaded.",
+    };
+  }
+  const match = printFormMatchesBill(snap.doc, name);
+  if (!match.ok) {
+    return match;
+  }
+
+  const opened = await raceTimeout(
+    erpEval(`(async () => {
     try {
       var f = window.cur_frm;
-      if (!f) return { ok: false, reason: "No form." };
+      var want = ${JSON.stringify(name)};
+      if (!f || !f.doc) return { ok: false, reason: "No form loaded." };
+      if (f.doc.doctype !== "Purchase Invoice") {
+        return { ok: false, reason: "Wrong form type (" + (f.doc.doctype || "?") + ")." };
+      }
+      if (String(f.doc.name) !== want) {
+        return { ok: false, reason: "Vanilla is on a different Bill (" + f.doc.name + "), not " + want + "." };
+      }
       if (typeof f.print_doc === "function") {
         f.print_doc();
-        return { ok: true };
+        return { ok: true, reason: "Navigating to print preview…" };
       }
       if (window.frappe && frappe.ui && frappe.ui.get_print_settings) {
         frappe.ui.get_print_settings(false, function () {}, f.doc.doctype);
@@ -1196,10 +1383,37 @@ ipcMain.handle("bill-print", async () => {
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
     }
-  })()`);
-  return opened && typeof opened === "object"
-    ? opened
-    : { ok: false, reason: "Could not open print." };
+  })()`),
+    BILL_PRINT_TIMEOUT_MS,
+    "Print",
+  );
+
+  const started = normalizePrintIpcResult(opened);
+  if (!started.ok) return started;
+
+  // Show Vanilla so the print page is visible (Electron has no browser "new tab").
+  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  surfaceMode = "erp";
+  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
+  savePrefs();
+  place();
+  sendUiState();
+  syncE2eApi();
+  try {
+    if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
+    if (win && !win.isDestroyed()) win.focus();
+  } catch {
+    /* ignore */
+  }
+
+  const landed = await waitForPrintPreview(name, BILL_PRINT_TIMEOUT_MS);
+  if (!(landed && landed.ok)) {
+    return {
+      ok: false,
+      reason: (landed && landed.reason) || "Print preview did not open.",
+    };
+  }
+  return { ok: true, reason: "Print preview opened." };
 });
 
 /**
@@ -1283,6 +1497,11 @@ ipcMain.on("bill-focus-surface", () => {
   }
 });
 
+ipcMain.on("bill-resolve-nav-gate", (_e, token, proceed) => {
+  if (activeNavGate && activeNavGate.token === token) {
+    activeNavGate.settle(!!proceed);
+  }
+});
 ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());
