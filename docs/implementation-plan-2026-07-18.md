@@ -45,9 +45,9 @@ flowchart TB
 | Area | State |
 |------|--------|
 | Scaffold + units + optional e2e smokes | **Done** |
-| Bill Doc view (`bill.html`) | **Done** — header, checksum, lines via `set_value`, add/delete, save & submit, assumptions list, lens prefs |
-| Bill vs museum | **Usable skeleton** — still missing Link autocomplete, Select PO / source modal, full toolbar, revert, Expenses tab note, USD blur format |
-| PO / Item Receipt Doc skins | **Not started** |
+| Bill Doc view (`bill.html`) | **Done** — T1–T3 dogfood passed 2026-07-21 |
+| Bill vs museum | Daily-driver usable; still missing Delete/Copy/Recalc/Pay Bill/nav tabs |
+| PO / Item Receipt Doc skins | **MVP done** — T4 dogfood 2026-07-21 (submit PO + IR); chrome gaps remain |
 | Home inventory (OI-050/051) | Direction locked; tiles not finalized |
 | Layer-2 browser→ERP e2e | **Not built** (sandbox `.env` pattern ready) |
 
@@ -135,14 +135,20 @@ OI-058 Print → Vanilla print preview (visible + Recent); OI-059 Expenses copy;
 
 | Step | What | Tests |
 |------|------|-------|
-| T4a | `po-map.js` + `po.html` (or shared doc shell + layout key) | Units like bill-map |
-| T4b | `receipt-map.js` + IR Doc view | Units |
+| T4a | `po-map.js` + shared `doc-form.html` (layout key) | Units like bill-map |
+| T4b | `receipt-map.js` + IR via same Doc shell | Units |
 | T4c | `DOC_SKIN_INDEX` ready rows + lens prefs | Index matrix |
-| T4d | Reuse T1 pickers + T2 source modal where SPECS need them | Dogfood |
-| T4e | PO-only: Date Expected / ribbons later | OI-007 **defer** unless trivial |
+| T4d | Reuse T1 pickers + T2 source modal (IR Select PO) | Dogfood |
+| T4e | PO Date Expected stamps line `schedule_date` on save | Units + dogfood |
 
-**OI touch:** OI-006/010 totals (add if cheap with line pattern), OI-011 IR ref (investigate).  
-**Exit:** PO + IR open in Doc skin with read+edit+save; Bill still green.
+**OI touch:** OI-006/010 totals (Σ Qty / Σ Amount on both); OI-011 IR supplier invoice ref — **dropped from Doc IR** (dogfood: packing list/BOL only at receive; invoice # belongs on Bill).  
+**Exit:** PO + IR open in Doc skin with read+edit+save; Bill still green.  
+**Status (2026-07-21 evening):** **MVP dogfood passed** — PO submit (Date Expected → Required By stamp); IR submit (Select PO). Shared `doc-form` shell. Not a full gambit; chrome gaps remain (see museum gap list below plan / OIs).
+
+**Museum logic still parked (not blocking MVP):**
+- PO: Mark as Closed, Create Copy, Create Item Receipt toolbar / OI-007 ribbons
+- IR: Recalculate, Delete/Copy, nav tabs Bill↔IR
+- Both: museum footer Save & Close / Save & New variants
 
 ---
 
@@ -152,8 +158,9 @@ Do **not** flesh full how until the packet starts. Parking lot:
 
 | Packet | Contents | OI / notes |
 |--------|----------|------------|
+| **D-DocChrome** | Museum toolbar leftovers (Delete, Copy, Closed, Recalc, Pay Bill, ribbons, nav tabs) | Museum `open_items.md` **OI-064** (private issues SSoT — not mirrored in this repo) |
 | **D-Home** | Chunks &lt; 12; report defaults; Vendor Center statement tile | OI-050, OI-051 |
-| **D-Bowtie** | AP bowtie PoC → Home tile only after proof | OI-041 |
+| **D-Bowtie** | AP bowtie PoC → Home tile only after proof | OI-041 (also indexed under OI-064 in museum inbox) |
 | **D-Shell** | DB diagnose panel; Feedback; nickel UI wire | OI-046, OI-048, OI-042 |
 | **D-Assumptions** | Second Skin values on Doc; placement greyed | OI-012, OI-030–034 |
 | **D-Nav** | Multi-window / tabs / tint; session history by date | OI-040, OI-035 |
