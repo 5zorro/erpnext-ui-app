@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Document</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
+    .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .status { font-size: 12px; color: #64748b; }
+    .status.warn { color: #b45309; }
+    .status.err { color: #b91c1c; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+    .toolbar button, .line-actions button, .del {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer;
+    }
+    .toolbar button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .toolbar button.ghost { background: #f8fafc; }
+    .toolbar button:disabled, .line-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .dirty-pill {
+      font-size: 11px; padding: 3px 8px; border-radius: 999px;
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+    }
+    .dirty-pill.is-dirty {
+      background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
+    }
+    .commit-gate {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px; box-sizing: border-box;
+      background: transparent;
+    }
+    .commit-gate[hidden] { display: none !important; }
+    .commit-gate-backdrop {
+      position: absolute; inset: 0; z-index: 0;
+      background: rgba(15, 23, 42, .62);
+      backdrop-filter: blur(1px);
+      cursor: pointer;
+    }
+    .commit-gate-dialog {
+      position: relative; z-index: 1;
+      width: min(660px, 100%); max-height: calc(100vh - 40px); overflow: auto;
+      padding: 18px 20px; background: #fff; border: 1px solid #cbd5e1;
+      border-top: 4px solid #b45309; border-radius: 10px;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, .38);
+      font-size: 13px;
+      cursor: default;
+    }
+    .commit-gate-title { display: block; margin-bottom: 4px; font-size: 17px; color: #1f2937; }
+    .commit-gate-copy { margin: 0; color: #475569; line-height: 1.45; }
+    .commit-gate-validation {
+      margin-top: 14px; padding: 11px 12px; border: 1px solid #cbd5e1;
+      border-left: 4px solid #64748b; border-radius: 7px; background: #f8fafc;
+    }
+    .commit-gate-validation.blocked {
+      border-color: #f59e0b; border-left-color: #b45309; background: #fffbeb;
+    }
+    .commit-gate-validation.ready {
+      border-color: #86efac; border-left-color: #15803d; background: #f0fdf4;
+    }
+    .commit-gate-validation-title { display: block; margin-bottom: 6px; font-size: 12px; }
+    .commit-gate-blockers { margin: 0; padding-left: 20px; color: #92400e; line-height: 1.55; }
+    .commit-gate .row {
+      display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px;
+    }
+    .commit-gate button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 8px 12px; font-size: 13px; cursor: pointer;
+    }
+    .commit-gate button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .commit-gate button.ghost { background: #f8fafc; }
+    .commit-gate button:disabled { opacity: .42; cursor: not-allowed; }
+    .commit-gate button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 2px; }
+    .commit-gate .hint {
+      margin: 6px 0 0; font-size: 12px; color: #64748b; line-height: 1.4;
+    }
+    .commit-gate .hint.warn { color: #b45309; }
+    @media (prefers-reduced-motion: no-preference) {
+      .commit-gate-dialog { animation: gate-enter 120ms ease-out; }
+      @keyframes gate-enter {
+        from { opacity: 0; transform: translateY(5px) scale(.99); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+    }
+    .card { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .field .row { display: flex; align-items: center; gap: 8px; }
+    .field input, .field textarea, td input {
+      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 9px; font-size: 14px; width: 100%;
+      box-sizing: border-box; background: #fff;
+    }
+    td input { padding: 5px 6px; font-size: 13px; }
+    .field input:read-only, .field textarea:read-only, td .ro {
+      background: #f8fafc; color: #475569; border: none; padding: 5px 2px;
+    }
+    .memo { margin-top: 12px; }
+    .memo-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-bottom: 4px; flex-wrap: wrap;
+    }
+    .memo-head label { margin: 0; }
+    .memo-head .attach {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 5px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+    }
+    .memo-head .attach:hover { background: #f1f5f9; }
+    .memo-head .attach:disabled { opacity: 0.55; cursor: not-allowed; }
+    td.tot-cell .clear-qty {
+      display: block; width: 100%; margin-top: 6px;
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 4px 6px; font-size: 11px; cursor: pointer; color: #334155;
+    }
+    td.tot-cell .clear-qty:hover { background: #f1f5f9; }
+    td.tot-cell .clear-qty:disabled { opacity: 0.55; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; }
+    .del { padding: 4px 8px; color: #991b1b; }
+    .line-actions { margin-top: 8px; }
+    tfoot#line-totals td {
+      border-bottom: none; padding-top: 10px; font-size: 13px; vertical-align: middle;
+      background: #f8fafc; border-top: 1px solid #cbd5e1;
+    }
+    tfoot#line-totals .tot-cell b { font-variant-numeric: tabular-nums; }
+    tfoot#line-totals .tot-label {
+      color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; margin-right: 4px;
+    }
+    td.num { text-align: right; }
+    .money-amt, .money-cost { font-variant-numeric: tabular-nums; }
+    .money-amt { display: block; text-align: right; }
+    input.money-cost { text-align: right; }
+    .ro.money-cost { display: block; text-align: right; }
+    .line-tabs {
+      display: flex; gap: 0; margin-top: 4px; border-bottom: 1px solid #e2e8f0;
+    }
+    .line-tab {
+      border: 1px solid transparent; border-bottom: none; background: transparent;
+      padding: 8px 14px; font-size: 13px; cursor: pointer; color: #64748b;
+      border-radius: 6px 6px 0 0; margin-bottom: -1px;
+    }
+    .line-tab:hover { color: #1f2d3d; background: #f8fafc; }
+    .line-tab.active {
+      color: #1f2d3d; font-weight: 600; background: #fff;
+      border-color: #e2e8f0 #e2e8f0 #fff;
+    }
+    .line-panel[hidden] { display: none !important; }
+    .expense-note {
+      margin: 14px 0 8px; padding: 12px 14px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;
+      line-height: 1.5; max-width: 42rem;
+    }
+    .expense-note a { color: #1d4ed8; cursor: pointer; }
+    .expense-note ol { margin: 8px 0 0; padding-left: 1.35rem; }
+    .expense-note li { margin: 6px 0; }
+    .taxes-block { margin-top: 14px; }
+    .taxes-block > .taxes-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+      display: block; margin-bottom: 6px;
+    }
+    .taxes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .taxes-table th, .taxes-table td {
+      border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle;
+    }
+    .taxes-table th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b;
+    }
+    .taxes-table .num { text-align: right; }
+    .taxes-add {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px;
+    }
+    .taxes-add .field { margin-bottom: 0; flex: 1; min-width: 140px; }
+    .taxes-add button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+    }
+    .money-stack {
+      margin-top: 12px; max-width: 320px; margin-left: auto;
+      border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px 12px;
+      font-size: 13px;
+    }
+    .money-stack .ms-row {
+      display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .money-stack .ms-row.grand {
+      border-top: 1px solid #cbd5e1; margin-top: 4px; padding-top: 8px; font-weight: 700;
+    }
+    .money-stack .ms-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+    .money-stack .ms-note { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.35; }
+    .hint { margin-top: 10px; font-size: 12px; color: #64748b; line-height: 1.4; }
+    details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
+    details.assumptions summary { cursor: pointer; font-weight: 600; }
+    details.assumptions ul { margin: 8px 0 0; padding-left: 18px; }
+    .link-wrap { position: relative; display: flex; gap: 4px; align-items: stretch; }
+    .link-wrap > input { flex: 1; min-width: 0; }
+    .link-btn {
+      border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px;
+      padding: 0 10px; cursor: pointer; font-size: 12px; color: #334155; flex-shrink: 0;
+    }
+    .link-btn:hover { background: #e2e8f0; }
+    .link-dd {
+      position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 20;
+      background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+      max-height: 220px; overflow: auto; box-shadow: 0 8px 20px rgba(15,23,42,.12);
+    }
+    .link-opt {
+      display: block; width: 100%; text-align: left; border: none; background: #fff;
+      padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f1f5f9;
+    }
+    .link-opt:hover, .link-opt:focus { background: #eaf4ff; outline: none; }
+    .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
+    .link-opt.active { background: #eaf4ff; }
+    .link-opt.link-action { font-style: italic; color: #1d4ed8; }
+    .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
+      pointer-events: none; opacity: 0.55;
+    }
+    .src-back {
+      position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .src-box {
+      background: #fff; border-radius: 10px; width: min(560px, 100%); max-height: 80vh;
+      display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15,23,42,.25);
+    }
+    .src-title { padding: 12px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+    .src-body { overflow: auto; padding: 8px 0; flex: 1; }
+    .src-group { padding: 6px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .src-group.active { color: #0f172a; font-weight: 700; }
+    .src-item {
+      padding: 8px 14px; font-size: 13px; cursor: pointer; border: none; background: #fff;
+      width: 100%; text-align: left; display: block;
+    }
+    .src-item:hover, .src-item.active { background: #eaf4ff; }
+    .src-item.draft { color: #94a3b8; cursor: not-allowed; background: #f8fafc; }
+    .src-foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #e2e8f0; }
+    .src-foot button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+    .src-foot button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .date-hint { font-size: 10px; color: #94a3b8; }
+    @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap" data-testid="doc-root">
+    <div class="banner">
+      <h1 id="doc-title">Document</h1>
+      <span class="status" id="status" data-testid="doc-status">Loading…</span>
+      <span class="banner-actions">
+        <button type="button" id="btn-retry" data-testid="doc-retry" hidden>Retry load</button>
+      </span>
+    </div>
+    <div class="toolbar" data-testid="doc-toolbar">
+      <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
+        title="Print this document (save first if new).">Print</button>
+      <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
+        title="Attach file">Attach file</button>
+      <span class="dirty-pill" id="dirty-pill" data-testid="doc-dirty-pill">All saved</span>
+      <span style="flex:1 1 8px"></span>
+      <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
+      <button type="button" id="btn-new" data-testid="doc-new">New</button>
+      <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
+      <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
+      <button type="button" id="btn-revert" data-testid="doc-revert"
+        title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
+      <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
+      <button type="button" id="btn-refresh" data-testid="doc-refresh">Refresh</button>
+      <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
+    </div>
+    <div class="commit-gate" id="commit-gate" data-testid="doc-commit-gate" hidden>
+      <div class="commit-gate-backdrop" id="commit-gate-backdrop"
+        data-testid="doc-gate-backdrop" aria-hidden="true"></div>
+      <section class="commit-gate-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
+        <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
+        <p class="commit-gate-copy" id="commit-gate-copy">
+          This decision must be resolved before you can continue.
+        </p>
+        <div class="commit-gate-validation" id="commit-gate-validation" data-testid="doc-gate-validation">
+          <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
+          <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="doc-gate-blockers"></ul>
+          <p class="hint" id="commit-gate-hint" data-testid="doc-commit-gate-hint"></p>
+        </div>
+        <div class="row">
+          <button type="button" data-gate="discard" data-testid="doc-gate-discard">Discard, then continue</button>
+          <button type="button" class="primary" data-gate="save" data-testid="doc-gate-save">Save draft, then continue</button>
+          <button type="button" data-gate="submit" data-testid="doc-gate-submit">Save &amp; submit, then continue</button>
+          <button type="button" class="ghost" data-gate="cancel" data-testid="doc-gate-cancel">Cancel</button>
+        </div>
+      </section>
+    </div>
+    <details class="assumptions" data-testid="doc-assumptions">
+      <summary>Assumptions this view makes</summary>
+      <ul id="assumptions-list"></ul>
+    </details>
+    <div class="card">
+      <div class="cols" id="header-cols">
+        <div id="header-left"></div>
+        <div id="header-right"></div>
+      </div>
+      <div>
+        <div class="line-tabs" role="tablist" data-testid="doc-line-tabs" hidden>
+          <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+            data-tab="items" data-testid="doc-tab-items">Items</button>
+          <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+            data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
+        </div>
+        <div class="line-panel" id="panel-items" data-testid="doc-panel-items" role="tabpanel">
+          <table>
+            <thead>
+              <tr id="items-head-row"></tr>
+            </thead>
+            <tbody id="items-body" data-testid="doc-items"></tbody>
+            <tfoot id="line-totals" data-testid="doc-line-totals" hidden></tfoot>
+          </table>
+          <div class="line-actions">
+            <button type="button" id="btn-add-line" data-testid="doc-add-line">Add line</button>
+          </div>
+        </div>
+        <div class="line-panel" id="panel-expenses" data-testid="doc-panel-expenses" role="tabpanel" hidden>
+          <p class="expense-note" data-testid="doc-expense-note"></p>
+        </div>
+        <div class="taxes-block" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
+          <span class="taxes-title">Taxes and Charges</span>
+          <table class="taxes-table">
+            <thead>
+              <tr>
+                <th>Account</th><th>Description</th><th>Type</th>
+                <th class="num">Rate %</th><th class="num">Amount</th><th>Add/Deduct</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
+          </table>
+          <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
+            <div class="field">
+              <label for="f-tax-account">Account</label>
+              <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
+            </div>
+            <div class="field" style="flex:0 0 120px;">
+              <label for="f-tax-amount">Amount</label>
+              <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+            </div>
+            <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+          </div>
+          <div class="money-stack" data-testid="doc-money-stack">
+            <div class="ms-row">
+              <span class="ms-label">Item subtotal</span>
+              <span id="ms-items" data-testid="doc-ms-items">$0.00</span>
+            </div>
+            <div class="ms-row">
+              <span class="ms-label">Taxes</span>
+              <span id="ms-taxes" data-testid="doc-ms-taxes">$0.00</span>
+            </div>
+            <div class="ms-row grand">
+              <span class="ms-label">Grand total</span>
+              <span id="ms-grand" data-testid="doc-ms-grand">$0.00</span>
+            </div>
+            <p class="ms-note" id="ms-note" data-testid="doc-ms-note" hidden></p>
+          </div>
+        </div>
+        <div class="field memo" id="memo-block" data-testid="doc-memo-block" hidden>
+          <div class="memo-head">
+            <label for="f-memo">Memo</label>
+            <button type="button" class="attach" id="btn-attach" data-testid="doc-attach">Attach file</button>
+          </div>
+          <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
+        </div>
+        <p class="hint" id="doc-hint"></p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="../src/doc-form-page.js"></script>
+</body>
+</html>

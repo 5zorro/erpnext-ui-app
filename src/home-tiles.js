@@ -18,8 +18,8 @@ export const HOME_GROUPS = {
       tiles: [
         { id: "bill-new", icon: "🧾", label: "Enter Bills", route: "/app/purchase-invoice/new" },
         { id: "pay-bills", icon: "💵", label: "Pay Bills", route: "/desk/payment-entry/new" },
-        { id: "po-new", icon: "📦", label: "Purchase Orders", route: "/desk/purchase-order/new" },
-        { id: "receipt-new", icon: "📥", label: "Receive Inventory", route: "/desk/purchase-receipt/new" },
+        { id: "po-new", icon: "📦", label: "Purchase Orders", route: "/app/purchase-order/new" },
+        { id: "receipt-new", icon: "📥", label: "Receive Inventory", route: "/app/purchase-receipt/new" },
         { id: "vendors", icon: "🏢", label: "Vendor Center", route: "/desk/supplier" },
       ],
     },
