@@ -40,11 +40,15 @@ describe("classifySurface", () => {
 });
 
 describe("DOC_SKIN_INDEX readiness", () => {
-  it("home and bill are ready (M3c)", () => {
+  it("home, bill, po, and receipt are ready (T4)", () => {
     const home = DOC_SKIN_INDEX.find((e) => e.id === "workflow-home");
     const bill = DOC_SKIN_INDEX.find((e) => e.id === "bill");
+    const po = DOC_SKIN_INDEX.find((e) => e.id === "po");
+    const receipt = DOC_SKIN_INDEX.find((e) => e.id === "receipt");
     assert.equal(home?.ready, true);
     assert.equal(bill?.ready, true);
+    assert.equal(po?.ready, true);
+    assert.equal(receipt?.ready, true);
   });
 
   it("lookup and hasDocSkin true for Bill form", () => {
@@ -52,6 +56,13 @@ describe("DOC_SKIN_INDEX readiness", () => {
     assert.equal(lookupDocSkin(ctx)?.id, "bill");
     assert.equal(hasDocSkin(ctx), true);
     assert.equal(resolveDocSkinTarget(ctx)?.kind, "doc-form");
+  });
+
+  it("lookup and hasDocSkin true for PO and Item Receipt forms", () => {
+    assert.equal(lookupDocSkin({ route: "/app/purchase-order/new" })?.id, "po");
+    assert.equal(hasDocSkin({ route: "/app/purchase-order/PO-1" }), true);
+    assert.equal(lookupDocSkin({ route: "/app/purchase-receipt/new" })?.id, "receipt");
+    assert.equal(resolveDocSkinTarget({ route: "/app/purchase-receipt/new" })?.layoutKey, "item-receipt");
   });
 });
 

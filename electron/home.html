@@ -55,6 +55,12 @@
           } else if (t.id === "bill-new" && api.openEntry) {
             b.title = "Enter Bills (last lens; default Doc)";
             b.onclick = () => api.openEntry("purchase-invoice");
+          } else if (t.id === "po-new" && api.openEntry) {
+            b.title = "Purchase Orders (last lens; default Doc)";
+            b.onclick = () => api.openEntry("purchase-order");
+          } else if (t.id === "receipt-new" && api.openEntry) {
+            b.title = "Receive Inventory (last lens; default Doc)";
+            b.onclick = () => api.openEntry("purchase-receipt");
           } else {
             b.title = t.route;
             b.onclick = () => api && api.openErp(t.route);
