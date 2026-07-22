@@ -27,12 +27,63 @@
       background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
     }
     .commit-gate {
-      margin: 0 0 12px; padding: 10px 12px; background: #f8fafc;
-      border: 1px dashed #cbd5e1; border-radius: 8px; font-size: 13px;
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px; box-sizing: border-box;
+      background: transparent;
     }
     .commit-gate[hidden] { display: none !important; }
-    .commit-gate strong { display: block; margin-bottom: 6px; }
-    .commit-gate .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .commit-gate-backdrop {
+      position: absolute; inset: 0; z-index: 0;
+      background: rgba(15, 23, 42, .62);
+      backdrop-filter: blur(1px);
+      cursor: pointer;
+    }
+    .commit-gate-dialog {
+      position: relative; z-index: 1;
+      width: min(660px, 100%); max-height: calc(100vh - 40px); overflow: auto;
+      padding: 18px 20px; background: #fff; border: 1px solid #cbd5e1;
+      border-top: 4px solid #b45309; border-radius: 10px;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, .38);
+      font-size: 13px;
+      cursor: default;
+    }
+    .commit-gate-title { display: block; margin-bottom: 4px; font-size: 17px; color: #1f2937; }
+    .commit-gate-copy { margin: 0; color: #475569; line-height: 1.45; }
+    .commit-gate-validation {
+      margin-top: 14px; padding: 11px 12px; border: 1px solid #cbd5e1;
+      border-left: 4px solid #64748b; border-radius: 7px; background: #f8fafc;
+    }
+    .commit-gate-validation.blocked {
+      border-color: #f59e0b; border-left-color: #b45309; background: #fffbeb;
+    }
+    .commit-gate-validation.ready {
+      border-color: #86efac; border-left-color: #15803d; background: #f0fdf4;
+    }
+    .commit-gate-validation-title { display: block; margin-bottom: 6px; font-size: 12px; }
+    .commit-gate-blockers { margin: 0; padding-left: 20px; color: #92400e; line-height: 1.55; }
+    .commit-gate .row {
+      display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px;
+    }
+    .commit-gate button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 8px 12px; font-size: 13px; cursor: pointer;
+    }
+    .commit-gate button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .commit-gate button.ghost { background: #f8fafc; }
+    .commit-gate button:disabled { opacity: .42; cursor: not-allowed; }
+    .commit-gate button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 2px; }
+    .commit-gate .hint {
+      margin: 6px 0 0; font-size: 12px; color: #64748b; line-height: 1.4;
+    }
+    .commit-gate .hint.warn { color: #b45309; }
+    @media (prefers-reduced-motion: no-preference) {
+      .commit-gate-dialog { animation: gate-enter 120ms ease-out; }
+      @keyframes gate-enter {
+        from { opacity: 0; transform: translateY(5px) scale(.99); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+    }
     .card { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
     .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -143,9 +194,11 @@
     .expense-note {
       margin: 14px 0 8px; padding: 12px 14px; background: #fffbeb;
       border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;
-      line-height: 1.45; max-width: 42rem;
+      line-height: 1.5; max-width: 42rem;
     }
-    .expense-hint { font-size: 12px; color: #64748b; margin: 0 0 8px; }
+    .expense-note a { color: #1d4ed8; cursor: pointer; }
+    .expense-note ol { margin: 8px 0 0; padding-left: 1.35rem; }
+    .expense-note li { margin: 6px 0; }
     .taxes-block { margin-top: 14px; }
     .taxes-block > .taxes-title {
       font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
@@ -260,14 +313,26 @@
       <button type="button" class="ghost" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
     </div>
     <div class="commit-gate" id="commit-gate" data-testid="bill-commit-gate" hidden>
-      <strong id="commit-gate-title">Unsaved changes</strong>
-      Choose how to leave this draft, then the action runs:
-      <div class="row">
-        <button type="button" data-gate="discard" data-testid="bill-gate-discard">Discard, then continue</button>
-        <button type="button" class="primary" data-gate="save" data-testid="bill-gate-save">Save draft, then continue</button>
-        <button type="button" data-gate="submit" data-testid="bill-gate-submit">Save &amp; submit, then continue</button>
-        <button type="button" class="ghost" data-gate="cancel" data-testid="bill-gate-cancel">Cancel</button>
-      </div>
+      <div class="commit-gate-backdrop" id="commit-gate-backdrop"
+        data-testid="bill-gate-backdrop" aria-hidden="true"></div>
+      <section class="commit-gate-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
+        <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
+        <p class="commit-gate-copy" id="commit-gate-copy">
+          This decision must be resolved before you can continue.
+        </p>
+        <div class="commit-gate-validation" id="commit-gate-validation" data-testid="bill-gate-validation">
+          <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
+          <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="bill-gate-blockers"></ul>
+          <p class="hint" id="commit-gate-hint" data-testid="bill-commit-gate-hint"></p>
+        </div>
+        <div class="row">
+          <button type="button" data-gate="discard" data-testid="bill-gate-discard">Discard, then continue</button>
+          <button type="button" class="primary" data-gate="save" data-testid="bill-gate-save">Save draft, then continue</button>
+          <button type="button" data-gate="submit" data-testid="bill-gate-submit">Save &amp; submit, then continue</button>
+          <button type="button" class="ghost" data-gate="cancel" data-testid="bill-gate-cancel">Cancel</button>
+        </div>
+      </section>
     </div>
     <details class="assumptions" data-testid="bill-assumptions">
       <summary>Assumptions this view makes</summary>
@@ -349,13 +414,8 @@
         </div>
         <div class="line-panel" id="panel-expenses" data-testid="bill-panel-expenses" role="tabpanel" hidden>
           <p class="expense-note" data-testid="bill-expense-note"></p>
-          <p class="expense-hint">
-            Switch back to <strong>Items</strong> and pick Chart-of-Accounts-mapped items for expense lines.
-            Vendor tax/freight usually belong on <strong>Taxes and Charges</strong> below (not as Items).
-            There is no separate GL expense grid on this Bill form.
-          </p>
         </div>
-        <div class="taxes-block" data-testid="bill-taxes-block">
+        <div class="taxes-block" id="bill-taxes-block" data-testid="bill-taxes-block">
           <span class="taxes-title">Taxes and Charges</span>
           <table class="taxes-table">
             <thead>
@@ -429,7 +489,6 @@
       formatBillLineTotal,
       BILL_ITEM_COLS,
       BILL_ASSUMPTIONS,
-      BILL_EXPENSE_NOTE,
       isDraftBillDoc,
       saveActionsBlockedByChecksum,
     } from "../src/bill-map.js";
@@ -470,9 +529,22 @@
     import {
       shouldOpenCommitGate,
       normalizeCommitGateChoice,
-      commitGateContinues,
       commitGateAllowsAction,
+      commitGateChoiceEnabled,
     } from "../src/bill-toolbar.js";
+    import {
+      commitGateProgressLabel,
+      commitGateSuccessLabel,
+      listLocalSaveBlockers,
+      commitGateSaveWarning,
+      commitGateSaveEnabled,
+      reduceCommitGatePhase,
+      billExpensesTaxOrientation,
+      gateTriggerLabel,
+      nextAfterGate,
+      commitGateErpFailureView,
+    } from "../src/bill-action-flow.js";
+    import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
     import { isSelectableSourceItem } from "../src/source-modal.js";
 
     const api = window.erpBill;
@@ -482,7 +554,10 @@
     let painting = false;
     let userEdited = false;
     /** @type {"find"|"new"|"print"|null} */
-    let pendingGateAction = null;
+    let pendingGate = null; // GateTrigger | null — SSoT for the one commit-gate
+    /** @type {string[]} live ERP meta mandatory blockers from last preflight */
+    let metaBlockers = [];
+    let metaPreflightSeq = 0;
     /** @type {WeakMap<HTMLElement, true>} */
     const linkMounted = new WeakMap();
     /** Prevent stacking multiple source modals. */
@@ -513,7 +588,12 @@
       print: document.getElementById("btn-print"),
       dirtyPill: document.getElementById("dirty-pill"),
       commitGate: document.getElementById("commit-gate"),
+      commitGateBackdrop: document.getElementById("commit-gate-backdrop"),
       commitGateTitle: document.getElementById("commit-gate-title"),
+      commitGateValidation: document.getElementById("commit-gate-validation"),
+      commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
+      commitGateBlockers: document.getElementById("commit-gate-blockers"),
+      commitGateHint: document.getElementById("commit-gate-hint"),
       addLine: document.getElementById("btn-add-line"),
       clearQty: document.getElementById("btn-clear-qty"),
       attach: document.getElementById("btn-attach"),
@@ -535,7 +615,47 @@
 
     const assumptionsUl = document.getElementById("assumptions-list");
     assumptionsUl.innerHTML = BILL_ASSUMPTIONS.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
-    if (el.expenseNote) el.expenseNote.textContent = BILL_EXPENSE_NOTE;
+    if (el.expenseNote) {
+      const orient = billExpensesTaxOrientation();
+      el.expenseNote.replaceChildren();
+      const lead = document.createElement("span");
+      lead.textContent =
+        "This ERP is items-based — expense lines on Bills are added in two ways:";
+      const list = document.createElement("ol");
+      const li1 = document.createElement("li");
+      li1.append(
+        document.createTextNode(
+          "via an Item (Chart-of-Accounts-mapped items) added as a row to the items table that this is attached to (",
+        ),
+      );
+      const jumpItems = document.createElement("a");
+      jumpItems.href = "#";
+      jumpItems.dataset.testid = "bill-jump-items";
+      jumpItems.textContent = orient.itemsJumpLabel || "click here";
+      jumpItems.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        setLineTab("items");
+      });
+      li1.append(jumpItems, document.createTextNode(")."));
+      const li2 = document.createElement("li");
+      li2.append(document.createTextNode("via Vendor tax/freight in the "));
+      const jumpTaxes = document.createElement("a");
+      jumpTaxes.href = "#bill-taxes-block";
+      jumpTaxes.id = "jump-taxes";
+      jumpTaxes.dataset.testid = "bill-jump-taxes";
+      jumpTaxes.textContent = "Taxes and Charges section below";
+      jumpTaxes.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        setLineTab("items");
+        const block = document.getElementById("bill-taxes-block");
+        if (block && typeof block.scrollIntoView === "function") {
+          block.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+      li2.append(jumpTaxes, document.createTextNode(" (related accounting)."));
+      list.append(li1, li2);
+      el.expenseNote.append(lead, list);
+    }
 
     function setLineTab(which) {
       const expenses = which === "expenses";
@@ -568,15 +688,155 @@
     }
 
     function hideCommitGate() {
-      pendingGateAction = null;
+      pendingGate = null;
       if (el.commitGate) el.commitGate.hidden = true;
+      setGateBusy(false);
     }
 
-    function actionLabel(action) {
-      if (action === "find") return "Find Bill…";
-      if (action === "new") return "New Bill";
-      if (action === "print") return "Print";
-      return action || "continue";
+    function currentSaveBlockers() {
+      return mergeSaveBlockers(
+        listLocalSaveBlockers({
+          amountDue,
+          doc: lastDoc,
+          supplier: el.vendor && el.vendor.value,
+        }),
+        metaBlockers,
+      );
+    }
+
+    // One gate, opened by either a toolbar action or a navigation (SSoT).
+    function openGate(trigger) {
+      // Last click wins: releasing a superseded nav waiter so main can't leak it.
+      if (
+        pendingGate &&
+        pendingGate.kind === "nav" &&
+        pendingGate.navToken &&
+        !(trigger && trigger.kind === "nav" && trigger.navToken === pendingGate.navToken) &&
+        api &&
+        api.resolveNavGate
+      ) {
+        api.resolveNavGate(pendingGate.navToken, false);
+      }
+      pendingGate = trigger;
+      if (el.commitGateTitle) {
+        el.commitGateTitle.textContent = `Unsaved changes — before ${gateTriggerLabel(trigger)}`;
+      }
+      refreshCommitGateHint();
+      if (el.commitGate) el.commitGate.hidden = false;
+      // Bill is its own WebContentsView — focus it so Escape / backdrop clicks land here,
+      // not on chrome/history layers (same class as the vendor-picker focus bug).
+      if (api && api.focusBillSurface) api.focusBillSurface();
+      // Cancel is the safest initial keyboard choice; the modal traps focus below.
+      requestAnimationFrame(() => {
+        const cancel = el.commitGate && el.commitGate.querySelector("[data-gate='cancel']");
+        if (cancel) cancel.focus();
+      });
+      void refreshMetaPreflight();
+    }
+
+    function cancelCommitGateFromOutside() {
+      if (!el.commitGate || el.commitGate.hidden) return;
+      const cancel = el.commitGate.querySelector("[data-gate='cancel']");
+      if (cancel && !cancel.disabled) resolveCommitGate("cancel");
+    }
+
+    async function refreshMetaPreflight() {
+      if (!api || !api.listMandatory) return;
+      const seq = ++metaPreflightSeq;
+      try {
+        const res = await api.listMandatory();
+        if (seq !== metaPreflightSeq) return; // superseded
+        metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
+      } catch {
+        if (seq !== metaPreflightSeq) return;
+        metaBlockers = [];
+      }
+      if (pendingGate && el.commitGate && !el.commitGate.hidden) {
+        refreshCommitGateHint();
+      }
+    }
+
+    function gateIsNewBill() {
+      return !!(
+        lastDoc &&
+        (lastDoc.__islocal ||
+          !lastDoc.name ||
+          String(lastDoc.name).startsWith("new") ||
+          lastDoc.name === "new")
+      );
+    }
+
+    function setGateBusy(busy) {
+      if (!el.commitGate) return;
+      const action = pendingGate && pendingGate.kind === "toolbar" ? pendingGate.action : "";
+      const isNew = gateIsNewBill();
+      el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
+        const choice = btn.getAttribute("data-gate");
+        if (busy) {
+          btn.disabled = true;
+          return;
+        }
+        if (!commitGateChoiceEnabled(action, choice, { isNew })) {
+          btn.disabled = true;
+          if (choice === "discard" && action === "print" && isNew) {
+            btn.title =
+              "Discarding a new Bill leaves nothing to print — Save draft or Cancel.";
+          }
+          return;
+        }
+        btn.title = "";
+        if (choice === "save" || choice === "submit") {
+          btn.disabled = !commitGateSaveEnabled(currentSaveBlockers());
+        } else {
+          btn.disabled = false;
+        }
+      });
+    }
+
+    function paintCommitGateValidation(opts = {}) {
+      if (!el.commitGateHint) return;
+      const blockers = Array.isArray(opts.blockers) ? opts.blockers.filter(Boolean) : [];
+      const blocked = opts.blocked != null ? !!opts.blocked : blockers.length > 0;
+      if (el.commitGateValidation) {
+        el.commitGateValidation.className =
+          "commit-gate-validation " + (blocked ? "blocked" : "ready");
+      }
+      if (el.commitGateValidationTitle) {
+        el.commitGateValidationTitle.textContent =
+          opts.title ||
+          (blocked ? "Save is blocked by:" : "Doc Bill + live ERP meta preflight passed");
+      }
+      if (el.commitGateBlockers) {
+        el.commitGateBlockers.replaceChildren(
+          ...blockers.map((blocker) => {
+            const item = document.createElement("li");
+            item.textContent = blocker;
+            return item;
+          }),
+        );
+        el.commitGateBlockers.hidden = blockers.length === 0;
+      }
+      el.commitGateHint.textContent =
+        opts.hint ||
+        (blocked
+          ? "Choose Cancel to return to the Bill and fix these fields."
+          : commitGateSaveWarning(blockers));
+      el.commitGateHint.className = "hint" + (blocked ? " warn" : "");
+    }
+
+    function refreshCommitGateHint() {
+      const blockers = currentSaveBlockers();
+      paintCommitGateValidation({
+        blockers,
+        blocked: blockers.length > 0,
+        title: blockers.length
+          ? "Save is blocked by:"
+          : "Doc Bill + live ERP meta preflight passed",
+        hint: blockers.length
+          ? "Choose Cancel to return to the Bill and fix these fields."
+          : commitGateSaveWarning(blockers),
+      });
+      setGateBusy(false);
     }
 
     async function runPendingAction(action) {
@@ -585,6 +845,7 @@
         setStatus("Opening Bill list…");
         const res = await api.findBills();
         if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
+        else setStatus("Bill list opened.");
         return;
       }
       if (action === "new") {
@@ -609,58 +870,93 @@
         await runPendingAction(action);
         return;
       }
-      pendingGateAction = action;
-      if (el.commitGateTitle) {
-        el.commitGateTitle.textContent = `Unsaved changes — before ${actionLabel(action)}`;
-      }
-      if (el.commitGate) el.commitGate.hidden = false;
+      openGate({ kind: "toolbar", action });
     }
 
     async function resolveCommitGate(choiceRaw) {
       const choice = normalizeCommitGateChoice(choiceRaw);
-      if (!choice || choice === "cancel") {
+      const trigger = pendingGate;
+      const navToken = trigger && trigger.kind === "nav" ? trigger.navToken : null;
+
+      // Cancel / unknown / nothing pending → stay; release any nav waiter in main.
+      if (!trigger || !choice || choice === "cancel") {
         hideCommitGate();
-        return;
-      }
-      const action = pendingGateAction;
-      if (!action) {
-        hideCommitGate();
-        return;
-      }
-      const isNew = !!(
-        lastDoc &&
-        (lastDoc.__islocal ||
-          !lastDoc.name ||
-          String(lastDoc.name).startsWith("new") ||
-          lastDoc.name === "new")
-      );
-      const allow = commitGateAllowsAction(action, choice, { isNew });
-      if (!allow.ok) {
-        setStatus(allow.reason || "Cannot continue.", "warn");
-        return;
-      }
-      if (!commitGateContinues(choice)) {
-        hideCommitGate();
+        if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
         return;
       }
 
+      // Toolbar-only guard: e.g. Print on a brand-new (unsaved) Bill after discard.
+      if (trigger.kind === "toolbar") {
+        const isNew = gateIsNewBill();
+        const allow = commitGateAllowsAction(trigger.action, choice, { isNew });
+        if (!allow.ok) {
+          setStatus(allow.reason || "Cannot continue.", "warn");
+          return;
+        }
+      }
+
+      const plan = nextAfterGate(trigger, choice);
+      if (plan.then === "close") {
+        hideCommitGate();
+        if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
+        return;
+      }
+
+      // Perform the chosen side effect. On failure, KEEP the gate open (no hang, no orphan).
       if (choice === "discard") {
+        setGateBusy(true);
         setStatus("Discarding unsaved changes…");
         const res = await api.revertUnsaved();
         if (!(res && res.ok)) {
           setStatus((res && res.reason) || "Discard failed.", "err");
+          setGateBusy(false);
           return;
         }
         userEdited = false;
         paint(res.doc, res.amountDue != null ? res.amountDue : "");
         paintDirtyPill();
       } else if (choice === "save" || choice === "submit") {
-        const ok = await doSave(choice === "submit");
-        if (!ok) return;
+        const blockers = currentSaveBlockers();
+        if (!commitGateSaveEnabled(blockers)) {
+          refreshCommitGateHint();
+          setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
+          return;
+        }
+        reduceCommitGatePhase("idle", { type: "start-save", choice });
+        setGateBusy(true);
+        const saveRes = await doSave(choice === "submit");
+        if (!(saveRes && saveRes.ok)) {
+          const reason = (saveRes && saveRes.reason) || "Save failed.";
+          reduceCommitGatePhase("saving", { type: "error", reason });
+          setGateBusy(false);
+          if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
+            metaBlockers = saveRes.blockers;
+            paintCommitGateValidation({
+              blockers: mergeSaveBlockers(
+                listLocalSaveBlockers({
+                  amountDue,
+                  doc: lastDoc,
+                  supplier: el.vendor && el.vendor.value,
+                }),
+                saveRes.blockers,
+              ),
+              blocked: true,
+              title: "Save is blocked by:",
+              hint: "Choose Cancel to return to the Bill and fix these fields.",
+            });
+          } else {
+            paintCommitGateValidation(commitGateErpFailureView(reason));
+          }
+          return;
+        }
       }
 
       hideCommitGate();
-      await runPendingAction(action);
+      if (plan.then === "proceed-nav") {
+        if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, true);
+      } else {
+        await runPendingAction(trigger.action);
+      }
     }
 
     function escapeHtml(v) {
@@ -1543,22 +1839,42 @@
     }
 
     async function doSave(submit) {
-      if (!api) return false;
-      if (!amountDueMatchesGrandTotal(amountDue, billCompareTotal(lastDoc))) {
-        setStatus("Fix Amount Due checksum before save (must match Grand total).", "err");
-        return false;
+      if (!api) return { ok: false, reason: "Bill API unavailable." };
+      // Refresh live meta right before save so the gate isn't stale.
+      if (api.listMandatory) {
+        try {
+          const res = await api.listMandatory();
+          metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
+        } catch {
+          /* keep prior metaBlockers */
+        }
       }
-      setStatus(submit ? "Saving & submitting…" : "Saving…");
+      const blockers = currentSaveBlockers();
+      if (!commitGateSaveEnabled(blockers)) {
+        setStatus(blockers[0] || "Fix Amount Due checksum before save.", "err");
+        return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
+      }
+      const choice = submit ? "submit" : "save";
+      setStatus(commitGateProgressLabel(choice));
       const r = await api.save({ submit: !!submit });
       if (r && r.ok) {
         userEdited = false;
+        metaBlockers = [];
         paint(r.doc, amountDue);
         paintDirtyPill();
-        setStatus(submit ? "Submitted." : "Saved draft.");
-        return true;
+        setStatus(commitGateSuccessLabel(choice));
+        return { ok: true };
       }
-      setStatus((r && r.reason) || "Save failed — check Vanilla validations.", "err");
-      return false;
+      if (r && Array.isArray(r.blockers) && r.blockers.length) {
+        metaBlockers = r.blockers;
+      }
+      const reason = (r && r.reason) || "Save failed — check Vanilla validations.";
+      setStatus(reason, "err");
+      return {
+        ok: false,
+        reason,
+        blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
+      };
     }
 
     el.vendor.addEventListener("change", () => onHeaderBlur(el.vendor));
@@ -1617,6 +1933,43 @@
     if (el.commitGate) {
       el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
         btn.addEventListener("click", () => resolveCommitGate(btn.getAttribute("data-gate")));
+      });
+      // Explicit backdrop layer (not flex empty-space hit testing) — Cancel on outside click.
+      const onBackdrop = (ev) => {
+        ev.preventDefault();
+        cancelCommitGateFromOutside();
+      };
+      if (el.commitGateBackdrop) {
+        el.commitGateBackdrop.addEventListener("mousedown", onBackdrop);
+        el.commitGateBackdrop.addEventListener("click", onBackdrop);
+      } else {
+        // Fallback: any click not inside the dialog card.
+        el.commitGate.addEventListener("mousedown", (ev) => {
+          if (ev.target.closest(".commit-gate-dialog")) return;
+          onBackdrop(ev);
+        });
+      }
+      el.commitGate.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          cancelCommitGateFromOutside();
+          return;
+        }
+        if (ev.key !== "Tab") return;
+        const choices = [...el.commitGate.querySelectorAll("[data-gate]:not(:disabled)")];
+        if (!choices.length) {
+          ev.preventDefault();
+          return;
+        }
+        const first = choices[0];
+        const last = choices[choices.length - 1];
+        if (ev.shiftKey && document.activeElement === first) {
+          ev.preventDefault();
+          last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+          ev.preventDefault();
+          first.focus();
+        }
       });
     }
     if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
@@ -1745,6 +2098,26 @@
           userEdited: snap && snap.userEdited,
         }),
       );
+    }
+
+    // Navigation (Home / Vanilla / Recent) routes through this SAME in-page gate.
+    if (api && api.onOpenNavGate) {
+      api.onOpenNavGate((payload) => {
+        const token = payload && payload.token;
+        if (!token) return;
+        if (!shouldOpenCommitGate(userEdited)) {
+          if (api.resolveNavGate) api.resolveNavGate(token, true);
+          return;
+        }
+        openGate({ kind: "nav", navToken: token, label: payload.label });
+      });
+    }
+    if (api && api.onCancelNavGate) {
+      api.onCancelNavGate((token) => {
+        if (pendingGate && pendingGate.kind === "nav" && pendingGate.navToken === token) {
+          hideCommitGate();
+        }
+      });
     }
     ensureHeaderLinkPickers();
     refresh();

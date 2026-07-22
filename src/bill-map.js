@@ -59,9 +59,11 @@ export const BILL_ASSUMPTIONS = [
   "This ERP is items-based — enter expenses as Chart-of-Accounts-mapped items, not direct GL lines here. Vendor tax/freight also use the Taxes and Charges table (not Item rows).",
 ];
 
-/** Museum Expenses-tab disclaimer (SPECS tabNotes / EXPENSE_NOTE). */
+/** Museum Expenses-tab disclaimer — dogfood wording 2026-07-21 (OI-059). */
 export const BILL_EXPENSE_NOTE =
-  "This ERP is an items-based ERP — enter expenses as Chart-of-Accounts-mapped items, not as direct GL lines here.";
+  "This ERP is items-based — expense lines on Bills are added in two ways:\n" +
+  "1) via an Item (Chart-of-Accounts-mapped items) added as a row to the items table that this is attached to.\n" +
+  "2) via Vendor tax/freight in the Taxes and Charges section below (related accounting).";
 
 /**
  * Museum SPECS assumptions (bind.js) — longer wording; alpha list is the short form shown in Doc Bill.

@@ -116,14 +116,16 @@ flowchart TB
 
 | Step | What | Gaps / OI |
 |------|------|-----------|
-| T3a | Toolbar: Find Bills, New, Print, Attach | **Done** (dirty commit gate); Attach partial (memo) |
-| T3b | Revert unsaved | museum revert |
-| T3c | Recalculate + Expenses tab disclaimer | museum tabNotes |
-| T3d | Amount Due USD format on blur | museum `fmtUsd` |
-| T3e | Optional Σ reconciliation banner (chip already exists) | OI-002 polish |
+| T3a | Toolbar: Find Bills, New, Print, Attach | **Hardened** Find waits for list; Print matches form; Attach partial |
+| T3b | Revert unsaved | **Done** |
+| T3c | Recalculate + Expenses tab disclaimer | Expenses→Taxes orientation done; Recalculate still out |
+| T3d | Amount Due USD format on blur | **Done** (money model) |
+| T3e | Optional Σ reconciliation banner (chip already exists) | OI-002 polish — optional |
 
 **Exit:** Toolbar covers Find / New / Print / Attach / Revert; Expenses note visible.  
-**Out:** Pay Bill, Create Copy, nav tabs Bill Credit / IR (can follow in T4).
+**Hardening (2026-07-20→21):** OI-057 save-gate settle + live meta preflight; OI-056 Find list;
+OI-058 Print → Vanilla print preview (visible + Recent); OI-059 Expenses copy; unified dirty gate
+(modal for toolbar + Home); Find Bills vs Bill history slots. **Dogfood passed 2026-07-21.**
 
 ---
 
@@ -192,7 +194,9 @@ Do **not** flesh full how until the packet starts. Parking lot:
 | Batch | Status |
 |-------|--------|
 | T1 Link / search bridge | **Done** — Vendor/Terms/Item/Project ▾ pickers via `search_link` |
-| T2 Source modal | **Next** |
+| T2 Source modal | **Done** — Select PO / after-vendor; drafts greyed |
+| T3 Doc chrome | **Done** — dogfood OI-056–059 + gate/print/history harden (2026-07-21); next T4 |
+| T4 PO + IR clones | **Next** |
 
 ---
 

@@ -78,9 +78,25 @@ export function commitGateContinues(choice) {
  */
 export function commitGateAllowsAction(action, choice, ctx = {}) {
   if (action === "print" && choice === "discard" && ctx.isNew) {
-    return { ok: false, reason: "Save the Bill before printing." };
+    return {
+      ok: false,
+      reason:
+        "Discarding a new Bill leaves nothing to print — Save draft (or Cancel), then Print.",
+    };
   }
   return { ok: true };
+}
+
+/**
+ * Whether a gate choice button should be clickable for this pending action.
+ * Print + brand-new Bill: Discard is nonsensical (would print a blank).
+ * @param {"find"|"new"|"print"|string} action
+ * @param {"discard"|"save"|"submit"|"cancel"|string} choice
+ * @param {{ isNew?: boolean }} [ctx]
+ */
+export function commitGateChoiceEnabled(action, choice, ctx = {}) {
+  if (action === "print" && choice === "discard" && ctx.isNew) return false;
+  return true;
 }
 
 /**

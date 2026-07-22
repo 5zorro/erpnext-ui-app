@@ -261,6 +261,7 @@ describe("BILL_ASSUMPTIONS museum topic parity", () => {
       assert.ok(covered.includes(topic), `missing topic ${topic}`);
     }
     assert.match(BILL_EXPENSE_NOTE, /items-based/i);
+    assert.match(BILL_EXPENSE_NOTE, /Taxes and Charges/i);
   });
 });
 

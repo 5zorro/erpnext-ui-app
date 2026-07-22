@@ -2,7 +2,8 @@
 
 ## Status
 
-**Fixed** (2026-07-18) — see debrief at end.
+**Fixed** (2026-07-18) — false-trip fix, debrief at end.
+**Strike 2 — Fixed** (2026-07-20) — two divergent gate UIs / stuck gate; SSoT merge, see "Strike 2" below.
 
 ## Contexts where found
 
@@ -59,3 +60,67 @@ Vanilla ERP cur_frm
 **Fix:** Product contract for Doc Bill leave = **only** `userEdited`. Setters and the Bill UI refuse to mark dirty unless the normalized value changed.
 
 **Validation:** `npm test` (dirty-gate + existing suite). Re-dogfood: Bill → tab fields → Home (no prompt); type Amount Due → Home (prompt).
+
+---
+
+## Strike 2 — Two dirty gates, one gets stuck (2026-07-20)
+
+Recurrence of the dirty-gate **class** (per house rule: recurrence → update the bounty).
+This time the defect is **presentation SSoT**, not false-tripping.
+
+### Contexts where found
+
+1. **erpnext-ui-app Doc Bill (dogfood, 2026-07-20)** — testing "Dirty + invalid Save draft, then continue" on the **New Bill** toolbar action, then navigating **Home and back**, left a **permanent commit-gate section** painted on the page that eventually **timed out** (the 45 s save race).
+
+### Behavior observed
+
+- **Two different dirty-gate UIs** existed for the same concept:
+  - Native `dialog.showMessageBox` (`main.js` `gateDirtyThen`) for **navigation** (Home / Vanilla / Recent / tiles) — choices: Save · Discard · Stay.
+  - In-page `<div class="commit-gate">` (`bill.html`) for **toolbar** Find / New / Print — choices: Discard · Save · **Save+submit** + per-action rules + validation hints.
+- The in-page gate was never hidden on repaint/refocus. Because `bill.html` is a persistent `WebContentsView` (not reloaded on Home→back), a gate left open **stayed open**; during an in-flight save its buttons stayed disabled until the timeout. Navigating via the **native** path meanwhile cleared `dirtyState` and moved on, orphaning the in-page div.
+
+### Behavior expected
+
+| User action | Gate |
+|---|---|
+| Any dirty leave (toolbar action OR navigation) | **One** gate UI, same choices, same labels |
+| Save fails inside the gate | Gate stays open to retry/cancel — never a stuck, buttonless panel |
+| Navigate away then back | No orphaned/duplicate gate; no second (native) dialog for the same dirty state |
+
+Industry pattern: **one owner** of "is there a pending gate, what are the choices, and what runs after." Presentation is a single component; multiple entry points feed it, they do not each own a dialog.
+
+### Unified project architecture (after fix)
+
+```
+Trigger (SSoT: GateTrigger { kind:"toolbar"|"nav", action|navToken, label })
+  ├─ toolbar Find/New/Print  → requestToolbarAction → openGate(trigger)
+  └─ navigation Home/Vanilla → main.gateDirtyThen → IPC bill-open-nav-gate → openGate(trigger)
+                                                     (native dialog = fallback only if renderer gone)
+
+ONE in-page commit-gate (bill.html)
+  → resolveCommitGate(choice)
+      → bill-action-flow.nextAfterGate(trigger, choice)  // SSoT decision table
+           then: "close"        → stay (nav: resolveNavGate(false))
+           then: "run-action"   → runPendingAction(action)         // toolbar
+           then: "proceed-nav"  → resolveNavGate(token, true)      // main does the nav
+  → on save/discard failure: KEEP gate open, re-enable buttons (no stuck panel)
+
+main single-slot activeNavGate { token, settle } — last nav click wins, supersede cancels prior
+```
+
+### Ways forward (checklist)
+
+- [x] Pure SSoT helpers `gateTriggerLabel` / `nextAfterGate` (`bill-action-flow.js`) + unit tests.
+- [x] `bill.html`: one `pendingGate` model for toolbar **and** nav; `openGate()`; kind-aware `resolveCommitGate`.
+- [x] Navigation routes through the in-page gate via IPC (`bill-open-nav-gate` / `bill-resolve-nav-gate` / `bill-cancel-nav-gate`).
+- [x] Native `showMessageBox` demoted to `nativeGateFallback` — only when the Bill renderer is destroyed.
+- [x] Failure paths re-enable buttons and keep the gate usable (no stuck/timeout panel).
+- [ ] Optional later: gate a window-close/quit path through the same fallback (currently close is ungated).
+
+### Debrief (Strike 2)
+
+**Root cause:** the in-page gate was added for toolbar actions after the native nav dialog already existed, giving the same concept **two UIs** with divergent choices and **two reset paths**. Navigation bypassing the in-page gate left it orphaned and (mid-save) stuck.
+
+**Fix:** one commit-gate component driven by a shared trigger model; both toolbar actions and navigation open it; a pure `nextAfterGate` table decides "run action" vs "proceed nav" vs "stay". The native dialog remains only as a renderer-gone fallback.
+
+**Validation:** `npm test` (new `nextAfterGate` / `gateTriggerLabel` cases + existing suite). Re-dogfood matrix: Dirty→Discard→New; Dirty→invalid Save (warn, stay, no hang); Dirty→valid Save→continue; Home while dirty (same gate, not native); Home→back (no orphan gate).
