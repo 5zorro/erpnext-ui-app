@@ -27,3 +27,7 @@ Thumbs.db
 *.har
 localhost.har
 .git-replace-5zorro.txt
+
+# Local print / PDF dogfood artifacts
+*.pdf
+output.pdf
