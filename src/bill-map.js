@@ -432,7 +432,9 @@ export function writableBillHeaderFields() {
  */
 export function isDraftBillDoc(doc) {
   if (!doc || typeof doc !== "object") return false;
-  return Number(doc.docstatus) === 0;
+  // New unsaved forms often omit docstatus; treat missing as draft (match PO/IR).
+  const ds = doc.docstatus;
+  return ds == null || ds === "" || Number(ds) === 0;
 }
 
 /**

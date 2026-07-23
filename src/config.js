@@ -4,6 +4,13 @@ export const HEALTH_PING_PATH = "/api/method/ping";
 export const HEALTH_PING_MS = 5000;
 export const TAB_BAR_HEIGHT = 46;
 
+export {
+  DEFAULT_FEEDBACK_FORM_URL,
+  resolveFeedbackFormUrl,
+  buildFeedbackUrl,
+  isPlaceholderFeedbackUrl,
+} from "./feedback-url.js";
+
 export function resolveErpBase(env = process.env) {
   const raw = (env && env.ERP_URL) || DEFAULT_ERP_BASE;
   return String(raw).replace(/\/+$/, "");

@@ -161,12 +161,12 @@ Do **not** flesh full how until the packet starts. Parking lot:
 | **D-DocChrome** | Museum toolbar leftovers (Delete, Copy, Closed, Recalc, Pay Bill, ribbons, nav tabs) | Museum `open_items.md` **OI-064** (private issues SSoT — not mirrored in this repo) |
 | **D-Home** | Chunks &lt; 12; report defaults; Vendor Center statement tile | OI-050, OI-051 |
 | **D-Bowtie** | AP bowtie PoC → Home tile only after proof | OI-041 (also indexed under OI-064 in museum inbox) |
-| **D-Shell** | DB diagnose panel; Feedback; nickel UI wire | OI-046, OI-048, OI-042 |
+| **D-Shell** | Nickel UI wire (won’t-do OI-042) | OI-046/048 **done** 2026-07-22 (diagnose + Feedback) |
 | **D-Assumptions** | Second Skin values on Doc; placement greyed | OI-012, OI-030–034 |
-| **D-Nav** | Multi-window / tabs / tint; session history by date | OI-040, OI-035 |
+| **D-Nav** | Multi-window / tabs / tint; session history by date | OI-040, OI-035 parked; OI-060/062 **done** 2026-07-22 |
 | **D-CleanCore** | 5-digit SO/PO series; shipping preferred address | OI-043, OI-037 |
 | **D-EntryExtras** | Date fat-finger; calc insert; zero-qty hash; CC charges model | OI-044, OI-018, OI-026, OI-027 |
-| **D-Product** | Self-update | OI-047 |
+| **D-Product** | Self-update (real updater after packaging) | OI-047 stub only (version + ask IT) |
 | **D-E2E** | Layer-2 browser→ERP Bill/PO smoke with sandbox auth | OI-049 layer 2 |
 
 ---

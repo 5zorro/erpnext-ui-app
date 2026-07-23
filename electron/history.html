@@ -9,12 +9,14 @@
       padding: 10px 12px 6px; font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
       color: #6b8299; border-bottom: 1px solid #2c3e50;
     }
+    .head-drafts { margin-top: 8px; }
     ul { list-style: none; margin: 0; padding: 6px; }
     li button {
       width: 100%; text-align: left; border: none; background: transparent; color: #cbd5e1;
       padding: 8px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
     }
     li button:hover { background: #2c3e50; color: #fff; }
+    li button.draft-label { font-size: 11px; line-height: 1.35; white-space: normal; }
     .empty { padding: 14px 12px; font-size: 12px; color: #6b8299; line-height: 1.4; }
     .older-toggle {
       display: block; width: calc(100% - 12px); margin: 4px 6px 0; text-align: left;
@@ -25,6 +27,7 @@
     .older-toggle[hidden] { display: none; }
     .older-panel { border-top: 1px solid #2c3e50; margin-top: 4px; }
     .older-panel[hidden] { display: none; }
+    #sec-drafts[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -35,25 +38,43 @@
   <div class="older-panel" id="older-panel" hidden>
     <ul id="list-older"></ul>
   </div>
+
+  <div id="sec-drafts" hidden>
+    <div class="head head-drafts">Drafts</div>
+    <ul id="list-drafts"></ul>
+    <button type="button" class="older-toggle" id="drafts-older-toggle" hidden aria-expanded="false">▼ Older drafts</button>
+    <div class="older-panel" id="drafts-older-panel" hidden>
+      <ul id="list-drafts-older"></ul>
+    </div>
+  </div>
+
   <script type="module">
     import { splitHistory } from "../src/history.js";
+    import { splitShelvedDrafts } from "../src/shelved-drafts.js";
 
     const listRecent = document.getElementById("list-recent");
     const listOlder = document.getElementById("list-older");
     const emptyEl = document.getElementById("empty");
     const olderToggle = document.getElementById("older-toggle");
     const olderPanel = document.getElementById("older-panel");
+    const secDrafts = document.getElementById("sec-drafts");
+    const listDrafts = document.getElementById("list-drafts");
+    const listDraftsOlder = document.getElementById("list-drafts-older");
+    const draftsOlderToggle = document.getElementById("drafts-older-toggle");
+    const draftsOlderPanel = document.getElementById("drafts-older-panel");
     const api = window.erpHist;
     let olderOpen = false;
+    let draftsOlderOpen = false;
 
-    function fillList(ul, rows) {
+    function fillList(ul, rows, opts = {}) {
       ul.innerHTML = "";
       rows.forEach((h) => {
         const li = document.createElement("li");
         const b = document.createElement("button");
         b.type = "button";
-        b.textContent = h.label || h.dt;
+        b.textContent = h.label || h.dt || h.name;
         b.title = h.route || "";
+        if (opts.draft) b.className = "draft-label";
         b.onclick = () => api && api.openErp(h.route);
         li.appendChild(b);
         ul.appendChild(li);
@@ -68,10 +89,24 @@
       olderToggle.textContent = open ? `▲ Older (${n})` : `▼ Older (${n})`;
     }
 
-    olderToggle.onclick = () => setOlderOpen(!olderOpen);
+    function setDraftsOlderOpen(open) {
+      draftsOlderOpen = open;
+      draftsOlderPanel.hidden = !open;
+      draftsOlderToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      const n = listDraftsOlder.querySelectorAll("li").length;
+      draftsOlderToggle.textContent = open ? `▲ Older drafts (${n})` : `▼ Older drafts (${n})`;
+    }
 
-    function render(items) {
-      const rows = Array.isArray(items) ? items : [];
+    olderToggle.onclick = () => setOlderOpen(!olderOpen);
+    draftsOlderToggle.onclick = () => setDraftsOlderOpen(!draftsOlderOpen);
+
+    function render(payload) {
+      const rows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload && payload.items)
+          ? payload.items
+          : [];
+      const shelved = Array.isArray(payload) ? [] : (payload && payload.shelved) || [];
       const { recent, older } = splitHistory(rows);
 
       if (!rows.length) {
@@ -79,26 +114,41 @@
         listRecent.hidden = true;
         olderToggle.hidden = true;
         olderPanel.hidden = true;
-        return;
+      } else {
+        emptyEl.hidden = true;
+        listRecent.hidden = false;
+        fillList(listRecent, recent);
+        if (older.length) {
+          fillList(listOlder, older);
+          olderToggle.hidden = false;
+          setOlderOpen(olderOpen);
+        } else {
+          olderToggle.hidden = true;
+          olderPanel.hidden = true;
+          olderOpen = false;
+        }
       }
 
-      emptyEl.hidden = true;
-      listRecent.hidden = false;
-      fillList(listRecent, recent);
-
-      if (older.length) {
-        fillList(listOlder, older);
-        olderToggle.hidden = false;
-        setOlderOpen(olderOpen);
+      if (!shelved.length) {
+        secDrafts.hidden = true;
+        return;
+      }
+      secDrafts.hidden = false;
+      const { visible, older: draftOlder } = splitShelvedDrafts(shelved);
+      fillList(listDrafts, visible, { draft: true });
+      if (draftOlder.length) {
+        fillList(listDraftsOlder, draftOlder, { draft: true });
+        draftsOlderToggle.hidden = false;
+        setDraftsOlderOpen(draftsOlderOpen);
       } else {
-        olderToggle.hidden = true;
-        olderPanel.hidden = true;
-        olderOpen = false;
+        draftsOlderToggle.hidden = true;
+        draftsOlderPanel.hidden = true;
+        draftsOlderOpen = false;
       }
     }
 
     if (api) api.onHistory(render);
-    render([]);
+    render({ items: [], shelved: [] });
   </script>
 </body>
 </html>
