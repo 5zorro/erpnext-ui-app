@@ -1,7 +1,7 @@
 /**
  * Electron main — M0–M2 shell + Doc Bill / PO / Item Receipt WebContentsViews (T4).
  */
-import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } from "electron";
+import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, clipboard } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,13 +9,27 @@ import { pingHealth } from "../src/health.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
-import { hasDocSkin, resolveDocSkinTarget } from "../src/lens-context.js";
+import { hasDocSkin, resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
 import { routeInfo, routesReferToSameDoc, isNewDocRecord } from "../src/route-info.js";
 import {
   rememberLens,
-  preferredLens,
   resolveEntryOpen,
+  shouldOpenDocLens,
 } from "../src/lens-prefs.js";
+import {
+  applySaveToShelved,
+} from "../src/shelved-drafts.js";
+import {
+  classifyHostClass,
+  formatDiagnoseLines,
+  diagnoseCopyText,
+  appendPingLog,
+} from "../src/diagnose.js";
+import {
+  resolveFeedbackFormUrl,
+  buildFeedbackUrl,
+  isPlaceholderFeedbackUrl,
+} from "../src/feedback-url.js";
 import {
   shouldGateNavigation,
   finishLensApply,
@@ -60,6 +74,11 @@ import {
   HEALTH_PING_MS,
   TAB_BAR_HEIGHT,
 } from "../src/config.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const PKG = require("../package.json");
+const APP_VERSION = PKG.version || "0.0.0";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ERP_BASE = resolveErpBase(process.env);
@@ -96,6 +115,20 @@ let lastHealth = "unknown";
 let history = [];
 /** @type {Record<string, string>} */
 let lensPrefs = {};
+/** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
+let shelvedDrafts = [];
+/** Avoid re-entrancy when Vanilla→Doc hijack loads the same URL under Doc skin. */
+let lensHijackLock = false;
+/** @type {{ status: string, code: number|null, latencyMs: number|null, lastOkAt: string|null, internetOk: boolean|null }} */
+let diagnoseState = {
+  status: "unknown",
+  code: null,
+  latencyMs: null,
+  lastOkAt: null,
+  internetOk: null,
+};
+/** @type {object[]} */
+let pingLog = [];
 /** Scratch Amount Due for Doc Bill (not an ERP field). */
 let amountDueScratch = "";
 /** Last committed Amount Due for dirty compares (focus/typing must not poison). */
@@ -130,11 +163,20 @@ function activeFormView() {
 function prefsPath() {
   return path.join(app.getPath("userData"), "lens-prefs.json");
 }
+function navStatePath() {
+  return path.join(app.getPath("userData"), "nav-state.json");
+}
 function loadPrefs() {
   try {
     lensPrefs = JSON.parse(fs.readFileSync(prefsPath(), "utf8")) || {};
   } catch {
     lensPrefs = {};
+  }
+  try {
+    const nav = JSON.parse(fs.readFileSync(navStatePath(), "utf8")) || {};
+    shelvedDrafts = Array.isArray(nav.shelved) ? nav.shelved : [];
+  } catch {
+    shelvedDrafts = [];
   }
 }
 function savePrefs() {
@@ -143,6 +185,22 @@ function savePrefs() {
   } catch {
     /* ignore */
   }
+}
+function saveNavState() {
+  try {
+    fs.writeFileSync(
+      navStatePath(),
+      JSON.stringify({ shelved: shelvedDrafts }, null, 0),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function noteShelvedFromSave(doctypeKey, doc) {
+  shelvedDrafts = applySaveToShelved(shelvedDrafts, doctypeKey, doc);
+  saveNavState();
+  sendHistory();
 }
 
 function showingHome() {
@@ -162,6 +220,8 @@ function syncE2eApi() {
     getErpUrl: () =>
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
     getHistory: () => history.map((h) => ({ ...h })),
+    getShelved: () => shelvedDrafts.map((d) => ({ ...d })),
+    appVersion: APP_VERSION,
     isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
     trackNav: (url) => {
       trackNav(url);
@@ -253,13 +313,17 @@ function sendUiState() {
       lens: onDoc ? "doc" : "vanilla",
       docSkinAvailable: hasDocSkin(ctx),
       route: ctx.route,
+      diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
     });
   }
 }
 
 function sendHistory() {
   if (hist && !hist.webContents.isDestroyed()) {
-    hist.webContents.send("history", history);
+    hist.webContents.send("history", {
+      items: history,
+      shelved: shelvedDrafts,
+    });
   }
 }
 
@@ -278,8 +342,65 @@ function pushDocFormSnapshot(snap) {
   }
 }
 
+/**
+ * Open a form route on preferred lens (Home / Recent / Drafts / hijack).
+ * @param {string} route
+ * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean }} [opts]
+ */
+function openRoutePreferred(route, opts = {}) {
+  const r = typeof route === "string" && route ? route : "/desk";
+  const info = routeInfo(r, ERP_BASE);
+  const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
+  if (
+    profile &&
+    shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })
+  ) {
+    if (profile.id === "bill") {
+      showBill(info.path || r, opts);
+      return;
+    }
+    if (profile.id === "po" || profile.id === "receipt") {
+      showDocForm(profile.id, info.path || r, opts);
+      return;
+    }
+  }
+  showErp(r, { forceLoad: opts.forceLoad !== false, skipDirtyGate: opts.skipDirtyGate });
+}
+
+/**
+ * Vanilla Desk in-page nav → Doc when prefs say doc (Wes: yes).
+ * @param {string} url
+ * @returns {boolean} true if hijacked
+ */
+function maybeHijackErpToDoc(url) {
+  if (lensHijackLock || surfaceMode !== "erp") return false;
+  if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return false;
+  const info = routeInfo(url, ERP_BASE);
+  const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
+  if (
+    !profile ||
+    !shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })
+  ) {
+    return false;
+  }
+  lensHijackLock = true;
+  try {
+    if (profile.id === "bill") showBill(info.path || url, { skipDirtyGate: true });
+    else if (profile.id === "po" || profile.id === "receipt") {
+      showDocForm(profile.id, info.path || url, { skipDirtyGate: true });
+    } else return false;
+  } finally {
+    // Release on next tick so showBill's erp loadURL navigations don't re-enter.
+    setImmediate(() => {
+      lensHijackLock = false;
+    });
+  }
+  return true;
+}
+
 function trackNav(url) {
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return;
+  if (maybeHijackErpToDoc(url)) return;
   const info = routeInfo(url, ERP_BASE);
   const next = info.path || currentRoute;
   const changed = next !== currentRoute;
@@ -505,6 +626,77 @@ function place() {
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
 }
 
+/** @type {BrowserWindow|null} */
+let diagnoseWin = null;
+
+function closeDiagnoseDropdown() {
+  if (diagnoseWin && !diagnoseWin.isDestroyed()) {
+    try {
+      diagnoseWin.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  diagnoseWin = null;
+  sendUiState();
+}
+
+function openDiagnoseDropdown() {
+  if (!win || win.isDestroyed()) return;
+  if (diagnoseWin && !diagnoseWin.isDestroyed()) {
+    diagnoseWin.focus();
+    return;
+  }
+  const snap = diagnoseSnapshot();
+  diagnoseWin = new BrowserWindow({
+    parent: win,
+    modal: false,
+    frame: false,
+    show: false,
+    width: 340,
+    height: 300,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+    backgroundColor: "#1a252f",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "diagnose-preload.cjs"),
+    },
+  });
+  const wb = win.getBounds();
+  const cb = win.getContentBounds();
+  const frameTop = Math.max(0, wb.height - cb.height);
+  // Dropdown under the DB light (top-right of content area).
+  const x = Math.round(wb.x + wb.width - 360);
+  const y = Math.round(wb.y + frameTop + TAB_BAR_HEIGHT - 4);
+  diagnoseWin.setPosition(Math.max(0, x), Math.max(0, y));
+  diagnoseWin.loadFile(path.join(__dirname, "diagnose-dropdown.html"));
+  diagnoseWin.once("ready-to-show", () => {
+    if (!diagnoseWin || diagnoseWin.isDestroyed()) return;
+    diagnoseWin.webContents.send("diagnose-data", snap);
+    diagnoseWin.show();
+    sendUiState();
+  });
+  diagnoseWin.on("blur", () => {
+    // Small delay so Copy/Close clicks inside the dropdown still register.
+    setTimeout(() => {
+      if (diagnoseWin && !diagnoseWin.isDestroyed() && !diagnoseWin.isFocused()) {
+        closeDiagnoseDropdown();
+      }
+    }, 150);
+  });
+  diagnoseWin.on("closed", () => {
+    diagnoseWin = null;
+    sendUiState();
+  });
+}
+
 // Single-slot pending navigation gate. The Bill renderer owns the ONE commit-gate UI;
 // main just asks it to open and waits for proceed/cancel. Last nav click wins.
 let navGateSeq = 0;
@@ -637,8 +829,8 @@ function showErp(route = "/desk", opts = {}) {
     surfaceMode = "erp";
     const info = routeInfo(route, ERP_BASE);
     currentRoute = info.path || route;
-    if (info.doctype === "purchase-invoice") {
-      lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
+    if (info.doctype && DOC_FORM_DOCTYPES.has(info.doctype) && info.record) {
+      lensPrefs = rememberLens(lensPrefs, info.doctype, "vanilla");
       savePrefs();
     }
     place();
@@ -666,27 +858,35 @@ async function showBill(route, opts = {}) {
         : "/app/purchase-invoice/new";
 
   // Already on this Bill — refocus only (Recent click must not reload / wipe edits).
+  // Do not reuse when memory holds a submitted/cancelled doc but the route is "new".
   if (surfaceMode === "bill" && routesReferToSameDoc(currentRoute, r, ERP_BASE)) {
-    place();
-    try {
-      if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
-      if (win && !win.isDestroyed()) win.focus();
-    } catch {
-      /* ignore */
+    const nextInfo = routeInfo(r, ERP_BASE);
+    const staleSubmittedOnNew =
+      isNewDocRecord(nextInfo.record) &&
+      dirtyState.doc &&
+      Number(dirtyState.doc.docstatus) > 0;
+    if (!staleSubmittedOnNew) {
+      place();
+      try {
+        if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
+        if (win && !win.isDestroyed()) win.focus();
+      } catch {
+        /* ignore */
+      }
+      sendUiState();
+      if (dirtyState.doc) {
+        pushBillSnapshot({
+          ok: true,
+          doc: dirtyState.doc,
+          amountDue: amountDueScratch,
+          userEdited: !!dirtyState.userEdited,
+          isNew: !!dirtyState.isNew,
+          focusVendor: false,
+        });
+      }
+      syncE2eApi();
+      return;
     }
-    sendUiState();
-    if (dirtyState.doc) {
-      pushBillSnapshot({
-        ok: true,
-        doc: dirtyState.doc,
-        amountDue: amountDueScratch,
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
-        focusVendor: false,
-      });
-    }
-    syncE2eApi();
-    return;
   }
 
   const proceed = async () => {
@@ -712,6 +912,16 @@ async function showBill(route, opts = {}) {
       /* ignore */
     }
     sendUiState();
+    // Clear stale submitted/draft memory before Vanilla load settles (new-* especially).
+    if (isNewDocRecord(routeInfo(currentRoute, ERP_BASE).record)) {
+      dirtyState = {
+        isDirty: false,
+        isNew: true,
+        userEdited: false,
+        baselineJson: null,
+        doc: null,
+      };
+    }
     pushBillSnapshot({
       ok: false,
       reason: "Loading Purchase Invoice in Vanilla…",
@@ -890,26 +1100,33 @@ async function showDocForm(skinId, route, opts = {}) {
     activeDocSkin === skinId &&
     routesReferToSameDoc(currentRoute, r, ERP_BASE)
   ) {
-    place();
-    try {
-      if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
-      if (win && !win.isDestroyed()) win.focus();
-    } catch {
-      /* ignore */
+    const nextInfo = routeInfo(r, ERP_BASE);
+    const staleSubmittedOnNew =
+      isNewDocRecord(nextInfo.record) &&
+      dirtyState.doc &&
+      Number(dirtyState.doc.docstatus) > 0;
+    if (!staleSubmittedOnNew) {
+      place();
+      try {
+        if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
+        if (win && !win.isDestroyed()) win.focus();
+      } catch {
+        /* ignore */
+      }
+      sendUiState();
+      if (dirtyState.doc) {
+        pushDocFormSnapshot({
+          ok: true,
+          doc: dirtyState.doc,
+          scratch: { dateExpected: dateExpectedScratch },
+          userEdited: !!dirtyState.userEdited,
+          isNew: !!dirtyState.isNew,
+          focusVendor: false,
+        });
+      }
+      syncE2eApi();
+      return;
     }
-    sendUiState();
-    if (dirtyState.doc) {
-      pushDocFormSnapshot({
-        ok: true,
-        doc: dirtyState.doc,
-        scratch: { dateExpected: dateExpectedScratch },
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
-        focusVendor: false,
-      });
-    }
-    syncE2eApi();
-    return;
   }
 
   const proceed = async () => {
@@ -1055,6 +1272,7 @@ async function saveBillFromErp(opts = {}) {
       baselineJson: captureBaseline(raw.doc),
     };
     amountDueCommitted = amountDueScratch;
+    noteShelvedFromSave("purchase-invoice", raw.doc);
   }
   return raw && typeof raw === "object" ? raw : { ok: false, reason: "Save failed." };
 }
@@ -1210,7 +1428,40 @@ async function tickHealth() {
     pingPath: HEALTH_PING_PATH,
     timeoutMs: 3000,
   });
+  const now = new Date();
+  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  if (result.status === "ok") diagnoseState.lastOkAt = clock;
+  diagnoseState = {
+    ...diagnoseState,
+    status: result.status,
+    code: result.code,
+    latencyMs: result.latencyMs,
+  };
+  pingLog = appendPingLog(pingLog, {
+    at: now.toISOString(),
+    status: result.status,
+    code: result.code,
+    latencyMs: result.latencyMs,
+  });
   sendHealth(result.status);
+}
+
+function diagnoseSnapshot() {
+  const lines = formatDiagnoseLines({
+    erpBase: ERP_BASE,
+    status: diagnoseState.status,
+    code: diagnoseState.code,
+    latencyMs: diagnoseState.latencyMs,
+    lastOkAt: diagnoseState.lastOkAt,
+    internetOk: diagnoseState.internetOk,
+  });
+  return {
+    lines,
+    copyText: diagnoseCopyText(lines),
+    hostClass: classifyHostClass(ERP_BASE),
+    version: APP_VERSION,
+    updateStub: "Shell updates: ask IT (packaged updater later).",
+  };
 }
 
 function createWindow() {
@@ -1291,6 +1542,7 @@ function createWindow() {
   place();
   win.on("resize", place);
   win.on("closed", () => {
+    closeDiagnoseDropdown();
     win = null;
     chrome = null;
     home = null;
@@ -1320,7 +1572,72 @@ function createWindow() {
 ipcMain.handle("get-config", () => ({
   erpBase: ERP_BASE,
   repo: "https://github.com/5zorro/erpnext-ui-app",
+  version: APP_VERSION,
+  feedbackFormUrl: resolveFeedbackFormUrl(process.env),
+  updateStub: "Shell updates: ask IT / see README (no auto-update until packaged).",
 }));
+
+ipcMain.handle("get-diagnose", () => diagnoseSnapshot());
+
+ipcMain.handle("copy-diagnose", () => {
+  const snap = diagnoseSnapshot();
+  clipboard.writeText(snap.copyText || "");
+  return { ok: true };
+});
+
+ipcMain.on("open-diagnose", () => openDiagnoseDropdown());
+ipcMain.on("diagnose-dropdown-close", () => closeDiagnoseDropdown());
+ipcMain.on("diagnose-dropdown-ready", (e) => {
+  if (diagnoseWin && !diagnoseWin.isDestroyed() && e.sender === diagnoseWin.webContents) {
+    e.sender.send("diagnose-data", diagnoseSnapshot());
+  }
+});
+
+ipcMain.handle("open-feedback", async () => {
+  try {
+    const base = resolveFeedbackFormUrl(process.env);
+    const url = buildFeedbackUrl(base, {
+      version: APP_VERSION,
+      hostClass: classifyHostClass(ERP_BASE),
+    });
+    if (!win || win.isDestroyed()) {
+      await shell.openExternal(url);
+      return { ok: true, placeholder: isPlaceholderFeedbackUrl(base), url };
+    }
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Open in browser", "Copy link", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+      title: "Feedback",
+      message: isPlaceholderFeedbackUrl(base)
+        ? "Feedback form (placeholder — set FEEDBACK_FORM_URL for your real form)"
+        : "Send feedback via Google Form?",
+      detail: url,
+    });
+    if (response === 0) {
+      await shell.openExternal(url);
+      return { ok: true, action: "open", placeholder: isPlaceholderFeedbackUrl(base), url };
+    }
+    if (response === 1) {
+      clipboard.writeText(url);
+      return { ok: true, action: "copy", placeholder: isPlaceholderFeedbackUrl(base), url };
+    }
+    return { ok: true, action: "cancel", url };
+  } catch (e) {
+    const reason = String(e && e.message ? e.message : e);
+    if (win && !win.isDestroyed()) {
+      await dialog.showMessageBox(win, {
+        type: "warning",
+        buttons: ["OK"],
+        title: "Could not open Feedback",
+        message: "Something went wrong opening the feedback form.",
+        detail: reason,
+      });
+    }
+    return { ok: false, reason };
+  }
+});
 
 ipcMain.handle("bill-get-snapshot", async () => snapshotBill());
 ipcMain.handle("bill-retry-load", async () => {
@@ -2104,6 +2421,8 @@ async function saveDocFormFromErp(opts = {}) {
       isDirty: false,
       baselineJson: captureBaseline(raw.doc),
     };
+    const profile = activeDocProfile();
+    if (profile) noteShelvedFromSave(profile.doctypeKey, raw.doc);
   }
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
@@ -2444,32 +2763,27 @@ ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());
 ipcMain.on("open-vanilla-skin", () => {
+  // From Home (or no form in focus): always Vanilla Desk — do not reuse last form URL.
+  // forceLoad required: erp WebContents often already has a prior page; without it
+  // showErp("/desk") would skip navigation and flash the last Vanilla form.
+  if (showingHome()) {
+    showErp("/desk", { forceLoad: true });
+    return;
+  }
   const info = routeInfo(currentRoute, ERP_BASE);
   if (info.doctype && info.record) {
     const profile = profileByDoctypeKey(info.doctype);
     if (profile) {
-      showErp(currentRoute, { forceLoad: true });
+      showErp(info.path || currentRoute, { forceLoad: true });
       return;
     }
   }
-  showErp("/desk", { forceLoad: false });
+  showErp("/desk", { forceLoad: true });
 });
 ipcMain.on("open-entry", (_e, doctypeKey) => openEntry(doctypeKey));
 ipcMain.on("open-erp", (_e, route) => {
   const r = typeof route === "string" && route ? route : "/desk";
-  const info = routeInfo(r, ERP_BASE);
-  if (info.doctype && info.record && preferredLens(info.doctype, lensPrefs) === "doc") {
-    const profile = profileByDoctypeKey(info.doctype);
-    if (profile?.id === "bill") {
-      showBill(r);
-      return;
-    }
-    if (profile?.id === "po" || profile?.id === "receipt") {
-      showDocForm(profile.id, r);
-      return;
-    }
-  }
-  showErp(r, { forceLoad: r !== "/desk" });
+  openRoutePreferred(r, { forceLoad: r !== "/desk" });
 });
 ipcMain.on("open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);

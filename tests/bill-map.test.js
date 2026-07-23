@@ -272,6 +272,11 @@ describe("isDraftBillDoc", () => {
     assert.equal(isDraftBillDoc({ docstatus: 1 }), false);
     assert.equal(isDraftBillDoc(null), false);
   });
+
+  it("treats missing docstatus as draft (new form)", () => {
+    assert.equal(isDraftBillDoc({ name: "new-purchase-invoice-1" }), true);
+    assert.equal(isDraftBillDoc({ name: "ACC-1", docstatus: null }), true);
+  });
 });
 
 describe("projectClearedQtyItems / packingSlipHashAfterClear", () => {

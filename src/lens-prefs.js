@@ -65,3 +65,19 @@ export function resolveEntryOpen(doctypeKey, prefs = {}, opts = {}) {
   if (lens === "doc") return { lens, surface: "doc-form", route };
   return { lens, surface: "erp-form", route };
 }
+
+/**
+ * Whether a Desk form route should open Doc skin given prefs.
+ * Lists (no record) stay Vanilla. Forms (incl. new-*) follow preferredLens.
+ * @param {string|null|undefined} doctype
+ * @param {string|null|undefined} record
+ * @param {Record<string, string>} [prefs]
+ * @param {{ hasDocSkin?: boolean }} [opts]
+ * @returns {boolean}
+ */
+export function shouldOpenDocLens(doctype, record, prefs = {}, opts = {}) {
+  const key = normalizeDoctypeKey(doctype);
+  if (!key || !record) return false;
+  if (opts.hasDocSkin === false) return false;
+  return preferredLens(key, prefs) === "doc";
+}
