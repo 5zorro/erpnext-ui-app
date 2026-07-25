@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Connection details</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%; background: #1a252f; color: #e2e8f0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1.45;
+      overflow: hidden;
+    }
+    .wrap { padding: 12px 14px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
+    h3 {
+      margin: 0 0 8px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: #9fb3c8;
+    }
+    pre {
+      margin: 0 0 10px; flex: 1; overflow: auto; white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cbd5e1;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      color: #fff; background: #34495e; border: none; padding: 7px 12px; font-size: 12px;
+      cursor: pointer; border-radius: 6px;
+    }
+    .btn:hover { background: #3d566e; }
+    .btn.ghost { background: transparent; color: #9fb3c8; }
+    .btn.ghost:hover { background: #243140; color: #fff; }
+    .hint { color: #6b8299; font-size: 11px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h3>Connection details</h3>
+    <pre id="body">Loading…</pre>
+    <div class="row">
+      <button type="button" class="btn" id="btn-copy">Copy all</button>
+      <button type="button" class="btn ghost" id="btn-close">Close</button>
+    </div>
+    <div class="hint" id="hint"></div>
+  </div>
+  <script>
+    const api = window.erpDiagnose;
+    const body = document.getElementById("body");
+    const hint = document.getElementById("hint");
+
+    function apply(snap) {
+      body.textContent = (snap && snap.copyText) || "No details yet.";
+      hint.textContent = (snap && snap.updateStub) || "";
+    }
+
+    document.getElementById("btn-copy").onclick = () => api && api.copy();
+    document.getElementById("btn-close").onclick = () => api && api.close();
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && api) api.close();
+    });
+
+    if (api) {
+      api.onData(apply);
+      api.ready();
+    }
+  </script>
+</body>
+</html>

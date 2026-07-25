@@ -115,6 +115,7 @@ export const BILL_LINK_DOCTYPES = {
   item_code: "Item",
   project: "Project",
   account_head: "Account",
+  sales_order: "Sales Order",
 };
 
 /**

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec "$repo_root/scripts/check-commit-attribution.sh" --message-file "$1"

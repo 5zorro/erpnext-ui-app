@@ -5,6 +5,7 @@ import {
   preferredLens,
   rememberLens,
   resolveEntryOpen,
+  shouldOpenDocLens,
   normalizeDoctypeKey,
 } from "../src/lens-prefs.js";
 
@@ -51,5 +52,20 @@ describe("resolveEntryOpen", () => {
     const t = resolveEntryOpen("purchase-invoice", { "purchase-invoice": "vanilla" });
     assert.equal(t.surface, "erp-form");
     assert.equal(t.lens, "vanilla");
+  });
+});
+
+describe("shouldOpenDocLens", () => {
+  it("requires a record and preferred doc", () => {
+    assert.equal(shouldOpenDocLens("purchase-invoice", "", {}), false);
+    assert.equal(shouldOpenDocLens("purchase-invoice", "new", {}), true);
+    assert.equal(
+      shouldOpenDocLens("purchase-order", "PO-1", { "purchase-order": "vanilla" }),
+      false,
+    );
+    assert.equal(
+      shouldOpenDocLens("purchase-order", "PO-1", { "purchase-order": "doc" }),
+      true,
+    );
   });
 });

@@ -45,9 +45,9 @@ flowchart TB
 | Area | State |
 |------|--------|
 | Scaffold + units + optional e2e smokes | **Done** |
-| Bill Doc view (`bill.html`) | **Done** — header, checksum, lines via `set_value`, add/delete, save & submit, assumptions list, lens prefs |
-| Bill vs museum | **Usable skeleton** — still missing Link autocomplete, Select PO / source modal, full toolbar, revert, Expenses tab note, USD blur format |
-| PO / Item Receipt Doc skins | **Not started** |
+| Bill Doc view (`bill.html`) | **Done** — T1–T3 dogfood passed 2026-07-21 |
+| Bill vs museum | Daily-driver usable; still missing Delete/Copy/Recalc/Pay Bill/nav tabs |
+| PO / Item Receipt Doc skins | **MVP done** — T4 dogfood 2026-07-21 (submit PO + IR); chrome gaps remain |
 | Home inventory (OI-050/051) | Direction locked; tiles not finalized |
 | Layer-2 browser→ERP e2e | **Not built** (sandbox `.env` pattern ready) |
 
@@ -116,14 +116,16 @@ flowchart TB
 
 | Step | What | Gaps / OI |
 |------|------|-----------|
-| T3a | Toolbar: Find Bills, New, Print, Attach | museum toolbar; OI-005 attach |
-| T3b | Revert unsaved | museum revert |
-| T3c | Recalculate + Expenses tab disclaimer | museum tabNotes |
-| T3d | Amount Due USD format on blur | museum `fmtUsd` |
-| T3e | Optional Σ reconciliation banner (chip already exists) | OI-002 polish |
+| T3a | Toolbar: Find Bills, New, Print, Attach | **Hardened** Find waits for list; Print matches form; Attach partial |
+| T3b | Revert unsaved | **Done** |
+| T3c | Recalculate + Expenses tab disclaimer | Expenses→Taxes orientation done; Recalculate still out |
+| T3d | Amount Due USD format on blur | **Done** (money model) |
+| T3e | Optional Σ reconciliation banner (chip already exists) | OI-002 polish — optional |
 
 **Exit:** Toolbar covers Find / New / Print / Attach / Revert; Expenses note visible.  
-**Out:** Pay Bill, Create Copy, nav tabs Bill Credit / IR (can follow in T4).
+**Hardening (2026-07-20→21):** OI-057 save-gate settle + live meta preflight; OI-056 Find list;
+OI-058 Print → Vanilla print preview (visible + Recent); OI-059 Expenses copy; unified dirty gate
+(modal for toolbar + Home); Find Bills vs Bill history slots. **Dogfood passed 2026-07-21.**
 
 ---
 
@@ -133,14 +135,20 @@ flowchart TB
 
 | Step | What | Tests |
 |------|------|-------|
-| T4a | `po-map.js` + `po.html` (or shared doc shell + layout key) | Units like bill-map |
-| T4b | `receipt-map.js` + IR Doc view | Units |
+| T4a | `po-map.js` + shared `doc-form.html` (layout key) | Units like bill-map |
+| T4b | `receipt-map.js` + IR via same Doc shell | Units |
 | T4c | `DOC_SKIN_INDEX` ready rows + lens prefs | Index matrix |
-| T4d | Reuse T1 pickers + T2 source modal where SPECS need them | Dogfood |
-| T4e | PO-only: Date Expected / ribbons later | OI-007 **defer** unless trivial |
+| T4d | Reuse T1 pickers + T2 source modal (IR Select PO) | Dogfood |
+| T4e | PO Date Expected stamps line `schedule_date` on save | Units + dogfood |
 
-**OI touch:** OI-006/010 totals (add if cheap with line pattern), OI-011 IR ref (investigate).  
-**Exit:** PO + IR open in Doc skin with read+edit+save; Bill still green.
+**OI touch:** OI-006/010 totals (Σ Qty / Σ Amount on both); OI-011 IR supplier invoice ref — **dropped from Doc IR** (dogfood: packing list/BOL only at receive; invoice # belongs on Bill).  
+**Exit:** PO + IR open in Doc skin with read+edit+save; Bill still green.  
+**Status (2026-07-21 evening):** **MVP dogfood passed** — PO submit (Date Expected → Required By stamp); IR submit (Select PO). Shared `doc-form` shell. Not a full gambit; chrome gaps remain (see museum gap list below plan / OIs).
+
+**Museum logic still parked (not blocking MVP):**
+- PO: Mark as Closed, Create Copy, Create Item Receipt toolbar / OI-007 ribbons
+- IR: Recalculate, Delete/Copy, nav tabs Bill↔IR
+- Both: museum footer Save & Close / Save & New variants
 
 ---
 
@@ -150,14 +158,15 @@ Do **not** flesh full how until the packet starts. Parking lot:
 
 | Packet | Contents | OI / notes |
 |--------|----------|------------|
+| **D-DocChrome** | Museum toolbar leftovers (Delete, Copy, Closed, Recalc, Pay Bill, ribbons, nav tabs) | Museum `open_items.md` **OI-064** (private issues SSoT — not mirrored in this repo) |
 | **D-Home** | Chunks &lt; 12; report defaults; Vendor Center statement tile | OI-050, OI-051 |
-| **D-Bowtie** | AP bowtie PoC → Home tile only after proof | OI-041 |
-| **D-Shell** | DB diagnose panel; Feedback; nickel UI wire | OI-046, OI-048, OI-042 |
+| **D-Bowtie** | AP bowtie PoC → Home tile only after proof | OI-041 (also indexed under OI-064 in museum inbox) |
+| **D-Shell** | Nickel UI wire (won’t-do OI-042) | OI-046/048 **done** 2026-07-22 (diagnose + Feedback) |
 | **D-Assumptions** | Second Skin values on Doc; placement greyed | OI-012, OI-030–034 |
-| **D-Nav** | Multi-window / tabs / tint; session history by date | OI-040, OI-035 |
+| **D-Nav** | Multi-window / tabs / tint; session history by date | OI-040, OI-035 parked; OI-060/062 **done** 2026-07-22 |
 | **D-CleanCore** | 5-digit SO/PO series; shipping preferred address | OI-043, OI-037 |
 | **D-EntryExtras** | Date fat-finger; calc insert; zero-qty hash; CC charges model | OI-044, OI-018, OI-026, OI-027 |
-| **D-Product** | Self-update | OI-047 |
+| **D-Product** | Self-update (real updater after packaging) | OI-047 stub only (version + ask IT) |
 | **D-E2E** | Layer-2 browser→ERP Bill/PO smoke with sandbox auth | OI-049 layer 2 |
 
 ---
@@ -192,7 +201,9 @@ Do **not** flesh full how until the packet starts. Parking lot:
 | Batch | Status |
 |-------|--------|
 | T1 Link / search bridge | **Done** — Vendor/Terms/Item/Project ▾ pickers via `search_link` |
-| T2 Source modal | **Next** |
+| T2 Source modal | **Done** — Select PO / after-vendor; drafts greyed |
+| T3 Doc chrome | **Done** — dogfood OI-056–059 + gate/print/history harden (2026-07-21); next T4 |
+| T4 PO + IR clones | **Next** |
 
 ---
 

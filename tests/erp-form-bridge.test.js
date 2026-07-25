@@ -1,11 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   formMatchesDoctype,
   stripHtmlPlain,
   rowNeedsItemEnrichment,
   pickItemAutofillFields,
   DOC_FORM_BRIDGE_VERSION,
+  isMandatoryValuePresent,
+  listMandatoryBlockersFromSnap,
+  mergeSaveBlockers,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {
@@ -54,6 +59,63 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 5);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 6);
+  });
+});
+
+describe("live meta mandatory preflight helpers", () => {
+  it("treats Check fields as always present", () => {
+    assert.equal(isMandatoryValuePresent(0, "Check"), true);
+    assert.equal(isMandatoryValuePresent("", "Data"), false);
+    assert.equal(isMandatoryValuePresent("Alpine", "Data"), true);
+    assert.equal(isMandatoryValuePresent([], "Table"), false);
+    assert.equal(isMandatoryValuePresent([{}], "Table"), true);
+  });
+
+  it("formats parent and child-table missing fields like Vanilla", () => {
+    const lines = listMandatoryBlockersFromSnap({
+      parent: [
+        { label: "Supplier", required: true, present: false },
+        { label: "Credit To", required: true, present: true },
+      ],
+      tables: [
+        {
+          label: "Items",
+          totalRows: 2,
+          missing: [{ label: "Item Name", rows: [1, 2] }],
+        },
+      ],
+    });
+    assert.ok(lines.some((l) => /Supplier is required/i.test(l)));
+    assert.ok(lines.some((l) => /Item Name is required in every row/i.test(l)));
+    assert.ok(!lines.some((l) => /Credit To/i.test(l)));
+  });
+
+  it("merges Doc-skin and meta blockers uniquely", () => {
+    assert.deepEqual(
+      mergeSaveBlockers(
+        ["Vendor (Supplier) is required.", "Amount Due must match Grand total (checksum)."],
+        ["Supplier is required.", "Items is required."],
+      ),
+      [
+        "Vendor (Supplier) is required.",
+        "Amount Due must match Grand total (checksum).",
+        "Supplier is required.",
+        "Items is required.",
+      ],
+    );
+  });
+});
+
+describe("erp-form-bridge-page save settle contract", () => {
+  it("exposes saveDoc and listMandatoryMissing on the bridge", () => {
+    const page = readFileSync(
+      fileURLToPath(new URL("../electron/erp-form-bridge-page.js", import.meta.url)),
+      "utf8",
+    );
+    assert.match(page, /listMandatoryMissing:\s*listMandatoryMissing/);
+    assert.match(page, /saveDoc:\s*saveDoc/);
+    assert.match(page, /var VERSION = 6/);
+    assert.match(page, /frappe\.desk\.form\.save\.savedocs/);
   });
 });

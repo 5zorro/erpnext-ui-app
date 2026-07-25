@@ -11,6 +11,8 @@
  * Examples when ready:
  *   desk / workflow home → Doc Workflow Home
  *   purchase-invoice form → Bill entry
+ *   purchase-order form → Purchase Order entry
+ *   purchase-receipt form → Item Receipt entry
  *   most other pages → none
  */
 
@@ -48,6 +50,20 @@ export const DOC_SKIN_INDEX = [
     label: "Bill entry",
     match: { doctypes: ["purchase-invoice"], needsRecord: true },
     layoutKey: "bill",
+    ready: true,
+  },
+  {
+    id: "po",
+    label: "Purchase Order entry",
+    match: { doctypes: ["purchase-order"], needsRecord: true },
+    layoutKey: "purchase-order",
+    ready: true,
+  },
+  {
+    id: "receipt",
+    label: "Item Receipt entry",
+    match: { doctypes: ["purchase-receipt"], needsRecord: true },
+    layoutKey: "item-receipt",
     ready: true,
   },
 ];
@@ -188,6 +204,30 @@ export function docSkinRouteMatrix() {
     {
       name: "Bill list",
       ctx: { showingHome: false, route: "/app/purchase-invoice" },
+      expectTab: false,
+      expectKind: null,
+    },
+    {
+      name: "PO form (ready)",
+      ctx: { showingHome: false, route: "/app/purchase-order/new" },
+      expectTab: true,
+      expectKind: "doc-form",
+    },
+    {
+      name: "PO list",
+      ctx: { showingHome: false, route: "/app/purchase-order" },
+      expectTab: false,
+      expectKind: null,
+    },
+    {
+      name: "Item Receipt form (ready)",
+      ctx: { showingHome: false, route: "/app/purchase-receipt/new" },
+      expectTab: true,
+      expectKind: "doc-form",
+    },
+    {
+      name: "Item Receipt list",
+      ctx: { showingHome: false, route: "/app/purchase-receipt" },
       expectTab: false,
       expectKind: null,
     },

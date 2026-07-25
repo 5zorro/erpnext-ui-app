@@ -5,18 +5,23 @@
   <style>
     html, body { margin: 0; height: 46px; overflow: hidden; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #2c3e50; }
     .bar { display: flex; align-items: center; height: 46px; padding: 0 8px; gap: 6px; }
-    .brand { color: #fff; font-weight: 700; font-size: 14px; padding-left: 6px; margin-right: 4px; }
-    .btn { color: #cbd5e1; background: transparent; border: none; padding: 7px 10px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+    .brand { color: #fff; font-weight: 700; font-size: 14px; padding-left: 6px; margin-right: 4px; flex-shrink: 0; }
+    .ver { color: #6b8299; font-size: 10px; margin-right: 4px; flex-shrink: 0; }
+    .btn { color: #cbd5e1; background: transparent; border: none; padding: 7px 10px; font-size: 13px; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
     .btn:hover { background: #34495e; color: #fff; }
-    .lbl { color: #6b8299; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-left: 4px; }
-    .seg { display: flex; background: #1f2d3d; border-radius: 8px; padding: 2px; }
+    .lbl { color: #6b8299; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-left: 4px; flex-shrink: 0; }
+    .seg { display: flex; background: #1f2d3d; border-radius: 8px; padding: 2px; flex-shrink: 0; }
     .seg .opt { color: #9fb3c8; background: transparent; border: none; padding: 6px 14px; font-size: 13px; cursor: pointer; border-radius: 6px; }
     .seg .opt.active { background: #f7fafc; color: #2c3e50; font-weight: 600; }
     .seg .opt:disabled { opacity: 0.4; cursor: not-allowed; }
     .seg .opt[hidden] { display: none; }
     .lbl[hidden] { display: none; }
-    .spacer { flex: 1; }
-    .health { display: flex; align-items: center; gap: 6px; color: #9fb3c8; font-size: 12px; padding: 0 8px; cursor: default; }
+    .spacer { flex: 1; min-width: 8px; }
+    .health {
+      display: flex; align-items: center; gap: 6px; color: #9fb3c8; font-size: 12px; padding: 0 8px;
+      cursor: pointer; border: none; background: transparent; border-radius: 6px; flex-shrink: 0;
+    }
+    .health:hover { background: #34495e; }
     .health .dot { width: 9px; height: 9px; border-radius: 50%; background: #7f8c8d; }
     .health.ok .dot { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
     .health.bad .dot { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
@@ -29,6 +34,7 @@
 <body>
   <div class="bar" role="navigation" aria-label="Shell toolbar">
     <span class="brand">Books</span>
+    <span class="ver" id="app-ver" title="Shell updates: ask IT"></span>
     <button type="button" class="btn" id="btn-home" data-testid="btn-home" title="Doc Workflow Home (tiles)">Home</button>
     <span class="lbl" id="lens-label">View this page as:</span>
     <div class="seg" role="tablist">
@@ -36,10 +42,11 @@
       <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc skin</button>
     </div>
     <span class="spacer"></span>
-    <span class="health" id="health" data-testid="health" title="ERPNext /api/method/ping — clickable diagnose panel later (OI-046)">
+    <button type="button" class="health" id="health" data-testid="health" title="Click for connection details" aria-haspopup="dialog" aria-expanded="false">
       <span class="dot" aria-hidden="true"></span>
       <span class="htext">DB …</span>
-    </span>
+    </button>
+    <button type="button" class="btn" id="btn-feedback" data-testid="btn-feedback" title="Send feedback (Google Form)">Feedback</button>
     <button type="button" class="btn dbg" id="btn-devtools" data-testid="btn-devtools" title="Open Electron DevTools for the ERP pane (Inspect / Console)">ERP console</button>
     <button type="button" class="btn src" id="btn-source" data-testid="btn-source">Source code</button>
   </div>
@@ -50,6 +57,8 @@
     const lensVanilla = document.getElementById("lens-vanilla");
     const lensDoc = document.getElementById("lens-doc");
     const lensLabel = document.getElementById("lens-label");
+    const appVer = document.getElementById("app-ver");
+    let diagnoseOpen = false;
 
     function setHealth(status) {
       healthEl.classList.toggle("ok", status === "ok");
@@ -59,17 +68,29 @@
 
     function applyUiState(s) {
       const showingHome = !!s.showingHome;
-      const showingBill = !!s.showingBill;
+      const onDocForm = !!(s.showingBill || s.showingDocForm);
       const docOk = s.docSkinAvailable !== false;
       lensDoc.hidden = !docOk;
       lensLabel.hidden = false;
-      lensDoc.classList.toggle("active", (showingHome || showingBill) && docOk);
-      lensVanilla.classList.toggle("active", !showingHome && !showingBill);
+      lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
+      lensVanilla.classList.toggle("active", !showingHome && !onDocForm);
+      if (s.diagnoseOpen != null) {
+        diagnoseOpen = !!s.diagnoseOpen;
+        healthEl.setAttribute("aria-expanded", diagnoseOpen ? "true" : "false");
+      }
     }
 
     document.getElementById("btn-home").onclick = () => api && api.goHome();
+    document.getElementById("btn-feedback").onclick = () => {
+      if (api && api.openFeedback) api.openFeedback();
+    };
     lensDoc.onclick = () => api && api.openDocSkin && api.openDocSkin();
     lensVanilla.onclick = () => api && api.openVanillaSkin && api.openVanillaSkin();
+    healthEl.onclick = () => {
+      if (!api) return;
+      if (diagnoseOpen && api.closeDiagnose) api.closeDiagnose();
+      else if (api.openDiagnose) api.openDiagnose();
+    };
     document.getElementById("btn-devtools").onclick = () => api && api.openDevtools("erp");
     document.getElementById("btn-source").onclick = () => {
       api && api.getConfig().then((c) => api.openExternal(c.repo));
@@ -78,7 +99,17 @@
     if (api) {
       api.onHealth(setHealth);
       api.onState((s) => applyUiState(s || {}));
+      api.getConfig().then((c) => {
+        if (c && c.version) {
+          appVer.textContent = `v${c.version}`;
+          appVer.title = c.updateStub || "Shell updates: ask IT";
+        }
+      });
     }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && diagnoseOpen && api && api.closeDiagnose) api.closeDiagnose();
+    });
   </script>
 </body>
 </html>
