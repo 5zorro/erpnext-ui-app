@@ -19,6 +19,9 @@ blob-report/
 # Editor
 .vscode/
 .idea/
+# Local Cursor rules/state — recreate via link script from Windows SSoT if needed.
+# Do not commit Windows path symlinks (they break clones).
+.cursor/
 
 # OS
 Thumbs.db
