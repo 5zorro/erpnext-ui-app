@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 5;
+  var VERSION = 6;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   function stripHtml(s) {
@@ -16,6 +16,258 @@
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function isMandatoryValuePresent(value, fieldtype) {
+    if (fieldtype === "Check") return true;
+    if (value == null) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "number") return !isNaN(value);
+    return stripHtml(value) !== "";
+  }
+
+  function evalMandatoryDependsOn(frm, doc, df) {
+    if (!df) return false;
+    if (!df.mandatory_depends_on) return !!df.reqd;
+    var expression = df.mandatory_depends_on;
+    var parent = frm && frm.doc;
+    try {
+      if (typeof expression === "boolean") return expression;
+      if (typeof expression === "function") return !!expression(doc);
+      if (typeof expression === "string" && expression.substr(0, 5) === "eval:") {
+        return !!frappe.utils.eval(expression.substr(5), { doc: doc, parent: parent });
+      }
+      var value = doc[expression];
+      if (Array.isArray(value)) return !!value.length;
+      return !!value;
+    } catch (e) {
+      return !!df.reqd;
+    }
+  }
+
+  /**
+   * Silent live-meta mandatory check (same rules as frappe.ui.form.check_mandatory,
+   * but no msgprint — so Doc Bill can show blockers without hanging f.save()).
+   */
+  function listMandatoryMissing(doctype) {
+    try {
+      var f = window.cur_frm;
+      if (!f || !f.doc) {
+        return { ok: false, reason: "No form open in Vanilla (cur_frm missing).", blockers: [] };
+      }
+      if (doctype && f.doctype !== doctype && f.doc.doctype !== doctype) {
+        return { ok: false, reason: "Vanilla form is not a " + doctype + ".", blockers: [] };
+      }
+      if (f.doc.docstatus === 2) return { ok: true, blockers: [] };
+
+      var parent = [];
+      var tablesByField = {};
+      var promptNameMissing = !!(f.is_new && f.is_new() && f.meta && f.meta.autoname === "Prompt" && !f.doc.__newname);
+
+      var docs = frappe.model.get_all_docs(f.doc);
+      for (var i = 0; i < docs.length; i++) {
+        var doc = docs[i];
+        var fieldsDict = frappe.meta.get_docfield_copy(doc.doctype, doc.name) || {};
+        var fieldList = frappe.meta.docfield_list[doc.doctype] || [];
+        var missingLabels = [];
+
+        for (var j = 0; j < fieldList.length; j++) {
+          var docfield = fieldList[j];
+          if (!docfield || !docfield.fieldname) continue;
+          var df = fieldsDict[docfield.fieldname];
+          if (!df) continue;
+          if (!df.reqd && !df.mandatory_depends_on) continue;
+          if (df.fieldtype === "Fold") continue;
+          if (!evalMandatoryDependsOn(f, doc, df)) continue;
+          var present = false;
+          try {
+            present = !!frappe.model.has_value(doc.doctype, doc.name, df.fieldname);
+          } catch (eHas) {
+            present = isMandatoryValuePresent(doc[df.fieldname], df.fieldtype);
+          }
+          if (!present) missingLabels.push(df.label || df.fieldname);
+        }
+
+        var meta = frappe.get_meta(doc.doctype);
+        if (meta && meta.istable) {
+          var parentfield = doc.parentfield;
+          if (!tablesByField[parentfield]) {
+            var tableField =
+              frappe.meta.docfield_map[doc.parenttype] &&
+              frappe.meta.docfield_map[doc.parenttype][parentfield];
+            tablesByField[parentfield] = {
+              label: (tableField && (tableField.label || parentfield)) || parentfield,
+              totalRows: (f.doc[parentfield] || []).length,
+              byLabel: {},
+            };
+          }
+          for (var m = 0; m < missingLabels.length; m++) {
+            var lab = missingLabels[m];
+            if (!tablesByField[parentfield].byLabel[lab]) {
+              tablesByField[parentfield].byLabel[lab] = [];
+            }
+            tablesByField[parentfield].byLabel[lab].push(doc.idx || 0);
+          }
+        } else {
+          for (var p = 0; p < missingLabels.length; p++) {
+            parent.push({
+              label: missingLabels[p],
+              required: true,
+              present: false,
+            });
+          }
+        }
+      }
+
+      var tables = [];
+      Object.keys(tablesByField).forEach(function (pf) {
+        var te = tablesByField[pf];
+        var missing = Object.keys(te.byLabel).map(function (lab) {
+          return { label: lab, rows: te.byLabel[lab] };
+        });
+        tables.push({ label: te.label, totalRows: te.totalRows, missing: missing });
+      });
+
+      // Inline mirror of listMandatoryBlockersFromSnap (page script cannot import ESM).
+      var blockers = [];
+      if (promptNameMissing) blockers.push("Name is required.");
+      for (var a = 0; a < parent.length; a++) {
+        blockers.push(stripHtml(parent[a].label) + " is required.");
+      }
+      for (var t = 0; t < tables.length; t++) {
+        var table = tables[t];
+        var tableLabel = stripHtml(table.label) || "Table";
+        for (var x = 0; x < (table.missing || []).length; x++) {
+          var miss = table.missing[x];
+          var fieldLabel = stripHtml(miss.label) || "Field";
+          var rows = (miss.rows || []).filter(function (n) {
+            return n > 0;
+          });
+          rows.sort(function (aa, bb) {
+            return aa - bb;
+          });
+          if (!rows.length) continue;
+          if (table.totalRows > 0 && rows.length === table.totalRows) {
+            blockers.push("In " + tableLabel + ", " + fieldLabel + " is required in every row.");
+          } else if (rows.length === 1) {
+            blockers.push(
+              "In " + tableLabel + ", " + fieldLabel + " is required in row " + rows[0] + ".",
+            );
+          } else {
+            blockers.push(
+              "In " + tableLabel + ", " + fieldLabel + " is required in rows " + rows.join(", ") + ".",
+            );
+          }
+        }
+      }
+
+      return { ok: true, blockers: blockers };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), blockers: [] };
+    }
+  }
+
+  /**
+   * Save that always settles. Vanilla f.save() hangs forever when check_mandatory
+   * fails (msgprint shown, callback never called) — that caused Doc Bill's 45s timeout.
+   */
+  function saveDoc(action) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f || !f.doc) return { ok: false, reason: "No form open in Vanilla (cur_frm missing)." };
+        if (f.doc.docstatus !== 0) return { ok: false, reason: "Document is not a draft." };
+        action = action || "Save";
+
+        var pre = listMandatoryMissing();
+        if (pre && pre.blockers && pre.blockers.length) {
+          return {
+            ok: false,
+            preflight: true,
+            blockers: pre.blockers,
+            reason: pre.blockers[0] || "Missing mandatory fields.",
+          };
+        }
+
+        try {
+          f.refresh_field("items");
+        } catch (eRefresh) {}
+
+        frappe.validated = true;
+        try {
+          await f.script_manager.trigger("validate");
+          await f.script_manager.trigger("before_save");
+        } catch (eTrig) {
+          return { ok: false, reason: String(eTrig && eTrig.message ? eTrig.message : eTrig) };
+        }
+        if (!frappe.validated) {
+          return { ok: false, reason: "Client validation failed (form script)." };
+        }
+
+        // Re-check after scripts — they can clear/toggle reqd fields.
+        pre = listMandatoryMissing();
+        if (pre && pre.blockers && pre.blockers.length) {
+          return {
+            ok: false,
+            preflight: true,
+            blockers: pre.blockers,
+            reason: pre.blockers[0] || "Missing mandatory fields.",
+          };
+        }
+
+        return await new Promise(function (resolve) {
+          frappe.call({
+            method: "frappe.desk.form.save.savedocs",
+            args: { doc: f.doc, action: action },
+            freeze: true,
+            callback: function (r) {
+              if (r && r.exc) {
+                var msg = "";
+                try {
+                  if (r._server_messages) {
+                    var parsed = JSON.parse(r._server_messages);
+                    if (Array.isArray(parsed)) {
+                      msg = parsed
+                        .map(function (m) {
+                          try {
+                            var o = typeof m === "string" ? JSON.parse(m) : m;
+                            return stripHtml((o && o.message) || m);
+                          } catch (eMap) {
+                            return stripHtml(m);
+                          }
+                        })
+                        .filter(Boolean)
+                        .join(" ");
+                    }
+                  }
+                } catch (eMsg) {}
+                resolve({
+                  ok: false,
+                  reason: msg || stripHtml(String(r.exc)) || "Save failed.",
+                });
+                return;
+              }
+              try {
+                if (typeof f.refresh === "function") f.refresh();
+              } catch (eRef) {}
+              resolve({
+                ok: true,
+                doc: JSON.parse(JSON.stringify(f.doc)),
+                submitted: action === "Submit",
+              });
+            },
+            error: function (r) {
+              resolve({
+                ok: false,
+                reason: stripHtml((r && (r.message || r.exc)) || "Save request failed."),
+              });
+            },
+          });
+        });
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
   }
 
   function formMatches(doctype) {
@@ -545,5 +797,7 @@
     addTaxRow: addTaxRow,
     deleteTaxRow: deleteTaxRow,
     afterAjaxQuiet: afterAjaxQuiet,
+    listMandatoryMissing: listMandatoryMissing,
+    saveDoc: saveDoc,
   };
 })();

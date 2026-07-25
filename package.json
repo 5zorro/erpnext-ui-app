@@ -1,6 +1,6 @@
 {
   "name": "erpnext-ui-app",
-  "version": "0.1.0-m0",
+  "version": "0.2.0-alpha.1",
   "private": true,
   "description": "Standalone Electron UI + tools over unmodified ERPNext (Doc / Vanilla skins). AGPL-3.0.",
   "license": "AGPL-3.0-or-later",

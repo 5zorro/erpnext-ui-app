@@ -261,6 +261,7 @@ describe("BILL_ASSUMPTIONS museum topic parity", () => {
       assert.ok(covered.includes(topic), `missing topic ${topic}`);
     }
     assert.match(BILL_EXPENSE_NOTE, /items-based/i);
+    assert.match(BILL_EXPENSE_NOTE, /Taxes and Charges/i);
   });
 });
 
@@ -270,6 +271,11 @@ describe("isDraftBillDoc", () => {
     assert.equal(isDraftBillDoc({ docstatus: "0" }), true);
     assert.equal(isDraftBillDoc({ docstatus: 1 }), false);
     assert.equal(isDraftBillDoc(null), false);
+  });
+
+  it("treats missing docstatus as draft (new form)", () => {
+    assert.equal(isDraftBillDoc({ name: "new-purchase-invoice-1" }), true);
+    assert.equal(isDraftBillDoc({ name: "ACC-1", docstatus: null }), true);
   });
 });
 

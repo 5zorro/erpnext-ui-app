@@ -34,7 +34,7 @@ export function classifyHealthStatus(statusCode, opts = {}) {
  * @param {string} [opts.pingPath]
  * @param {typeof fetch} [opts.fetchImpl]
  * @param {number} [opts.timeoutMs]
- * @returns {Promise<{ status: "ok"|"bad"|"unknown", code: number|null, url: string }>}
+ * @returns {Promise<{ status: "ok"|"bad"|"unknown", code: number|null, url: string, latencyMs: number|null }>}
  */
 export async function pingHealth({
   erpBase,
@@ -44,19 +44,26 @@ export async function pingHealth({
 } = {}) {
   const url = buildPingUrl(erpBase, pingPath);
   if (typeof fetchImpl !== "function") {
-    return { status: "unknown", code: null, url };
+    return { status: "unknown", code: null, url, latencyMs: null };
   }
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const started = Date.now();
   try {
     const res = await fetchImpl(url, { method: "GET", signal: ctrl.signal });
     return {
       status: classifyHealthStatus(res.status),
       code: res.status,
       url,
+      latencyMs: Date.now() - started,
     };
   } catch {
-    return { status: classifyHealthStatus(null, { networkError: true }), code: null, url };
+    return {
+      status: classifyHealthStatus(null, { networkError: true }),
+      code: null,
+      url,
+      latencyMs: Date.now() - started,
+    };
   } finally {
     clearTimeout(t);
   }

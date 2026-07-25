@@ -1,9 +1,33 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { pushHistory, splitHistory, HISTORY_CAP, RECENT_MAX } from "../src/history.js";
+import {
+  pushHistory,
+  splitHistory,
+  historySlotKey,
+  historyLabelFor,
+  HISTORY_CAP,
+  RECENT_MAX,
+} from "../src/history.js";
 
 describe("pushHistory", () => {
-  it("dedupes by doctype and keeps most recent first", () => {
+  it("keeps list and form of the same doctype as separate Recent slots (OI-062)", () => {
+    let h = [];
+    h = pushHistory(h, "/app/purchase-invoice/ACC-1", {
+      labels: { "purchase-invoice": "Bill", "purchase-invoice:list": "Find Bills" },
+    });
+    h = pushHistory(h, "/app/purchase-invoice", {
+      labels: { "purchase-invoice": "Bill", "purchase-invoice:list": "Find Bills" },
+    });
+    assert.equal(h.length, 2);
+    assert.equal(h[0].label, "Find Bills");
+    assert.equal(h[0].slot, "purchase-invoice:list");
+    assert.equal(h[0].route, "/app/purchase-invoice");
+    assert.equal(h[1].label, "Bill");
+    assert.equal(h[1].slot, "purchase-invoice:form");
+    assert.equal(h[1].route, "/app/purchase-invoice/ACC-1");
+  });
+
+  it("dedupes forms of the same doctype and keeps most recent first", () => {
     let h = [];
     h = pushHistory(h, "/desk/purchase-invoice/A");
     h = pushHistory(h, "/desk/sales-order/B");
@@ -41,6 +65,20 @@ describe("pushHistory", () => {
     const next = pushHistory(prev, "/desk/item/1");
     assert.equal(prev.length, 0);
     assert.equal(next.length, 1);
+  });
+});
+
+describe("historySlotKey / historyLabelFor", () => {
+  it("labels list slots as Find Bills", () => {
+    assert.equal(historySlotKey("purchase-invoice", ""), "purchase-invoice:list");
+    assert.equal(historySlotKey("purchase-invoice", "ACC-1"), "purchase-invoice:form");
+    assert.equal(
+      historyLabelFor("purchase-invoice", "", {
+        "purchase-invoice": "Bill",
+        "purchase-invoice:list": "Find Bills",
+      }),
+      "Find Bills",
+    );
   });
 });
 
