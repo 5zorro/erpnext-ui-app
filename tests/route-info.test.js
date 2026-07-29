@@ -6,6 +6,7 @@ import {
   isNewDocRecord,
   normalizeAppRoute,
   routesReferToSameDoc,
+  isDocListRoute,
 } from "../src/route-info.js";
 
 describe("routeInfo", () => {
@@ -94,5 +95,15 @@ describe("routesReferToSameDoc", () => {
       routesReferToSameDoc("/app/purchase-invoice/new", "/app/sales-order/new"),
       false,
     );
+  });
+});
+
+describe("isDocListRoute", () => {
+  it("true for list, false for form/new", () => {
+    assert.equal(isDocListRoute("purchase-invoice", "/app/purchase-invoice"), true);
+    assert.equal(isDocListRoute("purchase-order", "/desk/purchase-order"), true);
+    assert.equal(isDocListRoute("purchase-receipt", "/app/purchase-receipt"), true);
+    assert.equal(isDocListRoute("purchase-invoice", "/app/purchase-invoice/new"), false);
+    assert.equal(isDocListRoute("purchase-order", "/app/purchase-order/PO-1"), false);
   });
 });

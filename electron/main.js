@@ -10,7 +10,7 @@ import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import { hasDocSkin, resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
-import { routeInfo, routesReferToSameDoc, isNewDocRecord } from "../src/route-info.js";
+import { routeInfo, routesReferToSameDoc, isNewDocRecord, isDocListRoute } from "../src/route-info.js";
 import {
   rememberLens,
   resolveEntryOpen,
@@ -25,6 +25,7 @@ import {
   diagnoseCopyText,
   appendPingLog,
 } from "../src/diagnose.js";
+import { findListFocusField, findListFocusLabel } from "../src/doc-chrome.js";
 import {
   resolveFeedbackFormUrl,
   buildFeedbackUrl,
@@ -45,7 +46,12 @@ import {
   isEditableBillItemField,
   isEditableBillTaxField,
 } from "../src/bill-map.js";
-import { isEditablePoItemField, resolvePoStampDate, poRowsNeedingScheduleStamp } from "../src/po-map.js";
+import {
+  isEditablePoItemField,
+  resolvePoStampDate,
+  poRowsNeedingScheduleStamp,
+  shouldStampPoDateExpectedOnSave,
+} from "../src/po-map.js";
 import { isEditableReceiptItemField } from "../src/receipt-map.js";
 import { normalizeSearchLinkResults } from "../src/link-search.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders } from "../src/source-modal.js";
@@ -343,6 +349,26 @@ function pushDocFormSnapshot(snap) {
 }
 
 /**
+ * Open a Doc skin for a registry profile (shell-dispatch — add skins in DOC_SKIN_PROFILES only).
+ * @param {import("../src/doc-skin-registry.js").DocSkinProfile} profile
+ * @param {string} route
+ * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean }} [opts]
+ * @returns {boolean}
+ */
+function openDocSkinProfile(profile, route, opts = {}) {
+  if (!profile) return false;
+  if (profile.shell === "bill") {
+    showBill(route, opts);
+    return true;
+  }
+  if (profile.shell === "doc-form") {
+    showDocForm(profile.id, route, opts);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Open a form route on preferred lens (Home / Recent / Drafts / hijack).
  * @param {string} route
  * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean }} [opts]
@@ -353,16 +379,10 @@ function openRoutePreferred(route, opts = {}) {
   const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
   if (
     profile &&
-    shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })
+    shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true }) &&
+    openDocSkinProfile(profile, info.path || r, opts)
   ) {
-    if (profile.id === "bill") {
-      showBill(info.path || r, opts);
-      return;
-    }
-    if (profile.id === "po" || profile.id === "receipt") {
-      showDocForm(profile.id, info.path || r, opts);
-      return;
-    }
+    return;
   }
   showErp(r, { forceLoad: opts.forceLoad !== false, skipDirtyGate: opts.skipDirtyGate });
 }
@@ -385,10 +405,9 @@ function maybeHijackErpToDoc(url) {
   }
   lensHijackLock = true;
   try {
-    if (profile.id === "bill") showBill(info.path || url, { skipDirtyGate: true });
-    else if (profile.id === "po" || profile.id === "receipt") {
-      showDocForm(profile.id, info.path || url, { skipDirtyGate: true });
-    } else return false;
+    if (!openDocSkinProfile(profile, info.path || url, { skipDirtyGate: true })) {
+      return false;
+    }
   } finally {
     // Release on next tick so showBill's erp loadURL navigations don't re-enter.
     setImmediate(() => {
@@ -477,6 +496,181 @@ async function waitForPurchaseInvoiceList(timeoutMs = BILL_FIND_TIMEOUT_MS) {
     await sleep(150);
   }
   return classifyFindBillResult(last, ERP_BASE);
+}
+
+/** Wait until Vanilla URL is the list for this doctype (no record). */
+async function waitForDocListRoute(doctypeKey, timeoutMs = BILL_FIND_TIMEOUT_MS) {
+  const start = Date.now();
+  let last = "";
+  while (Date.now() - start < timeoutMs) {
+    if (!erp || erp.webContents.isDestroyed()) {
+      return { ok: false, reason: "ERP view not ready" };
+    }
+    last = erp.webContents.getURL() || "";
+    if (/\/login/i.test(last)) {
+      return { ok: false, reason: "Please log in on Vanilla skin, then try Find again." };
+    }
+    if (isDocListRoute(doctypeKey, last, ERP_BASE)) {
+      return { ok: true };
+    }
+    await sleep(150);
+  }
+  return {
+    ok: false,
+    reason: `Timed out waiting for ${doctypeKey} list.`,
+  };
+}
+
+/**
+ * Re-assert ERP WebContents keyboard focus after Find (Bill/doc chrome IPC can steal it).
+ * # ponytail: short ticks + in-page focus keeper; drop if Electron WC focus improves.
+ */
+function scheduleErpKeyboardFocus() {
+  for (const ms of [0, 50, 200, 500]) {
+    setTimeout(() => {
+      try {
+        if (surfaceMode !== "erp") return;
+        if (!erp || erp.webContents.isDestroyed()) return;
+        blurNonErpWebContents();
+        erp.webContents.focus();
+        if (win && !win.isDestroyed()) win.focus();
+      } catch {
+        /* ignore */
+      }
+    }, ms);
+  }
+}
+
+/** Blur Bill / Doc / Home so OS keyboard focus can settle on ERP. */
+function blurNonErpWebContents() {
+  for (const view of [bill, docForm, home]) {
+    try {
+      if (!view || view.webContents.isDestroyed()) continue;
+      if (view.webContents.isFocused && view.webContents.isFocused()) {
+        view.webContents.blur();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Close Getting Started / Buying panel *before* focusing filters, then settle.
+ * Same-tick dismiss + focus was racing the filter to document BODY (~500ms).
+ */
+async function dismissOnboardingAndSettle() {
+  if (!erp || erp.webContents.isDestroyed()) return;
+  try {
+    await erp.webContents.executeJavaScript(`(function(){
+      var panel = document.querySelector(".onb-panel");
+      if (!panel) return false;
+      try {
+        var closeBtn = document.querySelector(".onb-panel .onb-header-actions button:last-child")
+          || document.querySelector(".onb-panel .onb-header-actions button");
+        if (closeBtn) closeBtn.click();
+      } catch (e0) {}
+      return true;
+    })()`);
+  } catch {
+    /* ignore */
+  }
+  await sleep(400);
+}
+
+/**
+ * Brief in-page re-focus if list refresh / onboarding teardown blurs the filter to BODY.
+ * @param {string} fieldname
+ * @param {number} [ms=2200]
+ */
+async function installFindFocusKeeper(fieldname, ms = 2200) {
+  if (!erp || erp.webContents.isDestroyed()) return;
+  try {
+    await erp.webContents.executeJavaScript(`(function(){
+      var field = ${JSON.stringify(fieldname)};
+      var until = Date.now() + ${Number(ms) || 2200};
+      window.__docFindFocusKeep = { field: field, until: until };
+      if (window.__docFindFocusKeepTimer) clearInterval(window.__docFindFocusKeepTimer);
+      window.__docFindFocusKeepTimer = setInterval(function(){
+        var keep = window.__docFindFocusKeep;
+        if (!keep || Date.now() > keep.until) {
+          clearInterval(window.__docFindFocusKeepTimer);
+          window.__docFindFocusKeepTimer = null;
+          return;
+        }
+        var el = document.querySelector('.standard-filter-section [data-fieldname="' + keep.field + '"] input')
+          || document.querySelector('[data-fieldname="' + keep.field + '"] input');
+        if (!el || document.activeElement === el) return;
+        try { el.focus({ preventScroll: true }); } catch (e1) { try { el.focus(); } catch (e2) {} }
+        try { if (typeof el.select === "function") el.select(); } catch (e3) {}
+      }, 120);
+      return true;
+    })()`);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Wait until Vanilla list standard-filter input exists (URL settle is not enough).
+ * @param {string} fieldname
+ * @param {number} [timeoutMs]
+ */
+async function waitForListFilterField(fieldname, timeoutMs = BILL_FIND_TIMEOUT_MS) {
+  if (!fieldname || !erp || erp.webContents.isDestroyed()) {
+    return { ok: false, reason: "ERP view not ready" };
+  }
+  const start = Date.now();
+  let last = { ok: false, reason: "filter not ready" };
+  while (Date.now() - start < timeoutMs) {
+    if (!erp || erp.webContents.isDestroyed()) {
+      return { ok: false, reason: "ERP view not ready" };
+    }
+    try {
+      last = await erp.webContents.executeJavaScript(`(function(){
+        var field = ${JSON.stringify(fieldname)};
+        try {
+          if (!window.cur_list || !cur_list.page) {
+            return { ok: false, reason: "cur_list not ready", hasField: false };
+          }
+          try {
+            var pf = cur_list.page.page_form;
+            if (pf && pf.length && pf.hasClass("hide")) pf.removeClass("hide");
+          } catch (eHide) {}
+          var dict = cur_list.page.fields_dict || {};
+          var df = dict[field];
+          var hasInput = false;
+          if (df) {
+            if (df.$wrapper && df.$wrapper.find) {
+              hasInput = df.$wrapper.find("input:not([type=hidden]), textarea").length > 0;
+            }
+            if (!hasInput && df.$input && df.$input.length) hasInput = true;
+            if (!hasInput && df.input) hasInput = true;
+          }
+          var dom = document.querySelector('.standard-filter-section [data-fieldname="' + field + '"] input')
+            || document.querySelector('[data-fieldname="' + field + '"] input');
+          if (hasInput || dom) {
+            return { ok: true, hasField: true, field: field };
+          }
+          return {
+            ok: false,
+            reason: "filter input not ready",
+            hasField: !!df,
+            field: field,
+          };
+        } catch (e) {
+          return { ok: false, reason: String(e && e.message ? e.message : e) };
+        }
+      })()`);
+    } catch (e) {
+      last = { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+    if (last && last.ok) return last;
+    await sleep(150);
+  }
+  return last && typeof last === "object"
+    ? { ...last, ok: false, reason: (last.reason || "filter not ready") + " (timeout)" }
+    : { ok: false, reason: "filter not ready (timeout)" };
 }
 
 /**
@@ -1235,8 +1429,7 @@ function openDocSkin() {
   if (target.kind === "doc-form") {
     const profile = profileByLayoutKey(target.layoutKey) || profileByDoctypeKey(target.doctype);
     if (!profile) return;
-    if (profile.id === "bill") showBill(target.route);
-    else if (profile.id === "po" || profile.id === "receipt") showDocForm(profile.id, target.route);
+    openDocSkinProfile(profile, target.route);
   }
 }
 
@@ -1245,9 +1438,8 @@ function openEntry(doctypeKey) {
   const t = resolveEntryOpen(key, lensPrefs);
   if (t.surface === "doc-form") {
     const profile = profileByDoctypeKey(key);
-    if (profile?.id === "bill") showBill(t.route);
-    else if (profile?.id === "po" || profile?.id === "receipt") showDocForm(profile.id, t.route);
-    else showBill(t.route);
+    if (profile && openDocSkinProfile(profile, t.route)) return;
+    showBill(t.route);
   } else showErp(t.route, { forceLoad: true });
 }
 
@@ -1480,24 +1672,46 @@ function createWindow() {
   };
 
   chrome = new WebContentsView({
-    webPreferences: { ...pref, preload: path.join(__dirname, "preload.cjs") },
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "preload.cjs"),
+    },
   });
   home = new WebContentsView({
-    webPreferences: { ...pref, preload: path.join(__dirname, "home-preload.cjs") },
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "home-preload.cjs"),
+    },
   });
   bill = new WebContentsView({
-    webPreferences: { ...pref, preload: path.join(__dirname, "bill-preload.cjs") },
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "bill-preload.cjs"),
+    },
   });
   docForm = new WebContentsView({
-    webPreferences: { ...pref, preload: path.join(__dirname, "doc-form-preload.cjs") },
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "doc-form-preload.cjs"),
+    },
   });
   hist = new WebContentsView({
-    webPreferences: { ...pref, preload: path.join(__dirname, "history-preload.cjs") },
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "history-preload.cjs"),
+    },
   });
   erp = new WebContentsView({
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Avoid auto-stealing focus on every Desk nav (Electron #42578 / focusOnNavigation).
+      focusOnNavigation: false,
     },
   });
 
@@ -1909,8 +2123,7 @@ ipcMain.handle("bill-find", async () => {
   const route = "/app/purchase-invoice";
   surfaceMode = "erp";
   currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
-  savePrefs();
+  // List Find must not flip entry-lens pref (Doc stays Doc until a Vanilla *form* opens).
   place();
   const target = erpUrl(ERP_BASE, route);
   await loadErpUrl(target);
@@ -1924,8 +2137,190 @@ ipcMain.handle("bill-find", async () => {
       reason: (confirm && confirm.reason) || "Could not open Bill list.",
     };
   }
-  return { ok: true };
+  const focusField = findListFocusField("purchase-invoice");
+  const focusLabel = findListFocusLabel("purchase-invoice") || focusField;
+  let focus = { ok: false };
+  if (focusField) {
+    const ready = await waitForListFilterField(focusField);
+    if (!(ready && ready.ok)) {
+      scheduleErpKeyboardFocus();
+      return {
+        ok: true,
+        focusOk: false,
+        focusField,
+        reason: `Bill list opened; ${focusLabel} filter not ready yet.`,
+      };
+    }
+    await dismissOnboardingAndSettle();
+    focus = await focusListStandardFilter(focusField);
+  }
+  scheduleErpKeyboardFocus();
+  if (!(focus && focus.ok)) {
+    return {
+      ok: true,
+      focusOk: false,
+      focusField,
+      reason: `Bill list opened; could not focus ${focusLabel}.`,
+    };
+  }
+  return { ok: true, focusOk: true, focusField };
 });
+
+/**
+ * After Find IPC returns, Bill/doc chrome often steals OS keyboard focus.
+ * Caller re-invokes this so native click + select run *after* that steal.
+ */
+ipcMain.handle("erp-refocus-list-filter", async (_e, fieldname) => {
+  const field =
+    typeof fieldname === "string" && fieldname.trim()
+      ? fieldname.trim()
+      : findListFocusField("purchase-invoice") || "bill_no";
+  if (surfaceMode !== "erp") {
+    return { ok: false, reason: "Not on Vanilla list surface." };
+  }
+  await dismissOnboardingAndSettle();
+  const focus = await focusListStandardFilter(field);
+  scheduleErpKeyboardFocus();
+  return {
+    ok: !!(focus && focus.ok),
+    focusField: field,
+    reason: focus && focus.ok ? undefined : (focus && focus.reason) || "refocus failed",
+  };
+});
+
+/**
+ * Focus a Vanilla list standard-filter input (e.g. bill_no = Supplier Invoice No.).
+ * Native sendInputEvent click + select; brief focus keeper fights BODY blur race.
+ * @param {string} fieldname
+ */
+async function focusListStandardFilter(fieldname) {
+  if (!fieldname || !erp || erp.webContents.isDestroyed()) {
+    return { ok: false, reason: "ERP view not ready" };
+  }
+
+  const locateJs = `(function(){
+    var field = ${JSON.stringify(fieldname)};
+    function inputForField() {
+      try {
+        if (!window.cur_list || !cur_list.page) return null;
+        try {
+          var pf = cur_list.page.page_form;
+          if (pf && pf.length && pf.hasClass("hide")) pf.removeClass("hide");
+        } catch (eHide) {}
+        var dict = cur_list.page.fields_dict;
+        var df = dict && dict[field];
+        if (df) {
+          var $in = null;
+          if (df.$wrapper && df.$wrapper.length) {
+            $in = df.$wrapper.find("input:not([type=hidden]), textarea").first();
+          }
+          if ((!$in || !$in.length) && df.$input && df.$input.length) $in = df.$input;
+          if ($in && $in.length) return $in.get(0);
+          if (df.input) return df.input;
+        }
+      } catch (e1) {}
+      return document.querySelector('.standard-filter-section [data-fieldname="' + field + '"] input')
+        || document.querySelector('[data-fieldname="' + field + '"] input')
+        || document.querySelector('input[data-fieldname="' + field + '"]')
+        || null;
+    }
+    var el = inputForField();
+    if (!el) {
+      return {
+        ok: false,
+        reason: "filter input not found",
+        field: field,
+        listReady: !!(window.cur_list && cur_list.page && cur_list.page.fields_dict),
+        hasField: !!(window.cur_list && cur_list.page && cur_list.page.fields_dict
+          && cur_list.page.fields_dict[field]),
+      };
+    }
+    try { el.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e2) {}
+    var r = el.getBoundingClientRect();
+    return {
+      ok: true,
+      field: field,
+      x: r.left,
+      y: r.top,
+      width: r.width,
+      height: r.height,
+    };
+  })()`;
+
+  let loc;
+  try {
+    loc = await erp.webContents.executeJavaScript(locateJs);
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+  if (!(loc && loc.ok)) {
+    return loc && typeof loc === "object" ? loc : { ok: false, reason: "filter input not found" };
+  }
+
+  blurNonErpWebContents();
+  try {
+    if (win && !win.isDestroyed()) win.focus();
+    erp.webContents.focus();
+  } catch {
+    /* ignore */
+  }
+
+  const x = Math.max(1, Math.round(Number(loc.x) + Number(loc.width) / 2));
+  const y = Math.max(1, Math.round(Number(loc.y) + Number(loc.height) / 2));
+  try {
+    erp.webContents.sendInputEvent({
+      type: "mouseDown",
+      x,
+      y,
+      button: "left",
+      clickCount: 1,
+    });
+    erp.webContents.sendInputEvent({
+      type: "mouseUp",
+      x,
+      y,
+      button: "left",
+      clickCount: 1,
+    });
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+
+  let selectResult = null;
+  try {
+    selectResult = await erp.webContents.executeJavaScript(`(function(){
+      var field = ${JSON.stringify(fieldname)};
+      var el = document.querySelector('.standard-filter-section [data-fieldname="' + field + '"] input')
+        || document.querySelector('[data-fieldname="' + field + '"] input')
+        || document.querySelector('input[data-fieldname="' + field + '"]');
+      if (!el) return { ok: false };
+      try { el.focus({ preventScroll: true }); } catch (e1) { try { el.focus(); } catch (e2) {} }
+      try { if (typeof el.select === "function") el.select(); } catch (e3) {}
+      return {
+        ok: document.activeElement === el,
+        selected: !!(el.selectionStart === 0 && el.selectionEnd === (el.value || "").length),
+      };
+    })()`);
+  } catch {
+    /* non-fatal */
+  }
+
+  blurNonErpWebContents();
+  try {
+    erp.webContents.focus();
+  } catch {
+    /* ignore */
+  }
+
+  scheduleErpKeyboardFocus();
+  await installFindFocusKeeper(fieldname);
+  return {
+    ok: true,
+    field: fieldname,
+    via: "sendInputEvent",
+    selected: !!(selectResult && selectResult.selected),
+  };
+}
 
 /** New Bill on Doc skin (T3a). Caller handles dirty commit first. */
 ipcMain.handle("bill-new", async () => {
@@ -2192,7 +2587,8 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
 ipcMain.handle("doc-set-date-expected", async (_e, value) => {
   dateExpectedScratch = value == null ? "" : String(value);
   dirtyState = markUserEdited({ ...dirtyState, isDirty: true });
-  const stamped = await stampPoDateExpected();
+  // Explicit header edit: always re-stamp all Required By (OI-069 edge case).
+  const stamped = await stampPoDateExpected({ force: true });
   if (!(stamped && stamped.ok)) {
     return {
       ok: false,
@@ -2232,13 +2628,26 @@ async function setDocItemField(rowIndex, field, value) {
       ? dirtyState.doc.items[rowIndex][field]
       : undefined;
   if (valuesMeaningfullyEqual(prev, next, { kind })) {
-    return { ok: true, doc: dirtyState.doc, skipped: true };
+    return {
+      ok: true,
+      doc: dirtyState.doc,
+      skipped: true,
+      scratch: { dateExpected: dateExpectedScratch },
+    };
   }
   const raw = await bridgeCall("setRow", rowIndex, field, next);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+    if (activeDocSkin === "po" && field === "schedule_date") {
+      if (!shouldStampPoDateExpectedOnSave(raw.doc)) {
+        dateExpectedScratch = "";
+      }
+    }
   }
-  return raw;
+  const scratch = { dateExpected: dateExpectedScratch };
+  return raw && typeof raw === "object"
+    ? { ...raw, scratch }
+    : { ok: false, reason: "Update failed.", scratch };
 }
 
 ipcMain.handle("doc-set-item", async (_e, rowIndex, field, value) =>
@@ -2363,10 +2772,23 @@ ipcMain.handle("doc-attach-file", async () => {
     : { ok: false, reason: "Could not open attach dialog." };
 });
 
-/** Stamp PO Date Expected (or week-out default) onto line schedule_date. */
-async function stampPoDateExpected() {
+/** Stamp PO Date Expected (or week-out default) onto line schedule_date.
+ * @param {{ force?: boolean }} [opts] force=true when clerk explicitly sets Date Expected
+ *   (must overwrite divergent Required By). Auto stamp-on-save skips when lines diverge.
+ */
+async function stampPoDateExpected(opts = {}) {
   if (activeDocSkin !== "po") {
     return { ok: true, doc: dirtyState.doc, stamped: 0 };
+  }
+  const force = !!opts.force;
+  if (!force && !shouldStampPoDateExpectedOnSave(dirtyState.doc)) {
+    dateExpectedScratch = "";
+    return {
+      ok: true,
+      doc: dirtyState.doc,
+      stamped: 0,
+      scratch: { dateExpected: "" },
+    };
   }
   const stampIso = resolvePoStampDate(dateExpectedScratch);
   if (!dateExpectedScratch) {
@@ -2473,15 +2895,47 @@ ipcMain.handle("doc-find", async () => {
   surfaceMode = "erp";
   activeDocSkin = null;
   currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, profile.doctypeKey, "vanilla");
-  savePrefs();
+  // List Find must not flip entry-lens pref.
   place();
   const target = erpUrl(ERP_BASE, route);
   await loadErpUrl(target);
   trackNav(target);
+  const confirm = await waitForDocListRoute(profile.doctypeKey, BILL_FIND_TIMEOUT_MS);
   sendUiState();
   syncE2eApi();
-  return { ok: true };
+  if (!(confirm && confirm.ok)) {
+    return {
+      ok: false,
+      reason: (confirm && confirm.reason) || "Could not open list.",
+    };
+  }
+  const focusField = findListFocusField(profile.doctypeKey);
+  const focusLabel = findListFocusLabel(profile.doctypeKey) || focusField;
+  let focus = { ok: false };
+  if (focusField) {
+    const ready = await waitForListFilterField(focusField);
+    if (!(ready && ready.ok)) {
+      scheduleErpKeyboardFocus();
+      return {
+        ok: true,
+        focusOk: false,
+        focusField,
+        reason: `List opened; ${focusLabel} filter not ready yet.`,
+      };
+    }
+    await dismissOnboardingAndSettle();
+    focus = await focusListStandardFilter(focusField);
+  }
+  scheduleErpKeyboardFocus();
+  if (!(focus && focus.ok)) {
+    return {
+      ok: true,
+      focusOk: false,
+      focusField,
+      reason: `List opened; could not focus ${focusLabel}.`,
+    };
+  }
+  return { ok: true, focusOk: true, focusField };
 });
 
 ipcMain.handle("doc-new", async () => {

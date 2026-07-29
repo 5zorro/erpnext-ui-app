@@ -96,6 +96,22 @@ export function formatUsdAmountHtml(value) {
 }
 
 /**
+ * Signed USD for chip deltas: `+$10.00` / `−$10.00` with underlined cents.
+ * @param {unknown} value
+ * @returns {string} HTML or plain em-dash
+ */
+export function formatSignedUsdHtml(value) {
+  if (value == null || value === "" || value === "—") return "—";
+  const raw = String(value).trim();
+  const sign = raw.startsWith("+") ? "+" : raw.startsWith("−") || raw.startsWith("-") ? "−" : "";
+  const n = parseMoney(raw);
+  if (n == null) return escapeMoneyHtml(raw);
+  const abs = Math.abs(n);
+  const html = formatUsdAmountHtml(abs);
+  return sign ? `${sign}${html}` : html;
+}
+
+/**
  * @param {string} s
  */
 function escapeMoneyHtml(s) {

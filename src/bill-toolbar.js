@@ -27,15 +27,15 @@ export const MUSEUM_BILL_TOOLBAR = Object.freeze([
  * @type {readonly { id: string, label: string, museumEquivalent: string|null }[]}
  */
 export const ALPHA_BILL_TOOLBAR = Object.freeze([
-  { id: "btn-print", label: "Print", museumEquivalent: "Print" },
-  { id: "btn-find", label: "Find Bill…", museumEquivalent: "Find Bills" },
-  { id: "btn-new", label: "New Bill", museumEquivalent: "New" },
-  { id: "btn-save", label: "Save draft", museumEquivalent: "Save" },
-  { id: "btn-submit", label: "Save draft & submit", museumEquivalent: "Save" },
-  { id: "btn-revert", label: "Revert unsaved changes", museumEquivalent: null },
-  { id: "btn-select-po", label: "Select PO / source", museumEquivalent: "Select PO" },
-  { id: "btn-refresh", label: "Refresh", museumEquivalent: null },
-  { id: "btn-vanilla", label: "Open in Vanilla", museumEquivalent: null },
+  { id: "btn-print", label: "Print", museumEquivalent: "Print", group: "fileRetention" },
+  { id: "btn-find", label: "Find Bill…", museumEquivalent: "Find Bills", group: "navigate" },
+  { id: "btn-new", label: "New Bill", museumEquivalent: "New", group: "navigate" },
+  { id: "btn-save", label: "Save draft", museumEquivalent: "Save", group: "fileRetention" },
+  { id: "btn-submit", label: "Save draft & submit", museumEquivalent: "Save", group: "fileRetention" },
+  { id: "btn-revert", label: "Revert unsaved changes", museumEquivalent: null, group: "fileRetention" },
+  { id: "btn-select-po", label: "Select PO / source", museumEquivalent: "Select PO", group: "navigate" },
+  { id: "btn-refresh", label: "Refresh", museumEquivalent: null, group: "navigate" },
+  { id: "btn-vanilla", label: "Open in Vanilla", museumEquivalent: null, group: "navigate" },
 ]);
 
 /** Actions that use the dirty commit popover (T3a). */

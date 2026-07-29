@@ -2,6 +2,7 @@
  * Deduplicated navigation history — list vs form slots per doctype, most-recent first.
  */
 import { routeInfo, titleizeDoctype } from "./route-info.js";
+import { formLabelForDoctype, listLabelForDoctype } from "./doctype-labels.js";
 
 export const HISTORY_CAP = 12;
 /** M1.5: visible in Recent; remainder goes under Older (collapsed). */
@@ -37,16 +38,9 @@ export function historyEntrySlot(entry, erpBase) {
  * @param {string} [record]
  * @param {Record<string, string>} [labels]
  */
-export function historyLabelFor(doctype, record, labels = {}) {
-  const dt = doctype == null ? "" : String(doctype);
-  if (!record) {
-    if (labels[`${dt}:list`]) return labels[`${dt}:list`];
-    const base = labels[dt] || titleizeDoctype(dt) || "Documents";
-    // "Bill" → "Find Bills"; "Item" → "Find Items"
-    if (/s$/i.test(base)) return `Find ${base}`;
-    return `Find ${base}s`;
-  }
-  return labels[dt] || titleizeDoctype(dt);
+export function historyLabelFor(doctype, record, labels) {
+  if (!record) return listLabelForDoctype(doctype, labels);
+  return formLabelForDoctype(doctype, labels) || titleizeDoctype(doctype);
 }
 
 /**
