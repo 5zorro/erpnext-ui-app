@@ -9,6 +9,8 @@ import {
   sumPoLineAmount,
   formatPoLineTotal,
   isDraftPoDoc,
+  PO_MULTIPLE_DATES_LABEL,
+  poDateExpectedHeaderDisplay,
 } from "./po-map.js";
 import {
   readReceiptHeader,
@@ -73,6 +75,13 @@ import {
 } from "./doc-action-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
 import { isSelectableSourceItem } from "./source-modal.js";
+import {
+  docLifecyclePill,
+  focusFinalizeControl,
+  flushPendingFieldEdits,
+  isNewBlankDocName,
+  REFRESH_BUTTON_TITLE,
+} from "./doc-chrome.js";
 
 const api = window.erpDoc;
 
@@ -83,6 +92,10 @@ let lastDoc = null;
 let scratch = {};
 let painting = false;
 let userEdited = false;
+/** @type {Promise<void>|null} */
+let lineApplyInFlight = null;
+/** @type {boolean} */
+let saveInFlight = false;
 /** @type {import("./bill-action-flow.js").GateTrigger|null} */
 let pendingGate = null;
 /** @type {string[]} */
@@ -218,8 +231,15 @@ function setStatus(text, cls) {
 
 function paintDirtyPill() {
   if (!el.dirtyPill) return;
-  el.dirtyPill.textContent = userEdited ? "Unsaved changes" : "All saved";
-  el.dirtyPill.className = "dirty-pill" + (userEdited ? " is-dirty" : "");
+  const isDraft = lastDoc ? mapHelpers().isDraft(lastDoc) : true;
+  const pill = docLifecyclePill({
+    isDraft,
+    userEdited,
+    isNewBlank: isDraft && isNewBlankDocName(lastDoc && lastDoc.name),
+  });
+  el.dirtyPill.textContent = pill.text;
+  el.dirtyPill.title = pill.title;
+  el.dirtyPill.className = "dirty-pill tone-" + pill.tone + (userEdited ? " is-dirty" : "");
 }
 
 function noteUserEdit() {
@@ -382,8 +402,25 @@ async function runPendingAction(action) {
   if (action === "find") {
     setStatus(`Opening ${docTitle()} list…`);
     const res = await api.findDocs();
+    try {
+      if (document.activeElement && typeof document.activeElement.blur === "function") {
+        document.activeElement.blur();
+      }
+    } catch {
+      /* ignore */
+    }
+    let post = null;
+    if (res && res.ok && api.refocusListFilter) {
+      try {
+        post = await api.refocusListFilter(res.focusField || "name");
+      } catch {
+        /* ignore */
+      }
+    }
     if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
-    else setStatus(`${docTitle()} list opened.`);
+    else if (res.focusOk === false || (post && post.ok === false)) {
+      setStatus(res.reason || post?.reason || "List opened (filter focus missed).", "warn");
+    } else setStatus(`${docTitle()} list opened — type in ID.`);
     return;
   }
   if (action === "new") {
@@ -901,17 +938,26 @@ function paintItems(doc) {
     const linkDt = linkDoctypeForDocField(field, ui.headerFields, ui.itemCols);
     const apply = async (value) => {
       if (!api || painting) return;
-      setStatus(`Updating ${field}…`);
-      const res = await api.setItem(ri, field, value);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Line updated.");
-        const nextField = nextFieldAfterLinkPick(field);
-        if (nextField) focusItemCell(ri, nextField);
-      } else {
-        setStatus((res && res.reason) || "Line update failed.", "err");
-        await refresh();
+      const run = async () => {
+        setStatus(`Updating ${field}…`);
+        const res = await api.setItem(ri, field, value);
+        if (res && res.ok) {
+          noteUserEdit();
+          if (res.scratch) scratch = res.scratch;
+          paint(res.doc, res.scratch || scratch);
+          setStatus("Line updated.");
+          const nextField = nextFieldAfterLinkPick(field);
+          if (nextField) focusItemCell(ri, nextField);
+        } else {
+          setStatus((res && res.reason) || "Line update failed.", "err");
+          await refresh();
+        }
+      };
+      lineApplyInFlight = run();
+      try {
+        await lineApplyInFlight;
+      } finally {
+        lineApplyInFlight = null;
       }
     };
     if (linkDt) {
@@ -1051,6 +1097,9 @@ function buildHeaderFields(fields) {
         input.dataset.testid = meta.scratch ? "doc-date-expected" : `doc-${meta.field}`;
         if (meta.scratch) {
           input.dataset.scratch = "dateExpected";
+          input.addEventListener("focus", () => {
+            if (input.value === PO_MULTIPLE_DATES_LABEL) input.value = "";
+          });
         } else {
           input.dataset.field = meta.field;
         }
@@ -1374,6 +1423,21 @@ function paint(doc, snapScratch, opts = {}) {
     const inp = headerInputs[meta.label];
     if (!inp) continue;
     const val = h[meta.label] ?? "";
+    if (meta.field === "__date_expected") {
+      const shown = poDateExpectedHeaderDisplay(doc, scratch);
+      if (shown.mode === "multiple") {
+        inp.value = PO_MULTIPLE_DATES_LABEL;
+        inp.placeholder = PO_MULTIPLE_DATES_LABEL;
+        inp.title =
+          (meta.validationHint || "") +
+          " Line Required By dates differ — type one Date Expected to re-stamp all lines.";
+      } else {
+        inp.value = formatDocDateDisplay(shown.display) || shown.display || "";
+        inp.placeholder = "MM/DD/YYYY";
+        if (meta.validationHint) inp.title = meta.validationHint;
+      }
+      continue;
+    }
     if (meta.type === "date") {
       inp.value = formatDocDateDisplay(val) || val;
     } else {
@@ -1431,8 +1495,16 @@ async function onHeaderBlur(input) {
 
   if (input.dataset.scratch === "dateExpected") {
     const raw = filterDateInputValue(input.value).trim();
-    if (!raw) {
-      input.value = formatDocDateDisplay(paintedScratchDateExpected()) || "";
+    if (
+      !raw ||
+      raw === PO_MULTIPLE_DATES_LABEL ||
+      /^multiple dates$/i.test(raw)
+    ) {
+      const shown = poDateExpectedHeaderDisplay(lastDoc, scratch);
+      input.value =
+        shown.mode === "multiple"
+          ? PO_MULTIPLE_DATES_LABEL
+          : formatDocDateDisplay(shown.display) || shown.display || "";
       return;
     }
     const parsed = parseDocDate(raw);
@@ -1536,46 +1608,62 @@ async function flushDateExpectedFromInput() {
 
 async function doSave(submit) {
   if (!api) return { ok: false, reason: "Doc API unavailable." };
-  await flushDateExpectedFromInput();
-  if (api.listMandatory) {
-    try {
-      const res = await api.listMandatory();
-      metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
-      if (res && res.doc) {
-        paint(res.doc, res.scratch || scratch);
-      } else if (res && res.scratch) {
-        scratch = res.scratch;
-      }
-    } catch {
-      /* keep prior metaBlockers */
+  if (saveInFlight) return { ok: false, reason: "Save already in progress." };
+  saveInFlight = true;
+  try {
+    const flush = await flushPendingFieldEdits({
+      getInFlight: () => lineApplyInFlight,
+      waitMs: 5000,
+    });
+    if (flush && flush.timedOut) {
+      setStatus("Line update slow — saving with last committed lines…", "warn");
     }
+    await flushDateExpectedFromInput();
+    if (api.listMandatory) {
+      try {
+        const res = await api.listMandatory();
+        metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
+        if (res && res.doc) {
+          paint(res.doc, res.scratch || scratch);
+        } else if (res && res.scratch) {
+          scratch = res.scratch;
+        }
+      } catch {
+        /* keep prior metaBlockers */
+      }
+    }
+    const blockers = currentSaveBlockers();
+    if (!commitGateSaveEnabled(blockers)) {
+      setStatus(blockers[0] || "Fix save prerequisites first.", "err");
+      return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
+    }
+    const choice = submit ? "submit" : "save";
+    setStatus(commitGateProgressLabel(choice));
+    const r = await api.save({ submit: !!submit });
+    if (r && r.ok) {
+      userEdited = false;
+      metaBlockers = [];
+      paint(r.doc, r.scratch || scratch);
+      paintDirtyPill();
+      setStatus(commitGateSuccessLabel(choice));
+      return { ok: true };
+    }
+    if (r && Array.isArray(r.blockers) && r.blockers.length) {
+      metaBlockers = r.blockers;
+    }
+    const reason =
+      (r && r.timedOut && r.reason) ||
+      (r && r.reason) ||
+      "Save failed — check Vanilla validations.";
+    setStatus(reason, "err");
+    return {
+      ok: false,
+      reason,
+      blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
+    };
+  } finally {
+    saveInFlight = false;
   }
-  const blockers = currentSaveBlockers();
-  if (!commitGateSaveEnabled(blockers)) {
-    setStatus(blockers[0] || "Fix save prerequisites first.", "err");
-    return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
-  }
-  const choice = submit ? "submit" : "save";
-  setStatus(commitGateProgressLabel(choice));
-  const r = await api.save({ submit: !!submit });
-  if (r && r.ok) {
-    userEdited = false;
-    metaBlockers = [];
-    paint(r.doc, r.scratch || scratch);
-    paintDirtyPill();
-    setStatus(commitGateSuccessLabel(choice));
-    return { ok: true };
-  }
-  if (r && Array.isArray(r.blockers) && r.blockers.length) {
-    metaBlockers = r.blockers;
-  }
-  const reason = (r && r.reason) || "Save failed — check Vanilla validations.";
-  setStatus(reason, "err");
-  return {
-    ok: false,
-    reason,
-    blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
-  };
 }
 
 function setLineTab(which) {
@@ -1694,11 +1782,22 @@ async function attachFileAction() {
 }
 
 function wireStaticControls() {
-  document.getElementById("btn-refresh").onclick = () => refresh();
+  const btnRefresh = document.getElementById("btn-refresh");
+  if (btnRefresh) {
+    btnRefresh.onclick = () => refresh();
+    btnRefresh.title = REFRESH_BUTTON_TITLE;
+  }
   document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
   if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");
+  const btnBackTop = document.getElementById("btn-back-top");
+  if (btnBackTop) {
+    btnBackTop.onclick = () => {
+      focusFinalizeControl(el.submit);
+      setStatus("Focused Save draft & submit — finish entry, then finalize.");
+    };
+  }
 
   if (el.commitGate) {
     el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
@@ -1830,8 +1929,15 @@ async function ensureUiConfig() {
   if (!api || !api.getUi) return false;
   const config = await api.getUi();
   if (!config) return false;
-  if (!ui || ui.profileId !== config.profileId) {
+  const rebuild = !ui || ui.profileId !== config.profileId;
+  if (rebuild) {
     applyUiConfig(config);
+  } else {
+    ui = config;
+    document.title = ui.title;
+    if (el.title) el.title.textContent = ui.title;
+    if (el.find) el.find.textContent = ui.findLabel;
+    if (el.newDoc) el.newDoc.textContent = ui.newLabel;
   }
   return true;
 }

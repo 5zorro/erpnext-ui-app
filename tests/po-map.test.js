@@ -5,6 +5,11 @@ import {
   readPoHeader,
   readPoItemRows,
   resolvePoDateExpected,
+  poDateExpectedHeaderDisplay,
+  distinctPoScheduleDates,
+  PO_MULTIPLE_DATES_LABEL,
+  shouldStampPoDateExpectedOnSave,
+  poDateExpectedStampPolicy,
   resolvePoStampDate,
   defaultPoScheduleDate,
   poRowsNeedingScheduleStamp,
@@ -69,13 +74,66 @@ describe("readPoHeader", () => {
   });
 });
 
-describe("resolvePoDateExpected", () => {
-  it("falls back to first line schedule_date", () => {
+describe("resolvePoDateExpected / OI-069 Multiple dates", () => {
+  it("falls back to first line schedule_date when all lines agree", () => {
     assert.equal(resolvePoDateExpected(sampleDoc), "2026-07-25");
   });
 
   it("returns empty when no scratch and no line dates", () => {
     assert.equal(resolvePoDateExpected({ items: [{ qty: 1 }] }), "");
+  });
+
+  it("shows Multiple dates when line Required By diverges", () => {
+    const doc = {
+      items: [
+        { schedule_date: "2026-07-25" },
+        { schedule_date: "2026-08-01" },
+      ],
+    };
+    assert.deepEqual(distinctPoScheduleDates(doc), ["2026-07-25", "2026-08-01"]);
+    const shown = poDateExpectedHeaderDisplay(doc, {});
+    assert.equal(shown.mode, "multiple");
+    assert.equal(shown.display, PO_MULTIPLE_DATES_LABEL);
+    assert.equal(resolvePoDateExpected(doc), "");
+    assert.equal(readPoHeader(doc)["Date Expected"], PO_MULTIPLE_DATES_LABEL);
+  });
+
+  it("shows Multiple dates when line Required By diverges (wins over stale scratch)", () => {
+    const doc = {
+      items: [
+        { schedule_date: "2026-07-25" },
+        { schedule_date: "2026-08-01" },
+      ],
+    };
+    const shown = poDateExpectedHeaderDisplay(doc, { dateExpected: "2026-09-01" });
+    assert.equal(shown.mode, "multiple");
+    assert.equal(shown.display, PO_MULTIPLE_DATES_LABEL);
+  });
+
+  it("shouldStampPoDateExpectedOnSave false when lines diverge", () => {
+    const doc = {
+      items: [{ schedule_date: "2026-07-25" }, { schedule_date: "2026-08-01" }],
+    };
+    assert.equal(shouldStampPoDateExpectedOnSave(doc), false);
+    assert.equal(shouldStampPoDateExpectedOnSave(sampleDoc), true);
+  });
+
+  it("explicit Date Expected always stamps even when lines diverge", () => {
+    const doc = {
+      items: [{ schedule_date: "2026-07-25" }, { schedule_date: "2026-08-01" }],
+    };
+    assert.deepEqual(poDateExpectedStampPolicy("explicit-header", doc), {
+      stamp: true,
+      force: true,
+    });
+    assert.deepEqual(poDateExpectedStampPolicy("auto-save", doc), {
+      stamp: false,
+      force: false,
+    });
+    assert.deepEqual(poDateExpectedStampPolicy("auto-save", sampleDoc), {
+      stamp: true,
+      force: false,
+    });
   });
 });
 

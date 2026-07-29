@@ -100,6 +100,15 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     notes: "Idle (grey · —) until user types; then typed Due ↔ grand_total. Never auto-fill from grand_total.",
   },
   {
+    id: "amount-due-grand-pointer",
+    name: "OI-073 Amount Due row shows Bill grand total beside diff chip",
+    museum: false,
+    alpha: true,
+    coverage: "tested",
+    pureModule: "bill-map.js",
+    notes: "Pointer only — money stack remains tax breakdown SSoT.",
+  },
+  {
     id: "amount-due-usd-blur",
     name: "Amount Due USD $ blur format",
     museum: true,

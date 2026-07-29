@@ -1,6 +1,7 @@
 /**
- * Per-doctype lens preference (museum lensByDoctype / defaultView: "doc").
- * Enter Bills · Vanilla PI · Vanilla simplified PI · Doc Bill = same path; last lens wins.
+ * Per-doctype lens preference (last lens wins; persisted in lens-prefs.json).
+ * Empty prefs → Doc (installer gets the Doc app experience). Opening Doc or
+ * Vanilla **form** updates the pref; list-only Find must not flip it.
  */
 
 /** @typedef {"vanilla"|"simplified"|"doc"} LensId */
@@ -52,7 +53,7 @@ export function rememberLens(prefs, doctype, lens) {
 }
 
 /**
- * Where "Enter Bills" / open-entry should land given last preference.
+ * Where Home "Enter …" / open-entry should land given last preference.
  * @param {string} doctypeKey e.g. purchase-invoice
  * @param {Record<string, string>} [prefs]
  * @param {{ newRoute?: string }} [opts]
@@ -63,6 +64,7 @@ export function resolveEntryOpen(doctypeKey, prefs = {}, opts = {}) {
   const lens = preferredLens(key, prefs);
   const route = opts.newRoute || `/app/${key}/new`;
   if (lens === "doc") return { lens, surface: "doc-form", route };
+  // vanilla + simplified share erp-form until a simplified shell exists
   return { lens, surface: "erp-form", route };
 }
 

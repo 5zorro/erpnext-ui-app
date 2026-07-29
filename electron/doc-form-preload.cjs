@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
   listMandatory: () => ipcRenderer.invoke("doc-list-mandatory"),
   revertUnsaved: () => ipcRenderer.invoke("doc-revert-unsaved"),
   findDocs: () => ipcRenderer.invoke("doc-find"),
+  refocusListFilter: (fieldname) =>
+    ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => ipcRenderer.invoke("doc-new"),
   printDoc: () => ipcRenderer.invoke("doc-print"),
   searchLink: (doctype, txt) => ipcRenderer.invoke("doc-search-link", doctype, txt || ""),

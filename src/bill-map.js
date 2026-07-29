@@ -285,6 +285,37 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   };
 }
 
+/**
+ * OI-073 — pointer next to Amount Due chip (same compare target as checksum).
+ * Money stack at page bottom remains the full breakdown SSoT for taxes.
+ * @param {string|number|null|undefined} compareTotal
+ * @returns {{ text: string, title: string, grandTotal: number|null }}
+ */
+export function amountDueGrandPointer(compareTotal) {
+  const usd = (n) =>
+    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+  if (compareTotal == null || compareTotal === "") {
+    return {
+      text: "Bill —",
+      title: "Bill grand total not available yet — add lines/taxes or Refresh",
+      grandTotal: null,
+    };
+  }
+  const n = Number(compareTotal);
+  if (!Number.isFinite(n)) {
+    return {
+      text: "Bill —",
+      title: "Bill grand total not available yet — add lines/taxes or Refresh",
+      grandTotal: null,
+    };
+  }
+  return {
+    text: `Bill ${usd(n)}`,
+    title: "Bill grand total (checksum target) — full tax breakdown is in the money stack below",
+    grandTotal: n,
+  };
+}
+
 /** Editable fields on Purchase Taxes and Charges rows (thin Doc skin cut). */
 export const BILL_TAX_EDIT_FIELDS = Object.freeze([
   "account_head",

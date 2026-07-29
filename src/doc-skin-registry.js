@@ -30,6 +30,7 @@ import {
   RECEIPT_ITEM_COLS,
   RECEIPT_MEMO_FIELD,
 } from "./receipt-map.js";
+import { findButtonLabel } from "./doctype-labels.js";
 
 /**
  * @typedef {{
@@ -161,7 +162,7 @@ export function docFormUiPayload(profileId) {
       memoField: PO_MEMO_FIELD,
       expenseNote: null,
       leavingLabel: "leaving this Purchase Order",
-      findLabel: "Find Purchase Order…",
+      findLabel: findButtonLabel(p.doctypeKey),
       newLabel: "New Purchase Order",
       sourceLabel: null,
       attachTitle: "Opens Vanilla Desk attach for this Purchase Order (save draft first if new).",
@@ -184,7 +185,7 @@ export function docFormUiPayload(profileId) {
       memoField: RECEIPT_MEMO_FIELD,
       expenseNote: RECEIPT_EXPENSE_NOTE,
       leavingLabel: "leaving this Item Receipt",
-      findLabel: "Find Item Receipt…",
+      findLabel: findButtonLabel(p.doctypeKey),
       newLabel: "New Item Receipt",
       sourceLabel: "Select PO",
       attachTitle: "Opens Vanilla Desk attach for this Item Receipt (save draft first if new).",

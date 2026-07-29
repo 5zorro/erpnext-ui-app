@@ -101,21 +101,81 @@ export function getPoAnchor() {
   };
 }
 
+/** Header label when line Required By dates diverge (OI-069). */
+export const PO_MULTIPLE_DATES_LABEL = "Multiple dates";
+
+/**
+ * Distinct non-empty line schedule_date values (sorted).
+ * @param {object|null|undefined} doc
+ * @returns {string[]}
+ */
+export function distinctPoScheduleDates(doc) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  const set = new Set();
+  for (const it of items) {
+    const s = it && it.schedule_date != null ? String(it.schedule_date).trim() : "";
+    if (s) set.add(s);
+  }
+  return [...set].sort();
+}
+
+/**
+ * OI-069 — what the Date Expected header should show.
+ * Line divergence wins over stale scratch (clerk edited Required By after a stamp).
+ * @param {object|null|undefined} doc
+ * @param {{ dateExpected?: string|null }} [scratch]
+ * @returns {{ mode: "empty"|"single"|"multiple", value: string, display: string }}
+ */
+export function poDateExpectedHeaderDisplay(doc, scratch = {}) {
+  const dates = distinctPoScheduleDates(doc);
+  if (dates.length >= 2) {
+    return { mode: "multiple", value: "", display: PO_MULTIPLE_DATES_LABEL };
+  }
+  if (scratch.dateExpected != null && String(scratch.dateExpected).trim() !== "") {
+    const v = String(scratch.dateExpected).trim();
+    return { mode: "single", value: v, display: v };
+  }
+  if (dates.length === 1) {
+    return { mode: "single", value: dates[0], display: dates[0] };
+  }
+  return { mode: "empty", value: "", display: "" };
+}
+
+/**
+ * Should save / mandatory preflight re-stamp all Required By from Date Expected?
+ * Never when lines already diverge (OI-069) — that would wipe per-line edits.
+ * Explicit header Date Expected always stamps (see poDateExpectedStampPolicy).
+ * @param {object|null|undefined} doc
+ * @returns {boolean}
+ */
+export function shouldStampPoDateExpectedOnSave(doc) {
+  return distinctPoScheduleDates(doc).length < 2;
+}
+
+/**
+ * Stamp policy for Date Expected → Required By.
+ * @param {"explicit-header"|"auto-save"|"auto-add-line"} trigger
+ * @param {object|null|undefined} doc
+ * @returns {{ stamp: boolean, force: boolean }}
+ */
+export function poDateExpectedStampPolicy(trigger, doc) {
+  if (trigger === "explicit-header") {
+    return { stamp: true, force: true };
+  }
+  return { stamp: shouldStampPoDateExpectedOnSave(doc), force: false };
+}
+
 /**
  * Default Date Expected: first line schedule_date, else today+7 (museum).
+ * When lines diverge and scratch is empty, returns "" (header shows Multiple dates via display helper).
  * @param {object} doc
  * @param {{ dateExpected?: string|null }} [scratch]
  * @returns {string}
  */
 export function resolvePoDateExpected(doc, scratch = {}) {
-  if (scratch.dateExpected != null && String(scratch.dateExpected).trim() !== "") {
-    return String(scratch.dateExpected).trim();
-  }
-  const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  for (const it of items) {
-    if (it && it.schedule_date) return String(it.schedule_date);
-  }
-  return "";
+  const shown = poDateExpectedHeaderDisplay(doc, scratch);
+  if (shown.mode === "multiple") return "";
+  return shown.value;
 }
 
 /**
@@ -128,7 +188,7 @@ export function readPoHeader(doc, scratch = {}) {
   const out = {};
   for (const meta of PO_HEADER_FIELDS) {
     if (meta.field === "__date_expected") {
-      out[meta.label] = resolvePoDateExpected(d, scratch);
+      out[meta.label] = poDateExpectedHeaderDisplay(d, scratch).display;
       continue;
     }
     if (meta.display === "supplier_name|supplier") {
