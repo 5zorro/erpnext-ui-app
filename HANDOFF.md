@@ -9,8 +9,11 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Current dated working plan: `docs/implementation-plan-2026-07-18.md` (T1–T4 MVP done; deferred packets sketched).
-   Flyout / shell ops (Drafts, diagnose, Feedback, lens prefs) shipped 2026-07-22 on `alpha` — see CHANGELOG / museum OI-060/046/048/062.
+3. Current dated working plan: `docs/implementation-plan-2026-07-29.md` (Vanilla Simplified /
+   OI-086 architecture-first; carryover dogfood from T1–T4 chrome polish).
+   Prior tranche `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP + Find focus /
+   lens/chrome dogfood). Flyout / shell ops (Drafts, diagnose, Feedback, lens prefs) shipped
+   2026-07-22 — see museum OI-060/046/048/062.
 4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
    `~/agent-harness/erpnext/doc-shell/open_items.md` — **not** mirrored into this public tree.
 
@@ -79,7 +82,7 @@ flowchart LR
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
-| Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc** |
+| Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Link search (T1) | `link-search.js` | Normalize `search_link` rows; Bill field→doctype |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
@@ -136,7 +139,7 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `doc-terms.test.js` | QB-style relabel / reverse | Used by Bill Doc labels |
 | `bill-map.test.js` | Header/items; amount-due checksum | Bill view (`bill.html`) |
 | `dirty-gate.test.js` | Lens dirt vs user edit nav gate | Bill leave prompts in main |
-| `lens-prefs.test.js` | Per-doctype last lens; default doc | Enter Bills + prefs file |
+| `lens-prefs.test.js` | Default doc; prior-session vanilla; per-doctype; registry extensibility | Enter Bills + prefs file |
 | `lens-context.test.js` | Doc-skin index + readiness matrix | Doc tab visibility |
 
 When adding a `src/` module: add units first; extend an existing scaffold smoke if main wires it; only add a new e2e file for a new scaffold.
@@ -172,16 +175,21 @@ npm run test:e2e:xvfb # same under Xvfb (WSL/CI-friendly)
 
 | Home | Role |
 |------|------|
-| `docs/implementation-plan-YYYY-MM-DD.md` | **Working how** for one build tranche: modules, flows, business rules being coded to, tests. 5zorro audits this before/during implementation. |
+| `docs/implementation-plan-YYYY-MM-DD.md` | **Working how** for one build tranche: modules, flows, business rules being coded to, tests. 5zorro audits this before/during implementation. **First section** must include cross-architecture dogfood handling (group by architecture family; residual table — do not reopen Done batches; promote decisions before delete). |
 
 Rules:
 
 1. **Never** keep a permanent undated `implementation-plan.md` as the living SSoT.
 2. When open items become **ready to implement**, create a **new dated** plan with enough **how**
    that a non-programmer can spot wrong assumptions — not only a milestone title list.
-3. After the tranche ships and durable facts are copied to decisions/ADR/CHANGELOG/OI status,
+3. Copy the **How to handle cross-architecture dogfood** preamble from the prior plan (or this HANDOFF)
+   into the top of every new dated plan.
+4. Mid-tranche dogfood that spans Bill / PO / IR / chrome goes in that plan’s **Dogfood residuals**
+   table (by architecture family / error class) — **not** as a dump into museum `open_items.md`.
+5. After the tranche ships and durable facts are copied to
+   `~/agent-harness/memory/decisions.md` (via `append-decision.sh`) / ADR / CHANGELOG / OI status,
    **delete** that dated plan file.
-4. High-level milestone maps may stay sparse in an early draft; **how** is required before coding
+6. High-level milestone maps may stay sparse in an early draft; **how** is required before coding
    a promoted OI (or when 5zorro asks to review architecture).
 
 ## Communication (what 5zorro wants from agents)

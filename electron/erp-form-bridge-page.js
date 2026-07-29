@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 6;
+  var VERSION = 7;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   function stripHtml(s) {
@@ -538,6 +538,21 @@
           return { ok: false, reason: "Row missing — refresh and retry." };
         }
         await setValueAsync(row.doctype, row.name, field, value);
+
+        // Lightweight fields: skip taxes/ajax-quiet chain (description edits were
+        // blocking Save for many seconds via afterAjaxQuiet + calculate_taxes).
+        var lightFields = {
+          description: true,
+          sales_order: true,
+          project: true,
+        };
+        if (lightFields[field]) {
+          try {
+            f.refresh_field("items");
+          } catch (eLight) {}
+          return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+        }
+
         await afterAjaxQuiet();
         row = (f.doc.items || [])[rowIndex];
 

@@ -7,6 +7,7 @@ import {
   amountDueMatchesGrandTotal,
   amountDueChecksumStatus,
   amountDueChecksumChip,
+  amountDueGrandPointer,
   billCompareTotal,
   amountDueDelta,
   billMoneyStack,
@@ -128,6 +129,19 @@ describe("amountDueChecksumChip", () => {
     const match = amountDueChecksumChip(10, 10);
     assert.equal(match.emoji, "✓");
     assert.match(match.moneyText, /\$0\.00/);
+  });
+});
+
+describe("amountDueGrandPointer (OI-073)", () => {
+  it("shows Bill $ next to the chip target", () => {
+    const ptr = amountDueGrandPointer(123.45);
+    assert.match(ptr.text, /Bill \$123\.45/);
+    assert.equal(ptr.grandTotal, 123.45);
+  });
+
+  it("shows dash when total missing", () => {
+    assert.equal(amountDueGrandPointer(null).text, "Bill —");
+    assert.equal(amountDueGrandPointer("x").grandTotal, null);
   });
 });
 

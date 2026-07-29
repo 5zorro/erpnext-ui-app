@@ -3,7 +3,7 @@
  * Rendered by electron/home.html; not ERP Desk HTML.
  *
  * Enter Bills: same path as Vanilla / Simplified PI; open target follows last lens
- * (default Doc) via `resolveEntryOpen` once M3c wires it — today route is Vanilla ERP.
+ * (default Doc) via `resolveEntryOpen` — last lens wins per doctype.
  *
  * @typedef {{ id: string, icon: string, label: string, route: string, disabled?: boolean }} HomeTile
  * @typedef {{ id: string, title: string, tiles: HomeTile[] }} HomeGroup

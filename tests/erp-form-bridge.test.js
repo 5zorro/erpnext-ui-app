@@ -59,7 +59,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 6);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 7);
   });
 });
 
@@ -115,7 +115,8 @@ describe("erp-form-bridge-page save settle contract", () => {
     );
     assert.match(page, /listMandatoryMissing:\s*listMandatoryMissing/);
     assert.match(page, /saveDoc:\s*saveDoc/);
-    assert.match(page, /var VERSION = 6/);
+    assert.match(page, /var VERSION = 7/);
+    assert.match(page, /description:\s*true/);
     assert.match(page, /frappe\.desk\.form\.save\.savedocs/);
   });
 });
