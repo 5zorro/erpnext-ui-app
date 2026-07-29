@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld("erpBill", {
   listMandatory: () => ipcRenderer.invoke("bill-list-mandatory"),
   revertUnsaved: () => ipcRenderer.invoke("bill-revert-unsaved"),
   findBills: () => ipcRenderer.invoke("bill-find"),
+  /** Re-assert ERP list filter focus after Find IPC returns (Bill chrome may steal OS focus). */
+  refocusListFilter: (fieldname) =>
+    ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "bill_no"),
   newBill: () => ipcRenderer.invoke("bill-new"),
   printBill: () => ipcRenderer.invoke("bill-print"),
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),

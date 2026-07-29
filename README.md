@@ -4,6 +4,8 @@ Standalone **desktop UI + tools** for [ERPNext](https://erpnext.com/) / Frappe �
 
 **License:** [AGPL-3.0-or-later](LICENSE)
 
+> **Alpha stage.** While Alpha only pushes to `main` when tests pass, there is still a high likelihood of broken links or similar issues if you do not have the exact ERPNext modules installed as in the test environment. Please file problems in [GitHub Issues](https://github.com/5zorro/erpnext-ui-app/issues); **5zorro** will read them and decide the best path forward.
+
 ## Why this exists (product purpose)
 
 This shell is not a second ERP. It exists to make daily books work safer and more familiar on ordinary office PCs:
@@ -26,10 +28,10 @@ This shell is not a second ERP. It exists to make daily books work safer and mor
 
 Language for this tree: **plain JavaScript** . That is a tooling choice, not an architecture change.
 
-**M0–M2** chrome, history, Doc Workflow Home · **M3** Bill Doc binder (`bill.html` + `set_value`
-lines) — on local `alpha`. Active how: [docs/implementation-plan-2026-07-18.md](docs/implementation-plan-2026-07-18.md).
-Promote when ready.
-
+**M0–M2** chrome, history, Doc Workflow Home · **M3** Bill Doc binder · **T4** PO + IR Doc skins —
+AP daily-entry MVP on `alpha` / `main`. Active how:
+[docs/implementation-plan-2026-07-29.md](docs/implementation-plan-2026-07-29.md) (Vanilla Simplified /
+OI-086 — temporary working plan).
 
 ## Develop
 

@@ -39,6 +39,19 @@ describe("museum Bill toolbar contract", () => {
     assert.ok(ALPHA_BILL_TOOLBAR.some((a) => a.id === "btn-print"));
   });
 
+  it("assigns File vs Navigate groups (5zorro chrome chunking)", () => {
+    const byId = Object.fromEntries(ALPHA_BILL_TOOLBAR.map((a) => [a.id, a.group]));
+    assert.equal(byId["btn-save"], "fileRetention");
+    assert.equal(byId["btn-submit"], "fileRetention");
+    assert.equal(byId["btn-revert"], "fileRetention");
+    assert.equal(byId["btn-print"], "fileRetention");
+    assert.equal(byId["btn-find"], "navigate");
+    assert.equal(byId["btn-new"], "navigate");
+    assert.equal(byId["btn-select-po"], "navigate");
+    assert.equal(byId["btn-refresh"], "navigate");
+    assert.equal(byId["btn-vanilla"], "navigate");
+  });
+
   it("records museum nav / line tabs / footer", () => {
     assert.deepEqual([...MUSEUM_BILL_NAV_TABS], [
       "Bill",

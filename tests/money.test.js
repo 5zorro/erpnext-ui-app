@@ -7,6 +7,7 @@ import {
   formatUsdAmount,
   splitUsdDisplay,
   formatUsdAmountHtml,
+  formatSignedUsdHtml,
 } from "../src/money.js";
 
 describe("roundToNickel", () => {
@@ -58,5 +59,10 @@ describe("formatUsdAmount / splitUsdDisplay (Amount $#,###.__)", () => {
   it("builds html with money-cents span", () => {
     const html = formatUsdAmountHtml(12.5);
     assert.match(html, /\$12\.<span class="money-cents">50<\/span>/);
+  });
+
+  it("formatSignedUsdHtml underlines cents on deltas", () => {
+    const html = formatSignedUsdHtml("+$10.00");
+    assert.match(html, /\+.*money-cents.*00/);
   });
 });

@@ -72,6 +72,21 @@ export function normalizeAppRoute(routeOrUrl, erpBase) {
 }
 
 /**
+ * True when URL is a doctype **list** (no record / not /new).
+ * @param {string|null|undefined} doctypeKey e.g. purchase-order
+ * @param {string} routeOrUrl
+ * @param {string} [erpBase]
+ */
+export function isDocListRoute(doctypeKey, routeOrUrl, erpBase) {
+  const key = String(doctypeKey || "")
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (!key) return false;
+  const n = normalizeAppRoute(routeOrUrl, erpBase);
+  return n.doctype === key && !n.record;
+}
+
+/**
  * Same document target? Used to skip reload when Recent / lens re-opens the page you're on.
  * New drafts (`new`, `new-purchase-invoice-…`) count as the same "new Bill" surface.
  *

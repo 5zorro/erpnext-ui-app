@@ -11,7 +11,16 @@
     .status { font-size: 12px; color: #64748b; }
     .status.warn { color: #b45309; }
     .status.err { color: #b91c1c; }
-    .toolbar { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+    .toolbar { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; align-items: stretch; }
+    .tb-group {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 8px;
+      background: #f8fafc;
+    }
+    .tb-group-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.04em; color: #64748b; margin-right: 2px;
+    }
     .toolbar button, .line-actions button, .del {
       border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
       padding: 7px 12px; font-size: 13px; cursor: pointer;
@@ -20,12 +29,29 @@
     .toolbar button.ghost { background: #f8fafc; }
     .toolbar button:disabled, .line-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
     .dirty-pill {
-      font-size: 11px; padding: 3px 8px; border-radius: 999px;
-      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+      font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px;
+      background: #fef9c3; color: #a16207; border: 1px solid #fde047;
     }
-    .dirty-pill.is-dirty {
+    .dirty-pill.is-dirty, .dirty-pill.tone-draft-dirty {
       background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
     }
+    .dirty-pill.tone-draft {
+      background: #fef9c3; color: #a16207; border: 1px solid #fde047;
+    }
+    .dirty-pill.tone-posted {
+      background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;
+    }
+    .dirty-pill.tone-posted-dirty {
+      background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;
+    }
+    .back-to-top-row {
+      display: flex; justify-content: flex-end; margin-top: 12px;
+    }
+    .back-to-top-row button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 8px 14px; font-size: 13px; cursor: pointer;
+    }
+    .money-cents { text-decoration: underline; text-underline-offset: 2px; }
     .commit-gate {
       position: fixed; inset: 0; z-index: 200;
       display: flex; align-items: center; justify-content: center;
@@ -254,21 +280,27 @@
       </span>
     </div>
     <div class="toolbar" data-testid="doc-toolbar">
-      <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
-        title="Print this document (save first if new).">Print</button>
-      <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
-        title="Attach file">Attach file</button>
-      <span class="dirty-pill" id="dirty-pill" data-testid="doc-dirty-pill">All saved</span>
-      <span style="flex:1 1 8px"></span>
-      <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
-      <button type="button" id="btn-new" data-testid="doc-new">New</button>
-      <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
-      <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
-      <button type="button" id="btn-revert" data-testid="doc-revert"
-        title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
-      <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
-      <button type="button" id="btn-refresh" data-testid="doc-refresh">Refresh</button>
-      <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
+      <div class="tb-group" data-testid="doc-toolbar-file" title="Keep, print, discard, or finalize this document">
+        <span class="tb-group-label">File</span>
+        <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="doc-dirty-pill">Draft · all saved</span>
+        <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
+          title="Print this document (save first if new).">Print</button>
+        <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
+          title="Attach file">Attach file</button>
+        <button type="button" id="btn-revert" data-testid="doc-revert"
+          title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
+        <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
+        <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
+      </div>
+      <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
+        <span class="tb-group-label">Navigate</span>
+        <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
+        <button type="button" id="btn-new" data-testid="doc-new">New</button>
+        <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
+        <button type="button" id="btn-refresh" data-testid="doc-refresh"
+          title="Re-read the open Vanilla form into this page (keeps your Doc edits). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
+        <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
+      </div>
     </div>
     <div class="commit-gate" id="commit-gate" data-testid="doc-commit-gate" hidden>
       <div class="commit-gate-backdrop" id="commit-gate-backdrop"
@@ -367,6 +399,10 @@
             <button type="button" class="attach" id="btn-attach" data-testid="doc-attach">Attach file</button>
           </div>
           <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
+        </div>
+        <div class="back-to-top-row">
+          <button type="button" id="btn-back-top" data-testid="doc-back-top"
+            title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
         </div>
         <p class="hint" id="doc-hint"></p>
       </div>
