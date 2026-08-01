@@ -15,10 +15,24 @@ import {
   rememberLens,
   resolveEntryOpen,
   shouldOpenDocLens,
+  normalizeDoctypeKey,
 } from "../src/lens-prefs.js";
 import {
   applySaveToShelved,
+  draftableDoctypeKeys,
+  reconcileShelvedWithOpenDoc,
+  draftShelfLabel,
 } from "../src/shelved-drafts.js";
+import {
+  appendCalcHistory,
+  pruneCalcHistory,
+  makeCalcHistoryEntry,
+  findCalcHistoryEntry,
+  formatCalcCopyTable,
+  formatCalcCopyTotal,
+  calcSourceLabel,
+  markCalcHistoryPriorSession,
+} from "../src/calc/session-history.js";
 import {
   classifyHostClass,
   formatDiagnoseLines,
@@ -62,7 +76,7 @@ import {
   profileByDoctypeKey,
   profileByLayoutKey,
 } from "../src/doc-skin-registry.js";
-import { DOC_FORM_BRIDGE_VERSION } from "../src/erp-form-bridge.js";
+import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import {
   BILL_FIND_TIMEOUT_MS,
   BILL_PRINT_TIMEOUT_MS,
@@ -89,7 +103,7 @@ const APP_VERSION = PKG.version || "0.0.0";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ERP_BASE = resolveErpBase(process.env);
 const OFF = { x: -20000, y: 0, width: 10, height: 10 };
-const HISTORY_WIDTH = 160;
+const HISTORY_WIDTH = 176;
 const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
   path.join(__dirname, "erp-form-bridge-page.js"),
   "utf8",
@@ -123,6 +137,8 @@ let history = [];
 let lensPrefs = {};
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
 let shelvedDrafts = [];
+/** @type {import("../src/calc/session-history.js").CalcHistoryEntry[]} */
+let calcHistory = [];
 /** Avoid re-entrancy when Vanilla→Doc hijack loads the same URL under Doc skin. */
 let lensHijackLock = false;
 /** @type {{ status: string, code: number|null, latencyMs: number|null, lastOkAt: string|null, internetOk: boolean|null }} */
@@ -181,8 +197,13 @@ function loadPrefs() {
   try {
     const nav = JSON.parse(fs.readFileSync(navStatePath(), "utf8")) || {};
     shelvedDrafts = Array.isArray(nav.shelved) ? nav.shelved : [];
+    // Persisted rows survive restart — mark so the flyout can say "Previous session".
+    calcHistory = markCalcHistoryPriorSession(
+      pruneCalcHistory(Array.isArray(nav.calcHistory) ? nav.calcHistory : []),
+    );
   } catch {
     shelvedDrafts = [];
+    calcHistory = [];
   }
 }
 function savePrefs() {
@@ -196,17 +217,106 @@ function saveNavState() {
   try {
     fs.writeFileSync(
       navStatePath(),
-      JSON.stringify({ shelved: shelvedDrafts }, null, 0),
+      JSON.stringify({ shelved: shelvedDrafts, calcHistory }, null, 0),
     );
   } catch {
     /* ignore */
   }
 }
 
+function noteCalcHistoryAppend(raw) {
+  const payload = raw && typeof raw === "object" ? { ...raw } : {};
+  if (!payload.sourceLabel) {
+    payload.sourceLabel = calcSourceLabel(payload.doctypeKey);
+  }
+  const entry = makeCalcHistoryEntry(payload);
+  if (!entry) return;
+  calcHistory = appendCalcHistory(calcHistory, entry);
+  saveNavState();
+  sendHistory();
+}
+
 function noteShelvedFromSave(doctypeKey, doc) {
   shelvedDrafts = applySaveToShelved(shelvedDrafts, doctypeKey, doc);
   saveNavState();
   sendHistory();
+  // Unmute Recent form row once this draft is on the shelf (or drop mute if submitted).
+  if (doc && doc.name && currentRoute) {
+    const info = routeInfo(currentRoute, ERP_BASE);
+    if (
+      info.doctype === normalizeDoctypeKey(doctypeKey) &&
+      info.record &&
+      String(info.record) === String(doc.name).trim()
+    ) {
+      bumpFormHistoryFromDoc(currentRoute, doctypeKey, doc);
+    }
+  }
+}
+
+/** Drop submitted / refresh already-shelved draft when a form is opened (OI-060). */
+function noteShelvedFromOpen(doctypeKey, doc) {
+  const next = reconcileShelvedWithOpenDoc(shelvedDrafts, doctypeKey, doc);
+  const unchanged =
+    next.length === shelvedDrafts.length &&
+    next.every(
+      (e, i) =>
+        e.name === shelvedDrafts[i].name &&
+        e.doctypeKey === shelvedDrafts[i].doctypeKey &&
+        e.label === shelvedDrafts[i].label &&
+        e.shelvedAt === shelvedDrafts[i].shelvedAt,
+    );
+  if (unchanged) return;
+  shelvedDrafts = next;
+  saveNavState();
+  sendHistory();
+}
+
+function shelveKeyFromDoc(doc) {
+  if (!doc) return "";
+  return normalizeDoctypeKey(doctypeKeyFromErpDoctype(doc.doctype));
+}
+
+/**
+ * Vanilla Save/Submit fires a document "save" event the bridge records.
+ * Also peek cur_frm so submitted docs leave Drafts even if the save hook missed.
+ */
+async function drainErpSaveIntoShelved() {
+  if (!erp || erp.webContents.isDestroyed()) return;
+  await ensureErpFormBridge();
+  const raw = await erpEval(
+    `(function(){
+      try {
+        if (!window.__docFormBridge) return { ok: false };
+        var saved =
+          typeof window.__docFormBridge.takeLastSavedDoc === "function"
+            ? window.__docFormBridge.takeLastSavedDoc()
+            : { ok: false };
+        var peek =
+          typeof window.__docFormBridge.peekShelveDoc === "function"
+            ? window.__docFormBridge.peekShelveDoc()
+            : { ok: false };
+        return { ok: true, saved: saved, peek: peek };
+      } catch (e) {
+        return { ok: false };
+      }
+    })()`,
+  );
+  if (!raw || !raw.ok) return;
+
+  if (raw.saved && raw.saved.ok && raw.saved.doc) {
+    const key = shelveKeyFromDoc(raw.saved.doc);
+    if (key && draftableDoctypeKeys().includes(key)) {
+      noteShelvedFromSave(key, raw.saved.doc);
+    }
+  }
+
+  if (raw.peek && raw.peek.ok && raw.peek.doc && Number(raw.peek.doc.docstatus) !== 0) {
+    const key = shelveKeyFromDoc(raw.peek.doc);
+    if (!key || !draftableDoctypeKeys().includes(key)) return;
+    const name = String(raw.peek.doc.name || "").trim();
+    if (!shelvedDrafts.some((e) => e.doctypeKey === key && e.name === name)) return;
+    noteShelvedFromSave(key, raw.peek.doc);
+  }
 }
 
 function showingHome() {
@@ -325,12 +435,15 @@ function sendUiState() {
 }
 
 function sendHistory() {
+  calcHistory = pruneCalcHistory(calcHistory);
   if (hist && !hist.webContents.isDestroyed()) {
     hist.webContents.send("history", {
       items: history,
       shelved: shelvedDrafts,
+      calcHistory,
     });
   }
+  pushCalcHistoryDropdown();
 }
 
 function pushBillSnapshot(snap) {
@@ -419,7 +532,6 @@ function maybeHijackErpToDoc(url) {
 
 function trackNav(url) {
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return;
-  if (maybeHijackErpToDoc(url)) return;
   const info = routeInfo(url, ERP_BASE);
   const next = info.path || currentRoute;
   const changed = next !== currentRoute;
@@ -429,17 +541,27 @@ function trackNav(url) {
     labels: DOCTYPE_LABELS,
   });
   sendHistory();
+  // Hijack after Recent update so Vanilla→Doc nav still moves the flyout.
+  if (maybeHijackErpToDoc(url)) {
+    syncE2eApi();
+    return;
+  }
   if (surfaceMode === "erp" && changed) sendUiState();
   syncE2eApi();
 }
 
 function pollErpRoute() {
+  if (!erp || erp.webContents.isDestroyed()) return;
   // URL sync for chrome/history when on Vanilla — not a DB poll.
-  if (surfaceMode !== "erp" || !erp || erp.webContents.isDestroyed()) return;
-  const url = erp.webContents.getURL();
-  if (!url || url === lastPolledErpUrl) return;
-  lastPolledErpUrl = url;
-  trackNav(url);
+  if (surfaceMode === "erp") {
+    const url = erp.webContents.getURL();
+    if (url && url !== lastPolledErpUrl) {
+      lastPolledErpUrl = url;
+      trackNav(url);
+    }
+  }
+  // Submit often keeps the same form URL — still drain shelf updates.
+  drainErpSaveIntoShelved().catch(() => {});
 }
 
 async function erpEval(js) {
@@ -793,10 +915,46 @@ function loadErpUrl(url) {
   });
 }
 
-function bumpBillHistory(routePath) {
+function bumpBillHistory(routePath, opts = {}) {
   history = pushHistory(history, routePath, {
     erpBase: ERP_BASE,
     labels: DOCTYPE_LABELS,
+    detail: opts.detail,
+    detailMuted: !!opts.detailMuted,
+    labelOverride: opts.labelOverride,
+  });
+  sendHistory();
+}
+
+function isNameOnShelvedDrafts(doctypeKey, name) {
+  const key = normalizeDoctypeKey(doctypeKey);
+  const n = name != null ? String(name).trim() : "";
+  if (!key || !n) return false;
+  return shelvedDrafts.some((e) => e.doctypeKey === key && e.name === n);
+}
+
+/**
+ * Recent form row: primary label stays "Bill" (etc.); draft identity is a suffix.
+ * Viewed-only (not on Drafts shelf) → suffix de-emphasized.
+ * @param {string} routePath
+ * @param {string} doctypeKey
+ * @param {object|null|undefined} doc
+ */
+function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
+  const name = doc && doc.name != null ? String(doc.name).trim() : "";
+  const isDraft = doc && Number(doc.docstatus) === 0 && name && !/^new/i.test(name);
+  const viewedOnly = !!(isDraft && !isNameOnShelvedDrafts(doctypeKey, name));
+  let detail = "";
+  if (isDraft && draftableDoctypeKeys().includes(normalizeDoctypeKey(doctypeKey))) {
+    detail = draftShelfLabel(doctypeKey, doc) || name;
+  } else if (name && !/^new/i.test(name)) {
+    detail = name;
+  }
+  history = pushHistory(history, routePath, {
+    erpBase: ERP_BASE,
+    labels: DOCTYPE_LABELS,
+    detail,
+    detailMuted: viewedOnly,
   });
   sendHistory();
 }
@@ -822,6 +980,89 @@ function place() {
 
 /** @type {BrowserWindow|null} */
 let diagnoseWin = null;
+/** @type {import("electron").BrowserWindow|null} */
+let calcHistoryWin = null;
+
+/**
+ * Click-away for frameless popovers.
+ * Child windows with `parent:` often keep focus (or skip blur) on the first
+ * click into a parent WebContentsView — especially Linux/WSL. Dismiss when any
+ * shell surface gains focus, not only on popover blur.
+ *
+ * @param {import("electron").BrowserWindow} popover
+ * @param {() => void} closeFn
+ */
+function bindTransientPopoverDismiss(popover, closeFn) {
+  const openedAt = Date.now();
+  /** @type {Array<[Electron.WebContents, () => void]>} */
+  const wcPairs = [];
+  let closing = false;
+
+  const shouldIgnore = () => Date.now() - openedAt < 250;
+
+  const dismiss = () => {
+    if (closing) return;
+    if (!popover || popover.isDestroyed()) return;
+    if (shouldIgnore()) return;
+    closing = true;
+    closeFn();
+  };
+
+  // Internal blur (rare): only if focus truly left the popover.
+  const onBlur = () => {
+    setTimeout(() => {
+      if (closing || !popover || popover.isDestroyed()) return;
+      if (shouldIgnore()) return;
+      if (popover.isFocused()) return;
+      dismiss();
+    }, 40);
+  };
+
+  // Click into Bill / hist / chrome / etc. — always dismiss (do not trust isFocused).
+  const onShellFocus = () => {
+    setTimeout(() => {
+      if (closing || !popover || popover.isDestroyed()) return;
+      if (shouldIgnore()) return;
+      dismiss();
+    }, 0);
+  };
+
+  popover.on("blur", onBlur);
+  if (win && !win.isDestroyed()) {
+    win.on("focus", onShellFocus);
+  }
+
+  for (const view of [chrome, hist, home, bill, docForm, erp]) {
+    if (!view || !view.webContents || view.webContents.isDestroyed()) continue;
+    const fn = () => onShellFocus();
+    view.webContents.on("focus", fn);
+    wcPairs.push([view.webContents, fn]);
+  }
+
+  const cleanup = () => {
+    try {
+      popover.removeListener("blur", onBlur);
+    } catch {
+      /* ignore */
+    }
+    if (win && !win.isDestroyed()) {
+      try {
+        win.removeListener("focus", onShellFocus);
+      } catch {
+        /* ignore */
+      }
+    }
+    for (const [wc, fn] of wcPairs) {
+      try {
+        if (!wc.isDestroyed()) wc.removeListener("focus", fn);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  popover.on("closed", cleanup);
+}
 
 function closeDiagnoseDropdown() {
   if (diagnoseWin && !diagnoseWin.isDestroyed()) {
@@ -833,6 +1074,89 @@ function closeDiagnoseDropdown() {
   }
   diagnoseWin = null;
   sendUiState();
+}
+
+function closeCalcHistoryDropdown() {
+  if (calcHistoryWin && !calcHistoryWin.isDestroyed()) {
+    try {
+      calcHistoryWin.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  calcHistoryWin = null;
+}
+
+function calcHistoryPayload() {
+  calcHistory = pruneCalcHistory(calcHistory);
+  return { calcHistory: calcHistory.map((e) => ({ ...e })) };
+}
+
+function pushCalcHistoryDropdown() {
+  if (calcHistoryWin && !calcHistoryWin.isDestroyed()) {
+    calcHistoryWin.webContents.send("calc-history-data", calcHistoryPayload());
+  }
+}
+
+/**
+ * Frameless panel to the right of the left rail (diagnose-style).
+ * @param {{ x?: number, y?: number, width?: number, height?: number }} [anchor] button rect in hist view coords
+ */
+function openCalcHistoryDropdown(anchor = {}) {
+  if (!win || win.isDestroyed()) return;
+  if (calcHistoryWin && !calcHistoryWin.isDestroyed()) {
+    pushCalcHistoryDropdown();
+    calcHistoryWin.focus();
+    return;
+  }
+
+  const panelW = 340;
+  const panelH = 460;
+  calcHistoryWin = new BrowserWindow({
+    parent: win,
+    modal: false,
+    frame: false,
+    show: false,
+    width: panelW,
+    height: panelH,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+    backgroundColor: "#1a252f",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "calc-history-preload.cjs"),
+    },
+  });
+
+  const cb = win.getContentBounds();
+  const histBounds = hist && !hist.webContents.isDestroyed() ? hist.getBounds() : { x: 0, y: TAB_BAR_HEIGHT, width: HISTORY_WIDTH, height: 400 };
+  const ax = Number(anchor.x);
+  const ay = Number(anchor.y);
+  let x = Math.round(cb.x + histBounds.x + (Number.isFinite(ax) ? ax : histBounds.width) + 4);
+  let y = Math.round(cb.y + histBounds.y + (Number.isFinite(ay) ? ay : 8));
+  if (x + panelW > cb.x + cb.width - 8) x = Math.round(cb.x + cb.width - panelW - 8);
+  if (y + panelH > cb.y + cb.height - 8) y = Math.round(cb.y + cb.height - panelH - 8);
+  if (x < cb.x + 8) x = cb.x + 8;
+  if (y < cb.y + 8) y = cb.y + 8;
+  calcHistoryWin.setPosition(Math.max(0, x), Math.max(0, y));
+
+  calcHistoryWin.loadFile(path.join(__dirname, "calc-history-dropdown.html"));
+  calcHistoryWin.once("ready-to-show", () => {
+    if (!calcHistoryWin || calcHistoryWin.isDestroyed()) return;
+    calcHistoryWin.webContents.send("calc-history-data", calcHistoryPayload());
+    calcHistoryWin.show();
+    calcHistoryWin.focus();
+  });
+  bindTransientPopoverDismiss(calcHistoryWin, closeCalcHistoryDropdown);
+  calcHistoryWin.on("closed", () => {
+    calcHistoryWin = null;
+  });
 }
 
 function openDiagnoseDropdown() {
@@ -875,16 +1199,10 @@ function openDiagnoseDropdown() {
     if (!diagnoseWin || diagnoseWin.isDestroyed()) return;
     diagnoseWin.webContents.send("diagnose-data", snap);
     diagnoseWin.show();
+    diagnoseWin.focus();
     sendUiState();
   });
-  diagnoseWin.on("blur", () => {
-    // Small delay so Copy/Close clicks inside the dropdown still register.
-    setTimeout(() => {
-      if (diagnoseWin && !diagnoseWin.isDestroyed() && !diagnoseWin.isFocused()) {
-        closeDiagnoseDropdown();
-      }
-    }, 150);
-  });
+  bindTransientPopoverDismiss(diagnoseWin, closeDiagnoseDropdown);
   diagnoseWin.on("closed", () => {
     diagnoseWin = null;
     sendUiState();
@@ -1069,6 +1387,8 @@ async function showBill(route, opts = {}) {
       }
       sendUiState();
       if (dirtyState.doc) {
+        noteShelvedFromOpen("purchase-invoice", dirtyState.doc);
+        bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
         pushBillSnapshot({
           ok: true,
           doc: dirtyState.doc,
@@ -1145,6 +1465,8 @@ async function showBill(route, opts = {}) {
       );
       // Amount Due stays blank until the user types (checksum idle / grey).
       amountDueCommitted = amountDueScratch;
+      noteShelvedFromOpen("purchase-invoice", snap.doc);
+      bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", snap.doc);
       try {
         if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
       } catch {
@@ -1309,6 +1631,11 @@ async function showDocForm(skinId, route, opts = {}) {
       }
       sendUiState();
       if (dirtyState.doc) {
+        const earlyProfile = DOC_SKIN_PROFILES[skinId];
+        if (earlyProfile) {
+          noteShelvedFromOpen(earlyProfile.doctypeKey, dirtyState.doc);
+          bumpFormHistoryFromDoc(currentRoute, earlyProfile.doctypeKey, dirtyState.doc);
+        }
         pushDocFormSnapshot({
           ok: true,
           doc: dirtyState.doc,
@@ -1384,6 +1711,8 @@ async function showDocForm(skinId, route, opts = {}) {
           }
         }
       }
+      noteShelvedFromOpen(profile.doctypeKey, snap.doc);
+      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, snap.doc);
       try {
         if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
       } catch {
@@ -1448,8 +1777,8 @@ async function saveBillFromErp(opts = {}) {
   if (!amountDueMatchesGrandTotal(amountDueScratch, billCompareTotal(dirtyState.doc))) {
     return { ok: false, reason: "Amount Due checksum failed (must match Grand total)." };
   }
-  // Bridge saveDoc always settles (preflight + savedocs). Bare f.save() hangs 45s when
-  // Vanilla finds mandatory gaps (msgprint, no callback).
+  // Bridge saveDoc always settles (preflight + short inner deadline + scraped Vanilla msgs).
+  // Outer race is a backstop if executeJavaScript itself hangs.
   const raw = await raceTimeout(
     bridgeCall("saveDoc", submit ? "Submit" : "Save"),
     BILL_SAVE_TIMEOUT_MS,
@@ -1799,11 +2128,41 @@ ipcMain.handle("copy-diagnose", () => {
   return { ok: true };
 });
 
+ipcMain.on("calc-history-append", (_e, raw) => {
+  noteCalcHistoryAppend(raw);
+});
+
+ipcMain.handle("calc-history-list", () => {
+  calcHistory = pruneCalcHistory(calcHistory);
+  return calcHistory.map((e) => ({ ...e }));
+});
+
+ipcMain.handle("calc-history-copy", (_e, id, mode) => {
+  calcHistory = pruneCalcHistory(calcHistory);
+  const entry = findCalcHistoryEntry(calcHistory, id);
+  if (!entry) return { ok: false, reason: "Not found" };
+  const text =
+    mode === "total" ? formatCalcCopyTotal(entry) : formatCalcCopyTable(entry);
+  if (!text) return { ok: false, reason: "Empty" };
+  clipboard.writeText(text);
+  return { ok: true, text };
+});
+
 ipcMain.on("open-diagnose", () => openDiagnoseDropdown());
 ipcMain.on("diagnose-dropdown-close", () => closeDiagnoseDropdown());
 ipcMain.on("diagnose-dropdown-ready", (e) => {
   if (diagnoseWin && !diagnoseWin.isDestroyed() && e.sender === diagnoseWin.webContents) {
     e.sender.send("diagnose-data", diagnoseSnapshot());
+  }
+});
+
+ipcMain.on("open-calc-history", (_e, anchor) => {
+  openCalcHistoryDropdown(anchor && typeof anchor === "object" ? anchor : {});
+});
+ipcMain.on("calc-history-dropdown-close", () => closeCalcHistoryDropdown());
+ipcMain.on("calc-history-dropdown-ready", (e) => {
+  if (calcHistoryWin && !calcHistoryWin.isDestroyed() && e.sender === calcHistoryWin.webContents) {
+    e.sender.send("calc-history-data", calcHistoryPayload());
   }
 });
 
