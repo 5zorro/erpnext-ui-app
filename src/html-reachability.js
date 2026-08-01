@@ -6,8 +6,9 @@
 /** Shell / flyout HTML that is not a Home tile destination. */
 export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "chrome.html": "Top chrome shell (always loaded with the window)",
-  "history.html": "Recent / Drafts flyout (chrome button)",
+  "history.html": "Recent / Drafts flyout (left rail)",
   "diagnose-dropdown.html": "Diagnose popover (chrome ERP health)",
+  "calc-history-dropdown.html": "Calculator history popover (left-rail Calculator button)",
 });
 
 /**

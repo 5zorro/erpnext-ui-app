@@ -160,6 +160,73 @@
     .money-amt { display: block; text-align: right; }
     input.money-cost { text-align: right; }
     .ro.money-cost { display: block; text-align: right; }
+    #calc-overlay {
+      position: fixed; z-index: 40;
+      display: flex; flex-direction: column;
+      box-sizing: border-box;
+      background: #1e293b; color: #e2e8f0; border-radius: 8px;
+      padding: 6px 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .35);
+      font-variant-numeric: tabular-nums;
+      pointer-events: auto;
+      opacity: 0.62;
+      transition: opacity 120ms ease;
+    }
+    #calc-overlay:hover,
+    #calc-overlay.calc-expanded { opacity: 1; }
+    #calc-overlay[hidden] { display: none !important; }
+    #calc-overlay .calc-history {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      margin: 0 0 6px; padding: 0 0 6px; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-history[hidden] { display: none !important; }
+    #calc-overlay .calc-live { flex: 0 0 auto; }
+    #calc-overlay .calc-expr {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; color: #94a3b8; letter-spacing: .02em;
+      white-space: pre; text-align: right; line-height: 1.35;
+    }
+    #calc-overlay .calc-result {
+      margin-top: 4px; padding-top: 4px; border-top: 1px solid #334155;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px; font-weight: 700; letter-spacing: .02em; text-align: right;
+    }
+    #calc-overlay .calc-hint { margin-top: 4px; font-size: 9px; color: #64748b; line-height: 1.3; }
+    #calc-overlay .calc-hist-empty {
+      font-size: 10px; color: #64748b; padding: 4px 0; line-height: 1.35; text-align: right;
+    }
+    #calc-overlay .calc-hist-block {
+      padding: 6px 0; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-hist-block:last-child { border-bottom: none; }
+    #calc-overlay .calc-hist-block.prior-session { opacity: 0.85; }
+    #calc-overlay .calc-hist-tape {
+      margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px; white-space: pre; text-align: right; color: #94a3b8; line-height: 1.3;
+    }
+    #calc-overlay .calc-hist-total {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; font-weight: 700; text-align: right; color: #e2e8f0; margin: 2px 0 4px;
+    }
+    #calc-overlay .calc-hist-actions {
+      display: flex; justify-content: flex-end; gap: 4px;
+    }
+    #calc-overlay .calc-hist-copy {
+      border: none; border-radius: 4px; padding: 2px 5px; font-size: 12px; line-height: 1.2;
+      cursor: pointer; background: #334155; color: #e2e8f0;
+    }
+    #calc-overlay .calc-hist-copy:hover { background: #475569; }
+    #calc-overlay .calc-ico {
+      display: inline-flex; align-items: center; gap: 2px; vertical-align: middle;
+    }
+    #calc-overlay .calc-ico svg { display: block; }
+    button.amount-back-in {
+      display: block; width: 100%; border: none; background: transparent;
+      padding: 5px 2px; margin: 0; text-align: right; cursor: pointer;
+      font: inherit; color: #64748b;
+    }
+    button.amount-back-in:hover { color: #1e293b; background: #f1f5f9; border-radius: 4px; }
+    button.amount-back-in:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+    td.num input.amount-back-in-input { text-align: right; }
     .line-tabs {
       display: flex; gap: 0; margin-top: 4px; border-bottom: 1px solid #e2e8f0;
     }
@@ -406,6 +473,14 @@
         </div>
         <p class="hint" id="doc-hint"></p>
       </div>
+    </div>
+  </div>
+  <div id="calc-overlay" hidden data-testid="doc-calc-overlay" role="status" aria-live="polite">
+    <div class="calc-history" id="calc-history" hidden data-testid="doc-calc-history"></div>
+    <div class="calc-live">
+      <div class="calc-expr" id="calc-expr"></div>
+      <div class="calc-result" id="calc-result"></div>
+      <div class="calc-hint">Hover tape for session history · Enter / Tab commit · Esc cancel</div>
     </div>
   </div>
   <script type="module" src="../src/doc-form-page.js"></script>

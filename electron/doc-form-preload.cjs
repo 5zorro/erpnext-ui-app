@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld("erpDoc", {
   openVanilla: () => ipcRenderer.send("doc-open-vanilla"),
   openVendorAdd: () => ipcRenderer.send("doc-open-vendor-add"),
   focusSurface: () => ipcRenderer.send("doc-focus-surface"),
+  appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
+  getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
+  copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
   onSnapshot: (cb) => {
     const handler = (_e, snap) => cb(snap);
     ipcRenderer.on("doc-snapshot", handler);
