@@ -53,7 +53,9 @@ export function nextAfterGate(trigger, choice) {
   return { then: trigger.kind === "nav" ? "proceed-nav" : "run-action" };
 }
 
-export const BILL_SAVE_TIMEOUT_MS = 45_000;
+export const BILL_SAVE_TIMEOUT_MS = 18_000;
+/** Inner bridge deadline — must be ≤ {@link BILL_SAVE_TIMEOUT_MS}. */
+export const BILL_SAVE_BRIDGE_TIMEOUT_MS = 12_000;
 export const BILL_FIND_TIMEOUT_MS = 20_000;
 export const BILL_PRINT_TIMEOUT_MS = 25_000;
 
@@ -147,10 +149,13 @@ export function commitGateErpFailureView(reason) {
     reason && String(reason).trim()
       ? String(reason).trim()
       : "ERPNext rejected the save (no detail returned).";
+  const timedOut = /timed out/i.test(text);
   return {
-    title: "ERPNext rejected the save:",
+    title: timedOut ? "Save did not finish:" : "ERPNext rejected the save:",
     blockers: [text],
-    hint: "Cancel to return to the Bill and fix what Vanilla reported, or Discard / try again.",
+    hint: timedOut
+      ? "Cancel, open Vanilla to see the live error/freeze, fix or reload, then try again."
+      : "Cancel to return to the Bill and fix what Vanilla reported, or Discard / try again.",
     blocked: true,
   };
 }
@@ -334,13 +339,42 @@ export function normalizePrintIpcResult(raw) {
 /**
  * Shape a timed-out bridge call.
  * @param {string} what
+ * @param {{ detail?: string, suggestVanilla?: boolean }} [opts]
  */
-export function timeoutFailure(what) {
+export function timeoutFailure(what, opts = {}) {
+  const detail = opts.detail && String(opts.detail).trim();
+  const suggest =
+    opts.suggestVanilla !== false
+      ? " Open Vanilla (toolbar) to read the freeze/dialog, then reload this Bill."
+      : "";
+  const mid = detail ? ` ${detail}` : " check Vanilla validations or reload the Bill.";
   return {
     ok: false,
     timedOut: true,
-    reason: `${what} timed out — check Vanilla validations or reload the Bill.`,
+    reason: `${what} timed out —${mid}${suggest}`.replace(/\s+/g, " ").trim(),
+    blockers: detail ? [detail] : undefined,
   };
+}
+
+/**
+ * Prefer a concrete ERP/Vanilla reason over a generic timeout string.
+ * @param {{ ok?: boolean, timedOut?: boolean, reason?: string, blockers?: string[], preflight?: boolean }|null|undefined} raw
+ * @param {string} [fallbackWhat]
+ */
+export function formatSaveFailureReason(raw, fallbackWhat = "Save") {
+  if (!raw || typeof raw !== "object") {
+    return `${fallbackWhat} failed — no response from Vanilla.`;
+  }
+  if (Array.isArray(raw.blockers) && raw.blockers.length) {
+    return raw.blockers.filter(Boolean).join(" · ");
+  }
+  if (raw.reason && String(raw.reason).trim()) {
+    return String(raw.reason).trim();
+  }
+  if (raw.timedOut) {
+    return timeoutFailure(fallbackWhat).reason;
+  }
+  return `${fallbackWhat} failed — check Vanilla validations.`;
 }
 
 /**

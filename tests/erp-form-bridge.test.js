@@ -11,6 +11,9 @@ import {
   isMandatoryValuePresent,
   listMandatoryBlockersFromSnap,
   mergeSaveBlockers,
+  shouldResetPostingDateToToday,
+  postingDateYmd,
+  doctypeKeyFromErpDoctype,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {
@@ -59,7 +62,44 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 7);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 10);
+  });
+});
+
+describe("posting-date reset (Vanilla confirm yes-path)", () => {
+  it("parses YYYY-MM-DD from posting_date", () => {
+    assert.equal(postingDateYmd("2026-07-15"), "2026-07-15");
+    assert.equal(postingDateYmd("2026-07-15 12:00:00"), "2026-07-15");
+    assert.equal(postingDateYmd(""), "");
+  });
+
+  it("resets when Edit Posting Date is unchecked and date ≠ today", () => {
+    assert.equal(
+      shouldResetPostingDateToToday(
+        { posting_date: "2026-07-15", set_posting_time: 0 },
+        "2026-08-01",
+      ),
+      true,
+    );
+    assert.equal(
+      shouldResetPostingDateToToday(
+        { posting_date: "2026-08-01", set_posting_time: 0 },
+        "2026-08-01",
+      ),
+      false,
+    );
+    assert.equal(
+      shouldResetPostingDateToToday(
+        { posting_date: "2026-07-15", set_posting_time: 1 },
+        "2026-08-01",
+      ),
+      false,
+    );
+  });
+
+  it("maps ERP doctype titles to shelf keys", () => {
+    assert.equal(doctypeKeyFromErpDoctype("Purchase Invoice"), "purchase-invoice");
+    assert.equal(doctypeKeyFromErpDoctype("Purchase Order"), "purchase-order");
   });
 });
 
@@ -115,7 +155,15 @@ describe("erp-form-bridge-page save settle contract", () => {
     );
     assert.match(page, /listMandatoryMissing:\s*listMandatoryMissing/);
     assert.match(page, /saveDoc:\s*saveDoc/);
-    assert.match(page, /var VERSION = 7/);
+    assert.match(page, /takeLastSavedDoc:\s*takeLastSavedDoc/);
+    assert.match(page, /peekShelveDoc:\s*peekShelveDoc/);
+    assert.match(page, /pickShelveDoc/);
+    assert.match(page, /alignPostingDateLikeVanillaOk/);
+    assert.match(page, /withAutoAcceptConfirm/);
+    assert.match(page, /isPostingDateConfirmMsg/);
+    assert.match(page, /var VERSION = 10/);
+    assert.match(page, /SAVE_CALL_TIMEOUT_MS\s*=\s*12000/);
+    assert.match(page, /collectVisibleVanillaErrors/);
     assert.match(page, /description:\s*true/);
     assert.match(page, /frappe\.desk\.form\.save\.savedocs/);
   });
