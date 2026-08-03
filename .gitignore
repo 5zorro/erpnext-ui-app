@@ -31,6 +31,10 @@ Thumbs.db
 localhost.har
 .git-replace-5zorro.txt
 
+# Python bytecode from ops seed helpers
+**/__pycache__/
+*.py[cod]
+
 # Local print / PDF dogfood artifacts
 *.pdf
 output.pdf
