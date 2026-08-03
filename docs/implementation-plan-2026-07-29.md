@@ -328,7 +328,7 @@ flowchart LR
 | Slice | Intent | Exit |
 |-------|--------|------|
 | **S−1** | Sample-data seed (dev/demo) | **Applied 2026-08-01** on HECSANDBOX — 25× Q/SO/SI/PO/PR/PI (`ui-app-sample-v1`). Re-run: `CONFIRM_SAMPLE_SEED=1 npm run seed:sample [-- --reset]`. Dogfood pickers + from-nothing vs from-source. |
-| **S0** | Input-count unit tests + fixtures | **Bill anchor landed 2026-08-01** — scraper + curated Doc inventory + Vanilla fixture; CI asserts completeness + \(N_v > N_d\). Extend to PO/IR later. |
+| **S0** | Input-count unit tests + fixtures | **Bill anchor landed 2026-08-01** — scraper + curated Doc inventory + Vanilla fixture; CI asserts completeness + \(N_v > N_d\). Advertising bar segments (blank / sourced / required mode / minimal Save) in `input-count.js` — **Vanilla · Doc · Simplified only** (no competitor bars). Extend to PO/IR later. |
 | **S1** | Simplified tab + prefs | Pref lands Simplified |
 | **S2** | Chosen mockup path on PI/Bill + Doc affordances | Save = ERP truth; \(N_s \approx N_d\); pickers/focus/validations dogfood green |
 | **S3** | Expand config toward \(N_s' \approx N_v\) | No rewrite to grow |
