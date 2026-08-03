@@ -53,6 +53,8 @@ flowchart LR
 | Path | Role |
 |------|------|
 | `src/*.js` | SSoT for each concern’s **logic** (health, history, route-info, nav-guard, config, money, …) |
+| `src/sample-data/` | Pure sample corpus plan + sandbox guard (OI-055 / S−1) |
+| `ops/sample-data/` | Sandbox-only bench seed runner (`npm run seed:sample`) |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
