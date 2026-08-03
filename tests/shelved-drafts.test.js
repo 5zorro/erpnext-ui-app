@@ -13,6 +13,9 @@ import {
   removeShelvedDraft,
   applySaveToShelved,
   splitShelvedDrafts,
+  pickShelveDocFields,
+  reconcileShelvedWithOpenDoc,
+  recentDraftDetailForHistory,
 } from "../src/shelved-drafts.js";
 
 describe("draftableDoctypeKeys completeness", () => {
@@ -58,6 +61,28 @@ describe("draftShelfLabel", () => {
       items: [{ purchase_order: "PO-1" }],
     });
     assert.equal(label, "BOL-9; PO-1; 7/20/2026");
+  });
+});
+
+describe("recentDraftDetailForHistory", () => {
+  it("viewed-only draft keeps muted identity on Recent", () => {
+    const r = recentDraftDetailForHistory({
+      isDraft: true,
+      onShelf: false,
+      shelfLabel: "INV I1; 7/21/2026",
+    });
+    assert.equal(r.detail, "INV I1; 7/21/2026");
+    assert.equal(r.detailMuted, true);
+  });
+
+  it("shelved (edited) draft leaves Recent label-only", () => {
+    const r = recentDraftDetailForHistory({
+      isDraft: true,
+      onShelf: true,
+      shelfLabel: "INV I1; 7/21/2026",
+    });
+    assert.equal(r.detail, "");
+    assert.equal(r.detailMuted, false);
   });
 });
 
@@ -126,6 +151,44 @@ describe("shelved push / split / applySave", () => {
     assert.equal(list.length, 1);
     assert.equal(list[0].route, "/app/purchase-invoice/ACC-1");
     list = applySaveToShelved(list, "purchase-invoice", { ...draft, docstatus: 1 });
+    assert.equal(list.length, 0);
+  });
+
+  it("pickShelveDocFields strips to plain shelf fields", () => {
+    const plain = pickShelveDocFields({
+      name: "ACC-1",
+      doctype: "Purchase Invoice",
+      docstatus: 1,
+      posting_date: "2026-07-21",
+      bill_no: "R1",
+      items: [{ purchase_order: "PO-1", item_code: "X", __circular: null }],
+      __unsaved: 1,
+    });
+    assert.equal(plain.name, "ACC-1");
+    assert.equal(plain.docstatus, 1);
+    assert.deepEqual(plain.items, [{ purchase_order: "PO-1" }]);
+    assert.equal(plain.__unsaved, undefined);
+  });
+
+  it("reconcileShelvedWithOpenDoc drops submitted; refreshes shelved drafts only", () => {
+    const draft = {
+      name: "ACC-1",
+      docstatus: 0,
+      bill_no: "R1",
+      posting_date: "2026-07-21",
+      items: [],
+    };
+    let list = applySaveToShelved([], "purchase-invoice", draft, { now: "t0" });
+    list = reconcileShelvedWithOpenDoc(list, "purchase-invoice", {
+      ...draft,
+      bill_no: "R2",
+    }, { now: "t1" });
+    assert.equal(list.length, 1);
+    assert.match(list[0].label, /R2/);
+    list = reconcileShelvedWithOpenDoc(list, "purchase-invoice", { ...draft, docstatus: 1 });
+    assert.equal(list.length, 0);
+    // Mere open of an unshelved draft does not invent a shelf row.
+    list = reconcileShelvedWithOpenDoc([], "purchase-invoice", draft);
     assert.equal(list.length, 0);
   });
 

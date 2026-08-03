@@ -22,6 +22,7 @@ import {
   draftableDoctypeKeys,
   reconcileShelvedWithOpenDoc,
   draftShelfLabel,
+  recentDraftDetailForHistory,
 } from "../src/shelved-drafts.js";
 import {
   appendCalcHistory,
@@ -934,19 +935,29 @@ function isNameOnShelvedDrafts(doctypeKey, name) {
 }
 
 /**
- * Recent form row: primary label stays "Bill" (etc.); draft identity is a suffix.
- * Viewed-only (not on Drafts shelf) → suffix de-emphasized.
+ * Recent form row: primary label stays "Bill" (etc.).
+ * Viewed-only draft → muted identity suffix. Shelved draft → label only (Drafts has identity).
  * @param {string} routePath
  * @param {string} doctypeKey
  * @param {object|null|undefined} doc
  */
 function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
   const name = doc && doc.name != null ? String(doc.name).trim() : "";
-  const isDraft = doc && Number(doc.docstatus) === 0 && name && !/^new/i.test(name);
-  const viewedOnly = !!(isDraft && !isNameOnShelvedDrafts(doctypeKey, name));
+  const isDraft = !!(doc && Number(doc.docstatus) === 0 && name && !/^new/i.test(name));
+  const onShelf = !!(isDraft && isNameOnShelvedDrafts(doctypeKey, name));
+  const draftable = draftableDoctypeKeys().includes(normalizeDoctypeKey(doctypeKey));
+
   let detail = "";
-  if (isDraft && draftableDoctypeKeys().includes(normalizeDoctypeKey(doctypeKey))) {
-    detail = draftShelfLabel(doctypeKey, doc) || name;
+  let detailMuted = false;
+  if (isDraft && draftable) {
+    const recent = recentDraftDetailForHistory({
+      isDraft: true,
+      onShelf,
+      shelfLabel: draftShelfLabel(doctypeKey, doc),
+      fallbackName: name,
+    });
+    detail = recent.detail;
+    detailMuted = recent.detailMuted;
   } else if (name && !/^new/i.test(name)) {
     detail = name;
   }
@@ -954,7 +965,7 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
     erpBase: ERP_BASE,
     labels: DOCTYPE_LABELS,
     detail,
-    detailMuted: viewedOnly,
+    detailMuted,
   });
   sendHistory();
 }

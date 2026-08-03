@@ -23,6 +23,8 @@ describe("pushHistory", () => {
     assert.equal(h[0].slot, "purchase-invoice:list");
     assert.equal(h[0].route, "/app/purchase-invoice");
     assert.equal(h[1].label, "Bill");
+    assert.equal(h[1].detail, "ACC-1");
+    assert.equal(h[1].detailMuted, false);
     assert.equal(h[1].slot, "purchase-invoice:form");
     assert.equal(h[1].route, "/app/purchase-invoice/ACC-1");
   });
@@ -43,6 +45,18 @@ describe("pushHistory", () => {
       labels: { "purchase-invoice": "Bill" },
     });
     assert.equal(h[0].label, "Bill");
+    assert.equal(h[0].detail, "x");
+  });
+
+  it("keeps Bill full emphasis with muted viewed-draft detail", () => {
+    const h = pushHistory([], "/app/purchase-invoice/ACC-9", {
+      labels: { "purchase-invoice": "Bill" },
+      detail: "INV R1; 7/21/2026",
+      detailMuted: true,
+    });
+    assert.equal(h[0].label, "Bill");
+    assert.equal(h[0].detail, "INV R1; 7/21/2026");
+    assert.equal(h[0].detailMuted, true);
   });
 
   it("ignores routes without doctype", () => {
