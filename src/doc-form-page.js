@@ -61,6 +61,7 @@ import {
   commitGateProgressLabel,
   commitGateSuccessLabel,
   nextAfterGate,
+  formatSaveFailureReason,
 } from "./bill-action-flow.js";
 import {
   listDocFormSaveBlockers,
@@ -82,6 +83,10 @@ import {
   isNewBlankDocName,
   REFRESH_BUTTON_TITLE,
 } from "./doc-chrome.js";
+import { createFieldCalcUi } from "./calc/attach-field-calc.js";
+import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
+import { calcSourceLabel } from "./calc/session-history.js";
+import { addressTextareaRows } from "./address-format.js";
 
 const api = window.erpDoc;
 
@@ -108,6 +113,32 @@ let sourceModalOpen = false;
 const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
 let totalsLayout = { qtyIdx: 2, amtIdx: 4 };
+
+const calcUi = createFieldCalcUi({
+  overlay: document.getElementById("calc-overlay"),
+  exprEl: document.getElementById("calc-expr"),
+  resultEl: document.getElementById("calc-result"),
+  historyEl: document.getElementById("calc-history"),
+  getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
+  copyHistory: (id, mode) =>
+    api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
+});
+
+function publishCalcHistory(payload) {
+  if (!api || !api.appendCalcHistory || !payload) return;
+  const doctypeKey =
+    (ui && ui.doctypeKey) ||
+    (ui && ui.profileId === "po"
+      ? "purchase-order"
+      : ui && ui.profileId === "receipt"
+        ? "purchase-receipt"
+        : "");
+  api.appendCalcHistory({
+    ...payload,
+    doctypeKey,
+    sourceLabel: calcSourceLabel(doctypeKey),
+  });
+}
 
 const el = {
   status: document.getElementById("status"),
@@ -155,6 +186,7 @@ const el = {
   selectSource: document.getElementById("btn-select-source"),
   headerLeft: document.getElementById("header-left"),
   headerRight: document.getElementById("header-right"),
+  headerAddresses: document.getElementById("header-addresses"),
 };
 
 function mapHelpers() {
@@ -896,9 +928,13 @@ function paintItems(doc) {
         .map((col, ci) => {
           const val = r[ci] ?? "";
           if (col.displayOnly || col.field == null) {
-            const html = /amount|rec'd|received/i.test(col.label || "")
+            const isAmount = /^amount$/i.test(col.label || "");
+            const html = isAmount || /rec'd|received/i.test(col.label || "")
               ? formatUsdAmountHtml(val)
               : "";
+            if (isAmount && canEdit) {
+              return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Rate)" data-testid="doc-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
+            }
             return `<td class="num"><span class="ro money-amt" data-testid="doc-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
           }
           if (col.field === "rate") {
@@ -972,13 +1008,32 @@ function paintItems(doc) {
         if (n != null) inp.value = String(n);
       });
       inp.addEventListener("blur", () => {
+        if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
         const n = parseMoney(inp.value);
         if (n != null) inp.value = formatGroupedNumber(n);
         else if (normalizeEditableText(inp.value) === "") inp.value = "";
       });
     }
+    if (field === "qty" || field === "rate") {
+      calcUi.attach(inp, {
+        kind: field,
+        isPainting: () => painting,
+        isEditable: () => editable(),
+        onHistory: publishCalcHistory,
+        onCommit: async (value) => {
+          let next = value;
+          if (field === "rate") {
+            const n = parseMoney(value);
+            next = n == null ? "" : String(n);
+            if (n != null) inp.value = formatGroupedNumber(n);
+          }
+          await apply(next);
+        },
+      });
+    }
     inp.addEventListener("change", async () => {
       if (!api || painting) return;
+      if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
       const kind = dirtyCompareKindForField(field);
       let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
       if (field === "rate") {
@@ -1034,6 +1089,79 @@ function paintItems(doc) {
       }
     });
   });
+  el.items.querySelectorAll("button[data-back-in]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!editable() || painting) return;
+      const ri = Number(btn.getAttribute("data-back-in"));
+      beginAmountBackIn(btn, ri);
+    });
+  });
+}
+
+/**
+ * Click Amount → temporary input + calc; commit writes rate = amount ÷ qty.
+ * @param {HTMLElement} btn
+ * @param {number} ri
+ */
+function beginAmountBackIn(btn, ri) {
+  const td = btn.closest("td");
+  if (!td || !lastDoc || !lastDoc.items || !lastDoc.items[ri]) return;
+  const row = lastDoc.items[ri];
+  const priorAmt =
+    row.amount != null && row.amount !== ""
+      ? String(row.amount)
+      : String((Number(row.qty) || 0) * (Number(row.rate) || 0) || "");
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.inputMode = "decimal";
+  inp.className = "money-cost amount-back-in-input";
+  inp.setAttribute("data-testid", `doc-amt-edit-${ri}`);
+  const n0 = parseMoney(priorAmt);
+  inp.value = n0 != null ? String(n0) : "";
+  td.replaceChildren(inp);
+  setStatus("Back into rate: enter Amount (calc OK) — Rate = Amount ÷ Qty.");
+  const finishRestore = () => {
+    paint(lastDoc, scratch);
+  };
+  calcUi.attach(inp, {
+    kind: "amount",
+    commitOnIdleBlur: true,
+    isPainting: () => painting,
+    isEditable: () => editable(),
+    onHistory: publishCalcHistory,
+    onCommit: async (value) => {
+      const derived = rateFromBackedInAmount(value, row.qty);
+      if (!derived.ok) {
+        setStatus(derived.reason, "warn");
+        finishRestore();
+        return;
+      }
+      setStatus("Updating rate from amount…");
+      const res = await api.setItem(ri, "rate", derived.rateText);
+      if (res && res.ok) {
+        noteUserEdit();
+        paint(res.doc, res.scratch || scratch);
+        setStatus(`Rate set to ${derived.rateText} (Amount ÷ Qty).`);
+      } else {
+        setStatus((res && res.reason) || "Could not update rate.", "err");
+        await refresh();
+      }
+    },
+  });
+  inp.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && calcUi.getState().mode !== "active") {
+      ev.preventDefault();
+      // Detach before paint so blur does not idle-commit the edit.
+      calcUi.clear(inp.value);
+      finishRestore();
+    }
+  });
+  inp.focus();
+  try {
+    inp.select();
+  } catch {
+    /* ignore */
+  }
 }
 
 function wireDateField(input) {
@@ -1066,9 +1194,35 @@ function wireDateField(input) {
 function buildHeaderFields(fields) {
   el.headerLeft.replaceChildren();
   el.headerRight.replaceChildren();
+  if (el.headerAddresses) {
+    el.headerAddresses.replaceChildren();
+    el.headerAddresses.hidden = true;
+  }
   Object.keys(headerInputs).forEach((k) => delete headerInputs[k]);
 
-  const { left, right } = splitHeaderColumns(fields);
+  const { left, right, addresses } = splitHeaderColumns(fields);
+
+  const mountReadOnlyControl = (meta, fieldEl) => {
+    const multiline = !!(meta.multiline || meta.addressRole || meta.type === "textarea");
+    const input = document.createElement(multiline ? "textarea" : "input");
+    input.id = `f-${slugLabel(meta.label)}`;
+    input.readOnly = true;
+    input.tabIndex = -1;
+    input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
+    if (meta.addressRole) input.dataset.addressRole = meta.addressRole;
+    if (multiline) {
+      input.rows = 4;
+      input.spellcheck = false;
+    }
+    if (meta.validationHint) input.title = meta.validationHint;
+    else if (meta.addressRole) {
+      input.title =
+        "Read-only here. Set addresses on the document or party in Vanilla ERPNext, then Refresh.";
+    }
+    fieldEl.appendChild(input);
+    headerInputs[meta.label] = input;
+  };
+
   const mountCol = (colEl, list) => {
     for (const meta of list) {
       const field = document.createElement("div");
@@ -1079,14 +1233,7 @@ function buildHeaderFields(fields) {
 
       const isReadOnly = meta.readOnly || !meta.field;
       if (isReadOnly) {
-        const input = document.createElement("input");
-        input.id = `f-${slugLabel(meta.label)}`;
-        input.readOnly = true;
-        input.tabIndex = -1;
-        input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
-        if (meta.validationHint) input.title = meta.validationHint;
-        field.appendChild(input);
-        headerInputs[meta.label] = input;
+        mountReadOnlyControl(meta, field);
       } else if (meta.type === "date") {
         const input = document.createElement("input");
         input.type = "text";
@@ -1129,6 +1276,25 @@ function buildHeaderFields(fields) {
 
   mountCol(el.headerLeft, left);
   mountCol(el.headerRight, right);
+
+  if (el.headerAddresses && addresses.length) {
+    el.headerAddresses.hidden = false;
+    for (const meta of addresses) {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = meta.label;
+      field.appendChild(label);
+      mountReadOnlyControl(meta, field);
+      el.headerAddresses.appendChild(field);
+    }
+    const hint = document.createElement("span");
+    hint.className = "addr-hint";
+    hint.style.gridColumn = "1 / -1";
+    hint.textContent =
+      "Read-only. Edit Ship from / Ship to / Billing on the document or party in Vanilla, then Refresh. Empty means ERP has no address linked yet (PO may lack a dedicated ship-from field).";
+    el.headerAddresses.appendChild(hint);
+  }
 }
 
 function ensureHeaderLinkPickers() {
@@ -1398,6 +1564,7 @@ function paintedScratchDateExpected() {
 
 function paint(doc, snapScratch, opts = {}) {
   painting = true;
+  calcUi.clear();
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
   if (opts.userEdited != null) userEdited = !!opts.userEdited;
@@ -1442,6 +1609,9 @@ function paint(doc, snapScratch, opts = {}) {
       inp.value = formatDocDateDisplay(val) || val;
     } else {
       inp.value = val;
+    }
+    if (meta.addressRole && inp.tagName === "TEXTAREA") {
+      inp.rows = addressTextareaRows(String(val ?? ""));
     }
   }
 
@@ -1651,15 +1821,16 @@ async function doSave(submit) {
     if (r && Array.isArray(r.blockers) && r.blockers.length) {
       metaBlockers = r.blockers;
     }
-    const reason =
-      (r && r.timedOut && r.reason) ||
-      (r && r.reason) ||
-      "Save failed — check Vanilla validations.";
+    const reason = formatSaveFailureReason(
+      r,
+      submit ? "Save & submit" : "Save draft",
+    );
     setStatus(reason, "err");
     return {
       ok: false,
       reason,
       blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
+      timedOut: !!(r && r.timedOut),
     };
   } finally {
     saveInFlight = false;

@@ -6,7 +6,46 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 7;
+export const DOC_FORM_BRIDGE_VERSION = 10;
+
+/**
+ * YYYY-MM-DD from an ERP date field (string or Date-like).
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function postingDateYmd(value) {
+  if (value == null || value === "") return "";
+  const s = String(value).trim();
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : s.slice(0, 10);
+}
+
+/**
+ * Mirror ERPNext `confirm_posting_date_change` yes-path:
+ * when Edit Posting Date is unchecked and posting_date ≠ today, Vanilla will
+ * reset to today (after a confirm the Doc skin cannot click).
+ * @param {object|null|undefined} doc
+ * @param {string} todayYmd
+ */
+export function shouldResetPostingDateToToday(doc, todayYmd) {
+  if (!doc || typeof doc !== "object") return false;
+  if (doc.set_posting_time) return false;
+  const posting = postingDateYmd(doc.posting_date);
+  if (!posting) return false;
+  return posting !== postingDateYmd(todayYmd);
+}
+
+/**
+ * @param {string|null|undefined} doctype ERP title or slug
+ * @returns {string} e.g. purchase-invoice
+ */
+export function doctypeKeyFromErpDoctype(doctype) {
+  return String(doctype || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-");
+}
 
 /**
  * @param {object|null|undefined} frm cur_frm-like

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   BILL_SAVE_TIMEOUT_MS,
+  BILL_SAVE_BRIDGE_TIMEOUT_MS,
   commitGateProgressLabel,
   commitGateSuccessLabel,
   listLocalSaveBlockers,
@@ -14,6 +15,7 @@ import {
   printFormMatchesBill,
   normalizePrintIpcResult,
   timeoutFailure,
+  formatSaveFailureReason,
   billExpensesTaxOrientation,
   billToolbarActionMatrix,
   gateTriggerLabel,
@@ -90,8 +92,10 @@ describe("commit gate save messaging (OI-057)", () => {
     assert.equal(idle.busy, false);
   });
 
-  it("exposes a finite save timeout constant", () => {
-    assert.ok(BILL_SAVE_TIMEOUT_MS >= 15_000);
+  it("exposes a finite save timeout constant (fail before long freezes)", () => {
+    assert.ok(BILL_SAVE_TIMEOUT_MS >= 10_000);
+    assert.ok(BILL_SAVE_TIMEOUT_MS <= 30_000);
+    assert.ok(BILL_SAVE_BRIDGE_TIMEOUT_MS <= BILL_SAVE_TIMEOUT_MS);
   });
 
   it("shapes timeout failures without claiming success", () => {
@@ -99,6 +103,26 @@ describe("commit gate save messaging (OI-057)", () => {
     assert.equal(t.ok, false);
     assert.equal(t.timedOut, true);
     assert.match(t.reason, /timed out/i);
+    assert.match(t.reason, /Vanilla/i);
+    const detailed = timeoutFailure("Save & submit", { detail: "Credit To is mandatory" });
+    assert.match(detailed.reason, /Credit To/);
+  });
+
+  it("formats save failures preferring blockers then reason", () => {
+    assert.match(formatSaveFailureReason(null, "Save draft"), /no response/i);
+    assert.equal(
+      formatSaveFailureReason({ blockers: ["Credit To missing"], reason: "ignored" }),
+      "Credit To missing",
+    );
+    assert.match(
+      formatSaveFailureReason({ timedOut: true, reason: "Submit did not finish in Vanilla within 12s" }),
+      /did not finish/i,
+    );
+  });
+
+  it("titles timeout ERP failures distinctly", () => {
+    const view = commitGateErpFailureView("Save & submit timed out — open Vanilla");
+    assert.match(view.title, /did not finish/i);
   });
 });
 

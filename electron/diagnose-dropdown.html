@@ -17,7 +17,7 @@
       margin: 0 0 10px; flex: 1; overflow: auto; white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cbd5e1;
     }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
     .btn {
       color: #fff; background: #34495e; border: none; padding: 7px 12px; font-size: 12px;
       cursor: pointer; border-radius: 6px;
@@ -25,13 +25,24 @@
     .btn:hover { background: #3d566e; }
     .btn.ghost { background: transparent; color: #9fb3c8; }
     .btn.ghost:hover { background: #243140; color: #fff; }
-    .hint { color: #6b8299; font-size: 11px; margin-top: 8px; }
+    .btn.primary { background: #1f6feb; }
+    .btn.primary:hover { background: #388bfd; }
+    .btn[hidden] { display: none !important; }
+    .hint { color: #6b8299; font-size: 11px; margin-top: 4px; }
+    .remediation-hint { color: #9fb3c8; font-size: 11px; margin: 0 0 8px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h3>Connection details</h3>
     <pre id="body">Loading…</pre>
+    <p class="remediation-hint" id="remediation-hint" hidden></p>
+    <div class="row" id="remediation-row">
+      <button type="button" class="btn primary" id="btn-autofix" hidden>Start ERPNext</button>
+      <button type="button" class="btn" id="btn-notify" hidden>Notify IT</button>
+      <button type="button" class="btn" id="btn-finish-autofix" hidden>Finish autofix setup…</button>
+      <button type="button" class="btn" id="btn-setup" hidden>Set up how IT wants to handle this…</button>
+    </div>
     <div class="row">
       <button type="button" class="btn" id="btn-copy">Copy all</button>
       <button type="button" class="btn ghost" id="btn-close">Close</button>
@@ -42,14 +53,51 @@
     const api = window.erpDiagnose;
     const body = document.getElementById("body");
     const hint = document.getElementById("hint");
+    const remHint = document.getElementById("remediation-hint");
+    const btnSetup = document.getElementById("btn-setup");
+    const btnNotify = document.getElementById("btn-notify");
+    const btnAutofix = document.getElementById("btn-autofix");
+    const btnFinish = document.getElementById("btn-finish-autofix");
 
     function apply(snap) {
       body.textContent = (snap && snap.copyText) || "No details yet.";
       hint.textContent = (snap && snap.updateStub) || "";
+      const r = (snap && snap.remediation) || {};
+      remHint.hidden = !r.hint;
+      remHint.textContent = r.hint || "";
+      btnSetup.hidden = !r.showSetup;
+      btnSetup.textContent = r.setupLabel || "Set up how IT wants to handle this…";
+      btnNotify.hidden = !r.showNotify;
+      btnNotify.textContent = r.notifyLabel || "Notify IT";
+      btnAutofix.hidden = !r.showAutofix;
+      btnAutofix.textContent = r.autofixLabel || "Start ERPNext";
+      btnFinish.hidden = !r.showFinishAutofixSetup;
+      btnFinish.textContent = r.finishAutofixLabel || "Finish autofix setup…";
+    }
+
+    async function afterAction(res) {
+      if (res && res.message) remHint.textContent = res.message;
+      if (api && api.refresh) {
+        const snap = await api.refresh();
+        if (snap) apply(snap);
+      }
     }
 
     document.getElementById("btn-copy").onclick = () => api && api.copy();
     document.getElementById("btn-close").onclick = () => api && api.close();
+    btnSetup.onclick = async () => {
+      if (!api || !api.setupRemediation) return;
+      afterAction(await api.setupRemediation());
+    };
+    btnFinish.onclick = () => btnSetup.onclick();
+    btnNotify.onclick = async () => {
+      if (!api || !api.notifyIt) return;
+      afterAction(await api.notifyIt());
+    };
+    btnAutofix.onclick = async () => {
+      if (!api || !api.runAutofix) return;
+      afterAction(await api.runAutofix());
+    };
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && api) api.close();
     });

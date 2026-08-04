@@ -101,6 +101,30 @@ export function draftShelfLabel(doctypeKey, doc) {
 }
 
 /**
+ * Recent flyout suffix for a draft form row.
+ * - Viewed only (not on Drafts shelf): muted identity string (keep de-emphasis).
+ * - On Drafts shelf (edited/saved): empty — Recent shows “Bill” only; identity lives in Drafts.
+ *
+ * @param {{
+ *   isDraft: boolean,
+ *   onShelf: boolean,
+ *   shelfLabel?: string,
+ *   fallbackName?: string,
+ * }} opts
+ * @returns {{ detail: string, detailMuted: boolean }}
+ */
+export function recentDraftDetailForHistory(opts) {
+  if (!opts || !opts.isDraft) {
+    return { detail: "", detailMuted: false };
+  }
+  if (opts.onShelf) {
+    return { detail: "", detailMuted: false };
+  }
+  const detail = String(opts.shelfLabel || opts.fallbackName || "").trim();
+  return { detail, detailMuted: !!detail };
+}
+
+/**
  * @typedef {{
  *   doctypeKey: string,
  *   name: string,
@@ -164,6 +188,37 @@ export function removeShelvedDraft(list, doctypeKey, name) {
 }
 
 /**
+ * Plain fields for shelf sync — Frappe locals are circular; never JSON.stringify(doc).
+ * Bridge page mirrors this shape (cannot import ESM into injected script).
+ * @param {object|null|undefined} doc
+ * @returns {object|null}
+ */
+export function pickShelveDocFields(doc) {
+  if (!doc || typeof doc !== "object") return null;
+  const name = doc.name != null ? String(doc.name).trim() : "";
+  if (!name) return null;
+  const itemsIn = Array.isArray(doc.items) ? doc.items : [];
+  const items = [];
+  for (const it of itemsIn) {
+    if (!it || typeof it !== "object") continue;
+    const po = it.purchase_order;
+    items.push({
+      purchase_order: po != null && String(po).trim() ? String(po).trim() : "",
+    });
+  }
+  return {
+    name,
+    doctype: doc.doctype != null ? String(doc.doctype) : "",
+    docstatus: doc.docstatus == null ? 0 : Number(doc.docstatus),
+    posting_date: doc.posting_date != null ? String(doc.posting_date) : "",
+    bill_no: doc.bill_no != null ? String(doc.bill_no) : "",
+    transaction_date: doc.transaction_date != null ? String(doc.transaction_date) : "",
+    lr_no: doc.lr_no != null ? String(doc.lr_no) : "",
+    items,
+  };
+}
+
+/**
  * After save: shelf draft or drop if submitted/cancelled.
  * @param {ShelvedDraft[]} list
  * @param {string} doctypeKey
@@ -180,6 +235,29 @@ export function applySaveToShelved(list, doctypeKey, doc, opts = {}) {
   const entry = shelvedEntryFromDoc(doctypeKey, doc, opts);
   if (!entry) return Array.isArray(list) ? list.slice() : [];
   return pushShelvedDraft(list, entry);
+}
+
+/**
+ * When opening a form: drop submitted/cancelled; refresh label/MRU only if already shelved.
+ * Does not invent new Drafts rows on mere open (OI-060 = shelf on Save).
+ * @param {ShelvedDraft[]} list
+ * @param {string} doctypeKey
+ * @param {object} doc
+ * @param {{ now?: string }} [opts]
+ * @returns {ShelvedDraft[]}
+ */
+export function reconcileShelvedWithOpenDoc(list, doctypeKey, doc, opts = {}) {
+  const prev = Array.isArray(list) ? list : [];
+  if (!doc || typeof doc !== "object") return prev.slice();
+  const key = normalizeDoctypeKey(doctypeKey);
+  const name = doc.name != null ? String(doc.name).trim() : "";
+  if (!key || !name || /^new/i.test(name)) return prev.slice();
+  if (Number(doc.docstatus) !== 0) {
+    return removeShelvedDraft(prev, key, name);
+  }
+  const exists = prev.some((e) => e.doctypeKey === key && e.name === name);
+  if (!exists) return prev.slice();
+  return applySaveToShelved(prev, key, doc, opts);
 }
 
 /**

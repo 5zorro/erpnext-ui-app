@@ -52,7 +52,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
   },
   {
     id: "address-readonly",
-    name: "Address read-only (strip HTML)",
+    name: "Ship from / Ship to / Billing (multiline, read-only)",
     museum: true,
     alpha: true,
     coverage: "tested",

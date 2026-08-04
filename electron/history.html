@@ -9,7 +9,7 @@
       padding: 10px 12px 6px; font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
       color: #6b8299; border-bottom: 1px solid #2c3e50;
     }
-    .head-drafts { margin-top: 8px; }
+    .head-drafts, .head-calc { margin-top: 8px; }
     ul { list-style: none; margin: 0; padding: 6px; }
     li button {
       width: 100%; text-align: left; border: none; background: transparent; color: #cbd5e1;
@@ -17,6 +17,9 @@
     }
     li button:hover { background: #2c3e50; color: #fff; }
     li button.draft-label { font-size: 11px; line-height: 1.35; white-space: normal; }
+    li button .hist-detail { margin-left: 0.35em; font-weight: 400; }
+    li button .hist-detail.muted { color: #6b8299; }
+    li button:hover .hist-detail.muted { color: #9fb3c8; }
     .empty { padding: 14px 12px; font-size: 12px; color: #6b8299; line-height: 1.4; }
     .older-toggle {
       display: block; width: calc(100% - 12px); margin: 4px 6px 0; text-align: left;
@@ -27,7 +30,17 @@
     .older-toggle[hidden] { display: none; }
     .older-panel { border-top: 1px solid #2c3e50; margin-top: 4px; }
     .older-panel[hidden] { display: none; }
-    #sec-drafts[hidden] { display: none; }
+    #sec-drafts[hidden], #sec-calc[hidden] { display: none; }
+    .calc-open-btn {
+      display: block; width: calc(100% - 12px); margin: 6px 6px 10px; text-align: left;
+      border: 1px solid #3b4d63; background: #243140; color: #e2e8f0;
+      padding: 10px 12px; border-radius: 8px; font-size: 12px; cursor: pointer;
+      letter-spacing: .2px;
+    }
+    .calc-open-btn:hover { background: #2c3e50; border-color: #526780; }
+    .calc-open-btn .calc-open-sub {
+      display: block; margin-top: 4px; font-size: 10px; color: #6b8299; letter-spacing: .3px;
+    }
   </style>
 </head>
 <body>
@@ -48,6 +61,14 @@
     </div>
   </div>
 
+  <div id="sec-calc">
+    <div class="head head-calc">Calculator</div>
+    <button type="button" class="calc-open-btn" id="calc-open" data-testid="calc-history-open">
+      Calculator history
+      <span class="calc-open-sub" id="calc-open-sub">No calculations yet</span>
+    </button>
+  </div>
+
   <script type="module">
     import { splitHistory } from "../src/history.js";
     import { splitShelvedDrafts } from "../src/shelved-drafts.js";
@@ -62,9 +83,12 @@
     const listDraftsOlder = document.getElementById("list-drafts-older");
     const draftsOlderToggle = document.getElementById("drafts-older-toggle");
     const draftsOlderPanel = document.getElementById("drafts-older-panel");
+    const calcOpenBtn = document.getElementById("calc-open");
+    const calcOpenSub = document.getElementById("calc-open-sub");
     const api = window.erpHist;
     let olderOpen = false;
     let draftsOlderOpen = false;
+    let calcCount = 0;
 
     function fillList(ul, rows, opts = {}) {
       ul.innerHTML = "";
@@ -72,9 +96,19 @@
         const li = document.createElement("li");
         const b = document.createElement("button");
         b.type = "button";
-        b.textContent = h.label || h.dt || h.name;
         b.title = h.route || "";
         if (opts.draft) b.className = "draft-label";
+
+        const primary = h.label || h.dt || h.name || "";
+        b.appendChild(document.createTextNode(primary));
+        const detail = h.detail != null ? String(h.detail).trim() : "";
+        if (detail) {
+          const span = document.createElement("span");
+          span.className = "hist-detail" + (h.detailMuted ? " muted" : "");
+          span.textContent = detail;
+          b.appendChild(span);
+        }
+
         b.onclick = () => api && api.openErp(h.route);
         li.appendChild(b);
         ul.appendChild(li);
@@ -97,8 +131,27 @@
       draftsOlderToggle.textContent = open ? `▲ Older drafts (${n})` : `▼ Older drafts (${n})`;
     }
 
+    function updateCalcButton() {
+      calcOpenSub.textContent =
+        calcCount === 0
+          ? "No calculations yet"
+          : calcCount === 1
+            ? "1 calculation · open panel"
+            : `${calcCount} calculations · open panel`;
+    }
+
     olderToggle.onclick = () => setOlderOpen(!olderOpen);
     draftsOlderToggle.onclick = () => setDraftsOlderOpen(!draftsOlderOpen);
+    calcOpenBtn.onclick = () => {
+      if (!api || !api.openCalcHistory) return;
+      const r = calcOpenBtn.getBoundingClientRect();
+      api.openCalcHistory({
+        x: r.right,
+        y: r.top,
+        width: r.width,
+        height: r.height,
+      });
+    };
 
     function render(payload) {
       const rows = Array.isArray(payload)
@@ -107,6 +160,9 @@
           ? payload.items
           : [];
       const shelved = Array.isArray(payload) ? [] : (payload && payload.shelved) || [];
+      const calcRows = Array.isArray(payload) ? [] : (payload && payload.calcHistory) || [];
+      calcCount = calcRows.length;
+      updateCalcButton();
       const { recent, older } = splitHistory(rows);
 
       if (!rows.length) {
@@ -131,24 +187,24 @@
 
       if (!shelved.length) {
         secDrafts.hidden = true;
-        return;
-      }
-      secDrafts.hidden = false;
-      const { visible, older: draftOlder } = splitShelvedDrafts(shelved);
-      fillList(listDrafts, visible, { draft: true });
-      if (draftOlder.length) {
-        fillList(listDraftsOlder, draftOlder, { draft: true });
-        draftsOlderToggle.hidden = false;
-        setDraftsOlderOpen(draftsOlderOpen);
       } else {
-        draftsOlderToggle.hidden = true;
-        draftsOlderPanel.hidden = true;
-        draftsOlderOpen = false;
+        secDrafts.hidden = false;
+        const { visible, older: draftOlder } = splitShelvedDrafts(shelved);
+        fillList(listDrafts, visible, { draft: true });
+        if (draftOlder.length) {
+          fillList(listDraftsOlder, draftOlder, { draft: true });
+          draftsOlderToggle.hidden = false;
+          setDraftsOlderOpen(draftsOlderOpen);
+        } else {
+          draftsOlderToggle.hidden = true;
+          draftsOlderPanel.hidden = true;
+          draftsOlderOpen = false;
+        }
       }
     }
 
     if (api) api.onHistory(render);
-    render({ items: [], shelved: [] });
+    render({ items: [], shelved: [], calcHistory: [] });
   </script>
 </body>
 </html>

@@ -8,14 +8,176 @@
  */
 (function () {
   "use strict";
-  var VERSION = 7;
+  var VERSION = 10;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
+
+  /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
+  var SAVE_CALL_TIMEOUT_MS = 12000;
 
   function stripHtml(s) {
     return String(s || "")
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function clearSaveLocks() {
+    try {
+      if (frappe.dom && typeof frappe.dom.unfreeze === "function") frappe.dom.unfreeze();
+    } catch (e1) {}
+    try {
+      frappe.ui.form.is_saving = false;
+    } catch (e2) {}
+  }
+
+  /**
+   * Scrape whatever Vanilla already painted (msgprint / modal / toast) so Doc Bill
+   * can show a real reason instead of waiting for a hung frappe.call.
+   */
+  function collectVisibleVanillaErrors() {
+    var parts = [];
+    function push(t) {
+      t = stripHtml(t);
+      if (!t) return;
+      if (parts.indexOf(t) >= 0) return;
+      parts.push(t);
+    }
+    try {
+      var nodes = document.querySelectorAll(
+        ".msgprint, .modal.show .modal-body, .modal.in .modal-body, " +
+          ".frappe-message, .alert-danger, .alert-warning, .toast-message, " +
+          ".indicator-pill.red, .indicator-pill.orange"
+      );
+      for (var i = 0; i < nodes.length; i++) {
+        push(nodes[i].innerText || nodes[i].textContent);
+      }
+    } catch (eQ) {}
+    try {
+      if (frappe && frappe.msg_dialog && frappe.msg_dialog.$wrapper) {
+        var $w = frappe.msg_dialog.$wrapper;
+        if ($w.is(":visible")) push($w.text());
+      }
+    } catch (eM) {}
+    try {
+      if (frappe && frappe.throw_msg) push(frappe.throw_msg);
+    } catch (eT) {}
+    return parts;
+  }
+
+  /**
+   * Same effect as clicking OK on ERPNext's posting-date confirm
+   * (`confirm_posting_date_change` in transaction.js). Doc skin cannot click
+   * that dialog on the hidden ERP pane — so apply the yes-path before validate.
+   */
+  function alignPostingDateLikeVanillaOk(f) {
+    try {
+      if (!f || !f.doc) return null;
+      if (!frappe.meta.has_field(f.doc.doctype, "set_posting_time")) return null;
+      if (f.doc.set_posting_time) return null;
+      var today = frappe.datetime.get_today();
+      if (!f.doc.posting_date || today == f.doc.posting_date) return null;
+      var prev = f.doc.posting_date;
+      f.doc.posting_date = today;
+      try {
+        f.refresh_field("posting_date");
+      } catch (eRf) {}
+      return { reset: true, from: prev, to: today };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Auto-accept only the posting-date confirm (hidden under Doc skin).
+   * Other confirms fall through to original (or reject) so we do not
+   * silently OK unrelated Vanilla prompts.
+   */
+  function isPostingDateConfirmMsg(msg) {
+    var s = String(msg || "");
+    return /posting date will change/i.test(s) || /edit posting date and time/i.test(s);
+  }
+
+  function withAutoAcceptConfirm(run) {
+    var original = frappe.confirm;
+    frappe.confirm = function (msg, yes, no) {
+      if (isPostingDateConfirmMsg(msg)) {
+        try {
+          if (typeof yes === "function") yes();
+        } catch (eY) {}
+        return;
+      }
+      return original.apply(this, arguments);
+    };
+    return Promise.resolve()
+      .then(function () {
+        return run();
+      })
+      .finally(function () {
+        frappe.confirm = original;
+      });
+  }
+
+  /**
+   * Plain shelf fields only — Frappe locals are circular; JSON.stringify(doc) throws
+   * and used to wipe lastSavedDoc (Vanilla submit never drained into Drafts).
+   * Shape mirrors src/shelved-drafts.js pickShelveDocFields.
+   */
+  function pickShelveDoc(doc) {
+    if (!doc) return null;
+    var name = doc.name != null ? String(doc.name).trim() : "";
+    if (!name) return null;
+    var itemsIn = doc.items || [];
+    var items = [];
+    for (var i = 0; i < itemsIn.length; i++) {
+      var it = itemsIn[i];
+      if (!it) continue;
+      var po = it.purchase_order;
+      items.push({
+        purchase_order: po != null && String(po).trim() ? String(po).trim() : "",
+      });
+    }
+    return {
+      name: name,
+      doctype: doc.doctype != null ? String(doc.doctype) : "",
+      docstatus: doc.docstatus == null ? 0 : Number(doc.docstatus),
+      posting_date: doc.posting_date != null ? String(doc.posting_date) : "",
+      bill_no: doc.bill_no != null ? String(doc.bill_no) : "",
+      transaction_date: doc.transaction_date != null ? String(doc.transaction_date) : "",
+      lr_no: doc.lr_no != null ? String(doc.lr_no) : "",
+      items: items,
+    };
+  }
+
+  function installSaveWatch() {
+    if (window.__docFormBridgeSaveWatch) return;
+    window.__docFormBridgeSaveWatch = true;
+    try {
+      $(document).on("save.docFormBridgeShelve", function (_e, doc) {
+        window.__docFormBridge.lastSavedDoc = pickShelveDoc(doc);
+        window.__docFormBridge.lastSavedAt = Date.now();
+      });
+    } catch (eHook) {}
+  }
+
+  /** Peek open form for shelf prune (submitted still on Drafts after Vanilla submit). */
+  function peekShelveDoc() {
+    try {
+      var f = window.cur_frm;
+      if (!f || !f.doc) return { ok: false };
+      var plain = pickShelveDoc(f.doc);
+      if (!plain) return { ok: false };
+      return { ok: true, doc: plain };
+    } catch (e) {
+      return { ok: false };
+    }
+  }
+
+  function takeLastSavedDoc() {
+    installSaveWatch();
+    var d = window.__docFormBridge.lastSavedDoc || null;
+    window.__docFormBridge.lastSavedDoc = null;
+    if (!d) return { ok: false };
+    return { ok: true, doc: d };
   }
 
   function isMandatoryValuePresent(value, fieldtype) {
@@ -169,15 +331,30 @@
 
   /**
    * Save that always settles. Vanilla f.save() hangs forever when check_mandatory
-   * fails (msgprint shown, callback never called) — that caused Doc Bill's 45s timeout.
+   * fails (msgprint shown, callback never called) — that caused Doc Bill's long timeout.
+   * We preflight mandatories, clear stuck freeze locks, race savedocs against a short
+   * deadline, and scrape visible Vanilla messages when the call never returns.
    */
   function saveDoc(action) {
     return (async function () {
       try {
         var f = window.cur_frm;
         if (!f || !f.doc) return { ok: false, reason: "No form open in Vanilla (cur_frm missing)." };
-        if (f.doc.docstatus !== 0) return { ok: false, reason: "Document is not a draft." };
+        if (f.doc.docstatus !== 0) {
+          return {
+            ok: false,
+            reason:
+              "Document is not a draft (docstatus=" +
+              f.doc.docstatus +
+              "). Reload the Bill or open a draft.",
+          };
+        }
         action = action || "Save";
+        clearSaveLocks();
+        installSaveWatch();
+
+        // Avoid hanging on ERPNext posting-date confirm (hidden under Doc skin).
+        alignPostingDateLikeVanillaOk(f);
 
         var pre = listMandatoryMissing();
         if (pre && pre.blockers && pre.blockers.length) {
@@ -185,7 +362,7 @@
             ok: false,
             preflight: true,
             blockers: pre.blockers,
-            reason: pre.blockers[0] || "Missing mandatory fields.",
+            reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
           };
         }
 
@@ -193,78 +370,172 @@
           f.refresh_field("items");
         } catch (eRefresh) {}
 
-        frappe.validated = true;
-        try {
-          await f.script_manager.trigger("validate");
-          await f.script_manager.trigger("before_save");
-        } catch (eTrig) {
-          return { ok: false, reason: String(eTrig && eTrig.message ? eTrig.message : eTrig) };
-        }
-        if (!frappe.validated) {
-          return { ok: false, reason: "Client validation failed (form script)." };
-        }
+        return await withAutoAcceptConfirm(async function () {
+          frappe.validated = true;
+          try {
+            await f.script_manager.trigger("validate");
+            await f.script_manager.trigger("before_save");
+          } catch (eTrig) {
+            var trigMsg = String(eTrig && eTrig.message ? eTrig.message : eTrig);
+            var visible = collectVisibleVanillaErrors();
+            return {
+              ok: false,
+              reason: visible.length ? visible.join(" · ") : trigMsg || "Client validation failed.",
+              blockers: visible.length ? visible : [trigMsg],
+            };
+          }
+          if (!frappe.validated) {
+            var visFail = collectVisibleVanillaErrors();
+            return {
+              ok: false,
+              reason:
+                (visFail.length ? visFail.join(" · ") : null) ||
+                "Client validation failed (form script set frappe.validated = false).",
+              blockers: visFail.length ? visFail : ["Client validation failed (form script)."],
+            };
+          }
 
-        // Re-check after scripts — they can clear/toggle reqd fields.
-        pre = listMandatoryMissing();
-        if (pre && pre.blockers && pre.blockers.length) {
-          return {
-            ok: false,
-            preflight: true,
-            blockers: pre.blockers,
-            reason: pre.blockers[0] || "Missing mandatory fields.",
-          };
-        }
+          // Re-check after scripts — they can clear/toggle reqd fields.
+          pre = listMandatoryMissing();
+          if (pre && pre.blockers && pre.blockers.length) {
+            return {
+              ok: false,
+              preflight: true,
+              blockers: pre.blockers,
+              reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
+            };
+          }
 
-        return await new Promise(function (resolve) {
-          frappe.call({
-            method: "frappe.desk.form.save.savedocs",
-            args: { doc: f.doc, action: action },
-            freeze: true,
-            callback: function (r) {
-              if (r && r.exc) {
-                var msg = "";
-                try {
-                  if (r._server_messages) {
-                    var parsed = JSON.parse(r._server_messages);
-                    if (Array.isArray(parsed)) {
-                      msg = parsed
-                        .map(function (m) {
-                          try {
-                            var o = typeof m === "string" ? JSON.parse(m) : m;
-                            return stripHtml((o && o.message) || m);
-                          } catch (eMap) {
-                            return stripHtml(m);
-                          }
-                        })
-                        .filter(Boolean)
-                        .join(" ");
-                    }
-                  }
-                } catch (eMsg) {}
-                resolve({
-                  ok: false,
-                  reason: msg || stripHtml(String(r.exc)) || "Save failed.",
-                });
-                return;
-              }
-              try {
-                if (typeof f.refresh === "function") f.refresh();
-              } catch (eRef) {}
-              resolve({
-                ok: true,
-                doc: JSON.parse(JSON.stringify(f.doc)),
-                submitted: action === "Submit",
-              });
-            },
-            error: function (r) {
-              resolve({
+          return await new Promise(function (resolve) {
+            var settled = false;
+            function finish(result) {
+              if (settled) return;
+              settled = true;
+              clearSaveLocks();
+              resolve(result);
+            }
+            var timer = setTimeout(function () {
+              var scraped = collectVisibleVanillaErrors();
+              finish({
                 ok: false,
-                reason: stripHtml((r && (r.message || r.exc)) || "Save request failed."),
+                timedOut: true,
+                blockers: scraped.length ? scraped : undefined,
+                reason: scraped.length
+                  ? scraped.join(" · ")
+                  : action +
+                    " did not finish in Vanilla within " +
+                    SAVE_CALL_TIMEOUT_MS / 1000 +
+                    "s (no dialog text found). Open Vanilla to inspect the freeze, then reload this Bill.",
               });
-            },
+            }, SAVE_CALL_TIMEOUT_MS);
+
+            frappe.call({
+              method: "frappe.desk.form.save.savedocs",
+              args: { doc: f.doc, action: action },
+              freeze: true,
+              callback: function (r) {
+                clearTimeout(timer);
+                if (r && r.exc) {
+                  var msg = "";
+                  try {
+                    if (r._server_messages) {
+                      var parsed = JSON.parse(r._server_messages);
+                      if (Array.isArray(parsed)) {
+                        msg = parsed
+                          .map(function (m) {
+                            try {
+                              var o = typeof m === "string" ? JSON.parse(m) : m;
+                              return stripHtml((o && o.message) || m);
+                            } catch (eMap) {
+                              return stripHtml(m);
+                            }
+                          })
+                          .filter(Boolean)
+                          .join(" ");
+                      }
+                    }
+                  } catch (eMsg) {}
+                  if (!msg) {
+                    var scrapedExc = collectVisibleVanillaErrors();
+                    if (scrapedExc.length) msg = scrapedExc.join(" · ");
+                  }
+                  finish({
+                    ok: false,
+                    reason: msg || stripHtml(String(r.exc)) || "Save failed.",
+                    blockers: msg ? [msg] : undefined,
+                  });
+                  return;
+                }
+                var docOut = null;
+                try {
+                  if (r && Array.isArray(r.docs) && r.docs[0]) {
+                    docOut = r.docs[0];
+                    if (typeof f.refresh_fields === "function") {
+                      try {
+                        f.refresh_fields();
+                      } catch (eRf) {}
+                    }
+                  } else if (typeof f.refresh === "function") {
+                    f.refresh();
+                    docOut = f.doc;
+                  } else {
+                    docOut = f.doc;
+                  }
+                } catch (eRef) {
+                  docOut = (r && r.docs && r.docs[0]) || (f && f.doc) || null;
+                }
+                var plain = null;
+                try {
+                  plain = docOut ? JSON.parse(JSON.stringify(docOut)) : null;
+                } catch (eJson) {
+                  finish({
+                    ok: false,
+                    reason: "Save succeeded but could not read document back — reload the Bill.",
+                  });
+                  return;
+                }
+                if (!plain) {
+                  var scrapedOk = collectVisibleVanillaErrors();
+                  finish({
+                    ok: false,
+                    reason:
+                      (scrapedOk.length ? scrapedOk.join(" · ") : null) ||
+                      "Vanilla returned no document after " + action + ".",
+                    blockers: scrapedOk.length ? scrapedOk : undefined,
+                  });
+                  return;
+                }
+                try {
+                  window.__docFormBridge.lastSavedDoc = plain;
+                  window.__docFormBridge.lastSavedAt = Date.now();
+                } catch (eLs) {}
+                finish({
+                  ok: true,
+                  doc: plain,
+                  submitted: action === "Submit",
+                });
+              },
+              error: function (r) {
+                clearTimeout(timer);
+                var scrapedErr = collectVisibleVanillaErrors();
+                var errMsg = stripHtml((r && (r.message || r.exc)) || "");
+                finish({
+                  ok: false,
+                  reason:
+                    (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
+                    errMsg ||
+                    "Save request failed.",
+                  blockers: scrapedErr.length ? scrapedErr : errMsg ? [errMsg] : undefined,
+                });
+              },
+              always: function () {
+                clearSaveLocks();
+              },
+            });
           });
         });
       } catch (e) {
+        clearSaveLocks();
         return { ok: false, reason: String(e && e.message ? e.message : e) };
       }
     })();
@@ -507,8 +778,14 @@
         try {
           f.refresh_fields([
             "address_display",
+            "shipping_address_display",
+            "billing_address_display",
+            "dispatch_address_display",
             "supplier_name",
             "supplier_address",
+            "shipping_address",
+            "billing_address",
+            "dispatch_address",
             "payment_terms_template",
             "due_date",
           ]);
@@ -800,6 +1077,8 @@
     })();
   }
 
+  installSaveWatch();
+
   window.__docFormBridge = {
     version: VERSION,
     waitForForm: waitForForm,
@@ -814,5 +1093,7 @@
     afterAjaxQuiet: afterAjaxQuiet,
     listMandatoryMissing: listMandatoryMissing,
     saveDoc: saveDoc,
+    takeLastSavedDoc: takeLastSavedDoc,
+    peekShelveDoc: peekShelveDoc,
   };
 })();

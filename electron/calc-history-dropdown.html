@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Calculator history</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%; background: #1a252f; color: #e2e8f0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1.4;
+      overflow: hidden;
+    }
+    .wrap {
+      box-sizing: border-box; height: 100%; padding: 12px 12px 10px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .top {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    h3 {
+      margin: 0; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: #9fb3c8;
+    }
+    .btn {
+      color: #fff; background: #34495e; border: none; padding: 6px 10px; font-size: 12px;
+      cursor: pointer; border-radius: 6px;
+    }
+    .btn:hover { background: #3d566e; }
+    .btn.ghost { background: transparent; color: #9fb3c8; }
+    .btn.ghost:hover { background: #243140; color: #fff; }
+    .empty { padding: 16px 4px; color: #6b8299; line-height: 1.45; }
+    .scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+    .hint { color: #6b8299; font-size: 11px; }
+
+    .calc-group {
+      margin: 0 0 10px; border: 1px solid #334155; border-radius: 6px; overflow: hidden;
+    }
+    .calc-group--a { background: #1e293b; border-color: #3b4d63; }
+    .calc-group--b { background: #243447; border-color: #455a73; }
+    .calc-group.prior-session { border-style: dashed; opacity: 0.92; }
+    .calc-group-label {
+      padding: 6px 8px;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .45px;
+      color: #9fb3c8; background: rgba(0,0,0,.18);
+      border-bottom: 1px solid #334155;
+    }
+    .calc-entry {
+      padding: 8px 10px;
+      border-top: 1px solid rgba(51, 65, 85, .55);
+    }
+    .calc-entry:first-of-type { border-top: none; }
+    .calc-tape {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; white-space: pre; text-align: right; color: #94a3b8; line-height: 1.35;
+      margin: 0 0 4px;
+    }
+    .calc-total {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px; font-weight: 700; text-align: right; color: #e2e8f0; margin: 0 0 6px;
+    }
+    .calc-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .calc-actions button {
+      border: none; border-radius: 4px; padding: 5px 8px;
+      cursor: pointer; background: #2c3e50; color: #cbd5e1;
+      display: inline-flex; align-items: center;
+    }
+    .calc-actions button:hover { background: #334155; color: #fff; }
+    .calc-actions button.ok { color: #86efac; }
+    .calc-ico { display: inline-flex; align-items: center; gap: 3px; }
+    .calc-ico svg { display: block; }
+
+    .older-toggle {
+      display: block; width: 100%; margin: 0 0 6px; text-align: left;
+      border: none; background: #243140; color: #9fb3c8; padding: 8px 10px; border-radius: 6px;
+      font-size: 11px; cursor: pointer; letter-spacing: .3px;
+    }
+    .older-toggle:hover { background: #2c3e50; color: #fff; }
+    .calc-prior-panel[hidden] { display: none; }
+    .calc-prior-section {
+      margin: 0 0 10px;
+      border: 1px solid #526780;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #182230;
+    }
+    .calc-prior-band {
+      padding: 7px 10px;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+      color: #9fb3c8; background: #243140;
+      border-color: #526780;
+    }
+    .calc-prior-band--top { border-bottom: 1px solid #526780; }
+    .calc-prior-band--bottom { border-top: 1px solid #526780; }
+    .calc-prior-section .calc-group { margin: 8px; }
+    .calc-prior-section .calc-group:last-child { margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h3>Calculator history</h3>
+      <button type="button" class="btn ghost" id="btn-close">Close</button>
+    </div>
+    <div class="scroll" id="scroll">
+      <div class="empty" id="empty">Use + − × ÷ in money fields — results land here for this session.</div>
+      <div id="list"></div>
+    </div>
+    <div class="hint">Newest at bottom · clipboard icons copy table / total · Esc closes</div>
+  </div>
+  <script type="module">
+    import { groupCalcHistoryForFlyout, splitCalcHistoryFlyoutSections } from "../src/calc/session-history.js";
+    import { copyTableIconHtml, copyTotalIconHtml } from "../src/calc/calc-icons.js";
+
+    const api = window.erpCalcHist;
+    const emptyEl = document.getElementById("empty");
+    const listEl = document.getElementById("list");
+    let priorOpen = false;
+    /** @type {import("../src/calc/session-history.js").CalcHistoryEntry[]} */
+    let rows = [];
+
+    function flashCopy(btn, ok) {
+      const prev = btn.innerHTML;
+      btn.textContent = ok ? "Copied" : "Failed";
+      if (ok) btn.classList.add("ok");
+      setTimeout(() => {
+        btn.innerHTML = prev;
+        btn.classList.remove("ok");
+      }, 900);
+    }
+
+    function makeCopyButton(entryId, mode, iconHtml, title) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.innerHTML = iconHtml;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!api || !api.copy) return;
+        const r = await api.copy(entryId, mode);
+        flashCopy(btn, !!(r && r.ok));
+      };
+      return btn;
+    }
+
+    function appendGroups(parent, groups, startTint) {
+      groups.forEach((g, gi) => {
+        const section = document.createElement("div");
+        const tint = (startTint + gi) % 2 === 0 ? "a" : "b";
+        section.className = `calc-group calc-group--${tint}`;
+        if (g.priorSession) section.classList.add("prior-session");
+
+        const label = document.createElement("div");
+        label.className = "calc-group-label";
+        label.textContent = g.label;
+        section.appendChild(label);
+
+        for (const e of g.entries) {
+          const box = document.createElement("div");
+          box.className = "calc-entry";
+          box.dataset.testid = `calc-hist-${e.id}`;
+
+          if (e.footing) {
+            const tape = document.createElement("pre");
+            tape.className = "calc-tape";
+            tape.textContent = e.footing;
+            box.appendChild(tape);
+          }
+
+          const tot = document.createElement("div");
+          tot.className = "calc-total";
+          tot.textContent = `= ${e.total}`;
+          box.appendChild(tot);
+
+          const actions = document.createElement("div");
+          actions.className = "calc-actions";
+          actions.appendChild(
+            makeCopyButton(e.id, "table", copyTableIconHtml(), "Copy table (spreadsheet-friendly)"),
+          );
+          actions.appendChild(
+            makeCopyButton(e.id, "total", copyTotalIconHtml(), "Copy total"),
+          );
+          box.appendChild(actions);
+          section.appendChild(box);
+        }
+        parent.appendChild(section);
+      });
+    }
+
+    function scrollToNewest() {
+      const scroll = document.getElementById("scroll");
+      if (!scroll) return;
+      scroll.scrollTop = scroll.scrollHeight;
+    }
+
+    function wrapPriorSection(groups, startTint) {
+      const section = document.createElement("div");
+      section.className = "calc-prior-section";
+      section.dataset.testid = "calc-prior-section";
+
+      const top = document.createElement("div");
+      top.className = "calc-prior-band calc-prior-band--top";
+      top.textContent = "Previous sessions";
+      section.appendChild(top);
+
+      const body = document.createElement("div");
+      body.className = "calc-prior-body";
+      appendGroups(body, groups, startTint);
+      section.appendChild(body);
+
+      const bottom = document.createElement("div");
+      bottom.className = "calc-prior-band calc-prior-band--bottom";
+      bottom.textContent = "Previous sessions";
+      section.appendChild(bottom);
+
+      return section;
+    }
+
+    function render() {
+      listEl.innerHTML = "";
+      if (!rows.length) {
+        emptyEl.hidden = false;
+        return;
+      }
+      emptyEl.hidden = true;
+      const { current, prior, collapsePrior, priorEntryCount } = splitCalcHistoryFlyoutSections(rows);
+
+      if (collapsePrior) {
+        const priorToggle = document.createElement("button");
+        priorToggle.type = "button";
+        priorToggle.className = "older-toggle";
+        priorToggle.setAttribute("aria-expanded", priorOpen ? "true" : "false");
+        priorToggle.textContent = priorOpen
+          ? `▲ Previous sessions (${priorEntryCount})`
+          : `▼ Previous sessions (${priorEntryCount})`;
+
+        const priorPanel = document.createElement("div");
+        priorPanel.className = "calc-prior-panel";
+        priorPanel.hidden = !priorOpen;
+        priorPanel.appendChild(wrapPriorSection(prior, 0));
+
+        priorToggle.onclick = () => {
+          priorOpen = !priorOpen;
+          priorPanel.hidden = !priorOpen;
+          priorToggle.setAttribute("aria-expanded", priorOpen ? "true" : "false");
+          priorToggle.textContent = priorOpen
+            ? `▲ Previous sessions (${priorEntryCount})`
+            : `▼ Previous sessions (${priorEntryCount})`;
+        };
+
+        listEl.appendChild(priorToggle);
+        listEl.appendChild(priorPanel);
+        appendGroups(listEl, current, prior.length);
+      } else {
+        const all = groupCalcHistoryForFlyout(rows);
+        const priorOnly = all.filter((g) => g.priorSession);
+        const currentOnly = all.filter((g) => !g.priorSession);
+        if (priorOnly.length && currentOnly.length === 0) {
+          // Entire list is prior — still bookend so bottom-scrollers see the band.
+          listEl.appendChild(wrapPriorSection(priorOnly, 0));
+        } else {
+          appendGroups(listEl, all, 0);
+        }
+        priorOpen = false;
+      }
+
+      requestAnimationFrame(() => {
+        scrollToNewest();
+        requestAnimationFrame(scrollToNewest);
+      });
+    }
+
+    function apply(payload) {
+      rows = Array.isArray(payload && payload.calcHistory) ? payload.calcHistory : [];
+      render();
+    }
+
+    document.getElementById("btn-close").onclick = () => api && api.close();
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && api) api.close();
+    });
+
+    if (api) {
+      api.onData(apply);
+      api.ready();
+    }
+  </script>
+</body>
+</html>

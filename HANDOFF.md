@@ -53,6 +53,12 @@ flowchart LR
 | Path | Role |
 |------|------|
 | `src/*.js` | SSoT for each concern’s **logic** (health, history, route-info, nav-guard, config, money, …) |
+| `src/sample-data/` | Pure sample corpus plan + sandbox guard (OI-055 / S−1) |
+| `ops/sample-data/` | Sandbox-only bench seed runner (`npm run seed:sample`) |
+| `ops/input-count/` | Bill scrape dogfood report (`npm run report:input-count`) |
+| `ops/erp-host/` | Optional ERP host scripts: `ensure-erp-up.sh` (docker + ping; no UI); example autofix wrapper |
+| `docs/input-count-gotchas.md` | Measurement gotchas + dogfood checklist before Simplified mockups |
+| `docs/erp-unreachable.md` | ERP timeout: host `start-shell.sh` + IT notify/autofix setup in diagnose |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
@@ -71,7 +77,7 @@ flowchart LR
 
 | Capability | Pure module(s) | Electron surface |
 |------------|----------------|------------------|
-| DB / reachability | `health.js` (+ future diagnose helpers) | Toolbar health control in `chrome.html` |
+| DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
 | Recent history | `route-info.js`, `history.js`, `doctype-labels.js` | Left `history.html` view |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
 | Chrome UI state | `chrome-state.js` | Toolbar highlight / home vs ERP |
