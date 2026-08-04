@@ -38,6 +38,22 @@ describe("interactable-scrape helpers", () => {
       "tenkey",
     );
     assert.equal(inferModeSwitch({ "data-testid": "bill-vendor" }, "input"), "none");
+    // Frappe Desk: data-fieldname + date with inputmode=numeric must stay date.
+    assert.equal(
+      inferModeSwitch(
+        { "data-fieldname": "posting_date", "data-testid": "v-posting-date", inputmode: "numeric" },
+        "input",
+      ),
+      "date",
+    );
+  });
+
+  it("reads data-fieldname like Frappe Desk", () => {
+    const html = `<input data-fieldname="supplier" data-testid="v-supplier" />`;
+    const { items } = scrapeInteractables(html);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].field, "supplier");
+    assert.equal(items[0].id, "v-supplier");
   });
 
   it("preprocess drops hidden subtrees and scripts", () => {
@@ -64,7 +80,10 @@ describe("scrape Bill Doc electron/bill.html", () => {
     assert.ok(ids.has("bill-vendor"));
     assert.ok(ids.has("bill-amount-due"));
     assert.ok(ids.has("bill-assumptions"));
-    assert.equal(ids.has("bill-address"), false, "readonly address excluded");
+    assert.equal(ids.has("bill-address"), false, "legacy single address removed");
+    assert.equal(ids.has("bill-ship-from"), false, "readonly address excluded");
+    assert.equal(ids.has("bill-ship-to"), false, "readonly address excluded");
+    assert.equal(ids.has("bill-billing-address"), false, "readonly address excluded");
     assert.equal(ids.has("bill-gate-save"), false, "hidden commit-gate excluded");
     assert.equal(ids.has("bill-retry"), false, "hidden retry excluded");
   });

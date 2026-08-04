@@ -120,16 +120,25 @@ export function parseAttrs(attrChunk) {
  * @param {string} tag
  * @returns {ModeSwitch}
  */
+/**
+ * Doc skins use data-field; Frappe Desk often uses data-fieldname.
+ * @param {Record<string, string>} attrs
+ * @returns {string}
+ */
+export function fieldNameFromAttrs(attrs) {
+  return attrs["data-field"] || attrs["data-fieldname"] || "";
+}
+
 export function inferModeSwitch(attrs, tag) {
   const inputmode = (attrs.inputmode || "").toLowerCase();
   const cls = attrs.class || "";
   const type = (attrs.type || "text").toLowerCase();
-  const field = attrs["data-field"] || "";
+  const field = fieldNameFromAttrs(attrs);
   const testId = attrs["data-testid"] || "";
   const blob = `${field} ${testId}`;
   if (
     type === "date" ||
-    /(^|[_-])date\b|due_date|posting_date|bill-date|due-date/.test(blob)
+    /(^|[_-])date\b|due_date|posting_date|bill_date|bill-date|due-date/.test(blob)
   ) {
     return "date";
   }
@@ -139,11 +148,13 @@ export function inferModeSwitch(attrs, tag) {
     field === "qty" ||
     field === "rate" ||
     field === "tax_amount" ||
-    /amount-due|tax-amount|cell-qty|cell-rate/.test(testId)
+    field === "conversion_rate" ||
+    /amount-due|tax-amount|cell-qty|cell-rate|conversion-rate/.test(testId)
   ) {
     return "tenkey";
   }
   if (inputmode === "numeric" || (tag === "input" && type === "number")) {
+    // Desk often marks dates inputmode=numeric — field/testid date rules win above.
     return "tenkey";
   }
   return "none";
@@ -179,7 +190,8 @@ function inferKind(tag, attrs) {
 export function interactableId(tag, attrs, ordinal) {
   if (attrs["data-testid"]) return attrs["data-testid"];
   if (attrs.id) return attrs.id;
-  if (attrs["data-field"]) return `field:${attrs["data-field"]}`;
+  const field = fieldNameFromAttrs(attrs);
+  if (field) return `field:${field}`;
   if (attrs.name) return `name:${attrs.name}`;
   if (attrs["data-gate"]) return `gate:${attrs["data-gate"]}`;
   return `${tag}#${ordinal}`;
@@ -276,7 +288,7 @@ export function scrapeInteractables(html, options = {}) {
       id,
       tag,
       kind: inferKind(tag, attrs),
-      field: attrs["data-field"] || null,
+      field: fieldNameFromAttrs(attrs) || null,
       testId: attrs["data-testid"] || null,
       readOnly: attrs.readonly != null && attrs.readonly !== "false",
       disabled: attrs.disabled != null && attrs.disabled !== "false",
