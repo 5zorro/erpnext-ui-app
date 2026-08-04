@@ -328,7 +328,7 @@ flowchart LR
 | Slice | Intent | Exit |
 |-------|--------|------|
 | **S−1** | Sample-data seed (dev/demo) | **Applied 2026-08-01** on HECSANDBOX — 25× Q/SO/SI/PO/PR/PI (`ui-app-sample-v1`). Re-run: `CONFIRM_SAMPLE_SEED=1 npm run seed:sample [-- --reset]`. Dogfood pickers + from-nothing vs from-source. |
-| **S0** | Input-count unit tests + fixtures | **Bill anchor landed 2026-08-01** — scraper + curated Doc inventory + Vanilla fixture; CI asserts completeness + \(N_v > N_d\). Advertising bar segments (blank / sourced / required mode / minimal Save) in `input-count.js` — **Vanilla · Doc · Simplified only** (no competitor bars). Extend to PO/IR later. |
+| **S0** | Input-count unit tests + fixtures | **Bill anchor landed** — scraper + curated Doc inventory + Vanilla fixture; CI \(N_v > N_d\). Bar helpers in `input-count.js`. **Next:** dogfood via `npm run report:input-count` + `docs/input-count-gotchas.md` before Simplified mockups. |
 | **S1** | Simplified tab + prefs | Pref lands Simplified |
 | **S2** | Chosen mockup path on PI/Bill + Doc affordances | Save = ERP truth; \(N_s \approx N_d\); pickers/focus/validations dogfood green |
 | **S3** | Expand config toward \(N_s' \approx N_v\) | No rewrite to grow |
@@ -343,6 +343,7 @@ flowchart LR
 | Area | Item | Status | Re-dogfood |
 |------|------|--------|------------|
 | Bill binder | Save after description | **code shipped** | Edit description → Save &lt; ~5s |
+| Bill addresses | Ship from / Ship to / Billing multiline (OI-077) | **Display landed 2026-08-02** — USA multi-row; country row if not USA; Bill uses dispatch/shipping/supplier displays; PO uses supplier/shipping/billing (empty OK if ERP field missing) | Open Bill + PO with addresses set in Vanilla → three blocks; non-US shows country line |
 | PO binder | Date Expected force-stamp | **code shipped** | Multiple dates → type date → all lines |
 | Doc chrome | Back to top focuses Submit | **code shipped** | Tab → Enter focuses; second Enter submits |
 | Lens prefs | Doc default; vanilla sticks | **code shipped** | Restart after Vanilla form → Vanilla |
@@ -362,7 +363,7 @@ flowchart LR
 | **D-Assumptions** | OI-012 — Simplified levers |
 | **D-Shortcuts** | Keymap — chrome toolbar or Assumptions; **not this branch** |
 | **D-BillRef** | OI-054 + **OI-087** pattern; needs OI-055 sample data |
-| **D-Health+** | OI-089 deps color; OI-090 OS in diagnose |
+| **D-Health+** | OI-089 deps color; OI-090 OS in diagnose; IT notify/autofix setup landed 2026-08-02 (`docs/erp-unreachable.md`, userData only) |
 | **D-Donate** | OI-091 Patreon + disclaimers + alpha X/Y |
 | **D-i18n** | OI-088 — Frappe catalogs + shell catalog |
 | **D-CurrencyUX** | OI-092 research malformed money |
