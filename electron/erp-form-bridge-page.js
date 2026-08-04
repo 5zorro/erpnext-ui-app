@@ -778,8 +778,14 @@
         try {
           f.refresh_fields([
             "address_display",
+            "shipping_address_display",
+            "billing_address_display",
+            "dispatch_address_display",
             "supplier_name",
             "supplier_address",
+            "shipping_address",
+            "billing_address",
+            "dispatch_address",
             "payment_terms_template",
             "due_date",
           ]);
