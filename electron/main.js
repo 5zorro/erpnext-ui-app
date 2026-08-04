@@ -40,6 +40,17 @@ import {
   diagnoseCopyText,
   appendPingLog,
 } from "../src/diagnose.js";
+import {
+  HEALTH_REMEDIATION_FILENAME,
+  EMPTY_HEALTH_REMEDIATION,
+  normalizeHealthRemediationPrefs,
+  remediationUiState,
+  applyRemediationSetup,
+  isSafeNotifyUrl,
+  isAllowedAutofixScriptPath,
+  autofixReady,
+} from "../src/health-remediation.js";
+import { spawn } from "node:child_process";
 import { findListFocusField, findListFocusLabel } from "../src/doc-chrome.js";
 import {
   resolveFeedbackFormUrl,
@@ -150,6 +161,8 @@ let diagnoseState = {
   lastOkAt: null,
   internetOk: null,
 };
+/** @type {import("../src/health-remediation.js").HealthRemediationPrefs} */
+let healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
 /** @type {object[]} */
 let pingLog = [];
 /** Scratch Amount Due for Doc Bill (not an ERP field). */
@@ -189,6 +202,9 @@ function prefsPath() {
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
 }
+function healthRemediationPath() {
+  return path.join(app.getPath("userData"), HEALTH_REMEDIATION_FILENAME);
+}
 function loadPrefs() {
   try {
     lensPrefs = JSON.parse(fs.readFileSync(prefsPath(), "utf8")) || {};
@@ -205,6 +221,20 @@ function loadPrefs() {
   } catch {
     shelvedDrafts = [];
     calcHistory = [];
+  }
+  try {
+    healthRemediation = normalizeHealthRemediationPrefs(
+      JSON.parse(fs.readFileSync(healthRemediationPath(), "utf8")),
+    );
+  } catch {
+    healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
+  }
+}
+function saveHealthRemediation() {
+  try {
+    fs.writeFileSync(healthRemediationPath(), JSON.stringify(healthRemediation, null, 2));
+  } catch {
+    /* ignore */
   }
 }
 function savePrefs() {
@@ -1183,7 +1213,7 @@ function openDiagnoseDropdown() {
     frame: false,
     show: false,
     width: 340,
-    height: 300,
+    height: 420,
     resizable: false,
     maximizable: false,
     minimizable: false,
@@ -1987,12 +2017,17 @@ function diagnoseSnapshot() {
     lastOkAt: diagnoseState.lastOkAt,
     internetOk: diagnoseState.internetOk,
   });
+  const remediation = remediationUiState(healthRemediation, {
+    status: diagnoseState.status,
+  });
   return {
     lines,
     copyText: diagnoseCopyText(lines),
     hostClass: classifyHostClass(ERP_BASE),
     version: APP_VERSION,
     updateStub: "Shell updates: ask IT (packaged updater later).",
+    remediation,
+    healthStatus: diagnoseState.status,
   };
 }
 
@@ -2137,6 +2172,157 @@ ipcMain.handle("copy-diagnose", () => {
   const snap = diagnoseSnapshot();
   clipboard.writeText(snap.copyText || "");
   return { ok: true };
+});
+
+/**
+ * IT recovery setup wizard (notify HTTPS form vs autofix absolute script).
+ * Never invents a default script path.
+ */
+ipcMain.handle("health-remediation-setup", async () => {
+  const parent = win && !win.isDestroyed() ? win : undefined;
+  const { response } = await dialog.showMessageBox(parent, {
+    type: "question",
+    buttons: ["Notify IT (HTTPS form)", "Autofix (pick script)", "Clear settings", "Cancel"],
+    defaultId: 0,
+    cancelId: 3,
+    title: "IT recovery settings",
+    message: "How should this PC handle ERP unreachable?",
+    detail:
+      "Notify opens an https:// form (e.g. Google Form).\n" +
+      "Autofix runs only a script you pick on this PC — clones ship with none (security).\n" +
+      "See docs/erp-unreachable.md.",
+  });
+  if (response === 3) return { ok: true, action: "cancel" };
+  if (response === 2) {
+    const applied = applyRemediationSetup(healthRemediation, { mode: "unset" });
+    healthRemediation = applied.prefs;
+    saveHealthRemediation();
+    return { ok: true, action: "cleared", message: "Recovery settings cleared." };
+  }
+  if (response === 0) {
+    const { response: urlBox } = await dialog.showMessageBox(parent, {
+      type: "question",
+      buttons: ["Save URL from clipboard", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Notify form URL",
+      message: "Copy your https:// form URL, then Save.",
+      detail:
+        (healthRemediation.notifyUrl
+          ? `Current: ${healthRemediation.notifyUrl}\n\n`
+          : "") + "Clipboard must contain an https:// URL (Google Form, ticket intake, etc.).",
+    });
+    if (urlBox === 1) return { ok: true, action: "cancel" };
+    const clip = clipboard.readText().trim();
+    if (!isSafeNotifyUrl(clip)) {
+      return {
+        ok: false,
+        message:
+          "Clipboard is not a valid https:// URL. Copy the form link, then try Notify again.",
+      };
+    }
+    const applied = applyRemediationSetup(healthRemediation, {
+      mode: "notify",
+      notifyUrl: clip,
+    });
+    if (!applied.ok) return { ok: false, message: applied.reason };
+    healthRemediation = applied.prefs;
+    saveHealthRemediation();
+    return { ok: true, action: "notify", message: "Notify IT saved (HTTPS form from clipboard)." };
+  }
+  const picked = await dialog.showOpenDialog(parent, {
+    title: "Choose IT autofix script (absolute path)",
+    properties: ["openFile"],
+    filters: [
+      { name: "Scripts", extensions: ["sh", "bash", "bat", "cmd", "ps1"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  });
+  if (picked.canceled || !picked.filePaths || !picked.filePaths[0]) {
+    return { ok: true, action: "cancel" };
+  }
+  const scriptPath = picked.filePaths[0];
+  if (!isAllowedAutofixScriptPath(scriptPath)) {
+    return { ok: false, message: "That path is not allowed (need an absolute path)." };
+  }
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, message: "File does not exist." };
+  }
+  const applied = applyRemediationSetup(healthRemediation, {
+    mode: "autofix",
+    autofixScriptPath: scriptPath,
+  });
+  if (!applied.ok) return { ok: false, message: applied.reason };
+  healthRemediation = applied.prefs;
+  saveHealthRemediation();
+  return {
+    ok: true,
+    action: "autofix",
+    message: `Autofix saved. Start ERPNext will run:\n${scriptPath}`,
+  };
+});
+
+ipcMain.handle("health-remediation-notify", async () => {
+  const prefs = normalizeHealthRemediationPrefs(healthRemediation);
+  if (prefs.mode !== "notify" || !isSafeNotifyUrl(prefs.notifyUrl)) {
+    return { ok: false, message: "Notify is not configured. Use Set up first." };
+  }
+  await shell.openExternal(prefs.notifyUrl);
+  return { ok: true, action: "opened" };
+});
+
+ipcMain.handle("health-remediation-autofix", async () => {
+  const prefs = normalizeHealthRemediationPrefs(healthRemediation);
+  if (!autofixReady(prefs)) {
+    return {
+      ok: false,
+      message: "Autofix is not configured. Use Set up and pick an absolute script path.",
+    };
+  }
+  const scriptPath = prefs.autofixScriptPath;
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, message: `Script missing:\n${scriptPath}` };
+  }
+  const parent = win && !win.isDestroyed() ? win : undefined;
+  const { response } = await dialog.showMessageBox(parent, {
+    type: "warning",
+    buttons: ["Run script", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    title: "Start ERPNext?",
+    message: "Run the IT-configured recovery script?",
+    detail: scriptPath,
+  });
+  if (response !== 0) return { ok: true, action: "cancel" };
+
+  return await new Promise((resolve) => {
+    const isWin = process.platform === "win32";
+    const child = isWin
+      ? spawn(scriptPath, [], { shell: false, windowsHide: true })
+      : spawn("/bin/bash", [scriptPath], { shell: false });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+      if (stderr.length > 2000) stderr = stderr.slice(-2000);
+    });
+    child.on("error", (err) => {
+      resolve({ ok: false, message: String(err && err.message ? err.message : err) });
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({
+          ok: true,
+          action: "ran",
+          message: "Script finished (exit 0). Re-check the DB light in a few seconds.",
+        });
+      } else {
+        resolve({
+          ok: false,
+          message: `Script exited ${code}.${stderr ? `\n${stderr}` : ""}`,
+        });
+      }
+    });
+  });
 });
 
 ipcMain.on("calc-history-append", (_e, raw) => {
