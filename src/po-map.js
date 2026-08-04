@@ -5,13 +5,18 @@
 
 import { relabelTerm } from "./doc-terms.js";
 import { stripHtml, sumBillLineQty, sumBillLineAmount, formatBillLineTotal } from "./bill-map.js";
+import { formatAddressDisplay } from "./address-format.js";
 
 export const PO_DOCTYPE = "Purchase Order";
 export const PO_LAYOUT_KEY = "purchase-order";
 export const PO_LIST_ROUTE = "/app/purchase-order";
 export const PO_NEW_ROUTE = "/app/purchase-order/new";
 
-/** Header: Doc label → ERPNext field meta. Date Expected is scratch (stamps line schedule_date). */
+/**
+ * Header: Doc label → ERPNext field meta. Date Expected is scratch (stamps line schedule_date).
+ * Address roles (OI-077): Ship from = supplier address (PO has no dispatch_* on many versions);
+ * Ship to = shipping; Billing = company billing_address_display when present.
+ */
 export const PO_HEADER_FIELDS = [
   { label: "Vendor", field: "supplier", type: "text", linkDoctype: "Supplier", display: "supplier_name|supplier" },
   { label: "Date", field: "transaction_date", type: "date" },
@@ -24,20 +29,31 @@ export const PO_HEADER_FIELDS = [
       "Stamps every line’s Required By (ERP schedule_date). Applied when you leave this field and again before save.",
   },
   {
-    label: "Vendor Shipping Address",
+    label: "Ship from",
     field: null,
-    type: "text",
+    type: "textarea",
     readOnly: true,
+    multiline: true,
+    addressRole: "ship_from",
     display: "address_display",
-    stripHtml: true,
   },
   {
-    label: "Ship To Address",
+    label: "Ship to",
     field: null,
-    type: "text",
+    type: "textarea",
     readOnly: true,
+    multiline: true,
+    addressRole: "ship_to",
     display: "shipping_address_display",
-    stripHtml: true,
+  },
+  {
+    label: "Billing address",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "billing",
+    display: "billing_address_display",
   },
   { label: "P.O. No.", field: "name", type: "text", readOnly: true },
 ];
@@ -195,12 +211,8 @@ export function readPoHeader(doc, scratch = {}) {
       out[meta.label] = d.supplier_name || d.supplier || "";
       continue;
     }
-    if (meta.display === "address_display") {
-      out[meta.label] = stripHtml(d.address_display);
-      continue;
-    }
-    if (meta.display === "shipping_address_display") {
-      out[meta.label] = stripHtml(d.shipping_address_display);
+    if (meta.addressRole && meta.display) {
+      out[meta.label] = formatAddressDisplay(d[meta.display]);
       continue;
     }
     if (!meta.field) {

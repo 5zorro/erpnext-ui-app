@@ -135,13 +135,25 @@ export function focusTargetAfterDocSourceModal(profileId, closeKind) {
 
 /**
  * Split header fields into two columns (museum-style card layout).
+ * Address blocks (`addressRole`) are excluded — mount them in a full-width grid.
  *
  * @template T
  * @param {T[]} fields
- * @returns {{ left: T[], right: T[] }}
+ * @returns {{ left: T[], right: T[], addresses: T[] }}
  */
 export function splitHeaderColumns(fields) {
   const list = Array.isArray(fields) ? fields : [];
-  const mid = Math.ceil(list.length / 2);
-  return { left: list.slice(0, mid), right: list.slice(mid) };
+  /** @type {T[]} */
+  const addresses = [];
+  /** @type {T[]} */
+  const rest = [];
+  for (const f of list) {
+    if (f && typeof f === "object" && /** @type {{ addressRole?: string }} */ (f).addressRole) {
+      addresses.push(f);
+    } else {
+      rest.push(f);
+    }
+  }
+  const mid = Math.ceil(rest.length / 2);
+  return { left: rest.slice(0, mid), right: rest.slice(mid), addresses };
 }

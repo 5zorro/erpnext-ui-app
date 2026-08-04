@@ -4,16 +4,46 @@
  */
 
 import { relabelTerm } from "./doc-terms.js";
+import { formatAddressDisplay } from "./address-format.js";
 
 export const BILL_DOCTYPE = "Purchase Invoice";
 export const BILL_LAYOUT_KEY = "bill";
 export const BILL_LIST_ROUTE = "/app/purchase-invoice";
 export const BILL_NEW_ROUTE = "/app/purchase-invoice/new";
 
-/** Header: Doc label → ERPNext field meta. */
+/**
+ * Header: Doc label → ERPNext field meta.
+ * Address roles (OI-077): Ship from = dispatch; Ship to = shipping; Billing = supplier address.
+ */
 export const BILL_HEADER_FIELDS = [
   { label: "Vendor Name", field: "supplier", type: "text", linkDoctype: "Supplier", display: "supplier_name|supplier" },
-  { label: "Address", field: null, type: "text", readOnly: true, display: "address_display", stripHtml: true },
+  {
+    label: "Ship from",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_from",
+    display: "dispatch_address_display",
+  },
+  {
+    label: "Ship to",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_to",
+    display: "shipping_address_display",
+  },
+  {
+    label: "Billing address",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "billing",
+    display: "address_display",
+  },
   { label: "Terms", field: "payment_terms_template", type: "text", linkDoctype: "Payment Terms Template" },
   { label: "Date", field: "posting_date", type: "date" },
   { label: "Ref No. (Supplier Invoice No.)", field: "bill_no", type: "text" },
@@ -116,8 +146,8 @@ export function readBillHeader(doc, scratch = {}) {
       out[meta.label] = d.supplier_name || d.supplier || "";
       continue;
     }
-    if (meta.display === "address_display") {
-      out[meta.label] = stripHtml(d.address_display);
+    if (meta.addressRole && meta.display) {
+      out[meta.label] = formatAddressDisplay(d[meta.display]);
       continue;
     }
     if (!meta.field) {

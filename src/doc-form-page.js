@@ -86,6 +86,7 @@ import {
 import { createFieldCalcUi } from "./calc/attach-field-calc.js";
 import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
+import { addressTextareaRows } from "./address-format.js";
 
 const api = window.erpDoc;
 
@@ -185,6 +186,7 @@ const el = {
   selectSource: document.getElementById("btn-select-source"),
   headerLeft: document.getElementById("header-left"),
   headerRight: document.getElementById("header-right"),
+  headerAddresses: document.getElementById("header-addresses"),
 };
 
 function mapHelpers() {
@@ -1192,9 +1194,35 @@ function wireDateField(input) {
 function buildHeaderFields(fields) {
   el.headerLeft.replaceChildren();
   el.headerRight.replaceChildren();
+  if (el.headerAddresses) {
+    el.headerAddresses.replaceChildren();
+    el.headerAddresses.hidden = true;
+  }
   Object.keys(headerInputs).forEach((k) => delete headerInputs[k]);
 
-  const { left, right } = splitHeaderColumns(fields);
+  const { left, right, addresses } = splitHeaderColumns(fields);
+
+  const mountReadOnlyControl = (meta, fieldEl) => {
+    const multiline = !!(meta.multiline || meta.addressRole || meta.type === "textarea");
+    const input = document.createElement(multiline ? "textarea" : "input");
+    input.id = `f-${slugLabel(meta.label)}`;
+    input.readOnly = true;
+    input.tabIndex = -1;
+    input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
+    if (meta.addressRole) input.dataset.addressRole = meta.addressRole;
+    if (multiline) {
+      input.rows = 4;
+      input.spellcheck = false;
+    }
+    if (meta.validationHint) input.title = meta.validationHint;
+    else if (meta.addressRole) {
+      input.title =
+        "Read-only here. Set addresses on the document or party in Vanilla ERPNext, then Refresh.";
+    }
+    fieldEl.appendChild(input);
+    headerInputs[meta.label] = input;
+  };
+
   const mountCol = (colEl, list) => {
     for (const meta of list) {
       const field = document.createElement("div");
@@ -1205,14 +1233,7 @@ function buildHeaderFields(fields) {
 
       const isReadOnly = meta.readOnly || !meta.field;
       if (isReadOnly) {
-        const input = document.createElement("input");
-        input.id = `f-${slugLabel(meta.label)}`;
-        input.readOnly = true;
-        input.tabIndex = -1;
-        input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
-        if (meta.validationHint) input.title = meta.validationHint;
-        field.appendChild(input);
-        headerInputs[meta.label] = input;
+        mountReadOnlyControl(meta, field);
       } else if (meta.type === "date") {
         const input = document.createElement("input");
         input.type = "text";
@@ -1255,6 +1276,25 @@ function buildHeaderFields(fields) {
 
   mountCol(el.headerLeft, left);
   mountCol(el.headerRight, right);
+
+  if (el.headerAddresses && addresses.length) {
+    el.headerAddresses.hidden = false;
+    for (const meta of addresses) {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = meta.label;
+      field.appendChild(label);
+      mountReadOnlyControl(meta, field);
+      el.headerAddresses.appendChild(field);
+    }
+    const hint = document.createElement("span");
+    hint.className = "addr-hint";
+    hint.style.gridColumn = "1 / -1";
+    hint.textContent =
+      "Read-only. Edit Ship from / Ship to / Billing on the document or party in Vanilla, then Refresh. Empty means ERP has no address linked yet (PO may lack a dedicated ship-from field).";
+    el.headerAddresses.appendChild(hint);
+  }
 }
 
 function ensureHeaderLinkPickers() {
@@ -1569,6 +1609,9 @@ function paint(doc, snapScratch, opts = {}) {
       inp.value = formatDocDateDisplay(val) || val;
     } else {
       inp.value = val;
+    }
+    if (meta.addressRole && inp.tagName === "TEXTAREA") {
+      inp.rows = addressTextareaRows(String(val ?? ""));
     }
   }
 
