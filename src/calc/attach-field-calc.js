@@ -14,8 +14,36 @@ import {
 } from "./field-calc.js";
 import { calcHistoryTapeOrder } from "./session-history.js";
 import { copyTableIconHtml, copyTotalIconHtml } from "./calc-icons.js";
+import { padDisplayToFooting, stripCalcDisplayPad, footingAlignMetrics, formatAlignedFootingLine } from "./calc-engine.js";
 
 export { calcHistoryTapeOrder } from "./session-history.js";
+
+const CALC_MONO =
+  'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+/**
+ * @param {HTMLElement} el
+ * @param {string} align "left"|"right"|"center"|"start"|"end"
+ */
+function applyTapeTextAlign(el, align) {
+  if (!el) return;
+  const a = align === "left" || align === "start" || align === "center" ? "left" : "right";
+  el.style.textAlign = a;
+}
+
+/**
+ * @param {HTMLInputElement} inp
+ * @returns {"left"|"right"}
+ */
+function fieldTextAlign(inp) {
+  try {
+    const a = getComputedStyle(inp).textAlign;
+    if (a === "right" || a === "end") return "right";
+  } catch {
+    /* ignore */
+  }
+  return "left";
+}
 
 /**
  * @param {{
@@ -43,6 +71,45 @@ export function createFieldCalcUi(els) {
   let historyLoading = false;
   /** Keep blur from committing while pointer is on the overlay (copy / scroll). */
   let pointerOnOverlay = false;
+  /** @type {HTMLInputElement|null} */
+  let monoStyledInput = null;
+
+  function restoreInputCalcStyle() {
+    if (!monoStyledInput) return;
+    const inp = monoStyledInput;
+    monoStyledInput = null;
+    if (inp.dataset.calcFontPrev != null) {
+      inp.style.fontFamily = inp.dataset.calcFontPrev;
+      delete inp.dataset.calcFontPrev;
+    } else {
+      inp.style.fontFamily = "";
+    }
+    if (inp.dataset.calcWhiteSpacePrev != null) {
+      inp.style.whiteSpace = inp.dataset.calcWhiteSpacePrev;
+      delete inp.dataset.calcWhiteSpacePrev;
+    } else {
+      inp.style.whiteSpace = "";
+    }
+  }
+
+  /**
+   * Monospace + preserve spaces so padded decimals match the tape.
+   * @param {HTMLInputElement} inp
+   */
+  function applyInputCalcStyle(inp) {
+    if (!inp) return;
+    if (monoStyledInput && monoStyledInput !== inp) restoreInputCalcStyle();
+    if (monoStyledInput === inp) return;
+    monoStyledInput = inp;
+    if (inp.dataset.calcFontPrev == null) {
+      inp.dataset.calcFontPrev = inp.style.fontFamily || "";
+    }
+    if (inp.dataset.calcWhiteSpacePrev == null) {
+      inp.dataset.calcWhiteSpacePrev = inp.style.whiteSpace || "";
+    }
+    inp.style.fontFamily = CALC_MONO;
+    inp.style.whiteSpace = "pre";
+  }
 
   function hideHistoryPanel() {
     historyExpanded = false;
@@ -57,19 +124,27 @@ export function createFieldCalcUi(els) {
     pointerOnOverlay = false;
     lastAnchor = null;
     hideHistoryPanel();
+    restoreInputCalcStyle();
     if (overlay) {
       overlay.hidden = true;
       overlay.style.maxHeight = "";
       overlay.style.height = "";
       overlay.style.bottom = "";
     }
-    if (exprEl) exprEl.textContent = "";
-    if (resultEl) resultEl.textContent = "";
+    if (exprEl) {
+      exprEl.textContent = "";
+      exprEl.style.textAlign = "";
+    }
+    if (resultEl) {
+      resultEl.textContent = "";
+      resultEl.style.textAlign = "";
+    }
   }
 
   /**
-   * Position tape to match the field box (left edge + width). Contents stay right-aligned
-   * so decimals line up within the tape; same width as Amount Due / rate makes that “close enough”.
+   * Position tape to match the field box (left edge + width). Tape/result
+   * text-align follows the input so left-aligned Amount Due and right-aligned
+   * rate cells both get decimal columns that match the field.
    * @param {HTMLElement} anchor
    */
   function positionOverlay(anchor) {
@@ -82,6 +157,18 @@ export function createFieldCalcUi(els) {
     overlay.style.width = `${width}px`;
     overlay.style.minWidth = `${width}px`;
     overlay.style.maxWidth = `${width}px`;
+
+    const align =
+      anchor instanceof HTMLInputElement || anchor instanceof HTMLTextAreaElement
+        ? fieldTextAlign(/** @type {HTMLInputElement} */ (anchor))
+        : "right";
+    if (exprEl) applyTapeTextAlign(exprEl, align);
+    if (resultEl) applyTapeTextAlign(resultEl, align);
+    if (historyEl) {
+      historyEl.querySelectorAll(".calc-hist-tape, .calc-hist-total, .calc-hist-empty").forEach((node) => {
+        applyTapeTextAlign(/** @type {HTMLElement} */ (node), align);
+      });
+    }
 
     if (historyExpanded) {
       const bottom = window.innerHeight - r.top + gap;
@@ -237,11 +324,38 @@ export function createFieldCalcUi(els) {
     lastAnchor = anchor;
     exprEl.textContent = expression || "";
     if (resultEl) {
-      resultEl.textContent = preview != null && preview !== "" ? `= ${preview}` : "";
+      if (preview != null && preview !== "") {
+        const logical = String(expression || "")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const bare = stripCalcDisplayPad(preview);
+        const metrics = footingAlignMetrics([...logical, bare, `${bare}=`]);
+        // Put "=" in the op column so the decimal matches the tape/field.
+        resultEl.textContent = formatAlignedFootingLine(`${bare}=`, metrics);
+      } else {
+        resultEl.textContent = "";
+      }
     }
     overlay.hidden = false;
     if (!historyExpanded) hideHistoryPanel();
     positionOverlay(anchor);
+  }
+
+  /**
+   * Paint mid-calc field value with leading spaces matching the tape.
+   * @param {HTMLInputElement} inp
+   * @param {string|null|undefined} preview
+   * @param {string|null|undefined} expression
+   */
+  function paintFieldAligned(inp, preview, expression) {
+    if (!inp) return;
+    applyInputCalcStyle(inp);
+    if (preview == null || preview === "") {
+      inp.value = "";
+      return;
+    }
+    inp.value = padDisplayToFooting(preview, expression || "");
   }
 
   function clear(prior) {
@@ -306,14 +420,17 @@ export function createFieldCalcUi(els) {
         fieldCalc = createFieldCalcState(inp.value, undefined, { kind: opts.kind });
         fieldCalcInput = inp;
       }
-      const r = reduceFieldCalc(fieldCalc, { key: ev.key, fieldValue: inp.value });
+      const r = reduceFieldCalc(fieldCalc, {
+        key: ev.key,
+        fieldValue: stripCalcDisplayPad(inp.value),
+      });
       fieldCalc = r.state;
       if (r.action === "none" || r.action === "ignore") return;
 
       if (r.action === "prevent") {
         ev.preventDefault();
         ev.stopPropagation();
-        if (r.preview != null) inp.value = r.preview;
+        paintFieldAligned(inp, r.preview, r.expression);
         showOverlay(inp, r.expression, r.preview);
         return;
       }

@@ -52,7 +52,7 @@ export function applyOp(a, op, b) {
 export function parseCalcNumber(raw) {
   if (raw == null || raw === "") return null;
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
-  const s = String(raw).trim().replace(/,/g, "");
+  const s = String(raw).replace(/[\s,]/g, "").trim();
   if (s === "" || s === "-" || s === "." || s === "-.") return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
@@ -224,74 +224,172 @@ export function calcFootingText(session) {
 }
 
 /**
- * Format the live entry for the footing tape (pad to field decimals when complete).
- * Incomplete fragments like `206.` stay as typed.
+ * Format the live entry for the footing tape.
+ * Keep raw digits while typing so Backspace matches what the clerk sees;
+ * completed operands in `parts` are already display-formatted when an op lands.
  * @param {string} entry
- * @param {number|null|undefined} decimals
+ * @param {number|null|undefined} _decimals unused (kept for call-site stability)
  * @returns {string}
  */
-export function formatEntryForTape(entry, decimals) {
+export function formatEntryForTape(entry, _decimals) {
   const e = entry == null ? "" : String(entry);
-  if (e === "" || e === "-") return e;
-  if (e.endsWith(".")) return e;
-  const n = parseCalcNumber(e);
-  if (n == null) return e;
-  return formatCalcDisplay(n, decimals);
-}
-
-/**
- * Align footing lines on the decimal point (monospace pad).
- * Suffix ops stay glued (`104.00+`).
- * @param {string[]} lines
- * @returns {string}
- */
-export function alignDecimalFooting(lines) {
-  const list = Array.isArray(lines) ? lines : [];
-  /** @type {{ kind: "raw"|"num", text?: string, int?: string, frac?: string|null, suffix?: string }[]} */
-  const parsed = list.map((line) => {
-    const s = String(line);
-    const m = /^(-?\d+)(?:\.(\d+))?([+\-*/=]*)$/.exec(s.trim());
-    if (!m) return { kind: "raw", text: s };
-    return {
-      kind: "num",
-      int: m[1],
-      frac: m[2] != null ? m[2] : null,
-      suffix: m[3] || "",
-    };
-  });
-  const maxInt = Math.max(0, ...parsed.map((p) => (p.kind === "num" ? p.int.length : 0)));
-  const maxFrac = Math.max(
-    0,
-    ...parsed.map((p) => (p.kind === "num" && p.frac != null ? p.frac.length : 0)),
-  );
-  const showDot = maxFrac > 0;
-
-  return parsed
-    .map((p) => {
-      if (p.kind === "raw") return p.text;
-      const intPad = String(p.int).padStart(maxInt, " ");
-      if (!showDot) return intPad + p.suffix;
-      const fracSrc = p.frac != null ? p.frac : "";
-      const fracPad = fracSrc.padEnd(maxFrac, "0");
-      return `${intPad}.${fracPad}${p.suffix}`;
-    })
-    .join("\n");
+  return e;
 }
 
 /**
  * Value shown as “running” answer while typing the current entry.
+ * Live entry stays raw (Backspace-editable). Empty entry after an op → blank
+ * (not the prior total), so the field is ready for the next number.
  * @param {CalcSession} session
  * @returns {string}
  */
 export function calcPreview(session) {
   if (!session) return "";
   if (session.entry !== "") {
-    const n = parseCalcNumber(session.entry);
-    if (n != null) return formatCalcDisplay(n, session.decimals);
     return session.entry;
   }
+  // Mid-chord waiting for the next operand — don't paint the prior total into the field.
+  if (session.pendingOp != null) return "";
   if (session.total != null) return formatCalcDisplay(session.total, session.decimals);
   return "";
+}
+
+/**
+ * Align footing lines on the decimal point (monospace pad).
+ * Trailing ops stay in a fixed-width suffix column (`104.00+`) so every line
+ * has the same length — decimals stay aligned with text-align left *or* right.
+ * @param {string[]} lines
+ * @returns {string}
+ */
+export function alignDecimalFooting(lines) {
+  const list = Array.isArray(lines) ? lines : [];
+  const metrics = footingAlignMetrics(list);
+  return list.map((line) => formatAlignedFootingLine(line, metrics)).join("\n");
+}
+
+/**
+ * @typedef {{
+ *   maxInt: number,
+ *   maxFrac: number,
+ *   maxSuffix: number,
+ *   showDot: boolean,
+ *   width: number,
+ * }} FootingAlignMetrics
+ */
+
+/**
+ * Measure int / frac / suffix columns for a set of footing lines.
+ * @param {string[]} lines
+ * @returns {FootingAlignMetrics}
+ */
+export function footingAlignMetrics(lines) {
+  const list = Array.isArray(lines) ? lines : [];
+  let maxInt = 0;
+  let maxFrac = 0;
+  let maxSuffix = 0;
+  let showDot = false;
+  for (const line of list) {
+    const p = parseFootingLine(line);
+    if (p.kind !== "num") continue;
+    maxInt = Math.max(maxInt, p.int.length);
+    if (p.hasDot) {
+      showDot = true;
+      maxFrac = Math.max(maxFrac, p.frac.length);
+    }
+    maxSuffix = Math.max(maxSuffix, p.suffix.length);
+  }
+  const width = maxInt + (showDot ? 1 + maxFrac : 0) + maxSuffix;
+  return { maxInt, maxFrac, maxSuffix, showDot, width };
+}
+
+/**
+ * @param {string} line
+ * @returns {{
+ *   kind: "raw"|"num",
+ *   text?: string,
+ *   int?: string,
+ *   frac?: string,
+ *   hasDot?: boolean,
+ *   suffix?: string,
+ * }}
+ */
+export function parseFootingLine(line) {
+  const s = String(line ?? "");
+  // Allow trailing dot while typing (`206.`) and glued ops (`104.00+`, `1=`).
+  const m = /^(-?\d+)(?:(\.)(\d*))?([+\-*/=]*)$/.exec(s.trim());
+  if (!m) return { kind: "raw", text: s };
+  return {
+    kind: "num",
+    int: m[1],
+    hasDot: !!m[2],
+    frac: m[3] != null ? m[3] : "",
+    suffix: m[4] || "",
+  };
+}
+
+/**
+ * @param {string} line
+ * @param {FootingAlignMetrics} metrics
+ * @returns {string}
+ */
+export function formatAlignedFootingLine(line, metrics) {
+  const p = parseFootingLine(line);
+  const width = metrics.width || 0;
+  if (p.kind === "raw") {
+    return String(p.text ?? "").padStart(width, " ");
+  }
+  const intPad = String(p.int).padStart(metrics.maxInt, " ");
+  let body = intPad;
+  if (metrics.showDot) {
+    const openDot =
+      p.hasDot && p.frac === "" && String(line).trim().replace(/[+\-*/=]+$/, "").endsWith(".");
+    // Pad with spaces (not zeros) so live entries like 206.5 stay Backspace-faithful
+    // under completed 104.00 operands — zeros only exist if already in the source text.
+    const frac = openDot
+      ? "".padEnd(metrics.maxFrac, " ")
+      : (p.hasDot ? p.frac : "").padEnd(metrics.maxFrac, " ");
+    body = `${intPad}.${frac}`;
+  }
+  const suffixPad = String(p.suffix).padEnd(metrics.maxSuffix, " ");
+  return body + suffixPad;
+}
+
+/**
+ * Pad a display number (preview / field) to the footing’s decimal column.
+ * Does not invent a suffix — field usually shows the bare total/entry.
+ * @param {string|number|null|undefined} display
+ * @param {string} footingText already-aligned or raw newline footing
+ * @returns {string}
+ */
+export function padDisplayToFooting(display, footingText) {
+  const raw = display == null ? "" : String(display);
+  if (raw.trim() === "") return "";
+  const footingLines = String(footingText || "")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+  // Metrics from unpadded logical lines when possible
+  const logical = footingLines.map((l) => l.trim());
+  const metrics = footingAlignMetrics(logical.length ? logical : [raw.trim()]);
+  // Include the display itself so a short result still pads to tall operands above.
+  const withSelf = footingAlignMetrics([...logical, raw.trim()]);
+  const m = {
+    maxInt: Math.max(metrics.maxInt, withSelf.maxInt),
+    maxFrac: Math.max(metrics.maxFrac, withSelf.maxFrac),
+    maxSuffix: 0,
+    showDot: metrics.showDot || withSelf.showDot,
+    width: 0,
+  };
+  m.width = m.maxInt + (m.showDot ? 1 + m.maxFrac : 0);
+  return formatAlignedFootingLine(raw.trim(), m).trimEnd();
+}
+
+/**
+ * Strip calc display padding before commit / parse.
+ * @param {string|null|undefined} s
+ * @returns {string}
+ */
+export function stripCalcDisplayPad(s) {
+  return String(s ?? "").replace(/\s+/g, "").trim();
 }
 
 /**
