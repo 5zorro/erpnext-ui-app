@@ -70,10 +70,28 @@ describe("readBillHeader", () => {
   it("projects museum header labels", () => {
     const h = readBillHeader(sampleDoc);
     assert.equal(h["Vendor Name"], "Acme Hardware");
-    assert.equal(h.Address, "123 Main Town");
+    assert.equal(h["Billing address"], "123 Main\nTown");
+    assert.equal(h["Ship from"], "");
+    assert.equal(h["Ship to"], "");
     assert.equal(h.Date, "2026-07-18");
     assert.equal(h.Memo, "Rush");
     assert.equal(h["Amount Due"], "");
+  });
+
+  it("projects three address roles with USA multiline formatting", () => {
+    const h = readBillHeader({
+      ...sampleDoc,
+      dispatch_address_display:
+        "<p>Three Little Pigs<br>attn:AR clerk<br>123 street addr<br>City, TX 77444-1234<br>United States</p>",
+      shipping_address_display: "<p>Our Warehouse<br>9 Dock Rd<br>Houston, TX 77002<br>USA</p>",
+      address_display: "<p>Billing Desk<br>PO Box 1<br>Austin, TX 78701</p>",
+    });
+    assert.equal(
+      h["Ship from"],
+      "Three Little Pigs\nattn:AR clerk\n123 street addr\nCity, TX 77444-1234",
+    );
+    assert.equal(h["Ship to"], "Our Warehouse\n9 Dock Rd\nHouston, TX 77002");
+    assert.equal(h["Billing address"], "Billing Desk\nPO Box 1\nAustin, TX 78701");
   });
 
   it("prefers scratch amount due", () => {

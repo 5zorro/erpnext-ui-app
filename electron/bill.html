@@ -110,6 +110,77 @@
       margin: 6px 0 0; font-size: 12px; color: #64748b; line-height: 1.4;
     }
     .commit-gate .hint.warn { color: #b45309; }
+    /* Packet C — in-field calculator overlay (+ hover history tape) */
+    #calc-overlay {
+      position: fixed; z-index: 40;
+      display: flex; flex-direction: column;
+      box-sizing: border-box;
+      background: #1e293b; color: #e2e8f0; border-radius: 8px;
+      padding: 6px 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .35);
+      font-variant-numeric: tabular-nums;
+      pointer-events: auto;
+      opacity: 0.62;
+      transition: opacity 120ms ease;
+    }
+    #calc-overlay:hover,
+    #calc-overlay.calc-expanded { opacity: 1; }
+    #calc-overlay[hidden] { display: none !important; }
+    #calc-overlay .calc-history {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      margin: 0 0 6px; padding: 0 0 6px; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-history[hidden] { display: none !important; }
+    #calc-overlay .calc-live { flex: 0 0 auto; }
+    #calc-overlay .calc-expr {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; color: #94a3b8; letter-spacing: .02em;
+      white-space: pre; line-height: 1.35;
+      /* text-align set in JS to match the field (left Amount Due / right rate) */
+    }
+    #calc-overlay .calc-result {
+      margin-top: 4px; padding-top: 4px; border-top: 1px solid #334155;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px; font-weight: 700; letter-spacing: .02em;
+      white-space: pre;
+    }
+    #calc-overlay .calc-hint { margin-top: 4px; font-size: 9px; color: #64748b; line-height: 1.3; }
+    #calc-overlay .calc-hist-empty {
+      font-size: 10px; color: #64748b; padding: 4px 0; line-height: 1.35;
+    }
+    #calc-overlay .calc-hist-block {
+      padding: 6px 0; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-hist-block:last-child { border-bottom: none; }
+    #calc-overlay .calc-hist-block.prior-session { opacity: 0.85; }
+    #calc-overlay .calc-hist-tape {
+      margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px; white-space: pre; color: #94a3b8; line-height: 1.3;
+    }
+    #calc-overlay .calc-hist-total {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; font-weight: 700; color: #e2e8f0; margin: 2px 0 4px;
+      white-space: pre;
+    }
+    #calc-overlay .calc-hist-actions {
+      display: flex; justify-content: flex-end; gap: 4px;
+    }
+    #calc-overlay .calc-hist-copy {
+      border: none; border-radius: 4px; padding: 2px 5px; font-size: 12px; line-height: 1.2;
+      cursor: pointer; background: #334155; color: #e2e8f0;
+    }
+    #calc-overlay .calc-hist-copy:hover { background: #475569; }
+    #calc-overlay .calc-ico {
+      display: inline-flex; align-items: center; gap: 2px; vertical-align: middle;
+    }
+    #calc-overlay .calc-ico svg { display: block; }
+    button.amount-back-in {
+      display: block; width: 100%; border: none; background: transparent;
+      padding: 5px 2px; margin: 0; text-align: right; cursor: pointer;
+      font: inherit; color: #64748b;
+    }
+    button.amount-back-in:hover { color: #1e293b; background: #f1f5f9; border-radius: 4px; }
+    button.amount-back-in:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+    td.num input.amount-back-in-input { text-align: right; }
     @media (prefers-reduced-motion: no-preference) {
       .commit-gate-dialog { animation: gate-enter 120ms ease-out; }
       @keyframes gate-enter {
@@ -292,6 +363,22 @@
     .link-opt.active { background: #eaf4ff; }
     .link-opt.link-action { font-style: italic; color: #1d4ed8; }
     .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
+    .addr-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px 14px;
+      margin: 4px 0 12px;
+    }
+    .addr-grid textarea {
+      min-height: 4.8em;
+      resize: vertical;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      font-family: inherit;
+    }
+    @media (max-width: 900px) {
+      .addr-grid { grid-template-columns: 1fr; }
+    }
     .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
       pointer-events: none; opacity: 0.55;
@@ -381,15 +468,6 @@
       <div class="cols">
         <div>
           <div class="field"><label>Vendor Name</label><input id="f-vendor" data-field="supplier" data-testid="bill-vendor" autocomplete="off" /></div>
-          <div class="field">
-            <label>Address</label>
-            <input id="f-address" readonly tabindex="-1" data-testid="bill-address"
-              title="Read-only here. Edit the vendor’s address in ERPNext: Home → Buying → Supplier (Vendor) → open the vendor → Address / Contact. Then Refresh this Bill." />
-            <span class="addr-hint" id="address-hint">
-              Read-only on Bill. Edit address on the Vendor (Supplier) form:
-              <em>Home → Buying → Supplier → [vendor] → Address</em>. Then Refresh.
-            </span>
-          </div>
           <div class="field"><label>Terms</label><input id="f-terms" data-field="payment_terms_template" data-testid="bill-terms" /></div>
         </div>
         <div>
@@ -418,6 +496,27 @@
             <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
           </div>
         </div>
+      </div>
+      <div class="addr-grid" data-testid="bill-address-grid">
+        <div class="field">
+          <label>Ship from</label>
+          <textarea id="f-ship-from" readonly tabindex="-1" rows="4" data-testid="bill-ship-from" spellcheck="false"
+            title="Vendor dispatch / ship-from. Read-only here — set Dispatch Address on the Bill in Vanilla, then Refresh."></textarea>
+        </div>
+        <div class="field">
+          <label>Ship to</label>
+          <textarea id="f-ship-to" readonly tabindex="-1" rows="4" data-testid="bill-ship-to" spellcheck="false"
+            title="Where goods are received. Read-only here — set Shipping Address on the Bill in Vanilla, then Refresh."></textarea>
+        </div>
+        <div class="field">
+          <label>Billing address</label>
+          <textarea id="f-billing-address" readonly tabindex="-1" rows="4" data-testid="bill-billing-address" spellcheck="false"
+            title="Vendor billing address. Read-only here — set Supplier Address on the Bill (or Vendor) in Vanilla, then Refresh."></textarea>
+        </div>
+        <span class="addr-hint" id="address-hint" style="grid-column: 1 / -1">
+          Read-only on Bill. Multi-line USA format (country shown only when not USA).
+          Edit in Vanilla: Dispatch = Ship from · Shipping = Ship to · Supplier Address = Billing. Then Refresh.
+        </span>
       </div>
       <div>
         <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
@@ -520,6 +619,14 @@
       </div>
     </div>
   </div>
+  <div id="calc-overlay" hidden data-testid="bill-calc-overlay" role="status" aria-live="polite">
+    <div class="calc-history" id="calc-history" hidden data-testid="bill-calc-history"></div>
+    <div class="calc-live">
+      <div class="calc-expr" id="calc-expr"></div>
+      <div class="calc-result" id="calc-result"></div>
+      <div class="calc-hint">Hover tape for session history · Enter / Tab commit · Esc cancel</div>
+    </div>
+  </div>
   <script type="module">
     import {
       readBillHeader,
@@ -538,6 +645,7 @@
       isDraftBillDoc,
       saveActionsBlockedByChecksum,
     } from "../src/bill-map.js";
+    import { addressTextareaRows } from "../src/address-format.js";
     import {
       docLifecyclePill,
       focusFinalizeControl,
@@ -597,9 +705,12 @@
       gateTriggerLabel,
       nextAfterGate,
       commitGateErpFailureView,
+      formatSaveFailureReason,
     } from "../src/bill-action-flow.js";
     import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
     import { isSelectableSourceItem } from "../src/source-modal.js";
+    import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
+    import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 
     const api = window.erpBill;
     let lastDoc = null;
@@ -620,11 +731,47 @@
     let lineApplyInFlight = null;
     /** @type {boolean} */
     let saveInFlight = false;
+    const calcUi = createFieldCalcUi({
+      overlay: document.getElementById("calc-overlay"),
+      exprEl: document.getElementById("calc-expr"),
+      resultEl: document.getElementById("calc-result"),
+      historyEl: document.getElementById("calc-history"),
+      getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
+      copyHistory: (id, mode) =>
+        api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
+    });
+
+    /**
+     * @param {HTMLInputElement} inp
+     * @param {{ kind: string, onCommit: (value: string) => void | Promise<void> }} opts
+     */
+    function wireFieldCalc(inp, opts) {
+      calcUi.attach(inp, {
+        kind: opts.kind,
+        onCommit: opts.onCommit,
+        isPainting: () => painting,
+        isEditable: () => editable(),
+        commitOnIdleBlur: !!opts.commitOnIdleBlur,
+        onHistory: (payload) => {
+          if (!api || !api.appendCalcHistory) return;
+          api.appendCalcHistory({
+            ...payload,
+            sourceLabel: "Bill entry",
+          });
+        },
+      });
+    }
+
+    function clearFieldCalc(prior) {
+      calcUi.clear(prior);
+    }
 
     const el = {
       status: document.getElementById("status"),
       vendor: document.getElementById("f-vendor"),
-      address: document.getElementById("f-address"),
+      shipFrom: document.getElementById("f-ship-from"),
+      shipTo: document.getElementById("f-ship-to"),
+      billingAddress: document.getElementById("f-billing-address"),
       terms: document.getElementById("f-terms"),
       date: document.getElementById("f-date"),
       billno: document.getElementById("f-billno"),
@@ -1403,9 +1550,12 @@
         .map((r, ri) => {
           const cells = BILL_ITEM_COLS.map((col, ci) => {
             const val = r[ci] ?? "";
-            // Amount (display-only): $#,###.<u>__</u>
+            // Amount: display-only in ERP; click to back into unit cost (amount ÷ qty → rate).
             if (col.displayOnly || col.field == null) {
               const html = formatUsdAmountHtml(val);
+              if (col.label === "Amount" && canEdit) {
+                return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Cost)" data-testid="bill-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
+              }
               return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
             }
             // Cost: #,###.## (editable text so commas work)
@@ -1468,13 +1618,29 @@
             if (n != null) inp.value = String(n);
           });
           inp.addEventListener("blur", () => {
+            if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
             const n = parseMoney(inp.value);
             if (n != null) inp.value = formatGroupedNumber(n);
             else if (normalizeEditableText(inp.value) === "") inp.value = "";
           });
         }
+        if (field === "qty" || field === "rate") {
+          wireFieldCalc(inp, {
+            kind: field,
+            onCommit: async (value) => {
+              let next = value;
+              if (field === "rate") {
+                const n = parseMoney(value);
+                next = n == null ? "" : String(n);
+                if (n != null) inp.value = formatGroupedNumber(n);
+              }
+              await apply(next);
+            },
+          });
+        }
         inp.addEventListener("change", async () => {
           if (!api || painting) return;
+          if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
           const kind = dirtyCompareKindForField(field);
           let next =
             kind === "number" ? inp.value : normalizeEditableText(inp.value);
@@ -1510,6 +1676,78 @@
           }
         });
       });
+      el.items.querySelectorAll("button[data-back-in]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!editable() || painting) return;
+          const ri = Number(btn.getAttribute("data-back-in"));
+          beginAmountBackIn(btn, ri);
+        });
+      });
+    }
+
+    /**
+     * Click Amount → temporary input + calc; commit writes rate = amount ÷ qty.
+     * @param {HTMLElement} btn
+     * @param {number} ri
+     */
+    function beginAmountBackIn(btn, ri) {
+      const td = btn.closest("td");
+      if (!td || !lastDoc || !lastDoc.items || !lastDoc.items[ri]) return;
+      const row = lastDoc.items[ri];
+      const priorAmt =
+        row.amount != null && row.amount !== ""
+          ? String(row.amount)
+          : String((Number(row.qty) || 0) * (Number(row.rate) || 0) || "");
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.inputMode = "decimal";
+      inp.className = "money-cost amount-back-in-input";
+      inp.dataset.testid = `bill-amt-edit-${ri}`;
+      inp.setAttribute("data-testid", `bill-amt-edit-${ri}`);
+      const n0 = parseMoney(priorAmt);
+      inp.value = n0 != null ? String(n0) : "";
+      td.replaceChildren(inp);
+      setStatus("Back into cost: enter Amount (calc OK) — Cost = Amount ÷ Qty.");
+      const finishRestore = () => {
+        paint(lastDoc, amountDue);
+      };
+      wireFieldCalc(inp, {
+        kind: "amount",
+        commitOnIdleBlur: true,
+        onCommit: async (value) => {
+          const qty = row.qty;
+          const derived = rateFromBackedInAmount(value, qty);
+          if (!derived.ok) {
+            setStatus(derived.reason, "warn");
+            finishRestore();
+            return;
+          }
+          setStatus("Updating cost from amount…");
+          const res = await api.setItem(ri, "rate", derived.rateText);
+          if (res && res.ok) {
+            noteUserEdit();
+            paint(res.doc, amountDue);
+            setStatus(`Cost set to ${derived.rateText} (Amount ÷ Qty).`);
+          } else {
+            setStatus((res && res.reason) || "Could not update cost.", "err");
+            await refresh();
+          }
+        },
+      });
+      inp.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && calcUi.getState().mode !== "active") {
+          ev.preventDefault();
+          // Detach before paint so blur does not idle-commit the edit.
+          calcUi.clear(inp.value);
+          finishRestore();
+        }
+      });
+      inp.focus();
+      try {
+        inp.select();
+      } catch {
+        /* ignore */
+      }
     }
 
     function ensureHeaderLinkPickers() {
@@ -1785,6 +2023,7 @@
 
     function paint(doc, scratchDue, opts = {}) {
       painting = true;
+      clearFieldCalc(amountDue);
       lastDoc = doc || null;
       amountDue = scratchDue != null ? String(scratchDue) : amountDue;
       if (opts.userEdited != null) userEdited = !!opts.userEdited;
@@ -1806,7 +2045,15 @@
     setFormBlocked(false);
       const h = readBillHeader(doc, { amountDue: amountDue || undefined });
       el.vendor.value = h["Vendor Name"] ?? "";
-      el.address.value = h.Address ?? "";
+      const paintAddr = (node, text) => {
+        if (!node) return;
+        const v = text ?? "";
+        node.value = v;
+        node.rows = addressTextareaRows(v);
+      };
+      paintAddr(el.shipFrom, h["Ship from"]);
+      paintAddr(el.shipTo, h["Ship to"]);
+      paintAddr(el.billingAddress, h["Billing address"]);
       el.terms.value = h.Terms ?? "";
       el.date.value = formatDocDateDisplay(h.Date ?? "") || (h.Date ?? "");
       el.billno.value = h["Ref No. (Supplier Invoice No.)"] ?? "";
@@ -1822,7 +2069,9 @@
       el.duedate.readOnly = !canEdit;
       el.memo.readOnly = !canEdit;
       el.amountdue.readOnly = !canEdit;
-      el.address.readOnly = true;
+      if (el.shipFrom) el.shipFrom.readOnly = true;
+      if (el.shipTo) el.shipTo.readOnly = true;
+      if (el.billingAddress) el.billingAddress.readOnly = true;
       el.addLine.disabled = !canEdit;
       if (el.clearQty) el.clearQty.disabled = !canEdit;
       if (el.attach) el.attach.disabled = !canEdit;
@@ -1981,15 +2230,16 @@
         if (r && Array.isArray(r.blockers) && r.blockers.length) {
           metaBlockers = r.blockers;
         }
-        const reason =
-          (r && r.timedOut && r.reason) ||
-          (r && r.reason) ||
-          "Save failed — check Vanilla validations.";
+        const reason = formatSaveFailureReason(
+          r,
+          submit ? "Save & submit" : "Save draft",
+        );
         setStatus(reason, "err");
         return {
           ok: false,
           reason,
           blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
+          timedOut: !!(r && r.timedOut),
         };
       } finally {
         saveInFlight = false;
@@ -2017,10 +2267,25 @@
       }
     });
     el.amountdue.addEventListener("input", () => {
+      if (calcUi.getState().mode === "active" && calcUi.getInput() === el.amountdue) return;
       const n = parseMoney(el.amountdue.value);
       amountDue = n != null ? String(n) : el.amountdue.value;
       paintChip();
       if (api) api.setAmountDue(amountDue);
+    });
+    // Attach before blur so active calc commits first, then this blur formats.
+    wireFieldCalc(el.amountdue, {
+      kind: "amountDue",
+      onCommit: (value) => {
+        const n = parseMoney(value);
+        amountDue = n != null ? String(n) : "";
+        const changed = !valuesMeaningfullyEqual(amountDueAtFocus, amountDue, { kind: "number" });
+        if (api) api.setAmountDue(amountDue, changed);
+        if (changed) noteUserEdit();
+        amountDueAtFocus = amountDue;
+        paintAmountDueInput({ keepRaw: true });
+        paintChip();
+      },
     });
     el.amountdue.addEventListener("blur", () => {
       const n = parseMoney(el.amountdue.value);
@@ -2032,6 +2297,7 @@
       paintChip();
     });
     el.amountdue.addEventListener("keydown", (ev) => {
+      if (calcUi.getState().mode === "active" && calcUi.getInput() === el.amountdue) return;
       if (ev.key === "Enter") {
         ev.preventDefault();
         el.amountdue.blur();

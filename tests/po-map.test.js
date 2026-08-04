@@ -61,11 +61,20 @@ describe("readPoHeader", () => {
   it("projects museum header labels", () => {
     const h = readPoHeader(sampleDoc);
     assert.equal(h.Vendor, "Acme Hardware");
-    assert.equal(h["Vendor Shipping Address"], "123 Main Town");
-    assert.equal(h["Ship To Address"], "Ship Yard");
+    assert.equal(h["Ship from"], "123 Main\nTown");
+    assert.equal(h["Ship to"], "Ship Yard");
+    assert.equal(h["Billing address"], "");
     assert.equal(h.Date, "2026-07-18");
     assert.equal(h["P.O. No."], "PO-0001");
     assert.equal(h["Date Expected"], "2026-07-25");
+  });
+
+  it("fills Billing when billing_address_display is present", () => {
+    const h = readPoHeader({
+      ...sampleDoc,
+      billing_address_display: "<p>Co Bill<br>1 HQ<br>Dallas, TX 75201<br>United States</p>",
+    });
+    assert.equal(h["Billing address"], "Co Bill\n1 HQ\nDallas, TX 75201");
   });
 
   it("prefers scratch Date Expected", () => {

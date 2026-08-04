@@ -1,7 +1,7 @@
 /**
  * Deduplicated navigation history — list vs form slots per doctype, most-recent first.
  */
-import { routeInfo, titleizeDoctype } from "./route-info.js";
+import { routeInfo, titleizeDoctype, isNewDocRecord } from "./route-info.js";
 import { formLabelForDoctype, listLabelForDoctype } from "./doctype-labels.js";
 
 export const HISTORY_CAP = 12;
@@ -34,13 +34,17 @@ export function historyEntrySlot(entry, erpBase) {
 }
 
 /**
+ * Primary flyout label only ("Bill", "Find Bills", "New Bill").
+ * Document identity goes in `detail` (optionally muted) — not mashed into label.
  * @param {string} doctype
  * @param {string} [record]
  * @param {Record<string, string>} [labels]
  */
 export function historyLabelFor(doctype, record, labels) {
   if (!record) return listLabelForDoctype(doctype, labels);
-  return formLabelForDoctype(doctype, labels) || titleizeDoctype(doctype);
+  const base = formLabelForDoctype(doctype, labels) || titleizeDoctype(doctype);
+  if (isNewDocRecord(record)) return base ? `New ${base}` : "New";
+  return base || titleizeDoctype(doctype) || String(doctype);
 }
 
 /**
@@ -60,13 +64,27 @@ export function splitHistory(list, opts = {}) {
 }
 
 /**
- * @typedef {{ route: string, dt: string, label: string, slot?: string }} HistoryEntry
+ * @typedef {{
+ *   route: string,
+ *   dt: string,
+ *   label: string,
+ *   slot?: string,
+ *   detail?: string,
+ *   detailMuted?: boolean,
+ * }} HistoryEntry
  */
 
 /**
  * @param {HistoryEntry[]} list
  * @param {string} routeOrUrl
- * @param {{ erpBase?: string, labels?: Record<string, string>, cap?: number }} [opts]
+ * @param {{
+ *   erpBase?: string,
+ *   labels?: Record<string, string>,
+ *   cap?: number,
+ *   detail?: string,
+ *   detailMuted?: boolean,
+ *   labelOverride?: string,
+ * }} [opts]
  * @returns {HistoryEntry[]} new list (does not mutate input)
  */
 export function pushHistory(list, routeOrUrl, opts = {}) {
@@ -77,12 +95,26 @@ export function pushHistory(list, routeOrUrl, opts = {}) {
   const labels = opts.labels || {};
   const cap = opts.cap ?? HISTORY_CAP;
   const slot = historySlotKey(doctype, record);
-  const label = historyLabelFor(doctype, record, labels);
+  const label =
+    opts.labelOverride != null && String(opts.labelOverride).trim()
+      ? String(opts.labelOverride).trim()
+      : historyLabelFor(doctype, record, labels);
+
+  let detail = "";
+  if (opts.detail != null && String(opts.detail).trim()) {
+    detail = String(opts.detail).trim();
+  } else if (record && !isNewDocRecord(record) && !opts.labelOverride) {
+    // Vanilla nav knows the name before Doc snap — show as secondary, full emphasis.
+    detail = String(record);
+  }
+
   const entry = {
     route: path.startsWith("/") ? path : `/${path}`,
     dt: doctype,
     label,
     slot,
+    detail,
+    detailMuted: !!(detail && opts.detailMuted),
   };
 
   const next = prev.filter((h) => historyEntrySlot(h, opts.erpBase) !== slot);

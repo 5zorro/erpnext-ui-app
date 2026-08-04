@@ -54,9 +54,28 @@ describe("doc-action-flow", () => {
     assert.equal(focusTargetAfterDocSourceModal("receipt", "cancel"), null);
   });
 
-  it("splitHeaderColumns balances columns", () => {
-    const { left, right } = splitHeaderColumns([1, 2, 3, 4, 5]);
+  it("splitHeaderColumns balances columns and peels address roles", () => {
+    const { left, right, addresses } = splitHeaderColumns([1, 2, 3, 4, 5]);
     assert.deepEqual(left, [1, 2, 3]);
     assert.deepEqual(right, [4, 5]);
+    assert.deepEqual(addresses, []);
+    const parted = splitHeaderColumns([
+      { label: "A" },
+      { label: "Ship from", addressRole: "ship_from" },
+      { label: "B" },
+      { label: "Ship to", addressRole: "ship_to" },
+    ]);
+    assert.deepEqual(
+      parted.left.map((x) => x.label),
+      ["A"],
+    );
+    assert.deepEqual(
+      parted.right.map((x) => x.label),
+      ["B"],
+    );
+    assert.deepEqual(
+      parted.addresses.map((x) => x.addressRole),
+      ["ship_from", "ship_to"],
+    );
   });
 });
