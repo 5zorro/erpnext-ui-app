@@ -180,6 +180,28 @@ export function reduceFieldCalc(state, ev) {
     return commitFieldCalc(st);
   }
 
+  // Backspace edits only the live entry (before + / − / × / ÷ / = finalizes it).
+  if (mapped === "Backspace") {
+    const entry = st.session && st.session.entry != null ? String(st.session.entry) : "";
+    if (!entry.length) {
+      // Nothing to delete on this operand — keep tape; do not touch prior finalized lines.
+      return {
+        state: st,
+        action: "prevent",
+        expression: calcFootingText(st.session),
+        preview: calcPreview(st.session),
+      };
+    }
+    const out = feedCalcKey(st.session, "Backspace");
+    const next = { ...st, session: out.session };
+    return {
+      state: next,
+      action: "prevent",
+      expression: calcFootingText(out.session),
+      preview: calcPreview(out.session),
+    };
+  }
+
   const out = feedCalcKey(st.session, mapped);
   const next = { ...st, session: out.session };
   return {

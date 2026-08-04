@@ -4,6 +4,8 @@ import {
   calcFootingLines,
   calcFootingText,
   alignDecimalFooting,
+  padDisplayToFooting,
+  stripCalcDisplayPad,
   evaluateChord,
   createCalcSession,
   seedExcelWithValue,
@@ -22,7 +24,8 @@ describe("calcFootingLines (vertical tape)", () => {
     // After =, entry cleared; parts include final operand
     const lines = calcFootingLines(r.session);
     assert.deepEqual(lines, ["10+", "4110+", "300"]);
-    assert.equal(calcFootingText(r.session), "  10+\n4110+\n 300");
+    // Suffix column padded so every line is equal width (decimals stay aligned L or R).
+    assert.equal(calcFootingText(r.session), "  10+\n4110+\n 300 ");
   });
 
   it("field reducer expression is newline footing while typing", () => {
@@ -35,10 +38,10 @@ describe("calcFootingLines (vertical tape)", () => {
     out = reduceFieldCalc(st, { key: "+", fieldValue: "" });
     st = out.state;
     out = reduceFieldCalc(st, { key: "3", fieldValue: "" });
-    assert.equal(out.expression, "1+\n2+\n3");
+    assert.equal(out.expression, "1+\n2+\n3 ");
   });
 
-  it("money field pads to 2 decimals and aligns on the point", () => {
+  it("money field pads completed operands; live entry stays raw for Backspace", () => {
     let st = createFieldCalcState("104", undefined, { kind: "amount" });
     let out = reduceFieldCalc(st, { key: "+", fieldValue: "104" });
     st = out.state;
@@ -47,8 +50,46 @@ describe("calcFootingLines (vertical tape)", () => {
       out = reduceFieldCalc(st, { key: ch, fieldValue: "" });
       st = out.state;
     }
-    assert.equal(out.expression, "104.00+\n206.50");
-    assert.equal(alignDecimalFooting(["104.00+", "206.50"]), "104.00+\n206.50");
+    assert.equal(out.expression, "104.00+\n206.5  ");
+    assert.equal(out.preview, "206.5");
+    // Equal-width lines; frac pad uses spaces (not invented zeros) for short live entries.
+    assert.equal(alignDecimalFooting(["104.00+", "206.5"]), "104.00+\n206.5  ");
+  });
+
+  it("aligns short result under long operands (1000000 vs 1)", () => {
+    const text = alignDecimalFooting(["1000000-", "1000000+", "1"]);
+    const rows = text.split("\n");
+    assert.equal(rows.length, 3);
+    assert.equal(rows[0].length, rows[1].length);
+    assert.equal(rows[1].length, rows[2].length);
+    // Decimal/int column: '1' sits under the ones place of 1000000
+    assert.equal(rows[2].trimEnd(), "      1");
+    assert.equal(padDisplayToFooting("1", text).trimEnd(), "      1");
+    assert.equal(stripCalcDisplayPad("      1.00"), "1.00");
+  });
+
+  it("Backspace edits live entry only; empty after op is a no-op", () => {
+    let st = createFieldCalcState("100", undefined, { kind: "amountDue" });
+    let out = reduceFieldCalc(st, { key: "+", fieldValue: "100" });
+    st = out.state;
+    out = reduceFieldCalc(st, { key: "Backspace", fieldValue: "" });
+    assert.equal(out.action, "prevent");
+    assert.equal(st.session.entry, "");
+    assert.equal(out.preview, "");
+
+    out = reduceFieldCalc(st, { key: "2", fieldValue: "" });
+    st = out.state;
+    out = reduceFieldCalc(st, { key: "5", fieldValue: "" });
+    st = out.state;
+    assert.equal(out.preview, "25");
+    out = reduceFieldCalc(st, { key: "Backspace", fieldValue: "25" });
+    st = out.state;
+    assert.equal(out.preview, "2");
+    assert.equal(st.session.entry, "2");
+    out = reduceFieldCalc(st, { key: "Backspace", fieldValue: "2" });
+    st = out.state;
+    assert.equal(out.preview, "");
+    assert.equal(st.session.entry, "");
   });
 });
 
