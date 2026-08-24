@@ -3,7 +3,7 @@
  * Emit the deterministic corpus plan as JSON (stdout).
  * Usage: node ops/sample-data/emit-plan.js > /tmp/corpus-plan.json
  */
-import { buildCorpusPlan, dateForOffset } from "../../src/sample-data/corpus-plan.js";
+import { buildCorpusPlan, postingDateForDoc } from "../../src/sample-data/corpus-plan.js";
 
 const asOf = process.env.SAMPLE_AS_OF || new Date().toISOString().slice(0, 10);
 const plan = buildCorpusPlan();
@@ -12,7 +12,7 @@ const enriched = {
   asOf,
   docs: plan.docs.map((d) => ({
     ...d,
-    postingDate: dateForOffset(asOf, d.dayOffset),
+    postingDate: postingDateForDoc(asOf, d),
   })),
 };
 

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Document</title>
+  <link rel="stylesheet" href="doc-wash.css" />
   <style>
     html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
@@ -327,6 +328,7 @@
     .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
     .link-opt.active { background: #eaf4ff; }
     .link-opt.link-action { font-style: italic; color: #1d4ed8; }
+    .link-opt.link-opt-muted { color: #94a3b8; }
     .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
       pointer-events: none; opacity: 0.55;
@@ -335,8 +337,14 @@
       position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
       display: flex; align-items: center; justify-content: center; padding: 16px;
     }
+    #panel-items table thead th.sortable {
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    #panel-items table thead th.sortable:hover { background: #e2e8f0; }
+    #panel-items table thead th.sortable.sorted { color: #0f172a; }
+    td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums; }
     .src-box {
-      background: #fff; border-radius: 10px; width: min(560px, 100%); max-height: 80vh;
+      background: #fff; border-radius: 10px; width: min(720px, 100%); max-height: 80vh;
       display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15,23,42,.25);
     }
     .src-title { padding: 12px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
@@ -423,9 +431,9 @@
       <div>
         <div class="line-tabs" role="tablist" data-testid="doc-line-tabs" hidden>
           <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
-            data-tab="items" data-testid="doc-tab-items">Items</button>
+            tabindex="-1" data-tab="items" data-testid="doc-tab-items">Items</button>
           <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
-            data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
+            tabindex="-1" data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
         </div>
         <div class="line-panel" id="panel-items" data-testid="doc-panel-items" role="tabpanel">
           <table>

@@ -6,7 +6,14 @@ import {
   resolveLinkPickIndex,
   linkPickerKeyAction,
   nextFieldAfterLinkPick,
+  nextItemFieldAfterEdit,
+  nextItemFocusAfterEdit,
+  itemNavFieldsFromCols,
+  scrollLinkOptionIntoView,
+  DEFAULT_ITEM_NAV_FIELDS,
 } from "../src/link-picker-policy.js";
+import { PO_ITEM_COLS } from "../src/po-map.js";
+import { RECEIPT_ITEM_COLS } from "../src/receipt-map.js";
 
 describe("initialLinkHighlightIndex", () => {
   it("highlights first when any options", () => {
@@ -45,10 +52,113 @@ describe("linkPickerKeyAction", () => {
   });
 });
 
-describe("nextFieldAfterLinkPick", () => {
-  it("sends focus to description after item_code", () => {
+describe("nextFieldAfterLinkPick / nextItemFieldAfterEdit", () => {
+  it("walks Item → Description → Qty → Cost → Project", () => {
+    assert.equal(nextItemFieldAfterEdit("item_code"), "description");
     assert.equal(nextFieldAfterLinkPick("item_code"), "description");
-    assert.equal(nextFieldAfterLinkPick("project"), null);
-    assert.equal(nextFieldAfterLinkPick("qty"), null);
+    assert.equal(nextItemFieldAfterEdit("description"), "qty");
+    assert.equal(nextItemFieldAfterEdit("qty"), "rate");
+    assert.equal(nextItemFieldAfterEdit("rate"), "project");
+    assert.equal(nextItemFieldAfterEdit("project"), null);
+  });
+
+  it("nextItemFocusAfterEdit wraps or adds a row at the table end", () => {
+    assert.deepEqual(nextItemFocusAfterEdit("qty", 0, 2), {
+      rowIndex: 0,
+      field: "rate",
+      addRow: false,
+      deleteRow: false,
+      leaveTable: false,
+    });
+    assert.deepEqual(nextItemFocusAfterEdit("project", 0, 2), {
+      rowIndex: 1,
+      field: "item_code",
+      addRow: false,
+      deleteRow: false,
+      leaveTable: false,
+    });
+    assert.deepEqual(nextItemFocusAfterEdit("project", 1, 2), {
+      rowIndex: 1,
+      field: null,
+      addRow: true,
+      deleteRow: false,
+      leaveTable: false,
+    });
+  });
+
+  it("Tab on empty Item leaves the table and deletes the invalid row", () => {
+    assert.deepEqual(nextItemFocusAfterEdit("item_code", 1, 2, { cellValue: "" }), {
+      rowIndex: 1,
+      field: null,
+      addRow: false,
+      deleteRow: true,
+      leaveTable: true,
+    });
+    assert.deepEqual(nextItemFocusAfterEdit("item_code", 1, 2, { cellValue: "  " }), {
+      rowIndex: 1,
+      field: null,
+      addRow: false,
+      deleteRow: true,
+      leaveTable: true,
+    });
+    assert.deepEqual(nextItemFocusAfterEdit("item_code", 0, 1, { cellValue: "SKU-1" }), {
+      rowIndex: 0,
+      field: "description",
+      addRow: false,
+      deleteRow: false,
+      leaveTable: false,
+    });
+  });
+});
+
+describe("itemNavFieldsFromCols / PO Tab order", () => {
+  it("defaults match Bill project order", () => {
+    assert.deepEqual([...DEFAULT_ITEM_NAV_FIELDS], [
+      "item_code",
+      "description",
+      "qty",
+      "rate",
+      "project",
+    ]);
+    assert.deepEqual(itemNavFieldsFromCols(RECEIPT_ITEM_COLS), [
+      "item_code",
+      "description",
+      "qty",
+      "rate",
+      "project",
+    ]);
+  });
+
+  it("PO ends with sales_order + schedule_date so Tab adds a row", () => {
+    const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
+    assert.deepEqual(fields, [
+      "item_code",
+      "description",
+      "qty",
+      "rate",
+      "sales_order",
+      "schedule_date",
+    ]);
+    assert.deepEqual(nextItemFocusAfterEdit("schedule_date", 0, 1, { fields }), {
+      rowIndex: 0,
+      field: null,
+      addRow: true,
+      deleteRow: false,
+      leaveTable: false,
+    });
+  });
+});
+
+describe("scrollLinkOptionIntoView", () => {
+  it("calls scrollIntoView nearest when present", () => {
+    let seen = null;
+    const el = {
+      scrollIntoView(opts) {
+        seen = opts;
+      },
+    };
+    assert.equal(scrollLinkOptionIntoView(el), true);
+    assert.deepEqual(seen, { block: "nearest" });
+    assert.equal(scrollLinkOptionIntoView(null), false);
   });
 });

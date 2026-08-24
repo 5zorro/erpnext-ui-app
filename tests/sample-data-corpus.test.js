@@ -6,6 +6,8 @@ import {
   DEFAULT_DRAFTS_PER_KIND,
   buildCorpusPlan,
   dateForOffset,
+  idleVendorPoPostingDate,
+  postingDateForDoc,
   summarizePlan,
   pad2,
 } from "../src/sample-data/corpus-plan.js";
@@ -27,14 +29,18 @@ describe("sample-data corpus plan", () => {
     assert.equal(plan.windowDays, 60);
     for (const [kind, n] of Object.entries(DEFAULT_COUNTS)) {
       assert.equal(plan.counts[kind], n, kind);
-      const submitted = plan.docs.filter((d) => d.kind === kind && !d.asDraft);
+      const submitted = plan.docs.filter((d) => d.kind === kind && !d.asDraft && !d.outsideWindow);
       const drafts = plan.docs.filter((d) => d.kind === kind && d.asDraft);
       assert.equal(submitted.length, n, `submitted docs ${kind}`);
       assert.equal(drafts.length, DEFAULT_DRAFTS_PER_KIND, `draft docs ${kind}`);
     }
-    assert.equal(plan.parties.suppliers.length, 8);
+    assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 8);
+    assert.equal(plan.parties.suppliers.length, 10);
     assert.equal(plan.parties.customers.length, 8);
     assert.equal(plan.parties.items.length, 12);
+    assert.equal(plan.parties.projects.length, 4);
+    assert.ok(plan.parties.suppliers.some((s) => s.accountNumber === "CUST-44192"));
+    assert.ok(plan.parties.suppliers.some((s) => s.accountNumber === "ACCT-998877"));
     assert.equal(plan.summary.drafts, DEFAULT_DRAFTS_PER_KIND * 6);
   });
 
@@ -119,10 +125,21 @@ describe("sample-data corpus plan", () => {
     assert.ok(supplierKeys.size >= 5);
     assert.ok(customerKeys.size >= 5);
 
-    const offsets = plan.docs.map((d) => d.dayOffset);
+    const offsets = plan.docs.filter((d) => !d.outsideWindow).map((d) => d.dayOffset);
     assert.equal(Math.min(...offsets), 0);
     assert.ok(Math.max(...offsets) >= 50);
     assert.ok(offsets.every((o) => o >= 0 && o < 60));
+  });
+
+  it("OI-131 includes one idle vendor (old PO) and one never-PO vendor", () => {
+    const plan = buildCorpusPlan();
+    assert.ok(plan.parties.suppliers.some((s) => s.key === "SUP-IDLE" && s.activity === "idle"));
+    assert.ok(plan.parties.suppliers.some((s) => s.key === "SUP-NEVER" && s.activity === "never"));
+    const idlePos = plan.docs.filter((d) => d.kind === "purchase_order" && d.partyKey === "SUP-IDLE");
+    assert.equal(idlePos.length, 1);
+    assert.ok(idlePos[0].dayOffset > plan.windowDays);
+    const neverDocs = plan.docs.filter((d) => d.partyKey === "SUP-NEVER");
+    assert.equal(neverDocs.length, 0);
   });
 
   it("links some PO lines to sales orders for SO picker dogfood", () => {
@@ -137,9 +154,44 @@ describe("sample-data corpus plan", () => {
     assert.equal(dateForOffset("2026-08-01", 60), "2026-06-02");
   });
 
+  it("PO-IDLE postingDate is prior calendar year (inside FY N−1)", () => {
+    assert.equal(idleVendorPoPostingDate("2026-08-21"), "2025-11-15");
+    const plan = buildCorpusPlan();
+    const idle = plan.docs.find((d) => d.key === "PO-IDLE");
+    assert.equal(postingDateForDoc("2026-08-21", idle), "2025-11-15");
+  });
+
   it("summarizePlan matches buildCorpusPlan.summary", () => {
     const plan = buildCorpusPlan();
     assert.deepEqual(summarizePlan(plan.docs), plan.summary);
+  });
+
+  it("OI-115 tax mix: ~7/8 customers taxable, ~2/8 suppliers TW", () => {
+    const plan = buildCorpusPlan();
+    assert.equal(plan.tax.tdsCategory, "SAMPLE-TDS");
+    assert.equal(plan.tax.taxableCustomers, 7);
+    assert.equal(plan.tax.withholdingSuppliers, 2);
+    assert.equal(plan.parties.customers.filter((c) => c.taxable).length, 7);
+    assert.equal(plan.parties.customers.filter((c) => !c.taxable).length, 1);
+    assert.equal(plan.parties.suppliers.filter((s) => s.taxWithholding).length, 2);
+
+    const submittedSi = plan.docs.filter((d) => d.kind === "sales_invoice" && !d.asDraft);
+    const taxableKeys = new Set(plan.parties.customers.filter((c) => c.taxable).map((c) => c.key));
+    for (const d of submittedSi) {
+      assert.equal(!!d.salesTax, taxableKeys.has(d.partyKey), d.key);
+    }
+    const draftSi = plan.docs.filter((d) => d.kind === "sales_invoice" && d.asDraft);
+    assert.ok(draftSi.every((d) => !d.salesTax));
+
+    const submittedPi = plan.docs.filter((d) => d.kind === "purchase_invoice" && !d.asDraft);
+    const twKeys = new Set(plan.parties.suppliers.filter((s) => s.taxWithholding).map((s) => s.key));
+    const twPis = submittedPi.filter((d) => d.taxWithholding);
+    assert.ok(twPis.length >= 6, `expected several TW PIs, got ${twPis.length}`);
+    for (const d of submittedPi) {
+      assert.equal(!!d.taxWithholding, twKeys.has(d.partyKey), d.key);
+    }
+    const draftPi = plan.docs.filter((d) => d.kind === "purchase_invoice" && d.asDraft);
+    assert.ok(draftPi.every((d) => !d.taxWithholding));
   });
 });
 

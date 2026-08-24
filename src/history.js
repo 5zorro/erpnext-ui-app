@@ -1,8 +1,12 @@
 /**
  * Deduplicated navigation history — list vs form slots per doctype, most-recent first.
  */
-import { routeInfo, titleizeDoctype, isNewDocRecord } from "./route-info.js";
+import { routeInfo, titleizeDoctype, isNewDocRecord, normalizeAppRoute } from "./route-info.js";
 import { formLabelForDoctype, listLabelForDoctype } from "./doctype-labels.js";
+import {
+  decorateHistoryEntry,
+  shouldOmitHistoryRoute,
+} from "./history-nav.js";
 
 export const HISTORY_CAP = 12;
 /** M1.5: visible in Recent; remainder goes under Older (collapsed). */
@@ -71,6 +75,7 @@ export function splitHistory(list, opts = {}) {
  *   slot?: string,
  *   detail?: string,
  *   detailMuted?: boolean,
+ *   kind?: "doc"|"setup",
  * }} HistoryEntry
  */
 
@@ -84,12 +89,15 @@ export function splitHistory(list, opts = {}) {
  *   detail?: string,
  *   detailMuted?: boolean,
  *   labelOverride?: string,
+ *   companyAbbr?: string|null,
  * }} [opts]
  * @returns {HistoryEntry[]} new list (does not mutate input)
  */
 export function pushHistory(list, routeOrUrl, opts = {}) {
   const prev = Array.isArray(list) ? list : [];
-  const { doctype, path, record } = routeInfo(routeOrUrl, opts.erpBase);
+  if (shouldOmitHistoryRoute(routeOrUrl, opts)) return prev.slice();
+
+  const { doctype, path, record } = normalizeAppRoute(routeOrUrl, opts.erpBase);
   if (!doctype) return prev.slice();
 
   const labels = opts.labels || {};
@@ -108,14 +116,17 @@ export function pushHistory(list, routeOrUrl, opts = {}) {
     detail = String(record);
   }
 
-  const entry = {
-    route: path.startsWith("/") ? path : `/${path}`,
-    dt: doctype,
-    label,
-    slot,
-    detail,
-    detailMuted: !!(detail && opts.detailMuted),
-  };
+  const entry = decorateHistoryEntry(
+    {
+      route: path.startsWith("/") ? path : `/${path}`,
+      dt: doctype,
+      label,
+      slot,
+      detail,
+      detailMuted: !!(detail && opts.detailMuted),
+    },
+    opts.erpBase,
+  );
 
   const next = prev.filter((h) => historyEntrySlot(h, opts.erpBase) !== slot);
   next.unshift(entry);

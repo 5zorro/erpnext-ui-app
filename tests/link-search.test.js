@@ -4,6 +4,7 @@ import {
   normalizeSearchLinkResults,
   filterLinkOptions,
   linkOptionLabel,
+  linkOptionClassNames,
   linkDoctypeForBillField,
   withEmptySearchActions,
   isCreateSupplierLinkAction,
@@ -61,6 +62,11 @@ describe("linkOptionLabel", () => {
       "Acme (SUP-1)",
     );
     assert.equal(linkOptionLabel({ value: "A", description: "A" }), "A");
+    assert.match(
+      linkOptionLabel({ value: "V", description: "Idle Co", activity: "idle" }),
+      /idle/,
+    );
+    assert.match(linkOptionClassNames({ value: "V", activity: "never" }), /link-opt-muted/);
   });
 });
 

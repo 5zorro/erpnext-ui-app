@@ -28,6 +28,7 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-find", kind: "button", modeSwitch: "none" },
   { id: "bill-new", kind: "button", modeSwitch: "none" },
   { id: "bill-select-po", kind: "button", modeSwitch: "none" },
+  { id: "bill-assign-0", kind: "button", modeSwitch: "none" },
   { id: "bill-refresh", kind: "button", modeSwitch: "none" },
   { id: "bill-vanilla", kind: "button", modeSwitch: "none" },
   // Assumptions disclosure
@@ -39,9 +40,10 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-ref", kind: "text", modeSwitch: "none" },
   { id: "bill-amount-due", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-due-date", kind: "date", modeSwitch: "date" },
-  // Tabs
-  { id: "bill-tab-items", kind: "tab", modeSwitch: "none" },
-  { id: "bill-tab-expenses", kind: "tab", modeSwitch: "none" },
+  { id: "bill-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
+  // Tabs (mouse-only — tabindex=-1; still scraped as buttons)
+  { id: "bill-tab-items", kind: "tab", modeSwitch: "none", notes: "mouse-only (OI-099)" },
+  { id: "bill-tab-expenses", kind: "tab", modeSwitch: "none", notes: "mouse-only (OI-099)" },
   // Lines / taxes chrome (empty table — add controls)
   { id: "bill-add-line", kind: "button", modeSwitch: "none" },
   { id: "bill-tax-account", kind: "text", modeSwitch: "none" },

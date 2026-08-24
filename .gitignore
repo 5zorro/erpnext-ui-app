@@ -35,3 +35,4 @@ localhost.har
 # Local print / PDF dogfood artifacts
 *.pdf
 output.pdf
+ops/sample-data/dogfood-sources/generated/

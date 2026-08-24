@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("erpBill", {
   getSnapshot: () => ipcRenderer.invoke("bill-get-snapshot"),
   setHeader: (field, value) => ipcRenderer.invoke("bill-set-header", field, value),
+  checkRef: (billNo) => ipcRenderer.invoke("bill-check-ref", billNo),
   setAmountDue: (value, markEdited) =>
     ipcRenderer.invoke("bill-set-amount-due", value, !!markEdited),
   setItem: (rowIndex, field, value) =>
@@ -28,10 +29,21 @@ contextBridge.exposeInMainWorld("erpBill", {
   printBill: () => ipcRenderer.invoke("bill-print"),
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),
   listSources: (supplier) => ipcRenderer.invoke("bill-list-sources", supplier || ""),
-  mergeSource: (kind, name) => ipcRenderer.invoke("bill-merge-source", kind, name),
+  /** Single (kind, name) or multi ([{ kind, name }, ...]). */
+  mergeSource: (kindOrItems, name) =>
+    Array.isArray(kindOrItems)
+      ? ipcRenderer.invoke("bill-merge-sources", kindOrItems)
+      : ipcRenderer.invoke("bill-merge-source", kindOrItems, name),
+  listSalesOrdersForPicker: (payload) => ipcRenderer.invoke("bill-so-picker-list", payload || {}),
+  listProjectsForPicker: (customer) =>
+    ipcRenderer.invoke("bill-list-projects", customer || ""),
+  applyLineAllocation: (rowIndex, payload) =>
+    ipcRenderer.invoke("bill-apply-line-allocation", rowIndex, payload || {}),
+  bridgeSalesOrderToPo: (payload) => ipcRenderer.invoke("bill-so-bridge-po", payload || {}),
   retryLoad: () => ipcRenderer.invoke("bill-retry-load"),
   openVanilla: () => ipcRenderer.send("bill-open-vanilla"),
   openVendorAdd: () => ipcRenderer.send("bill-open-vendor-add"),
+  openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
   focusBillSurface: () => ipcRenderer.send("bill-focus-surface"),
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
   getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
