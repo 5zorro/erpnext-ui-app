@@ -6,9 +6,16 @@
  *   - create from nothing (no source)
  *   - create from source (Q→SO→SI, PO→PR→PI, PO→PI)
  *   - leftover open sources in pickers
+ *
+ * Tax mix (OI-115): ~7/8 customers taxable (sales tax on submitted SI);
+ * most AP nontaxable (no purchase ST); ~2/8 suppliers have tax withholding (TDS)
+ * applied on their submitted PIs → Tax Withholding Details report.
  */
 
 export const SAMPLE_TAG = "ui-app-sample-v1";
+
+/** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
+export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
 
 export const DEFAULT_COUNTS = Object.freeze({
   quotation: 25,
@@ -50,70 +57,102 @@ export function buildCorpusPlan(opts = {}) {
   const partyCounts = { ...DEFAULT_PARTY_COUNTS, ...(opts.parties || {}) };
   const tag = opts.tag || SAMPLE_TAG;
 
-  const suppliers = Array.from({ length: partyCounts.suppliers }, (_, i) => ({
-    key: `SUP-${pad2(i)}`,
-    name: `SAMPLE Vendor ${pad2(i + 1)}`,
-  }));
+  // OI-115: first 7 taxable (~87.5%), last exempt.
   const customers = Array.from({ length: partyCounts.customers }, (_, i) => ({
     key: `CUS-${pad2(i)}`,
     name: `SAMPLE Customer ${pad2(i + 1)}`,
+    taxable: i < partyCounts.customers - 1,
   }));
+  // ~2/8 vendors with TDS withholding; AP sales-tax off for all.
+  const suppliers = Array.from({ length: partyCounts.suppliers }, (_, i) => ({
+    key: `SUP-${pad2(i)}`,
+    name: `SAMPLE Vendor ${pad2(i + 1)}`,
+    taxWithholding: i < 2,
+    // OI-087: your account # at the vendor (Customer Number At Supplier).
+    accountNumber: i === 0 ? "CUST-44192" : i === 1 ? "ACCT-998877" : null,
+  }));
+  // OI-131: picker rank fixtures — not used in the 60-day rotation.
+  suppliers.push(
+    { key: "SUP-IDLE", name: "SAMPLE Vendor Idle", taxWithholding: false, activity: "idle" },
+    { key: "SUP-NEVER", name: "SAMPLE Vendor Never", taxWithholding: false, activity: "never" },
+  );
   const items = Array.from({ length: partyCounts.items }, (_, i) => ({
     key: `ITM-${pad2(i)}`,
     code: `SAMPLE-SKU-${pad2(i + 1)}`,
     name: `SAMPLE Item ${pad2(i + 1)}`,
     rate: 10 + (i % 7) * 5.5,
   }));
+  const projects = [
+    { key: "PRJ-00", name: "SAMPLE Project Alpha", customerKey: "CUS-00" },
+    { key: "PRJ-01", name: "SAMPLE Project Beta", customerKey: "CUS-01" },
+    { key: "PRJ-02", name: "SAMPLE Project Overhead", customerKey: null },
+    { key: "PRJ-03", name: "SAMPLE Project Gamma", customerKey: "CUS-02" },
+  ];
+
+  const customerByKey = Object.fromEntries(customers.map((c) => [c.key, c]));
+  const supplierByKey = Object.fromEntries(suppliers.map((s) => [s.key, s]));
 
   /** @type {object[]} */
   const docs = [];
 
   for (let i = 0; i < counts.quotation; i++) {
-    docs.push(baseDoc("quotation", i, windowDays, 0, {
-      partyKey: customers[i % customers.length].key,
-      items: lineItems(items, i, 1 + (i % 3)),
-      source: null,
-    }));
+    docs.push(
+      baseDoc("quotation", i, windowDays, 0, {
+        partyKey: customers[i % customers.length].key,
+        items: lineItems(items, i, 1 + (i % 3)),
+        source: null,
+      }),
+    );
   }
 
   for (let i = 0; i < counts.sales_order; i++) {
     // 0..14 from quotation; 15..24 from nothing (leaves Q 15..24 unconverted)
     const fromQuote = i < 15;
-    docs.push(baseDoc("sales_order", i, windowDays, 1, {
-      partyKey: customers[i % customers.length].key,
-      items: lineItems(items, i, 1 + (i % 3)),
-      source: fromQuote ? { kind: "quotation", index: i } : null,
-    }));
+    docs.push(
+      baseDoc("sales_order", i, windowDays, 1, {
+        partyKey: customers[i % customers.length].key,
+        items: lineItems(items, i, 1 + (i % 3)),
+        source: fromQuote ? { kind: "quotation", index: i } : null,
+      }),
+    );
   }
 
   for (let i = 0; i < counts.sales_invoice; i++) {
     // 0..11 from SO; 12..24 from nothing (leaves SO 12..24 uninvoiced)
     const fromSo = i < 12;
-    docs.push(baseDoc("sales_invoice", i, windowDays, 2, {
-      partyKey: customers[i % customers.length].key,
-      items: lineItems(items, i, 1 + (i % 3)),
-      source: fromSo ? { kind: "sales_order", index: i } : null,
-      updateStock: false,
-    }));
+    const partyKey = customers[i % customers.length].key;
+    docs.push(
+      baseDoc("sales_invoice", i, windowDays, 2, {
+        partyKey,
+        items: lineItems(items, i, 1 + (i % 3)),
+        source: fromSo ? { kind: "sales_order", index: i } : null,
+        updateStock: false,
+        salesTax: !!customerByKey[partyKey]?.taxable,
+      }),
+    );
   }
 
   for (let i = 0; i < counts.purchase_order; i++) {
     const soLink = i % 4 === 0 ? { kind: "sales_order", index: i % 15 } : null;
-    docs.push(baseDoc("purchase_order", i, windowDays, 0, {
-      partyKey: suppliers[i % suppliers.length].key,
-      items: lineItems(items, i, 1 + (i % 3), { salesOrderRef: soLink }),
-      source: null,
-      salesOrderLink: soLink,
-    }));
+    docs.push(
+      baseDoc("purchase_order", i, windowDays, 0, {
+        partyKey: suppliers[i % partyCounts.suppliers].key,
+        items: lineItems(items, i, 1 + (i % 3), { salesOrderRef: soLink }),
+        source: null,
+        salesOrderLink: soLink,
+      }),
+    );
   }
 
   for (let i = 0; i < counts.purchase_receipt; i++) {
     const fromPo = i < 12;
-    docs.push(baseDoc("purchase_receipt", i, windowDays, 1, {
-      partyKey: suppliers[i % suppliers.length].key,
-      items: lineItems(items, i, 1 + (i % 3)),
-      source: fromPo ? { kind: "purchase_order", index: i } : null,
-    }));
+    docs.push(
+      baseDoc("purchase_receipt", i, windowDays, 1, {
+        partyKey: suppliers[i % partyCounts.suppliers].key,
+        items: lineItems(items, i, 1 + (i % 3)),
+        source: fromPo ? { kind: "purchase_order", index: i } : null,
+      }),
+    );
   }
 
   for (let i = 0; i < counts.purchase_invoice; i++) {
@@ -127,16 +166,41 @@ export function buildCorpusPlan(opts = {}) {
       source = { kind: "purchase_order", index: poIndex };
       chainIndex = poIndex;
     }
-    docs.push(baseDoc("purchase_invoice", i, windowDays, 2, {
-      partyKey: suppliers[i % suppliers.length].key,
-      items: lineItems(items, i, 1 + (i % 3)),
-      source,
-      billNo: `SMP-BILL-${pad2(i + 1)}`,
-      updateStock: false,
-    }, chainIndex));
+    const partyKey = suppliers[i % partyCounts.suppliers].key;
+    docs.push(
+      baseDoc(
+        "purchase_invoice",
+        i,
+        windowDays,
+        2,
+        {
+          partyKey,
+          items: lineItems(items, i, 1 + (i % 3)),
+          source,
+          billNo: `SMP-BILL-${pad2(i + 1)}`,
+          updateStock: false,
+          taxWithholding: !!supplierByKey[partyKey]?.taxWithholding,
+        },
+        chainIndex,
+      ),
+    );
   }
 
+  // OI-131: one submitted PO in prior calendar year (idle vs trailing FY). postingDate set in emit-plan.
+  docs.push({
+    ...baseDoc("purchase_order", 800, windowDays, 0, {
+      partyKey: "SUP-IDLE",
+      items: lineItems(items, 80, 1),
+      source: null,
+    }),
+    key: "PO-IDLE",
+    dayOffset: windowDays + 400,
+    outsideWindow: true,
+    activity: "idle",
+  });
+
   // Drafts: create-from-nothing only (no link-graph dependency); distinct parties.
+  // No salesTax / taxWithholding on drafts (Find/Drafts dogfood stays simple).
   appendDraftDocs(docs, {
     draftsPerKind,
     windowDays,
@@ -150,7 +214,12 @@ export function buildCorpusPlan(opts = {}) {
     windowDays,
     counts,
     draftsPerKind,
-    parties: { suppliers, customers, items },
+    parties: { suppliers, customers, items, projects },
+    tax: {
+      tdsCategory: SAMPLE_TDS_CATEGORY,
+      taxableCustomers: customers.filter((c) => c.taxable).length,
+      withholdingSuppliers: suppliers.filter((s) => s.taxWithholding).length,
+    },
     docs,
     summary: summarizePlan(docs),
   };
@@ -168,6 +237,7 @@ export function buildCorpusPlan(opts = {}) {
  */
 function appendDraftDocs(docs, cfg) {
   const { draftsPerKind, windowDays, suppliers, customers, items } = cfg;
+  const buyingRotate = suppliers.filter((s) => s.activity !== "idle" && s.activity !== "never");
   if (draftsPerKind < 1) return;
 
   const selling = ["quotation", "sales_order", "sales_invoice"];
@@ -187,7 +257,7 @@ function appendDraftDocs(docs, cfg) {
   for (const kind of buying) {
     for (let i = 0; i < draftsPerKind; i++) {
       const extra = {
-        partyKey: suppliers[i % suppliers.length].key,
+        partyKey: buyingRotate[i % buyingRotate.length].key,
         items: lineItems(items, 60 + i, 1 + (i % 2)),
         updateStock: false,
       };
@@ -234,7 +304,8 @@ function draftDoc(kind, draftIndex, windowDays, extra) {
  * @param {number} [chainIndex] index used for date spacing (defaults to index; use source index when linking across ids)
  */
 function baseDoc(kind, index, windowDays, stage, extra, chainIndex = index) {
-  const dayOffset = chainDayOffset(chainIndex, stage, windowDays);
+  const dayOffset =
+    extra && extra.dayOffset != null ? extra.dayOffset : chainDayOffset(chainIndex, stage, windowDays);
   return {
     kind,
     index,
@@ -324,6 +395,32 @@ export function dateForOffset(asOf, dayOffset) {
   const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
   d.setUTCDate(d.getUTCDate() - dayOffset);
   return formatYmd(d);
+}
+
+/**
+ * OI-131 idle vendor PO: prior calendar year (needs FY N−1 on site — seed_corpus ensures it).
+ * Must fall before current FY start so vendor-activity classifies as idle, but inside an open FY.
+ * @param {string|Date} asOf
+ * @returns {string}
+ */
+export function idleVendorPoPostingDate(asOf) {
+  const base = asOf instanceof Date ? new Date(asOf) : parseYmd(asOf);
+  if (Number.isNaN(base.getTime())) {
+    throw new Error(`Invalid asOf date: ${asOf}`);
+  }
+  const y = base.getUTCFullYear() - 1;
+  return formatYmd(new Date(Date.UTC(y, 10, 15))); // Nov 15 prior year
+}
+
+/**
+ * @param {string|Date} asOf
+ * @param {{ key?: string, dayOffset?: number, postingDate?: string }} doc
+ * @returns {string}
+ */
+export function postingDateForDoc(asOf, doc) {
+  if (doc && doc.postingDate) return String(doc.postingDate);
+  if (doc && doc.key === "PO-IDLE") return idleVendorPoPostingDate(asOf);
+  return dateForOffset(asOf, doc && doc.dayOffset != null ? doc.dayOffset : 0);
 }
 
 /** @param {string} ymd */

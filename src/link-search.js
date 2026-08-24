@@ -2,6 +2,7 @@
  * Link search normalizers — T1 Doc pickers (Vendor, Item, …).
  * ERP returns search_link rows; Doc HTML displays { value, description }.
  */
+import { vendorActivitySuffix } from "./vendor-activity.js";
 
 /**
  * @typedef {{ value: string, description: string, action?: string }} LinkOption
@@ -9,6 +10,7 @@
 
 /** Sentinel value: empty Supplier search → open Vanilla “new Supplier”. */
 export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
+export const LINK_ACTION_CREATE_PROJECT = "__doc_create_project__";
 
 /**
  * Normalize frappe.desk.search.search_link (or list-like) payloads.
@@ -52,6 +54,15 @@ export function withEmptySearchActions(rows, doctype) {
         value: LINK_ACTION_CREATE_SUPPLIER,
         description: "Go to Vendor add…",
         action: "create_supplier",
+      },
+    ];
+  }
+  if (doctype === "Project") {
+    return [
+      {
+        value: LINK_ACTION_CREATE_PROJECT,
+        description: "No projects found — create Project…",
+        action: "create_project",
       },
     ];
   }
@@ -102,10 +113,23 @@ export function filterLinkOptions(options, query, opts = {}) {
 export function linkOptionLabel(opt) {
   if (!opt || !opt.value) return "";
   if (isCreateSupplierLinkAction(opt)) return opt.description || "Go to Vendor add…";
+  let label = opt.description || opt.value;
   if (opt.description && opt.description !== opt.value) {
-    return `${opt.description} (${opt.value})`;
+    label = `${opt.description} (${opt.value})`;
   }
-  return opt.description || opt.value;
+  const suf = vendorActivitySuffix(opt.activity);
+  return suf ? `${label} · ${suf}` : label;
+}
+
+/**
+ * @param {LinkOption|null|undefined} opt
+ * @returns {string}
+ */
+export function linkOptionClassNames(opt) {
+  const bits = ["link-opt"];
+  if (isCreateSupplierLinkAction(opt)) bits.push("link-action");
+  if (opt && (opt.activity === "idle" || opt.activity === "never")) bits.push("link-opt-muted");
+  return bits.join(" ");
 }
 
 /** Doctypes used by Bill Doc Link fields. */

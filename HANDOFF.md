@@ -59,6 +59,7 @@ flowchart LR
 | `ops/erp-host/` | Optional ERP host scripts: `ensure-erp-up.sh` (docker + ping; no UI); example autofix wrapper |
 | `docs/input-count-gotchas.md` | Measurement gotchas + dogfood checklist before Simplified mockups |
 | `docs/erp-unreachable.md` | ERP timeout: host `start-shell.sh` + IT notify/autofix setup in diagnose |
+| `docs/erpnext-schema-browse.md` | Safe MariaDB/DBeaver schema browse (read-only, one-hop recipe, Clean Core) |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
@@ -78,8 +79,9 @@ flowchart LR
 | Capability | Pure module(s) | Electron surface |
 |------------|----------------|------------------|
 | DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
-| Recent history | `route-info.js`, `history.js`, `doctype-labels.js` | Left `history.html` view |
+| Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` view (peek tree under parent Doc, OI-128 A) |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
+| Nav incident log | `nav-incident.js` | Toolbar **Nav issue** (temporarily hidden on alpha); `userData/nav-incidents.log` |
 | Chrome UI state | `chrome-state.js` | Toolbar highlight / home vs ERP |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
@@ -90,9 +92,10 @@ flowchart LR
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
 | Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
-| Link search (T1) | `link-search.js` | Normalize `search_link` rows; Bill field→doctype |
+| Link search (T1) | `link-search.js`, `vendor-activity.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131) |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`ce79ba6`) |
+| **Fixed** Setup peek return (OI-112 class) | `docs/bug-bounty-setup-peek-return.md` | Vanilla Create-new-Account; Esc/Recent parent now in-SPA |
 | Bill feature catalog (museum↔alpha) | `src/bill-feature-catalog.js` + `tests/bill-*.test.js` | Pure contracts; CI fails if built features lack tests |
 
 Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
@@ -105,6 +108,7 @@ ERP Desk itself is unmodified — it will not show our tiles (by design).
 2. Click toolbar **ERP console** (detached DevTools for the Desk pane).
 3. **Console:** copy errors; **Elements:** Copy selector or note `data-testid` on shell controls.
 4. Name the surface (ERP / Launcher / Recent / toolbar) + expected vs observed in one breath.
+   (Nav incident toolbar is temporarily hidden on alpha; logs still live under `userData/` if enabled later.)
 
 ### Test strategy (locked 2026-07-16 — OI-049)
 
@@ -138,6 +142,7 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `config.test.js` | `ERP_BASE` from env | `scaffold-url-api` (`erpBase`) |
 | `route-info.test.js` | Parse desk/app routes | Indirect via `scaffold-pure-wiring` (`trackNav` → history entries) |
 | `history.test.js` | Dedupe, cap, `splitHistory` | `scaffold-pure-wiring` (`trackNav` / `getHistory`); split UI still best-effort in hist view |
+| `peek-stack.test.js` | Nested peeks under parent Doc; collapse vs Esc-keep; flyout tree decorate | Flyout tree is visual; collapse wired in `main.js` |
 | `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
 | `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
 | `chrome-state.test.js` | Pure reducer | **Gap** — not required in e2e yet (main uses its own `showingHome` flag) |

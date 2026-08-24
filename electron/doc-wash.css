@@ -1,0 +1,125 @@
+/**
+ * Doc wash tints — shared by bill.html + doc-form.html (OI-125).
+ * Tokens match src/doc-wash.js DOC_WASH_COLORS.
+ */
+:root {
+  --wash-request: #eef6fb;
+  --wash-order: #e8f4fc;
+  --wash-fulfill: #fff4e0;
+  --wash-invoice: #f6eaf2;
+  --wash-payment: #e6f5f0;
+  --accent-request: #0072B2;
+  --accent-order: #56B4E9;
+  --accent-fulfill: #E69F00;
+  --accent-invoice: #CC79A7;
+  --accent-payment: #009E73;
+  --hatch-lighten: repeating-linear-gradient(
+    -32deg,
+    transparent 0,
+    transparent 6px,
+    rgba(255, 255, 255, 0.48) 6px,
+    rgba(255, 255, 255, 0.48) 8px
+  );
+  --stamp-buy: url("assets/buying-stamp.svg");
+  --stamp-sell: url("assets/selling-stamp.svg");
+}
+
+/* Page wash by document role */
+html[data-doc-role="request"],
+html[data-doc-role="request"] body { background-color: var(--wash-request); }
+html[data-doc-role="order"],
+html[data-doc-role="order"] body { background-color: var(--wash-order); }
+html[data-doc-role="fulfill"],
+html[data-doc-role="fulfill"] body { background-color: var(--wash-fulfill); }
+html[data-doc-role="invoice"],
+html[data-doc-role="invoice"] body { background-color: var(--wash-invoice); }
+html[data-doc-role="payment"],
+html[data-doc-role="payment"] body { background-color: var(--wash-payment); }
+
+/* Buying / Selling stamp (desk identity — not the pattern preference) */
+html[data-doc-desk="ap"] body::before,
+html[data-doc-desk="ar"] body::before {
+  content: "";
+  position: fixed;
+  right: 2%;
+  bottom: 4%;
+  width: min(220px, 28vw);
+  height: min(220px, 28vw);
+  background: var(--stamp-buy) center / contain no-repeat;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+html[data-doc-desk="ar"] body::before {
+  background-image: var(--stamp-sell);
+}
+
+/* Pattern preference: which desk(s) get lightening hatch */
+html[data-pattern="ap"][data-doc-desk="ap"] body,
+html[data-pattern="ar"][data-doc-desk="ar"] body,
+html[data-pattern="both"][data-doc-desk="ap"] body,
+html[data-pattern="both"][data-doc-desk="ar"] body {
+  background-image: var(--hatch-lighten);
+}
+
+/* Keep form chrome above the stamp */
+body > .wrap,
+body > .commit-gate {
+  position: relative;
+  z-index: 1;
+}
+
+/*
+  Sourced RO: upstream role wash (beats generic :read-only gray).
+  Party/address RO stays neutral — only upstream *document* sources use these.
+*/
+.field input[data-wash-source="request"]:read-only,
+.field textarea[data-wash-source="request"]:read-only {
+  background-color: var(--wash-request);
+  background-image: none;
+  color: #1f2d3d;
+  border: 1px solid color-mix(in srgb, var(--accent-request) 35%, #cbd5e1);
+  padding: 7px 9px;
+}
+.field input[data-wash-source="order"]:read-only,
+.field textarea[data-wash-source="order"]:read-only {
+  background-color: var(--wash-order);
+  background-image: none;
+  color: #1f2d3d;
+  border: 1px solid color-mix(in srgb, var(--accent-order) 35%, #cbd5e1);
+  padding: 7px 9px;
+}
+.field input[data-wash-source="fulfill"]:read-only,
+.field textarea[data-wash-source="fulfill"]:read-only {
+  background-color: var(--wash-fulfill);
+  background-image: none;
+  color: #1f2d3d;
+  border: 1px solid color-mix(in srgb, var(--accent-fulfill) 35%, #cbd5e1);
+  padding: 7px 9px;
+}
+.field input[data-wash-source="invoice"]:read-only,
+.field textarea[data-wash-source="invoice"]:read-only {
+  background-color: var(--wash-invoice);
+  background-image: none;
+  color: #1f2d3d;
+  border: 1px solid color-mix(in srgb, var(--accent-invoice) 35%, #cbd5e1);
+  padding: 7px 9px;
+}
+.field input[data-wash-source="payment"]:read-only,
+.field textarea[data-wash-source="payment"]:read-only {
+  background-color: var(--wash-payment);
+  background-image: none;
+  color: #1f2d3d;
+  border: 1px solid color-mix(in srgb, var(--accent-payment) 35%, #cbd5e1);
+  padding: 7px 9px;
+}
+
+/* When this desk is patterned, sourced RO fields also get the hatch */
+html[data-pattern="ap"][data-doc-desk="ap"] .field input[data-wash-source]:read-only,
+html[data-pattern="ap"][data-doc-desk="ap"] .field textarea[data-wash-source]:read-only,
+html[data-pattern="ar"][data-doc-desk="ar"] .field input[data-wash-source]:read-only,
+html[data-pattern="ar"][data-doc-desk="ar"] .field textarea[data-wash-source]:read-only,
+html[data-pattern="both"] .field input[data-wash-source]:read-only,
+html[data-pattern="both"] .field textarea[data-wash-source]:read-only {
+  background-image: var(--hatch-lighten);
+}

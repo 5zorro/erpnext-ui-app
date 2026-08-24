@@ -2,6 +2,7 @@
  * Bill source-picker groups (museum source-modal / OI-001) — pure.
  * Submitted PO/PR selectable; drafts listed but not selectable; NIC = no source.
  * Item Receipts show linked Purchase Order number(s) when present.
+ * Multi-select (Vanilla-like): Space toggles check; Enter finalizes checked set.
  */
 
 /**
@@ -17,6 +18,123 @@ export function formatSourceMoney(n) {
   if (n == null || n === "") return "";
   const x = Number(n);
   return Number.isFinite(x) ? x.toFixed(2) : "";
+}
+
+/**
+ * Stable key for checkbox selection (NIC has no name).
+ * @param {SourceItem|null|undefined} it
+ * @returns {string}
+ */
+export function sourceItemKey(it) {
+  if (!it || typeof it !== "object") return "";
+  if (it.kind === "nic") return "nic";
+  if (!it.name) return "";
+  return `${it.kind}:${it.name}`;
+}
+
+/**
+ * @param {string|null|undefined} key
+ * @param {SourceGroup[]} groups
+ * @returns {SourceItem|null}
+ */
+export function findSourceItemByKey(key, groups) {
+  if (!key || !Array.isArray(groups)) return null;
+  for (const g of groups) {
+    for (const it of g.items || []) {
+      if (sourceItemKey(it) === key) return it;
+    }
+  }
+  return null;
+}
+
+/**
+ * Toggle check for one item. NIC is exclusive vs PO/PR.
+ * @param {Iterable<string>|null|undefined} selectedKeys
+ * @param {SourceItem|null|undefined} item
+ * @returns {string[]} new selection (immutable)
+ */
+export function toggleSourceSelection(selectedKeys, item) {
+  if (!isSelectableSourceItem(item)) {
+    return selectedKeys ? [...selectedKeys] : [];
+  }
+  const key = sourceItemKey(item);
+  if (!key) return selectedKeys ? [...selectedKeys] : [];
+  const prev = new Set(selectedKeys || []);
+  if (item.kind === "nic") {
+    if (prev.has("nic")) return [];
+    return ["nic"];
+  }
+  prev.delete("nic");
+  if (prev.has(key)) prev.delete(key);
+  else prev.add(key);
+  return [...prev];
+}
+
+/**
+ * What to pull on Enter / primary button.
+ * - Any checks → those items (NIC alone → nic; NIC+others never coexist).
+ * - No checks → active row if selectable (single-select fallback).
+ * @param {SourceGroup[]} groups
+ * @param {Iterable<string>|null|undefined} selectedKeys
+ * @param {SourceItem|null|undefined} activeItem
+ * @returns {{ mode: "nic"|"merge"|"none", items: SourceItem[], reason?: string }}
+ */
+export function resolveSourcesToCommit(groups, selectedKeys, activeItem) {
+  const keys = [...(selectedKeys || [])].filter(Boolean);
+  if (keys.includes("nic")) {
+    return { mode: "nic", items: [{ label: "NIC", kind: "nic" }] };
+  }
+  if (keys.length) {
+    /** @type {SourceItem[]} */
+    const items = [];
+    for (const k of keys) {
+      const it = findSourceItemByKey(k, groups);
+      if (it && isSelectableSourceItem(it) && it.kind !== "nic") items.push(it);
+    }
+    if (!items.length) return { mode: "none", items: [], reason: "no_valid_selection" };
+    return { mode: "merge", items };
+  }
+  if (activeItem && activeItem.kind === "nic" && isSelectableSourceItem(activeItem)) {
+    return { mode: "nic", items: [activeItem] };
+  }
+  if (activeItem && isSelectableSourceItem(activeItem) && activeItem.kind !== "nic") {
+    return { mode: "merge", items: [activeItem] };
+  }
+  return { mode: "none", items: [], reason: "nothing_active" };
+}
+
+/**
+ * Combine several mapped PI payloads into one mergeFromMapped argument.
+ * First doc wins for header fields; items are concatenated in selection order.
+ * @param {object[]} mappedDocs
+ * @returns {object|null}
+ */
+export function combineMappedBillSources(mappedDocs) {
+  const list = Array.isArray(mappedDocs) ? mappedDocs.filter((d) => d && typeof d === "object") : [];
+  if (!list.length) return null;
+  const first = list[0];
+  /** @type {object[]} */
+  const items = [];
+  for (const doc of list) {
+    if (Array.isArray(doc.items)) items.push(...doc.items);
+  }
+  if (!items.length) return null;
+  return { ...first, items };
+}
+
+/**
+ * Keyboard action for the source modal (multi-select).
+ * @param {string} key
+ * @returns {"tab"|"up"|"down"|"toggle"|"finalize"|"cancel"|"none"}
+ */
+export function sourceModalKeyAction(key) {
+  if (key === "Tab") return "tab";
+  if (key === "ArrowDown") return "down";
+  if (key === "ArrowUp") return "up";
+  if (key === " " || key === "Spacebar" || key === "Space") return "toggle";
+  if (key === "Enter") return "finalize";
+  if (key === "Escape") return "cancel";
+  return "none";
 }
 
 /**
@@ -51,13 +169,17 @@ export function enrichReceiptsWithPurchaseOrders(receipts = [], itemRows = []) {
 }
 
 /**
- * @param {{ name?: string, transaction_date?: string, posting_date?: string, grand_total?: number, purchase_orders?: string[], purchase_order?: string }} row
+ * @param {{ name?: string, title?: string, transaction_date?: string, posting_date?: string, grand_total?: number, purchase_orders?: string[], purchase_order?: string }} row
  * @param {"po" | "pr"} kind
  * @param {boolean} [draft]
  * @returns {SourceItem}
  */
 export function sourceItemFromRow(row, kind, draft = false) {
   const date = kind === "po" ? row.transaction_date : row.posting_date;
+  const logbook =
+    kind === "po" && row.title != null && String(row.title).trim()
+      ? String(row.title).trim()
+      : "";
   if (draft) {
     const poBit =
       kind === "pr"
@@ -66,8 +188,9 @@ export function sourceItemFromRow(row, kind, draft = false) {
             return pos.length ? `   ·   PO ${pos.join(", ")}` : "";
           })()
         : "";
+    const titleBit = logbook ? `   ·   ${logbook}` : "";
     return {
-      label: `n/a — draft   ·   ${row.name || ""}${poBit}`,
+      label: `n/a — draft   ·   ${row.name || ""}${titleBit}${poBit}`,
       kind,
       name: row.name,
       draft: true,
@@ -83,8 +206,10 @@ export function sourceItemFromRow(row, kind, draft = false) {
       name: row.name,
     };
   }
+  // Submitted PO: ERP name + logbook PO# (OI-121 title) when present.
+  const titleBit = logbook ? `   ·   ${logbook}` : "";
   return {
-    label: `${row.name || ""}   ·   ${date || ""}   ·   ${money}`,
+    label: `${row.name || ""}${titleBit}   ·   ${date || ""}   ·   ${money}`,
     kind,
     name: row.name,
   };

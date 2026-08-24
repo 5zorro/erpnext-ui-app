@@ -66,12 +66,15 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
     as_of = as_of or plan.get("asOf") or nowdate()
     warehouse = _default_warehouse(company)
 
+    _ensure_fiscal_years(as_of)
+
     if cint(reset):
         deleted = _reset_tagged(tag)
         frappe.db.commit()
         print(f"reset: deleted {deleted} tagged docs")
 
-    party_map = _ensure_masters(plan["parties"], company, warehouse, tag)
+    tax_ctx = _ensure_tax_masters(company, plan)
+    party_map = _ensure_masters(plan["parties"], company, warehouse, tag, tax_ctx)
     name_map: dict[str, str] = {}  # plan key -> ERP name
 
     # Apply in dependency order
@@ -153,9 +156,183 @@ def _date_for_offset(as_of: str, day_offset: int) -> str:
     return str(add_days(getdate(as_of), -cint(day_offset)))
 
 
-def _ensure_masters(parties: dict, company: str, warehouse: str, tag: str) -> dict[str, dict[str, str]]:
+def _company_abbr(company: str) -> str:
+    return frappe.db.get_value("Company", company, "abbr") or "HI"
+
+
+def _ensure_fiscal_years(as_of: str) -> None:
+    """Ensure calendar FY rows exist for as_of year and prior year (OI-131 idle PO)."""
+    anchor = getdate(as_of)
+    for y in (anchor.year - 1, anchor.year):
+        name = str(y)
+        if frappe.db.exists("Fiscal Year", name):
+            continue
+        doc = frappe.get_doc(
+            {
+                "doctype": "Fiscal Year",
+                "year": name,
+                "year_start_date": f"{y}-01-01",
+                "year_end_date": f"{y}-12-31",
+            }
+        )
+        doc.insert(ignore_permissions=True)
+        print(f"created Fiscal Year {name}")
+
+
+def _ensure_tax_masters(company: str, plan: dict) -> dict[str, str]:
+    """
+    Ensure sales-tax template + SAMPLE-TDS withholding category/account.
+    Returns {sales_tax_template, tds_category, tds_account}.
+    """
+    abbr = _company_abbr(company)
+    tax_plan = plan.get("tax") or {}
+    tds_name = tax_plan.get("tdsCategory") or "SAMPLE-TDS"
+
+    sales_template = _ensure_sales_tax_template(company, abbr)
+    tds_account = _ensure_tds_payable_account(company, abbr)
+    _ensure_tax_withholding_category(tds_name, company, tds_account)
+
+    frappe.db.commit()
+    print(
+        json.dumps(
+            {
+                "tax_masters": {
+                    "sales_tax_template": sales_template,
+                    "tds_category": tds_name,
+                    "tds_account": tds_account,
+                }
+            }
+        )
+    )
+    return {
+        "sales_tax_template": sales_template,
+        "tds_category": tds_name,
+        "tds_account": tds_account,
+    }
+
+
+def _ensure_sales_tax_template(company: str, abbr: str) -> str:
+    """Prefer existing US ST 6.25%; else create SAMPLE UT ST 7.25%."""
+    preferred = [
+        f"US ST 6.25% - {abbr}",
+        f"US ST 6% - {abbr}",
+        f"US ST 4% - {abbr}",
+    ]
+    for name in preferred:
+        if frappe.db.exists("Sales Taxes and Charges Template", name):
+            return name
+
+    # Create 7.25% SAMPLE template + liability account when stock US templates missing.
+    acct = _ensure_tax_liability_account(company, abbr, f"ST 7.25% - {abbr}", "Sales Tax 7.25%")
+    tmpl_name = f"SAMPLE UT ST 7.25% - {abbr}"
+    if not frappe.db.exists("Sales Taxes and Charges Template", tmpl_name):
+        frappe.get_doc(
+            {
+                "doctype": "Sales Taxes and Charges Template",
+                "title": "SAMPLE UT ST 7.25%",
+                "company": company,
+                "taxes": [
+                    {
+                        "charge_type": "On Net Total",
+                        "account_head": acct,
+                        "description": "SAMPLE UT sales tax 7.25%",
+                        "rate": 7.25,
+                    }
+                ],
+            }
+        ).insert(ignore_permissions=True)
+    return tmpl_name
+
+
+def _ensure_tax_liability_account(company: str, abbr: str, name: str, account_name: str) -> str:
+    if frappe.db.exists("Account", name):
+        return name
+    parent = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_name": ("like", "Duties and Taxes%"), "is_group": 1},
+        "name",
+    ) or frappe.db.get_value(
+        "Account",
+        {"company": company, "name": ("like", f"Duties and Taxes%"), "is_group": 1},
+        "name",
+    )
+    if not parent:
+        raise frappe.ValidationError(f"No Duties and Taxes group for {company}")
+    doc = frappe.get_doc(
+        {
+            "doctype": "Account",
+            "account_name": account_name,
+            "company": company,
+            "parent_account": parent,
+            "is_group": 0,
+            "account_type": "Tax",
+            "root_type": "Liability",
+            "report_type": "Balance Sheet",
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_tds_payable_account(company: str, abbr: str) -> str:
+    name = f"TDS Payable - {abbr}"
+    if frappe.db.exists("Account", name):
+        return name
+    return _ensure_tax_liability_account(company, abbr, name, "TDS Payable")
+
+
+def _ensure_tax_withholding_category(tds_name: str, company: str, tds_account: str) -> str:
+    fy = frappe.db.get_value(
+        "Fiscal Year",
+        {"disabled": 0},
+        ["name", "year_start_date", "year_end_date"],
+        as_dict=True,
+    )
+    if not fy:
+        raise frappe.ValidationError("No open Fiscal Year for tax withholding rates")
+
+    if frappe.db.exists("Tax Withholding Category", tds_name):
+        doc = frappe.get_doc("Tax Withholding Category", tds_name)
+        # Ensure company account row exists
+        if not any(r.company == company for r in (doc.accounts or [])):
+            doc.append("accounts", {"company": company, "account": tds_account})
+            doc.save(ignore_permissions=True)
+        return tds_name
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "Tax Withholding Category",
+            "name": tds_name,
+            "category_name": "SAMPLE Tax Withholding (dogfood)",
+            "rates": [
+                {
+                    "from_date": fy.year_start_date,
+                    "to_date": fy.year_end_date,
+                    "tax_withholding_rate": 10,
+                    # Low thresholds so small SAMPLE invoices always withhold.
+                    "single_threshold": 0,
+                    "cumulative_threshold": 0,
+                }
+            ],
+            "accounts": [{"company": company, "account": tds_account}],
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_masters(
+    parties: dict,
+    company: str,
+    warehouse: str,
+    tag: str,
+    tax_ctx: dict | None = None,
+) -> dict[str, dict[str, str]]:
     """Return maps: suppliers/customers/items keyed by plan key → ERP name/code."""
-    out = {"suppliers": {}, "customers": {}, "items": {}}
+    tax_ctx = tax_ctx or {}
+    out = {"suppliers": {}, "customers": {}, "items": {}, "projects": {}}
+    sales_tmpl = tax_ctx.get("sales_tax_template") or ""
+    tds_cat = tax_ctx.get("tds_category") or "SAMPLE-TDS"
 
     for s in parties["suppliers"]:
         name = s["name"]
@@ -169,6 +346,28 @@ def _ensure_masters(parties: dict, company: str, warehouse: str, tag: str) -> di
                 }
             )
             doc.insert(ignore_permissions=True)
+        else:
+            doc = frappe.get_doc("Supplier", name)
+        if s.get("taxWithholding") and frappe.db.exists("Tax Withholding Category", tds_cat):
+            if doc.tax_withholding_category != tds_cat:
+                doc.tax_withholding_category = tds_cat
+                doc.save(ignore_permissions=True)
+        elif not s.get("taxWithholding") and doc.tax_withholding_category == tds_cat:
+            doc.tax_withholding_category = None
+            doc.save(ignore_permissions=True)
+        # OI-087: vendor account # (what they call us) for Ref sandwich checks.
+        acct = (s.get("accountNumber") or "").strip()
+        if acct:
+            existing_nums = {
+                (r.customer_number or "").strip()
+                for r in (doc.customer_numbers or [])
+            }
+            if acct not in existing_nums:
+                doc.append(
+                    "customer_numbers",
+                    {"company": company, "customer_number": acct},
+                )
+                doc.save(ignore_permissions=True)
         out["suppliers"][s["key"]] = name
 
     for c in parties["customers"]:
@@ -184,6 +383,13 @@ def _ensure_masters(parties: dict, company: str, warehouse: str, tag: str) -> di
                 }
             )
             doc.insert(ignore_permissions=True)
+        else:
+            doc = frappe.get_doc("Customer", name)
+        # OI-115: taxable vs exempt
+        want_exempt = not c.get("taxable", True)
+        if cint(getattr(doc, "exempt_from_sales_tax", 0)) != cint(want_exempt):
+            doc.exempt_from_sales_tax = 1 if want_exempt else 0
+            doc.save(ignore_permissions=True)
         out["customers"][c["key"]] = name
 
     for it in parties["items"]:
@@ -210,7 +416,30 @@ def _ensure_masters(parties: dict, company: str, warehouse: str, tag: str) -> di
             _ensure_bin_qty(code, warehouse, 500, rate=flt(it.get("rate") or 10))
         out["items"][it["key"]] = code
 
+    for p in parties.get("projects") or []:
+        name = p["name"]
+        cust_key = p.get("customerKey")
+        customer = out["customers"].get(cust_key) if cust_key else None
+        if not frappe.db.exists("Project", name):
+            doc = frappe.get_doc(
+                {
+                    "doctype": "Project",
+                    "project_name": name,
+                    "customer": customer,
+                    "status": "Open",
+                }
+            )
+            doc.insert(ignore_permissions=True)
+        else:
+            doc = frappe.get_doc("Project", name)
+            if customer and doc.customer != customer:
+                doc.customer = customer
+                doc.save(ignore_permissions=True)
+        out["projects"][p["key"]] = name
+
     frappe.db.commit()
+    # Stash template on party_map via side channel for _create_one
+    out["_tax"] = {"sales_tax_template": sales_tmpl, "tds_category": tds_cat}
     return out
 
 
@@ -310,6 +539,9 @@ def _create_one(
         doc = _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, posting, as_of)
 
     _apply_tag_fields(doc, tag, key)
+    _apply_doc_taxes(doc, kind, spec, party_map)
+    if kind == "purchase_invoice":
+        _normalize_pi_dates(doc, posting)
     doc.flags.ignore_permissions = True
     doc.insert()
     if cint(spec.get("asDraft")):
@@ -318,6 +550,56 @@ def _create_one(
     doc.submit()
     print(f"created {doc.doctype} {doc.name} ({key}) source={source}")
     return doc.name
+
+
+def _normalize_pi_dates(doc, posting: str) -> None:
+    """Keep bill_date / due_date / schedule coherent after map-from-source (seed only)."""
+    doc.posting_date = posting
+    if hasattr(doc, "set_posting_time"):
+        doc.set_posting_time = 1
+    doc.bill_date = posting
+    doc.due_date = add_days(getdate(posting), 30)
+    if hasattr(doc, "payment_schedule"):
+        doc.set("payment_schedule", [])
+
+
+def _apply_doc_taxes(doc, kind: str, spec: dict, party_map: dict) -> None:
+    """Attach sales tax template or enable TDS withholding before insert/submit."""
+    tax_meta = (party_map or {}).get("_tax") or {}
+    if kind == "sales_invoice" and spec.get("salesTax") and not cint(spec.get("asDraft")):
+        tmpl = tax_meta.get("sales_tax_template")
+        if tmpl and frappe.db.exists("Sales Taxes and Charges Template", tmpl):
+            doc.taxes_and_charges = tmpl
+            try:
+                doc.set_taxes()
+            except Exception as exc:
+                print(f"warn: set_taxes {spec.get('key')}: {exc}")
+            if not doc.get("taxes"):
+                tmpl_doc = frappe.get_doc("Sales Taxes and Charges Template", tmpl)
+                doc.set("taxes", [])
+                for row in tmpl_doc.taxes or []:
+                    doc.append(
+                        "taxes",
+                        {
+                            "charge_type": row.charge_type,
+                            "account_head": row.account_head,
+                            "description": row.description or row.account_head,
+                            "rate": row.rate,
+                        },
+                    )
+            try:
+                doc.calculate_taxes_and_totals()
+            except Exception as exc:
+                print(f"warn: SI tax calc {spec.get('key')}: {exc}")
+    if kind == "purchase_invoice" and spec.get("taxWithholding") and not cint(spec.get("asDraft")):
+        # Newer ERPNext: PurchaseTaxWithholding runs on validate when supplier has category.
+        if hasattr(doc, "ignore_tax_withholding_threshold"):
+            doc.ignore_tax_withholding_threshold = 1
+        if hasattr(doc, "apply_tax_withholding_amount"):
+            doc.apply_tax_withholding_amount = 1
+        tds = tax_meta.get("tds_category")
+        if tds and hasattr(doc, "tax_withholding_category"):
+            doc.tax_withholding_category = tds
 
 
 def _plan_key(kind: str, index: int) -> str:

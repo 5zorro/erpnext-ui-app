@@ -20,6 +20,15 @@
     li button .hist-detail { margin-left: 0.35em; font-weight: 400; }
     li button .hist-detail.muted { color: #6b8299; }
     li button:hover .hist-detail.muted { color: #9fb3c8; }
+    li button.hist-setup { color: #9fb3c8; }
+    li button.hist-peek-parent { font-weight: 600; color: #e2e8f0; }
+    li button.hist-peek-child { padding-left: 18px; }
+    .hist-tree-guide {
+      display: inline-block; min-width: 2.1em; margin-right: 0.15em;
+      color: #6b8299; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      font-size: 11px; font-weight: 400;
+    }
+    li button:hover .hist-tree-guide { color: #9fb3c8; }
     .empty { padding: 14px 12px; font-size: 12px; color: #6b8299; line-height: 1.4; }
     .older-toggle {
       display: block; width: calc(100% - 12px); margin: 4px 6px 0; text-align: left;
@@ -100,7 +109,22 @@
         if (opts.draft) b.className = "draft-label";
 
         const primary = h.label || h.dt || h.name || "";
+        if (!opts.draft && h.treeDepth === 1) {
+          b.classList.add("hist-peek-child");
+          b.dataset.testid = "hist-peek-child";
+          const guide = document.createElement("span");
+          guide.className = "hist-tree-guide";
+          guide.setAttribute("aria-hidden", "true");
+          guide.textContent = "L→ ";
+          b.appendChild(guide);
+          const parentName = h.treeParentLabel || "document";
+          b.setAttribute("aria-label", `${primary}, peek under ${parentName}`);
+        } else if (h.treeRole === "parent") {
+          b.classList.add("hist-peek-parent");
+          b.dataset.testid = "hist-peek-parent";
+        }
         b.appendChild(document.createTextNode(primary));
+        if (h.kind === "setup") b.classList.add("hist-setup");
         const detail = h.detail != null ? String(h.detail).trim() : "";
         if (detail) {
           const span = document.createElement("span");
@@ -109,7 +133,10 @@
           b.appendChild(span);
         }
 
-        b.onclick = () => api && api.openErp(h.route);
+        b.onclick = () => {
+          if (api && api.navDebug) api.navDebug("hist-click", h.route || "(empty route)");
+          if (api) api.openErp(h.route);
+        };
         li.appendChild(b);
         ul.appendChild(li);
       });

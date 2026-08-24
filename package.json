@@ -15,8 +15,12 @@
     "test:e2e:xvfb": "xvfb-run -a playwright test",
     "seed:sample": "bash ops/sample-data/run-seed.sh",
     "seed:sample:plan": "node ops/sample-data/emit-plan.js",
+    "dogfood:ap-sources": "node ops/sample-data/emit-dogfood-sources.js",
+    "dogfood:ap-sources:pdf": "node ops/sample-data/emit-dogfood-sources.js --pdf",
     "report:input-count": "node ops/input-count/report-bill.js",
     "erp:up": "bash ops/erp-host/ensure-erp-up.sh",
+    "erp:check": "bash ops/erp-host/upgrade-sandbox.sh --check",
+    "erp:upgrade-sandbox": "bash ops/erp-host/upgrade-sandbox.sh --upgrade",
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
     "start:linux": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage"
   },

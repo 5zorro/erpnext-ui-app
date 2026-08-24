@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Bill</title>
+  <link rel="stylesheet" href="doc-wash.css" />
   <style>
     html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
@@ -210,6 +211,22 @@
     .chip.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
     .chip.match { background: #dcfce7; color: #166534; border-color: #86efac; }
     .chip.mismatch { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .chip.warn { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+    .chip.ok { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .ref-warn {
+      margin: 0; font-size: 12px; color: #92400e; line-height: 1.35; white-space: pre-wrap;
+    }
+    .bill-ref-row input { flex: 1; min-width: 0; }
+    .toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+      z-index: 40; max-width: min(520px, 92vw);
+      padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      background: #78350f; color: #fffbeb; border: 1px solid #fbbf24;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+      opacity: 0; pointer-events: none; transition: opacity 180ms ease;
+    }
+    .toast.show { opacity: 1; pointer-events: auto; }
+    .toast.fade-out { opacity: 0; transition: opacity 600ms ease; }
     .memo { margin-top: 12px; }
     .memo-head {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -243,6 +260,19 @@
       color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; margin-right: 4px;
     }
     td.num { text-align: right; }
+    #panel-items table thead th.sortable {
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    #panel-items table thead th.sortable:hover { background: #e2e8f0; }
+    #panel-items table thead th.sorted { background: #dbeafe; }
+    #items-body tr[data-wash-source="order"] td { background-color: var(--wash-order); }
+    #items-body tr[data-wash-source="fulfill"] td { background-color: var(--wash-fulfill); }
+    #items-body tr[data-wash-source="invoice"] td { background-color: var(--wash-invoice); }
+    #items-body tr[data-wash-source] td input,
+    #items-body tr[data-wash-source] td .ro { background-color: transparent; }
+    #items-body tr[data-wash-source] td.num .amount-back-in { background-color: transparent; }
     .money-amt, .money-cost { font-variant-numeric: tabular-nums; }
     .money-amt { display: block; text-align: right; }
     .money-cents { text-decoration: underline; text-underline-offset: 2px; }
@@ -362,22 +392,37 @@
     .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
     .link-opt.active { background: #eaf4ff; }
     .link-opt.link-action { font-style: italic; color: #1d4ed8; }
+    .link-opt.link-opt-muted { color: #94a3b8; }
     .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
     .addr-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px 14px;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 10px 10px;
       margin: 4px 0 12px;
+      align-items: center;
     }
-    .addr-grid textarea {
+    .addr-flow {
+      font-size: 1.75rem;
+      line-height: 1;
+      color: #64748b;
+      user-select: none;
+      padding: 0 4px;
+      align-self: center;
+      margin-top: 1.1rem; /* align with textareas under labels */
+    }
+    .addr-grid textarea,
+    #f-billing-address {
       min-height: 4.8em;
       resize: vertical;
       white-space: pre-wrap;
       line-height: 1.35;
       font-family: inherit;
+      width: 100%;
+      box-sizing: border-box;
     }
     @media (max-width: 900px) {
       .addr-grid { grid-template-columns: 1fr; }
+      .addr-flow { display: none; }
     }
     .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
@@ -388,7 +433,7 @@
       display: flex; align-items: center; justify-content: center; padding: 16px;
     }
     .src-box {
-      background: #fff; border-radius: 10px; width: min(560px, 100%); max-height: 80vh;
+      background: #fff; border-radius: 10px; width: min(720px, 100%); max-height: 80vh;
       display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15,23,42,.25);
     }
     .src-title { padding: 12px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
@@ -397,10 +442,26 @@
     .src-group.active { color: #0f172a; font-weight: 700; }
     .src-item {
       padding: 8px 14px; font-size: 13px; cursor: pointer; border: none; background: #fff;
-      width: 100%; text-align: left; display: block;
+      width: 100%; text-align: left; display: flex; align-items: flex-start; gap: 10px;
     }
     .src-item:hover, .src-item.active { background: #eaf4ff; }
     .src-item.draft { color: #94a3b8; cursor: not-allowed; background: #f8fafc; }
+    .src-item.checked { background: #dbeafe; }
+    .src-item.active.checked { background: #bfdbfe; }
+    .src-check {
+      flex: 0 0 1.1rem; width: 1.1rem; height: 1.1rem; margin-top: 1px;
+      border: 1.5px solid #64748b; border-radius: 3px; background: #fff;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 11px; line-height: 1; color: #0f172a; box-sizing: border-box;
+    }
+    .src-item.checked .src-check { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+    .src-item.draft .src-check { opacity: 0.35; }
+    .src-item-label { flex: 1; min-width: 0; }
+    .alloc-so { white-space: nowrap; }
+    .alloc-so .assign-deal {
+      margin-left: 6px; font-size: 11px; padding: 2px 6px; border-radius: 4px;
+      border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer;
+    }
     .src-foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #e2e8f0; }
     .src-foot button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
     .src-foot button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
@@ -436,6 +497,8 @@
         <button type="button" id="btn-refresh" data-testid="bill-refresh"
           title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
         <button type="button" class="ghost" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
+        <button type="button" class="ghost" id="btn-caps" data-testid="bill-caps"
+          title="Default ALL-CAPS data entry — click to turn off for this page">⇪ CAPS: ON</button>
       </div>
     </div>
     <div class="commit-gate" id="commit-gate" data-testid="bill-commit-gate" hidden>
@@ -468,7 +531,17 @@
       <div class="cols">
         <div>
           <div class="field"><label>Vendor Name</label><input id="f-vendor" data-field="supplier" data-testid="bill-vendor" autocomplete="off" /></div>
+          <div class="field">
+            <label>Billing address</label>
+            <textarea id="f-billing-address" readonly tabindex="-1" rows="4" data-testid="bill-billing-address" spellcheck="false"
+              title="Vendor billing address. Read-only here — set Supplier Address on the Bill (or Vendor) in Vanilla, then Refresh."></textarea>
+          </div>
           <div class="field"><label>Terms</label><input id="f-terms" data-field="payment_terms_template" data-testid="bill-terms" /></div>
+          <div class="field">
+            <label>Bill Due Date</label>
+            <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
+            <span class="date-hint">Digits and / - . only · Tab once to leave · MM/DD fills nearest year</span>
+          </div>
         </div>
         <div>
           <div class="field">
@@ -476,7 +549,17 @@
             <input id="f-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="posting_date" data-testid="bill-date" autocomplete="off" />
             <span class="date-hint">Digits and / - . only · Tab once to leave · MM/DD fills nearest year</span>
           </div>
-          <div class="field"><label>Ref No. (Supplier Invoice No.)</label><input id="f-billno" data-field="bill_no" data-testid="bill-ref" /></div>
+          <div class="field">
+            <label>Ref No. (Supplier Invoice No.)</label>
+            <div class="row bill-ref-row" data-testid="bill-ref-row">
+              <input id="f-billno" data-field="bill_no" data-testid="bill-ref" autocomplete="off" />
+              <span class="chip idle" id="ref-status" data-testid="bill-ref-chip"
+                title="Soft check vs duplicates, PO logbook #, and vendor account #">
+                <span class="due-emoji" id="ref-emoji" data-testid="bill-ref-emoji">·</span>
+              </span>
+            </div>
+            <p class="ref-warn" id="ref-warn" data-testid="bill-ref-warn" hidden></p>
+          </div>
           <div class="field">
             <label>Amount Due</label>
             <div class="row amount-due-row" data-testid="bill-amount-due-row">
@@ -491,10 +574,7 @@
                 title="Bill grand total (checksum target)">Bill —</span>
             </div>
           </div>
-          <div class="field">
-            <label>Bill Due Date</label>
-            <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
-          </div>
+          <div id="linked-po-block" data-testid="bill-linked-pos" hidden></div>
         </div>
       </div>
       <div class="addr-grid" data-testid="bill-address-grid">
@@ -503,39 +583,45 @@
           <textarea id="f-ship-from" readonly tabindex="-1" rows="4" data-testid="bill-ship-from" spellcheck="false"
             title="Vendor dispatch / ship-from. Read-only here — set Dispatch Address on the Bill in Vanilla, then Refresh."></textarea>
         </div>
+        <div class="addr-flow" aria-hidden="true" data-testid="bill-ship-arrow" title="Ship from → Ship to">⇒</div>
         <div class="field">
           <label>Ship to</label>
           <textarea id="f-ship-to" readonly tabindex="-1" rows="4" data-testid="bill-ship-to" spellcheck="false"
             title="Where goods are received. Read-only here — set Shipping Address on the Bill in Vanilla, then Refresh."></textarea>
         </div>
-        <div class="field">
-          <label>Billing address</label>
-          <textarea id="f-billing-address" readonly tabindex="-1" rows="4" data-testid="bill-billing-address" spellcheck="false"
-            title="Vendor billing address. Read-only here — set Supplier Address on the Bill (or Vendor) in Vanilla, then Refresh."></textarea>
-        </div>
         <span class="addr-hint" id="address-hint" style="grid-column: 1 / -1">
-          Read-only on Bill. Multi-line USA format (country shown only when not USA).
+          Ship from / Ship to are read-only here. Billing address is in the left column above.
           Edit in Vanilla: Dispatch = Ship from · Shipping = Ship to · Supplier Address = Billing. Then Refresh.
         </span>
       </div>
       <div>
         <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
           <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
-            data-tab="items" data-testid="bill-tab-items">Items</button>
+            tabindex="-1" data-tab="items" data-testid="bill-tab-items">Items</button>
           <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
-            data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
+            tabindex="-1" data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
         </div>
         <div class="line-panel" id="panel-items" data-testid="bill-panel-items" role="tabpanel">
         <table>
           <thead>
-            <tr>
-              <th>Item</th><th>Description</th><th>Qty</th><th>Cost</th><th>Amount</th><th>Customer:Job</th><th></th>
+            <tr id="items-head-row">
+              <th class="sortable sorted" data-sort="lineNo" title="Sort by Line">Line ▲</th>
+              <th class="sortable" data-sort="poLine" title="Sort by PO line">PO line</th>
+              <th class="sortable" data-sort="item_code" title="Sort by Item">Item</th>
+              <th class="sortable" data-sort="description" title="Sort by Description">Description</th>
+              <th class="sortable" data-sort="qty" title="Sort by Qty">Qty</th>
+              <th class="sortable" data-sort="rate" title="Sort by Cost">Cost</th>
+              <th class="sortable" data-sort="amount" title="Sort by Amount">Amount</th>
+              <th class="sortable" data-sort="customer" title="Sort by Customer">Customer</th>
+              <th class="sortable" data-sort="salesOrders" title="Sort by Sales order(s)">Sales order(s)</th>
+              <th class="sortable" data-sort="project" title="Sort by Project">Project</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="items-body" data-testid="bill-items"></tbody>
           <tfoot id="line-totals" data-testid="bill-line-totals" hidden>
             <tr>
-              <td colspan="2"></td>
+              <td colspan="4"></td>
               <td class="tot-cell">
                 <span class="tot-label">Σ Qty</span><b id="tot-qty">0</b>
                 <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="bill-clear-qty"
@@ -543,8 +629,7 @@
               </td>
               <td></td>
               <td class="tot-cell"><span class="tot-label">Item subtotal</span><b id="tot-amt">0.00</b></td>
-              <td></td>
-              <td></td>
+              <td></td><td></td><td></td><td></td>
             </tr>
           </tfoot>
         </table>
@@ -619,6 +704,7 @@
       </div>
     </div>
   </div>
+  <div id="bill-toast" class="toast" data-testid="bill-toast" role="status" aria-live="polite" hidden></div>
   <div id="calc-overlay" hidden data-testid="bill-calc-overlay" role="status" aria-live="polite">
     <div class="calc-history" id="calc-history" hidden data-testid="bill-calc-history"></div>
     <div class="calc-live">
@@ -630,7 +716,6 @@
   <script type="module">
     import {
       readBillHeader,
-      readBillItemRows,
       readBillTaxRows,
       amountDueChecksumChip,
       amountDueGrandPointer,
@@ -644,7 +729,23 @@
       BILL_ASSUMPTIONS,
       isDraftBillDoc,
       saveActionsBlockedByChecksum,
+      linkedPurchaseOrdersForBill,
     } from "../src/bill-map.js";
+    import { ALLOC_SALES_ORDERS_FIELD } from "../src/bill-line-allocation.js";
+    import {
+      buildBillItemRowModels,
+      sortBillItemRowModels,
+      BILL_ITEM_SORTABLE_HEADERS,
+    } from "../src/bill-item-table.js";
+    import {
+      evaluateBillRef,
+    } from "../src/bill-ref-check.js";
+    import {
+      shouldBlockDeleteLastItemRow,
+      emptyItemRowCleanupAction,
+      LAST_ITEM_ROW_TOAST,
+      isEmptyItemCode,
+    } from "../src/bill-item-guard.js";
     import { addressTextareaRows } from "../src/address-format.js";
     import {
       docLifecyclePill,
@@ -663,6 +764,7 @@
     import {
       linkDoctypeForBillField,
       linkOptionLabel,
+      linkOptionClassNames,
       withEmptySearchActions,
       isCreateSupplierLinkAction,
     } from "../src/link-search.js";
@@ -671,8 +773,23 @@
       nextLinkHighlightIndex,
       resolveLinkPickIndex,
       linkPickerKeyAction,
-      nextFieldAfterLinkPick,
+      nextItemFocusAfterEdit,
+      scrollLinkOptionIntoView,
     } from "../src/link-picker-policy.js";
+    import {
+      CELL_MODE_EDIT,
+      CELL_MODE_NAV,
+      itemTableKeyDecision,
+      neighborItemCell,
+      shouldLeaveItemTableBackward,
+    } from "../src/item-table-nav.js";
+    import {
+      toggleDocCaps,
+      docCapsButtonLabel,
+      docCapsButtonTitle,
+      shouldForceCapsOnElement,
+      applyDocCapsValue,
+    } from "../src/doc-caps.js";
     import {
       shouldOpenSourceModalAfterVendorPick,
       focusTargetAfterSourceModal,
@@ -708,15 +825,37 @@
       formatSaveFailureReason,
     } from "../src/bill-action-flow.js";
     import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
-    import { isSelectableSourceItem } from "../src/source-modal.js";
+    import {
+      isSelectableSourceItem,
+      sourceItemKey,
+      toggleSourceSelection,
+      resolveSourcesToCommit,
+      sourceModalKeyAction,
+    } from "../src/source-modal.js";
+    import {
+      formatSalesOrderPickerLabel,
+    } from "../src/so-picker.js";
     import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
     import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
+    import {
+      applyDocWashToDocument,
+      setWashSourceAttr,
+      washRoleForSourceKind,
+    } from "../src/doc-wash.js";
+
+    applyDocWashToDocument(document, { profileId: "bill" });
 
     const api = window.erpBill;
     let lastDoc = null;
     let amountDue = "";
     let amountDueAtFocus = "";
     let painting = false;
+    /** ALL-CAPS entry — default ON each Bill open (OI-111); page toggle only. */
+    let docCapsOn = true;
+    /** Suppress change while Tab keydown commits the item cell. */
+    let itemTabGuard = false;
+    /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
+    let itemCellMode = CELL_MODE_EDIT;
     let userEdited = false;
     /** @type {"find"|"new"|"print"|null} */
     let pendingGate = null; // GateTrigger | null — SSoT for the one commit-gate
@@ -727,6 +866,14 @@
     const linkMounted = new WeakMap();
     /** Prevent stacking multiple source modals. */
     let sourceModalOpen = false;
+    let allocationPickerOpen = false;
+    /** @type {Record<number, object>} */
+    let lineAllocations = {};
+    /** @type {Record<number, object>} */
+    let poLineMeta = {};
+    /** @type {{ key: string, asc: boolean }} */
+    let itemSort = { key: "lineNo", asc: true };
+    let itemsHeadWired = false;
     /** @type {Promise<void>|null} */
     let lineApplyInFlight = null;
     /** @type {boolean} */
@@ -775,12 +922,16 @@
       terms: document.getElementById("f-terms"),
       date: document.getElementById("f-date"),
       billno: document.getElementById("f-billno"),
+      refStatus: document.getElementById("ref-status"),
+      refEmoji: document.getElementById("ref-emoji"),
+      refWarn: document.getElementById("ref-warn"),
       amountdue: document.getElementById("f-amountdue"),
       dueStatus: document.getElementById("due-status"),
       dueEmoji: document.getElementById("due-emoji"),
       dueMoney: document.getElementById("due-money"),
       dueGrand: document.getElementById("due-grand"),
       duedate: document.getElementById("f-duedate"),
+      linkedPoBlock: document.getElementById("linked-po-block"),
       memo: document.getElementById("f-memo"),
       items: document.getElementById("items-body"),
       lineTotals: document.getElementById("line-totals"),
@@ -808,12 +959,14 @@
       taxAccount: document.getElementById("f-tax-account"),
       taxAmount: document.getElementById("f-tax-amount"),
       addTax: document.getElementById("btn-add-tax"),
+      toast: document.getElementById("bill-toast"),
       msItems: document.getElementById("ms-items"),
       msTaxes: document.getElementById("ms-taxes"),
       msGrand: document.getElementById("ms-grand"),
       msNote: document.getElementById("ms-note"),
       tabItems: document.getElementById("tab-items"),
       tabExpenses: document.getElementById("tab-expenses"),
+      caps: document.getElementById("btn-caps"),
       panelItems: document.getElementById("panel-items"),
       panelExpenses: document.getElementById("panel-expenses"),
       expenseNote: document.querySelector("[data-testid='bill-expense-note']"),
@@ -880,6 +1033,71 @@
     function setStatus(text, cls) {
       el.status.textContent = text;
       el.status.className = "status" + (cls ? " " + cls : "");
+    }
+
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    let toastTimer = null;
+    /**
+     * Fading notice (last-row delete, etc.).
+     * @param {string} text
+     * @param {number} [ms]
+     */
+    function showToast(text, ms = 3200) {
+      if (!el.toast) {
+        setStatus(text, "warn");
+        return;
+      }
+      if (toastTimer) clearTimeout(toastTimer);
+      el.toast.hidden = false;
+      el.toast.textContent = text;
+      el.toast.classList.remove("fade-out");
+      el.toast.classList.add("show");
+      toastTimer = setTimeout(() => {
+        el.toast.classList.add("fade-out");
+        toastTimer = setTimeout(() => {
+          el.toast.classList.remove("show", "fade-out");
+          el.toast.hidden = true;
+          el.toast.textContent = "";
+          toastTimer = null;
+        }, 650);
+      }, ms);
+    }
+
+    /**
+     * Vanilla requires ≥1 item — seed a blank line when the grid is empty.
+     * @param {object|null|undefined} doc
+     */
+    async function ensureAtLeastOneItemRow(doc) {
+      if (!api || !editable() || painting) return;
+      const items = doc && Array.isArray(doc.items) ? doc.items : [];
+      if (items.length > 0) return;
+      const res = await api.addItem();
+      if (res && res.ok) {
+        noteUserEdit();
+        paint(res.doc, amountDue);
+      }
+    }
+
+    /**
+     * Remove blank Item rows when the clerk dismisses the picker / leaves the cell.
+     * @param {number} rowIndex
+     * @param {string} itemCode
+     */
+    async function cleanupEmptyItemRow(rowIndex, itemCode) {
+      if (!api || !editable() || painting || itemTabGuard) return;
+      const rowCount =
+        lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+      const decision = emptyItemRowCleanupAction(rowCount, itemCode);
+      if (decision.action !== "delete") return;
+      setStatus("Removing empty line…");
+      const removed = await api.deleteItem(rowIndex);
+      if (removed && removed.ok) {
+        noteUserEdit();
+        paint(removed.doc, amountDue);
+        setStatus("Empty line removed.");
+      } else if (removed && removed.blockedLastRow) {
+        showToast(removed.reason || LAST_ITEM_ROW_TOAST);
+      }
     }
 
     function paintDirtyPill() {
@@ -1231,7 +1449,10 @@
       function setHi(i) {
         opts.forEach((b) => b.classList.remove("active"));
         hi = i;
-        if (hi >= 0 && opts[hi]) opts[hi].classList.add("active");
+        if (hi >= 0 && opts[hi]) {
+          opts[hi].classList.add("active");
+          scrollLinkOptionIntoView(opts[hi]);
+        }
       }
 
       async function pickValue(v) {
@@ -1275,12 +1496,15 @@
         dd.innerHTML = rows
           .map(
             (o) =>
-              `<button type="button" class="link-opt${isCreateSupplierLinkAction(o) ? " link-action" : ""}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
+              `<button type="button" class="${linkOptionClassNames(o)}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
           )
           .join("");
         opts = [...dd.querySelectorAll(".link-opt")];
         hi = initialLinkHighlightIndex(opts.length);
-        if (hi === 0) opts[0].classList.add("active");
+        if (hi === 0) {
+          opts[0].classList.add("active");
+          scrollLinkOptionIntoView(opts[0]);
+        }
         opts.forEach((b) => {
           b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
         });
@@ -1361,6 +1585,62 @@
       el.submit.disabled = block;
     }
 
+    /** @type {number} */
+    let refCheckSeq = 0;
+
+    /**
+     * Non-blocking Ref No. chip (OI-054 / OI-087). Never disables Save.
+     * @param {import("../src/bill-ref-check.js").BillRefCheckResult} result
+     */
+    function paintRefChip(result) {
+      const r = result || evaluateBillRef("");
+      if (el.refStatus) {
+        const tone =
+          r.status === "warn" ? "warn" : r.status === "ok" ? "ok" : "idle";
+        el.refStatus.className = "chip " + tone;
+        el.refStatus.title = r.title || "";
+      }
+      if (el.refEmoji) el.refEmoji.textContent = r.emoji || "·";
+      if (el.refWarn) {
+        if (r.status === "warn" && r.warnings && r.warnings.length) {
+          el.refWarn.hidden = false;
+          el.refWarn.textContent = r.warnings
+            .map((w) => w.message + (w.detail ? ` — ${w.detail}` : ""))
+            .join("\n");
+        } else {
+          el.refWarn.hidden = true;
+          el.refWarn.textContent = "";
+        }
+      }
+    }
+
+    async function runBillRefCheck(billNoOverride) {
+      const seq = ++refCheckSeq;
+      const typed =
+        billNoOverride != null
+          ? String(billNoOverride)
+          : el.billno
+            ? el.billno.value
+            : "";
+      if (!String(typed).trim()) {
+        paintRefChip(evaluateBillRef(""));
+        return;
+      }
+      if (!api || !api.checkRef) {
+        paintRefChip(evaluateBillRef(typed));
+        return;
+      }
+      try {
+        const res = await api.checkRef(typed);
+        if (seq !== refCheckSeq) return;
+        if (res && res.result) paintRefChip(res.result);
+        else paintRefChip(evaluateBillRef(typed));
+      } catch {
+        if (seq !== refCheckSeq) return;
+        paintRefChip(evaluateBillRef(typed));
+      }
+    }
+
     /** Show Amount Due in the single input (USD on blur / when not focused). */
     function paintAmountDueInput(opts = {}) {
       const keepRaw = !!opts.keepRaw || document.activeElement === el.amountdue;
@@ -1373,15 +1653,20 @@
       el.amountdue.value = plain || (amountDue !== "" ? String(amountDue) : "");
     }
 
-    function focusItemCell(rowIndex, field) {
+    function focusItemCell(rowIndex, field, opts = {}) {
+      const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+      itemCellMode = mode;
+      const wantSelect =
+        opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
       const tryFocus = () => {
         const inp = el.items.querySelector(
           `input[data-row="${rowIndex}"][data-field="${field}"]`,
         );
         if (!inp) return false;
         try {
+          if (mode === CELL_MODE_NAV) inp.dataset.navFocus = "1";
           inp.focus({ preventScroll: false });
-          if (typeof inp.select === "function") inp.select();
+          if (wantSelect && typeof inp.select === "function") inp.select();
         } catch {
           try {
             inp.focus();
@@ -1396,6 +1681,13 @@
         tryFocus();
         setTimeout(tryFocus, 50);
       });
+    }
+
+    function isItemLinkDropdownOpen(inp) {
+      const wrap = inp && inp.closest ? inp.closest(".link-wrap") : null;
+      if (!wrap) return false;
+      const dd = wrap.querySelector(".link-dd");
+      return !!(dd && !dd.hidden);
     }
 
     function editable() {
@@ -1485,17 +1777,33 @@
       el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
         const field = inp.getAttribute("data-tax-field");
         const ri = Number(inp.getAttribute("data-tax-row"));
+        let taxBusy = false;
+        const readTaxValue = () => {
+          const kind = dirtyCompareKindForField(field);
+          let next =
+            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+          if (field === "rate" || field === "tax_amount") {
+            const n = parseMoney(inp.value);
+            next = n == null ? "" : String(n);
+          }
+          return next;
+        };
         const apply = async (value) => {
-          if (!api || painting || !api.setTax) return;
-          setStatus(`Updating tax ${field}…`);
-          const res = await api.setTax(ri, field, value);
-          if (res && res.ok) {
-            noteUserEdit();
-            paint(res.doc, amountDue);
-            setStatus("Tax row updated.");
-          } else {
-            setStatus((res && res.reason) || "Tax update failed.", "err");
-            await refresh();
+          if (!api || painting || !api.setTax || taxBusy) return;
+          taxBusy = true;
+          try {
+            setStatus(`Updating tax ${field}…`);
+            const res = await api.setTax(ri, field, value);
+            if (res && res.ok) {
+              noteUserEdit();
+              paint(res.doc, amountDue);
+              setStatus("Tax row updated — totals refreshed.");
+            } else {
+              setStatus((res && res.reason) || "Tax update failed.", "err");
+              await refresh();
+            }
+          } finally {
+            taxBusy = false;
           }
         };
         if (field === "account_head") {
@@ -1506,23 +1814,31 @@
             const n = parseMoney(inp.value);
             if (n != null) inp.value = String(n);
           });
-          inp.addEventListener("blur", () => {
-            const n = parseMoney(inp.value);
-            if (n != null) inp.value = formatGroupedNumber(n);
-          });
         }
-        const evName = inp.tagName === "SELECT" ? "change" : "change";
-        inp.addEventListener(evName, async () => {
-          if (!api || painting) return;
-          const kind = dirtyCompareKindForField(field);
-          let next =
-            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+        const commitTax = async () => {
+          if (!api || painting || taxBusy) return;
+          let next = readTaxValue();
           if (field === "rate" || field === "tax_amount") {
             const n = parseMoney(inp.value);
-            next = n == null ? "" : String(n);
             if (n != null) inp.value = formatGroupedNumber(n);
           }
+          const row =
+            lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
+          const prev = row && row[field] != null ? row[field] : "";
+          const kind = dirtyCompareKindForField(field);
+          if (valuesMeaningfullyEqual(prev, next, { kind })) return;
           await apply(next);
+        };
+        inp.addEventListener("change", () => {
+          void commitTax();
+        });
+        inp.addEventListener("blur", () => {
+          void commitTax();
+        });
+        inp.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Tab" || painting) return;
+          // Commit before focus leaves so Grand total updates on Tab-away.
+          void commitTax();
         });
       });
       el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
@@ -1543,20 +1859,67 @@
       paintMoneyStack(doc);
     }
 
+    function paintItemsHead() {
+      const thead = document.getElementById("items-head-row");
+      if (!thead) return;
+      thead.innerHTML =
+        BILL_ITEM_SORTABLE_HEADERS.map((h) => {
+          const active = itemSort.key === h.sortKey;
+          const arrow = active ? (itemSort.asc ? " ▲" : " ▼") : "";
+          return `<th class="sortable${active ? " sorted" : ""}" data-sort="${h.sortKey}" title="Sort by ${h.label}">${h.label}${arrow}</th>`;
+        }).join("") + "<th></th>";
+      if (!itemsHeadWired) {
+        itemsHeadWired = true;
+        thead.addEventListener("click", (ev) => {
+          const th = /** @type {HTMLElement|null} */ (ev.target).closest("th[data-sort]");
+          if (!th) return;
+          const key = th.getAttribute("data-sort");
+          if (!key) return;
+          if (itemSort.key === key) itemSort.asc = !itemSort.asc;
+          else {
+            itemSort.key = key;
+            itemSort.asc = true;
+          }
+          paintItemsHead();
+          if (lastDoc) paintItems(lastDoc);
+        });
+      }
+    }
+
     function paintItems(doc) {
-      const rows = readBillItemRows(doc);
+      paintItemsHead();
+      const models = sortBillItemRowModels(
+        buildBillItemRowModels(doc, lineAllocations, poLineMeta),
+        itemSort.key,
+        itemSort.asc,
+      );
       const canEdit = editable();
-      el.items.innerHTML = rows
-        .map((r, ri) => {
+      el.items.innerHTML = models
+        .map((model) => {
+          const ri = model.rowIndex;
+          const r = [model.lineNo, model.poLine, ...model.cells];
           const cells = BILL_ITEM_COLS.map((col, ci) => {
             const val = r[ci] ?? "";
-            // Amount: display-only in ERP; click to back into unit cost (amount ÷ qty → rate).
             if (col.displayOnly || col.field == null) {
               const html = formatUsdAmountHtml(val);
               if (col.label === "Amount" && canEdit) {
                 return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Cost)" data-testid="bill-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
               }
-              return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
+              if (col.label === "Amount") {
+                return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
+              }
+              if (col.label === "Line" || col.label === "PO line") {
+                return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
+              }
+            }
+            if (col.field === ALLOC_SALES_ORDERS_FIELD) {
+              const assignBtn = canEdit
+                ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
+                : "";
+              return `<td class="alloc-so"><span class="ro alloc-so-text">${escapeHtml(val) || "—"}</span>${assignBtn}</td>`;
+            }
+            if (col.scratch && col.readOnly) {
+              return `<td><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
             }
             // Cost: #,###.## (editable text so commas work)
             if (col.field === "rate") {
@@ -1576,7 +1939,7 @@
           const del = canEdit
             ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
             : `<td></td>`;
-          return `<tr data-rowidx="${ri}">${cells}${del}</tr>`;
+          return `<tr data-rowidx="${ri}" data-wash-source="${model.washRole}">${cells}${del}</tr>`;
         })
         .join("");
 
@@ -1586,7 +1949,75 @@
         const field = inp.getAttribute("data-field");
         const ri = Number(inp.getAttribute("data-row"));
         const linkDt = linkDoctypeForBillField(field);
-        const apply = async (value) => {
+        const readCellValue = () => {
+          const kind = dirtyCompareKindForField(field);
+          let next =
+            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+          if (field === "rate") {
+            const n = parseMoney(inp.value);
+            next = n == null ? "" : String(n);
+          }
+          if (shouldForceCapsOnElement(docCapsOn, inp) && kind !== "number") {
+            next = applyDocCapsValue(next, docCapsOn);
+          }
+          return next;
+        };
+        const focusAfterItemEdit = async (docAfter, cellValue) => {
+          const rowCount =
+            docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
+          const dest = nextItemFocusAfterEdit(field, ri, rowCount, { cellValue });
+          if (dest.deleteRow && dest.leaveTable) {
+            if (!api || !editable()) return;
+            const rowCountNow =
+              lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+            if (shouldBlockDeleteLastItemRow(rowCountNow)) {
+              showToast(LAST_ITEM_ROW_TOAST);
+              try {
+                if (el.addLine && !el.addLine.disabled) el.addLine.focus();
+              } catch {
+                /* ignore */
+              }
+              return;
+            }
+            setStatus("Removing empty line…");
+            const removed = await api.deleteItem(ri);
+            if (removed && removed.ok) {
+              noteUserEdit();
+              paint(removed.doc, amountDue);
+              setStatus("Left items table.");
+              try {
+                if (el.addLine && !el.addLine.disabled) el.addLine.focus();
+              } catch {
+                /* ignore */
+              }
+            } else if (removed && removed.blockedLastRow) {
+              showToast(removed.reason || LAST_ITEM_ROW_TOAST);
+            } else {
+              setStatus((removed && removed.reason) || "Could not remove empty line.", "err");
+            }
+            return;
+          }
+          if (dest.field) {
+            focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+            return;
+          }
+          if (!dest.addRow || !api || !editable()) return;
+          setStatus("Adding line…");
+          const added = await api.addItem();
+          if (added && added.ok) {
+            noteUserEdit();
+            paint(added.doc, amountDue);
+            const newRi =
+              added.doc && Array.isArray(added.doc.items)
+                ? added.doc.items.length - 1
+                : ri + 1;
+            focusItemCell(Math.max(0, newRi), "item_code", { mode: CELL_MODE_NAV });
+            setStatus("Line added.");
+          } else {
+            setStatus((added && added.reason) || "Add line failed.", "err");
+          }
+        };
+        const apply = async (value, opts = {}) => {
           if (!api || painting) return;
           const run = async () => {
             setStatus(`Updating ${field}…`);
@@ -1595,8 +2026,13 @@
               noteUserEdit();
               paint(res.doc, amountDue);
               setStatus("Line updated.");
-              const nextField = nextFieldAfterLinkPick(field);
-              if (nextField) focusItemCell(ri, nextField);
+              if (opts.focus && opts.focus.field) {
+                focusItemCell(opts.focus.rowIndex, opts.focus.field, {
+                  mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
+                });
+              } else if (!opts.stay) {
+                await focusAfterItemEdit(res.doc, value);
+              }
             } else {
               setStatus((res && res.reason) || "Line update failed.", "err");
               await refresh();
@@ -1611,6 +2047,27 @@
         };
         if (linkDt) {
           mountLinkPicker(inp, linkDt, apply);
+        }
+        inp.addEventListener("focus", () => {
+          if (inp.dataset.navFocus === "1") {
+            itemCellMode = CELL_MODE_NAV;
+            delete inp.dataset.navFocus;
+          } else {
+            itemCellMode = CELL_MODE_EDIT;
+          }
+        });
+        if (field === "item_code") {
+          inp.addEventListener("blur", () => {
+            // Click-away from Item picker / leave cell without Tab — drop blank extras.
+            window.setTimeout(() => {
+              if (!editable() || painting || itemTabGuard) return;
+              const wrap = inp.closest(".link-wrap");
+              if (wrap && wrap.contains(document.activeElement)) return;
+              const code = normalizeEditableText(inp.value);
+              if (!isEmptyItemCode(code)) return;
+              void cleanupEmptyItemRow(ri, code);
+            }, 180);
+          });
         }
         if (field === "rate") {
           inp.addEventListener("focus", () => {
@@ -1638,18 +2095,147 @@
             },
           });
         }
+        inp.addEventListener("keydown", (ev) => {
+          if (!editable() || painting) return;
+          const calcActive =
+            calcUi.getState().mode === "active" && calcUi.getInput() === inp;
+          const decision = itemTableKeyDecision({
+            mode: itemCellMode,
+            key: ev.key,
+            shiftKey: !!ev.shiftKey,
+            ctrlKey: !!ev.ctrlKey,
+            metaKey: !!ev.metaKey,
+            altKey: !!ev.altKey,
+            selectionStart: inp.selectionStart,
+            selectionEnd: inp.selectionEnd,
+            valueLength: String(inp.value ?? "").length,
+            linkDropdownOpen: isItemLinkDropdownOpen(inp),
+            calcActive,
+          });
+
+          if (decision.action === "leave_edit") {
+            if (decision.preventDefault) ev.preventDefault();
+            itemCellMode = CELL_MODE_NAV;
+            try {
+              if (typeof inp.select === "function") inp.select();
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+
+          if (decision.action === "enter_edit") {
+            itemCellMode = CELL_MODE_EDIT;
+            if (ev.key === "F2") {
+              ev.preventDefault();
+              try {
+                const len = String(inp.value ?? "").length;
+                inp.setSelectionRange(len, len);
+              } catch {
+                /* ignore */
+              }
+            }
+            return;
+          }
+
+          if (decision.action === "passthrough") {
+            if (ev.key !== "Tab" || ev.shiftKey) return;
+          } else if (decision.preventDefault) {
+            ev.preventDefault();
+          }
+
+          if (
+            decision.action === "move" ||
+            decision.action === "leave_edit_move" ||
+            (decision.action === "tab" && decision.direction === "left")
+          ) {
+            itemCellMode = CELL_MODE_NAV;
+            itemTabGuard = true;
+            void (async () => {
+              try {
+                const next = readCellValue();
+                const rowCount =
+                  lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+                const dest = neighborItemCell(field, ri, rowCount, decision.direction || "left");
+                const prev =
+                  (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
+                  "";
+                const kind = dirtyCompareKindForField(field);
+                const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
+                if (!dest) {
+                  if (dirty) await apply(next, { stay: true });
+                  if (shouldLeaveItemTableBackward(dest, decision.direction)) {
+                    try {
+                      if (el.amountdue && !el.amountdue.disabled) {
+                        el.amountdue.focus({ preventScroll: false });
+                        if (typeof el.amountdue.select === "function") el.amountdue.select();
+                      } else if (el.billno) {
+                        el.billno.focus({ preventScroll: false });
+                      }
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                  return;
+                }
+                if (dirty) {
+                  await apply(next, {
+                    focus: {
+                      rowIndex: dest.rowIndex,
+                      field: dest.field,
+                      mode: CELL_MODE_NAV,
+                    },
+                  });
+                } else {
+                  focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+                }
+              } finally {
+                itemTabGuard = false;
+              }
+            })();
+            return;
+          }
+
+          if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
+          ev.preventDefault();
+          itemCellMode = CELL_MODE_NAV;
+          itemTabGuard = true;
+          void (async () => {
+            try {
+              const next = readCellValue();
+              const rowCount =
+                lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+              const dest = nextItemFocusAfterEdit(field, ri, rowCount, { cellValue: next });
+              if (dest.deleteRow && dest.leaveTable) {
+                await focusAfterItemEdit(lastDoc, next);
+                return;
+              }
+              const prev =
+                (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
+                "";
+              const kind = dirtyCompareKindForField(field);
+              if (!valuesMeaningfullyEqual(prev, next, { kind })) {
+                await apply(next);
+              } else if (dest.field) {
+                focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+              } else if (dest.addRow) {
+                await focusAfterItemEdit(lastDoc, next);
+              }
+            } finally {
+              itemTabGuard = false;
+            }
+          })();
+        });
         inp.addEventListener("change", async () => {
-          if (!api || painting) return;
+          if (!api || painting || itemTabGuard) return;
           if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-          const kind = dirtyCompareKindForField(field);
-          let next =
-            kind === "number" ? inp.value : normalizeEditableText(inp.value);
+          let next = readCellValue();
           if (field === "rate") {
             const n = parseMoney(inp.value);
-            next = n == null ? "" : String(n);
             if (n != null) inp.value = formatGroupedNumber(n);
           }
           const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
+          const kind = dirtyCompareKindForField(field);
           if (valuesMeaningfullyEqual(prev, next, { kind })) {
             if (field === "rate" && parseMoney(prev) != null) {
               inp.value = formatGroupedNumber(prev);
@@ -1665,12 +2251,20 @@
         btn.addEventListener("click", async () => {
           if (!api) return;
           const ri = Number(btn.getAttribute("data-del"));
+          const rowCount =
+            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+          if (shouldBlockDeleteLastItemRow(rowCount)) {
+            showToast(LAST_ITEM_ROW_TOAST);
+            return;
+          }
           setStatus("Removing line…");
           const res = await api.deleteItem(ri);
           if (res && res.ok) {
             noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Line removed.");
+          } else if (res && res.blockedLastRow) {
+            showToast(res.reason || LAST_ITEM_ROW_TOAST);
           } else {
             setStatus((res && res.reason) || "Delete failed.", "err");
           }
@@ -1681,6 +2275,12 @@
           if (!editable() || painting) return;
           const ri = Number(btn.getAttribute("data-back-in"));
           beginAmountBackIn(btn, ri);
+        });
+      });
+      el.items.querySelectorAll("button[data-assign]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!editable() || painting) return;
+          openLineAllocationPicker(Number(btn.getAttribute("data-assign")));
         });
       });
     }
@@ -1816,19 +2416,34 @@
         return;
       }
       const groups = res.groups || [];
-      setStatus(`Sources loaded (${groups.length} groups) — pick one.`);
-      showSourceModal(groups, async (it) => {
-        if (!it || it.kind === "nic") {
+      setStatus(`Sources loaded (${groups.length} groups) — Space to check · Enter to pull.`);
+      showSourceModal(groups, async (choice) => {
+        const mode = choice && choice.mode;
+        const items = (choice && choice.items) || [];
+        if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
           setStatus("No source — enter lines manually.");
           if (focusTargetAfterSourceModal("choose") === "terms") focusTermsField();
           return;
         }
-        setStatus(`Pulling from ${it.name}…`);
-        const merged = await api.mergeSource(it.kind, it.name);
+        if (mode !== "merge" || !items.length) {
+          setStatus("Pick at least one source (Space to check), or NIC.", "warn");
+          return;
+        }
+        const labels = items.map((it) => it.name || it.kind).join(", ");
+        setStatus(`Pulling from ${labels}…`);
+        const payload = items.map((it) => ({ kind: it.kind, name: it.name }));
+        const merged =
+          payload.length === 1
+            ? await api.mergeSource(payload[0].kind, payload[0].name)
+            : await api.mergeSource(payload);
         if (merged && merged.ok) {
           noteUserEdit();
           paint(merged.doc, amountDue);
-          setStatus(`Pulled from ${it.name}.`);
+          setStatus(
+            payload.length === 1
+              ? `Pulled from ${payload[0].name}.`
+              : `Pulled from ${payload.length} sources.`,
+          );
         } else {
           setStatus((merged && merged.reason) || "Could not pull source.", "err");
           await refresh();
@@ -1861,13 +2476,15 @@
 
     /**
      * @param {import("../src/source-modal.js").SourceGroup[]} groups
-     * @param {(it: import("../src/source-modal.js").SourceItem) => void|Promise<void>} onChoose
+     * @param {(choice: { mode: string, items: import("../src/source-modal.js").SourceItem[] }) => void|Promise<void>} onChoose
      */
     function showSourceModal(groups, onChoose) {
       if (sourceModalOpen) return;
       sourceModalOpen = true;
       let gi = 0;
       let ii = 0;
+      /** @type {string[]} */
+      let selectedKeys = [];
       const back = document.createElement("div");
       back.className = "src-back";
       back.dataset.testid = "bill-source-modal";
@@ -1877,10 +2494,10 @@
       box.setAttribute("role", "dialog");
       box.setAttribute("aria-modal", "true");
       box.setAttribute("aria-label", "Source Selection");
-      box.innerHTML = `<div class="src-title">Source Selection — Tab: group · ↑/↓: item · Enter: select</div>
+      box.innerHTML = `<div class="src-title">Source Selection — Tab: group · ↑/↓: move · Space: check · Enter: pull</div>
         <div class="src-body"></div>
         <div class="src-foot">
-          <button type="button" class="primary" data-act="pick">Select this source</button>
+          <button type="button" class="primary" data-act="pick" data-testid="bill-source-pull">Pull selected</button>
           <button type="button" data-act="cancel">Cancel</button>
         </div>`;
       back.appendChild(box);
@@ -1892,6 +2509,15 @@
         return groups[gi] && groups[gi].items[ii];
       }
 
+      function updatePickLabel() {
+        const n = selectedKeys.filter((k) => k && k !== "nic").length;
+        const nic = selectedKeys.includes("nic");
+        if (nic) pickBtn.textContent = "Continue without source (NIC)";
+        else if (n > 1) pickBtn.textContent = `Pull selected (${n})`;
+        else if (n === 1) pickBtn.textContent = "Pull selected (1)";
+        else pickBtn.textContent = "Pull highlighted / selected";
+      }
+
       function draw() {
         body.innerHTML = "";
         groups.forEach((g, ggi) => {
@@ -1900,25 +2526,46 @@
           h.textContent = g.name;
           body.appendChild(h);
           g.items.forEach((it, iii) => {
+            const key = sourceItemKey(it);
+            const checked = selectedKeys.includes(key);
             const r = document.createElement("button");
             r.type = "button";
             r.className =
               "src-item" +
               (ggi === gi && iii === ii ? " active" : "") +
-              (it.draft ? " draft" : "");
-            r.textContent = it.label;
+              (it.draft ? " draft" : "") +
+              (checked ? " checked" : "");
+            r.setAttribute("aria-checked", checked ? "true" : "false");
+            r.dataset.sourceKey = key;
+            const mark = document.createElement("span");
+            mark.className = "src-check";
+            mark.setAttribute("aria-hidden", "true");
+            mark.textContent = checked ? "✓" : "";
+            const lab = document.createElement("span");
+            lab.className = "src-item-label";
+            lab.textContent = it.label;
+            r.appendChild(mark);
+            r.appendChild(lab);
             r.onclick = () => {
               if (it.draft) return;
               gi = ggi;
               ii = iii;
+              selectedKeys = toggleSourceSelection(selectedKeys, it);
               draw();
             };
             r.ondblclick = () => {
-              if (!it.draft) choose();
+              if (it.draft) return;
+              gi = ggi;
+              ii = iii;
+              if (!selectedKeys.includes(key)) {
+                selectedKeys = toggleSourceSelection(selectedKeys, it);
+              }
+              choose();
             };
             body.appendChild(r);
           });
         });
+        updatePickLabel();
         const a = body.querySelector(".src-item.active");
         if (a && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
       }
@@ -1930,35 +2577,56 @@
       }
 
       async function choose() {
-        const it = activeItem();
-        if (!isSelectableSourceItem(it)) return;
+        const resolved = resolveSourcesToCommit(groups, selectedKeys, activeItem());
+        if (resolved.mode === "none") {
+          setStatus("Space to check a source (or highlight NIC), then Enter.", "warn");
+          return;
+        }
         close();
-        await onChoose(it);
+        await onChoose(resolved);
       }
 
       function onKey(ev) {
-        if (ev.key === "Tab") {
+        const act = sourceModalKeyAction(ev.key);
+        if (act === "none") return;
+        if (act === "tab") {
           ev.preventDefault();
           gi = (gi + (ev.shiftKey ? groups.length - 1 : 1)) % groups.length;
           ii = 0;
           draw();
-        } else if (ev.key === "ArrowDown") {
+          return;
+        }
+        if (act === "down") {
           ev.preventDefault();
           const items = groups[gi].items;
           do {
             ii = Math.min(items.length - 1, ii + 1);
           } while (ii < items.length - 1 && items[ii].draft);
           draw();
-        } else if (ev.key === "ArrowUp") {
+          return;
+        }
+        if (act === "up") {
           ev.preventDefault();
           do {
             ii = Math.max(0, ii - 1);
           } while (ii > 0 && groups[gi].items[ii].draft);
           draw();
-        } else if (ev.key === "Enter") {
+          return;
+        }
+        if (act === "toggle") {
+          ev.preventDefault();
+          const it = activeItem();
+          if (!isSelectableSourceItem(it)) return;
+          selectedKeys = toggleSourceSelection(selectedKeys, it);
+          draw();
+          return;
+        }
+        if (act === "finalize") {
           ev.preventDefault();
           choose();
-        } else if (ev.key === "Escape") {
+          return;
+        }
+        if (act === "cancel") {
           ev.preventDefault();
           close();
         }
@@ -1991,7 +2659,319 @@
       };
       focusModal();
       setTimeout(focusModal, 30);
-      setStatus("Choose a source (or NIC).");
+      setStatus("Space to check sources · Enter to pull (or NIC).");
+    }
+
+    /**
+     * OI-134: per-line Assign — customer → multi SO → Project.
+     * @param {number} rowIndex
+     */
+    async function openLineAllocationPicker(rowIndex) {
+      if (!api || !api.listSalesOrdersForPicker || !api.applyLineAllocation) {
+        setStatus("Line allocation API missing — restart the shell.", "err");
+        return;
+      }
+      if (allocationPickerOpen || sourceModalOpen) return;
+      if (!editable()) {
+        setStatus("Bill is not a draft — allocation locked.", "warn");
+        return;
+      }
+      const sup =
+        normalizeEditableText(lastDoc && lastDoc.supplier) ||
+        normalizeEditableText(el.vendor.value);
+      if (!sup) {
+        setStatus("Pick a vendor before Assign.", "warn");
+        return;
+      }
+
+      allocationPickerOpen = true;
+      let step = "customer";
+      let customerRows = [];
+      let soRows = [];
+      let projectRows = [];
+      let ci = 0;
+      let customerFilter = "";
+      let customerName = "";
+      /** @type {Set<string>} */
+      const selectedSos = new Set();
+      let projectIdx = 0;
+
+      const back = document.createElement("div");
+      back.className = "src-back";
+      back.dataset.testid = "bill-allocation-picker";
+      const box = document.createElement("div");
+      box.className = "src-box";
+      box.tabIndex = -1;
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+      box.setAttribute("aria-label", "Assign deal");
+      box.innerHTML = `<div class="src-title" data-alloc-title>Assign — customer</div>
+        <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
+          <input type="text" data-alloc-search placeholder="Search…" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div class="src-body"></div>
+        <div class="src-foot">
+          <button type="button" data-act="back" hidden>Back</button>
+          <button type="button" class="primary" data-act="pick">Continue</button>
+          <button type="button" data-act="cancel">Cancel</button>
+        </div>`;
+      back.appendChild(box);
+      document.body.appendChild(back);
+      const body = box.querySelector(".src-body");
+      const titleEl = box.querySelector("[data-alloc-title]");
+      const searchEl = box.querySelector("[data-alloc-search]");
+      const pickBtn = box.querySelector('[data-act="pick"]');
+      const backBtn = box.querySelector('[data-act="back"]');
+
+      function billLinesForMargin() {
+        const items = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items : [];
+        const row = items[rowIndex];
+        return row
+          ? [{ item_code: row.item_code, qty: row.qty, rate: row.rate, amount: row.amount }]
+          : items.map((r) => ({
+              item_code: r.item_code,
+              qty: r.qty,
+              rate: r.rate,
+              amount: r.amount,
+            }));
+      }
+
+      async function loadCustomers(q) {
+        if (!api.searchLink) return [];
+        const res = await api.searchLink("Customer", q || "");
+        return res && res.ok && Array.isArray(res.results) ? res.results : [];
+      }
+
+      async function loadSalesOrders(customer) {
+        const res = await api.listSalesOrdersForPicker({
+          supplier: sup,
+          customer: customer || "",
+          billLines: billLinesForMargin(),
+        });
+        return res && res.ok && Array.isArray(res.orders) ? res.orders : [];
+      }
+
+      async function loadProjects(customer) {
+        if (!api.listProjectsForPicker) return [];
+        const res = await api.listProjectsForPicker(customer || "");
+        return res && res.ok && Array.isArray(res.projects) ? res.projects : [];
+      }
+
+      function activeCustomer() {
+        if (ci === 0) return { value: "", description: "All customers" };
+        return customerRows[ci - 1];
+      }
+
+      function close() {
+        allocationPickerOpen = false;
+        document.removeEventListener("keydown", onKey, true);
+        if (back.parentNode) back.parentNode.removeChild(back);
+      }
+
+      function drawCustomers() {
+        step = "customer";
+        titleEl.textContent = `Assign line ${rowIndex + 1} — pick customer`;
+        pickBtn.textContent = "Next: Sales orders";
+        backBtn.hidden = true;
+        searchEl.parentElement.hidden = false;
+        searchEl.placeholder = "Customer search…";
+        body.innerHTML = "";
+        const allBtn = document.createElement("button");
+        allBtn.type = "button";
+        allBtn.className = "src-item" + (ci === 0 ? " active" : "");
+        allBtn.textContent = "All customers";
+        allBtn.onclick = () => {
+          ci = 0;
+          drawCustomers();
+        };
+        body.appendChild(allBtn);
+        customerRows.forEach((row, idx) => {
+          const r = document.createElement("button");
+          r.type = "button";
+          r.className = "src-item" + (ci === idx + 1 ? " active" : "");
+          r.textContent = row.description || row.value;
+          r.onclick = () => {
+            ci = idx + 1;
+            drawCustomers();
+          };
+          body.appendChild(r);
+        });
+      }
+
+      function drawSalesOrders() {
+        step = "so";
+        titleEl.textContent = `Assign line ${rowIndex + 1} — select Sales order(s)`;
+        pickBtn.textContent = "Next: Project";
+        backBtn.hidden = false;
+        searchEl.parentElement.hidden = true;
+        body.innerHTML = "";
+        if (!soRows.length) {
+          const empty = document.createElement("div");
+          empty.className = "src-group";
+          empty.textContent = "No Sales Orders — continue to assign Project only.";
+          body.appendChild(empty);
+          return;
+        }
+        soRows.forEach((row) => {
+          if (row.draft) return;
+          const r = document.createElement("button");
+          r.type = "button";
+          const on = selectedSos.has(row.name);
+          r.className =
+            "src-item" + (on ? " selected" : "") + (row.negativeMargin ? " negative" : "");
+          r.textContent = (on ? "☑ " : "☐ ") + formatSalesOrderPickerLabel(row);
+          r.onclick = () => {
+            if (selectedSos.has(row.name)) selectedSos.delete(row.name);
+            else selectedSos.add(row.name);
+            drawSalesOrders();
+          };
+          body.appendChild(r);
+        });
+      }
+
+      function drawProjects() {
+        step = "project";
+        titleEl.textContent = `Assign line ${rowIndex + 1} — Project`;
+        pickBtn.textContent = "Apply to line";
+        backBtn.hidden = false;
+        searchEl.parentElement.hidden = false;
+        searchEl.placeholder = "Project search…";
+        body.innerHTML = "";
+        const noneBtn = document.createElement("button");
+        noneBtn.type = "button";
+        noneBtn.className = "src-item" + (projectIdx === 0 ? " active" : "");
+        noneBtn.textContent = "— No project —";
+        noneBtn.onclick = () => {
+          projectIdx = 0;
+          drawProjects();
+        };
+        body.appendChild(noneBtn);
+        if (!projectRows.length) {
+          const empty = document.createElement("button");
+          empty.type = "button";
+          empty.className = "src-item link-action";
+          empty.textContent = "No projects found — create Project in Vanilla…";
+          empty.onclick = () => {
+            if (api.openProjectAdd) api.openProjectAdd();
+          };
+          body.appendChild(empty);
+        }
+        projectRows.forEach((row, idx) => {
+          const r = document.createElement("button");
+          r.type = "button";
+          r.className = "src-item" + (projectIdx === idx + 1 ? " active" : "");
+          const label = row.project_name || row.name;
+          const cust = row.customer_name || row.customer || "";
+          r.textContent = cust ? `${label} · ${cust}` : label;
+          r.onclick = () => {
+            projectIdx = idx + 1;
+            drawProjects();
+          };
+          body.appendChild(r);
+        });
+      }
+
+      async function goToSalesOrders() {
+        const cust = activeCustomer();
+        customerFilter = cust && cust.value ? cust.value : "";
+        customerName = cust && cust.description ? cust.description : customerFilter;
+        setStatus("Loading Sales Orders…");
+        soRows = await loadSalesOrders(customerFilter);
+        drawSalesOrders();
+      }
+
+      async function goToProjects() {
+        setStatus("Loading projects…");
+        projectRows = await loadProjects(customerFilter);
+        projectIdx = 0;
+        drawProjects();
+      }
+
+      async function applyAllocation() {
+        const project =
+          projectIdx > 0 && projectRows[projectIdx - 1]
+            ? projectRows[projectIdx - 1].name
+            : "";
+        close();
+        setStatus("Applying allocation…");
+        const res = await api.applyLineAllocation(rowIndex, {
+          customer: customerFilter,
+          customerName,
+          salesOrders: [...selectedSos],
+          project,
+          supplier: sup,
+        });
+        if (res && res.ok) {
+          noteUserEdit();
+          if (res.poLineMeta) poLineMeta = res.poLineMeta;
+          if (res.lineAllocations) lineAllocations = res.lineAllocations;
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue, {
+            linkedPos: res.linkedPos,
+            lineAllocations: res.lineAllocations,
+            poLineMeta: res.poLineMeta,
+          });
+          const poNote = res.bridgePo ? ` · PO ${res.bridgePo}` : "";
+          setStatus(`Line ${rowIndex + 1} assigned${poNote}.`);
+        } else {
+          setStatus((res && res.reason) || "Could not apply allocation.", "err");
+          await refresh();
+        }
+      }
+
+      async function onPrimary() {
+        if (step === "customer") await goToSalesOrders();
+        else if (step === "so") await goToProjects();
+        else await applyAllocation();
+      }
+
+      function onKey(ev) {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          close();
+        } else if (ev.key === "Enter") {
+          ev.preventDefault();
+          onPrimary();
+        }
+      }
+
+      let searchTimer = null;
+      searchEl.oninput = () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(async () => {
+          if (step === "customer") {
+            customerRows = await loadCustomers(searchEl.value);
+            ci = Math.min(ci, customerRows.length);
+            drawCustomers();
+          } else if (step === "project") {
+            const q = normalizeEditableText(searchEl.value).toLowerCase();
+            projectRows = (await loadProjects(customerFilter)).filter((p) => {
+              const blob = `${p.name} ${p.project_name || ""} ${p.customer_name || ""}`.toLowerCase();
+              return !q || blob.includes(q);
+            });
+            drawProjects();
+          }
+        }, 180);
+      };
+
+      pickBtn.onclick = () => onPrimary();
+      backBtn.onclick = () => {
+        if (step === "so") drawCustomers();
+        else if (step === "project") drawSalesOrders();
+      };
+      box.querySelector('[data-act="cancel"]').onclick = () => close();
+      back.addEventListener("click", (ev) => {
+        if (ev.target === back) close();
+      });
+      document.addEventListener("keydown", onKey, true);
+
+      customerRows = await loadCustomers("");
+      drawCustomers();
+      try {
+        if (api.focusBillSurface) api.focusBillSurface();
+      } catch {
+        /* ignore */
+      }
+      searchEl.focus();
     }
 
     function setFormBlocked(blocked, reason) {
@@ -2021,12 +3001,62 @@
       setTimeout(tryFocus, 500);
     }
 
+    function paintLinkedPos(doc, linkedPos) {
+      const block = el.linkedPoBlock;
+      if (!block) return;
+      const rows = linkedPurchaseOrdersForBill(doc, linkedPos || []);
+      block.replaceChildren();
+      if (!rows.length) {
+        block.hidden = true;
+        return;
+      }
+      block.hidden = false;
+      rows.forEach((row, i) => {
+        const name = row && row.name != null ? String(row.name) : "";
+        const title = row && row.title != null ? String(row.title) : "";
+        const erpField = document.createElement("div");
+        erpField.className = "field";
+        const erpLabel = document.createElement("label");
+        erpLabel.textContent = rows.length > 1 ? `Purchase Order (${i + 1})` : "Purchase Order";
+        const erpInput = document.createElement("input");
+        erpInput.type = "text";
+        erpInput.readOnly = true;
+        erpInput.tabIndex = -1;
+        erpInput.value = name;
+        erpInput.dataset.testid = `bill-linked-po-name-${i}`;
+        erpInput.title = "ERP Purchase Order id (series name). Read-only.";
+        setWashSourceAttr(erpInput, washRoleForSourceKind("po"));
+        erpField.append(erpLabel, erpInput);
+        const logField = document.createElement("div");
+        logField.className = "field";
+        const logLabel = document.createElement("label");
+        logLabel.textContent = rows.length > 1 ? `PO# (logbook) (${i + 1})` : "PO# (logbook)";
+        const logInput = document.createElement("input");
+        logInput.type = "text";
+        logInput.readOnly = true;
+        logInput.tabIndex = -1;
+        logInput.value = title;
+        logInput.dataset.testid = `bill-linked-po-title-${i}`;
+        logInput.title =
+          "Logbook / salesman PO# from the linked Purchase Order Title field (OI-121). Read-only on Bill.";
+        setWashSourceAttr(logInput, washRoleForSourceKind("po"));
+        logField.append(logLabel, logInput);
+        block.append(erpField, logField);
+      });
+    }
+
     function paint(doc, scratchDue, opts = {}) {
       painting = true;
       clearFieldCalc(amountDue);
       lastDoc = doc || null;
       amountDue = scratchDue != null ? String(scratchDue) : amountDue;
       if (opts.userEdited != null) userEdited = !!opts.userEdited;
+      if (opts.lineAllocations && typeof opts.lineAllocations === "object") {
+        lineAllocations = opts.lineAllocations;
+      }
+      if (opts.poLineMeta && typeof opts.poLineMeta === "object") {
+        poLineMeta = opts.poLineMeta;
+      }
       paintDirtyPill();
       if (!doc) {
         setFormBlocked(true, opts.reason || "No Purchase Invoice loaded in Vanilla yet.");
@@ -2038,6 +3068,7 @@
       if (el.clearQty) el.clearQty.disabled = true;
       if (el.attach) el.attach.disabled = true;
       if (el.addTax) el.addTax.disabled = true;
+      paintLinkedPos(null, []);
       paintChip();
       painting = false;
       return;
@@ -2051,15 +3082,16 @@
         node.value = v;
         node.rows = addressTextareaRows(v);
       };
+      paintAddr(el.billingAddress, h["Billing address"]);
       paintAddr(el.shipFrom, h["Ship from"]);
       paintAddr(el.shipTo, h["Ship to"]);
-      paintAddr(el.billingAddress, h["Billing address"]);
       el.terms.value = h.Terms ?? "";
       el.date.value = formatDocDateDisplay(h.Date ?? "") || (h.Date ?? "");
       el.billno.value = h["Ref No. (Supplier Invoice No.)"] ?? "";
       // Amount Due is user scratch only — stay blank until they type (no grand_total seed).
       paintAmountDueInput();
       el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
+      paintLinkedPos(doc, opts.linkedPos);
       el.memo.value = h.Memo ?? "";
       const canEdit = isDraftBillDoc(doc);
       el.vendor.readOnly = !canEdit;
@@ -2084,7 +3116,47 @@
       paintDirtyPill();
       paintChip();
       painting = false;
-      if (opts.focusVendor && canEdit) focusVendorField();
+      void ensureAtLeastOneItemRow(doc);
+      runBillRefCheck(el.billno ? el.billno.value : "");
+      if (opts.focusVendor) {
+        docCapsOn = true;
+        syncCapsButton();
+        if (canEdit) focusVendorField();
+      }
+    }
+
+    function syncCapsButton() {
+      if (!el.caps) return;
+      el.caps.textContent = docCapsButtonLabel(docCapsOn);
+      el.caps.title = docCapsButtonTitle(docCapsOn);
+    }
+
+    function wireDocCaps() {
+      syncCapsButton();
+      if (el.caps) {
+        el.caps.addEventListener("click", () => {
+          docCapsOn = toggleDocCaps(docCapsOn);
+          syncCapsButton();
+        });
+      }
+      document.addEventListener(
+        "input",
+        (ev) => {
+          const t = /** @type {HTMLInputElement|HTMLTextAreaElement} */ (ev.target);
+          if (!shouldForceCapsOnElement(docCapsOn, t)) return;
+          const s = t.selectionStart;
+          const en = t.selectionEnd;
+          const up = applyDocCapsValue(t.value, true);
+          if (up === t.value) return;
+          t.value = up;
+          try {
+            if (typeof s === "number" && typeof en === "number") t.setSelectionRange(s, en);
+          } catch {
+            /* ignore */
+          }
+        },
+        true,
+      );
     }
 
     async function refresh() {
@@ -2095,6 +3167,9 @@
         reason: snap && snap.reason,
         focusVendor: false,
         userEdited: snap && snap.userEdited,
+        linkedPos: snap && snap.linkedPos,
+        lineAllocations: snap && snap.lineAllocations,
+        poLineMeta: snap && snap.poLineMeta,
       });
       if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
     }
@@ -2140,6 +3215,7 @@
       if (valuesMeaningfullyEqual(painted, next, { kind })) {
         if (field === "supplier") input.value = String(painted ?? "");
         else if (kind !== "number") input.value = normalizeEditableText(String(painted ?? ""));
+        if (field === "bill_no") await runBillRefCheck(next);
         return;
       }
       const res = await api.setHeader(field, next);
@@ -2159,9 +3235,13 @@
           return;
         }
       }
-      if (res && res.skipped) return;
+      if (res && res.skipped) {
+        if (field === "bill_no") await runBillRefCheck(next);
+        return;
+      }
       if (res && res.ok) noteUserEdit();
       await refresh();
+      if (field === "bill_no") await runBillRefCheck(next);
     }
 
     function wireDateField(input) {
@@ -2225,6 +3305,11 @@
           paint(r.doc, amountDue);
           paintDirtyPill();
           setStatus(commitGateSuccessLabel(choice));
+          // After submit, next clerk step is often another Bill — focus New Bill (not Finalize).
+          if (submit && el.newBill) {
+            focusFinalizeControl(el.newBill);
+            setStatus(`${commitGateSuccessLabel(choice)} — New Bill focused.`);
+          }
           return { ok: true };
         }
         if (r && Array.isArray(r.blockers) && r.blockers.length) {
@@ -2322,6 +3407,7 @@
       };
     }
     document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+    wireDocCaps();
     if (el.find) el.find.onclick = () => requestToolbarAction("find");
     if (el.newBill) el.newBill.onclick = () => requestToolbarAction("new");
     if (el.print) el.print.onclick = () => requestToolbarAction("print");
@@ -2491,6 +3577,9 @@
           reason: snap && snap.reason,
           focusVendor: !!(snap && snap.focusVendor),
           userEdited: snap && snap.userEdited,
+          linkedPos: snap && snap.linkedPos,
+          lineAllocations: snap && snap.lineAllocations,
+          poLineMeta: snap && snap.poLineMeta,
         }),
       );
     }

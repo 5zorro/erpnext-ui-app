@@ -19,15 +19,18 @@ import {
   sumPoLineAmount,
   formatPoLineTotal,
   PO_DOCTYPE,
+  PO_HEADER_FIELDS,
   PO_ASSUMPTIONS,
   MUSEUM_PO_ASSUMPTION_TOPICS,
   poAssumptionTopicsCovered,
   isDraftPoDoc,
 } from "../src/po-map.js";
+import { splitHeaderColumns } from "../src/doc-action-flow.js";
 
 const sampleDoc = {
   doctype: PO_DOCTYPE,
   name: "PO-0001",
+  title: "TO0001",
   supplier: "SUP-001",
   supplier_name: "Acme Hardware",
   address_display: "<p>123 Main<br>Town</p>",
@@ -65,7 +68,8 @@ describe("readPoHeader", () => {
     assert.equal(h["Ship to"], "Ship Yard");
     assert.equal(h["Billing address"], "");
     assert.equal(h.Date, "2026-07-18");
-    assert.equal(h["P.O. No."], "PO-0001");
+    assert.equal(h["PO No."], "PO-0001");
+    assert.equal(h["PO# (logbook)"], "TO0001");
     assert.equal(h["Date Expected"], "2026-07-25");
   });
 
@@ -80,6 +84,24 @@ describe("readPoHeader", () => {
   it("prefers scratch Date Expected", () => {
     const h = readPoHeader(sampleDoc, { dateExpected: "2026-08-01" });
     assert.equal(h["Date Expected"], "2026-08-01");
+  });
+});
+
+describe("PO header layout (Bill-like columns)", () => {
+  it("places billing with vendor; identity under Date Expected; ship in addr row", () => {
+    const { left, right, addresses } = splitHeaderColumns(PO_HEADER_FIELDS);
+    assert.deepEqual(
+      left.map((f) => f.label),
+      ["Vendor", "Billing address"],
+    );
+    assert.deepEqual(
+      right.map((f) => f.label),
+      ["Date", "Date Expected", "PO No.", "PO# (logbook)"],
+    );
+    assert.deepEqual(
+      addresses.map((f) => f.addressRole),
+      ["ship_from", "ship_to"],
+    );
   });
 });
 
@@ -147,10 +169,10 @@ describe("resolvePoDateExpected / OI-069 Multiple dates", () => {
 });
 
 describe("readPoItemRows", () => {
-  it("maps item columns including SO, Required By, and received qty", () => {
+  it("maps item columns including Line, SO, Required By, and received qty", () => {
     const rows = readPoItemRows(sampleDoc);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], ["SKU-1", "Widget", 2, 10, "SO-1", "2026-07-25", 20, 1]);
+    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, "SO-1", "2026-07-25", 20, 1]);
   });
 });
 
@@ -162,10 +184,11 @@ describe("editable fields", () => {
     assert.equal(isEditablePoItemField("amount"), false);
   });
 
-  it("writable header excludes scratch and read-only", () => {
+  it("writable header excludes scratch and read-only; includes logbook title", () => {
     const w = writablePoHeaderFields();
     assert.ok(w.includes("supplier"));
     assert.ok(w.includes("transaction_date"));
+    assert.ok(w.includes("title"));
     assert.ok(!w.includes("__date_expected"));
     assert.ok(!w.includes("name"));
   });

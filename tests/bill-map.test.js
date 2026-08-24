@@ -32,7 +32,11 @@ import {
   reconciliationReport,
   saveActionsBlockedByChecksum,
   formatUsdAmount,
+  uniqueLinkedPurchaseOrderNames,
+  linkedPurchaseOrdersForBill,
+  BILL_HEADER_FIELDS,
 } from "../src/bill-map.js";
+import { splitHeaderColumns } from "../src/doc-action-flow.js";
 
 const sampleDoc = {
   doctype: BILL_DOCTYPE,
@@ -63,6 +67,53 @@ describe("getBillAnchor", () => {
     assert.equal(a.doctype, "Purchase Invoice");
     assert.equal(a.title, "Bill");
     assert.ok(a.newPath.includes("purchase-invoice"));
+  });
+});
+
+describe("Bill header layout (OI-121 linked POs)", () => {
+  it("places billing + due date on left; ship addresses only in addr row", () => {
+    const { left, right, addresses } = splitHeaderColumns(BILL_HEADER_FIELDS);
+    assert.deepEqual(
+      left.map((f) => f.label),
+      ["Vendor Name", "Billing address", "Terms", "Bill Due Date"],
+    );
+    assert.deepEqual(
+      right.map((f) => f.label),
+      ["Date", "Ref No. (Supplier Invoice No.)", "Amount Due"],
+    );
+    assert.deepEqual(
+      addresses.map((f) => f.addressRole),
+      ["ship_from", "ship_to"],
+    );
+  });
+
+  it("uniqueLinkedPurchaseOrderNames preserves first-seen order", () => {
+    assert.deepEqual(
+      uniqueLinkedPurchaseOrderNames({
+        items: [
+          { purchase_order: "PUR-ORD-1" },
+          { purchase_order: "PUR-ORD-2" },
+          { purchase_order: "PUR-ORD-1" },
+          { purchase_order: "" },
+          {},
+        ],
+      }),
+      ["PUR-ORD-1", "PUR-ORD-2"],
+    );
+  });
+
+  it("linkedPurchaseOrdersForBill pairs titles by name", () => {
+    const doc = {
+      items: [{ purchase_order: "PUR-ORD-A" }, { purchase_order: "PUR-ORD-B" }],
+    };
+    assert.deepEqual(linkedPurchaseOrdersForBill(doc, [{ name: "PUR-ORD-B", title: "JE0001" }]), [
+      { name: "PUR-ORD-A", title: "" },
+      { name: "PUR-ORD-B", title: "JE0001" },
+    ]);
+    assert.deepEqual(linkedPurchaseOrdersForBill(doc, { "PUR-ORD-A": "TO0002" }), [
+      { name: "PUR-ORD-A", title: "TO0002" },
+      { name: "PUR-ORD-B", title: "" },
+    ]);
   });
 });
 
@@ -109,7 +160,7 @@ describe("readBillItemRows", () => {
   it("maps item columns including display amount", () => {
     const rows = readBillItemRows(sampleDoc);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], ["SKU-1", "Widget", 2, 10, 20, "JOB-1"]);
+    assert.deepEqual(rows[0], ["1", "", "SKU-1", "Widget", 2, 10, 20, "", "", "JOB-1"]);
   });
 });
 
