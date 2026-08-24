@@ -5,6 +5,8 @@
  * Enter Bills: same path as Vanilla / Simplified PI; open target follows last lens
  * (default Doc) via `resolveEntryOpen` — last lens wins per doctype.
  *
+ * Routes use `/app/…` (Frappe Desk SPA). Exact `/desk` is allowed for Vanilla Desk root.
+ *
  * @typedef {{ id: string, icon: string, label: string, route: string, disabled?: boolean }} HomeTile
  * @typedef {{ id: string, title: string, tiles: HomeTile[] }} HomeGroup
  */
@@ -17,29 +19,29 @@ export const HOME_GROUPS = {
       title: "Vendors",
       tiles: [
         { id: "bill-new", icon: "🧾", label: "Enter Bills", route: "/app/purchase-invoice/new" },
-        { id: "pay-bills", icon: "💵", label: "Pay Bills", route: "/desk/payment-entry/new" },
+        { id: "pay-bills", icon: "💵", label: "Pay Bills", route: "/app/payment-entry/new" },
         { id: "po-new", icon: "📦", label: "Purchase Orders", route: "/app/purchase-order/new" },
         { id: "receipt-new", icon: "📥", label: "Receive Inventory", route: "/app/purchase-receipt/new" },
-        { id: "vendors", icon: "🏢", label: "Vendor Center", route: "/desk/supplier" },
+        { id: "vendors", icon: "🏢", label: "Vendor Center", route: "/app/supplier" },
       ],
     },
     {
       id: "customers",
       title: "Customers",
       tiles: [
-        { id: "estimate-new", icon: "📝", label: "Estimates", route: "/desk/quotation/new" },
-        { id: "so-new", icon: "📋", label: "Sales Orders", route: "/desk/sales-order/new" },
-        { id: "invoice-new", icon: "🧾", label: "Create Invoices", route: "/desk/sales-invoice/new" },
-        { id: "receive-pay", icon: "💰", label: "Receive Payments", route: "/desk/payment-entry/new" },
-        { id: "customers", icon: "👤", label: "Customer Center", route: "/desk/customer" },
+        { id: "estimate-new", icon: "📝", label: "Estimates", route: "/app/quotation/new" },
+        { id: "so-new", icon: "📋", label: "Sales Orders", route: "/app/sales-order/new" },
+        { id: "invoice-new", icon: "🧾", label: "Create Invoices", route: "/app/sales-invoice/new" },
+        { id: "receive-pay", icon: "💰", label: "Receive Payments", route: "/app/payment-entry/new" },
+        { id: "customers", icon: "👤", label: "Customer Center", route: "/app/customer" },
       ],
     },
     {
       id: "employees",
       title: "Employees",
       tiles: [
-        { id: "employees", icon: "👥", label: "Employees", route: "/desk/employee" },
-        { id: "timesheet-new", icon: "⏱️", label: "Enter Time", route: "/desk/timesheet/new" },
+        { id: "employees", icon: "👥", label: "Employees", route: "/app/employee" },
+        { id: "timesheet-new", icon: "⏱️", label: "Enter Time", route: "/app/timesheet/new" },
         { id: "payroll", icon: "💳", label: "Payroll", route: "", disabled: true },
       ],
     },
@@ -49,14 +51,14 @@ export const HOME_GROUPS = {
       id: "company",
       title: "Company",
       tiles: [
-        { id: "coa", icon: "📚", label: "Chart of Accounts", route: "/desk/account/view/tree" },
-        { id: "items", icon: "🏷️", label: "Items & Services", route: "/desk/item" },
-        { id: "je-new", icon: "📒", label: "Journal Entry", route: "/desk/journal-entry/new" },
+        { id: "coa", icon: "📚", label: "Chart of Accounts", route: "/app/account/view/tree" },
+        { id: "items", icon: "🏷️", label: "Items & Services", route: "/app/item" },
+        { id: "je-new", icon: "📒", label: "Journal Entry", route: "/app/journal-entry/new" },
         {
           id: "pnl",
           icon: "📈",
           label: "Profit & Loss",
-          route: "/desk/query-report/Profit%20and%20Loss%20Statement",
+          route: "/app/query-report/Profit%20and%20Loss%20Statement",
         },
       ],
     },
@@ -64,14 +66,14 @@ export const HOME_GROUPS = {
       id: "banking",
       title: "Banking",
       tiles: [
-        { id: "reconcile", icon: "🔁", label: "Reconcile", route: "/desk/bank-reconciliation-tool" },
-        { id: "checks", icon: "🖊️", label: "Write Checks", route: "/desk/payment-entry/new" },
-        { id: "bank-tx", icon: "🏦", label: "Bank Transactions", route: "/desk/bank-transaction" },
+        { id: "reconcile", icon: "🔁", label: "Reconcile", route: "/app/bank-reconciliation-tool" },
+        { id: "checks", icon: "🖊️", label: "Write Checks", route: "/app/payment-entry/new" },
+        { id: "bank-tx", icon: "🏦", label: "Bank Transactions", route: "/app/bank-transaction" },
         {
           id: "bs",
           icon: "📊",
           label: "Balance Sheet",
-          route: "/desk/query-report/Balance%20Sheet",
+          route: "/app/query-report/Balance%20Sheet",
         },
       ],
     },
@@ -126,6 +128,9 @@ export function validateHomeTiles(input = HOME_GROUPS) {
     if (t.disabled) continue;
     if (typeof t.route !== "string" || !t.route.startsWith("/")) {
       errors.push(`tile ${t.id || "?"}: route must start with /`);
+    } else if (t.route.startsWith("/desk/") ) {
+      // OI-118: prefer /app/…; exact /desk root is OK for Vanilla Desk tile.
+      errors.push(`tile ${t.id || "?"}: use /app/… not /desk/…`);
     }
   }
   return errors;

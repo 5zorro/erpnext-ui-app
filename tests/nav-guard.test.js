@@ -28,4 +28,11 @@ describe("erpUrl", () => {
     assert.equal(erpUrl("http://localhost:8080/", "/desk"), "http://localhost:8080/desk");
     assert.equal(erpUrl("http://localhost:8080", "login"), "http://localhost:8080/login");
   });
+
+  it("encodes spaces in record names", () => {
+    assert.equal(
+      erpUrl("http://localhost:8080", "/app/tax-category/TAX EXEMPT"),
+      "http://localhost:8080/app/tax-category/TAX%20EXEMPT",
+    );
+  });
 });

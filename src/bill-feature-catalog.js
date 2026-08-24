@@ -43,6 +43,14 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     notes: "DOM in bill.html; policy + search pure-tested",
   },
   {
+    id: "vendor-idle-rank",
+    name: "Vendor picker: idle / never-PO sink below active (OI-131)",
+    museum: true,
+    alpha: true,
+    coverage: "tested",
+    pureModule: "vendor-activity.js",
+  },
+  {
     id: "vendor-add-empty",
     name: "Empty Supplier search → Go to Vendor add…",
     museum: false,
@@ -76,11 +84,13 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
   },
   {
     id: "ref-no",
-    name: "Ref No. (bill_no)",
+    name: "Ref No. soft checks (dupe + PO logbook + vendor account #)",
     museum: true,
     alpha: true,
     coverage: "tested",
-    pureModule: "bill-map.js",
+    pureModule: "bill-ref-check.js",
+    notes:
+      "OI-054/087 non-blocking. Vendor account # = Customer Number At Supplier (your # at the vendor), not SO customer.",
   },
   {
     id: "memo",
@@ -260,6 +270,15 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     coverage: "tested",
     pureModule: "bill-source-flow.js",
   },
+  {
+    id: "bill-line-allocation",
+    name: "Line Assign: customer → multi SO → Project (OI-134)",
+    museum: true,
+    alpha: true,
+    coverage: "tested",
+    pureModule: "bill-line-allocation.js + so-picker.js",
+    notes: "Per-line Assign…; project persists; customer+SO in shell scratch; JIT PO when item+vendor",
+  },
 
   // —— Assumptions / dirty / lens ——
   {
@@ -385,9 +404,9 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     id: "all-caps",
     name: "ALL-CAPS entry toggle",
     museum: true,
-    alpha: false,
-    coverage: "missing",
-    pureModule: null,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "doc-caps.js",
   },
   {
     id: "form-bridge",

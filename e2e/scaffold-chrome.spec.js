@@ -54,13 +54,18 @@ test.describe("scaffold: toolbar chrome", () => {
           !!document.querySelector('[data-testid="btn-home"]'),
           !!health,
           !!document.querySelector('[data-testid="btn-devtools"]'),
+          (() => {
+            const n = document.querySelector('[data-testid="btn-nav-issue"]');
+            // Present in DOM but temporarily hidden for alpha clones.
+            return !!(n && n.hidden);
+          })(),
           !!document.querySelector('[data-testid="lens-vanilla"]'),
           htext ? htext.textContent : ""
         ]);
       })()`,
     );
-    const [hasHome, hasHealth, hasDevtools, hasVanilla, healthText] = JSON.parse(ids);
-    expect(hasHome && hasHealth && hasDevtools && hasVanilla).toBe(true);
+    const [hasHome, hasHealth, hasDevtools, navIssueHidden, hasVanilla, healthText] = JSON.parse(ids);
+    expect(hasHome && hasHealth && hasDevtools && navIssueHidden && hasVanilla).toBe(true);
     expect(healthText).toMatch(/^DB [✓✗…]/);
 
     // Starts on Doc Workflow Home

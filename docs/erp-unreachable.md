@@ -45,6 +45,7 @@ Prefs live only under Electron `userData` (`health-remediation.json`), not in th
 | Script | Role |
 |--------|------|
 | `ops/erp-host/ensure-erp-up.sh` | **Preferred** — docker up + DNS-race fix + ping check; no UI |
+| `ops/erp-host/upgrade-sandbox.sh` | Version check + rebuild `qb-erpnext` + **in-place** `bench migrate` (keeps DB) |
 | `ops/erp-host/restart-erp.example.sh` | Thin copy-me wrapper → `ensure-erp-up.sh` |
 | `frappe_docker/start-shell.sh` | Calls ensure; optional `--launch-museum` for Doc Ops |
 

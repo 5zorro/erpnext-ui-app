@@ -5,6 +5,12 @@
 
 import { relabelTerm } from "./doc-terms.js";
 import { formatAddressDisplay } from "./address-format.js";
+import {
+  BILL_ALLOCATION_COLS,
+  JOB_COST_CENTER_FIELD,
+  JOB_COST_CENTER_LABEL,
+} from "./bill-line-allocation.js";
+import { BILL_LINE_META_COLS, readBillItemRowsWithAllocation } from "./bill-item-table.js";
 
 export const BILL_DOCTYPE = "Purchase Invoice";
 export const BILL_LAYOUT_KEY = "bill";
@@ -14,26 +20,19 @@ export const BILL_NEW_ROUTE = "/app/purchase-invoice/new";
 /**
  * Header: Doc label → ERPNext field meta.
  * Address roles (OI-077): Ship from = dispatch; Ship to = shipping; Billing = supplier address.
+ * Layout (2026-08-16 dogfood): left = Vendor → Billing → Terms → Bill Due Date;
+ * right = Date → Ref → Amount Due → linked PO ERP names + logbook `title` (OI-121);
+ * bottom addr-grid = Ship from · Ship to only.
+ * `column`: "left" | "right" | "addresses" — when set, `splitHeaderColumns` uses it.
  */
 export const BILL_HEADER_FIELDS = [
-  { label: "Vendor Name", field: "supplier", type: "text", linkDoctype: "Supplier", display: "supplier_name|supplier" },
   {
-    label: "Ship from",
-    field: null,
-    type: "textarea",
-    readOnly: true,
-    multiline: true,
-    addressRole: "ship_from",
-    display: "dispatch_address_display",
-  },
-  {
-    label: "Ship to",
-    field: null,
-    type: "textarea",
-    readOnly: true,
-    multiline: true,
-    addressRole: "ship_to",
-    display: "shipping_address_display",
+    label: "Vendor Name",
+    field: "supplier",
+    type: "text",
+    linkDoctype: "Supplier",
+    display: "supplier_name|supplier",
+    column: "left",
   },
   {
     label: "Billing address",
@@ -43,32 +42,110 @@ export const BILL_HEADER_FIELDS = [
     multiline: true,
     addressRole: "billing",
     display: "address_display",
+    column: "left",
   },
-  { label: "Terms", field: "payment_terms_template", type: "text", linkDoctype: "Payment Terms Template" },
-  { label: "Date", field: "posting_date", type: "date" },
-  { label: "Ref No. (Supplier Invoice No.)", field: "bill_no", type: "text" },
+  {
+    label: "Terms",
+    field: "payment_terms_template",
+    type: "text",
+    linkDoctype: "Payment Terms Template",
+    column: "left",
+  },
+  { label: "Bill Due Date", field: "due_date", type: "date", column: "left" },
+  { label: "Date", field: "posting_date", type: "date", column: "right" },
+  { label: "Ref No. (Supplier Invoice No.)", field: "bill_no", type: "text", column: "right" },
   {
     label: "Amount Due",
     field: "__amount_due",
     type: "text",
     scratch: true,
+    column: "right",
     validationHint:
       "Enter the vendor invoice total when ready. Checksum stays idle until you type; then it must match Bill grand total.",
   },
-  { label: "Bill Due Date", field: "due_date", type: "date" },
+  {
+    label: "Ship from",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_from",
+    display: "dispatch_address_display",
+    column: "addresses",
+  },
+  {
+    label: "Ship to",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_to",
+    display: "shipping_address_display",
+    column: "addresses",
+  },
 ];
+
+/**
+ * Distinct Purchase Order `name`s linked from Bill item lines (order of first appearance).
+ * @param {object|null|undefined} doc
+ * @returns {string[]}
+ */
+export function uniqueLinkedPurchaseOrderNames(doc) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const po = it && it.purchase_order != null ? String(it.purchase_order).trim() : "";
+    if (!po || seen.has(po)) continue;
+    seen.add(po);
+    out.push(po);
+  }
+  return out;
+}
+
+/**
+ * Pair linked PO ERP ids with logbook titles (PO.`title`, OI-121).
+ * @param {object|null|undefined} doc
+ * @param {Array<{ name?: string, title?: string|null }>|Record<string, string>|null|undefined} titles
+ * @returns {Array<{ name: string, title: string }>}
+ */
+export function linkedPurchaseOrdersForBill(doc, titles) {
+  const names = uniqueLinkedPurchaseOrderNames(doc);
+  /** @type {Record<string, string>} */
+  const byName = {};
+  if (titles && typeof titles === "object" && !Array.isArray(titles)) {
+    for (const [k, v] of Object.entries(titles)) {
+      if (k) byName[k] = v != null ? String(v) : "";
+    }
+  } else if (Array.isArray(titles)) {
+    for (const row of titles) {
+      if (!row || row.name == null) continue;
+      const n = String(row.name).trim();
+      if (!n) continue;
+      byName[n] = row.title != null ? String(row.title) : "";
+    }
+  }
+  return names.map((name) => ({
+    name,
+    title: byName[name] != null ? byName[name] : "",
+  }));
+}
 
 export const BILL_MEMO_FIELD = "remarks";
 
+export { JOB_COST_CENTER_FIELD, JOB_COST_CENTER_LABEL };
+
 /** Items tab columns; null = display-only Amount from ERPNext. */
-export const BILL_ITEM_COLS = [
+export const BILL_ITEM_BASE_COLS = [
   { label: "Item", field: "item_code", linkDoctype: "Item" },
   { label: "Description", field: "description" },
   { label: "Qty", field: "qty" },
   { label: "Cost", field: "rate" },
   { label: "Amount", field: null, displayOnly: true },
-  { label: "Customer:Job", field: "project", linkDoctype: "Project" },
 ];
+
+export const BILL_ITEM_COLS = [...BILL_LINE_META_COLS, ...BILL_ITEM_BASE_COLS, ...BILL_ALLOCATION_COLS];
 
 /** ERPNext child fields safe to write via frappe.model.set_value (M3d). */
 export const BILL_ITEM_EDIT_FIELDS = BILL_ITEM_COLS.map((c) => c.field).filter(Boolean);
@@ -162,21 +239,12 @@ export function readBillHeader(doc, scratch = {}) {
 
 /**
  * @param {object} doc
+ * @param {Record<string|number, import("./bill-line-allocation.js").LineAllocation>} [lineAllocations]
+ * @param {Record<string|number, import("./bill-item-table.js").PoLineMeta>} [poMetaByRow]
  * @returns {Array<Array<string|number>>}
  */
-export function readBillItemRows(doc) {
-  const items = (doc && Array.isArray(doc.items) ? doc.items : []);
-  return items.map((it) => {
-    const row = it || {};
-    return [
-      row.item_code || "",
-      stripHtml(row.description),
-      row.qty != null ? row.qty : "",
-      row.rate != null ? row.rate : "",
-      row.amount != null ? row.amount : "",
-      row.project || "",
-    ];
-  });
+export function readBillItemRows(doc, lineAllocations, poMetaByRow) {
+  return readBillItemRowsWithAllocation(doc, lineAllocations, poMetaByRow);
 }
 
 /**

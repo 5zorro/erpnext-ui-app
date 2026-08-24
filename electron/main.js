@@ -8,14 +8,52 @@ import { fileURLToPath } from "node:url";
 import { pingHealth } from "../src/health.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
+import {
+  classifyHistoryOpen,
+  pickFallbackDocRoute,
+  FALLBACK_DOC_ROUTE,
+  isSoftPeekRoute,
+  isQueryReportRoute,
+  appRouteParts,
+  filterHistoryForCompany,
+  softPeekReturnLabel,
+  shouldForceVanillaReopen,
+  erpLivePathDiffers,
+} from "../src/history-nav.js";
+import {
+  applyPeekTreeToHistory,
+  applyErpHopToPeekStack,
+  beginPeekParent,
+  collapsePeekStack,
+  isActivePeekStack,
+  pushPeekChild,
+  shouldCollapsePeekStack,
+} from "../src/peek-stack.js";
+import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
+import { shouldAcceptErpTrackNav, shouldClearErpNavIntent } from "../src/erp-nav-intent.js";
+import {
+  NAV_INCIDENT_NOTE_MAX,
+  buildNavIncident,
+  formatNavIncidentContextLines,
+  formatNavIncidentsDigest,
+  appendNavIncident,
+  serializeNavIncidentLine,
+} from "../src/nav-incident.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
-import { hasDocSkin, resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
-import { routeInfo, routesReferToSameDoc, isNewDocRecord, isDocListRoute } from "../src/route-info.js";
+import { resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
+import {
+  routeInfo,
+  routesReferToSameDoc,
+  isNewDocRecord,
+  isDocListRoute,
+  normalizeAppRoute,
+} from "../src/route-info.js";
 import {
   rememberLens,
   resolveEntryOpen,
   shouldOpenDocLens,
   normalizeDoctypeKey,
+  preferredLens,
 } from "../src/lens-prefs.js";
 import {
   applySaveToShelved,
@@ -71,6 +109,8 @@ import {
   billCompareTotal,
   isEditableBillItemField,
   isEditableBillTaxField,
+  uniqueLinkedPurchaseOrderNames,
+  linkedPurchaseOrdersForBill,
 } from "../src/bill-map.js";
 import {
   isEditablePoItemField,
@@ -80,7 +120,21 @@ import {
 } from "../src/po-map.js";
 import { isEditableReceiptItemField } from "../src/receipt-map.js";
 import { normalizeSearchLinkResults } from "../src/link-search.js";
-import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders } from "../src/source-modal.js";
+import { rankSupplierLinkOptions, utcYmd } from "../src/vendor-activity.js";
+import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders, combineMappedBillSources } from "../src/source-modal.js";
+import { formatJitPoTitle } from "../src/jit-po-bridge.js";
+import { rankSalesOrdersForBill } from "../src/so-picker.js";
+import {
+  normalizeLineAllocation,
+  jitPoTitleForSalesOrders,
+  splitQtyAcrossSalesOrders,
+} from "../src/bill-line-allocation.js";
+import {
+  indexPoLineMeta,
+  hydrateBillLineAllocations,
+  poFetchKeysForBillDoc,
+} from "../src/bill-po-hydrate.js";
+import { evaluateBillRef } from "../src/bill-ref-check.js";
 import { buildReceiptSourceGroups } from "../src/receipt-source.js";
 import {
   DOC_SKIN_PROFILES,
@@ -153,6 +207,14 @@ let shelvedDrafts = [];
 let calcHistory = [];
 /** Avoid re-entrancy when Vanilla→Doc hijack loads the same URL under Doc skin. */
 let lensHijackLock = false;
+/**
+ * Intentional shell→ERP destination (/app/…). Stale did-navigate from the prior
+ * form (e.g. Bill) must not overwrite currentRoute or Doc-hijack back (Home→PO).
+ * @type {string|null}
+ */
+let erpNavIntentPath = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let erpNavIntentTimer = null;
 /** @type {{ status: string, code: number|null, latencyMs: number|null, lastOkAt: string|null, internetOk: boolean|null }} */
 let diagnoseState = {
   status: "unknown",
@@ -161,6 +223,12 @@ let diagnoseState = {
   lastOkAt: null,
   internetOk: null,
 };
+/** @type {import("../src/nav-debug.js").NavDebugEntry[]} */
+let navDebugLog = [];
+/** @type {object[]} */
+let navIncidentRing = [];
+/** Frozen context while the Nav issue dialog is open. */
+let navIncidentDraft = null;
 /** @type {import("../src/health-remediation.js").HealthRemediationPrefs} */
 let healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
 /** @type {object[]} */
@@ -179,6 +247,97 @@ let dirtyState = {
   baselineJson: null,
   doc: null,
 };
+/** Shell scratch: customer + multi-SO per Bill line (ERP PI item has no SO column). */
+/** @type {Record<string, Record<number, import("../src/bill-line-allocation.js").LineAllocation>>} */
+let billLineAllocationsByDoc = {};
+/** @type {Record<string, Record<number, import("../src/bill-item-table.js").PoLineMeta>>} */
+let billPoLineMetaByDoc = {};
+/**
+ * Soft-peek park (OI-112): Doc surface hidden while ERP shows a master; dirtyState kept.
+ * @type {{ mode: "bill"|"doc", skinId: string|null, route: string }|null}
+ */
+let parkedDocSurface = null;
+/**
+ * Nested peeks under the parent Doc (OI-128 A). Survives Esc/Doc-tab rebind;
+ * cleared on hard leave. Children stay in `history` as standalone rows.
+ * @type {import("../src/peek-stack.js").PeekStack|null}
+ */
+let peekStack = null;
+/** Active company abbr from ERP (OI-118 history hygiene). */
+let sessionCompanyAbbr = "";
+
+/**
+ * Dogfood nav trail (OI-112) — ring + userData file; shown in DB diagnose copy.
+ * @param {string} event
+ * @param {string} [detail]
+ */
+function navDebug(event, detail) {
+  const entry = {
+    at: new Date().toISOString(),
+    event: String(event || "event"),
+    surfaceMode,
+    currentRoute: currentRoute || "",
+    detail: detail != null ? String(detail) : "",
+  };
+  navDebugLog = appendNavDebug(navDebugLog, entry);
+  try {
+    if (app.isReady()) {
+      const file = path.join(app.getPath("userData"), "nav-debug.log");
+      fs.appendFileSync(file, `${JSON.stringify(entry)}\n`, { encoding: "utf8" });
+    }
+  } catch {
+    /* ignore disk errors during dogfood */
+  }
+}
+
+function navDebugLogPath() {
+  return path.join(app.getPath("userData"), "nav-debug.log");
+}
+
+function navIncidentLogPath() {
+  return path.join(app.getPath("userData"), "nav-incidents.log");
+}
+
+function currentErpPathname() {
+  if (!erp || erp.webContents.isDestroyed()) return "";
+  const url = erp.webContents.getURL();
+  if (!url || !isAllowedErpUrl(ERP_BASE, url)) return "";
+  try {
+    return new URL(url).pathname || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Privacy-safe freeze of nav state at the moment Nav issue is clicked. */
+function collectNavIncidentContext() {
+  const info = routeInfo(currentRoute || "", ERP_BASE);
+  return {
+    surfaceMode,
+    currentRoute: currentRoute || "",
+    erpPath: currentErpPathname(),
+    activeDocSkin: activeDocSkin || "",
+    preferredLens:
+      info.doctype && profileByDoctypeKey(info.doctype)
+        ? preferredLens(info.doctype, lensPrefs) || ""
+        : "",
+    userEdited: !!dirtyState.userEdited,
+    isDirty: !!dirtyState.isDirty,
+    isNew: !!dirtyState.isNew,
+    companyAbbr: sessionCompanyAbbr || "",
+    guestWindowCount: BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed()).length,
+    shelvedCount: Array.isArray(shelvedDrafts) ? shelvedDrafts.length : 0,
+    parked: parkedDocSurface,
+    peekParent: peekStack && peekStack.parent ? peekStack.parent.route : "",
+    peekChildren:
+      peekStack && Array.isArray(peekStack.children)
+        ? peekStack.children.map((c) => c.route)
+        : [],
+    doc: dirtyState.doc,
+    history,
+    navTrail: navDebugLog,
+  };
+}
 
 function isDocLensSurface() {
   return surfaceMode === "bill" || surfaceMode === "doc";
@@ -413,7 +572,7 @@ function syncE2eApi() {
       docForm: docForm ? docForm.getBounds() : null,
       erp: erp ? erp.getBounds() : null,
     }),
-    docSkinAvailable: () => hasDocSkin(shellCtx()),
+    docSkinAvailable: () => true,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
       const map = { chrome, home, hist, erp, bill, docForm };
@@ -452,15 +611,32 @@ function sendUiState() {
   if (chrome && !chrome.webContents.isDestroyed()) {
     const ctx = shellCtx();
     const onDoc = showingHome() || isDocLensSurface();
+    // OI-112: keep Doc tab on masters (Tax Category / tax template) so clerks can hop back.
+    const docSkinAvailable = true;
+    const livePath = currentErpPathname();
+    const peekingAway =
+      surfaceMode === "erp" &&
+      isActivePeekStack(peekStack) &&
+      !!(livePath || currentRoute) &&
+      !routesReferToSameDoc(
+        peekStack.parent.route,
+        livePath || currentRoute,
+        ERP_BASE,
+      );
     chrome.webContents.send("ui-state", {
       showingHome: showingHome(),
       showingBill: surfaceMode === "bill",
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
       lens: onDoc ? "doc" : "vanilla",
-      docSkinAvailable: hasDocSkin(ctx),
+      docSkinAvailable,
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
+      softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
+      softPeekHint: softPeekReturnLabel(
+        parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
+        peekingAway && peekStack ? peekStack.parent : null,
+      ),
     });
   }
 }
@@ -469,7 +645,7 @@ function sendHistory() {
   calcHistory = pruneCalcHistory(calcHistory);
   if (hist && !hist.webContents.isDestroyed()) {
     hist.webContents.send("history", {
-      items: history,
+      items: applyPeekTreeToHistory(history, peekStack, ERP_BASE),
       shelved: shelvedDrafts,
       calcHistory,
     });
@@ -477,10 +653,133 @@ function sendHistory() {
   pushCalcHistoryDropdown();
 }
 
+function collapsePeekStackHard(reason) {
+  if (!isActivePeekStack(peekStack)) return;
+  navDebug("peek-collapse", reason || "");
+  peekStack = collapsePeekStack();
+}
+
+function collapsePeekStackIfLeaving(nextRoute, reason) {
+  if (!shouldCollapsePeekStack(peekStack, nextRoute, { erpBase: ERP_BASE })) return;
+  collapsePeekStackHard(reason);
+}
+
+function notePeekParentAndChild(childRoute) {
+  if (!parkedDocSurface || !parkedDocSurface.route) return;
+  const opts = { erpBase: ERP_BASE, history };
+  peekStack = beginPeekParent(peekStack, parkedDocSurface.route, opts);
+  peekStack = pushPeekChild(peekStack, childRoute, opts);
+  navDebug("peek-child", `${peekStack && peekStack.parent ? peekStack.parent.route : ""} → ${childRoute}`);
+}
+
+function notePeekFromErpNav(path, fromPath) {
+  const had = isActivePeekStack(peekStack);
+  peekStack = applyErpHopToPeekStack(peekStack, fromPath, path, {
+    erpBase: ERP_BASE,
+    history,
+  });
+  if (isActivePeekStack(peekStack) && peekStack.children.length) {
+    if (!had) navDebug("peek-erp-hop", `${fromPath || ""} → ${path}`);
+    armSoftPeekEscHook(true).catch(() => {});
+  } else if (had && !isActivePeekStack(peekStack)) {
+    armSoftPeekEscHook(false).catch(() => {});
+  }
+}
+
 function pushBillSnapshot(snap) {
   if (bill && !bill.webContents.isDestroyed()) {
-    bill.webContents.send("bill-snapshot", snap);
+    bill.webContents.send("bill-snapshot", {
+      ...snap,
+      lineAllocations: snap.lineAllocations || getBillLineAllocations(),
+      poLineMeta: snap.poLineMeta || getBillPoLineMeta(),
+    });
   }
+}
+
+function currentBillDocKey() {
+  const name = dirtyState.doc && dirtyState.doc.name;
+  if (name) return String(name);
+  const rec = routeInfo(currentRoute || "", ERP_BASE).record;
+  return rec || currentRoute || "__new__";
+}
+
+function getBillLineAllocations() {
+  const key = currentBillDocKey();
+  return billLineAllocationsByDoc[key] || {};
+}
+
+function getBillPoLineMeta() {
+  const key = currentBillDocKey();
+  return billPoLineMetaByDoc[key] || {};
+}
+
+/**
+ * Load PO Item idx / sales_order + PO customer for Bill line hydration.
+ * @param {object|null|undefined} doc
+ */
+async function fetchBillPoLineMeta(doc) {
+  const { poDetails, poNames } = poFetchKeysForBillDoc(doc);
+  if (!poDetails.length && !poNames.length) return {};
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, poItems: [], poHeaders: [] };
+      }
+      var poDetails = ${JSON.stringify(poDetails)};
+      var poNames = ${JSON.stringify(poNames)};
+      var poItems = poDetails.length
+        ? await frappe.db.get_list("Purchase Order Item", {
+            filters: [["name", "in", poDetails]],
+            fields: ["name", "idx", "sales_order", "customer", "parent"],
+            limit: poDetails.length,
+          })
+        : [];
+      var poHeaders = poNames.length
+        ? await frappe.db.get_list("Purchase Order", {
+            filters: [["name", "in", poNames]],
+            fields: ["name", "customer", "customer_name"],
+            limit: poNames.length,
+          })
+        : [];
+      return { ok: true, poItems: poItems || [], poHeaders: poHeaders || [] };
+    } catch (e) {
+      return { ok: false, poItems: [], poHeaders: [], reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  /** @type {Record<string, object>} */
+  const poItemsByName = {};
+  for (const row of (raw && raw.poItems) || []) {
+    if (row && row.name) poItemsByName[String(row.name)] = row;
+  }
+  /** @type {Record<string, object>} */
+  const poHeadersByName = {};
+  for (const row of (raw && raw.poHeaders) || []) {
+    if (row && row.name) poHeadersByName[String(row.name)] = row;
+  }
+  return indexPoLineMeta(doc, poItemsByName, poHeadersByName);
+}
+
+/**
+ * Merge linked PO metadata into shell scratch + cache PO line meta for the table.
+ * @param {object|null|undefined} doc
+ */
+async function enrichBillLineContext(doc) {
+  const poLineMeta = await fetchBillPoLineMeta(doc);
+  const key = currentBillDocKey();
+  billPoLineMetaByDoc[key] = poLineMeta;
+  const lineAllocations = hydrateBillLineAllocations(doc, getBillLineAllocations(), poLineMeta);
+  billLineAllocationsByDoc[key] = lineAllocations;
+  return { poLineMeta, lineAllocations };
+}
+
+/**
+ * @param {number} rowIndex
+ * @param {import("../src/bill-line-allocation.js").LineAllocation} alloc
+ */
+function setBillLineAllocation(rowIndex, alloc) {
+  const key = currentBillDocKey();
+  if (!billLineAllocationsByDoc[key]) billLineAllocationsByDoc[key] = {};
+  billLineAllocationsByDoc[key][rowIndex] = normalizeLineAllocation(alloc);
 }
 
 function pushDocFormSnapshot(snap) {
@@ -518,17 +817,405 @@ function openDocSkinProfile(profile, route, opts = {}) {
  * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean }} [opts]
  */
 function openRoutePreferred(route, opts = {}) {
+  const n = normalizeAppRoute(typeof route === "string" && route ? route : "/desk", ERP_BASE);
+  const r = n.path || "/desk";
+  resumeParkedDoc(r).then((ok) => {
+    if (ok) {
+      navDebug("openRoutePreferred", `park-resume → ${r}`);
+      return;
+    }
+    const info = routeInfo(r, ERP_BASE);
+    const lens = preferredLens(info.doctype, lensPrefs);
+    const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
+    const wantDoc =
+      !!profile &&
+      shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true });
+    navDebug(
+      "openRoutePreferred",
+      `lens=${lens} wantDoc=${wantDoc} same=${routesReferToSameDoc(currentRoute, r, ERP_BASE)} → ${r}`,
+    );
+    if (wantDoc && openDocSkinProfile(profile, info.path || r, opts)) {
+      return;
+    }
+    showErp(r, {
+      forceLoad: opts.forceLoad !== false,
+      skipDirtyGate: opts.skipDirtyGate,
+    });
+  });
+}
+
+/**
+ * Recent / Drafts / hist flyout click (OI-112 / OI-113 / OI-118).
+ * Masters soft-peek when ERP is warm; Doc-skin doctypes follow prefs (resume park first).
+ * @param {string} route
+ */
+function openHistoryRoute(route) {
   const r = typeof route === "string" && route ? route : "/desk";
-  const info = routeInfo(r, ERP_BASE);
-  const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
-  if (
-    profile &&
-    shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true }) &&
-    openDocSkinProfile(profile, info.path || r, opts)
-  ) {
+  const classified = classifyHistoryOpen(r, ERP_BASE);
+  const path = classified.path || r;
+  const lens = preferredLens(classified.doctype, lensPrefs);
+  const same = routesReferToSameDoc(currentRoute, path, ERP_BASE);
+  navDebug(
+    "openHistoryRoute",
+    `${classified.mode} lens=${lens || "-"} same=${same} → ${path}`,
+  );
+  if (classified.mode === "vanilla-always") {
+    if (isSoftPeekRoute(path, ERP_BASE) && (erpIsWarm() || surfaceMode === "bill" || surfaceMode === "doc")) {
+      // Same-route child clicks stay soft so we do not hard-load and collapse the tree.
+      softPeekErp(path);
+      return;
+    }
+    // Query reports and cold ERP from Home always forceLoad (isSoftPeekRoute false for reports).
+    showErp(path, { forceLoad: true });
     return;
   }
-  showErp(r, { forceLoad: opts.forceLoad !== false, skipDirtyGate: opts.skipDirtyGate });
+  resumeParkedDoc(path).then((ok) => {
+    if (ok) return;
+    const wantDoc = shouldOpenDocLens(classified.doctype, classified.record, lensPrefs, {
+      hasDocSkin: true,
+    });
+    // Warm Vanilla: in-SPA hop back to the Bill, not loadURL (unsaved Account traps hard nav).
+    if (
+      !wantDoc &&
+      erpIsWarm() &&
+      surfaceMode === "erp" &&
+      !isQueryReportRoute(path, ERP_BASE)
+    ) {
+      const abandon =
+        isActivePeekStack(peekStack) &&
+        routesReferToSameDoc(peekStack.parent.route, path, ERP_BASE);
+      navDebug("openHistoryRoute", `inSpa abandon=${abandon ? 1 : 0} → ${path}`);
+      showErp(path, {
+        inSpa: true,
+        skipDirtyGate: true,
+        forceLoad: false,
+        abandonUnsaved: abandon,
+      });
+      return;
+    }
+    openRoutePreferred(path, { forceLoad: true });
+  });
+}
+
+/** @returns {boolean} */
+function erpIsWarm() {
+  if (!erp || erp.webContents.isDestroyed()) return false;
+  const cur = erp.webContents.getURL();
+  return !!(cur && isAllowedErpUrl(ERP_BASE, cur) && !/\/login\b/i.test(cur));
+}
+
+function parkDocSurfaceIfNeeded() {
+  if (surfaceMode === "bill" || surfaceMode === "doc") {
+    parkedDocSurface = {
+      mode: surfaceMode,
+      skinId: surfaceMode === "doc" ? activeDocSkin : null,
+      route: currentRoute || "",
+    };
+    navDebug("doc-park", `${parkedDocSurface.mode} ${parkedDocSurface.route}`);
+    return;
+  }
+  // Recent flyout IPC can log surfaceMode=home while currentRoute is still the Bill (OI-112 strike 2).
+  const info = routeInfo(currentRoute || "", ERP_BASE);
+  if (info.doctype === "purchase-invoice" && dirtyState.doc) {
+    parkedDocSurface = { mode: "bill", skinId: null, route: currentRoute || "" };
+    navDebug("doc-park", `bill (route-hold) ${parkedDocSurface.route}`);
+  }
+}
+
+/**
+ * When Doc chrome claims a /app route but ERP SPA is elsewhere, resync before bridge reads cur_frm.
+ * @param {string} appPath
+ * @returns {Promise<{ ok: boolean, synced?: boolean, reason?: string }>}
+ */
+async function ensureErpMatchesShellRoute(appPath) {
+  if (!erp || erp.webContents.isDestroyed() || !erpIsWarm()) {
+    return { ok: false, reason: "ERP view not warm" };
+  }
+  const path = normalizeAppRoute(appPath, ERP_BASE).path || appPath;
+  const live = erp.webContents.getURL() || "";
+  if (!erpLivePathDiffers(path, live, ERP_BASE)) {
+    return { ok: true, synced: false };
+  }
+  navDebug("erp-resync", `${currentErpPathname()} → ${path}`);
+  const soft = await erpSoftSetRoute(path, { abandonUnsaved: true });
+  if (soft && soft.ok) {
+    trackNav(erpUrl(ERP_BASE, path));
+    return { ok: true, synced: true };
+  }
+  await erpForceReopenRoute(path);
+  return { ok: true, synced: true };
+}
+
+/**
+ * Soft-peek a setup/master route: keep Doc dirtyState, set_route when possible (OI-112).
+ * @param {string} route
+ */
+async function softPeekErp(route) {
+  const path = normalizeAppRoute(route, ERP_BASE).path || route;
+  navDebug("soft-peek", path);
+  try {
+    if (surfaceMode === "bill") await snapshotBill();
+    else if (surfaceMode === "doc") await snapshotDocForm();
+    else if (routeInfo(currentRoute || "", ERP_BASE).doctype === "purchase-invoice") {
+      await snapshotBill();
+    }
+  } catch {
+    /* park whatever dirtyState we already have */
+  }
+  parkDocSurfaceIfNeeded();
+  notePeekParentAndChild(path);
+  showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+  armSoftPeekEscHook(true).catch(() => {});
+  sendHistory();
+}
+
+/**
+ * Esc / chrome hint → leave setup peek (OI-112).
+ * Parked Doc rebinds the Doc surface; Vanilla-to-Vanilla peeks set_route back to the parent Bill.
+ */
+function dismissSoftPeekFromEsc() {
+  if (surfaceMode !== "erp") return;
+  if (parkedDocSurface) {
+    const route = parkedDocSurface.route;
+    navDebug("soft-peek-esc", route);
+    resumeParkedDoc(route).then((ok) => {
+      if (ok) armSoftPeekEscHook(false).catch(() => {});
+    });
+    return;
+  }
+  returnToPeekParent();
+}
+
+/**
+ * In-SPA return to the peek parent (Vanilla Bill still in locals). Drops the child's unsaved trap.
+ * @returns {boolean} true if a peek parent return was attempted
+ */
+function returnToPeekParent() {
+  if (!isActivePeekStack(peekStack) || surfaceMode !== "erp") return false;
+  const route = peekStack.parent.route;
+  navDebug("peek-return", route);
+  erpSoftSetRoute(route, { abandonUnsaved: true }).then((r) => {
+    if (r && r.ok) {
+      trackNav(erpUrl(ERP_BASE, route));
+      armSoftPeekEscHook(false).catch(() => {});
+      sendUiState();
+      sendHistory();
+      return;
+    }
+    navDebug("peek-return-fail", (r && r.reason) || "set_route failed");
+    showErp(route, { inSpa: true, skipDirtyGate: true, abandonUnsaved: true, forceLoad: false });
+  });
+  return true;
+}
+
+/**
+ * Inject Esc capture on Desk only while soft-peek is armed (skip Frappe modals).
+ * @param {boolean} armed
+ */
+async function armSoftPeekEscHook(armed) {
+  if (!erp || erp.webContents.isDestroyed()) return;
+  try {
+    await erp.webContents.executeJavaScript(`(function(){
+      window.__erpUiSoftPeekArmed = ${armed ? "true" : "false"};
+      if (window.__erpUiSoftPeekEscBound) return true;
+      window.__erpUiSoftPeekEscBound = true;
+      document.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape" || !window.__erpUiSoftPeekArmed) return;
+        try {
+          if (window.cur_dialog && cur_dialog.display) return;
+          if (document.querySelector(".modal.show, .modal.in")) return;
+        } catch (err) {}
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          if (window.erpUiShell && typeof window.erpUiShell.softPeekEsc === "function") {
+            window.erpUiShell.softPeekEsc();
+          }
+        } catch (err2) {}
+      }, true);
+      return true;
+    })()`);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Resume parked Doc Bill/PO/IR after soft-peek without destroying dirtyState (OI-112).
+ * Soft-routes ERP back under Doc so bridge Save still hits the right cur_frm.
+ * @param {string} route
+ * @returns {Promise<boolean>}
+ */
+async function resumeParkedDoc(route) {
+  if (!parkedDocSurface || !dirtyState.doc) return false;
+  if (!routesReferToSameDoc(parkedDocSurface.route, route, ERP_BASE)) return false;
+  const park = parkedDocSurface;
+  parkedDocSurface = null;
+  navDebug("doc-rebind", `${park.mode} ${park.route}`);
+  currentRoute = park.route;
+  armSoftPeekEscHook(false).catch(() => {});
+  if (erpIsWarm() && (park.route || "").startsWith("/app/")) {
+    const soft = await erpSoftSetRoute(park.route);
+    if (!soft || !soft.ok) {
+      navDebug("doc-rebind-erp", (soft && soft.reason) || "set_route failed");
+      await erpForceReopenRoute(park.route);
+    }
+  }
+  if (park.mode === "bill") {
+    surfaceMode = "bill";
+    activeDocSkin = null;
+    place();
+    try {
+      if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
+      if (win && !win.isDestroyed()) win.focus();
+    } catch {
+      /* ignore */
+    }
+    bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
+    pushBillSnapshot({
+      ok: true,
+      doc: dirtyState.doc,
+      amountDue: amountDueScratch,
+      userEdited: !!dirtyState.userEdited,
+      isNew: !!dirtyState.isNew,
+      focusVendor: false,
+    });
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+    return true;
+  }
+  if (park.mode === "doc" && park.skinId) {
+    const profile = DOC_SKIN_PROFILES[park.skinId];
+    surfaceMode = "doc";
+    activeDocSkin = park.skinId;
+    place();
+    try {
+      if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
+      if (win && !win.isDestroyed()) win.focus();
+    } catch {
+      /* ignore */
+    }
+    if (profile) {
+      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, dirtyState.doc);
+    }
+    pushDocFormSnapshot({
+      ok: true,
+      doc: dirtyState.doc,
+      scratch: { dateExpected: dateExpectedScratch },
+      userEdited: !!dirtyState.userEdited,
+      isNew: !!dirtyState.isNew,
+      focusVendor: false,
+    });
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * In-SPA Desk navigation (Vanilla soft-leave). Falls back to loadURL when frappe missing.
+ * @param {string} appPath
+ * @param {{ abandonUnsaved?: boolean }} [opts]
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+async function erpSoftSetRoute(appPath, opts = {}) {
+  if (!erp || erp.webContents.isDestroyed()) {
+    return { ok: false, reason: "no-erp" };
+  }
+  const parts = appRouteParts(appPath, ERP_BASE);
+  if (!parts.length) return { ok: false, reason: "no-parts" };
+  const abandonUnsaved = !!opts.abandonUnsaved;
+  try {
+    const result = await erp.webContents.executeJavaScript(
+      `(async () => {
+        try {
+          if (typeof frappe === "undefined" || !frappe.set_route) {
+            return { ok: false, reason: "no-frappe" };
+          }
+          ${
+            abandonUnsaved
+              ? `try {
+            if (typeof cur_frm !== "undefined" && cur_frm && cur_frm.doc) {
+              cur_frm.doc.__unsaved = 0;
+            }
+          } catch (e) {}`
+              : ""
+          }
+          const parts = ${JSON.stringify(parts)};
+          await frappe.set_route(...parts);
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, reason: String((e && e.message) || e) };
+        }
+      })()`,
+    );
+    return result && typeof result === "object" ? result : { ok: false, reason: "bad-result" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+}
+
+function maybeRefreshCompanyAbbr() {
+  if (!erpIsWarm()) return;
+  erp.webContents
+    .executeJavaScript(
+      `(function () {
+        try {
+          if (typeof frappe === "undefined") return "";
+          const name =
+            (frappe.defaults && frappe.defaults.get_user_default && frappe.defaults.get_user_default("Company")) ||
+            "";
+          if (!name) return "";
+          const row = locals && locals["Company"] && locals["Company"][name];
+          if (row && row.abbr) return String(row.abbr);
+          return "";
+        } catch (e) {
+          return "";
+        }
+      })()`,
+    )
+    .then((abbr) => {
+      const next = abbr != null ? String(abbr).trim() : "";
+      if (!next || next === sessionCompanyAbbr) return;
+      sessionCompanyAbbr = next;
+      history = filterHistoryForCompany(history, sessionCompanyAbbr, ERP_BASE);
+      sendHistory();
+      navDebug("company-abbr", sessionCompanyAbbr);
+    })
+    .catch(() => {});
+}
+
+/**
+ * Mark an intentional ERP destination so stale prior-form navigations are ignored.
+ * @param {string} path
+ */
+function beginErpNavIntent(path) {
+  const n = normalizeAppRoute(path, ERP_BASE);
+  const p = n.path || path;
+  if (!p || !p.startsWith("/app/")) return;
+  erpNavIntentPath = p;
+  if (erpNavIntentTimer) clearTimeout(erpNavIntentTimer);
+  erpNavIntentTimer = setTimeout(() => {
+    if (erpNavIntentPath === p) {
+      navDebug("nav-intent-timeout", p);
+      erpNavIntentPath = null;
+    }
+    erpNavIntentTimer = null;
+  }, 15000);
+  navDebug("nav-intent", p);
+}
+
+function clearErpNavIntent(reason) {
+  if (!erpNavIntentPath) return;
+  navDebug("nav-intent-clear", `${reason || "clear"} ← ${erpNavIntentPath}`);
+  erpNavIntentPath = null;
+  if (erpNavIntentTimer) {
+    clearTimeout(erpNavIntentTimer);
+    erpNavIntentTimer = null;
+  }
 }
 
 /**
@@ -539,6 +1226,11 @@ function openRoutePreferred(route, opts = {}) {
 function maybeHijackErpToDoc(url) {
   if (lensHijackLock || surfaceMode !== "erp") return false;
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return false;
+  // Never hijack to a doctype that isn't the active nav intent (stale Bill after Home→PO).
+  if (erpNavIntentPath && !shouldAcceptErpTrackNav(erpNavIntentPath, url, ERP_BASE)) {
+    navDebug("hijack-skip-stale", url);
+    return false;
+  }
   const info = routeInfo(url, ERP_BASE);
   const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
   if (
@@ -561,17 +1253,32 @@ function maybeHijackErpToDoc(url) {
   return true;
 }
 
-function trackNav(url) {
+/**
+ * @param {string} url
+ * @param {{ fromBrowser?: boolean }} [opts] fromBrowser false = optimistic shell trackNav
+ */
+function trackNav(url, opts = {}) {
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return;
-  const info = routeInfo(url, ERP_BASE);
-  const next = info.path || currentRoute;
+  if (erpNavIntentPath && !shouldAcceptErpTrackNav(erpNavIntentPath, url, ERP_BASE)) {
+    navDebug("trackNav-stale", `${url} (intent ${erpNavIntentPath})`);
+    return;
+  }
+  const n = normalizeAppRoute(url, ERP_BASE);
+  const prev = currentRoute;
+  const next = n.path || currentRoute;
   const changed = next !== currentRoute;
   currentRoute = next;
   history = pushHistory(history, url, {
     erpBase: ERP_BASE,
     labels: DOCTYPE_LABELS,
+    companyAbbr: sessionCompanyAbbr,
   });
+  notePeekFromErpNav(next, prev);
   sendHistory();
+  maybeRefreshCompanyAbbr();
+  if (shouldClearErpNavIntent(erpNavIntentPath, url, opts, ERP_BASE)) {
+    clearErpNavIntent("arrived");
+  }
   // Hijack after Recent update so Vanilla→Doc nav still moves the flyout.
   if (maybeHijackErpToDoc(url)) {
     syncE2eApi();
@@ -586,9 +1293,11 @@ function pollErpRoute() {
   // URL sync for chrome/history when on Vanilla — not a DB poll.
   if (surfaceMode === "erp") {
     const url = erp.webContents.getURL();
-    if (url && url !== lastPolledErpUrl) {
-      lastPolledErpUrl = url;
-      trackNav(url);
+    if (url && isAllowedErpUrl(ERP_BASE, url)) {
+      if (url !== lastPolledErpUrl || erpLivePathDiffers(currentRoute, url, ERP_BASE)) {
+        lastPolledErpUrl = url;
+        trackNav(url);
+      }
     }
   }
   // Submit often keeps the same form URL — still drain shelf updates.
@@ -694,9 +1403,11 @@ function scheduleErpKeyboardFocus() {
   }
 }
 
-/** Blur Bill / Doc / Home so OS keyboard focus can settle on ERP. */
+/** Blur shell surfaces so OS keyboard focus can settle on ERP (Vanilla). */
 function blurNonErpWebContents() {
-  for (const view of [bill, docForm, home]) {
+  // Include chrome + history: otherwise Tab stays trapped in the left toolbar
+  // after opening Vanilla (clerk data entry is almost always in the ERP view).
+  for (const view of [bill, docForm, home, chrome, hist]) {
     try {
       if (!view || view.webContents.isDestroyed()) continue;
       if (view.webContents.isFocused && view.webContents.isFocused()) {
@@ -859,6 +1570,193 @@ async function bridgeCall(method, ...args) {
   );
 }
 
+/**
+ * Load PO.`title` (logbook PO#, OI-121) for Purchase Orders linked on Bill lines.
+ * @param {object|null|undefined} doc
+ * @returns {Promise<Array<{ name: string, title: string }>>}
+ */
+async function linkedPosForBillDoc(doc) {
+  const names = uniqueLinkedPurchaseOrderNames(doc);
+  if (!names.length) return [];
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, rows: [] };
+      }
+      var names = ${JSON.stringify(names)};
+      var rows = await frappe.db.get_list("Purchase Order", {
+        filters: [["name", "in", names]],
+        fields: ["name", "title"],
+        limit: names.length,
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return linkedPurchaseOrdersForBill(doc, (raw && raw.rows) || []);
+}
+
+/**
+ * Vendor account #s at supplier (Customer Number At Supplier) — payment identity, not SO customer.
+ * @param {string} supplier
+ * @param {string} [company]
+ * @returns {Promise<string[]>}
+ */
+async function vendorAccountNumbersForSupplier(supplier, company) {
+  const sup = supplier != null ? String(supplier).trim() : "";
+  if (!sup) return [];
+  const co = company != null ? String(company).trim() : "";
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, rows: [] };
+      }
+      var filters = [["parent", "=", ${JSON.stringify(sup)}]];
+      var rows = await frappe.db.get_list("Customer Number At Supplier", {
+        filters: filters,
+        fields: ["customer_number", "company"],
+        limit: 20,
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const nums = [];
+  const seen = new Set();
+  for (const row of (raw && raw.rows) || []) {
+    const n = row && row.customer_number != null ? String(row.customer_number).trim() : "";
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    nums.push(n);
+  }
+  return nums;
+}
+
+/**
+ * Other Purchase Invoices with the same bill_no (soft dupe lookup).
+ * @param {string} billNo
+ * @param {string} [excludeName]
+ * @returns {Promise<Array<object>>}
+ */
+async function existingBillsWithRef(billNo, excludeName) {
+  const ref = billNo != null ? String(billNo).trim() : "";
+  if (!ref) return [];
+  const exclude = excludeName != null ? String(excludeName).trim() : "";
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, rows: [] };
+      }
+      var filters = [["bill_no", "=", ${JSON.stringify(ref)}]];
+      if (${JSON.stringify(exclude)}) {
+        filters.push(["name", "!=", ${JSON.stringify(exclude)}]);
+      }
+      var rows = await frappe.db.get_list("Purchase Invoice", {
+        filters: filters,
+        fields: ["name", "bill_no", "supplier", "posting_date", "grand_total", "docstatus"],
+        order_by: "posting_date desc",
+        limit: 12,
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return (raw && raw.rows) || [];
+}
+
+/**
+ * Last N supplier invoice #s for this vendor (OI-087 pattern window).
+ * @param {string} supplier
+ * @param {string} [excludeName]
+ * @param {number} [limit]
+ * @returns {Promise<string[]>}
+ */
+async function recentVendorBillRefs(supplier, excludeName, limit = 6) {
+  const sup = supplier != null ? String(supplier).trim() : "";
+  if (!sup) return [];
+  const exclude = excludeName != null ? String(excludeName).trim() : "";
+  const lim = Math.max(3, Math.min(12, Number(limit) || 6));
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, rows: [] };
+      }
+      var filters = [
+        ["supplier", "=", ${JSON.stringify(sup)}],
+        ["bill_no", "!=", ""],
+      ];
+      if (${JSON.stringify(exclude)}) {
+        filters.push(["name", "!=", ${JSON.stringify(exclude)}]);
+      }
+      var rows = await frappe.db.get_list("Purchase Invoice", {
+        filters: filters,
+        fields: ["name", "bill_no", "posting_date"],
+        order_by: "posting_date desc",
+        limit: ${lim},
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const out = [];
+  const seen = new Set();
+  for (const row of (raw && raw.rows) || []) {
+    const n = row && row.bill_no != null ? String(row.bill_no).trim() : "";
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Non-blocking Ref No. sanity (OI-054 / OI-087). Never blocks Save.
+ * @param {string|null|undefined} [billNoOverride]
+ */
+async function checkBillRef(billNoOverride) {
+  const doc = dirtyState.doc;
+  const billNo =
+    billNoOverride != null && String(billNoOverride).trim() !== ""
+      ? String(billNoOverride).trim()
+      : doc && doc.bill_no != null
+        ? String(doc.bill_no).trim()
+        : "";
+  if (!billNo) {
+    return { ok: true, result: evaluateBillRef("") };
+  }
+  const supplier = doc && doc.supplier != null ? String(doc.supplier).trim() : "";
+  const company = doc && doc.company != null ? String(doc.company).trim() : "";
+  const currentName = doc && doc.name != null ? String(doc.name).trim() : "";
+  const [existingBills, vendorAccountNumbers, linkedPos, recentVendorRefs] =
+    await Promise.all([
+      existingBillsWithRef(billNo, currentName),
+      vendorAccountNumbersForSupplier(supplier, company),
+      linkedPosForBillDoc(doc),
+      recentVendorBillRefs(supplier, currentName, 6),
+    ]);
+  const result = evaluateBillRef(billNo, {
+    currentBillName: currentName,
+    supplier,
+    existingBills,
+    recentVendorRefs,
+    linkedPoTitles: linkedPos.map((r) => r.title).filter(Boolean),
+    linkedPoNames: linkedPos.map((r) => r.name).filter(Boolean),
+    vendorAccountNumbers,
+  });
+  return {
+    ok: true,
+    result,
+    existingBills,
+    vendorAccountNumbers,
+    recentVendorRefs,
+    linkedPos,
+  };
+}
+
 async function snapshotBill() {
   await ensureErpFormBridge();
   const raw = await bridgeCall("snapshot", "Purchase Invoice");
@@ -868,6 +1766,7 @@ async function snapshotBill() {
       reason: (raw && raw.reason) || "Could not read Bill from Vanilla.",
       doc: null,
       amountDue: amountDueScratch,
+      linkedPos: [],
       userEdited: !!dirtyState.userEdited,
       isNew: !!dirtyState.isNew,
     };
@@ -878,10 +1777,15 @@ async function snapshotBill() {
     isDirty: !!raw.isDirty,
     isNew: !!raw.isNew,
   };
+  const linkedPos = await linkedPosForBillDoc(raw.doc);
+  const { poLineMeta, lineAllocations } = await enrichBillLineContext(raw.doc);
   return {
     ok: true,
     doc: raw.doc,
     amountDue: amountDueScratch,
+    linkedPos,
+    poLineMeta,
+    lineAllocations,
     isDirty: raw.isDirty,
     isNew: raw.isNew,
     userEdited: !!dirtyState.userEdited,
@@ -918,10 +1822,15 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
     isDirty: !!raw.isDirty,
     isNew: !!raw.isNew,
   };
+  const linkedPos = await linkedPosForBillDoc(raw.doc);
+  const { poLineMeta, lineAllocations } = await enrichBillLineContext(raw.doc);
   return {
     ok: true,
     doc: raw.doc,
     amountDue: amountDueScratch,
+    linkedPos,
+    poLineMeta,
+    lineAllocations,
     isDirty: raw.isDirty,
     isNew: raw.isNew,
   };
@@ -953,6 +1862,7 @@ function bumpBillHistory(routePath, opts = {}) {
     detail: opts.detail,
     detailMuted: !!opts.detailMuted,
     labelOverride: opts.labelOverride,
+    companyAbbr: sessionCompanyAbbr,
   });
   sendHistory();
 }
@@ -996,6 +1906,7 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
     labels: DOCTYPE_LABELS,
     detail,
     detailMuted,
+    companyAbbr: sessionCompanyAbbr,
   });
   sendHistory();
 }
@@ -1023,6 +1934,8 @@ function place() {
 let diagnoseWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let calcHistoryWin = null;
+/** @type {import("electron").BrowserWindow|null} */
+let navIncidentWin = null;
 
 /**
  * Click-away for frameless popovers.
@@ -1115,6 +2028,71 @@ function closeDiagnoseDropdown() {
   }
   diagnoseWin = null;
   sendUiState();
+}
+
+function closeNavIncidentDialog() {
+  if (navIncidentWin && !navIncidentWin.isDestroyed()) {
+    try {
+      navIncidentWin.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function navIncidentPayload() {
+  return {
+    contextLines: formatNavIncidentContextLines(navIncidentDraft || {}),
+    logPath: app.isReady() ? navIncidentLogPath() : "",
+    noteMax: NAV_INCIDENT_NOTE_MAX,
+  };
+}
+
+function openNavIncidentDialog() {
+  if (!win || win.isDestroyed()) return;
+  closeDiagnoseDropdown();
+  if (navIncidentWin && !navIncidentWin.isDestroyed()) {
+    navIncidentWin.focus();
+    return;
+  }
+  navIncidentDraft = collectNavIncidentContext();
+  navDebug("nav-incident-open", currentRoute || "");
+  navIncidentWin = new BrowserWindow({
+    parent: win,
+    modal: false,
+    frame: true,
+    title: "Navigation issue",
+    show: false,
+    width: 460,
+    height: 560,
+    minWidth: 380,
+    minHeight: 420,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#1a252f",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "nav-incident-preload.cjs"),
+    },
+  });
+  navIncidentWin.loadFile(path.join(__dirname, "nav-incident-dialog.html"));
+  navIncidentWin.once("ready-to-show", () => {
+    if (!navIncidentWin || navIncidentWin.isDestroyed()) return;
+    navIncidentWin.webContents.send("nav-incident-data", navIncidentPayload());
+    navIncidentWin.show();
+    navIncidentWin.focus();
+  });
+  navIncidentWin.on("closed", () => {
+    if (navIncidentDraft) navDebug("nav-incident-cancel", currentRoute || "");
+    navIncidentDraft = null;
+    navIncidentWin = null;
+  });
 }
 
 function closeCalcHistoryDropdown() {
@@ -1257,6 +2235,7 @@ let activeNavGate = null; // { token, settle(proceed) }
 
 async function gateDirtyThen(doNav) {
   if (!isDocLensSurface()) {
+    navDebug("gate-skip", "not on Doc lens");
     doNav();
     return;
   }
@@ -1271,9 +2250,12 @@ async function gateDirtyThen(doNav) {
     userEdited: !!dirtyState.userEdited,
   };
   if (!shouldGateNavigation(state)) {
+    navDebug("gate-skip", "clean");
     doNav();
     return;
   }
+
+  navDebug("gate-open", "unsaved Doc edits — Save/Discard/Cancel in Bill");
 
   const view = activeFormView();
   const openChannel = surfaceMode === "bill" ? "bill-open-nav-gate" : "doc-open-nav-gate";
@@ -1312,9 +2294,12 @@ async function gateDirtyThen(doNav) {
       settled = true;
       if (activeNavGate && activeNavGate.token === token) activeNavGate = null;
       if (proceed) {
+        navDebug("gate-proceed", "continuing nav");
         dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
         amountDueCommitted = amountDueScratch;
         doNav();
+      } else {
+        navDebug("gate-cancel", "stayed on Doc");
       }
       resolve();
     };
@@ -1369,33 +2354,139 @@ async function nativeGateFallback(doNav) {
 
 function showHome() {
   gateDirtyThen(() => {
+    collapsePeekStackHard("home");
+    parkedDocSurface = null;
+    armSoftPeekEscHook(false).catch(() => {});
     surfaceMode = "home";
     place();
     sendUiState();
+    sendHistory();
     syncE2eApi();
   });
 }
 
+/**
+ * Chromium often no-ops loadURL when the target equals the current URL.
+ * Soft-set_route first; if that fails, bounce via /app then the target.
+ * @param {string} appPath normalized /app/… path
+ * @returns {Promise<void>}
+ */
+async function erpForceReopenRoute(appPath) {
+  if (!erp || erp.webContents.isDestroyed()) return;
+  const path = normalizeAppRoute(appPath, ERP_BASE).path || appPath;
+  const target = erpUrl(ERP_BASE, path);
+  const soft = await erpSoftSetRoute(path);
+  if (soft && soft.ok) {
+    navDebug("same-route-set_route", path);
+    trackNav(target);
+    return;
+  }
+  navDebug("same-route-bounce", `${(soft && soft.reason) || "no-set_route"} → ${path}`);
+  await loadErpUrl(erpUrl(ERP_BASE, "/app"));
+  await loadErpUrl(target);
+  trackNav(target);
+}
+
 function showErp(route = "/desk", opts = {}) {
-  const skipDirtyGate = !!opts.skipDirtyGate;
+  const softPeek = !!opts.softPeek;
+  const inSpa = softPeek || !!opts.inSpa;
+  const skipDirtyGate = !!opts.skipDirtyGate || inSpa;
+  const n = normalizeAppRoute(route, ERP_BASE);
+  // Keep exact roots that are not doctype paths.
+  let path = n.path || "/desk";
+  if (route === "/" || path === "/") path = "/";
+  else if (route === "/desk" || route === "/login") path = route;
+  else if (path.startsWith("/desk/") || (n.doctype && path.startsWith("/desk"))) {
+    path = n.path;
+  }
+
   const go = () => {
+    const cur = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
+    const alreadyOnErp = !!(cur && isAllowedErpUrl(ERP_BASE, cur));
+    const sameRoute =
+      routesReferToSameDoc(currentRoute, path, ERP_BASE) ||
+      (!!cur && routesReferToSameDoc(cur, path, ERP_BASE));
+    navDebug(
+      softPeek ? "showErp-soft" : inSpa ? "showErp-inSpa" : "showErp",
+      `${path}${sameRoute ? " same=1" : ""}`,
+    );
+    if (inSpa) {
+      parkDocSurfaceIfNeeded();
+      if (!softPeek) collapsePeekStackIfLeaving(path, "inSpa");
+    } else {
+      collapsePeekStackHard("hard-erp");
+      parkedDocSurface = null;
+      armSoftPeekEscHook(false).catch(() => {});
+      sendHistory();
+    }
     surfaceMode = "erp";
-    const info = routeInfo(route, ERP_BASE);
-    currentRoute = info.path || route;
-    if (info.doctype && DOC_FORM_DOCTYPES.has(info.doctype) && info.record) {
+    const info = routeInfo(path, ERP_BASE);
+    // Do not claim the destination until the SPA actually moves (OI-127 desync).
+    if (!inSpa) currentRoute = info.path || path;
+    if (!inSpa) beginErpNavIntent(info.path || path);
+    // Soft-peek / in-SPA return must not flip Bill/PO/IR lens prefs to Vanilla (A.nav).
+    if (
+      !inSpa &&
+      info.doctype &&
+      DOC_FORM_DOCTYPES.has(info.doctype) &&
+      info.record
+    ) {
       lensPrefs = rememberLens(lensPrefs, info.doctype, "vanilla");
       savePrefs();
     }
     place();
-    const target = erpUrl(ERP_BASE, route);
-    const cur = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
-    const alreadyOnErp = !!(cur && isAllowedErpUrl(ERP_BASE, cur));
-    if (opts.forceLoad || route !== "/desk" || !alreadyOnErp) {
-      erp.webContents.loadURL(target);
-      trackNav(target);
+    const target = erpUrl(ERP_BASE, info.path || path);
+    const trySoft =
+      inSpa &&
+      alreadyOnErp &&
+      (info.path || path).startsWith("/app/") &&
+      appRouteParts(info.path || path, ERP_BASE).length > 0;
+
+    const afterNav = () => {
+      try {
+        if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
+      } catch {
+        /* ignore */
+      }
+      sendUiState();
+      syncE2eApi();
+      scheduleErpKeyboardFocus();
+    };
+
+    if (trySoft) {
+      erpSoftSetRoute(info.path || path, { abandonUnsaved: !!opts.abandonUnsaved }).then((r) => {
+        if (r && r.ok) {
+          trackNav(target, { fromBrowser: false });
+          afterNav();
+          return;
+        }
+        navDebug("soft-peek-fallback", (r && r.reason) || "set_route failed");
+        erp.webContents.loadURL(target);
+        trackNav(target, { fromBrowser: false });
+        afterNav();
+      });
+      return;
     }
-    sendUiState();
-    syncE2eApi();
+
+    // Hist re-click while already on this Vanilla form: loadURL is a silent no-op.
+    if (
+      shouldForceVanillaReopen({
+        forceLoad: !!opts.forceLoad,
+        sameRoute,
+        alreadyOnErp,
+        softPeek: inSpa,
+      }) &&
+      (info.path || path).startsWith("/app/")
+    ) {
+      erpForceReopenRoute(info.path || path).then(afterNav);
+      return;
+    }
+
+    if (opts.forceLoad || path !== "/desk" || !alreadyOnErp) {
+      erp.webContents.loadURL(target);
+      trackNav(target, { fromBrowser: false });
+    }
+    afterNav();
   };
   if (skipDirtyGate) go();
   else gateDirtyThen(go);
@@ -1410,6 +2501,8 @@ async function showBill(route, opts = {}) {
         ? currentRoute
         : "/app/purchase-invoice/new";
 
+  if (await resumeParkedDoc(r)) return;
+
   // Already on this Bill — refocus only (Recent click must not reload / wipe edits).
   // Do not reuse when memory holds a submitted/cancelled doc but the route is "new".
   if (surfaceMode === "bill" && routesReferToSameDoc(currentRoute, r, ERP_BASE)) {
@@ -1419,6 +2512,9 @@ async function showBill(route, opts = {}) {
       dirtyState.doc &&
       Number(dirtyState.doc.docstatus) > 0;
     if (!staleSubmittedOnNew) {
+      parkedDocSurface = null;
+      collapsePeekStackIfLeaving(currentRoute, "showBill-refocus");
+      await ensureErpMatchesShellRoute(currentRoute);
       place();
       try {
         if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
@@ -1427,7 +2523,26 @@ async function showBill(route, opts = {}) {
         /* ignore */
       }
       sendUiState();
-      if (dirtyState.doc) {
+      const snap = await snapshotBill();
+      if (snap && snap.ok && snap.doc) {
+        dirtyState = {
+          ...dirtyState,
+          doc: snap.doc,
+          isDirty: !!snap.isDirty,
+          isNew: !!snap.isNew,
+        };
+        noteShelvedFromOpen("purchase-invoice", snap.doc);
+        bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", snap.doc);
+        pushBillSnapshot({
+          ok: true,
+          doc: snap.doc,
+          amountDue: snap.amountDue != null ? snap.amountDue : amountDueScratch,
+          linkedPos: snap.linkedPos || [],
+          userEdited: !!dirtyState.userEdited,
+          isNew: !!snap.isNew,
+          focusVendor: false,
+        });
+      } else if (dirtyState.doc) {
         noteShelvedFromOpen("purchase-invoice", dirtyState.doc);
         bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
         pushBillSnapshot({
@@ -1438,6 +2553,14 @@ async function showBill(route, opts = {}) {
           isNew: !!dirtyState.isNew,
           focusVendor: false,
         });
+      } else {
+        pushBillSnapshot({
+          ok: false,
+          reason: (snap && snap.reason) || "Bill form not loaded in Vanilla — Retry load.",
+          doc: null,
+          amountDue: amountDueScratch,
+          userEdited: false,
+        });
       }
       syncE2eApi();
       return;
@@ -1445,18 +2568,17 @@ async function showBill(route, opts = {}) {
   }
 
   const proceed = async () => {
+    parkedDocSurface = null;
     surfaceMode = "bill";
     activeDocSkin = null;
-    const info = routeInfo(r, ERP_BASE);
-    // Prefer /app/… (Desk SPA); rewrite legacy /desk/purchase-invoice → /app/…
-    let path = info.path || r;
-    if (path.startsWith("/desk/purchase-invoice")) {
-      path = path.replace("/desk/purchase-invoice", "/app/purchase-invoice");
-    }
+    const n = normalizeAppRoute(r, ERP_BASE);
+    let path = n.path || r;
     if (!path.includes("purchase-invoice")) {
       path = "/app/purchase-invoice/new";
     }
+    collapsePeekStackIfLeaving(path, "showBill");
     currentRoute = path;
+    beginErpNavIntent(path);
     lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "doc");
     savePrefs();
     bumpBillHistory(currentRoute);
@@ -1488,7 +2610,7 @@ async function showBill(route, opts = {}) {
     const target = erpUrl(ERP_BASE, currentRoute);
     // Always load so cur_frm is a real Bill form (SPA may have been on Desk home).
     await loadErpUrl(target);
-    trackNav(target);
+    trackNav(target, { fromBrowser: false });
 
     amountDueScratch = "";
     amountDueCommitted = "";
@@ -1517,6 +2639,7 @@ async function showBill(route, opts = {}) {
         ok: true,
         doc: snap.doc,
         amountDue: amountDueScratch,
+        linkedPos: snap.linkedPos || [],
         userEdited: false,
         isNew: !!snap.isNew,
         focusVendor: true,
@@ -1652,6 +2775,8 @@ async function showDocForm(skinId, route, opts = {}) {
         ? currentRoute
         : profile.newRoute;
 
+  if (await resumeParkedDoc(r)) return;
+
   if (
     surfaceMode === "doc" &&
     activeDocSkin === skinId &&
@@ -1663,6 +2788,7 @@ async function showDocForm(skinId, route, opts = {}) {
       dirtyState.doc &&
       Number(dirtyState.doc.docstatus) > 0;
     if (!staleSubmittedOnNew) {
+      parkedDocSurface = null;
       place();
       try {
         if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
@@ -1692,22 +2818,23 @@ async function showDocForm(skinId, route, opts = {}) {
   }
 
   const proceed = async () => {
+    parkedDocSurface = null;
     surfaceMode = "doc";
     activeDocSkin = skinId;
-    const info = routeInfo(r, ERP_BASE);
-    let path = info.path || r;
-    if (path.startsWith(`/desk/${slug}`)) {
-      path = path.replace(`/desk/${slug}`, `/app/${slug}`);
-    }
+    const n = normalizeAppRoute(r, ERP_BASE);
+    let path = n.path || r;
     if (!path.includes(slug)) {
       path = profile.newRoute;
     }
+    collapsePeekStackIfLeaving(path, "showDoc");
     currentRoute = path;
+    beginErpNavIntent(path);
     lensPrefs = rememberLens(lensPrefs, slug, "doc");
     savePrefs();
     history = pushHistory(history, currentRoute, {
       erpBase: ERP_BASE,
       labels: DOCTYPE_LABELS,
+      companyAbbr: sessionCompanyAbbr,
     });
     sendHistory();
     place();
@@ -1727,7 +2854,7 @@ async function showDocForm(skinId, route, opts = {}) {
 
     const target = erpUrl(ERP_BASE, currentRoute);
     await loadErpUrl(target);
-    trackNav(target);
+    trackNav(target, { fromBrowser: false });
 
     dateExpectedScratch = "";
     const snap = await waitForDocForm();
@@ -1790,22 +2917,53 @@ async function showDocForm(skinId, route, opts = {}) {
 }
 
 function openDocSkin() {
-  const target = resolveDocSkinTarget(shellCtx());
-  if (!target) return;
-  if (target.kind === "workflow-home") {
-    showHome();
+  // Soft-peek return: Doc tab rebinds parked Bill/PO/IR without wipe (OI-112).
+  const parkRoute = parkedDocSurface && parkedDocSurface.route;
+  if (parkRoute) {
+    resumeParkedDoc(parkRoute).then((ok) => {
+      if (ok) return;
+      openDocSkinContinue();
+    });
     return;
   }
-  if (target.kind === "doc-form") {
-    const profile = profileByLayoutKey(target.layoutKey) || profileByDoctypeKey(target.doctype);
-    if (!profile) return;
-    openDocSkinProfile(profile, target.route);
+  if (returnToPeekParent()) return;
+  openDocSkinContinue();
+}
+
+function openDocSkinContinue() {
+  const target = resolveDocSkinTarget(shellCtx());
+  if (target) {
+    navDebug("openDocSkin", target.kind + (target.route ? ` ${target.route}` : ""));
+    if (target.kind === "workflow-home") {
+      showHome();
+      return;
+    }
+    if (target.kind === "doc-form") {
+      const profile = profileByLayoutKey(target.layoutKey) || profileByDoctypeKey(target.doctype);
+      if (!profile) return;
+      openDocSkinProfile(profile, target.route);
+      return;
+    }
   }
+  // OI-112: Tax Category / Purchase Taxes template / Company — Doc tab returns to last Bill/PO/IR.
+  const dirtyDoc = dirtyState && dirtyState.doc;
+  const fb = pickFallbackDocRoute(history, {
+    erpBase: ERP_BASE,
+    dirtyDoctypeKey: dirtyDoc && (dirtyDoc.doctype || dirtyDoc.doctype_name),
+    dirtyDocName: dirtyDoc && dirtyDoc.name,
+    fallbackRoute: FALLBACK_DOC_ROUTE,
+  });
+  navDebug("openDocSkin-fallback", fb);
+  resumeParkedDoc(fb).then((ok) => {
+    if (ok) return;
+    openRoutePreferred(fb, { forceLoad: true });
+  });
 }
 
 function openEntry(doctypeKey) {
   const key = doctypeKey || "purchase-invoice";
   const t = resolveEntryOpen(key, lensPrefs);
+  navDebug("openEntry", `${key} lens=${t.lens} surface=${t.surface} → ${t.route}`);
   if (t.surface === "doc-form") {
     const profile = profileByDoctypeKey(key);
     if (profile && openDocSkinProfile(profile, t.route)) return;
@@ -1904,7 +3062,15 @@ async function deleteBillItem(rowIndex) {
     try {
       var f = window.cur_frm;
       if (!f) return { ok: false, reason: "No form." };
-      var row = (f.doc.items || [])[${rowIndex}];
+      var items = f.doc.items || [];
+      if (items.length <= 1) {
+        return {
+          ok: false,
+          blockedLastRow: true,
+          reason: "Must have at least one item on every saved Bill",
+        };
+      }
+      var row = items[${rowIndex}];
       if (!row) return { ok: false, reason: "Row not found." };
       var grid = f.get_field("items") && f.get_field("items").grid;
       if (grid && row.name && grid.grid_rows_by_docname && grid.grid_rows_by_docname[row.name]) {
@@ -1978,10 +3144,59 @@ async function searchLink(doctype, txt) {
       results: [],
     };
   }
-  return {
-    ok: true,
-    results: normalizeSearchLinkResults(raw.results),
-  };
+  const results = normalizeSearchLinkResults(raw.results);
+  if (doctype.trim() !== "Supplier" || !results.length) {
+    return { ok: true, results };
+  }
+  const ranked = await rankSupplierSearchResults(results);
+  return { ok: true, results: ranked };
+}
+
+/**
+ * Last submitted PO date per supplier + company FY start (OI-131).
+ * Search still works if this extra hop fails.
+ * @param {Array<{ value: string, description: string }>} results
+ */
+async function rankSupplierSearchResults(results) {
+  const names = results.map((r) => r.value).filter(Boolean);
+  if (!names.length) return results;
+  const extra = await erpEval(`(async () => {
+    try {
+      var names = ${JSON.stringify(names)};
+      var lastPo = {};
+      if (frappe.db && frappe.db.get_list) {
+        var pos = await frappe.db.get_list("Purchase Order", {
+          fields: ["supplier", "transaction_date"],
+          filters: [["supplier", "in", names], ["docstatus", "=", 1]],
+          order_by: "transaction_date desc",
+          limit: 200
+        });
+        (pos || []).forEach(function (row) {
+          if (row.supplier && !lastPo[row.supplier]) lastPo[row.supplier] = row.transaction_date;
+        });
+      }
+      var fyStart = "";
+      try {
+        var fy = frappe.defaults && frappe.defaults.get_user_default
+          ? frappe.defaults.get_user_default("fiscal_year")
+          : "";
+        if (fy && frappe.db && frappe.db.get_value) {
+          var v = await frappe.db.get_value("Fiscal Year", fy, "year_start_date");
+          if (v && v.message && v.message.year_start_date) fyStart = v.message.year_start_date;
+          else if (v && v.year_start_date) fyStart = v.year_start_date;
+          else if (typeof v === "string") fyStart = v;
+        }
+      } catch (e) {}
+      return { ok: true, lastPo: lastPo, fyStart: fyStart || "" };
+    } catch (e) {
+      return { ok: false, lastPo: {}, fyStart: "" };
+    }
+  })()`);
+  if (!extra || typeof extra !== "object") return results;
+  return rankSupplierLinkOptions(results, extra.lastPo || {}, {
+    fyStart: extra.fyStart || "",
+    asOf: utcYmd(),
+  });
 }
 
 async function tickHealth() {
@@ -2017,12 +3232,15 @@ function diagnoseSnapshot() {
     lastOkAt: diagnoseState.lastOkAt,
     internetOk: diagnoseState.internetOk,
   });
+  const navLines = formatNavDebugLines(navDebugLog);
+  const incidentLines = formatNavIncidentsDigest(navIncidentRing);
+  const allLines = [...lines, "", ...navLines, "", ...incidentLines];
   const remediation = remediationUiState(healthRemediation, {
     status: diagnoseState.status,
   });
   return {
-    lines,
-    copyText: diagnoseCopyText(lines),
+    lines: allLines,
+    copyText: diagnoseCopyText(allLines),
     hostClass: classifyHostClass(ERP_BASE),
     version: APP_VERSION,
     updateStub: "Shell updates: ask IT (packaged updater later).",
@@ -2085,6 +3303,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "erp-preload.cjs"),
       // Avoid auto-stealing focus on every Desk nav (Electron #42578 / focusOnNavigation).
       focusOnNavigation: false,
     },
@@ -2126,12 +3345,14 @@ function createWindow() {
   });
   erp.webContents.on("did-finish-load", () => {
     ensureErpFormBridge().catch(() => {});
+    if (surfaceMode === "erp") scheduleErpKeyboardFocus();
   });
 
   place();
   win.on("resize", place);
   win.on("closed", () => {
     closeDiagnoseDropdown();
+    closeNavIncidentDialog();
     win = null;
     chrome = null;
     home = null;
@@ -2164,6 +3385,8 @@ ipcMain.handle("get-config", () => ({
   version: APP_VERSION,
   feedbackFormUrl: resolveFeedbackFormUrl(process.env),
   updateStub: "Shell updates: ask IT / see README (no auto-update until packaged).",
+  navDebugLogPath: app.isReady() ? navDebugLogPath() : "",
+  navIncidentLogPath: app.isReady() ? navIncidentLogPath() : "",
 }));
 
 ipcMain.handle("get-diagnose", () => diagnoseSnapshot());
@@ -2363,6 +3586,31 @@ ipcMain.on("calc-history-dropdown-ready", (e) => {
   }
 });
 
+ipcMain.on("open-nav-incident", () => openNavIncidentDialog());
+ipcMain.on("nav-incident-close", () => closeNavIncidentDialog());
+ipcMain.on("nav-incident-ready", (e) => {
+  if (navIncidentWin && !navIncidentWin.isDestroyed() && e.sender === navIncidentWin.webContents) {
+    e.sender.send("nav-incident-data", navIncidentPayload());
+  }
+});
+ipcMain.handle("nav-incident-submit", (_e, note) => {
+  const frozen = navIncidentDraft || collectNavIncidentContext();
+  const incident = buildNavIncident(frozen, note, new Date().toISOString());
+  if (!incident) {
+    return { ok: false, reason: "Write a short note — empty reports are skipped." };
+  }
+  const file = navIncidentLogPath();
+  try {
+    fs.appendFileSync(file, serializeNavIncidentLine(incident), { encoding: "utf8" });
+  } catch (err) {
+    return { ok: false, reason: String(err && err.message ? err.message : err) };
+  }
+  navIncidentRing = appendNavIncident(navIncidentRing, incident);
+  navDebug("user-incident", incident.note.slice(0, 180));
+  navIncidentDraft = null;
+  return { ok: true, path: file, at: incident.at };
+});
+
 ipcMain.handle("open-feedback", async () => {
   try {
     const base = resolveFeedbackFormUrl(process.env);
@@ -2455,6 +3703,8 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
   return raw;
 });
 
+ipcMain.handle("bill-check-ref", async (_e, billNo) => checkBillRef(billNo));
+
 ipcMain.handle("bill-set-amount-due", async (_e, value, markEdited) => {
   const next = value == null ? "" : String(value);
   amountDueScratch = next;
@@ -2480,7 +3730,7 @@ ipcMain.handle("bill-list-sources", async (_e, supplier) => {
       var res = await Promise.all([
         frappe.db.get_list("Purchase Order", {
           filters: { supplier: supplier, docstatus: 1, per_billed: ["<", 100] },
-          fields: ["name", "transaction_date", "grand_total"],
+          fields: ["name", "title", "transaction_date", "grand_total"],
           order_by: "transaction_date desc",
           limit: 50,
         }),
@@ -2492,7 +3742,7 @@ ipcMain.handle("bill-list-sources", async (_e, supplier) => {
         }),
         frappe.db.get_list("Purchase Order", {
           filters: { supplier: supplier, docstatus: 0 },
-          fields: ["name", "transaction_date", "grand_total"],
+          fields: ["name", "title", "transaction_date", "grand_total"],
           order_by: "transaction_date desc",
           limit: 20,
         }),
@@ -2541,33 +3791,398 @@ ipcMain.handle("bill-merge-source", async (_e, kind, name) => {
   if (typeof name !== "string" || !name.trim()) {
     return { ok: false, reason: "Source name required" };
   }
+  return mergeBillSources([{ kind, name: name.trim() }]);
+});
+
+/**
+ * Map one or more PO/PR into the open Bill (items concatenated; headers from first).
+ * @param {Array<{ kind?: string, name?: string }>} items
+ */
+async function mergeBillSources(items) {
+  const list = Array.isArray(items)
+    ? items.filter((it) => it && (it.kind === "po" || it.kind === "pr") && typeof it.name === "string" && it.name.trim())
+    : [];
+  if (!list.length) return { ok: false, reason: "No sources to merge." };
   await ensureErpFormBridge();
-  const method =
-    kind === "po"
-      ? "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice"
-      : "erpnext.stock.doctype.purchase_receipt.purchase_receipt.make_purchase_invoice";
-  const mapped = await erpEval(`(async () => {
-    try {
-      var r = await frappe.call({
-        method: ${JSON.stringify(method)},
-        args: { source_name: ${JSON.stringify(name.trim())} },
-      });
-      return { ok: true, src: r && r.message };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
+  /** @type {object[]} */
+  const mappedDocs = [];
+  for (const it of list) {
+    const method =
+      it.kind === "po"
+        ? "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice"
+        : "erpnext.stock.doctype.purchase_receipt.purchase_receipt.make_purchase_invoice";
+    const nm = String(it.name).trim();
+    const mapped = await erpEval(`(async () => {
+      try {
+        var r = await frappe.call({
+          method: ${JSON.stringify(method)},
+          args: { source_name: ${JSON.stringify(nm)} },
+        });
+        return { ok: true, src: r && r.message };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })()`);
+    if (!mapped || !mapped.ok || !mapped.src) {
+      return {
+        ok: false,
+        reason: (mapped && mapped.reason) || `Could not map ${it.kind} ${nm}.`,
+      };
     }
-  })()`);
-  if (!mapped || !mapped.ok || !mapped.src) {
-    return {
-      ok: false,
-      reason: (mapped && mapped.reason) || "Could not map source document.",
-    };
+    mappedDocs.push(mapped.src);
   }
-  const raw = await bridgeCall("mergeFromMapped", mapped.src);
+  const combined = combineMappedBillSources(mappedDocs);
+  if (!combined) {
+    return { ok: false, reason: "Mapped sources had no item lines." };
+  }
+  const raw = await bridgeCall("mergeFromMapped", combined);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
   }
   return raw && typeof raw === "object" ? raw : { ok: false, reason: "Merge failed." };
+}
+
+ipcMain.handle("bill-merge-sources", async (_e, items) => mergeBillSources(items));
+
+ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
+  const supplier = normalizeEditableText(payload && payload.supplier);
+  if (!supplier) return { ok: false, reason: "Pick a vendor first.", orders: [] };
+  const customer =
+    payload && payload.customer != null ? normalizeEditableText(payload.customer) : "";
+  const billLines = Array.isArray(payload && payload.billLines) ? payload.billLines : [];
+
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, reason: "ERP Desk not ready" };
+      }
+      /** @type {Record<string, unknown>[]} */
+      var filters = [["docstatus", "in", [0, 1]]];
+      if (${JSON.stringify(customer)}) {
+        filters.push(["customer", "=", ${JSON.stringify(customer)}]);
+      }
+      var sos = await frappe.db.get_list("Sales Order", {
+        filters: filters,
+        fields: [
+          "name",
+          "customer",
+          "customer_name",
+          "transaction_date",
+          "delivery_date",
+          "grand_total",
+          "docstatus",
+        ],
+        order_by: "transaction_date desc",
+        limit: 40,
+      });
+      var names = (sos || []).map(function (r) { return r.name; }).filter(Boolean);
+      var itemsBySo = {};
+      if (names.length && frappe.db.get_list) {
+        var itemRows = await frappe.db.get_list("Sales Order Item", {
+          filters: [["parent", "in", names]],
+          fields: ["parent", "item_code", "qty", "rate", "amount"],
+          limit: 500,
+        });
+        for (var i = 0; i < (itemRows || []).length; i++) {
+          var row = itemRows[i];
+          if (!row || !row.parent) continue;
+          if (!itemsBySo[row.parent]) itemsBySo[row.parent] = [];
+          itemsBySo[row.parent].push(row);
+        }
+      }
+      var enriched = (sos || []).map(function (so) {
+        return Object.assign({}, so, { items: itemsBySo[so.name] || [] });
+      });
+      return { ok: true, orders: enriched };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), orders: [] };
+    }
+  })()`);
+  if (!raw || !raw.ok) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not list Sales Orders",
+      orders: [],
+    };
+  }
+  const ranked = rankSalesOrdersForBill(raw.orders || [], billLines);
+  return { ok: true, orders: ranked, supplier, customer: customer || null };
+});
+
+ipcMain.handle("bill-so-bridge-po", async (_e, payload) => {
+  const supplier = normalizeEditableText(payload && payload.supplier);
+  const salesOrder = normalizeEditableText(payload && payload.salesOrder);
+  if (!supplier) return { ok: false, reason: "Vendor required." };
+  if (!salesOrder) return { ok: false, reason: "Sales Order required." };
+
+  const supplierRef =
+    payload && payload.supplierRef != null
+      ? normalizeEditableText(payload.supplierRef)
+      : normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no);
+  const company =
+    payload && payload.company
+      ? normalizeEditableText(payload.company)
+      : normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
+  const title = formatJitPoTitle(salesOrder, supplierRef);
+
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db) {
+        return { ok: false, reason: "ERP Desk not ready" };
+      }
+      var supplier = ${JSON.stringify(supplier)};
+      var salesOrder = ${JSON.stringify(salesOrder)};
+      var title = ${JSON.stringify(title)};
+      var company = ${JSON.stringify(company || "")};
+
+      var openPos = await frappe.db.get_list("Purchase Order", {
+        filters: { supplier: supplier, docstatus: 1, per_billed: ["<", 100] },
+        fields: ["name", "supplier", "per_billed", "docstatus", "title"],
+        limit: 50,
+      });
+      var poNames = (openPos || []).map(function (p) { return p.name; }).filter(Boolean);
+      var poItems = [];
+      if (poNames.length) {
+        poItems = await frappe.db.get_list("Purchase Order Item", {
+          filters: [["parent", "in", poNames], ["sales_order", "=", salesOrder]],
+          fields: ["parent", "sales_order"],
+          limit: 50,
+        });
+      }
+      var existing = null;
+      var parents = {};
+      for (var i = 0; i < (poItems || []).length; i++) {
+        var it = poItems[i];
+        if (it && it.parent) parents[it.parent] = true;
+      }
+      for (var j = 0; j < (openPos || []).length; j++) {
+        var po = openPos[j];
+        if (po && po.name && parents[po.name]) {
+          existing = { name: po.name, title: po.title || "" };
+          break;
+        }
+      }
+      if (existing) {
+        return { ok: true, poName: existing.name, title: existing.title, created: false };
+      }
+
+      var soDoc = await frappe.db.get_doc("Sales Order", salesOrder);
+      if (!soDoc) return { ok: false, reason: "Sales Order not found." };
+      if (Number(soDoc.docstatus) !== 1) {
+        return { ok: false, reason: "Sales Order must be submitted." };
+      }
+      var co = company || soDoc.company;
+      if (!co) return { ok: false, reason: "Company missing on Bill and Sales Order." };
+
+      var today = frappe.datetime.get_today();
+      var sched = frappe.datetime.add_days(today, 7);
+      var po = frappe.model.get_new_doc("Purchase Order");
+      po.supplier = supplier;
+      po.company = co;
+      po.transaction_date = today;
+      po.schedule_date = sched;
+      po.title = title;
+      if (soDoc.customer) {
+        po.customer = soDoc.customer;
+        po.customer_name = soDoc.customer_name || soDoc.customer;
+      }
+      var lines = soDoc.items || [];
+      for (var k = 0; k < lines.length; k++) {
+        var line = lines[k];
+        if (!line || !line.item_code) continue;
+        var qty = Number(line.qty);
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        var child = frappe.model.add_child(po, "items");
+        child.item_code = line.item_code;
+        child.qty = qty;
+        child.schedule_date = sched;
+        child.sales_order = salesOrder;
+        if (line.name) child.sales_order_item = line.name;
+        if (line.uom) child.uom = line.uom;
+      }
+      if (!po.items || !po.items.length) {
+        return { ok: false, reason: "Sales Order has no lines to buy." };
+      }
+
+      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved || !saved.name) {
+        return { ok: false, reason: "Could not create bridge Purchase Order." };
+      }
+      var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+      var finalDoc = submitted && submitted.message ? submitted.message : saved;
+      return {
+        ok: true,
+        poName: finalDoc.name,
+        title: finalDoc.title || title,
+        created: true,
+      };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+
+  if (!raw || !raw.ok || !raw.poName) {
+    return { ok: false, reason: (raw && raw.reason) || "Could not bridge Sales Order to PO." };
+  }
+  return {
+    ok: true,
+    poName: raw.poName,
+    title: raw.title || title,
+    created: !!raw.created,
+  };
+});
+
+ipcMain.handle("bill-list-projects", async (_e, customer) => {
+  const cust = customer != null ? normalizeEditableText(customer) : "";
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, reason: "ERP Desk not ready", projects: [] };
+      }
+      var filters = [];
+      if (${JSON.stringify(cust)}) {
+        filters.push(["customer", "=", ${JSON.stringify(cust)}]);
+      }
+      var rows = await frappe.db.get_list("Project", {
+        filters: filters.length ? filters : undefined,
+        fields: ["name", "project_name", "customer", "customer_name", "status"],
+        order_by: "modified desc",
+        limit: 40,
+      });
+      return { ok: true, projects: rows || [] };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), projects: [] };
+    }
+  })()`);
+  if (!raw || !raw.ok) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not list projects",
+      projects: [],
+    };
+  }
+  return { ok: true, projects: raw.projects || [] };
+});
+
+ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
+  const ri = Number(rowIndex);
+  if (!Number.isInteger(ri) || ri < 0) {
+    return { ok: false, reason: "Invalid row." };
+  }
+  await ensureErpFormBridge();
+  await ensureErpMatchesShellRoute(currentRoute);
+
+  const customer = normalizeEditableText(payload && payload.customer);
+  const customerName =
+    normalizeEditableText(payload && payload.customerName) || customer;
+  const salesOrders = Array.isArray(payload && payload.salesOrders)
+    ? payload.salesOrders.map((s) => normalizeEditableText(s)).filter(Boolean)
+    : [];
+  const project = normalizeEditableText(payload && payload.project);
+  const supplier =
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.supplier) ||
+    normalizeEditableText(payload && payload.supplier);
+  const supplierRef = normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no);
+  const company = normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
+  const line =
+    dirtyState.doc && Array.isArray(dirtyState.doc.items)
+      ? dirtyState.doc.items[ri]
+      : null;
+
+  if (project) {
+    const pr = await setBillItemField(ri, "project", project);
+    if (!pr || !pr.ok) {
+      return { ok: false, reason: (pr && pr.reason) || "Could not set Project." };
+    }
+  }
+
+  let bridgePo = "";
+  if (salesOrders.length && supplier && line && line.item_code) {
+    const qtyParts = splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length);
+    const title = jitPoTitleForSalesOrders(salesOrders, supplierRef);
+    const bridge = await erpEval(`(async () => {
+      try {
+        if (!window.frappe || !frappe.db) {
+          return { ok: false, reason: "ERP Desk not ready" };
+        }
+        var supplier = ${JSON.stringify(supplier)};
+        var sos = ${JSON.stringify(salesOrders)};
+        var itemCode = ${JSON.stringify(String(line.item_code))};
+        var qtyParts = ${JSON.stringify(qtyParts)};
+        var rate = ${Number(line.rate) || 0};
+        var title = ${JSON.stringify(title)};
+        var company = ${JSON.stringify(company || "")};
+
+        var soDoc = await frappe.db.get_doc("Sales Order", sos[0]);
+        if (!soDoc) return { ok: false, reason: "Sales Order not found." };
+        var co = company || soDoc.company;
+        if (!co) return { ok: false, reason: "Company missing." };
+
+        var today = frappe.datetime.get_today();
+        var sched = frappe.datetime.add_days(today, 7);
+        var po = frappe.model.get_new_doc("Purchase Order");
+        po.supplier = supplier;
+        po.company = co;
+        po.transaction_date = today;
+        po.schedule_date = sched;
+        po.title = title;
+        if (soDoc.customer) {
+          po.customer = soDoc.customer;
+          po.customer_name = soDoc.customer_name || soDoc.customer;
+        }
+        for (var si = 0; si < sos.length; si++) {
+          var child = frappe.model.add_child(po, "items");
+          child.item_code = itemCode;
+          child.qty = qtyParts[si] || 1;
+          child.schedule_date = sched;
+          child.sales_order = sos[si];
+          if (rate) child.rate = rate;
+        }
+        if (!po.items || !po.items.length) {
+          return { ok: false, reason: "Could not build PO lines." };
+        }
+        var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
+        var saved = inserted && inserted.message ? inserted.message : null;
+        if (!saved || !saved.name) {
+          return { ok: false, reason: "Could not create bridge Purchase Order." };
+        }
+        var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        var finalDoc = submitted && submitted.message ? submitted.message : saved;
+        return { ok: true, poName: finalDoc.name, title: finalDoc.title || title };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })()`);
+    if (bridge && bridge.ok && bridge.poName) {
+      bridgePo = bridge.poName;
+      const linkPo = await bridgeCall("setRow", ri, "purchase_order", bridgePo);
+      if (linkPo && linkPo.ok) {
+        dirtyState = markUserEdited({ ...dirtyState, doc: linkPo.doc, isDirty: true });
+      }
+    }
+  }
+
+  setBillLineAllocation(ri, {
+    customer,
+    customerName,
+    salesOrders,
+    bridgePo,
+  });
+  dirtyState = markUserEdited(dirtyState);
+
+  const snap = await snapshotBill();
+  return {
+    ok: true,
+    doc: snap.doc || dirtyState.doc,
+    lineAllocations: snap.lineAllocations || getBillLineAllocations(),
+    poLineMeta: snap.poLineMeta || getBillPoLineMeta(),
+    bridgePo: bridgePo || undefined,
+    amountDue: amountDueScratch,
+    linkedPos: snap.linkedPos || [],
+    userEdited: !!dirtyState.userEdited,
+    isNew: !!dirtyState.isNew,
+  };
 });
 
 ipcMain.handle("bill-set-item", async (_e, rowIndex, field, value) =>
@@ -3072,6 +4687,10 @@ ipcMain.on("bill-open-vanilla", () => {
 
 ipcMain.on("bill-open-vendor-add", () => {
   showErp("/app/supplier/new", { forceLoad: true });
+});
+
+ipcMain.on("bill-open-project-add", () => {
+  showErp("/app/project/new", { forceLoad: true });
 });
 
 ipcMain.on("bill-focus-surface", () => {
@@ -3772,6 +5391,7 @@ ipcMain.on("doc-resolve-nav-gate", (_e, token, proceed) => {
 ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());
+ipcMain.on("soft-peek-esc", () => dismissSoftPeekFromEsc());
 ipcMain.on("open-vanilla-skin", () => {
   // From Home (or no form in focus): always Vanilla Desk — do not reuse last form URL.
   // forceLoad required: erp WebContents often already has a prior page; without it
@@ -3793,7 +5413,11 @@ ipcMain.on("open-vanilla-skin", () => {
 ipcMain.on("open-entry", (_e, doctypeKey) => openEntry(doctypeKey));
 ipcMain.on("open-erp", (_e, route) => {
   const r = typeof route === "string" && route ? route : "/desk";
-  openRoutePreferred(r, { forceLoad: r !== "/desk" });
+  navDebug("ipc-open-erp", r);
+  openHistoryRoute(r);
+});
+ipcMain.on("nav-debug", (_e, event, detail) => {
+  navDebug(event || "hist", detail != null ? String(detail) : "");
 });
 ipcMain.on("open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);

@@ -6,6 +6,11 @@ import {
   formatSourceMoney,
   enrichReceiptsWithPurchaseOrders,
   sourceItemFromRow,
+  sourceItemKey,
+  toggleSourceSelection,
+  resolveSourcesToCommit,
+  combineMappedBillSources,
+  sourceModalKeyAction,
 } from "../src/source-modal.js";
 
 describe("buildBillSourceGroups", () => {
@@ -31,6 +36,22 @@ describe("buildBillSourceGroups", () => {
     assert.equal(formatSourceMoney(null), "");
   });
 
+  it("shows PO ERP name and logbook title on submitted rows", () => {
+    const item = sourceItemFromRow(
+      {
+        name: "PUR-ORD-2026-0001",
+        title: "TO0001",
+        transaction_date: "2026-08-01",
+        grand_total: 12.5,
+      },
+      "po",
+      false,
+    );
+    assert.match(item.label, /PUR-ORD-2026-0001/);
+    assert.match(item.label, /TO0001/);
+    assert.match(item.label, /12\.50/);
+  });
+
   it("shows PO number on Item Receipt rows", () => {
     const prs = enrichReceiptsWithPurchaseOrders(
       [{ name: "PR-1", posting_date: "2019-02-01", grand_total: 50 }],
@@ -51,5 +72,66 @@ describe("buildBillSourceGroups", () => {
       false,
     );
     assert.match(item.label, /no PO/);
+  });
+});
+
+describe("source multi-select", () => {
+  const groups = buildBillSourceGroups({
+    purchaseOrders: [
+      { name: "PO-A", transaction_date: "2026-01-01", grand_total: 1 },
+      { name: "PO-B", transaction_date: "2026-01-02", grand_total: 2 },
+    ],
+    purchaseReceipts: [{ name: "PR-1", posting_date: "2026-01-03", grand_total: 3 }],
+  });
+
+  it("keys NIC and documents", () => {
+    assert.equal(sourceItemKey({ kind: "nic" }), "nic");
+    assert.equal(sourceItemKey({ kind: "po", name: "PO-A" }), "po:PO-A");
+  });
+
+  it("Space toggles; NIC is exclusive", () => {
+    let sel = toggleSourceSelection([], { kind: "po", name: "PO-A" });
+    assert.deepEqual(sel, ["po:PO-A"]);
+    sel = toggleSourceSelection(sel, { kind: "po", name: "PO-B" });
+    assert.deepEqual(sel.sort(), ["po:PO-A", "po:PO-B"].sort());
+    sel = toggleSourceSelection(sel, { kind: "nic", label: "NIC" });
+    assert.deepEqual(sel, ["nic"]);
+    sel = toggleSourceSelection(sel, { kind: "po", name: "PO-A" });
+    assert.deepEqual(sel, ["po:PO-A"]);
+  });
+
+  it("Enter with checks merges those; without checks uses active", () => {
+    const multi = resolveSourcesToCommit(groups, ["po:PO-A", "po:PO-B"], {
+      kind: "pr",
+      name: "PR-1",
+    });
+    assert.equal(multi.mode, "merge");
+    assert.deepEqual(
+      multi.items.map((i) => i.name),
+      ["PO-A", "PO-B"],
+    );
+    const single = resolveSourcesToCommit(groups, [], { kind: "po", name: "PO-B" });
+    assert.equal(single.mode, "merge");
+    assert.equal(single.items[0].name, "PO-B");
+    const nic = resolveSourcesToCommit(groups, ["nic"], { kind: "po", name: "PO-A" });
+    assert.equal(nic.mode, "nic");
+  });
+
+  it("combineMappedBillSources concatenates items", () => {
+    const c = combineMappedBillSources([
+      { bill_no: "A", items: [{ item_code: "1" }] },
+      { bill_no: "B", items: [{ item_code: "2" }, { item_code: "3" }] },
+    ]);
+    assert.equal(c.bill_no, "A");
+    assert.deepEqual(
+      c.items.map((i) => i.item_code),
+      ["1", "2", "3"],
+    );
+  });
+
+  it("sourceModalKeyAction maps Space / Enter", () => {
+    assert.equal(sourceModalKeyAction(" "), "toggle");
+    assert.equal(sourceModalKeyAction("Enter"), "finalize");
+    assert.equal(sourceModalKeyAction("Escape"), "cancel");
   });
 });

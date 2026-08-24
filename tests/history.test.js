@@ -36,8 +36,9 @@ describe("pushHistory", () => {
     h = pushHistory(h, "/desk/purchase-invoice/C");
     assert.equal(h.length, 2);
     assert.equal(h[0].dt, "purchase-invoice");
-    assert.equal(h[0].route, "/desk/purchase-invoice/C");
+    assert.equal(h[0].route, "/app/purchase-invoice/C");
     assert.equal(h[1].dt, "sales-order");
+    assert.equal(h[1].route, "/app/sales-order/B");
   });
 
   it("uses label map when provided", () => {
@@ -46,6 +47,7 @@ describe("pushHistory", () => {
     });
     assert.equal(h[0].label, "Bill");
     assert.equal(h[0].detail, "x");
+    assert.equal(h[0].route, "/app/purchase-invoice/x");
   });
 
   it("keeps Bill full emphasis with muted viewed-draft detail", () => {
