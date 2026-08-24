@@ -78,4 +78,27 @@ describe("doc-action-flow", () => {
       ["ship_from", "ship_to"],
     );
   });
+
+  it("splitHeaderColumns respects explicit column (billing in left)", () => {
+    const parted = splitHeaderColumns([
+      { label: "Vendor", column: "left" },
+      { label: "Billing", addressRole: "billing", column: "left" },
+      { label: "Terms", column: "left" },
+      { label: "Due", column: "left" },
+      { label: "Date", column: "right" },
+      { label: "Ship from", addressRole: "ship_from", column: "addresses" },
+    ]);
+    assert.deepEqual(
+      parted.left.map((x) => x.label),
+      ["Vendor", "Billing", "Terms", "Due"],
+    );
+    assert.deepEqual(
+      parted.right.map((x) => x.label),
+      ["Date"],
+    );
+    assert.deepEqual(
+      parted.addresses.map((x) => x.addressRole),
+      ["ship_from"],
+    );
+  });
 });

@@ -135,7 +135,9 @@ export function focusTargetAfterDocSourceModal(profileId, closeKind) {
 
 /**
  * Split header fields into two columns (museum-style card layout).
- * Address blocks (`addressRole`) are excluded — mount them in a full-width grid.
+ * When any field sets `column` ("left"|"right"|"addresses"), use that placement
+ * (billing may sit in a header column). Otherwise peel `addressRole` to addresses
+ * and mid-split the rest.
  *
  * @template T
  * @param {T[]} fields
@@ -143,6 +145,32 @@ export function focusTargetAfterDocSourceModal(profileId, closeKind) {
  */
 export function splitHeaderColumns(fields) {
   const list = Array.isArray(fields) ? fields : [];
+  const hasExplicit = list.some(
+    (f) =>
+      f &&
+      typeof f === "object" &&
+      typeof /** @type {{ column?: string }} */ (f).column === "string",
+  );
+  if (hasExplicit) {
+    /** @type {T[]} */
+    const left = [];
+    /** @type {T[]} */
+    const right = [];
+    /** @type {T[]} */
+    const addresses = [];
+    for (const f of list) {
+      if (!f || typeof f !== "object") continue;
+      const col = /** @type {{ column?: string, addressRole?: string }} */ (f).column;
+      if (col === "left") left.push(f);
+      else if (col === "right") right.push(f);
+      else if (col === "addresses" || /** @type {{ addressRole?: string }} */ (f).addressRole) {
+        addresses.push(f);
+      } else {
+        left.push(f);
+      }
+    }
+    return { left, right, addresses };
+  }
   /** @type {T[]} */
   const addresses = [];
   /** @type {T[]} */

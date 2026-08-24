@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Navigation issue</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%; background: #1a252f; color: #e2e8f0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif; font-size: 13px; line-height: 1.4;
+      overflow: hidden;
+    }
+    .wrap { padding: 14px 16px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 8px; }
+    h3 {
+      margin: 0; font-size: 12px; letter-spacing: .4px; text-transform: uppercase; color: #fbbf24;
+    }
+    .lead { margin: 0; color: #cbd5e1; font-size: 12px; }
+    label { font-size: 11px; color: #9fb3c8; letter-spacing: .3px; }
+    textarea {
+      width: 100%; min-height: 120px; resize: vertical; flex: 1;
+      box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid #3d4f63; background: #0f1720; color: #e2e8f0;
+      font-family: inherit; font-size: 13px;
+    }
+    textarea:focus { outline: 2px solid #f59e0b; outline-offset: 1px; }
+    pre {
+      margin: 0; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #9fb3c8;
+      background: #0f1720; border: 1px solid #2c3e50; border-radius: 6px; padding: 8px 10px;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      color: #fff; background: #34495e; border: none; padding: 8px 14px; font-size: 13px;
+      cursor: pointer; border-radius: 6px;
+    }
+    .btn:hover { background: #3d566e; }
+    .btn.ghost { background: transparent; color: #9fb3c8; }
+    .btn.ghost:hover { background: #243140; color: #fff; }
+    .btn.loud { background: #b45309; font-weight: 700; }
+    .btn.loud:hover { background: #c2410c; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .hint { color: #6b8299; font-size: 11px; margin: 0; }
+    .ok { color: #86efac; font-size: 12px; }
+    .path { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cbd5e1; word-break: break-all; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h3>Navigation issue</h3>
+    <p class="lead" id="lead">Describe what went wrong and what you expected. The snapshot below is frozen from the moment you clicked — keep typing even if the page changes.</p>
+    <label for="note">What happened (required)</label>
+    <textarea id="note" maxlength="4000" placeholder="e.g. I was on a Bill, opened Tax Category from Recent, Esc did not bring the Bill back. I expected the parked Bill."></textarea>
+    <label>Frozen snapshot (written with your note)</label>
+    <pre id="snap">Loading…</pre>
+    <p class="hint" id="hint"></p>
+    <p class="ok" id="saved" hidden></p>
+    <p class="path" id="path" hidden></p>
+    <div class="row">
+      <button type="button" class="btn loud" id="btn-submit">Log this</button>
+      <button type="button" class="btn ghost" id="btn-cancel">Cancel</button>
+    </div>
+  </div>
+  <script>
+    const api = window.erpNavIncident;
+    const noteEl = document.getElementById("note");
+    const snapEl = document.getElementById("snap");
+    const hintEl = document.getElementById("hint");
+    const savedEl = document.getElementById("saved");
+    const pathEl = document.getElementById("path");
+    const submitBtn = document.getElementById("btn-submit");
+    const cancelBtn = document.getElementById("btn-cancel");
+    const leadEl = document.getElementById("lead");
+    let noteMax = 4000;
+    let done = false;
+
+    function apply(data) {
+      if (!data) return;
+      if (data.noteMax) {
+        noteMax = data.noteMax;
+        noteEl.maxLength = data.noteMax;
+      }
+      snapEl.textContent = (data.contextLines || []).join("\n") || "(empty snapshot)";
+      if (data.logPath) hintEl.textContent = "Saves to " + data.logPath;
+    }
+
+    function syncSubmit() {
+      submitBtn.disabled = done || !noteEl.value.trim();
+    }
+
+    noteEl.addEventListener("input", syncSubmit);
+
+    submitBtn.onclick = async () => {
+      if (!api || !api.submit) return;
+      const note = noteEl.value;
+      if (!note.trim()) return;
+      submitBtn.disabled = true;
+      const res = await api.submit(note);
+      if (!res || !res.ok) {
+        hintEl.textContent = (res && res.reason) || "Could not write the log.";
+        submitBtn.disabled = false;
+        return;
+      }
+      done = true;
+      noteEl.disabled = true;
+      leadEl.textContent = "Logged. Leave this note in the log — no need to re-describe it in chat.";
+      savedEl.hidden = false;
+      savedEl.textContent = "Saved.";
+      pathEl.hidden = false;
+      pathEl.textContent = res.path || "";
+      submitBtn.hidden = true;
+      cancelBtn.textContent = "Close";
+    };
+
+    cancelBtn.onclick = () => api && api.close && api.close();
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && api) api.close();
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !submitBtn.disabled && !submitBtn.hidden) {
+        e.preventDefault();
+        submitBtn.click();
+      }
+    });
+
+    if (api) {
+      api.onData(apply);
+      api.ready();
+    }
+    syncSubmit();
+    noteEl.focus();
+  </script>
+</body>
+</html>

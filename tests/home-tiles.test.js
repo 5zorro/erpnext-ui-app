@@ -19,6 +19,18 @@ describe("HOME_GROUPS", () => {
     assert.ok(ids.has("desk"));
   });
 
+  it("uses /app/… for ERP tiles (OI-118); /desk root only for Vanilla Desk", () => {
+    for (const t of flattenHomeTiles()) {
+      if (t.disabled) continue;
+      if (t.id === "desk") {
+        assert.equal(t.route, "/desk");
+        continue;
+      }
+      if (t.route === "/" || t.route === "/login") continue;
+      assert.ok(t.route.startsWith("/app/"), `${t.id} → ${t.route}`);
+    }
+  });
+
   it("HOME_TILES matches flatten", () => {
     assert.equal(HOME_TILES.length, flattenHomeTiles().length);
   });

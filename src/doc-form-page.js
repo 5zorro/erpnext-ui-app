@@ -28,6 +28,7 @@ import {
 } from "./money.js";
 import {
   linkOptionLabel,
+  linkOptionClassNames,
   withEmptySearchActions,
   isCreateSupplierLinkAction,
 } from "./link-search.js";
@@ -36,8 +37,24 @@ import {
   nextLinkHighlightIndex,
   resolveLinkPickIndex,
   linkPickerKeyAction,
-  nextFieldAfterLinkPick,
+  nextItemFocusAfterEdit,
+  itemNavFieldsFromCols,
+  scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
+import {
+  CELL_MODE_EDIT,
+  CELL_MODE_NAV,
+  itemTableKeyDecision,
+  neighborItemCell,
+  shouldLeaveItemTableBackward,
+} from "./item-table-nav.js";
+import {
+  emptyItemRowCleanupAction,
+  isEmptyItemCode,
+  lastItemRowToast,
+  shouldBlockDeleteLastItemRow,
+} from "./bill-item-guard.js";
+import { sortDocItemRowModels, sortableHeadersFromCols } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick } from "./bill-source-flow.js";
 import {
   valuesMeaningfullyEqual,
@@ -87,6 +104,10 @@ import { createFieldCalcUi } from "./calc/attach-field-calc.js";
 import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
 import { addressTextareaRows } from "./address-format.js";
+import {
+  applyDocWashToDocument,
+  setWashSourceAttr,
+} from "./doc-wash.js";
 
 const api = window.erpDoc;
 
@@ -109,6 +130,13 @@ let metaPreflightSeq = 0;
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
 let sourceModalOpen = false;
+/** Suppress blur cleanup while Tab/arrow handlers are mid-flight. */
+let itemTabGuard = false;
+/** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
+let itemCellMode = CELL_MODE_EDIT;
+/** @type {{ key: string, asc: boolean }} */
+let itemSort = { key: "lineNo", asc: true };
+let itemsHeadWired = false;
 /** @type {Record<string, HTMLInputElement|HTMLTextAreaElement>} */
 const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
@@ -589,7 +617,10 @@ function mountLinkPicker(input, doctype, onPicked) {
   function setHi(i) {
     opts.forEach((b) => b.classList.remove("active"));
     hi = i;
-    if (hi >= 0 && opts[hi]) opts[hi].classList.add("active");
+    if (hi >= 0 && opts[hi]) {
+      opts[hi].classList.add("active");
+      scrollLinkOptionIntoView(opts[hi]);
+    }
   }
 
   async function pickValue(v) {
@@ -633,12 +664,15 @@ function mountLinkPicker(input, doctype, onPicked) {
     dd.innerHTML = rows
       .map(
         (o) =>
-          `<button type="button" class="link-opt${isCreateSupplierLinkAction(o) ? " link-action" : ""}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
+          `<button type="button" class="${linkOptionClassNames(o)}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
       )
       .join("");
     opts = [...dd.querySelectorAll(".link-opt")];
     hi = initialLinkHighlightIndex(opts.length);
-    if (hi === 0) opts[0].classList.add("active");
+    if (hi === 0) {
+      opts[0].classList.add("active");
+      scrollLinkOptionIntoView(opts[0]);
+    }
     opts.forEach((b) => {
       b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
     });
@@ -693,13 +727,18 @@ function mountLinkPicker(input, doctype, onPicked) {
   });
 }
 
-function focusItemCell(rowIndex, field) {
+function focusItemCell(rowIndex, field, opts = {}) {
+  const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+  itemCellMode = mode;
+  const wantSelect =
+    opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
   const tryFocus = () => {
     const inp = el.items.querySelector(`input[data-row="${rowIndex}"][data-field="${field}"]`);
     if (!inp) return false;
     try {
+      if (mode === CELL_MODE_NAV) inp.dataset.navFocus = "1";
       inp.focus({ preventScroll: false });
-      if (typeof inp.select === "function") inp.select();
+      if (wantSelect && typeof inp.select === "function") inp.select();
     } catch {
       try {
         inp.focus();
@@ -714,6 +753,53 @@ function focusItemCell(rowIndex, field) {
     tryFocus();
     setTimeout(tryFocus, 50);
   });
+}
+
+function isItemLinkDropdownOpen(inp) {
+  const wrap = inp && inp.closest ? inp.closest(".link-wrap") : null;
+  if (!wrap) return false;
+  const dd = wrap.querySelector(".link-dd");
+  return !!(dd && !dd.hidden);
+}
+
+function showToast(text) {
+  setStatus(text, "warn");
+}
+
+/**
+ * Vanilla requires ≥1 item — seed a blank line when the grid is empty.
+ * @param {object|null|undefined} doc
+ */
+async function ensureAtLeastOneItemRow(doc) {
+  if (!api || !editable() || painting) return;
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  if (items.length > 0) return;
+  const res = await api.addItem();
+  if (res && res.ok) {
+    noteUserEdit();
+    paint(res.doc, res.scratch || scratch);
+  }
+}
+
+/**
+ * Remove blank Item rows when the clerk dismisses the picker / leaves the cell.
+ * @param {number} rowIndex
+ * @param {string} itemCode
+ */
+async function cleanupEmptyItemRow(rowIndex, itemCode) {
+  if (!api || !editable() || painting || itemTabGuard) return;
+  const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+  const decision = emptyItemRowCleanupAction(rowCount, itemCode);
+  if (decision.action !== "delete") return;
+  setStatus("Removing empty line…");
+  const removed = await api.deleteItem(rowIndex);
+  if (removed && removed.ok) {
+    noteUserEdit();
+    paint(removed.doc, removed.scratch || scratch);
+    setStatus("Empty line removed.");
+  } else if (removed && removed.blockedLastRow) {
+    showToast(removed.reason || lastItemRowToast(docTitle()));
+  }
 }
 
 function focusHeaderField(fieldName) {
@@ -732,6 +818,112 @@ function focusHeaderField(fieldName) {
   }
 }
 
+/**
+ * After paint rebuilds inputs, put keyboard focus back where the clerk was headed
+ * (fixes Tab-away from PO# logbook / header fields losing focus).
+ * @returns {{ field: string|null, row: string|null, scratch: string|null }|null}
+ */
+function captureFocusAnchor() {
+  const a = document.activeElement;
+  if (!a || typeof a.getAttribute !== "function") return null;
+  return {
+    field: a.getAttribute("data-field"),
+    row: a.getAttribute("data-row"),
+    scratch: a.dataset ? a.dataset.scratch || null : null,
+  };
+}
+
+/**
+ * @param {{ field: string|null, row: string|null, scratch: string|null }|null|undefined} anchor
+ */
+function restoreFocusAnchor(anchor) {
+  if (!anchor) return;
+  if (anchor.row != null && anchor.field) {
+    focusItemCell(Number(anchor.row), anchor.field, { mode: CELL_MODE_NAV });
+    return;
+  }
+  if (anchor.scratch === "dateExpected") {
+    const inp = document.getElementById("f-date-expected");
+    if (inp) {
+      try {
+        inp.focus({ preventScroll: false });
+        if (typeof inp.select === "function") inp.select();
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+  if (anchor.field) focusHeaderField(anchor.field);
+}
+
+/** Shift+Tab out of the items grid → last editable header (PO# logbook on PO). */
+function focusLastHeaderBeforeItems() {
+  const prefer = ["title", "lr_no", "transaction_date", "posting_date", "supplier"];
+  for (const f of prefer) {
+    const inp = document.querySelector(
+      `input[data-field="${f}"]:not([readonly]), textarea[data-field="${f}"]:not([readonly])`,
+    );
+    if (inp && /** @type {HTMLElement} */ (inp).tabIndex !== -1) {
+      focusHeaderField(f);
+      return true;
+    }
+  }
+  const labels = Object.keys(headerInputs);
+  for (let i = labels.length - 1; i >= 0; i--) {
+    const inp = headerInputs[labels[i]];
+    if (!inp || inp.readOnly || inp.tabIndex === -1) continue;
+    try {
+      inp.focus({ preventScroll: false });
+      if (typeof inp.select === "function") inp.select();
+      return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
+
+function paintItemsHead() {
+  if (!el.itemsHead || !ui) return;
+  const headers = sortableHeadersFromCols(ui.itemCols);
+  if (!headers.length) {
+    el.itemsHead.innerHTML =
+      ui.itemCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
+    return;
+  }
+  el.itemsHead.innerHTML =
+    headers
+      .map((h) => {
+        const active = itemSort.key === h.sortKey;
+        const arrow = active ? (itemSort.asc ? " ▲" : " ▼") : "";
+        const title =
+          h.sortKey === "lineNo"
+            ? "Sort by Purchase Order line number"
+            : `Sort by ${h.label}`;
+        return `<th class="sortable${active ? " sorted" : ""}" data-sort="${escapeHtml(h.sortKey)}" title="${escapeHtml(title)}">${escapeHtml(h.label)}${arrow}</th>`;
+      })
+      .join("") + "<th></th>";
+  if (!itemsHeadWired) {
+    itemsHeadWired = true;
+    el.itemsHead.addEventListener("click", (ev) => {
+      const th = /** @type {HTMLElement|null} */ (
+        /** @type {HTMLElement} */ (ev.target).closest("th[data-sort]")
+      );
+      if (!th) return;
+      const key = th.getAttribute("data-sort");
+      if (!key) return;
+      if (itemSort.key === key) itemSort.asc = !itemSort.asc;
+      else {
+        itemSort.key = key;
+        itemSort.asc = true;
+      }
+      paintItemsHead();
+      if (lastDoc) paintItems(lastDoc);
+    });
+  }
+}
+
 function buildLineTotalsFoot(cols) {
   if (!el.lineTotals) return;
   const qtyIdx = cols.findIndex((c) => c.field === "qty");
@@ -747,7 +939,7 @@ function buildLineTotalsFoot(cols) {
     if (i === totalsLayout.qtyIdx) {
       cells.push(`<td class="tot-cell">
         <span class="tot-label">Σ Qty</span><b id="tot-qty">0</b>
-        <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="doc-clear-qty"
+        <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="doc-clear-qty" tabindex="-1"
           title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
       </td>`);
     } else if (i === totalsLayout.amtIdx) {
@@ -919,19 +1111,33 @@ function paintTaxes(doc) {
 
 function paintItems(doc) {
   if (!ui) return;
+  paintItemsHead();
   const cols = ui.itemCols;
-  const rows = mapHelpers().readItemRows(doc);
+  const navFields = itemNavFieldsFromCols(cols);
+  const models = sortDocItemRowModels(
+    doc,
+    cols,
+    (d) => mapHelpers().readItemRows(d),
+    itemSort.key,
+    itemSort.asc,
+  );
   const canEdit = editable();
-  el.items.innerHTML = rows
-    .map((r, ri) => {
+  el.items.innerHTML = models
+    .map((model) => {
+      const ri = model.rowIndex;
+      const r = model.cells;
       const cells = cols
         .map((col, ci) => {
           const val = r[ci] ?? "";
           if (col.displayOnly || col.field == null) {
+            const isLine = col.sortKey === "lineNo" || col.field === "__line_no";
             const isAmount = /^amount$/i.test(col.label || "");
             const html = isAmount || /rec'd|received/i.test(col.label || "")
               ? formatUsdAmountHtml(val)
               : "";
+            if (isLine) {
+              return `<td class="num line-meta"><span class="ro" title="Purchase Order line number">${escapeHtml(val) || "—"}</span></td>`;
+            }
             if (isAmount && canEdit) {
               return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Rate)" data-testid="doc-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
             }
@@ -960,7 +1166,7 @@ function paintItems(doc) {
         })
         .join("");
       const del = canEdit
-        ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="doc-del-${ri}">×</button></td>`
+        ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" tabindex="-1" data-testid="doc-del-${ri}">×</button></td>`
         : `<td></td>`;
       return `<tr data-rowidx="${ri}">${cells}${del}</tr>`;
     })
@@ -972,7 +1178,80 @@ function paintItems(doc) {
     const field = inp.getAttribute("data-field");
     const ri = Number(inp.getAttribute("data-row"));
     const linkDt = linkDoctypeForDocField(field, ui.headerFields, ui.itemCols);
-    const apply = async (value) => {
+    const readCellValue = () => {
+      const kind = dirtyCompareKindForField(field);
+      let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
+      if (field === "rate") {
+        const n = parseMoney(inp.value);
+        next = n == null ? "" : String(n);
+      }
+      if (inp.dataset.date === "1") {
+        const raw = filterDateInputValue(inp.value).trim();
+        if (!raw) return "";
+        const parsed = parseDocDate(raw);
+        if (parsed.ok) return parsed.iso;
+      }
+      return next;
+    };
+    const focusAfterItemEdit = async (docAfter, cellValue) => {
+      const rowCount =
+        docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
+      const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
+        cellValue,
+        fields: navFields,
+      });
+      if (dest.deleteRow && dest.leaveTable) {
+        if (!api || !editable()) return;
+        const rowCountNow =
+          lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+        if (shouldBlockDeleteLastItemRow(rowCountNow)) {
+          showToast(lastItemRowToast(docTitle()));
+          try {
+            if (el.addLine && !el.addLine.disabled) el.addLine.focus();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        setStatus("Removing empty line…");
+        const removed = await api.deleteItem(ri);
+        if (removed && removed.ok) {
+          noteUserEdit();
+          paint(removed.doc, removed.scratch || scratch);
+          setStatus("Left items table.");
+          try {
+            if (el.addLine && !el.addLine.disabled) el.addLine.focus();
+          } catch {
+            /* ignore */
+          }
+        } else if (removed && removed.blockedLastRow) {
+          showToast(removed.reason || lastItemRowToast(docTitle()));
+        } else {
+          setStatus((removed && removed.reason) || "Could not remove empty line.", "err");
+        }
+        return;
+      }
+      if (dest.field) {
+        focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+        return;
+      }
+      if (!dest.addRow || !api || !editable()) return;
+      setStatus("Adding line…");
+      const added = await api.addItem();
+      if (added && added.ok) {
+        noteUserEdit();
+        paint(added.doc, added.scratch || scratch);
+        const newRi =
+          added.doc && Array.isArray(added.doc.items)
+            ? added.doc.items.length - 1
+            : ri + 1;
+        focusItemCell(Math.max(0, newRi), "item_code", { mode: CELL_MODE_NAV });
+        setStatus("Line added.");
+      } else {
+        setStatus((added && added.reason) || "Add line failed.", "err");
+      }
+    };
+    const apply = async (value, opts = {}) => {
       if (!api || painting) return;
       const run = async () => {
         setStatus(`Updating ${field}…`);
@@ -982,8 +1261,13 @@ function paintItems(doc) {
           if (res.scratch) scratch = res.scratch;
           paint(res.doc, res.scratch || scratch);
           setStatus("Line updated.");
-          const nextField = nextFieldAfterLinkPick(field);
-          if (nextField) focusItemCell(ri, nextField);
+          if (opts.focus && opts.focus.field) {
+            focusItemCell(opts.focus.rowIndex, opts.focus.field, {
+              mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
+            });
+          } else if (!opts.stay) {
+            await focusAfterItemEdit(res.doc, value);
+          }
         } else {
           setStatus((res && res.reason) || "Line update failed.", "err");
           await refresh();
@@ -1001,6 +1285,26 @@ function paintItems(doc) {
     }
     if (inp.dataset.date === "1") {
       wireDateField(inp);
+    }
+    inp.addEventListener("focus", () => {
+      if (inp.dataset.navFocus === "1") {
+        itemCellMode = CELL_MODE_NAV;
+        delete inp.dataset.navFocus;
+      } else {
+        itemCellMode = CELL_MODE_EDIT;
+      }
+    });
+    if (field === "item_code") {
+      inp.addEventListener("blur", () => {
+        window.setTimeout(() => {
+          if (!editable() || painting || itemTabGuard) return;
+          const wrap = inp.closest(".link-wrap");
+          if (wrap && wrap.contains(document.activeElement)) return;
+          const code = normalizeEditableText(inp.value);
+          if (!isEmptyItemCode(code)) return;
+          void cleanupEmptyItemRow(ri, code);
+        }, 180);
+      });
     }
     if (field === "rate") {
       inp.addEventListener("focus", () => {
@@ -1031,14 +1335,143 @@ function paintItems(doc) {
         },
       });
     }
+    inp.addEventListener("keydown", (ev) => {
+      if (!editable() || painting) return;
+      const calcActive =
+        calcUi.getState().mode === "active" && calcUi.getInput() === inp;
+      const decision = itemTableKeyDecision({
+        mode: itemCellMode,
+        key: ev.key,
+        shiftKey: !!ev.shiftKey,
+        ctrlKey: !!ev.ctrlKey,
+        metaKey: !!ev.metaKey,
+        altKey: !!ev.altKey,
+        selectionStart: inp.selectionStart,
+        selectionEnd: inp.selectionEnd,
+        valueLength: String(inp.value ?? "").length,
+        linkDropdownOpen: isItemLinkDropdownOpen(inp),
+        calcActive,
+      });
+
+      if (decision.action === "leave_edit") {
+        if (decision.preventDefault) ev.preventDefault();
+        itemCellMode = CELL_MODE_NAV;
+        try {
+          if (typeof inp.select === "function") inp.select();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
+      if (decision.action === "enter_edit") {
+        itemCellMode = CELL_MODE_EDIT;
+        if (ev.key === "F2") {
+          ev.preventDefault();
+          try {
+            const len = String(inp.value ?? "").length;
+            inp.setSelectionRange(len, len);
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+
+      if (decision.action === "passthrough") {
+        if (ev.key !== "Tab" || ev.shiftKey) return;
+      } else if (decision.preventDefault) {
+        ev.preventDefault();
+      }
+
+      if (
+        decision.action === "move" ||
+        decision.action === "leave_edit_move" ||
+        (decision.action === "tab" && decision.direction === "left")
+      ) {
+        itemCellMode = CELL_MODE_NAV;
+        itemTabGuard = true;
+        void (async () => {
+          try {
+            const next = readCellValue();
+            const rowCount =
+              lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+            const dest = neighborItemCell(
+              field,
+              ri,
+              rowCount,
+              decision.direction || "left",
+              navFields,
+            );
+            const prev =
+              (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
+              "";
+            const kind = dirtyCompareKindForField(field);
+            const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
+            if (!dest) {
+              if (dirty) await apply(next, { stay: true });
+              if (shouldLeaveItemTableBackward(dest, decision.direction)) {
+                focusLastHeaderBeforeItems();
+              }
+              return;
+            }
+            if (dirty) {
+              await apply(next, {
+                focus: {
+                  rowIndex: dest.rowIndex,
+                  field: dest.field,
+                  mode: CELL_MODE_NAV,
+                },
+              });
+            } else {
+              focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+            }
+          } finally {
+            itemTabGuard = false;
+          }
+        })();
+        return;
+      }
+
+      if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
+      ev.preventDefault();
+      itemCellMode = CELL_MODE_NAV;
+      itemTabGuard = true;
+      void (async () => {
+        try {
+          const next = readCellValue();
+          const rowCount =
+            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+          const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
+            cellValue: next,
+            fields: navFields,
+          });
+          if (dest.deleteRow && dest.leaveTable) {
+            await focusAfterItemEdit(lastDoc, next);
+            return;
+          }
+          const prev =
+            (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
+            "";
+          const kind = dirtyCompareKindForField(field);
+          if (!valuesMeaningfullyEqual(prev, next, { kind })) {
+            await apply(next);
+          } else if (dest.field) {
+            focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
+          } else if (dest.addRow) {
+            await focusAfterItemEdit(lastDoc, next);
+          }
+        } finally {
+          itemTabGuard = false;
+        }
+      })();
+    });
     inp.addEventListener("change", async () => {
-      if (!api || painting) return;
+      if (!api || painting || itemTabGuard) return;
       if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-      const kind = dirtyCompareKindForField(field);
-      let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
+      let next = readCellValue();
       if (field === "rate") {
         const n = parseMoney(inp.value);
-        next = n == null ? "" : String(n);
         if (n != null) inp.value = formatGroupedNumber(n);
       }
       if (inp.dataset.date === "1") {
@@ -1061,6 +1494,7 @@ function paintItems(doc) {
         inp.value = parsed.display;
       }
       const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
+      const kind = dirtyCompareKindForField(field);
       if (valuesMeaningfullyEqual(prev, next, { kind })) {
         if (field === "rate" && parseMoney(prev) != null) {
           inp.value = formatGroupedNumber(prev);
@@ -1078,12 +1512,19 @@ function paintItems(doc) {
     btn.addEventListener("click", async () => {
       if (!api) return;
       const ri = Number(btn.getAttribute("data-del"));
+      const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+      if (shouldBlockDeleteLastItemRow(rowCount)) {
+        showToast(lastItemRowToast(docTitle()));
+        return;
+      }
       setStatus("Removing line…");
       const res = await api.deleteItem(ri);
       if (res && res.ok) {
         noteUserEdit();
         paint(res.doc, res.scratch || scratch);
         setStatus("Line removed.");
+      } else if (res && res.blockedLastRow) {
+        showToast(res.reason || lastItemRowToast(docTitle()));
       } else {
         setStatus((res && res.reason) || "Delete failed.", "err");
       }
@@ -1210,6 +1651,7 @@ function buildHeaderFields(fields) {
     input.tabIndex = -1;
     input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
     if (meta.addressRole) input.dataset.addressRole = meta.addressRole;
+    if (meta.sourceWashRole) setWashSourceAttr(input, meta.sourceWashRole);
     if (multiline) {
       input.rows = 4;
       input.spellcheck = false;
@@ -1646,6 +2088,7 @@ function paint(doc, snapScratch, opts = {}) {
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
   painting = false;
   if (opts.focusVendor && canEdit) focusVendorField();
+  void ensureAtLeastOneItemRow(doc);
 }
 
 async function refresh() {
@@ -1662,6 +2105,7 @@ async function refresh() {
 
 async function onHeaderBlur(input) {
   if (!api || painting || !editable()) return;
+  const focusAnchor = captureFocusAnchor();
 
   if (input.dataset.scratch === "dateExpected") {
     const raw = filterDateInputValue(input.value).trim();
@@ -1692,9 +2136,11 @@ async function onHeaderBlur(input) {
       noteUserEdit();
       scratch = res.scratch || { dateExpected: parsed.iso };
       paint(res.doc || lastDoc, scratch);
+      restoreFocusAnchor(focusAnchor);
     } else {
       setStatus((res && res.reason) || "Date Expected update failed.", "err");
       await refresh();
+      restoreFocusAnchor(focusAnchor);
     }
     return;
   }
@@ -1722,6 +2168,7 @@ async function onHeaderBlur(input) {
     if (res && res.skipped) return;
     if (res && res.ok) noteUserEdit();
     await refresh();
+    restoreFocusAnchor(focusAnchor);
     return;
   }
 
@@ -1756,6 +2203,7 @@ async function onHeaderBlur(input) {
   if (res && res.skipped) return;
   if (res && res.ok) noteUserEdit();
   await refresh();
+  restoreFocusAnchor(focusAnchor);
 }
 
 async function flushDateExpectedFromInput() {
@@ -1896,6 +2344,8 @@ function applyUiConfig(config) {
   ui = config;
   if (!ui) return;
 
+  applyDocWashToDocument(document, { profileId: ui.profileId });
+
   document.title = ui.title;
   if (el.title) el.title.textContent = ui.title;
   if (el.find) el.find.textContent = ui.findLabel;
@@ -1909,10 +2359,9 @@ function applyUiConfig(config) {
 
   buildHeaderFields(ui.headerFields);
 
-  if (el.itemsHead) {
-    el.itemsHead.innerHTML =
-      ui.itemCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
-  }
+  itemSort = { key: "lineNo", asc: true };
+  itemsHeadWired = false;
+  paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
 
   if (el.lineTabs) el.lineTabs.hidden = !ui.features.expensesTab;

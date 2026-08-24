@@ -6,6 +6,7 @@
 import { relabelTerm } from "./doc-terms.js";
 import { stripHtml, sumBillLineQty, sumBillLineAmount, formatBillLineTotal } from "./bill-map.js";
 import { formatAddressDisplay } from "./address-format.js";
+import { formatDocLineNumber } from "./doc-item-sort.js";
 
 export const PO_DOCTYPE = "Purchase Order";
 export const PO_LAYOUT_KEY = "purchase-order";
@@ -14,37 +15,19 @@ export const PO_NEW_ROUTE = "/app/purchase-order/new";
 
 /**
  * Header: Doc label → ERPNext field meta. Date Expected is scratch (stamps line schedule_date).
+ * Layout mirrors Bill (`column`): Vendor + Billing left; dates + identity right; Ship* addresses row.
+ * Identity (OI-121): ERP `name` is read-only; logbook PO# is editable `title`.
  * Address roles (OI-077): Ship from = supplier address (PO has no dispatch_* on many versions);
  * Ship to = shipping; Billing = company billing_address_display when present.
  */
 export const PO_HEADER_FIELDS = [
-  { label: "Vendor", field: "supplier", type: "text", linkDoctype: "Supplier", display: "supplier_name|supplier" },
-  { label: "Date", field: "transaction_date", type: "date" },
   {
-    label: "Date Expected",
-    field: "__date_expected",
-    type: "date",
-    scratch: true,
-    validationHint:
-      "Stamps every line’s Required By (ERP schedule_date). Applied when you leave this field and again before save.",
-  },
-  {
-    label: "Ship from",
-    field: null,
-    type: "textarea",
-    readOnly: true,
-    multiline: true,
-    addressRole: "ship_from",
-    display: "address_display",
-  },
-  {
-    label: "Ship to",
-    field: null,
-    type: "textarea",
-    readOnly: true,
-    multiline: true,
-    addressRole: "ship_to",
-    display: "shipping_address_display",
+    label: "Vendor",
+    field: "supplier",
+    type: "text",
+    linkDoctype: "Supplier",
+    display: "supplier_name|supplier",
+    column: "left",
   },
   {
     label: "Billing address",
@@ -54,8 +37,53 @@ export const PO_HEADER_FIELDS = [
     multiline: true,
     addressRole: "billing",
     display: "billing_address_display",
+    column: "left",
   },
-  { label: "P.O. No.", field: "name", type: "text", readOnly: true },
+  { label: "Date", field: "transaction_date", type: "date", column: "right" },
+  {
+    label: "Date Expected",
+    field: "__date_expected",
+    type: "date",
+    scratch: true,
+    column: "right",
+    validationHint:
+      "Stamps every line’s Required By (ERP schedule_date). Applied when you leave this field and again before save.",
+  },
+  {
+    label: "PO No.",
+    field: "name",
+    type: "text",
+    readOnly: true,
+    column: "right",
+    validationHint: "ERP Purchase Order name (assigned on first save). Not the logbook PO#.",
+  },
+  {
+    label: "PO# (logbook)",
+    field: "title",
+    type: "text",
+    column: "right",
+    validationHint: "Your logbook PO# (ERP title). Editable on drafts — distinct from ERP PO No.",
+  },
+  {
+    label: "Ship from",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_from",
+    display: "address_display",
+    column: "addresses",
+  },
+  {
+    label: "Ship to",
+    field: null,
+    type: "textarea",
+    readOnly: true,
+    multiline: true,
+    addressRole: "ship_to",
+    display: "shipping_address_display",
+    column: "addresses",
+  },
 ];
 
 /** PO SPECS: no memo block. */
@@ -64,19 +92,35 @@ export const PO_MEMO_FIELD = null;
 /**
  * Museum cols + Required By (schedule_date). ERP mandates it per row; Date Expected
  * stamps it, and the column lets clerks see/override (dogfood 2026-07-21).
+ * Leading Line = Purchase Order line number (ERP idx); headers are sortable (display-only).
  */
 export const PO_ITEM_COLS = [
-  { label: "Item", field: "item_code", linkDoctype: "Item" },
-  { label: "Description", field: "description" },
-  { label: "Qty", field: "qty" },
-  { label: "Rate", field: "rate" },
-  { label: "Sales Order", field: "sales_order", linkDoctype: "Sales Order" },
-  { label: "Required By", field: "schedule_date", type: "date" },
-  { label: "Amount", field: null, displayOnly: true },
-  { label: "Rec'd to Date", field: null, displayOnly: true, display: "received_qty" },
+  {
+    label: "Line",
+    field: "__line_no",
+    displayOnly: true,
+    readOnly: true,
+    sortKey: "lineNo",
+  },
+  { label: "Item", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
+  { label: "Description", field: "description", sortKey: "description" },
+  { label: "Qty", field: "qty", sortKey: "qty" },
+  { label: "Rate", field: "rate", sortKey: "rate" },
+  { label: "Sales Order", field: "sales_order", linkDoctype: "Sales Order", sortKey: "sales_order" },
+  { label: "Required By", field: "schedule_date", type: "date", sortKey: "schedule_date" },
+  { label: "Amount", field: null, displayOnly: true, sortKey: "amount" },
+  {
+    label: "Rec'd to Date",
+    field: null,
+    displayOnly: true,
+    display: "received_qty",
+    sortKey: "received_qty",
+  },
 ];
 
-export const PO_ITEM_EDIT_FIELDS = PO_ITEM_COLS.map((c) => c.field).filter(Boolean);
+export const PO_ITEM_EDIT_FIELDS = PO_ITEM_COLS.map((c) => c.field).filter(
+  (f) => typeof f === "string" && f && !f.startsWith("__"),
+);
 
 /**
  * @param {string} field
@@ -230,9 +274,10 @@ export function readPoHeader(doc, scratch = {}) {
  */
 export function readPoItemRows(doc) {
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  return items.map((it) => {
+  return items.map((it, ri) => {
     const row = it || {};
     return [
+      formatDocLineNumber(ri, row),
       row.item_code || "",
       stripHtml(row.description),
       row.qty != null ? row.qty : "",

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("erpHist", {
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
+  navDebug: (event, detail) => ipcRenderer.send("nav-debug", event || "hist", detail || ""),
   openCalcHistory: (anchor) => ipcRenderer.send("open-calc-history", anchor || {}),
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
   onHistory: (cb) => {

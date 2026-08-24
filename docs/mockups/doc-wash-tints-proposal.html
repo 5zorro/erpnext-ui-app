@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" data-pattern="ar">
+<head>
+  <meta charset="utf-8" />
+  <title>Doc wash tints — AP / AR proposal v5</title>
+  <style>
+    :root {
+      --ink: #1f2d3d;
+      --muted: #64748b;
+      --line: #d6dee6;
+      --page: #f7f8fa;
+      --wash-request: #eef6fb;
+      --wash-order: #e8f4fc;
+      --wash-fulfill: #fff4e0;
+      --wash-invoice: #f6eaf2;
+      --wash-payment: #e6f5f0;
+      --accent-request: #0072B2;
+      --accent-order: #56B4E9;
+      --accent-fulfill: #E69F00;
+      --accent-invoice: #CC79A7;
+      --accent-payment: #009E73;
+      --hatch-lighten: repeating-linear-gradient(
+        -32deg,
+        transparent 0,
+        transparent 6px,
+        rgba(255, 255, 255, 0.48) 6px,
+        rgba(255, 255, 255, 0.48) 8px
+      );
+      --stamp-buy: url("assets/buying-stamp.svg?v=5");
+      --stamp-sell: url("assets/selling-stamp.svg?v=5");
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 28px 32px 56px;
+      font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+      color: var(--ink); background: var(--page);
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 6px; }
+    .lede { color: var(--muted); max-width: 64rem; margin: 0 0 18px; }
+    h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 32px 0 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+
+    .card {
+      position: relative;
+      border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      min-height: 118px;
+    }
+    .card .hdr {
+      position: relative; z-index: 1;
+      padding: 10px 12px; font-weight: 650; font-size: 13px;
+      border-bottom: 3px solid transparent;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    }
+    .card .body { position: relative; z-index: 1; padding: 10px 12px 12px; background: rgba(255,255,255,.72); }
+    .chip {
+      font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 999px; background: #fff; border: 1px solid var(--line); color: var(--muted);
+      white-space: nowrap;
+    }
+    .hex { font: 11px ui-monospace, monospace; color: var(--muted); }
+
+    /* Desk identity: Buying/Selling stamp always (not preference). */
+    .desk-ap, .desk-ar { background-color: var(--wash, #fff); }
+    .desk-ap::before,
+    .desk-ar::before {
+      content: "";
+      position: absolute;
+      right: -2%; bottom: -8%;
+      width: 168px; height: 168px;
+      background: var(--stamp-buy) center / contain no-repeat;
+      opacity: 0.78;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .desk-ar::before { background-image: var(--stamp-sell); }
+
+    /*
+      Pattern preference (architecture): html[data-pattern] chooses which desks get hatch.
+      Product: store as user pref (e.g. patternDesks: ['ar'] | ['ap'] | ['ap','ar'] | []).
+      Default in this mock: ar (secondary desk when you live in A/P).
+    */
+    html[data-pattern="ar"] .desk-ar,
+    html[data-pattern="ap"] .desk-ap,
+    html[data-pattern="both"] .desk-ap,
+    html[data-pattern="both"] .desk-ar {
+      background-image: var(--hatch-lighten);
+    }
+    html[data-pattern="ar"] .desk-ar .field input.ro-from-so,
+    html[data-pattern="ar"] .desk-ar .field input.ro-from-dn,
+    html[data-pattern="ar"] .desk-ar .field input.ro-from-qt,
+    html[data-pattern="ap"] .desk-ap .field input.ro-from-po,
+    html[data-pattern="ap"] .desk-ap .field input.ro-from-ir,
+    html[data-pattern="ap"] .desk-ap .field input.ro-from-mr,
+    html[data-pattern="both"] .desk-ar .field input.ro-from-so,
+    html[data-pattern="both"] .desk-ar .field input.ro-from-dn,
+    html[data-pattern="both"] .desk-ar .field input.ro-from-qt,
+    html[data-pattern="both"] .desk-ap .field input.ro-from-po,
+    html[data-pattern="both"] .desk-ap .field input.ro-from-ir,
+    html[data-pattern="both"] .desk-ap .field input.ro-from-mr {
+      background-image: var(--hatch-lighten);
+    }
+
+    .pref {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line);
+      border-radius: 8px; max-width: 52rem; font-size: 13px;
+    }
+    .pref label { color: var(--muted); margin-right: 4px; }
+    .pref button {
+      font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 6px;
+      border: 1px solid var(--line); background: #f8fafc; cursor: pointer; color: var(--ink);
+    }
+    .pref button[aria-pressed="true"] {
+      background: #1f2d3d; color: #fff; border-color: #1f2d3d;
+    }
+
+    .mini-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; align-items: flex-end; }
+    .mini {
+      width: 128px; height: 80px; border-radius: 8px; border: 1px solid var(--line);
+      position: relative; overflow: hidden; padding: 6px; font-size: 11px; font-weight: 600;
+      background-color: var(--wash-invoice);
+    }
+    .mini.ap::before,
+    .mini.ar::before {
+      content: "";
+      position: absolute; right: -4px; bottom: -6px;
+      width: 64px; height: 64px;
+      background: var(--stamp-buy) center / contain no-repeat;
+      opacity: 0.78;
+    }
+    .mini.ar::before { background-image: var(--stamp-sell); }
+    html[data-pattern="ar"] .mini.ar,
+    html[data-pattern="ap"] .mini.ap,
+    html[data-pattern="both"] .mini.ap,
+    html[data-pattern="both"] .mini.ar {
+      background-image: var(--hatch-lighten);
+    }
+
+    .icon-legend {
+      display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+      margin: 10px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+      max-width: 48rem; font-size: 13px; color: var(--muted);
+    }
+    .icon-legend img { width: 40px; height: 40px; vertical-align: middle; background: #e8f4fc; border-radius: 8px; }
+
+    .stamp-explain {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+      max-width: 52rem; margin: 12px 0 0;
+    }
+    @media (max-width: 700px) { .stamp-explain { grid-template-columns: 1fr; } }
+    .stamp-explain .cell {
+      background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+      font-size: 12px; color: var(--muted);
+    }
+    .stamp-explain .preview {
+      height: 72px; border-radius: 8px; margin-bottom: 8px; position: relative; overflow: hidden;
+      background: var(--wash-invoice);
+    }
+    .stamp-explain .preview.with-stamp::before {
+      content: ""; position: absolute; right: 4px; bottom: 0; width: 64px; height: 64px;
+      background: var(--stamp-buy) center / contain no-repeat; opacity: 0.78;
+    }
+    .stamp-explain .preview.old-blob::before {
+      content: ""; position: absolute; right: 4px; bottom: 0; width: 64px; height: 64px;
+      background-color: rgba(255, 255, 255, 0.62);
+      -webkit-mask: url("assets/buying.svg") center / contain no-repeat;
+      mask: url("assets/buying.svg") center / contain no-repeat;
+    }
+
+    table.roles {
+      width: 100%; max-width: 58rem; border-collapse: collapse; font-size: 13px;
+      background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    }
+    table.roles th, table.roles td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.roles th { background: #f1f5f9; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+    .field { margin: 8px 0; display: grid; gap: 3px; }
+    .field label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+    .field input {
+      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 9px; font: inherit; width: 100%; background: #fff;
+    }
+    .field input.ro-from-po,
+    .field input.ro-from-so {
+      background-color: var(--wash-order);
+      border-color: color-mix(in srgb, var(--accent-order) 35%, #cbd5e1);
+    }
+    .field input.ro-from-ir,
+    .field input.ro-from-dn {
+      background-color: var(--wash-fulfill);
+      border-color: color-mix(in srgb, var(--accent-fulfill) 35%, #cbd5e1);
+    }
+    .field input.ro-from-mr,
+    .field input.ro-from-qt {
+      background-color: var(--wash-request);
+      border-color: color-mix(in srgb, var(--accent-request) 35%, #cbd5e1);
+    }
+
+    .demo {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 920px;
+    }
+    @media (max-width: 800px) { .demo { grid-template-columns: 1fr; } }
+
+    .note {
+      margin-top: 18px; padding: 12px 14px; background: #fff; border: 1px dashed var(--line);
+      border-radius: 8px; max-width: 58rem; color: var(--muted); font-size: 13px;
+    }
+    .callout {
+      background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 10px 12px;
+      max-width: 58rem; font-size: 13px; margin: 12px 0 0;
+    }
+    .arch {
+      background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px 12px;
+      max-width: 58rem; font-size: 13px; margin: 12px 0 0; color: var(--ink);
+    }
+    .arch code { font-size: 12px; }
+    .palettes { display: grid; gap: 10px; max-width: 58rem; }
+    .palettes .row {
+      display: grid; grid-template-columns: 11rem 1fr; gap: 10px; align-items: center;
+      padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    }
+    .dots { display: flex; gap: 5px; flex-wrap: wrap; }
+    .dots i { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; }
+  </style>
+</head>
+<body>
+  <h1>Doc wash tints — proposal v5</h1>
+  <p class="lede">
+    Stamp fixed (evenodd hole, not nested mask). Hatch is a <strong>user preference</strong> over which desk(s)
+    get patterned — try the toggle; default remains A/R patterned.
+  </p>
+
+  <div class="callout">
+    <strong>Stamp bug:</strong> nested SVG masks broke when used as CSS/<code>&lt;img&gt;</code>. Rebuilt as a single
+    evenodd path (tile white, glyph transparent). Hard-refresh required.
+  </div>
+
+  <div class="pref" role="group" aria-label="Pattern preference">
+    <label>Pattern desks:</label>
+    <button type="button" data-pattern-set="ar" aria-pressed="true">A/R only</button>
+    <button type="button" data-pattern-set="ap" aria-pressed="false">A/P only</button>
+    <button type="button" data-pattern-set="both" aria-pressed="false">Both</button>
+    <button type="button" data-pattern-set="none" aria-pressed="false">Neither</button>
+  </div>
+
+  <div class="arch">
+    <strong>Architecture (OI-125):</strong> desk <em>identity</em> = Buying/Selling stamp (fixed per A/P vs A/R).
+    Desk <em>pattern</em> = lightening hatch from preference
+    <code>patternDesks: ('ap' | 'ar')[]</code> — not hardcoded to A/R.
+    Sourced RO fields inherit hatch when their desk is in that set. Primary-desk users pattern the other side for contrast.
+  </div>
+
+  <div class="icon-legend">
+    <span><img src="assets/buying.svg" alt="Buying" /> source Buying</span>
+    <span><img src="assets/selling.svg" alt="Selling" /> source Selling</span>
+    <span><img src="assets/buying-stamp.svg?v=5" alt="Buying stamp" style="background:#c4b5d4" /> stamp (tile white, glyph hole)</span>
+  </div>
+
+  <div class="stamp-explain">
+    <div class="cell">
+      <div class="preview"></div>
+      <strong>1. Wash only</strong> — no stamp
+    </div>
+    <div class="cell">
+      <div class="preview with-stamp"></div>
+      <strong>2. Correct stamp</strong> — tile lightens; glyph cut out
+    </div>
+    <div class="cell">
+      <div class="preview old-blob"></div>
+      <strong>3. Old bug (v3)</strong> — mask on full SVG = featureless white blob
+    </div>
+  </div>
+
+  <h2>Role map</h2>
+  <table class="roles">
+    <thead>
+      <tr><th>Role</th><th>A/P (Buying stamp)</th><th>A/R (Selling stamp)</th><th>Wash</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Request</strong></td>
+        <td>Material Request</td>
+        <td>Quotation</td>
+        <td><code>#eef6fb</code></td>
+      </tr>
+      <tr>
+        <td><strong>Order</strong></td>
+        <td>Purchase Order</td>
+        <td>Sales Order</td>
+        <td><code>#e8f4fc</code></td>
+      </tr>
+      <tr>
+        <td><strong>Fulfill</strong></td>
+        <td>Item Receipt</td>
+        <td>Delivery Note</td>
+        <td><code>#fff4e0</code></td>
+      </tr>
+      <tr>
+        <td><strong>Invoice</strong></td>
+        <td>Bill (PI)</td>
+        <td>Sales Invoice</td>
+        <td><code>#f6eaf2</code></td>
+      </tr>
+      <tr>
+        <td><strong>Payment</strong></td>
+        <td>Payment Entry</td>
+        <td>Payment Receipt / PE</td>
+        <td><code>#e6f5f0</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>A/P vs A/R (same invoice wash)</h2>
+  <div class="mini-row">
+    <div class="mini ap">A/P + Buying</div>
+    <div class="mini ar">A/R + Selling</div>
+  </div>
+
+  <h2>A/P desk</h2>
+  <div class="grid">
+    <div class="card desk-ap" style="--wash: var(--wash-request)">
+      <div class="hdr" style="border-bottom-color: var(--accent-request)">Material Request <span class="chip">request</span></div>
+      <div class="body"><div class="hex">#eef6fb</div></div>
+    </div>
+    <div class="card desk-ap" style="--wash: var(--wash-order)">
+      <div class="hdr" style="border-bottom-color: var(--accent-order)">Purchase Order <span class="chip">order</span></div>
+      <div class="body"><div class="hex">#e8f4fc</div></div>
+    </div>
+    <div class="card desk-ap" style="--wash: var(--wash-fulfill)">
+      <div class="hdr" style="border-bottom-color: var(--accent-fulfill)">Item Receipt <span class="chip">fulfill</span></div>
+      <div class="body"><div class="hex">#fff4e0</div></div>
+    </div>
+    <div class="card desk-ap" style="--wash: var(--wash-invoice)">
+      <div class="hdr" style="border-bottom-color: var(--accent-invoice)">Bill (PI) <span class="chip">invoice</span></div>
+      <div class="body"><div class="hex">#f6eaf2</div></div>
+    </div>
+    <div class="card desk-ap" style="--wash: var(--wash-payment)">
+      <div class="hdr" style="border-bottom-color: var(--accent-payment)">Payment (AP) <span class="chip">payment</span></div>
+      <div class="body"><div class="hex">#e6f5f0</div></div>
+    </div>
+  </div>
+
+  <h2>A/R desk</h2>
+  <div class="grid">
+    <div class="card desk-ar" style="--wash: var(--wash-request)">
+      <div class="hdr" style="border-bottom-color: var(--accent-request)">Quotation <span class="chip">request</span></div>
+      <div class="body"><div class="hex">#eef6fb</div></div>
+    </div>
+    <div class="card desk-ar" style="--wash: var(--wash-order)">
+      <div class="hdr" style="border-bottom-color: var(--accent-order)">Sales Order <span class="chip">order</span></div>
+      <div class="body"><div class="hex">#e8f4fc</div></div>
+    </div>
+    <div class="card desk-ar" style="--wash: var(--wash-fulfill)">
+      <div class="hdr" style="border-bottom-color: var(--accent-fulfill)">Delivery Note <span class="chip">fulfill</span></div>
+      <div class="body"><div class="hex">#fff4e0</div></div>
+    </div>
+    <div class="card desk-ar" style="--wash: var(--wash-invoice)">
+      <div class="hdr" style="border-bottom-color: var(--accent-invoice)">Sales Invoice <span class="chip">invoice</span></div>
+      <div class="body"><div class="hex">#f6eaf2</div></div>
+    </div>
+    <div class="card desk-ar" style="--wash: var(--wash-payment)">
+      <div class="hdr" style="border-bottom-color: var(--accent-payment)">Payment Receipt <span class="chip">payment</span></div>
+      <div class="body"><div class="hex">#e6f5f0</div></div>
+    </div>
+  </div>
+
+  <h2>Sourced read-only fields — A/P Bill vs A/R Sales Invoice</h2>
+  <p class="lede">
+    RO field wash = <strong>upstream role</strong>. Hatch on those fields follows the pattern preference for that desk
+    (toggle above).
+  </p>
+  <div class="demo">
+    <div class="card desk-ap" style="--wash: var(--wash-invoice)">
+      <div class="hdr" style="border-bottom-color: var(--accent-invoice)">Bill (A/P mock)</div>
+      <div class="body" style="background: rgba(255,255,255,.85)">
+        <div class="field">
+          <label>Vendor (editable)</label>
+          <input value="OFFICE PANTRY LLC" />
+        </div>
+        <div class="field">
+          <label>Purchase Order (from PO)</label>
+          <input class="ro-from-po" readonly value="PUR-ORD-2026-00156" />
+        </div>
+        <div class="field">
+          <label>PO# logbook (from PO.title)</label>
+          <input class="ro-from-po" readonly value="JE0002" />
+        </div>
+        <div class="field">
+          <label>Packing / IR ref (from IR)</label>
+          <input class="ro-from-ir" readonly value="MAT-PRE-2026-00088" />
+        </div>
+        <div class="field">
+          <label>Material Request (from MR · optional)</label>
+          <input class="ro-from-mr" readonly value="MAT-MR-2026-00012" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card desk-ar" style="--wash: var(--wash-invoice)">
+      <div class="hdr" style="border-bottom-color: var(--accent-invoice)">Sales Invoice (A/R mock)</div>
+      <div class="body" style="background: rgba(255,255,255,.85)">
+        <div class="field">
+          <label>Customer (editable)</label>
+          <input value="ALPINE RETAIL LLC" />
+        </div>
+        <div class="field">
+          <label>Sales Order (from SO)</label>
+          <input class="ro-from-so" readonly value="SAL-ORD-2026-00044" />
+        </div>
+        <div class="field">
+          <label>Customer PO# (from SO / SI · often editable)</label>
+          <input value="CUST-PO-8812" />
+        </div>
+        <div class="field">
+          <label>Delivery Note (from DN)</label>
+          <input class="ro-from-dn" readonly value="MAT-DN-2026-00031" />
+        </div>
+        <div class="field">
+          <label>Quotation (from QT · optional)</label>
+          <input class="ro-from-qt" readonly value="SAL-QTN-2026-00009" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>CVD palettes (reminder)</h2>
+  <p class="lede">Okabe–Ito is the default here; Paul Tol / ColorBrewer / IBM Carbon are valid alternatives.</p>
+  <div class="palettes">
+    <div class="row">
+      <div><strong>Okabe–Ito</strong></div>
+      <div class="dots">
+        <i style="background:#E69F00"></i><i style="background:#56B4E9"></i><i style="background:#009E73"></i>
+        <i style="background:#F0E442"></i><i style="background:#0072B2"></i><i style="background:#D55E00"></i>
+        <i style="background:#CC79A7"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    Museum <strong>OI-125</strong>. Hard-refresh
+    <a href="http://127.0.0.1:8765/doc-wash-tints-proposal.html">http://127.0.0.1:8765/doc-wash-tints-proposal.html</a>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var buttons = document.querySelectorAll("[data-pattern-set]");
+      function setPattern(value) {
+        root.setAttribute("data-pattern", value);
+        buttons.forEach(function (btn) {
+          btn.setAttribute("aria-pressed", btn.getAttribute("data-pattern-set") === value ? "true" : "false");
+        });
+      }
+      buttons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          setPattern(btn.getAttribute("data-pattern-set"));
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -593,7 +593,7 @@
   }
 
   /** Run ERPNext taxes_and_totals so net_total / grand_total match items (+ taxes). */
-  function refreshTaxesAndTotals(f) {
+  async function refreshTaxesAndTotals(f) {
     try {
       f.refresh_field("items");
     } catch (eItems) {}
@@ -601,11 +601,15 @@
       f.refresh_field("taxes");
     } catch (e0) {}
     try {
+      var ret = null;
       if (f.cscript && typeof f.cscript.calculate_taxes_and_totals === "function") {
-        f.cscript.calculate_taxes_and_totals();
+        ret = f.cscript.calculate_taxes_and_totals();
       } else if (typeof f.calculate_taxes_and_totals === "function") {
-        f.calculate_taxes_and_totals();
+        ret = f.calculate_taxes_and_totals();
+      } else if (f.trigger) {
+        ret = f.trigger("calculate_taxes_and_totals");
       }
+      if (ret && typeof ret.then === "function") await ret;
     } catch (e1) {}
     try {
       f.refresh_fields([
@@ -616,6 +620,8 @@
         "total_taxes_and_charges",
         "grand_total",
         "rounded_total",
+        "base_grand_total",
+        "outstanding_amount",
       ]);
     } catch (e2) {}
   }
@@ -865,7 +871,7 @@
         try {
           f.refresh_field("items");
         } catch (e4) {}
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
@@ -955,7 +961,7 @@
         try {
           f.refresh_field("items");
         } catch (e3) {}
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
@@ -981,7 +987,7 @@
         try {
           f.refresh_field("items");
         } catch (e1) {}
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
@@ -1012,7 +1018,7 @@
         }
         await setValueAsync(row.doctype, row.name, field, value);
         await afterAjaxQuiet();
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
@@ -1041,8 +1047,12 @@
         row.add_deduct_tax = "Add";
         row.category = "Total";
         f.refresh_field("taxes");
+        // Drive ERP scripts via set_value so base_tax_amount / totals update.
+        if (row.name && row.doctype) {
+          await setValueAsync(row.doctype, row.name, "tax_amount", amt);
+        }
         await afterAjaxQuiet();
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {
@@ -1068,7 +1078,7 @@
           f.refresh_field("taxes");
         }
         await afterAjaxQuiet();
-        refreshTaxesAndTotals(f);
+        await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
       } catch (e) {

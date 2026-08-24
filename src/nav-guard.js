@@ -17,11 +17,36 @@ export function isAllowedErpUrl(erpBase, url) {
 }
 
 /**
+ * @param {string} pathOrRoute
+ * @returns {string}
+ */
+export function encodeErpPath(pathOrRoute) {
+  const raw = typeof pathOrRoute === "string" ? pathOrRoute : "";
+  if (!raw) return "/";
+  const qIdx = raw.search(/[?#]/);
+  const pathPart = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
+  const suffix = qIdx >= 0 ? raw.slice(qIdx) : "";
+  const withSlash = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  const encoded = withSlash
+    .split("/")
+    .map((seg) => {
+      if (!seg) return "";
+      try {
+        return encodeURIComponent(decodeURIComponent(seg));
+      } catch {
+        return encodeURIComponent(seg);
+      }
+    })
+    .join("/");
+  return encoded + suffix;
+}
+
+/**
  * @param {string} erpBase
  * @param {string} [route="/desk"]
  */
 export function erpUrl(erpBase, route = "/desk") {
   const base = String(erpBase).replace(/\/+$/, "");
-  const r = route.startsWith("/") ? route : `/${route}`;
+  const r = encodeErpPath(route.startsWith("/") ? route : `/${route}`);
   return base + r;
 }

@@ -9,6 +9,11 @@
     .ver { color: #6b8299; font-size: 10px; margin-right: 4px; flex-shrink: 0; }
     .btn { color: #cbd5e1; background: transparent; border: none; padding: 7px 10px; font-size: 13px; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
     .btn:hover { background: #34495e; color: #fff; }
+    .btn.loud[hidden] { display: none; }
+    .btn.loud {
+      background: #b45309; color: #fff; font-weight: 700; letter-spacing: .2px;
+    }
+    .btn.loud:hover { background: #c2410c; color: #fff; }
     .lbl { color: #6b8299; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-left: 4px; flex-shrink: 0; }
     .seg { display: flex; background: #1f2d3d; border-radius: 8px; padding: 2px; flex-shrink: 0; }
     .seg .opt { color: #9fb3c8; background: transparent; border: none; padding: 6px 14px; font-size: 13px; cursor: pointer; border-radius: 6px; }
@@ -16,6 +21,11 @@
     .seg .opt:disabled { opacity: 0.4; cursor: not-allowed; }
     .seg .opt[hidden] { display: none; }
     .lbl[hidden] { display: none; }
+    .peek-hint {
+      color: #f0e6d2; font-size: 12px; padding: 4px 10px; border-radius: 6px;
+      background: #3d4f63; flex-shrink: 0; letter-spacing: .2px;
+    }
+    .peek-hint[hidden] { display: none; }
     .spacer { flex: 1; min-width: 8px; }
     .health {
       display: flex; align-items: center; gap: 6px; color: #9fb3c8; font-size: 12px; padding: 0 8px;
@@ -41,6 +51,10 @@
       <button type="button" class="opt" id="lens-vanilla" data-testid="lens-vanilla" role="tab">Vanilla skin</button>
       <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc skin</button>
     </div>
+    <span class="peek-hint" id="peek-hint" hidden data-testid="soft-peek-hint"></span>
+    <!-- ponytail: temporarily hidden for alpha clones; re-enable when dogfood nav logging is wanted again -->
+    <button type="button" class="btn loud" id="btn-nav-issue" data-testid="btn-nav-issue" hidden
+      title="Log a navigation issue with a note (Ctrl+Shift+M). Click as soon as something feels wrong — snapshot freezes now.">Nav issue</button>
     <span class="spacer"></span>
     <button type="button" class="health" id="health" data-testid="health" title="Click for connection details" aria-haspopup="dialog" aria-expanded="false">
       <span class="dot" aria-hidden="true"></span>
@@ -57,8 +71,10 @@
     const lensVanilla = document.getElementById("lens-vanilla");
     const lensDoc = document.getElementById("lens-doc");
     const lensLabel = document.getElementById("lens-label");
+    const peekHint = document.getElementById("peek-hint");
     const appVer = document.getElementById("app-ver");
     let diagnoseOpen = false;
+    let softPeekActive = false;
 
     function setHealth(status) {
       healthEl.classList.toggle("ok", status === "ok");
@@ -70,10 +86,17 @@
       const showingHome = !!s.showingHome;
       const onDocForm = !!(s.showingBill || s.showingDocForm);
       const docOk = s.docSkinAvailable !== false;
+      softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
       lensLabel.hidden = false;
       lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
       lensVanilla.classList.toggle("active", !showingHome && !onDocForm);
+      if (peekHint) {
+        const hint = softPeekActive && s.softPeekHint ? String(s.softPeekHint) : "";
+        peekHint.hidden = !hint;
+        peekHint.textContent = hint;
+        peekHint.title = hint ? "Return to the document you were editing" : "";
+      }
       if (s.diagnoseOpen != null) {
         diagnoseOpen = !!s.diagnoseOpen;
         healthEl.setAttribute("aria-expanded", diagnoseOpen ? "true" : "false");
@@ -81,6 +104,11 @@
     }
 
     document.getElementById("btn-home").onclick = () => api && api.goHome();
+    document.getElementById("btn-nav-issue").onclick = () => {
+      const btn = document.getElementById("btn-nav-issue");
+      if (btn && btn.hidden) return;
+      if (api && api.openNavIncident) api.openNavIncident();
+    };
     document.getElementById("btn-feedback").onclick = () => {
       if (api && api.openFeedback) api.openFeedback();
     };
@@ -108,7 +136,20 @@
     }
 
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && diagnoseOpen && api && api.closeDiagnose) api.closeDiagnose();
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        // Temporarily disabled with the toolbar button (alpha clones).
+        const btn = document.getElementById("btn-nav-issue");
+        if (btn && btn.hidden) return;
+        e.preventDefault();
+        if (api && api.openNavIncident) api.openNavIncident();
+        return;
+      }
+      if (e.key !== "Escape") return;
+      if (diagnoseOpen && api && api.closeDiagnose) {
+        api.closeDiagnose();
+        return;
+      }
+      if (softPeekActive && api && api.dismissSoftPeek) api.dismissSoftPeek();
     });
   </script>
 </body>
