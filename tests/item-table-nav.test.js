@@ -143,4 +143,18 @@ describe("item-table-nav", () => {
     assert.equal(d.action, "leave_edit");
     assert.equal(d.mode, CELL_MODE_NAV);
   });
+
+  it("qty verticalArrowsAlwaysNav moves even mid-cell in edit", () => {
+    const d = itemTableKeyDecision({
+      mode: CELL_MODE_EDIT,
+      key: "ArrowUp",
+      selectionStart: 1,
+      selectionEnd: 1,
+      valueLength: 3,
+      verticalArrowsAlwaysNav: true,
+    });
+    assert.equal(d.action, "leave_edit_move");
+    assert.equal(d.direction, "up");
+    assert.equal(d.preventDefault, true);
+  });
 });

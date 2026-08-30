@@ -6,7 +6,147 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 10;
+export const DOC_FORM_BRIDGE_VERSION = 13;
+
+/** Max wait for get_party_details after supplier set_value (bridge deadline only). */
+export const SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
+
+/** Fields written by ERPNext party-details ajax (exclude supplier link itself). */
+export const SUPPLIER_PARTY_DETAIL_FIELDS = Object.freeze([
+  "supplier_name",
+  "supplier_address",
+  "address_display",
+  "shipping_address_display",
+  "dispatch_address_display",
+  "shipping_address",
+  "dispatch_address",
+  "payment_terms_template",
+]);
+
+/** Address link + display fields Bill header paint needs (PI billing = address_display). */
+export const SUPPLIER_ADDRESS_DISPLAY_FIELDS = Object.freeze([
+  "supplier_address",
+  "address_display",
+  "shipping_address_display",
+  "dispatch_address_display",
+  "shipping_address",
+  "dispatch_address",
+]);
+
+/** Meta-only party fields (may land before address_display HTML). */
+export const SUPPLIER_PARTY_META_FIELDS = Object.freeze([
+  "supplier_name",
+  "payment_terms_template",
+]);
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeSupplierKey(value) {
+  return String(value ?? "").trim();
+}
+
+/**
+ * Snapshot party-detail fields before supplier set_value (for settle diff).
+ * @param {object|null|undefined} doc
+ * @returns {Record<string, unknown>}
+ */
+export function supplierPartyBaseline(doc) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  /** @type {Record<string, unknown>} */
+  const out = { supplier: d.supplier };
+  for (const field of SUPPLIER_PARTY_DETAIL_FIELDS) {
+    out[field] = d[field];
+  }
+  return out;
+}
+
+/**
+ * True when any party-detail field differs from baseline (supplier link excluded).
+ * @param {object|null|undefined} doc
+ * @param {object|null|undefined} baseline
+ */
+export function supplierPartyDetailChanged(doc, baseline) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  const base = baseline && typeof baseline === "object" ? baseline : {};
+  for (const field of SUPPLIER_PARTY_DETAIL_FIELDS) {
+    if (stripHtmlPlain(d[field]) !== stripHtmlPlain(base[field])) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {object|null|undefined} doc
+ */
+export function hasSupplierAddressDisplaySignals(doc) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  for (const field of SUPPLIER_ADDRESS_DISPLAY_FIELDS) {
+    if (stripHtmlPlain(d[field])) return true;
+  }
+  return false;
+}
+
+/**
+ * Party meta (name, terms) changed but address displays not yet on doc.
+ * @param {object|null|undefined} doc
+ * @param {object|null|undefined} baseline
+ */
+export function isSupplierPartyMetaOnlyChange(doc, baseline) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  const base = baseline && typeof baseline === "object" ? baseline : {};
+  if (hasSupplierAddressDisplaySignals(d)) return false;
+  for (const field of SUPPLIER_PARTY_META_FIELDS) {
+    if (stripHtmlPlain(d[field]) !== stripHtmlPlain(base[field])) return true;
+  }
+  for (const field of SUPPLIER_ADDRESS_DISPLAY_FIELDS) {
+    if (stripHtmlPlain(d[field]) !== stripHtmlPlain(base[field])) return false;
+  }
+  return false;
+}
+
+/**
+ * Supplier set_value settle: link committed and party-details ajax reflected on doc.
+ * Parallel IPC (e.g. listSources) must not gate on generic ajax quiet alone.
+ * Prefer address display signals — supplier_name alone is not enough (Alpine flake 2026-08-30).
+ *
+ * @param {object|null|undefined} doc
+ * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnly?: boolean }} [ctx]
+ */
+export function isSupplierPartySettled(doc, ctx = {}) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  const target = normalizeSupplierKey(ctx.targetSupplier ?? d.supplier);
+  if (!target || normalizeSupplierKey(d.supplier) !== target) return false;
+
+  const base = ctx.baseline && typeof ctx.baseline === "object" ? ctx.baseline : null;
+
+  if (hasSupplierAddressDisplaySignals(d)) return true;
+
+  if (ctx.allowMetaOnly) {
+    if (!base) return stripHtmlPlain(d.supplier_name) !== "";
+    if (supplierPartyDetailChanged(d, base)) return true;
+  }
+
+  if (base && normalizeSupplierKey(base.supplier) === target && hasSupplierAddressDisplaySignals(base)) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Ms before deadline when meta-only settle is allowed (vendor with no address on file). */
+export const SUPPLIER_PARTY_META_ONLY_GRACE_MS = 3000;
+
+/**
+ * One after_ajax slice while waiting for supplier party settle.
+ * @param {number} deadlineMs
+ * @param {number} [nowMs]
+ */
+export function supplierPartyQuietSliceMs(deadlineMs, nowMs = Date.now()) {
+  const remaining = deadlineMs - nowMs;
+  if (remaining <= 0) return 0;
+  return Math.min(4000, Math.max(500, remaining));
+}
 
 /**
  * YYYY-MM-DD from an ERP date field (string or Date-like).

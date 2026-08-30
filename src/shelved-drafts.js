@@ -4,6 +4,7 @@
  */
 import { DOC_SKIN_PROFILES } from "./doc-skin-registry.js";
 import { normalizeDoctypeKey } from "./lens-prefs.js";
+import { copyRefForDoc } from "./history-copy-ref.js";
 
 /** Visible rows before Older dropdown. */
 export const DRAFT_VISIBLE_MAX = 3;
@@ -131,6 +132,7 @@ export function recentDraftDetailForHistory(opts) {
  *   route: string,
  *   label: string,
  *   shelvedAt: string,
+ *   copyRef?: string,
  * }} ShelvedDraft
  */
 
@@ -151,6 +153,7 @@ export function shelvedEntryFromDoc(doctypeKey, doc, opts = {}) {
     name,
     route: `/app/${key}/${name}`,
     label: draftShelfLabel(key, doc),
+    copyRef: copyRefForDoc(key, doc),
     shelvedAt: opts.now || new Date().toISOString(),
   };
 }

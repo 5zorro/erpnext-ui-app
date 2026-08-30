@@ -5,12 +5,18 @@
 
 import { relabelTerm } from "./doc-terms.js";
 import {
+  ERP_FREEFORM_TERMS_FIELD,
+  FREEFORM_TERMS_LABEL,
+  plainTermsText,
+} from "./doc-terms-fields.js";
+import {
   stripHtml,
   sumBillLineQty,
   sumBillLineAmount,
   formatBillLineTotal,
   formatUsdAmount,
   BILL_EXPENSE_NOTE,
+  BILL_MEMO_LABEL,
 } from "./bill-map.js";
 
 export const RECEIPT_DOCTYPE = "Purchase Receipt";
@@ -36,6 +42,10 @@ export const RECEIPT_HEADER_FIELDS = [
 ];
 
 export const RECEIPT_MEMO_FIELD = "remarks";
+export const RECEIPT_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
+
+/** Same museum wording as Bill memo block. */
+export const RECEIPT_MEMO_LABEL = BILL_MEMO_LABEL;
 
 /** Same ITEM_COLS pattern as Bill (museum itemColFields). */
 export const RECEIPT_ITEM_COLS = [
@@ -107,6 +117,7 @@ export function readReceiptHeader(doc) {
     out[meta.label] = d[meta.field] != null ? d[meta.field] : "";
   }
   out.Memo = d[RECEIPT_MEMO_FIELD] != null ? d[RECEIPT_MEMO_FIELD] : "";
+  out[FREEFORM_TERMS_LABEL] = plainTermsText(d[RECEIPT_TERMS_FIELD]);
   return out;
 }
 

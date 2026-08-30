@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Doc Workflow Home</title>
+  <link rel="stylesheet" href="doc-wash.css" />
   <style>
     body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
     h1 { font-size: 15px; margin: 16px 22px 2px; color: #2c3e50; font-weight: 600; }
@@ -17,8 +18,51 @@
       background: #f8fafc; cursor: pointer; font-size: 12px; text-align: center; padding: 6px;
     }
     .item:hover { background: #eaf4ff; border-color: #69b1ff; }
-    .item .ic { font-size: 20px; margin-bottom: 5px; line-height: 1; }
+    /* OI-125: AP process tiles use same wash/accent tokens as Doc skins */
+    .item[data-wash-role="request"] {
+      background: var(--wash-request);
+      border-color: color-mix(in srgb, var(--accent-request) 38%, #e1e8ee);
+    }
+    .item[data-wash-role="request"]:hover {
+      border-color: var(--accent-request);
+      background: color-mix(in srgb, var(--wash-request) 55%, white);
+    }
+    .item[data-wash-role="order"] {
+      background: var(--wash-order);
+      border-color: color-mix(in srgb, var(--accent-order) 38%, #e1e8ee);
+    }
+    .item[data-wash-role="order"]:hover {
+      border-color: var(--accent-order);
+      background: color-mix(in srgb, var(--wash-order) 55%, white);
+    }
+    .item[data-wash-role="fulfill"] {
+      background: var(--wash-fulfill);
+      border-color: color-mix(in srgb, var(--accent-fulfill) 38%, #e1e8ee);
+    }
+    .item[data-wash-role="fulfill"]:hover {
+      border-color: var(--accent-fulfill);
+      background: color-mix(in srgb, var(--wash-fulfill) 55%, white);
+    }
+    .item[data-wash-role="invoice"] {
+      background: var(--wash-invoice);
+      border-color: color-mix(in srgb, var(--accent-invoice) 38%, #e1e8ee);
+    }
+    .item[data-wash-role="invoice"]:hover {
+      border-color: var(--accent-invoice);
+      background: color-mix(in srgb, var(--wash-invoice) 55%, white);
+    }
+    .item[data-wash-role="payment"] {
+      background: var(--wash-payment);
+      border-color: color-mix(in srgb, var(--accent-payment) 38%, #e1e8ee);
+    }
+    .item[data-wash-role="payment"]:hover {
+      border-color: var(--accent-payment);
+      background: color-mix(in srgb, var(--wash-payment) 55%, white);
+    }
+    .item .ic { font-size: 20px; margin-bottom: 5px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+    .ui-ico svg { display: block; }
     .item.disabled { opacity: .42; cursor: not-allowed; }
+    .item.disabled:hover { background: inherit; border-color: inherit; }
     @media (max-width: 720px) {
       .wrap { grid-template-columns: 1fr; }
     }
@@ -32,6 +76,7 @@
   </div>
   <script type="module">
     import { HOME_GROUPS } from "../src/home-tiles.js";
+    import { homeTileIconHtml, missingHomeTileIcons } from "../src/ui-icons.js";
 
     const api = window.erpHome;
 
@@ -49,7 +94,8 @@
           const b = document.createElement("div");
           b.className = "item" + (t.disabled ? " disabled" : "");
           b.dataset.testid = `tile-${t.id}`;
-          b.innerHTML = `<div class="ic">${t.icon || ""}</div>${t.label}`;
+          if (t.washRole) b.dataset.washRole = t.washRole;
+          b.innerHTML = `<div class="ic">${homeTileIconHtml(t.id)}</div>${t.label}`;
           if (t.disabled) {
             b.title = "Requires an ERP module that may not be installed";
           } else if (t.id === "bill-new" && api.openEntry) {
@@ -74,6 +120,10 @@
 
     render(HOME_GROUPS.left, document.getElementById("left"));
     render(HOME_GROUPS.right, document.getElementById("right"));
+    const missing = missingHomeTileIcons(
+      [...HOME_GROUPS.left, ...HOME_GROUPS.right].flatMap((g) => g.tiles.map((t) => t.id)),
+    );
+    if (missing.length) console.warn("home tiles missing ui-icons:", missing.join(", "));
   </script>
 </body>
 </html>

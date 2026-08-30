@@ -15,11 +15,26 @@ import {
   BILL_DOC_CURATED,
   BILL_DOC_INVENTORY_META,
 } from "../src/inventories/bill-doc-inventory.js";
+import {
+  PO_DOC_CURATED,
+  PO_DOC_INVENTORY_META,
+  RECEIPT_DOC_CURATED,
+  RECEIPT_DOC_INVENTORY_META,
+} from "../src/inventories/doc-form-inventory.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const billHtml = readFileSync(join(root, "electron/bill.html"), "utf8");
-const vanillaHtml = readFileSync(
+const docFormHtml = readFileSync(join(root, "electron/doc-form.html"), "utf8");
+const billHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
+const vanillaBillHtml = readFileSync(
   join(root, "tests/fixtures/bill-vanilla-form.fixture.html"),
+  "utf8",
+);
+const vanillaPoHtml = readFileSync(
+  join(root, "tests/fixtures/po-vanilla-form.fixture.html"),
+  "utf8",
+);
+const vanillaReceiptHtml = readFileSync(
+  join(root, "tests/fixtures/receipt-vanilla-form.fixture.html"),
   "utf8",
 );
 
@@ -74,7 +89,7 @@ describe("Bill anchor N_d / N_v (plan S0)", () => {
   it("reports Doc curated + Vanilla fixture counts and Doc thinner than Vanilla", () => {
     const docScrape = scrapeInteractables(billHtml);
     const docWarm = summarizeInputCounts(BILL_DOC_CURATED);
-    const vanilla = summarizeInputCounts(scrapeInteractables(vanillaHtml).items);
+    const vanilla = summarizeInputCounts(scrapeInteractables(vanillaBillHtml).items);
 
     const N_d = docWarm.interactableCount;
     const N_v = vanilla.interactableCount;
@@ -94,12 +109,62 @@ describe("Bill anchor N_d / N_v (plan S0)", () => {
     assert.ok(ceiling.targets.expandedMin <= N_v);
 
     // Stable snapshot for marketing / mockup discussions (update when inventory intentional).
-    assert.ok(N_d >= 30 && N_d <= 45, `unexpected N_d=${N_d}`);
+    assert.ok(N_d >= 30 && N_d <= 60, `unexpected N_d=${N_d}`);
     assert.ok(N_v >= 50 && N_v <= 80, `unexpected N_v=${N_v}`);
   });
 
   it("completenessGate fails on unknowns", () => {
     assert.equal(completenessGate([]).ok, true);
     assert.deepEqual(completenessGate(["x"]).missing, ["x"]);
+  });
+});
+
+describe("PO anchor N_d / N_v", () => {
+  it("Doc curated thinner than Vanilla PO fixture", () => {
+    const docWarm = summarizeInputCounts(PO_DOC_CURATED);
+    const vanilla = summarizeInputCounts(scrapeInteractables(vanillaPoHtml).items);
+    const N_d = docWarm.interactableCount;
+    const N_v = vanilla.interactableCount;
+
+    assert.equal(PO_DOC_INVENTORY_META.anchor, "purchase-order");
+    assert.ok(N_v > N_d, `advertising: N_v (${N_v}) > N_d (${N_d})`);
+    assert.ok(N_d >= 35 && N_d <= 55, `unexpected PO N_d=${N_d}`);
+    assert.ok(N_v >= 55 && N_v <= 85, `unexpected PO N_v=${N_v}`);
+
+    const ceiling = evaluateSimplifiedMvpCeiling({
+      N_d,
+      N_v,
+      docEffort: docWarm.effort,
+      vanillaEffort: vanilla.effort,
+    });
+    assert.equal(ceiling.ok, true, ceiling.reasons.join("; "));
+  });
+});
+
+describe("Item Receipt anchor N_d / N_v", () => {
+  it("Doc curated thinner than Vanilla PR fixture", () => {
+    const docWarm = summarizeInputCounts(RECEIPT_DOC_CURATED);
+    const vanilla = summarizeInputCounts(scrapeInteractables(vanillaReceiptHtml).items);
+    const N_d = docWarm.interactableCount;
+    const N_v = vanilla.interactableCount;
+
+    assert.equal(RECEIPT_DOC_INVENTORY_META.anchor, "item-receipt");
+    assert.ok(N_v > N_d, `advertising: N_v (${N_v}) > N_d (${N_d})`);
+    assert.ok(N_d >= 50 && N_d <= 70, `unexpected IR N_d=${N_d}`);
+    assert.ok(N_v >= 65 && N_v <= 95, `unexpected IR N_v=${N_v}`);
+
+    const ceiling = evaluateSimplifiedMvpCeiling({
+      N_d,
+      N_v,
+      docEffort: docWarm.effort,
+      vanillaEffort: vanilla.effort,
+    });
+    assert.equal(ceiling.ok, true, ceiling.reasons.join("; "));
+  });
+
+  it("doc-form static scrape stays thinner than Vanilla PR fixture", () => {
+    const docStatic = scrapeInteractables(docFormHtml);
+    const vanilla = scrapeInteractables(vanillaReceiptHtml);
+    assert.ok(vanilla.count > docStatic.count);
   });
 });

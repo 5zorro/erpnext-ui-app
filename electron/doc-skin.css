@@ -1,0 +1,634 @@
+/**
+ * Shared Doc skin chrome — Bill, PO, Item Receipt (toolbar, gate, dirty pill, memo, link picker).
+ * Bill-only dashboard styles stay in bill.html; PO/IR-specific layout stays in doc-form.html.
+ */
+
+/* Inline SVG icons — SSoT: src/ui-icons.js (no Unicode emoji in product chrome). */
+.ui-ico,
+.calc-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  vertical-align: middle;
+  line-height: 0;
+}
+.ui-ico svg,
+.calc-ico svg {
+  display: block;
+}
+.due-emoji .ui-ico,
+.due-sticky .due-emoji .ui-ico {
+  color: inherit;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.tb-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  /* background: role wash via doc-wash.css when html[data-doc-role] is set */
+  background: #f8fafc;
+}
+.tb-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  margin-right: 2px;
+}
+.toolbar button,
+.line-actions button,
+.del {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.toolbar button.primary {
+  background: #2c3e50;
+  color: #fff;
+  border-color: #2c3e50;
+}
+.toolbar button.ghost {
+  background: #f8fafc;
+}
+.toolbar button:disabled,
+.line-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dirty-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #fef9c3;
+  color: #a16207;
+  border: 1px solid #fde047;
+}
+.dirty-pill.is-dirty,
+.dirty-pill.tone-draft-dirty {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fcd34d;
+}
+.dirty-pill.tone-draft {
+  background: #fef9c3;
+  color: #a16207;
+  border: 1px solid #fde047;
+}
+.dirty-pill.tone-posted {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+}
+.dirty-pill.tone-posted-dirty {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.back-to-top-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.back-to-top-row button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.commit-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+  background: transparent;
+}
+.commit-gate[hidden] {
+  display: none !important;
+}
+.commit-gate-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(1px);
+  cursor: pointer;
+}
+.commit-gate-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(660px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-top: 4px solid #b45309;
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.38);
+  font-size: 13px;
+  cursor: default;
+}
+.commit-gate-title {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 17px;
+  color: #1f2937;
+}
+.commit-gate-copy {
+  margin: 0;
+  color: #475569;
+  line-height: 1.45;
+}
+.commit-gate-validation {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #64748b;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+.commit-gate-validation.blocked {
+  border-color: #f59e0b;
+  border-left-color: #b45309;
+  background: #fffbeb;
+}
+.commit-gate-validation.ready {
+  border-color: #86efac;
+  border-left-color: #15803d;
+  background: #f0fdf4;
+}
+.commit-gate-validation-title {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.commit-gate-blockers {
+  margin: 0;
+  padding-left: 20px;
+  color: #92400e;
+  line-height: 1.55;
+}
+.commit-gate .row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.commit-gate button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.commit-gate button.primary {
+  background: #2c3e50;
+  color: #fff;
+  border-color: #2c3e50;
+}
+.commit-gate button.ghost {
+  background: #f8fafc;
+}
+.commit-gate button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.commit-gate button:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+.commit-gate .hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+.commit-gate .hint.warn {
+  color: #b45309;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .commit-gate-dialog {
+    animation: doc-skin-gate-enter 120ms ease-out;
+  }
+  @keyframes doc-skin-gate-enter {
+    from {
+      opacity: 0;
+      transform: translateY(5px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}
+
+.source-terms-block {
+  margin-bottom: 0.75rem;
+}
+.source-terms-block label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted, #666);
+  margin-bottom: 0.25rem;
+}
+.source-terms-body {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  background: var(--surface-2, #f4f4f5);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 4px;
+  max-height: 12rem;
+  overflow: auto;
+}
+.field.terms-text textarea {
+  width: 100%;
+  min-height: 4rem;
+}
+
+  margin-top: 12px;
+}
+.memo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.memo-head label {
+  margin: 0;
+}
+.memo-head .attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.memo-head .attach .attach-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #475569;
+}
+.memo-head .attach:hover {
+  background: #f1f5f9;
+}
+.memo-head .attach:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.link-wrap {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+}
+.link-wrap > input {
+  flex: 1;
+  min-width: 0;
+}
+.link-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #334155;
+  flex-shrink: 0;
+}
+.link-btn:hover {
+  background: #e2e8f0;
+}
+.link-dd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  max-height: 220px;
+  overflow: auto;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+.link-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+.link-opt:hover,
+.link-opt:focus {
+  background: #eaf4ff;
+  outline: none;
+}
+.link-muted {
+  padding: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+.link-opt.active {
+  background: #eaf4ff;
+}
+.link-opt.link-action {
+  font-style: italic;
+  color: #1d4ed8;
+}
+.link-opt.link-opt-muted {
+  color: #94a3b8;
+}
+.link-opt.link-opt-company-mismatch {
+  font-style: italic;
+}
+
+.blocked input:not([readonly]),
+.blocked textarea,
+.blocked .link-btn,
+.blocked .toolbar button.primary {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* Source selection modal — Bill (multi) + Item Receipt (single) */
+.src-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.src-box {
+  background: #fff;
+  border-radius: 10px;
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+}
+.src-title {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+}
+.src-body {
+  overflow: auto;
+  padding: 8px 0;
+  flex: 1;
+}
+.src-group {
+  padding: 6px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #64748b;
+}
+.src-group.active {
+  color: #0f172a;
+  font-weight: 700;
+}
+.src-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  background: #fff;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.src-item:hover,
+.src-item.active {
+  background: #eaf4ff;
+}
+.src-item.draft {
+  color: #94a3b8;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+.src-item.checked {
+  background: #dbeafe;
+}
+.src-item.active.checked {
+  background: #bfdbfe;
+}
+.src-check {
+  flex-shrink: 0;
+  width: 1.1em;
+  height: 1.1em;
+  border: 1px solid #94a3b8;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  margin-top: 1px;
+}
+.src-item.checked .src-check {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.src-item.draft .src-check {
+  opacity: 0.35;
+}
+.src-item-label {
+  flex: 1;
+  min-width: 0;
+}
+.src-foot {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid #e2e8f0;
+}
+.src-foot button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.src-foot button.primary {
+  background: #2c3e50;
+  color: #fff;
+  border-color: #2c3e50;
+}
+
+/* Address pickers (Bill + doc-form when features.addressPicker) */
+.addr-pick {
+  cursor: pointer;
+}
+.addr-pick:not(:disabled):hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+.addr-pick.is-locked {
+  cursor: default;
+}
+.addr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.addr-modal {
+  background: #fff;
+  border-radius: 10px;
+  max-width: 520px;
+  width: 100%;
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  padding: 16px 18px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+}
+.addr-modal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.addr-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.addr-modal-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.addr-modal-opt:hover,
+.addr-modal-opt:focus {
+  border-color: #93c5fd;
+  background: #f0f9ff;
+  outline: none;
+}
+.addr-modal-opt.is-current {
+  border-color: #64748b;
+  background: #f8fafc;
+}
+.addr-modal-opt .addr-head {
+  font-weight: 600;
+  font-size: 13px;
+}
+.addr-modal-opt .addr-body {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #475569;
+  white-space: pre-line;
+  line-height: 1.35;
+}
+.addr-modal-opt .addr-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.addr-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.addr-modal-actions button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.addr-modal-actions button.primary {
+  background: #1e293b;
+  color: #fff;
+  border-color: #1e293b;
+}
+.addr-modal-foot {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+.addr-modal-foot button {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #334155;
+  text-align: left;
+}
+.addr-modal-foot button:hover {
+  background: #f1f5f9;
+}
+.addr-modal-empty {
+  font-size: 13px;
+  color: #64748b;
+  margin: 8px 0;
+}

@@ -100,7 +100,7 @@ describe("source multi-select", () => {
     assert.deepEqual(sel, ["po:PO-A"]);
   });
 
-  it("Enter with checks merges those; without checks uses active", () => {
+  it("Enter with checks merges those; empty selection implies NIC", () => {
     const multi = resolveSourcesToCommit(groups, ["po:PO-A", "po:PO-B"], {
       kind: "pr",
       name: "PR-1",
@@ -110,9 +110,8 @@ describe("source multi-select", () => {
       multi.items.map((i) => i.name),
       ["PO-A", "PO-B"],
     );
-    const single = resolveSourcesToCommit(groups, [], { kind: "po", name: "PO-B" });
-    assert.equal(single.mode, "merge");
-    assert.equal(single.items[0].name, "PO-B");
+    const impliedNic = resolveSourcesToCommit(groups, [], { kind: "po", name: "PO-B" });
+    assert.equal(impliedNic.mode, "nic");
     const nic = resolveSourcesToCommit(groups, ["nic"], { kind: "po", name: "PO-A" });
     assert.equal(nic.mode, "nic");
   });

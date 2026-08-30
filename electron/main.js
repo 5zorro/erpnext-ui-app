@@ -27,9 +27,11 @@ import {
   collapsePeekStack,
   isActivePeekStack,
   pushPeekChild,
+  resolveSoftPeekEscAction,
   shouldCollapsePeekStack,
 } from "../src/peek-stack.js";
 import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
+import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
 import { shouldAcceptErpTrackNav, shouldClearErpNavIntent } from "../src/erp-nav-intent.js";
 import {
   NAV_INCIDENT_NOTE_MAX,
@@ -39,6 +41,14 @@ import {
   appendNavIncident,
   serializeNavIncidentLine,
 } from "../src/nav-incident.js";
+import {
+  FOCUS_INCIDENT_NOTE_MAX,
+  buildFocusIncident,
+  formatFocusIncidentContextLines,
+  formatFocusIncidentsDigest,
+  appendFocusIncident,
+  serializeFocusIncidentLine,
+} from "../src/focus-incident.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import { resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
 import {
@@ -62,6 +72,7 @@ import {
   draftShelfLabel,
   recentDraftDetailForHistory,
 } from "../src/shelved-drafts.js";
+import { copyRefForDoc } from "../src/history-copy-ref.js";
 import {
   appendCalcHistory,
   pruneCalcHistory,
@@ -109,9 +120,30 @@ import {
   billCompareTotal,
   isEditableBillItemField,
   isEditableBillTaxField,
+  isWritableBillHeaderField,
   uniqueLinkedPurchaseOrderNames,
   linkedPurchaseOrdersForBill,
 } from "../src/bill-map.js";
+import {
+  captureAlreadyPaidIntent,
+  clearIsPaidForJitPeWrites,
+  listJitPaymentEntryBlockers,
+  projectBillPaymentRows,
+} from "../src/bill-paid.js";
+import { projectAddressPickerOption } from "../src/bill-address.js";
+import {
+  addressRoleMeta,
+  addressListParty,
+  addressPickerOpenDecision as docAddressPickerOpenDecision,
+} from "../src/doc-address.js";
+import {
+  isAllocatableChargeRow,
+  planChargeToStockAllocation,
+} from "../src/bill-charge-allocate.js";
+import {
+  ITEM_ROW_CLEAR_FIELDS,
+  LAST_ITEM_ROW_TOAST,
+} from "../src/bill-item-guard.js";
 import {
   isEditablePoItemField,
   resolvePoStampDate,
@@ -119,7 +151,13 @@ import {
   shouldStampPoDateExpectedOnSave,
 } from "../src/po-map.js";
 import { isEditableReceiptItemField } from "../src/receipt-map.js";
-import { normalizeSearchLinkResults } from "../src/link-search.js";
+import { normalizeSearchLinkResults, PAYMENT_TERMS_TEMPLATE_NEW_ROUTE } from "../src/link-search.js";
+import {
+  annotateAccountLinkOptions,
+  accountNamesOnBillDoc,
+  listAccountCompanyMismatchBlockers,
+} from "../src/account-company.js";
+import { formatClientErrorReason } from "../src/frappe-error.js";
 import { rankSupplierLinkOptions, utcYmd } from "../src/vendor-activity.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders, combineMappedBillSources } from "../src/source-modal.js";
 import { formatJitPoTitle } from "../src/jit-po-bridge.js";
@@ -155,6 +193,13 @@ import {
   timeoutFailure,
 } from "../src/bill-action-flow.js";
 import {
+  BILL_LOAD_IDLE,
+  BILL_LOAD_LOADING,
+  BILL_LOAD_FAILED,
+  billRefocusAction,
+  billLoadPhaseAfterSnap,
+} from "../src/bill-load-phase.js";
+import {
   resolveErpBase,
   HEALTH_PING_PATH,
   HEALTH_PING_MS,
@@ -176,7 +221,7 @@ const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
 );
 
 /** @typedef {"home"|"erp"|"bill"|"doc"} SurfaceMode */
-/** @typedef {"po"|"receipt"} DocFormSkinId */
+/** @typedef {"po"|"receipt"|"bill"} DocFormSkinId */
 
 let win = null;
 let chrome = null;
@@ -225,10 +270,16 @@ let diagnoseState = {
 };
 /** @type {import("../src/nav-debug.js").NavDebugEntry[]} */
 let navDebugLog = [];
+/** @type {import("../src/focus-debug.js").FocusDebugEntry[]} */
+let focusDebugLog = [];
 /** @type {object[]} */
 let navIncidentRing = [];
+/** @type {object[]} */
+let focusIncidentRing = [];
 /** Frozen context while the Nav issue dialog is open. */
 let navIncidentDraft = null;
+/** Frozen context while the Focus issue dialog is open. */
+let focusIncidentDraft = null;
 /** @type {import("../src/health-remediation.js").HealthRemediationPrefs} */
 let healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
 /** @type {object[]} */
@@ -257,6 +308,10 @@ let billPoLineMetaByDoc = {};
  * @type {{ mode: "bill"|"doc", skinId: string|null, route: string }|null}
  */
 let parkedDocSurface = null;
+/** Bumps on each showBill proceed; stale loads abandon before paint (re-click race). */
+let billLoadGen = 0;
+/** @type {import("../src/bill-load-phase.js").typeof BILL_LOAD_IDLE | import("../src/bill-load-phase.js").typeof BILL_LOAD_LOADING | import("../src/bill-load-phase.js").typeof BILL_LOAD_FAILED | import("../src/bill-load-phase.js").typeof BILL_LOAD_READY} */
+let billLoadPhase = BILL_LOAD_IDLE;
 /**
  * Nested peeks under the parent Doc (OI-128 A). Survives Esc/Doc-tab rebind;
  * cleared on hard leave. Children stay in `history` as standalone rows.
@@ -296,6 +351,49 @@ function navDebugLogPath() {
 
 function navIncidentLogPath() {
   return path.join(app.getPath("userData"), "nav-incidents.log");
+}
+
+/**
+ * Dogfood focus trail — ring + userData file; shown in DB diagnose copy.
+ * @param {string} event
+ * @param {string} [detail]
+ * @param {{ surface?: string, active?: import("../src/focus-debug.js").FocusActiveSummary|null }} [extras]
+ */
+function focusDebug(event, detail, extras = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    event: String(event || "focus"),
+    surfaceMode,
+    surface: extras.surface != null ? String(extras.surface) : "",
+    currentRoute: currentRoute || "",
+    detail: detail != null ? String(detail) : "",
+    active: extras.active || null,
+  };
+  focusDebugLog = appendFocusDebug(focusDebugLog, entry);
+  try {
+    if (app.isReady()) {
+      const file = path.join(app.getPath("userData"), "focus-debug.log");
+      fs.appendFileSync(file, `${JSON.stringify(entry)}\n`, { encoding: "utf8" });
+    }
+  } catch {
+    /* ignore disk errors during dogfood */
+  }
+}
+
+function focusDebugLogPath() {
+  return path.join(app.getPath("userData"), "focus-debug.log");
+}
+
+function focusIncidentLogPath() {
+  return path.join(app.getPath("userData"), "focus-incidents.log");
+}
+
+/** Privacy-safe freeze of shell + focus trail at Focus issue click. */
+function collectFocusIncidentContext() {
+  return {
+    ...collectNavIncidentContext(),
+    focusTrail: focusDebugLog,
+  };
 }
 
 function currentErpPathname() {
@@ -340,19 +438,41 @@ function collectNavIncidentContext() {
 }
 
 function isDocLensSurface() {
-  return surfaceMode === "bill" || surfaceMode === "doc";
+  return surfaceMode === "doc";
 }
 
 function activeDocProfile() {
-  if (surfaceMode === "bill") return DOC_SKIN_PROFILES.bill;
   if (surfaceMode === "doc" && activeDocSkin) return DOC_SKIN_PROFILES[activeDocSkin] || null;
   return null;
 }
 
 function activeFormView() {
-  if (surfaceMode === "bill") return bill;
   if (surfaceMode === "doc") return docForm;
   return null;
+}
+
+/** @param {DocFormSkinId|string|null|undefined} skinId */
+function docShellKind(skinId) {
+  return skinId === "bill" ? "bill" : "doc-form";
+}
+
+function reloadDocFormShell() {
+  return new Promise((resolve) => {
+    if (!docForm || docForm.webContents.isDestroyed()) {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      docForm.webContents.removeListener("did-finish-load", finish);
+      resolve(true);
+    };
+    docForm.webContents.once("did-finish-load", finish);
+    docForm.webContents.loadFile(path.join(__dirname, "doc-form.html"));
+    setTimeout(finish, 10000);
+  });
 }
 
 function prefsPath() {
@@ -547,7 +667,7 @@ function syncE2eApi() {
     },
     openBill: (route) => {
       showBill(route || "/app/purchase-invoice/new");
-      return { surfaceMode };
+      return { surfaceMode, activeDocSkin };
     },
     openPo: (route) => {
       showDocForm("po", route || "/app/purchase-order/new");
@@ -573,6 +693,7 @@ function syncE2eApi() {
       erp: erp ? erp.getBounds() : null,
     }),
     docSkinAvailable: () => true,
+    getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
       const map = { chrome, home, hist, erp, bill, docForm };
@@ -625,7 +746,7 @@ function sendUiState() {
       );
     chrome.webContents.send("ui-state", {
       showingHome: showingHome(),
-      showingBill: surfaceMode === "bill",
+      showingBill: surfaceMode === "doc" && activeDocSkin === "bill",
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
       lens: onDoc ? "doc" : "vanilla",
@@ -635,7 +756,8 @@ function sendUiState() {
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
       softPeekHint: softPeekReturnLabel(
         parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
-        peekingAway && peekStack ? peekStack.parent : null,
+        isActivePeekStack(peekStack) ? peekStack.parent : null,
+        { currentRoute: livePath || currentRoute, erpBase: ERP_BASE },
       ),
     });
   }
@@ -665,9 +787,24 @@ function collapsePeekStackIfLeaving(nextRoute, reason) {
 }
 
 function notePeekParentAndChild(childRoute) {
-  if (!parkedDocSurface || !parkedDocSurface.route) return;
   const opts = { erpBase: ERP_BASE, history };
-  peekStack = beginPeekParent(peekStack, parkedDocSurface.route, opts);
+  /** @type {string|null} */
+  let parentRoute = null;
+  // Live Vanilla form (Payment Entry, etc.) wins over a stale parked Bill when already on ERP.
+  if (surfaceMode === "erp" && isSoftPeekRoute(currentRoute || "", ERP_BASE)) {
+    const cur = classifyHistoryOpen(currentRoute || "", ERP_BASE);
+    if (
+      cur.record &&
+      !routesReferToSameDoc(currentRoute || "", childRoute, ERP_BASE)
+    ) {
+      parentRoute = currentRoute || "";
+    }
+  }
+  if (!parentRoute && parkedDocSurface && parkedDocSurface.route) {
+    parentRoute = parkedDocSurface.route;
+  }
+  if (!parentRoute) return;
+  peekStack = beginPeekParent(peekStack, parentRoute, opts);
   peekStack = pushPeekChild(peekStack, childRoute, opts);
   navDebug("peek-child", `${peekStack && peekStack.parent ? peekStack.parent.route : ""} → ${childRoute}`);
 }
@@ -687,12 +824,24 @@ function notePeekFromErpNav(path, fromPath) {
 }
 
 function pushBillSnapshot(snap) {
-  if (bill && !bill.webContents.isDestroyed()) {
-    bill.webContents.send("bill-snapshot", {
+  pushDocFormSnapshot(snap);
+}
+
+function pushDocFormSnapshot(snap) {
+  if (docForm && !docForm.webContents.isDestroyed()) {
+    /** @type {Record<string, unknown>} */
+    const payload = {
       ...snap,
-      lineAllocations: snap.lineAllocations || getBillLineAllocations(),
-      poLineMeta: snap.poLineMeta || getBillPoLineMeta(),
-    });
+      profileId: activeDocSkin || "",
+      scratch: snap.scratch || { dateExpected: dateExpectedScratch },
+    };
+    if (activeDocSkin === "bill") {
+      payload.amountDue = snap.amountDue != null ? snap.amountDue : amountDueScratch;
+      payload.linkedPos = snap.linkedPos || [];
+      payload.poLineMeta = snap.poLineMeta || getBillPoLineMeta();
+      payload.lineAllocations = snap.lineAllocations || getBillLineAllocations();
+    }
+    docForm.webContents.send("doc-snapshot", payload);
   }
 }
 
@@ -772,6 +921,46 @@ async function enrichBillLineContext(doc) {
   return { poLineMeta, lineAllocations };
 }
 
+/** Soft ceiling for post-form PO title / line enrich (hang = Doc stuck on Loading…). */
+const BILL_ENRICH_TIMEOUT_MS = 8000;
+
+/**
+ * linkedPos + PO line meta after a form snapshot. Never block Doc paint forever.
+ * @param {object|null|undefined} doc
+ */
+async function enrichBillSnapshotExtras(doc) {
+  /** @type {Array<{ name: string, title: string }>} */
+  let linkedPos = [];
+  /** @type {Record<string, object>} */
+  let poLineMeta = {};
+  /** @type {Record<string|number, object>} */
+  let lineAllocations = {};
+
+  const linkedRaw = await raceTimeout(
+    linkedPosForBillDoc(doc),
+    BILL_ENRICH_TIMEOUT_MS,
+    "linked PO titles",
+  );
+  if (linkedRaw && linkedRaw.timedOut) {
+    navDebug("bill-enrich-timeout", "linked PO titles");
+  } else if (Array.isArray(linkedRaw)) {
+    linkedPos = linkedRaw;
+  }
+
+  const enrichRaw = await raceTimeout(
+    enrichBillLineContext(doc),
+    BILL_ENRICH_TIMEOUT_MS,
+    "Bill PO line enrich",
+  );
+  if (enrichRaw && enrichRaw.timedOut) {
+    navDebug("bill-enrich-timeout", "PO line enrich");
+  } else if (enrichRaw && typeof enrichRaw === "object") {
+    poLineMeta = enrichRaw.poLineMeta || {};
+    lineAllocations = enrichRaw.lineAllocations || {};
+  }
+  return { linkedPos, poLineMeta, lineAllocations };
+}
+
 /**
  * @param {number} rowIndex
  * @param {import("../src/bill-line-allocation.js").LineAllocation} alloc
@@ -780,15 +969,6 @@ function setBillLineAllocation(rowIndex, alloc) {
   const key = currentBillDocKey();
   if (!billLineAllocationsByDoc[key]) billLineAllocationsByDoc[key] = {};
   billLineAllocationsByDoc[key][rowIndex] = normalizeLineAllocation(alloc);
-}
-
-function pushDocFormSnapshot(snap) {
-  if (docForm && !docForm.webContents.isDestroyed()) {
-    docForm.webContents.send("doc-snapshot", {
-      ...snap,
-      scratch: snap.scratch || { dateExpected: dateExpectedScratch },
-    });
-  }
 }
 
 /**
@@ -800,12 +980,8 @@ function pushDocFormSnapshot(snap) {
  */
 function openDocSkinProfile(profile, route, opts = {}) {
   if (!profile) return false;
-  if (profile.shell === "bill") {
-    showBill(route, opts);
-    return true;
-  }
   if (profile.shell === "doc-form") {
-    showDocForm(profile.id, route, opts);
+    showDocForm(/** @type {DocFormSkinId} */ (profile.id), route, opts);
     return true;
   }
   return false;
@@ -860,7 +1036,7 @@ function openHistoryRoute(route) {
     `${classified.mode} lens=${lens || "-"} same=${same} → ${path}`,
   );
   if (classified.mode === "vanilla-always") {
-    if (isSoftPeekRoute(path, ERP_BASE) && (erpIsWarm() || surfaceMode === "bill" || surfaceMode === "doc")) {
+    if (isSoftPeekRoute(path, ERP_BASE) && (erpIsWarm() || surfaceMode === "doc")) {
       // Same-route child clicks stay soft so we do not hard-load and collapse the tree.
       softPeekErp(path);
       return;
@@ -905,19 +1081,19 @@ function erpIsWarm() {
 }
 
 function parkDocSurfaceIfNeeded() {
-  if (surfaceMode === "bill" || surfaceMode === "doc") {
+  if (surfaceMode === "doc" && activeDocSkin) {
     parkedDocSurface = {
-      mode: surfaceMode,
-      skinId: surfaceMode === "doc" ? activeDocSkin : null,
+      mode: "doc",
+      skinId: activeDocSkin,
       route: currentRoute || "",
     };
-    navDebug("doc-park", `${parkedDocSurface.mode} ${parkedDocSurface.route}`);
+    navDebug("doc-park", `${parkedDocSurface.skinId} ${parkedDocSurface.route}`);
     return;
   }
   // Recent flyout IPC can log surfaceMode=home while currentRoute is still the Bill (OI-112 strike 2).
   const info = routeInfo(currentRoute || "", ERP_BASE);
   if (info.doctype === "purchase-invoice" && dirtyState.doc) {
-    parkedDocSurface = { mode: "bill", skinId: null, route: currentRoute || "" };
+    parkedDocSurface = { mode: "doc", skinId: "bill", route: currentRoute || "" };
     navDebug("doc-park", `bill (route-hold) ${parkedDocSurface.route}`);
   }
 }
@@ -954,8 +1130,7 @@ async function softPeekErp(route) {
   const path = normalizeAppRoute(route, ERP_BASE).path || route;
   navDebug("soft-peek", path);
   try {
-    if (surfaceMode === "bill") await snapshotBill();
-    else if (surfaceMode === "doc") await snapshotDocForm();
+    if (surfaceMode === "doc") await snapshotDocForm();
     else if (routeInfo(currentRoute || "", ERP_BASE).doctype === "purchase-invoice") {
       await snapshotBill();
     }
@@ -970,20 +1145,41 @@ async function softPeekErp(route) {
 }
 
 /**
- * Esc / chrome hint → leave setup peek (OI-112).
- * Parked Doc rebinds the Doc surface; Vanilla-to-Vanilla peeks set_route back to the parent Bill.
+ * Esc / chrome hint → leave setup peek (OI-112 / OI-137).
+ * Child peeks return to peek parent first (Payment Entry ← Mode of Payment).
+ * Parked Doc rebinds only when the peek parent *is* that Doc (Bill ← Tax).
  */
 function dismissSoftPeekFromEsc() {
   if (surfaceMode !== "erp") return;
-  if (parkedDocSurface) {
-    const route = parkedDocSurface.route;
-    navDebug("soft-peek-esc", route);
-    resumeParkedDoc(route).then((ok) => {
-      if (ok) armSoftPeekEscHook(false).catch(() => {});
+  const here = currentErpPathname() || currentRoute || "";
+  const decision = resolveSoftPeekEscAction({
+    parked: parkedDocSurface,
+    peekStack,
+    currentRoute: here,
+    erpBase: ERP_BASE,
+  });
+  if (decision.action === "return-parent") {
+    navDebug("soft-peek-esc", decision.route || "parent");
+    returnToPeekParent();
+    return;
+  }
+  if (decision.action === "resume-park" && decision.route) {
+    navDebug("soft-peek-esc", decision.route);
+    resumeParkedDoc(decision.route).then((ok) => {
+      if (ok) {
+        collapsePeekStackHard("esc-resume");
+        armSoftPeekEscHook(false).catch(() => {});
+      }
     });
     return;
   }
-  returnToPeekParent();
+  if (decision.action === "disarm") {
+    navDebug("soft-peek-esc", "disarm");
+    collapsePeekStackHard("esc-disarm");
+    armSoftPeekEscHook(false).catch(() => {});
+    sendUiState();
+    sendHistory();
+  }
 }
 
 /**
@@ -1061,30 +1257,6 @@ async function resumeParkedDoc(route) {
       await erpForceReopenRoute(park.route);
     }
   }
-  if (park.mode === "bill") {
-    surfaceMode = "bill";
-    activeDocSkin = null;
-    place();
-    try {
-      if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
-      if (win && !win.isDestroyed()) win.focus();
-    } catch {
-      /* ignore */
-    }
-    bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
-    pushBillSnapshot({
-      ok: true,
-      doc: dirtyState.doc,
-      amountDue: amountDueScratch,
-      userEdited: !!dirtyState.userEdited,
-      isNew: !!dirtyState.isNew,
-      focusVendor: false,
-    });
-    sendUiState();
-    sendHistory();
-    syncE2eApi();
-    return true;
-  }
   if (park.mode === "doc" && park.skinId) {
     const profile = DOC_SKIN_PROFILES[park.skinId];
     surfaceMode = "doc";
@@ -1099,14 +1271,26 @@ async function resumeParkedDoc(route) {
     if (profile) {
       bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, dirtyState.doc);
     }
-    pushDocFormSnapshot({
-      ok: true,
-      doc: dirtyState.doc,
-      scratch: { dateExpected: dateExpectedScratch },
-      userEdited: !!dirtyState.userEdited,
-      isNew: !!dirtyState.isNew,
-      focusVendor: false,
-    });
+    if (park.skinId === "bill") {
+      pushDocFormSnapshot({
+        ok: true,
+        doc: dirtyState.doc,
+        amountDue: amountDueScratch,
+        userEdited: !!dirtyState.userEdited,
+        isNew: !!dirtyState.isNew,
+        focusVendor: false,
+        softPeekReturn: true,
+      });
+    } else {
+      pushDocFormSnapshot({
+        ok: true,
+        doc: dirtyState.doc,
+        scratch: { dateExpected: dateExpectedScratch },
+        userEdited: !!dirtyState.userEdited,
+        isNew: !!dirtyState.isNew,
+        focusVendor: false,
+      });
+    }
     sendUiState();
     sendHistory();
     syncE2eApi();
@@ -1777,8 +1961,7 @@ async function snapshotBill() {
     isDirty: !!raw.isDirty,
     isNew: !!raw.isNew,
   };
-  const linkedPos = await linkedPosForBillDoc(raw.doc);
-  const { poLineMeta, lineAllocations } = await enrichBillLineContext(raw.doc);
+  const { linkedPos, poLineMeta, lineAllocations } = await enrichBillSnapshotExtras(raw.doc);
   return {
     ok: true,
     doc: raw.doc,
@@ -1822,8 +2005,7 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
     isDirty: !!raw.isDirty,
     isNew: !!raw.isNew,
   };
-  const linkedPos = await linkedPosForBillDoc(raw.doc);
-  const { poLineMeta, lineAllocations } = await enrichBillLineContext(raw.doc);
+  const { linkedPos, poLineMeta, lineAllocations } = await enrichBillSnapshotExtras(raw.doc);
   return {
     ok: true,
     doc: raw.doc,
@@ -1906,6 +2088,7 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
     labels: DOCTYPE_LABELS,
     detail,
     detailMuted,
+    copyRef: copyRefForDoc(doctypeKey, doc),
     companyAbbr: sessionCompanyAbbr,
   });
   sendHistory();
@@ -1925,7 +2108,7 @@ function place() {
   chrome.setBounds({ x: 0, y: 0, width: b.width, height: H });
   hist.setBounds({ x: 0, y: H, width: HW, height: Math.max(100, b.height - H) });
   home.setBounds(surfaceMode === "home" ? main : OFF);
-  bill.setBounds(surfaceMode === "bill" ? main : OFF);
+  bill.setBounds(OFF);
   docForm.setBounds(surfaceMode === "doc" ? main : OFF);
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
 }
@@ -1936,6 +2119,8 @@ let diagnoseWin = null;
 let calcHistoryWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let navIncidentWin = null;
+/** @type {import("electron").BrowserWindow|null} */
+let focusIncidentWin = null;
 
 /**
  * Click-away for frameless popovers.
@@ -2095,6 +2280,71 @@ function openNavIncidentDialog() {
   });
 }
 
+function closeFocusIncidentDialog() {
+  if (focusIncidentWin && !focusIncidentWin.isDestroyed()) {
+    try {
+      focusIncidentWin.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function focusIncidentPayload() {
+  return {
+    contextLines: formatFocusIncidentContextLines(focusIncidentDraft || {}),
+    logPath: app.isReady() ? focusIncidentLogPath() : "",
+    noteMax: FOCUS_INCIDENT_NOTE_MAX,
+  };
+}
+
+function openFocusIncidentDialog() {
+  if (!win || win.isDestroyed()) return;
+  closeDiagnoseDropdown();
+  if (focusIncidentWin && !focusIncidentWin.isDestroyed()) {
+    focusIncidentWin.focus();
+    return;
+  }
+  focusIncidentDraft = collectFocusIncidentContext();
+  focusDebug("focus-incident-open", currentRoute || "", { surface: "main" });
+  focusIncidentWin = new BrowserWindow({
+    parent: win,
+    modal: false,
+    frame: true,
+    title: "Focus issue",
+    show: false,
+    width: 480,
+    height: 580,
+    minWidth: 380,
+    minHeight: 440,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#1a252f",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "focus-incident-preload.cjs"),
+    },
+  });
+  focusIncidentWin.loadFile(path.join(__dirname, "focus-incident-dialog.html"));
+  focusIncidentWin.once("ready-to-show", () => {
+    if (!focusIncidentWin || focusIncidentWin.isDestroyed()) return;
+    focusIncidentWin.webContents.send("focus-incident-data", focusIncidentPayload());
+    focusIncidentWin.show();
+    focusIncidentWin.focus();
+  });
+  focusIncidentWin.on("closed", () => {
+    if (focusIncidentDraft) focusDebug("focus-incident-cancel", currentRoute || "", { surface: "main" });
+    focusIncidentDraft = null;
+    focusIncidentWin = null;
+  });
+}
+
 function closeCalcHistoryDropdown() {
   if (calcHistoryWin && !calcHistoryWin.isDestroyed()) {
     try {
@@ -2239,8 +2489,13 @@ async function gateDirtyThen(doNav) {
     doNav();
     return;
   }
-  const live =
-    surfaceMode === "bill" ? await snapshotBill() : await snapshotDocForm();
+  // Fast path: do not await heavy snapshot when already clean (hang = dead Recents nav).
+  if (!dirtyState.userEdited) {
+    navDebug("gate-skip", "clean");
+    doNav();
+    return;
+  }
+  const live = await snapshotDocForm();
   const state = {
     ...dirtyState,
     doc: live.doc || dirtyState.doc,
@@ -2250,7 +2505,7 @@ async function gateDirtyThen(doNav) {
     userEdited: !!dirtyState.userEdited,
   };
   if (!shouldGateNavigation(state)) {
-    navDebug("gate-skip", "clean");
+    navDebug("gate-skip", "clean-after-snap");
     doNav();
     return;
   }
@@ -2258,10 +2513,10 @@ async function gateDirtyThen(doNav) {
   navDebug("gate-open", "unsaved Doc edits — Save/Discard/Cancel in Bill");
 
   const view = activeFormView();
-  const openChannel = surfaceMode === "bill" ? "bill-open-nav-gate" : "doc-open-nav-gate";
-  const cancelChannel = surfaceMode === "bill" ? "bill-cancel-nav-gate" : "doc-cancel-nav-gate";
+  const openChannel = "doc-open-nav-gate";
+  const cancelChannel = "doc-cancel-nav-gate";
   const leaving =
-    surfaceMode === "bill"
+    activeDocSkin === "bill"
       ? "leaving this Bill"
       : activeDocSkin === "po"
         ? "leaving this Purchase Order"
@@ -2336,7 +2591,7 @@ async function nativeGateFallback(doNav) {
   if (response === 2) return;
   if (response === 0) {
     const saved =
-      surfaceMode === "doc" ? await saveDocFormFromErp() : await saveBillFromErp();
+      activeDocSkin === "bill" ? await saveBillFromErp() : await saveDocFormFromErp();
     if (!saved.ok) {
       await dialog.showMessageBox(win, {
         type: "warning",
@@ -2493,177 +2748,7 @@ function showErp(route = "/desk", opts = {}) {
 }
 
 async function showBill(route, opts = {}) {
-  const skipDirtyGate = !!opts.skipDirtyGate;
-  const r =
-    typeof route === "string" && route
-      ? route
-      : currentRoute.includes("purchase-invoice")
-        ? currentRoute
-        : "/app/purchase-invoice/new";
-
-  if (await resumeParkedDoc(r)) return;
-
-  // Already on this Bill — refocus only (Recent click must not reload / wipe edits).
-  // Do not reuse when memory holds a submitted/cancelled doc but the route is "new".
-  if (surfaceMode === "bill" && routesReferToSameDoc(currentRoute, r, ERP_BASE)) {
-    const nextInfo = routeInfo(r, ERP_BASE);
-    const staleSubmittedOnNew =
-      isNewDocRecord(nextInfo.record) &&
-      dirtyState.doc &&
-      Number(dirtyState.doc.docstatus) > 0;
-    if (!staleSubmittedOnNew) {
-      parkedDocSurface = null;
-      collapsePeekStackIfLeaving(currentRoute, "showBill-refocus");
-      await ensureErpMatchesShellRoute(currentRoute);
-      place();
-      try {
-        if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
-        if (win && !win.isDestroyed()) win.focus();
-      } catch {
-        /* ignore */
-      }
-      sendUiState();
-      const snap = await snapshotBill();
-      if (snap && snap.ok && snap.doc) {
-        dirtyState = {
-          ...dirtyState,
-          doc: snap.doc,
-          isDirty: !!snap.isDirty,
-          isNew: !!snap.isNew,
-        };
-        noteShelvedFromOpen("purchase-invoice", snap.doc);
-        bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", snap.doc);
-        pushBillSnapshot({
-          ok: true,
-          doc: snap.doc,
-          amountDue: snap.amountDue != null ? snap.amountDue : amountDueScratch,
-          linkedPos: snap.linkedPos || [],
-          userEdited: !!dirtyState.userEdited,
-          isNew: !!snap.isNew,
-          focusVendor: false,
-        });
-      } else if (dirtyState.doc) {
-        noteShelvedFromOpen("purchase-invoice", dirtyState.doc);
-        bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
-        pushBillSnapshot({
-          ok: true,
-          doc: dirtyState.doc,
-          amountDue: amountDueScratch,
-          userEdited: !!dirtyState.userEdited,
-          isNew: !!dirtyState.isNew,
-          focusVendor: false,
-        });
-      } else {
-        pushBillSnapshot({
-          ok: false,
-          reason: (snap && snap.reason) || "Bill form not loaded in Vanilla — Retry load.",
-          doc: null,
-          amountDue: amountDueScratch,
-          userEdited: false,
-        });
-      }
-      syncE2eApi();
-      return;
-    }
-  }
-
-  const proceed = async () => {
-    parkedDocSurface = null;
-    surfaceMode = "bill";
-    activeDocSkin = null;
-    const n = normalizeAppRoute(r, ERP_BASE);
-    let path = n.path || r;
-    if (!path.includes("purchase-invoice")) {
-      path = "/app/purchase-invoice/new";
-    }
-    collapsePeekStackIfLeaving(path, "showBill");
-    currentRoute = path;
-    beginErpNavIntent(path);
-    lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "doc");
-    savePrefs();
-    bumpBillHistory(currentRoute);
-    place();
-    try {
-      if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
-    } catch {
-      /* ignore */
-    }
-    sendUiState();
-    // Clear stale submitted/draft memory before Vanilla load settles (new-* especially).
-    if (isNewDocRecord(routeInfo(currentRoute, ERP_BASE).record)) {
-      dirtyState = {
-        isDirty: false,
-        isNew: true,
-        userEdited: false,
-        baselineJson: null,
-        doc: null,
-      };
-    }
-    pushBillSnapshot({
-      ok: false,
-      reason: "Loading Purchase Invoice in Vanilla…",
-      doc: null,
-      amountDue: "",
-      userEdited: false,
-    });
-
-    const target = erpUrl(ERP_BASE, currentRoute);
-    // Always load so cur_frm is a real Bill form (SPA may have been on Desk home).
-    await loadErpUrl(target);
-    trackNav(target, { fromBrowser: false });
-
-    amountDueScratch = "";
-    amountDueCommitted = "";
-    const snap = await waitForPurchaseInvoice();
-    if (snap.ok) {
-      dirtyState = finishLensApply(
-        {
-          doc: snap.doc,
-          isDirty: !!snap.isDirty,
-          isNew: !!snap.isNew,
-          userEdited: false,
-          baselineJson: null,
-        },
-        true,
-      );
-      // Amount Due stays blank until the user types (checksum idle / grey).
-      amountDueCommitted = amountDueScratch;
-      noteShelvedFromOpen("purchase-invoice", snap.doc);
-      bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", snap.doc);
-      try {
-        if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
-      } catch {
-        /* ignore */
-      }
-      pushBillSnapshot({
-        ok: true,
-        doc: snap.doc,
-        amountDue: amountDueScratch,
-        linkedPos: snap.linkedPos || [],
-        userEdited: false,
-        isNew: !!snap.isNew,
-        focusVendor: true,
-      });
-    } else {
-      dirtyState = {
-        isDirty: false,
-        isNew: true,
-        userEdited: false,
-        baselineJson: null,
-        doc: null,
-      };
-      pushBillSnapshot({ ...snap, userEdited: false, focusVendor: false });
-    }
-    syncE2eApi();
-  };
-
-  if (surfaceMode === "bill" || skipDirtyGate) {
-    await proceed();
-    return;
-  }
-  gateDirtyThen(() => {
-    proceed();
-  });
+  return showDocForm("bill", route, opts);
 }
 
 async function snapshotDocForm() {
@@ -2677,6 +2762,9 @@ async function snapshotDocForm() {
       userEdited: !!dirtyState.userEdited,
       isNew: !!dirtyState.isNew,
     };
+  }
+  if (profile.id === "bill") {
+    return snapshotBill();
   }
   await ensureErpFormBridge();
   const raw = await bridgeCall("snapshot", profile.doctype);
@@ -2715,6 +2803,9 @@ async function waitForDocForm(timeoutMs = 25000) {
       doc: null,
       scratch: { dateExpected: dateExpectedScratch },
     };
+  }
+  if (profile.id === "bill") {
+    return waitForPurchaseInvoice(timeoutMs);
   }
   if (!erp || erp.webContents.isDestroyed()) {
     return {
@@ -2789,6 +2880,30 @@ async function showDocForm(skinId, route, opts = {}) {
       Number(dirtyState.doc.docstatus) > 0;
     if (!staleSubmittedOnNew) {
       parkedDocSurface = null;
+      collapsePeekStackIfLeaving(
+        currentRoute,
+        skinId === "bill" ? "showBill-refocus" : "showDoc-refocus",
+      );
+      let billReloadAfterFailed = false;
+      if (skinId === "bill" && !dirtyState.doc) {
+        const refocus = billRefocusAction({ hasDoc: false, phase: billLoadPhase });
+        if (refocus === "skip") {
+          navDebug("bill-refocus-skip", "load still in flight (no doc yet)");
+          place();
+          sendUiState();
+          syncE2eApi();
+          return;
+        }
+        navDebug(
+          "bill-load-retry",
+          billLoadPhase === BILL_LOAD_FAILED
+            ? "refocus after failed load — full reload"
+            : "refocus with no doc — full reload",
+        );
+        billReloadAfterFailed = true;
+      }
+      if (!billReloadAfterFailed) {
+      if (skinId === "bill") await ensureErpMatchesShellRoute(currentRoute);
       place();
       try {
         if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
@@ -2797,7 +2912,51 @@ async function showDocForm(skinId, route, opts = {}) {
         /* ignore */
       }
       sendUiState();
-      if (dirtyState.doc) {
+      if (skinId === "bill") {
+        const snap = await snapshotBill();
+        if (snap && snap.ok && snap.doc) {
+          billLoadPhase = billLoadPhaseAfterSnap(true);
+          dirtyState = {
+            ...dirtyState,
+            doc: snap.doc,
+            isDirty: !!snap.isDirty,
+            isNew: !!snap.isNew,
+          };
+          noteShelvedFromOpen("purchase-invoice", snap.doc);
+          bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", snap.doc);
+          pushDocFormSnapshot({
+            ok: true,
+            doc: snap.doc,
+            amountDue: snap.amountDue != null ? snap.amountDue : amountDueScratch,
+            linkedPos: snap.linkedPos || [],
+            poLineMeta: snap.poLineMeta || {},
+            lineAllocations: snap.lineAllocations || {},
+            userEdited: !!dirtyState.userEdited,
+            isNew: !!snap.isNew,
+            focusVendor: false,
+          });
+        } else if (dirtyState.doc) {
+          noteShelvedFromOpen("purchase-invoice", dirtyState.doc);
+          bumpFormHistoryFromDoc(currentRoute, "purchase-invoice", dirtyState.doc);
+          pushDocFormSnapshot({
+            ok: true,
+            doc: dirtyState.doc,
+            amountDue: amountDueScratch,
+            userEdited: !!dirtyState.userEdited,
+            isNew: !!dirtyState.isNew,
+            focusVendor: false,
+          });
+        } else {
+          billLoadPhase = billLoadPhaseAfterSnap(false);
+          pushDocFormSnapshot({
+            ok: false,
+            reason: (snap && snap.reason) || "Bill form not loaded in Vanilla — Retry load.",
+            doc: null,
+            amountDue: amountDueScratch,
+            userEdited: false,
+          });
+        }
+      } else if (dirtyState.doc) {
         const earlyProfile = DOC_SKIN_PROFILES[skinId];
         if (earlyProfile) {
           noteShelvedFromOpen(earlyProfile.doctypeKey, dirtyState.doc);
@@ -2814,29 +2973,40 @@ async function showDocForm(skinId, route, opts = {}) {
       }
       syncE2eApi();
       return;
+      }
     }
   }
+
+  const priorSkin = activeDocSkin;
+  const billLoadToken = skinId === "bill" ? ++billLoadGen : 0;
 
   const proceed = async () => {
     parkedDocSurface = null;
     surfaceMode = "doc";
     activeDocSkin = skinId;
+    if (priorSkin && docShellKind(priorSkin) !== docShellKind(skinId)) {
+      await reloadDocFormShell();
+    }
     const n = normalizeAppRoute(r, ERP_BASE);
     let path = n.path || r;
     if (!path.includes(slug)) {
       path = profile.newRoute;
     }
-    collapsePeekStackIfLeaving(path, "showDoc");
+    collapsePeekStackIfLeaving(path, skinId === "bill" ? "showBill" : "showDoc");
     currentRoute = path;
     beginErpNavIntent(path);
     lensPrefs = rememberLens(lensPrefs, slug, "doc");
     savePrefs();
-    history = pushHistory(history, currentRoute, {
-      erpBase: ERP_BASE,
-      labels: DOCTYPE_LABELS,
-      companyAbbr: sessionCompanyAbbr,
-    });
-    sendHistory();
+    if (skinId === "bill") {
+      bumpBillHistory(currentRoute);
+    } else {
+      history = pushHistory(history, currentRoute, {
+        erpBase: ERP_BASE,
+        labels: DOCTYPE_LABELS,
+        companyAbbr: sessionCompanyAbbr,
+      });
+      sendHistory();
+    }
     place();
     try {
       if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
@@ -2844,20 +3014,52 @@ async function showDocForm(skinId, route, opts = {}) {
       /* ignore */
     }
     sendUiState();
+    if (skinId === "bill" && isNewDocRecord(routeInfo(currentRoute, ERP_BASE).record)) {
+      dirtyState = {
+        isDirty: false,
+        isNew: true,
+        userEdited: false,
+        baselineJson: null,
+        doc: null,
+      };
+    }
+    if (skinId === "bill") {
+      billLoadPhase = BILL_LOAD_LOADING;
+    }
     pushDocFormSnapshot({
       ok: false,
-      reason: `Loading ${profile.doctype} in Vanilla…`,
+      reason:
+        skinId === "bill"
+          ? "Loading Purchase Invoice in Vanilla…"
+          : `Loading ${profile.doctype} in Vanilla…`,
       doc: null,
-      scratch: { dateExpected: "" },
+      scratch: { dateExpected: skinId === "bill" ? "" : dateExpectedScratch },
+      amountDue: skinId === "bill" ? "" : undefined,
       userEdited: false,
     });
 
     const target = erpUrl(ERP_BASE, currentRoute);
     await loadErpUrl(target);
+    if (skinId === "bill" && billLoadToken !== billLoadGen) {
+      navDebug("bill-load-stale", `after loadURL token=${billLoadToken}`);
+      return;
+    }
     trackNav(target, { fromBrowser: false });
 
-    dateExpectedScratch = "";
+    if (skinId === "bill") {
+      amountDueScratch = "";
+      amountDueCommitted = "";
+    } else {
+      dateExpectedScratch = "";
+    }
     const snap = await waitForDocForm();
+    if (skinId === "bill" && billLoadToken !== billLoadGen) {
+      navDebug("bill-load-stale", `after waitForForm token=${billLoadToken}`);
+      return;
+    }
+    if (skinId === "bill") {
+      billLoadPhase = billLoadPhaseAfterSnap(!!snap.ok);
+    }
     if (snap.ok) {
       dirtyState = finishLensApply(
         {
@@ -2869,8 +3071,9 @@ async function showDocForm(skinId, route, opts = {}) {
         },
         true,
       );
-      // Seed Date Expected from first line schedule_date when present.
-      if (skinId === "po" && snap.doc) {
+      if (skinId === "bill") {
+        amountDueCommitted = amountDueScratch;
+      } else if (skinId === "po" && snap.doc) {
         const items = Array.isArray(snap.doc.items) ? snap.doc.items : [];
         for (const it of items) {
           if (it && it.schedule_date) {
@@ -2886,14 +3089,28 @@ async function showDocForm(skinId, route, opts = {}) {
       } catch {
         /* ignore */
       }
-      pushDocFormSnapshot({
-        ok: true,
-        doc: snap.doc,
-        scratch: { dateExpected: dateExpectedScratch },
-        userEdited: false,
-        isNew: !!snap.isNew,
-        focusVendor: true,
-      });
+      if (skinId === "bill") {
+        pushDocFormSnapshot({
+          ok: true,
+          doc: snap.doc,
+          amountDue: amountDueScratch,
+          linkedPos: snap.linkedPos || [],
+          poLineMeta: snap.poLineMeta || {},
+          lineAllocations: snap.lineAllocations || {},
+          userEdited: false,
+          isNew: !!snap.isNew,
+          focusVendor: true,
+        });
+      } else {
+        pushDocFormSnapshot({
+          ok: true,
+          doc: snap.doc,
+          scratch: { dateExpected: dateExpectedScratch },
+          userEdited: false,
+          isNew: !!snap.isNew,
+          focusVendor: true,
+        });
+      }
     } else {
       dirtyState = {
         isDirty: false,
@@ -2971,11 +3188,390 @@ function openEntry(doctypeKey) {
   } else showErp(t.route, { forceLoad: true });
 }
 
+/**
+ * Apply header writes via bridge (used to clear is_paid before Submit+JIT PE).
+ * @param {Array<{ field: string, value: string|number }>} writes
+ */
+async function applyBillHeaderWrites(writes) {
+  let doc = dirtyState.doc;
+  for (const w of writes) {
+    const field = w.field;
+    const kind = dirtyCompareKindForField(field);
+    let next;
+    if (field === "is_paid") {
+      next = w.value === true || w.value === 1 || w.value === "1" ? "1" : "0";
+    } else if (kind === "number") {
+      next = w.value == null ? "" : String(w.value);
+    } else {
+      next = normalizeEditableText(w.value);
+    }
+    if (headerValueUnchanged(field, next)) continue;
+    const raw = await bridgeCall("setHeader", field, next);
+    if (!(raw && raw.ok)) {
+      return { ok: false, reason: (raw && raw.reason) || `Could not set ${field}.`, doc };
+    }
+    doc = raw.doc || doc;
+    dirtyState = { ...dirtyState, doc, isDirty: true };
+  }
+  return { ok: true, doc };
+}
+
+/**
+ * Create + submit Payment Entry for a submitted Purchase Invoice (OI-135 JIT).
+ * @param {string} billName
+ * @param {{ modeOfPayment: string, cashBankAccount: string, paidAmount: number }} intent
+ */
+async function createJitPaymentEntryForBill(billName, intent) {
+  const name = billName == null ? "" : String(billName).trim();
+  if (!name || isNewDocRecord(name)) {
+    return { ok: false, reason: "Bill must be saved/submitted before Payment Entry." };
+  }
+  const mop = JSON.stringify(intent.modeOfPayment || "");
+  const bank = JSON.stringify(intent.cashBankAccount || "");
+  const paid = Number(intent.paidAmount);
+  const paidLit = Number.isFinite(paid) ? String(paid) : "0";
+  const billLit = JSON.stringify(name);
+  const billNoLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || name,
+  );
+  const postingLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.posting_date) || "",
+  );
+  const raw = await erpEval(`(async () => {
+    function reasonFrom(err) {
+      function flat(msg) {
+        if (msg == null) return "";
+        if (typeof msg === "string") {
+          var t = msg.trim();
+          if (!t) return "";
+          if (t.charAt(0) === "{" || t.charAt(0) === "[") {
+            try { return flat(JSON.parse(t)); } catch (e1) { return t.replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim(); }
+          }
+          return t.replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim();
+        }
+        if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
+        if (Array.isArray(msg)) return msg.map(flat).filter(Boolean).join(" · ");
+        if (typeof msg === "object") {
+          if (msg.message != null && msg.message !== msg) {
+            var inner = flat(msg.message);
+            if (inner) return inner;
+          }
+          if (msg.exception != null) {
+            var exn = flat(msg.exception);
+            if (exn) return exn.replace(/^frappe\\.exceptions\\.\\w+:\\s*/i, "");
+          }
+          if (msg.responseText != null) {
+            var body = flat(msg.responseText);
+            if (body) return body.replace(/^frappe\\.exceptions\\.\\w+:\\s*/i, "");
+          }
+          if (msg._server_messages != null) {
+            var sm = flat(msg._server_messages);
+            if (sm) return sm;
+          }
+          if (msg.exc != null) {
+            var ex = flat(msg.exc);
+            if (ex) return ex;
+          }
+          try {
+            var s = JSON.stringify(msg);
+            if (s && s !== "{}" && s !== "[]") return s.slice(0, 500);
+          } catch (e2) {}
+        }
+        var fb = String(msg);
+        return fb === "[object Object]" ? "" : fb;
+      }
+      return flat(err) || "Payment Entry request failed.";
+    }
+    try {
+      var billName = ${billLit};
+      var mop = ${mop};
+      var bankAccount = ${bank};
+      var paidAmount = ${paidLit};
+      var r;
+      try {
+        r = await frappe.call({
+          method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
+          args: {
+            dt: "Purchase Invoice",
+            dn: billName,
+            bank_account: bankAccount || null,
+            bank_amount: paidAmount > 0 ? paidAmount : null,
+          },
+        });
+      } catch (eGet) {
+        return { ok: false, reason: reasonFrom(eGet), step: "get_payment_entry" };
+      }
+      if (r && r.exc) {
+        return { ok: false, reason: reasonFrom(r), step: "get_payment_entry" };
+      }
+      var pe = r && r.message;
+      if (!pe) return { ok: false, reason: "get_payment_entry returned empty.", step: "get_payment_entry" };
+      // Plain object for client.insert (avoid proxied / circular frm docs).
+      try { pe = JSON.parse(JSON.stringify(pe)); } catch (eJson) {}
+      if (!pe.doctype) pe.doctype = "Payment Entry";
+      if (mop) pe.mode_of_payment = mop;
+      if (bankAccount) {
+        if (pe.payment_type === "Pay") pe.paid_from = bankAccount;
+        else pe.paid_to = bankAccount;
+      }
+      if (paidAmount > 0) {
+        pe.paid_amount = paidAmount;
+        pe.received_amount = paidAmount;
+        if (pe.references && pe.references.length) {
+          pe.references[0].allocated_amount = paidAmount;
+        }
+      }
+      // Bank / CC accounts require Reference No + Date (PE validate).
+      var billNo = ${billNoLit};
+      var postingDate = ${postingLit};
+      if (!pe.reference_no) pe.reference_no = billNo || billName;
+      if (!pe.reference_date) {
+        pe.reference_date =
+          postingDate ||
+          (frappe.datetime && frappe.datetime.get_today
+            ? frappe.datetime.get_today()
+            : null);
+      }
+      var inserted;
+      try {
+        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      } catch (eIns) {
+        return { ok: false, reason: reasonFrom(eIns), step: "insert" };
+      }
+      if (inserted && inserted.exc) {
+        return { ok: false, reason: reasonFrom(inserted), step: "insert" };
+      }
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
+      var submitted;
+      try {
+        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+      } catch (eSub) {
+        return {
+          ok: false,
+          reason: reasonFrom(eSub) || "Payment Entry saved as draft but Submit failed.",
+          step: "submit",
+          name: saved.name || null,
+        };
+      }
+      if (submitted && submitted.exc) {
+        return {
+          ok: false,
+          reason: reasonFrom(submitted),
+          step: "submit",
+          name: saved.name || null,
+        };
+      }
+      var finalDoc = submitted && submitted.message ? submitted.message : saved;
+      return {
+        ok: true,
+        name: finalDoc && finalDoc.name ? finalDoc.name : null,
+        docstatus: finalDoc ? finalDoc.docstatus : null,
+        paid_amount: finalDoc ? finalDoc.paid_amount : null,
+      };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, reason: "Payment Entry create failed." };
+  }
+  if (raw.ok) return raw;
+  return {
+    ok: false,
+    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
+    step: raw.step,
+    name: raw.name || null,
+  };
+}
+
+/**
+ * List Payment Entries allocated to this Purchase Invoice (OI-139).
+ * Prefer parent PE filtered by child reference (child DocType get_list is often empty/denied).
+ * @param {string} billName
+ */
+async function listBillPaymentEntries(billName) {
+  const name = billName == null ? "" : String(billName).trim();
+  if (!name || isNewDocRecord(name)) {
+    return { ok: true, rows: [] };
+  }
+  const billLit = JSON.stringify(name);
+  const raw = await erpEval(`(async () => {
+    try {
+      var billName = ${billLit};
+      var peList = [];
+      try {
+        var pes = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Payment Entry",
+            filters: [
+              ["Payment Entry Reference", "reference_doctype", "=", "Purchase Invoice"],
+              ["Payment Entry Reference", "reference_name", "=", billName],
+            ],
+            fields: ["name", "posting_date", "mode_of_payment", "paid_amount", "status", "docstatus"],
+            limit_page_length: 50,
+            order_by: "posting_date desc",
+          },
+        });
+        peList = (pes && pes.message) || [];
+      } catch (ePe) {
+        peList = [];
+      }
+      if (!peList.length) {
+        try {
+          var refs = await frappe.call({
+            method: "frappe.client.get_list",
+            args: {
+              doctype: "Payment Entry Reference",
+              filters: {
+                reference_doctype: "Purchase Invoice",
+                reference_name: billName,
+              },
+              fields: ["name", "parent", "allocated_amount"],
+              limit_page_length: 50,
+            },
+          });
+          var list = (refs && refs.message) || [];
+          var parents = [];
+          var allocBy = {};
+          for (var i = 0; i < list.length; i++) {
+            var ref = list[i];
+            if (!ref || !ref.parent) continue;
+            parents.push(ref.parent);
+            allocBy[ref.parent] = ref.allocated_amount;
+          }
+          if (parents.length) {
+            var pes2 = await frappe.call({
+              method: "frappe.client.get_list",
+              args: {
+                doctype: "Payment Entry",
+                filters: [["name", "in", parents]],
+                fields: ["name", "posting_date", "mode_of_payment", "paid_amount", "status", "docstatus"],
+                limit_page_length: 50,
+              },
+            });
+            peList = ((pes2 && pes2.message) || []).map(function (row) {
+              return Object.assign({}, row, { allocated_amount: allocBy[row.name] });
+            });
+          }
+        } catch (eRef) {
+          /* keep peList empty */
+        }
+      }
+      var out = [];
+      for (var p = 0; p < peList.length; p++) {
+        var row = peList[p] || {};
+        var alloc = row.allocated_amount;
+        if (alloc == null || alloc === "") {
+          try {
+            var children = await frappe.db.get_all("Payment Entry Reference", {
+              filters: {
+                parent: row.name,
+                reference_doctype: "Purchase Invoice",
+                reference_name: billName,
+              },
+              fields: ["allocated_amount"],
+            });
+            alloc = 0;
+            for (var c = 0; c < (children || []).length; c++) {
+              alloc += Number(children[c].allocated_amount) || 0;
+            }
+          } catch (eChild) {
+            alloc = row.paid_amount;
+          }
+        }
+        out.push({
+          name: row.name,
+          posting_date: row.posting_date || "",
+          mode_of_payment: row.mode_of_payment || "",
+          paid_amount: row.paid_amount,
+          allocated_amount: alloc,
+          status: row.status || "",
+          docstatus: row.docstatus,
+        });
+      }
+      return { ok: true, rows: out };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), rows: [] };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not list payments.",
+      rows: [],
+    };
+  }
+  return { ok: true, rows: projectBillPaymentRows(raw.rows) };
+}
+
+/**
+ * Reload Purchase Invoice after JIT Payment Entry so status/outstanding match ledger.
+ * @param {string} billName
+ */
+async function reloadBillDocAfterPayment(billName) {
+  const name = billName == null ? "" : String(billName).trim();
+  if (!name || isNewDocRecord(name)) {
+    return { ok: false, reason: "Missing Bill name." };
+  }
+  const billLit = JSON.stringify(name);
+  const raw = await erpEval(`(async () => {
+    try {
+      var billName = ${billLit};
+      if (
+        typeof cur_frm !== "undefined" &&
+        cur_frm &&
+        cur_frm.doctype === "Purchase Invoice" &&
+        cur_frm.doc &&
+        cur_frm.doc.name === billName &&
+        typeof cur_frm.reload_doc === "function"
+      ) {
+        await cur_frm.reload_doc();
+        return { ok: true, doc: JSON.parse(JSON.stringify(cur_frm.doc)) };
+      }
+      var g = await frappe.call({
+        method: "frappe.client.get",
+        args: { doctype: "Purchase Invoice", name: billName },
+      });
+      if (g && g.message) return { ok: true, doc: g.message };
+      return { ok: false, reason: "Could not reload Bill after payment." };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  if (raw && raw.ok && raw.doc) return { ok: true, doc: raw.doc };
+  return {
+    ok: false,
+    reason: (raw && raw.reason) || "Could not reload Bill after payment.",
+  };
+}
+
 async function saveBillFromErp(opts = {}) {
   const submit = !!opts.submit;
   if (!amountDueMatchesGrandTotal(amountDueScratch, billCompareTotal(dirtyState.doc))) {
     return { ok: false, reason: "Amount Due checksum failed (must match Grand total)." };
   }
+
+  /** @type {ReturnType<typeof captureAlreadyPaidIntent>} */
+  let jitIntent = null;
+  if (submit) {
+    jitIntent = captureAlreadyPaidIntent(dirtyState.doc);
+    if (jitIntent) {
+      const blockers = listJitPaymentEntryBlockers(jitIntent);
+      if (blockers.length) {
+        return { ok: false, reason: blockers[0], blockers };
+      }
+      const cleared = await applyBillHeaderWrites(clearIsPaidForJitPeWrites());
+      if (!cleared.ok) {
+        return {
+          ok: false,
+          reason: cleared.reason || "Could not clear Already paid before Submit.",
+        };
+      }
+    }
+  }
+
   // Bridge saveDoc always settles (preflight + short inner deadline + scraped Vanilla msgs).
   // Outer race is a backstop if executeJavaScript itself hangs.
   const raw = await raceTimeout(
@@ -2993,6 +3589,49 @@ async function saveBillFromErp(opts = {}) {
     };
     amountDueCommitted = amountDueScratch;
     noteShelvedFromSave("purchase-invoice", raw.doc);
+
+    if (submit && jitIntent && raw.doc && raw.doc.name) {
+      const pe = await createJitPaymentEntryForBill(raw.doc.name, jitIntent);
+      if (pe && pe.ok) {
+        const reloaded = await reloadBillDocAfterPayment(raw.doc.name);
+        if (reloaded && reloaded.ok && reloaded.doc) {
+          dirtyState = {
+            ...dirtyState,
+            doc: reloaded.doc,
+            userEdited: false,
+            isDirty: false,
+            baselineJson: captureBaseline(reloaded.doc),
+          };
+          noteShelvedFromSave("purchase-invoice", reloaded.doc);
+          return {
+            ...raw,
+            doc: reloaded.doc,
+            jitPayment: {
+              ok: true,
+              name: pe.name,
+              paid_amount: pe.paid_amount,
+            },
+          };
+        }
+        return {
+          ...raw,
+          jitPayment: {
+            ok: true,
+            name: pe.name,
+            paid_amount: pe.paid_amount,
+          },
+        };
+      }
+      return {
+        ...raw,
+        jitPayment: {
+          ok: false,
+          reason:
+            (pe && pe.reason) ||
+            "Bill submitted, but Payment Entry failed — pay from Payment Entry / Pay Bills.",
+        },
+      };
+    }
   }
   return raw && typeof raw === "object" ? raw : { ok: false, reason: "Save failed." };
 }
@@ -3058,6 +3697,40 @@ async function deleteBillItem(rowIndex) {
     return { ok: false, reason: "Invalid row" };
   }
   dirtyState = markUserEdited(dirtyState);
+  const items =
+    dirtyState.doc && Array.isArray(dirtyState.doc.items) ? dirtyState.doc.items : [];
+  if (items.length <= 1) {
+    const raw = await bridgeCall("clearRow", rowIndex, [...ITEM_ROW_CLEAR_FIELDS]);
+    if (raw && raw.ok) {
+      dirtyState = { ...dirtyState, doc: raw.doc, isDirty: true };
+      const key = currentBillDocKey();
+      if (billLineAllocationsByDoc[key]) {
+        const next = { ...billLineAllocationsByDoc[key] };
+        delete next[rowIndex];
+        delete next[String(rowIndex)];
+        billLineAllocationsByDoc[key] = next;
+      }
+      if (billPoLineMetaByDoc[key]) {
+        const next = { ...billPoLineMetaByDoc[key] };
+        delete next[rowIndex];
+        delete next[String(rowIndex)];
+        billPoLineMetaByDoc[key] = next;
+      }
+      return {
+        ...raw,
+        clearedLastRow: true,
+        reason: LAST_ITEM_ROW_TOAST,
+        lineAllocations: getBillLineAllocations(),
+        poLineMeta: getBillPoLineMeta(),
+      };
+    }
+    return {
+      ok: false,
+      clearedLastRow: false,
+      blockedLastRow: true,
+      reason: (raw && raw.reason) || LAST_ITEM_ROW_TOAST,
+    };
+  }
   const raw = await erpEval(`(async () => {
     try {
       var f = window.cur_frm;
@@ -3067,7 +3740,7 @@ async function deleteBillItem(rowIndex) {
         return {
           ok: false,
           blockedLastRow: true,
-          reason: "Must have at least one item on every saved Bill",
+          reason: ${JSON.stringify(LAST_ITEM_ROW_TOAST)},
         };
       }
       var row = items[${rowIndex}];
@@ -3144,12 +3817,97 @@ async function searchLink(doctype, txt) {
       results: [],
     };
   }
-  const results = normalizeSearchLinkResults(raw.results);
+  let results = normalizeSearchLinkResults(raw.results);
+  if (doctype.trim() === "Account") {
+    results = await enrichAccountLinkResults(results);
+  }
   if (doctype.trim() !== "Supplier" || !results.length) {
     return { ok: true, results };
   }
   const ranked = await rankSupplierSearchResults(results);
   return { ok: true, results: ranked };
+}
+
+/**
+ * Attach Account.company and de-emphasize other-company rows vs open Bill company.
+ * @param {Array<{ value: string, description: string }>} results
+ */
+async function enrichAccountLinkResults(results) {
+  if (!results.length) return results;
+  const names = results.map((r) => r.value).filter(Boolean);
+  const billCompany = normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
+  const namesLit = JSON.stringify(names);
+  const raw = await erpEval(`(async () => {
+    try {
+      var names = ${namesLit};
+      if (!names.length) return { ok: true, byName: {} };
+      var list = await frappe.db.get_list("Account", {
+        fields: ["name", "company"],
+        filters: [["name", "in", names]],
+        limit_page_length: names.length,
+      });
+      var byName = {};
+      (list || []).forEach(function (row) {
+        if (row && row.name) byName[row.name] = row.company || "";
+      });
+      return { ok: true, byName: byName };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), byName: {} };
+    }
+  })()`);
+  const byName = (raw && raw.byName) || {};
+  const withCompany = results.map((r) => ({
+    ...r,
+    company: byName[r.value] || "",
+  }));
+  return annotateAccountLinkOptions(withCompany, billCompany);
+}
+
+/**
+ * Resolve Account.company for names on the open Bill; return save-gate blockers.
+ */
+async function listBillAccountCompanyMismatches() {
+  const doc = dirtyState.doc;
+  const billCompany = normalizeEditableText(doc && doc.company);
+  const names = accountNamesOnBillDoc(doc);
+  if (!billCompany || !names.length) {
+    return { ok: true, blockers: [], byName: {} };
+  }
+  const namesLit = JSON.stringify(names);
+  const raw = await erpEval(`(async () => {
+    try {
+      var names = ${namesLit};
+      var list = await frappe.db.get_list("Account", {
+        fields: ["name", "company"],
+        filters: [["name", "in", names]],
+        limit_page_length: names.length,
+      });
+      var byName = {};
+      (list || []).forEach(function (row) {
+        if (row && row.name) byName[row.name] = row.company || "";
+      });
+      return { ok: true, byName: byName };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), byName: {} };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not check Account companies.",
+      blockers: [],
+      byName: {},
+    };
+  }
+  const byName = raw.byName || {};
+  const taxes = Array.isArray(doc.taxes) ? doc.taxes : [];
+  const blockers = listAccountCompanyMismatchBlockers({
+    billCompany,
+    accountHeads: taxes.map((t) => (t && t.account_head) || ""),
+    cashBankAccount: doc.cash_bank_account,
+    accountCompanyByName: byName,
+  });
+  return { ok: true, blockers, byName };
 }
 
 /**
@@ -3234,7 +3992,19 @@ function diagnoseSnapshot() {
   });
   const navLines = formatNavDebugLines(navDebugLog);
   const incidentLines = formatNavIncidentsDigest(navIncidentRing);
-  const allLines = [...lines, "", ...navLines, "", ...incidentLines];
+  const focusLines = formatFocusDebugLines(focusDebugLog);
+  const focusIncidentLines = formatFocusIncidentsDigest(focusIncidentRing);
+  const allLines = [
+    ...lines,
+    "",
+    ...navLines,
+    "",
+    ...incidentLines,
+    "",
+    ...focusLines,
+    "",
+    ...focusIncidentLines,
+  ];
   const remediation = remediationUiState(healthRemediation, {
     status: diagnoseState.status,
   });
@@ -3318,7 +4088,7 @@ function createWindow() {
 
   chrome.webContents.loadFile(path.join(__dirname, "chrome.html"));
   home.webContents.loadFile(path.join(__dirname, "home.html"));
-  bill.webContents.loadFile(path.join(__dirname, "bill.html"));
+  bill.webContents.loadURL("about:blank");
   docForm.webContents.loadFile(path.join(__dirname, "doc-form.html"));
   hist.webContents.loadFile(path.join(__dirname, "history.html"));
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
@@ -3387,6 +4157,8 @@ ipcMain.handle("get-config", () => ({
   updateStub: "Shell updates: ask IT / see README (no auto-update until packaged).",
   navDebugLogPath: app.isReady() ? navDebugLogPath() : "",
   navIncidentLogPath: app.isReady() ? navIncidentLogPath() : "",
+  focusDebugLogPath: app.isReady() ? focusDebugLogPath() : "",
+  focusIncidentLogPath: app.isReady() ? focusIncidentLogPath() : "",
 }));
 
 ipcMain.handle("get-diagnose", () => diagnoseSnapshot());
@@ -3568,6 +4340,14 @@ ipcMain.handle("calc-history-copy", (_e, id, mode) => {
   return { ok: true, text };
 });
 
+ipcMain.handle("history-copy-ref", (_e, text) => {
+  const ref = text != null ? String(text).trim() : "";
+  if (!ref) return { ok: false, reason: "Nothing to copy" };
+  clipboard.writeText(ref);
+  navDebug("hist-copy-ref", ref.slice(0, 80));
+  return { ok: true, text: ref };
+});
+
 ipcMain.on("open-diagnose", () => openDiagnoseDropdown());
 ipcMain.on("diagnose-dropdown-close", () => closeDiagnoseDropdown());
 ipcMain.on("diagnose-dropdown-ready", (e) => {
@@ -3609,6 +4389,46 @@ ipcMain.handle("nav-incident-submit", (_e, note) => {
   navDebug("user-incident", incident.note.slice(0, 180));
   navIncidentDraft = null;
   return { ok: true, path: file, at: incident.at };
+});
+
+ipcMain.on("open-focus-incident", () => openFocusIncidentDialog());
+ipcMain.on("focus-incident-close", () => closeFocusIncidentDialog());
+ipcMain.on("focus-incident-ready", (e) => {
+  if (focusIncidentWin && !focusIncidentWin.isDestroyed() && e.sender === focusIncidentWin.webContents) {
+    e.sender.send("focus-incident-data", focusIncidentPayload());
+  }
+});
+ipcMain.handle("focus-incident-submit", (_e, note) => {
+  const frozen = focusIncidentDraft || collectFocusIncidentContext();
+  const incident = buildFocusIncident(frozen, note, new Date().toISOString());
+  if (!incident) {
+    return { ok: false, reason: "Write a short note — empty reports are skipped." };
+  }
+  const file = focusIncidentLogPath();
+  try {
+    fs.appendFileSync(file, serializeFocusIncidentLine(incident), { encoding: "utf8" });
+  } catch (err) {
+    return { ok: false, reason: String(err && err.message ? err.message : err) };
+  }
+  focusIncidentRing = appendFocusIncident(focusIncidentRing, incident);
+  focusDebug("user-focus-incident", incident.note.slice(0, 180), { surface: "main" });
+  focusIncidentDraft = null;
+  return { ok: true, path: file, at: incident.at };
+});
+
+ipcMain.on("focus-debug", (e, payload) => {
+  const p = payload && typeof payload === "object" ? payload : {};
+  let surface = p.surface != null ? String(p.surface) : "";
+  if (!surface) {
+    if (bill && !bill.webContents.isDestroyed() && e.sender === bill.webContents) surface = "bill";
+    else if (docForm && !docForm.webContents.isDestroyed() && e.sender === docForm.webContents) {
+      surface = "doc-form";
+    }
+  }
+  focusDebug(p.event || "focus", p.detail != null ? String(p.detail) : "", {
+    surface,
+    active: p.active && typeof p.active === "object" ? p.active : null,
+  });
 });
 
 ipcMain.handle("open-feedback", async () => {
@@ -3659,13 +4479,25 @@ ipcMain.handle("open-feedback", async () => {
 
 ipcMain.handle("bill-get-snapshot", async () => snapshotBill());
 ipcMain.handle("bill-retry-load", async () => {
-  await showBill(currentRoute.includes("purchase-invoice") ? currentRoute : "/app/purchase-invoice/new");
+  if (billLoadPhase === BILL_LOAD_LOADING) {
+    billLoadGen += 1;
+  }
+  billLoadPhase = BILL_LOAD_FAILED;
+  await showBill(currentRoute.includes("purchase-invoice") ? currentRoute : "/app/purchase-invoice/new", {
+    skipDirtyGate: true,
+  });
   return { ok: true };
 });
 
 function headerValueUnchanged(field, next) {
   const kind = dirtyCompareKindForField(field);
   const doc = dirtyState.doc;
+  if (field === "is_paid") {
+    const prev = doc ? doc.is_paid : 0;
+    const a = prev === true || prev === 1 || prev === "1" ? 1 : 0;
+    const b = next === true || next === 1 || next === "1" ? 1 : 0;
+    return a === b;
+  }
   const prev = doc ? doc[field] : undefined;
   if (valuesMeaningfullyEqual(prev, next, { kind })) return true;
   // Vendor input shows supplier_name; ERP key is supplier — either match is a no-op.
@@ -3680,9 +4512,18 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
   if (typeof field !== "string" || !field || field.startsWith("__")) {
     return { ok: false, reason: "Invalid field" };
   }
+  if (!isWritableBillHeaderField(field)) {
+    return { ok: false, reason: "Field not writable on Doc Bill" };
+  }
   const kind = dirtyCompareKindForField(field);
-  const next =
-    kind === "number" ? (value == null ? "" : String(value)) : normalizeEditableText(value);
+  let next;
+  if (field === "is_paid") {
+    next = value === true || value === 1 || value === "1" ? "1" : "0";
+  } else if (kind === "number") {
+    next = value == null ? "" : String(value);
+  } else {
+    next = normalizeEditableText(value);
+  }
   if (headerValueUnchanged(field, next)) {
     return {
       ok: true,
@@ -4241,6 +5082,233 @@ ipcMain.handle("bill-delete-tax", async (_e, rowIndex) => {
   return raw;
 });
 
+/** Applied Payment Entries for this Bill (OI-139). */
+ipcMain.handle("bill-list-payments", async () => {
+  const doc = dirtyState.doc;
+  const name = doc && doc.name ? String(doc.name) : "";
+  return listBillPaymentEntries(name);
+});
+
+/**
+ * Address master rows for profile address pickers (OI-136 / tranche 6).
+ */
+async function listAddressesForProfile(profileId, doc, role) {
+  const editable = doc && Number(doc.docstatus) === 0;
+  const decision = docAddressPickerOpenDecision(doc, profileId, role, { editable });
+  if (!decision.open) {
+    return { ok: false, reason: decision.reason || "Cannot open address picker.", rows: [] };
+  }
+  const meta = decision.meta || addressRoleMeta(profileId, role);
+  if (!meta || !meta.linkField) {
+    return { ok: false, reason: "Unknown address role.", rows: [] };
+  }
+  const listParty = addressListParty(doc, meta);
+  if (!listParty) {
+    return { ok: false, reason: decision.reason || "Cannot list addresses for this party.", rows: [] };
+  }
+  const partyDoctype = listParty.partyDoctype;
+  const partyName = listParty.partyName;
+  const current = doc[meta.linkField] != null ? String(doc[meta.linkField]).trim() : "";
+  const partyLit = JSON.stringify(partyName);
+  const doctypeLit = JSON.stringify(partyDoctype);
+  const raw = await erpEval(`(async () => {
+    try {
+      var partyName = ${partyLit};
+      var linkDoctype = ${doctypeLit};
+      var rows = await frappe.db.get_list("Address", {
+        filters: [
+          ["Dynamic Link", "link_doctype", "=", linkDoctype],
+          ["Dynamic Link", "link_name", "=", partyName],
+        ],
+        fields: [
+          "name",
+          "address_title",
+          "address_line1",
+          "address_line2",
+          "city",
+          "state",
+          "pincode",
+          "country",
+          "address_type",
+          "is_primary_address",
+          "is_shipping_address",
+        ],
+        limit: 50,
+        order_by: "modified desc",
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), rows: [] };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not list addresses.",
+      rows: [],
+      current: current || "",
+      linkField: meta.linkField,
+      title: meta.title,
+    };
+  }
+  const rows = (Array.isArray(raw.rows) ? raw.rows : [])
+    .map((r) => projectAddressPickerOption(r))
+    .filter((r) => r.name);
+  return {
+    ok: true,
+    rows,
+    current: current || "",
+    linkField: meta.linkField,
+    title: meta.title,
+    label: meta.label,
+  };
+}
+
+/**
+ * Fetch freeform `terms` text from linked PO/PR source documents.
+ * @param {Array<{ kind?: string, name?: string }>} refs
+ */
+async function fetchSourceTermsForRefs(refs) {
+  const list = Array.isArray(refs)
+    ? refs.filter((r) => r && (r.kind === "po" || r.kind === "pr") && typeof r.name === "string" && r.name.trim())
+    : [];
+  if (!list.length) return { ok: true, termsByKey: {} };
+  const pairs = list.map((r) => ({
+    key: `${r.kind}:${String(r.name).trim()}`,
+    doctype: r.kind === "po" ? "Purchase Order" : "Purchase Receipt",
+    name: String(r.name).trim(),
+  }));
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_value) {
+        return { ok: false, reason: "ERP Desk not ready" };
+      }
+      var pairs = ${JSON.stringify(pairs)};
+      var out = {};
+      for (var i = 0; i < pairs.length; i++) {
+        var p = pairs[i];
+        try {
+          var r = await frappe.db.get_value(p.doctype, p.name, "terms");
+          var m = r && (r.message || r);
+          out[p.key] = m && m.terms != null ? String(m.terms) : "";
+        } catch (e) {}
+      }
+      return { ok: true, termsByKey: out };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), termsByKey: {} };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return {
+      ok: false,
+      reason: (raw && raw.reason) || "Could not load source terms.",
+      termsByKey: {},
+    };
+  }
+  return { ok: true, termsByKey: raw.termsByKey || {} };
+}
+
+ipcMain.handle("fetch-source-terms", async (_e, refs) => fetchSourceTermsForRefs(refs));
+
+ipcMain.handle("bill-list-addresses", async (_e, role) =>
+  listAddressesForProfile("bill", dirtyState.doc, role),
+);
+
+ipcMain.handle("doc-list-addresses", async (_e, role) => {
+  const profile = activeDocProfile();
+  if (!profile || profile.shell !== "doc-form") {
+    return { ok: false, reason: "No Doc form skin active.", rows: [] };
+  }
+  if (!profile.features.addressPicker) {
+    return { ok: false, reason: "Address picker not enabled for this document.", rows: [] };
+  }
+  return listAddressesForProfile(profile.id, dirtyState.doc, role);
+});
+
+/**
+ * Allocate a Taxes/Charges Add row into item costs + Deduct offset (OI-140).
+ * Grand total unchanged.
+ */
+ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => {
+  const doc = dirtyState.doc;
+  if (!doc || Number(doc.docstatus) !== 0) {
+    return { ok: false, reason: "Allocate to stock only on draft Bills." };
+  }
+  const ri = Number(taxRowIndex);
+  if (!Number.isInteger(ri) || ri < 0) {
+    return { ok: false, reason: "Invalid charge row." };
+  }
+  const tax = Array.isArray(doc.taxes) ? doc.taxes[ri] : null;
+  if (!isAllocatableChargeRow(tax)) {
+    return { ok: false, reason: "Select an Add charge with amount > 0." };
+  }
+  const items = (Array.isArray(doc.items) ? doc.items : []).map((it, i) => ({
+    rowIndex: i,
+    qty: it.qty,
+    rate: it.rate,
+    amount: it.amount,
+    name: it.name,
+    item_code: it.item_code,
+  }));
+  const plan = planChargeToStockAllocation({
+    items,
+    chargeAmount: Number(tax.tax_amount),
+    mode: mode === "qty" || mode === "custom" ? mode : "amount",
+    custom: Array.isArray(custom) ? custom : [],
+    chargeAccount: tax.account_head,
+    chargeDescription: tax.description || tax.account_head,
+  });
+  if (!plan.ok) {
+    return { ok: false, reason: plan.reason || "Allocation failed." };
+  }
+
+  for (const u of plan.itemUpdates) {
+    const setRes = await setBillItemField(u.rowIndex, "rate", String(u.nextRate));
+    if (!(setRes && setRes.ok)) {
+      return {
+        ok: false,
+        reason: (setRes && setRes.reason) || `Could not update item rate on line ${u.rowIndex + 1}.`,
+      };
+    }
+  }
+
+  const offset = plan.offsetTax;
+  const addRes = await bridgeCall(
+    "addTaxRow",
+    offset.account_head,
+    offset.tax_amount,
+    offset.description,
+    offset.add_deduct_tax,
+  );
+  if (!(addRes && addRes.ok)) {
+    return {
+      ok: false,
+      reason:
+        (addRes && addRes.reason) ||
+        "Item costs updated, but offset Deduct charge failed — check Taxes and Charges.",
+      doc: dirtyState.doc,
+      partial: true,
+    };
+  }
+  dirtyState = markUserEdited({ ...dirtyState, doc: addRes.doc, isDirty: true });
+  return {
+    ok: true,
+    doc: addRes.doc,
+    allocatedTotal: plan.allocatedTotal,
+    remainder: plan.remainder,
+  };
+});
+
+/** Soft path to Vanilla Landed Cost Voucher (native distribute). */
+ipcMain.handle("bill-open-landed-cost", async () => {
+  const route = "/app/landed-cost-voucher/new";
+  currentRoute = route;
+  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
+  savePrefs();
+  showErp(route, { forceLoad: true });
+  return { ok: true, route };
+});
+
 /**
  * Attach files via Vanilla FileUploader (OI-005). ERP view must be visible —
  * Bill WebContents cannot host Frappe’s uploader DOM.
@@ -4678,6 +5746,7 @@ ipcMain.handle("bill-revert-unsaved", async () => {
 });
 
 ipcMain.handle("bill-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+ipcMain.handle("bill-account-company-check", async () => listBillAccountCompanyMismatches());
 ipcMain.on("bill-open-vanilla", () => {
   const route = currentRoute.includes("purchase-invoice")
     ? currentRoute
@@ -4689,14 +5758,38 @@ ipcMain.on("bill-open-vendor-add", () => {
   showErp("/app/supplier/new", { forceLoad: true });
 });
 
+ipcMain.handle("bill-open-supplier-form", async (_e, supplier) => {
+  const name = normalizeEditableText(supplier);
+  if (!name) {
+    return { ok: false, reason: "No supplier name." };
+  }
+  // Desk route uses the document name as-is (spaces allowed in path segment encoding).
+  showErp(`/app/supplier/${encodeURIComponent(name)}`, { forceLoad: true });
+  return { ok: true, supplier: name };
+});
+
 ipcMain.on("bill-open-project-add", () => {
   showErp("/app/project/new", { forceLoad: true });
+});
+
+ipcMain.on("bill-open-payment-terms-add", () => {
+  softPeekErp(PAYMENT_TERMS_TEMPLATE_NEW_ROUTE);
 });
 
 ipcMain.on("bill-focus-surface", () => {
   try {
     if (win && !win.isDestroyed()) win.focus();
-    if (bill && !bill.webContents.isDestroyed()) bill.webContents.focus();
+    // Tranche 10: Bill UI lives in docForm; legacy bill view stays off-screen.
+    const wc =
+      activeDocSkin === "bill" && docForm && !docForm.webContents.isDestroyed()
+        ? docForm.webContents
+        : bill && !bill.webContents.isDestroyed()
+          ? bill.webContents
+          : null;
+    focusDebug("bill-focus-surface", currentRoute || "", {
+      surface: wc && docForm && wc === docForm.webContents ? "doc-form" : "bill-legacy",
+    });
+    if (wc) wc.focus();
   } catch {
     /* ignore */
   }
@@ -4721,7 +5814,17 @@ ipcMain.handle("doc-retry-load", async () => {
   if (!profile || profile.shell !== "doc-form") {
     return { ok: false, reason: "No Doc form skin active." };
   }
-  await showDocForm(/** @type {DocFormSkinId} */ (profile.id), currentRoute.includes(profile.doctypeKey) ? currentRoute : profile.newRoute);
+  if (profile.id === "bill") {
+    if (billLoadPhase === BILL_LOAD_LOADING) {
+      billLoadGen += 1;
+    }
+    billLoadPhase = BILL_LOAD_FAILED;
+  }
+  await showDocForm(
+    /** @type {DocFormSkinId} */ (profile.id),
+    currentRoute.includes(profile.doctypeKey) ? currentRoute : profile.newRoute,
+    { skipDirtyGate: true },
+  );
   return { ok: true };
 });
 
@@ -4760,6 +5863,14 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
 });
 
 ipcMain.handle("doc-set-date-expected", async (_e, value) => {
+  if (activeDocSkin !== "po") {
+    return {
+      ok: false,
+      reason: "Date Expected is not used on this Doc form",
+      scratch: { dateExpected: dateExpectedScratch },
+      doc: dirtyState.doc,
+    };
+  }
   dateExpectedScratch = value == null ? "" : String(value);
   dirtyState = markUserEdited({ ...dirtyState, isDirty: true });
   // Explicit header edit: always re-stamp all Required By (OI-069 edge case).
@@ -4846,7 +5957,12 @@ ipcMain.handle("doc-add-item", async () => {
     scratch: { dateExpected: dateExpectedScratch },
   };
 });
-ipcMain.handle("doc-delete-item", async (_e, rowIndex) => deleteBillItem(Number(rowIndex)));
+ipcMain.handle("doc-delete-item", async (_e, rowIndex) => {
+  const raw = await deleteBillItem(Number(rowIndex));
+  return raw && typeof raw === "object"
+    ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
+    : raw;
+});
 ipcMain.handle("doc-clear-all-qty", async () => {
   const raw = await bridgeCall("zeroAllQty");
   if (raw && raw.ok) {
@@ -5373,7 +6489,12 @@ ipcMain.on("doc-open-vendor-add", () => {
   showErp("/app/supplier/new", { forceLoad: true });
 });
 
+ipcMain.on("doc-open-payment-terms-add", () => {
+  softPeekErp(PAYMENT_TERMS_TEMPLATE_NEW_ROUTE);
+});
+
 ipcMain.on("doc-focus-surface", () => {
+  focusDebug("doc-focus-surface", currentRoute || "", { surface: "doc-form" });
   try {
     if (win && !win.isDestroyed()) win.focus();
     if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();

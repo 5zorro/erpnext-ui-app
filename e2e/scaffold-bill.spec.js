@@ -26,13 +26,13 @@ test.describe("scaffold: Doc Bill view", () => {
 
     await e2eCall(app, "openBill", "/app/purchase-invoice/new");
     await expect
-      .poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 })
+      .poll(async () => e2eGet(app, "getActiveDocSkin"), { timeout: 15_000 })
       .toBe("bill");
 
     const title = await e2eCall(
       app,
       "execInView",
-      "bill",
+      "docForm",
       `document.querySelector('[data-testid="bill-root"]') ? "ok" : ""`,
     );
     expect(title).toBe("ok");
@@ -40,7 +40,7 @@ test.describe("scaffold: Doc Bill view", () => {
     const chip = await e2eCall(
       app,
       "execInView",
-      "bill",
+      "docForm",
       `document.querySelector('[data-testid="bill-due-chip"]')?.className || ""`,
     );
     expect(chip).toMatch(/chip/);

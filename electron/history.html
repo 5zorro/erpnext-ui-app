@@ -20,6 +20,15 @@
     li button .hist-detail { margin-left: 0.35em; font-weight: 400; }
     li button .hist-detail.muted { color: #6b8299; }
     li button:hover .hist-detail.muted { color: #9fb3c8; }
+    li.hist-row { display: flex; gap: 2px; align-items: stretch; }
+    li.hist-row .hist-nav { flex: 1; min-width: 0; }
+    li button.hist-copy-ref {
+      flex: 0 0 auto; width: 34px; padding: 0;
+      font-size: 14px; line-height: 1; color: #9fb3c8;
+    }
+    li button.hist-copy-ref:hover { background: #334155; color: #fff; }
+    li button.hist-copy-ref.is-copied { color: #86efac; }
+    .ui-ico svg { display: block; }
     li button.hist-setup { color: #9fb3c8; }
     li button.hist-peek-parent { font-weight: 600; color: #e2e8f0; }
     li button.hist-peek-child { padding-left: 18px; }
@@ -81,6 +90,8 @@
   <script type="module">
     import { splitHistory } from "../src/history.js";
     import { splitShelvedDrafts } from "../src/shelved-drafts.js";
+    import { flyoutRowCopyRef } from "../src/history-copy-ref.js";
+    import { copyTotalIconHtml, uiIconHtml } from "../src/ui-icons.js";
 
     const listRecent = document.getElementById("list-recent");
     const listOlder = document.getElementById("list-older");
@@ -103,10 +114,14 @@
       ul.innerHTML = "";
       rows.forEach((h) => {
         const li = document.createElement("li");
+        const copyRef = flyoutRowCopyRef(h, { draft: !!opts.draft });
+        if (copyRef) li.className = "hist-row";
+
         const b = document.createElement("button");
         b.type = "button";
+        b.className = copyRef ? "hist-nav" : "";
         b.title = h.route || "";
-        if (opts.draft) b.className = "draft-label";
+        if (opts.draft) b.classList.add("draft-label");
 
         const primary = h.label || h.dt || h.name || "";
         if (!opts.draft && h.treeDepth === 1) {
@@ -138,6 +153,37 @@
           if (api) api.openErp(h.route);
         };
         li.appendChild(b);
+
+        if (copyRef) {
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "hist-copy-ref";
+          copyBtn.dataset.testid = "hist-copy-ref";
+          copyBtn.title = `Copy ref: ${copyRef}`;
+          copyBtn.setAttribute("aria-label", `Copy ref ${copyRef}`);
+          copyBtn.innerHTML = copyTotalIconHtml();
+          copyBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            if (api && api.navDebug) api.navDebug("hist-copy-ref", copyRef);
+            const iconHtml = copyTotalIconHtml();
+            const done = (ok) => {
+              if (!ok) return;
+              copyBtn.classList.add("is-copied");
+              copyBtn.innerHTML = uiIconHtml("check", { size: 14 });
+              setTimeout(() => {
+                copyBtn.classList.remove("is-copied");
+                copyBtn.innerHTML = iconHtml;
+              }, 1200);
+            };
+            if (api && api.copyHistoryRef) {
+              api.copyHistoryRef(copyRef).then((r) => done(r && r.ok)).catch(() => {});
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(copyRef).then(() => done(true)).catch(() => {});
+            }
+          };
+          li.appendChild(copyBtn);
+        }
+
         ul.appendChild(li);
       });
     }

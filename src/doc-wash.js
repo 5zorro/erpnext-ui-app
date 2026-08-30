@@ -7,6 +7,9 @@
 /** @typedef {"ap"|"ar"} DocWashDesk */
 /** @typedef {"ar"|"ap"|"both"|"none"} DocWashPatternPref */
 
+/** Neutral page canvas behind Doc skins (layer 1). Role wash sits on toolbar + .card (layer 2). */
+export const DOC_PAGE_CANVAS = "#eef2f5";
+
 /** Okabe–Ito-derived washes (SSoT for CSS vars + tests). */
 export const DOC_WASH_COLORS = Object.freeze({
   request: "#eef6fb",

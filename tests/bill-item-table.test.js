@@ -87,6 +87,42 @@ describe("bill-item-table", () => {
     assert.equal(sorted[1].rowIndex, 0);
   });
 
+  it("sortBillItemRowModels tie-breaks equal amounts by line number", () => {
+    const doc = {
+      items: [
+        { idx: 1, item_code: "A", qty: 1, rate: 2, amount: 2 },
+        { idx: 2, item_code: "B", qty: 1, rate: 2, amount: 2 },
+        { idx: 3, item_code: "C", qty: 1, rate: 2, amount: 2 },
+        { idx: 4, item_code: "D", qty: 1, rate: 2, amount: 2 },
+      ],
+    };
+    const models = buildBillItemRowModels(doc, {}, {});
+    const sorted = sortBillItemRowModels(models, [{ key: "amount", asc: false }]);
+    assert.deepEqual(
+      sorted.map((m) => m.lineNo),
+      ["1", "2", "3", "4"],
+    );
+  });
+
+  it("sortBillItemRowModels multi-column: amount then item_code", () => {
+    const doc = {
+      items: [
+        { idx: 1, item_code: "Z", qty: 1, rate: 5, amount: 5 },
+        { idx: 2, item_code: "A", qty: 1, rate: 5, amount: 5 },
+        { idx: 3, item_code: "M", qty: 1, rate: 1, amount: 1 },
+      ],
+    };
+    const models = buildBillItemRowModels(doc, {}, {});
+    const sorted = sortBillItemRowModels(models, [
+      { key: "amount", asc: false },
+      { key: "item_code", asc: true },
+    ]);
+    assert.deepEqual(
+      sorted.map((m) => m.cells[0]),
+      ["A", "Z", "M"],
+    );
+  });
+
   it("indexPoLineMeta maps po_detail to row metadata", () => {
     const doc = {
       items: [{ purchase_order: "PO-1", po_detail: "POI-99" }],

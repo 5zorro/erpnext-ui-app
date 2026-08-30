@@ -1,8 +1,9 @@
 /**
- * Doc wash tints — shared by bill.html + doc-form.html (OI-125).
+ * Doc wash tints — shared by home.html, doc-form.html (OI-125).
  * Tokens match src/doc-wash.js DOC_WASH_COLORS.
  */
 :root {
+  --doc-page-canvas: #eef2f5;
   --wash-request: #eef6fb;
   --wash-order: #e8f4fc;
   --wash-fulfill: #fff4e0;
@@ -24,23 +25,40 @@
   --stamp-sell: url("assets/selling-stamp.svg");
 }
 
-/* Page wash by document role */
-html[data-doc-role="request"],
-html[data-doc-role="request"] body { background-color: var(--wash-request); }
-html[data-doc-role="order"],
-html[data-doc-role="order"] body { background-color: var(--wash-order); }
-html[data-doc-role="fulfill"],
-html[data-doc-role="fulfill"] body { background-color: var(--wash-fulfill); }
-html[data-doc-role="invoice"],
-html[data-doc-role="invoice"] body { background-color: var(--wash-invoice); }
-html[data-doc-role="payment"],
-html[data-doc-role="payment"] body { background-color: var(--wash-payment); }
+/*
+  Layer 1 — page canvas (grey): behind toolbar, card, stamp.
+  Layer 2 — role wash: File / Navigate .tb-group + entry .card (see below).
+  Layer 3 — .bill-section (except summary): stay #fff in bill-dashboard.css / doc-form.
+  Grand-total .bill-section-summary is transparent so layer-2 wash shows through.
+*/
+html[data-doc-role],
+html[data-doc-role] body {
+  background-color: var(--doc-page-canvas);
+  background-image: none;
+}
 
-/* Buying / Selling stamp (desk identity — not the pattern preference) */
-html[data-doc-desk="ap"] body::before,
-html[data-doc-desk="ar"] body::before {
+/* Layer 2 — main chrome groups use doc-skin role wash */
+html[data-doc-role="request"] .tb-group,
+html[data-doc-role="request"] .card { background-color: var(--wash-request); }
+html[data-doc-role="order"] .tb-group,
+html[data-doc-role="order"] .card { background-color: var(--wash-order); }
+html[data-doc-role="fulfill"] .tb-group,
+html[data-doc-role="fulfill"] .card { background-color: var(--wash-fulfill); }
+html[data-doc-role="invoice"] .tb-group,
+html[data-doc-role="invoice"] .card { background-color: var(--wash-invoice); }
+html[data-doc-role="payment"] .tb-group,
+html[data-doc-role="payment"] .card { background-color: var(--wash-payment); }
+
+/* Layer 2 stacking context: wash + hatch + stamp share .card */
+.card {
+  position: relative;
+}
+
+/* Buying / Selling stamp on layer 2 (.card), behind white subsections */
+html[data-doc-desk="ap"] .card::before,
+html[data-doc-desk="ar"] .card::before {
   content: "";
-  position: fixed;
+  position: absolute;
   right: 2%;
   bottom: 4%;
   width: min(220px, 28vw);
@@ -50,23 +68,31 @@ html[data-doc-desk="ar"] body::before {
   pointer-events: none;
   z-index: 0;
 }
-html[data-doc-desk="ar"] body::before {
+html[data-doc-desk="ar"] .card::before {
   background-image: var(--stamp-sell);
 }
 
-/* Pattern preference: which desk(s) get lightening hatch */
-html[data-pattern="ap"][data-doc-desk="ap"] body,
-html[data-pattern="ar"][data-doc-desk="ar"] body,
-html[data-pattern="both"][data-doc-desk="ap"] body,
-html[data-pattern="both"][data-doc-desk="ar"] body {
+/* Layer 3 — white subsections above card wash / stamp */
+.card > .bill-section:not(.bill-section-summary) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Pattern preference: hatch on layer-2 chrome (not the grey page canvas) */
+html[data-pattern="ap"][data-doc-desk="ap"] .tb-group,
+html[data-pattern="ap"][data-doc-desk="ap"] .card,
+html[data-pattern="ar"][data-doc-desk="ar"] .tb-group,
+html[data-pattern="ar"][data-doc-desk="ar"] .card,
+html[data-pattern="both"][data-doc-desk="ap"] .tb-group,
+html[data-pattern="both"][data-doc-desk="ap"] .card,
+html[data-pattern="both"][data-doc-desk="ar"] .tb-group,
+html[data-pattern="both"][data-doc-desk="ar"] .card {
   background-image: var(--hatch-lighten);
 }
 
-/* Keep form chrome above the stamp */
 body > .wrap,
 body > .commit-gate {
   position: relative;
-  z-index: 1;
 }
 
 /*

@@ -52,11 +52,8 @@
       <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc skin</button>
     </div>
     <span class="peek-hint" id="peek-hint" hidden data-testid="soft-peek-hint"></span>
-    <!-- ponytail: temporarily hidden for alpha clones; re-enable when dogfood nav logging is wanted again -->
-    <button type="button" class="btn loud" id="btn-nav-issue" data-testid="btn-nav-issue" hidden
-      title="Log a navigation issue with a note (Ctrl+Shift+M). Click as soon as something feels wrong — snapshot freezes now.">Nav issue</button>
     <span class="spacer"></span>
-    <button type="button" class="health" id="health" data-testid="health" title="Click for connection details" aria-haspopup="dialog" aria-expanded="false">
+    <button type="button" class="health" id="health" data-testid="health" title="Connection details · Nav issue lives here (or Ctrl+Shift+M)" aria-haspopup="dialog" aria-expanded="false">
       <span class="dot" aria-hidden="true"></span>
       <span class="htext">DB …</span>
     </button>
@@ -79,7 +76,7 @@
     function setHealth(status) {
       healthEl.classList.toggle("ok", status === "ok");
       healthEl.classList.toggle("bad", status === "bad");
-      htext.textContent = status === "ok" ? "DB ✓" : status === "bad" ? "DB ✗" : "DB …";
+      htext.textContent = status === "ok" ? "DB" : status === "bad" ? "DB" : "DB …";
     }
 
     function applyUiState(s) {
@@ -104,11 +101,6 @@
     }
 
     document.getElementById("btn-home").onclick = () => api && api.goHome();
-    document.getElementById("btn-nav-issue").onclick = () => {
-      const btn = document.getElementById("btn-nav-issue");
-      if (btn && btn.hidden) return;
-      if (api && api.openNavIncident) api.openNavIncident();
-    };
     document.getElementById("btn-feedback").onclick = () => {
       if (api && api.openFeedback) api.openFeedback();
     };
@@ -136,10 +128,8 @@
     }
 
     document.addEventListener("keydown", (e) => {
+      // Shortcut still works from chrome; primary entry is DB diagnose → Nav issue.
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "M" || e.key === "m")) {
-        // Temporarily disabled with the toolbar button (alpha clones).
-        const btn = document.getElementById("btn-nav-issue");
-        if (btn && btn.hidden) return;
         e.preventDefault();
         if (api && api.openNavIncident) api.openNavIncident();
         return;

@@ -4,6 +4,13 @@
  */
 
 import { relabelTerm } from "./doc-terms.js";
+import {
+  ERP_PAYMENT_TERMS_FIELD,
+  ERP_FREEFORM_TERMS_FIELD,
+  PAYMENT_TERMS_HEADER_LABEL,
+  FREEFORM_TERMS_LABEL,
+  plainTermsText,
+} from "./doc-terms-fields.js";
 import { formatAddressDisplay } from "./address-format.js";
 import {
   BILL_ALLOCATION_COLS,
@@ -20,8 +27,8 @@ export const BILL_NEW_ROUTE = "/app/purchase-invoice/new";
 /**
  * Header: Doc label → ERPNext field meta.
  * Address roles (OI-077): Ship from = dispatch; Ship to = shipping; Billing = supplier address.
- * Layout (2026-08-16 dogfood): left = Vendor → Billing → Terms → Bill Due Date;
- * right = Date → Ref → Amount Due → linked PO ERP names + logbook `title` (OI-121);
+ * Layout (2026-08-26 dogfood): left = Vendor → Invoice date → Billing → Terms → Bill Due Date;
+ * right = Ref → Amount Due → linked PO ERP names + logbook `title` (OI-121);
  * bottom addr-grid = Ship from · Ship to only.
  * `column`: "left" | "right" | "addresses" — when set, `splitHeaderColumns` uses it.
  */
@@ -34,8 +41,9 @@ export const BILL_HEADER_FIELDS = [
     display: "supplier_name|supplier",
     column: "left",
   },
+  { label: "Invoice date", field: "posting_date", type: "date", column: "left" },
   {
-    label: "Billing address",
+    label: "Remittance & Billing Address",
     field: null,
     type: "textarea",
     readOnly: true,
@@ -45,14 +53,13 @@ export const BILL_HEADER_FIELDS = [
     column: "left",
   },
   {
-    label: "Terms",
-    field: "payment_terms_template",
+    label: PAYMENT_TERMS_HEADER_LABEL,
+    field: ERP_PAYMENT_TERMS_FIELD,
     type: "text",
     linkDoctype: "Payment Terms Template",
     column: "left",
   },
   { label: "Bill Due Date", field: "due_date", type: "date", column: "left" },
-  { label: "Date", field: "posting_date", type: "date", column: "right" },
   { label: "Ref No. (Supplier Invoice No.)", field: "bill_no", type: "text", column: "right" },
   {
     label: "Amount Due",
@@ -64,7 +71,7 @@ export const BILL_HEADER_FIELDS = [
       "Enter the vendor invoice total when ready. Checksum stays idle until you type; then it must match Bill grand total.",
   },
   {
-    label: "Ship from",
+    label: "Ship from / supplier dispatch",
     field: null,
     type: "textarea",
     readOnly: true,
@@ -74,7 +81,7 @@ export const BILL_HEADER_FIELDS = [
     column: "addresses",
   },
   {
-    label: "Ship to",
+    label: "Ship to / receiving address",
     field: null,
     type: "textarea",
     readOnly: true,
@@ -133,6 +140,15 @@ export function linkedPurchaseOrdersForBill(doc, titles) {
 }
 
 export const BILL_MEMO_FIELD = "remarks";
+export const BILL_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
+
+/** Doc Bill hides editable ERP freeform terms; source terms stay read-only. */
+export function billShowsEditableTermsField() {
+  return false;
+}
+
+/** Doc + Bill memo block label (museum: Remarks & Freehand Memo). */
+export const BILL_MEMO_LABEL = "Remarks & Freehand Memo";
 
 export { JOB_COST_CENTER_FIELD, JOB_COST_CENTER_LABEL };
 
@@ -165,6 +181,114 @@ export const BILL_ASSUMPTIONS = [
   "Amount Due stays blank until you type the vendor invoice total; checksum is grey until then, then must match Bill grand total (item subtotal + taxes).",
   "This ERP is items-based — enter expenses as Chart-of-Accounts-mapped items, not direct GL lines here. Vendor tax/freight also use the Taxes and Charges table (not Item rows).",
 ];
+
+/**
+ * Vanilla Purchase Invoice Desk tabs vs what Doc Bill covers today.
+ * Shown under Assumptions for payment / credit-card brainstorming — not museum SPECS topics.
+ * @type {readonly { tab: string, note: string }[]}
+ */
+export const BILL_VANILLA_TAB_NOTES = Object.freeze([
+  {
+    tab: "Details",
+    note: "Vendor, dates, Terms, bill #, items — Doc Bill covers most of this surface today.",
+  },
+  {
+    tab: "Payments",
+    note:
+      "On-Bill Already paid memory (`is_paid` on draft). Doc Submit clears `is_paid` and creates a Payment Entry (JIT). Separate from Desk batch Pay.",
+  },
+  {
+    tab: "Payment Schedule",
+    note: "Installments / due dates from Payment Terms Template — Doc shows Terms on the header only; schedule rows stay in Vanilla for now.",
+  },
+  {
+    tab: "Terms and Conditions",
+    note: "Long-form T&C text — not mirrored on Doc Bill.",
+  },
+  {
+    tab: "Accounting Dimensions",
+    note: "Cost Center / Project (and site dimensions) at doc level — Doc has Project on lines; header dimensions mostly Vanilla.",
+  },
+  {
+    tab: "More Info",
+    note: "Status, remarks, is paid flags, and other meta — Doc shows a subset (memo / status chips).",
+  },
+  {
+    tab: "Connections",
+    note: "Linked PO / PR / Payment Entry / GL — Doc shows linked PO# wash; full Connections graph remains Vanilla.",
+  },
+]);
+
+/**
+ * Vanilla Bill → Payments tab — field/button inventory (dogfood 2026-08-25).
+ * Path 1 for credit card: draft Bill → Payments → Mode of Payment + paid amount.
+ * @type {readonly { control: string, note: string }[]}
+ */
+export const BILL_VANILLA_PAYMENTS_TAB_CONTROLS = Object.freeze([
+  {
+    control: "Is Paid (checkbox)",
+    note: "Marks the Bill paid at Submit; Vanilla may auto-create a Payment Entry when cash/bank account is set.",
+  },
+  {
+    control: "Mode of Payment",
+    note: "e.g. Credit Card / Check / Wire — link; create/edit opens Mode of Payment master (soft-peek).",
+  },
+  {
+    control: "Cash / Bank Account",
+    note: "GL account for the outflow; required for auto Payment Entry on Submit when Is Paid.",
+  },
+  {
+    control: "Paid Amount",
+    note: "Amount applied on this Bill; set to the Bill total for a full CC pay-at-entry.",
+  },
+  {
+    control: "Clearance Date / Reference No.",
+    note: "Bank/CC reference metadata when the payment clears.",
+  },
+  {
+    control: "Write Off Amount / Account",
+    note: "Small differences written off instead of left outstanding.",
+  },
+  {
+    control: "Allocate Advances / Payment Schedule",
+    note: "Advances against this supplier; schedule rows also live under Payment Schedule tab.",
+  },
+]);
+
+/**
+ * Desk → Payment Entry path (pay submitted / outstanding Bills) — dogfood notes.
+ * @type {readonly { step: string, note: string }[]}
+ */
+export const BILL_PAYMENT_ENTRY_FLOW_NOTES = Object.freeze([
+  {
+    step: "Open Payment Entry (Pay)",
+    note: "Accounts → Payment Entry → New (or Home Pay Bills / Create Payment Entry from a submitted Bill).",
+  },
+  {
+    step: "Party = Supplier (Vendor)",
+    note: "Payment Type usually Pay; pick the vendor who owns the unpaid Bills.",
+  },
+  {
+    step: "Mode of Payment = Credit Card",
+    note: "Same MoP master as on the Bill Payments tab; must resolve a cash/bank account.",
+  },
+  {
+    step: "Paid Amount > 0 first",
+    note: "Weird vs other ERPs: References / Get Outstanding Invoices often stays empty until Paid Amount is non-zero.",
+  },
+  {
+    step: "Get Outstanding Invoices",
+    note: "Pulls unpaid Purchase Invoices for that vendor into the References table.",
+  },
+  {
+    step: "Allocate / adjust amounts",
+    note: "Then change the allocated amount per Bill to match outstanding (or partial pay).",
+  },
+  {
+    step: "Save → Submit Payment Entry",
+    note: "Reduces Bill outstanding_amount; Bill status moves toward Paid.",
+  },
+]);
 
 /** Museum Expenses-tab disclaimer — dogfood wording 2026-07-21 (OI-059). */
 export const BILL_EXPENSE_NOTE =
@@ -234,6 +358,7 @@ export function readBillHeader(doc, scratch = {}) {
     out[meta.label] = d[meta.field] != null ? d[meta.field] : "";
   }
   out.Memo = d[BILL_MEMO_FIELD] != null ? d[BILL_MEMO_FIELD] : "";
+  out[FREEFORM_TERMS_LABEL] = plainTermsText(d[BILL_TERMS_FIELD]);
   return out;
 }
 
@@ -327,11 +452,11 @@ export function amountDueDelta(amountDue, compareTotal) {
 
 /**
  * Chip label + tooltip for Amount Due checksum.
- * UI lays out emoji and moneyText separately (input | emoji | money).
+ * UI lays out icon and moneyText separately (input | icon | money).
  * @param {string|number|null|undefined} amountDue
  * @param {string|number|null|undefined} compareTotal
  * @param {number} [eps=0.005]
- * @returns {{ status: "idle"|"match"|"mismatch", emoji: string, moneyText: string, text: string, title: string, delta: number|null }}
+ * @returns {{ status: "idle"|"match"|"mismatch", icon: string, moneyText: string, text: string, title: string, delta: number|null }}
  */
 export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   const status = amountDueChecksumStatus(amountDue, compareTotal, eps);
@@ -342,9 +467,9 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   if (status === "idle") {
     return {
       status,
-      emoji: "·",
+      icon: "idle",
       moneyText: "—",
-      text: "· —",
+      text: "—",
       title: "Type the vendor invoice total to activate Amount Due checksum",
       delta: null,
     };
@@ -352,9 +477,9 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   if (status === "match") {
     return {
       status,
-      emoji: "✓",
+      icon: "check",
       moneyText: usd(0),
-      text: `✓ ${usd(0)}`,
+      text: usd(0),
       title: "Amount Due matches Bill grand total",
       delta: 0,
     };
@@ -362,9 +487,9 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   if (delta == null) {
     return {
       status: "mismatch",
-      emoji: "!",
+      icon: "alert",
       moneyText: "—",
-      text: "! —",
+      text: "—",
       title: "Bill total not available yet — refresh after lines/taxes update",
       delta: null,
     };
@@ -375,9 +500,9 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   const title = `Off by ${money} (typed ${usd(Number(String(amountDue).replace(/[^0-9.\-]/g, "")))} vs bill total ${usd(Number(compareTotal))})`;
   return {
     status,
-    emoji: "!",
+    icon: "alert",
     moneyText: signedMoney,
-    text: `! ${signedMoney}`,
+    text: signedMoney,
     title,
     delta,
   };
@@ -552,7 +677,30 @@ export function amountDueMatchesGrandTotal(amountDue, grandTotal, eps = 0.005) {
 
 /** Writable header fields (for Doc form wiring later). */
 export function writableBillHeaderFields() {
-  return BILL_HEADER_FIELDS.filter((f) => f.field && !f.readOnly);
+  return BILL_HEADER_FIELDS.filter((f) => f.field && !f.readOnly && !String(f.field).startsWith("__"));
+}
+
+/**
+ * Header fields Doc Bill may write via setHeader (main header + Already paid).
+ * @param {string} field
+ */
+export function isWritableBillHeaderField(field) {
+  if (typeof field !== "string" || !field || field.startsWith("__")) return false;
+  if (writableBillHeaderFields().some((m) => m.field === field)) return true;
+  if (
+    field === "supplier_address" ||
+    field === "dispatch_address" ||
+    field === "shipping_address"
+  ) {
+    return true;
+  }
+  return (
+    field === "is_paid" ||
+    field === "mode_of_payment" ||
+    field === "cash_bank_account" ||
+    field === "paid_amount" ||
+    field === BILL_MEMO_FIELD
+  );
 }
 
 /**
@@ -631,6 +779,15 @@ export function reconciliationReport(doc, amountDue, eps = 0.005) {
  */
 export function saveActionsBlockedByChecksum(status) {
   return status === "mismatch";
+}
+
+/**
+ * OI-105: float the blocking Amount Due diff when the in-header chip scrolls away.
+ * @param {"idle"|"match"|"mismatch"|string|null|undefined} chipStatus
+ * @param {boolean} anchorInView
+ */
+export function shouldShowAmountDueSticky(chipStatus, anchorInView) {
+  return chipStatus === "mismatch" && !anchorInView;
 }
 
 /**

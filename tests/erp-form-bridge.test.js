@@ -14,6 +14,13 @@ import {
   shouldResetPostingDateToToday,
   postingDateYmd,
   doctypeKeyFromErpDoctype,
+  supplierPartyBaseline,
+  supplierPartyDetailChanged,
+  isSupplierPartySettled,
+  isSupplierPartyMetaOnlyChange,
+  hasSupplierAddressDisplaySignals,
+  supplierPartyQuietSliceMs,
+  SUPPLIER_PARTY_SETTLE_MAX_MS,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {
@@ -62,7 +69,8 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 10);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 13);
+    assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
 
@@ -147,6 +155,52 @@ describe("live meta mandatory preflight helpers", () => {
   });
 });
 
+describe("supplier party settle (parallel-safe setHeader)", () => {
+  it("not settled when only supplier link changed (party ajax still in flight)", () => {
+    const baseline = supplierPartyBaseline({});
+    const doc = { supplier: "Alpine Supply" };
+    assert.equal(isSupplierPartySettled(doc, { targetSupplier: "Alpine Supply", baseline }), false);
+  });
+
+  it("not settled on supplier_name alone — wait for address_display", () => {
+    const baseline = supplierPartyBaseline({});
+    const doc = { supplier: "Alpine Supply", supplier_name: "Alpine Supply Co" };
+    assert.equal(isSupplierPartyMetaOnlyChange(doc, baseline), true);
+    assert.equal(isSupplierPartySettled(doc, { targetSupplier: "Alpine Supply", baseline }), false);
+    assert.equal(
+      isSupplierPartySettled(doc, { targetSupplier: "Alpine Supply", baseline, allowMetaOnly: true }),
+      true,
+    );
+  });
+
+  it("settled when address display fields change from baseline", () => {
+    const baseline = supplierPartyBaseline({ supplier: "Alpine Supply" });
+    const doc = {
+      supplier: "Alpine Supply",
+      supplier_name: "Alpine Supply Co",
+      address_display: "<p>1 Mountain Rd<br>Denver, CO</p>",
+    };
+    assert.equal(supplierPartyDetailChanged(doc, baseline), true);
+    assert.equal(isSupplierPartySettled(doc, { targetSupplier: "Alpine Supply", baseline }), true);
+  });
+
+  it("settled on same-supplier re-pick when address displays already present", () => {
+    const baseline = supplierPartyBaseline({
+      supplier: "Alpine Supply",
+      supplier_name: "Alpine Supply Co",
+      address_display: "<p>1 Mountain Rd</p>",
+    });
+    const doc = { ...baseline };
+    assert.equal(hasSupplierAddressDisplaySignals(doc), true);
+    assert.equal(isSupplierPartySettled(doc, { targetSupplier: "Alpine Supply", baseline }), true);
+  });
+
+  it("quiet slice respects deadline", () => {
+    assert.equal(supplierPartyQuietSliceMs(1000, 900), 500);
+    assert.equal(supplierPartyQuietSliceMs(Date.now() + 10000), 4000);
+  });
+});
+
 describe("erp-form-bridge-page save settle contract", () => {
   it("exposes saveDoc and listMandatoryMissing on the bridge", () => {
     const page = readFileSync(
@@ -161,7 +215,9 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 10/);
+    assert.match(page, /var VERSION = 13/);
+    assert.match(page, /isSupplierPartyMetaOnlyChange/);
+    assert.match(page, /clearRow:\s*clearRow/);
     assert.match(page, /SAVE_CALL_TIMEOUT_MS\s*=\s*12000/);
     assert.match(page, /collectVisibleVanillaErrors/);
     assert.match(page, /description:\s*true/);

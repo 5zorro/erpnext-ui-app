@@ -7,9 +7,23 @@
  *
  * Routes use `/app/…` (Frappe Desk SPA). Exact `/desk` is allowed for Vanilla Desk root.
  *
- * @typedef {{ id: string, icon: string, label: string, route: string, disabled?: boolean }} HomeTile
+ * AP tile washes align with `DOC_WASH_BY_PROFILE` / OI-125 (`src/doc-wash.js`).
+ *
+ * @typedef {"request"|"order"|"fulfill"|"invoice"|"payment"} DocWashRole
+ * @typedef {{ id: string, label: string, route: string, disabled?: boolean, washRole?: DocWashRole }} HomeTile
  * @typedef {{ id: string, title: string, tiles: HomeTile[] }} HomeGroup
  */
+
+/** @type {Set<DocWashRole>} */
+export const HOME_TILE_WASH_ROLES = new Set(["request", "order", "fulfill", "invoice", "payment"]);
+
+/** AP vendor-column tiles → doc wash role (matches bill / po / receipt Doc skins). */
+export const AP_HOME_TILE_WASH = Object.freeze({
+  "po-new": "order",
+  "receipt-new": "fulfill",
+  "bill-new": "invoice",
+  "pay-bills": "payment",
+});
 
 /** @type {{ left: HomeGroup[], right: HomeGroup[] }} */
 export const HOME_GROUPS = {
@@ -18,31 +32,31 @@ export const HOME_GROUPS = {
       id: "vendors",
       title: "Vendors",
       tiles: [
-        { id: "bill-new", icon: "🧾", label: "Enter Bills", route: "/app/purchase-invoice/new" },
-        { id: "pay-bills", icon: "💵", label: "Pay Bills", route: "/app/payment-entry/new" },
-        { id: "po-new", icon: "📦", label: "Purchase Orders", route: "/app/purchase-order/new" },
-        { id: "receipt-new", icon: "📥", label: "Receive Inventory", route: "/app/purchase-receipt/new" },
-        { id: "vendors", icon: "🏢", label: "Vendor Center", route: "/app/supplier" },
+        { id: "bill-new", label: "Enter Bills", route: "/app/purchase-invoice/new", washRole: "invoice" },
+        { id: "pay-bills", label: "Pay Bills", route: "/app/payment-entry/new", washRole: "payment" },
+        { id: "po-new", label: "Purchase Orders", route: "/app/purchase-order/new", washRole: "order" },
+        { id: "receipt-new", label: "Receive Inventory", route: "/app/purchase-receipt/new", washRole: "fulfill" },
+        { id: "vendors", label: "Vendor Center", route: "/app/supplier" },
       ],
     },
     {
       id: "customers",
       title: "Customers",
       tiles: [
-        { id: "estimate-new", icon: "📝", label: "Estimates", route: "/app/quotation/new" },
-        { id: "so-new", icon: "📋", label: "Sales Orders", route: "/app/sales-order/new" },
-        { id: "invoice-new", icon: "🧾", label: "Create Invoices", route: "/app/sales-invoice/new" },
-        { id: "receive-pay", icon: "💰", label: "Receive Payments", route: "/app/payment-entry/new" },
-        { id: "customers", icon: "👤", label: "Customer Center", route: "/app/customer" },
+        { id: "estimate-new", label: "Estimates", route: "/app/quotation/new" },
+        { id: "so-new", label: "Sales Orders", route: "/app/sales-order/new" },
+        { id: "invoice-new", label: "Create Invoices", route: "/app/sales-invoice/new" },
+        { id: "receive-pay", label: "Receive Payments", route: "/app/payment-entry/new" },
+        { id: "customers", label: "Customer Center", route: "/app/customer" },
       ],
     },
     {
       id: "employees",
       title: "Employees",
       tiles: [
-        { id: "employees", icon: "👥", label: "Employees", route: "/app/employee" },
-        { id: "timesheet-new", icon: "⏱️", label: "Enter Time", route: "/app/timesheet/new" },
-        { id: "payroll", icon: "💳", label: "Payroll", route: "", disabled: true },
+        { id: "employees", label: "Employees", route: "/app/employee" },
+        { id: "timesheet-new", label: "Enter Time", route: "/app/timesheet/new" },
+        { id: "payroll", label: "Payroll", route: "", disabled: true },
       ],
     },
   ],
@@ -51,12 +65,11 @@ export const HOME_GROUPS = {
       id: "company",
       title: "Company",
       tiles: [
-        { id: "coa", icon: "📚", label: "Chart of Accounts", route: "/app/account/view/tree" },
-        { id: "items", icon: "🏷️", label: "Items & Services", route: "/app/item" },
-        { id: "je-new", icon: "📒", label: "Journal Entry", route: "/app/journal-entry/new" },
+        { id: "coa", label: "Chart of Accounts", route: "/app/account/view/tree" },
+        { id: "items", label: "Items & Services", route: "/app/item" },
+        { id: "je-new", label: "Journal Entry", route: "/app/journal-entry/new" },
         {
           id: "pnl",
-          icon: "📈",
           label: "Profit & Loss",
           route: "/app/query-report/Profit%20and%20Loss%20Statement",
         },
@@ -66,12 +79,11 @@ export const HOME_GROUPS = {
       id: "banking",
       title: "Banking",
       tiles: [
-        { id: "reconcile", icon: "🔁", label: "Reconcile", route: "/app/bank-reconciliation-tool" },
-        { id: "checks", icon: "🖊️", label: "Write Checks", route: "/app/payment-entry/new" },
-        { id: "bank-tx", icon: "🏦", label: "Bank Transactions", route: "/app/bank-transaction" },
+        { id: "reconcile", label: "Reconcile", route: "/app/bank-reconciliation-tool" },
+        { id: "checks", label: "Write Checks", route: "/app/payment-entry/new" },
+        { id: "bank-tx", label: "Bank Transactions", route: "/app/bank-transaction" },
         {
           id: "bs",
-          icon: "📊",
           label: "Balance Sheet",
           route: "/app/query-report/Balance%20Sheet",
         },
@@ -81,9 +93,9 @@ export const HOME_GROUPS = {
       id: "shell",
       title: "Shell",
       tiles: [
-        { id: "desk", icon: "🖥️", label: "Vanilla Desk", route: "/desk" },
-        { id: "site-root", icon: "🏠", label: "Site root (/)", route: "/" },
-        { id: "login", icon: "🔑", label: "Login", route: "/login" },
+        { id: "desk", label: "Vanilla Desk", route: "/desk" },
+        { id: "site-root", label: "Site root (/)", route: "/" },
+        { id: "login", label: "Login", route: "/login" },
       ],
     },
   ],
@@ -126,6 +138,9 @@ export function validateHomeTiles(input = HOME_GROUPS) {
       errors.push(`tile ${t.id || "?"}: label required`);
     }
     if (t.disabled) continue;
+    if (t.washRole != null && !HOME_TILE_WASH_ROLES.has(t.washRole)) {
+      errors.push(`tile ${t.id || "?"}: invalid washRole ${t.washRole}`);
+    }
     if (typeof t.route !== "string" || !t.route.startsWith("/")) {
       errors.push(`tile ${t.id || "?"}: route must start with /`);
     } else if (t.route.startsWith("/desk/") ) {

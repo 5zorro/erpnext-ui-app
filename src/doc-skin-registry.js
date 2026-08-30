@@ -1,6 +1,6 @@
 /**
  * Doc skin profiles for T4+ — SSoT for which layoutKey maps to which doctype/shell.
- * Bill keeps its dedicated bill.html; PO + IR share doc-form.html.
+ * Bill shares doc-form.html with PO + IR (tranche 10).
  */
 
 import {
@@ -8,6 +8,12 @@ import {
   BILL_LAYOUT_KEY,
   BILL_LIST_ROUTE,
   BILL_NEW_ROUTE,
+  BILL_HEADER_FIELDS,
+  BILL_ITEM_COLS,
+  BILL_ASSUMPTIONS,
+  BILL_MEMO_FIELD,
+  BILL_MEMO_LABEL,
+  BILL_EXPENSE_NOTE,
 } from "./bill-map.js";
 import {
   PO_DOCTYPE,
@@ -29,6 +35,7 @@ import {
   RECEIPT_HEADER_FIELDS,
   RECEIPT_ITEM_COLS,
   RECEIPT_MEMO_FIELD,
+  RECEIPT_MEMO_LABEL,
 } from "./receipt-map.js";
 import { findButtonLabel } from "./doctype-labels.js";
 
@@ -50,6 +57,9 @@ import { findButtonLabel } from "./doctype-labels.js";
  *     memo: boolean,
  *     lineTotals: boolean,
  *     dateExpected: boolean,
+ *     addressPicker: boolean,
+ *     sourceTerms: boolean,
+ *     termsField: boolean,
  *   },
  *   sourceKinds?: ("po"|"pr")[],
  * }} DocSkinProfile
@@ -65,7 +75,7 @@ export const DOC_SKIN_PROFILES = {
     listRoute: BILL_LIST_ROUTE,
     newRoute: BILL_NEW_ROUTE,
     title: "Bill",
-    shell: "bill",
+    shell: "doc-form",
     features: {
       amountDue: true,
       taxes: true,
@@ -74,6 +84,9 @@ export const DOC_SKIN_PROFILES = {
       memo: true,
       lineTotals: true,
       dateExpected: false,
+      addressPicker: true,
+      sourceTerms: true,
+      termsField: false,
     },
     sourceKinds: ["po", "pr"],
   },
@@ -94,6 +107,9 @@ export const DOC_SKIN_PROFILES = {
       memo: false,
       lineTotals: true,
       dateExpected: true,
+      addressPicker: true,
+      sourceTerms: false,
+      termsField: true,
     },
   },
   receipt: {
@@ -113,6 +129,9 @@ export const DOC_SKIN_PROFILES = {
       memo: true,
       lineTotals: true,
       dateExpected: false,
+      addressPicker: false,
+      sourceTerms: true,
+      termsField: true,
     },
     sourceKinds: ["po"],
   },
@@ -145,10 +164,33 @@ export function profileByDoctypeKey(doctypeKey) {
   return null;
 }
 
-/** UI payload for doc-form.html (PO / IR). */
+/** UI payload for doc-form.html (Bill / PO / IR). */
 export function docFormUiPayload(profileId) {
   const p = DOC_SKIN_PROFILES[profileId];
   if (!p || p.shell !== "doc-form") return null;
+  if (profileId === "bill") {
+    return {
+      profileId: "bill",
+      title: p.title,
+      doctype: p.doctype,
+      doctypeKey: p.doctypeKey,
+      features: p.features,
+      assumptions: BILL_ASSUMPTIONS,
+      headerFields: BILL_HEADER_FIELDS,
+      itemCols: BILL_ITEM_COLS,
+      memoField: BILL_MEMO_FIELD,
+      memoLabel: BILL_MEMO_LABEL,
+      expenseNote: BILL_EXPENSE_NOTE,
+      leavingLabel: "leaving this Bill",
+      findLabel: findButtonLabel(p.doctypeKey),
+      newLabel: "New Bill",
+      sourceLabel: "Select PO / source",
+      attachTitle: "Opens Vanilla Desk attach for this Bill (save draft first if new).",
+      hint:
+        "Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters). " +
+        "Amount Due must match Grand total — checksum chip shows the difference.",
+    };
+  }
   if (profileId === "po") {
     return {
       profileId: "po",
@@ -183,6 +225,7 @@ export function docFormUiPayload(profileId) {
       headerFields: RECEIPT_HEADER_FIELDS,
       itemCols: RECEIPT_ITEM_COLS,
       memoField: RECEIPT_MEMO_FIELD,
+      memoLabel: RECEIPT_MEMO_LABEL,
       expenseNote: RECEIPT_EXPENSE_NOTE,
       leavingLabel: "leaving this Item Receipt",
       findLabel: findButtonLabel(p.doctypeKey),

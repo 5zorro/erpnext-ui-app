@@ -11,6 +11,7 @@ import {
   collapsePeekStack,
   isActivePeekStack,
   peekRefFromRoute,
+  resolveSoftPeekEscAction,
 } from "../src/peek-stack.js";
 
 const bill = "/app/purchase-invoice/new";
@@ -159,5 +160,55 @@ describe("applyErpHopToPeekStack (Vanilla in-SPA leave)", () => {
     stack = applyErpHopToPeekStack(stack, tax, vendor);
     assert.equal(stack.children.length, 2);
     assert.equal(stack.parent.dt, "purchase-invoice");
+  });
+
+  it("re-parents when hopping Payment Entry → Mode of Payment (even under stale Bill)", () => {
+    const pe = "/app/payment-entry/new-payment-entry-abc";
+    const mop = "/app/mode-of-payment/Credit%20Card";
+    let stack = applyErpHopToPeekStack(null, bill, pe);
+    stack = applyErpHopToPeekStack(stack, pe, mop);
+    assert.equal(stack.parent.dt, "payment-entry");
+    assert.equal(stack.children.length, 1);
+    assert.equal(stack.children[0].dt, "mode-of-payment");
+  });
+});
+
+describe("resolveSoftPeekEscAction", () => {
+  const pe = "/app/payment-entry/new-payment-entry-abc";
+  const mop = "/app/mode-of-payment/Credit%20Card";
+  const parkedBill = { mode: "bill", route: "/app/purchase-invoice/ACC-1" };
+
+  it("Bill→Tax with matching park resumes Doc in one Esc", () => {
+    let stack = beginPeekParent(null, "/app/purchase-invoice/ACC-1");
+    stack = pushPeekChild(stack, tax);
+    const d = resolveSoftPeekEscAction({
+      parked: { mode: "bill", route: "/app/purchase-invoice/ACC-1" },
+      peekStack: stack,
+      currentRoute: tax,
+    });
+    assert.equal(d.action, "resume-park");
+  });
+
+  it("PE→MoP with stale Bill park returns to Payment Entry", () => {
+    let stack = beginPeekParent(null, pe);
+    stack = pushPeekChild(stack, mop);
+    const d = resolveSoftPeekEscAction({
+      parked: parkedBill,
+      peekStack: stack,
+      currentRoute: mop,
+    });
+    assert.equal(d.action, "return-parent");
+    assert.equal(d.route, pe);
+  });
+
+  it("disarms when already on vanilla peek parent with unrelated park", () => {
+    let stack = beginPeekParent(null, pe);
+    stack = pushPeekChild(stack, mop);
+    const d = resolveSoftPeekEscAction({
+      parked: parkedBill,
+      peekStack: stack,
+      currentRoute: pe,
+    });
+    assert.equal(d.action, "disarm");
   });
 });

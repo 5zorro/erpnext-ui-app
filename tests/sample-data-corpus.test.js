@@ -4,6 +4,8 @@ import {
   SAMPLE_TAG,
   DEFAULT_COUNTS,
   DEFAULT_DRAFTS_PER_KIND,
+  AP_DOGFOOD_FIXTURE_KEYS,
+  AP_FIXTURE_EXTRA_COUNTS,
   buildCorpusPlan,
   dateForOffset,
   idleVendorPoPostingDate,
@@ -16,6 +18,16 @@ import {
   assertSeedConfirmed,
   DEFAULT_ALLOWED_SITES,
 } from "../src/sample-data/sandbox-guard.js";
+
+/** @param {{ kind: string, index?: number, key?: string }} source */
+function sourcePlanKey(source) {
+  if (source.key) return source.key;
+  if (source.kind === "quotation") return `Q-${pad2(source.index)}`;
+  if (source.kind === "sales_order") return `SO-${pad2(source.index)}`;
+  if (source.kind === "purchase_order") return `PO-${pad2(source.index)}`;
+  if (source.kind === "purchase_receipt") return `PR-${pad2(source.index)}`;
+  return null;
+}
 
 describe("sample-data corpus plan", () => {
   it("pads indices", () => {
@@ -31,7 +43,8 @@ describe("sample-data corpus plan", () => {
       assert.equal(plan.counts[kind], n, kind);
       const submitted = plan.docs.filter((d) => d.kind === kind && !d.asDraft && !d.outsideWindow);
       const drafts = plan.docs.filter((d) => d.kind === kind && d.asDraft);
-      assert.equal(submitted.length, n, `submitted docs ${kind}`);
+      const extra = AP_FIXTURE_EXTRA_COUNTS[kind] || 0;
+      assert.equal(submitted.length, n + extra, `submitted docs ${kind}`);
       assert.equal(drafts.length, DEFAULT_DRAFTS_PER_KIND, `draft docs ${kind}`);
     }
     assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 8);
@@ -66,7 +79,7 @@ describe("sample-data corpus plan", () => {
     assert.equal(bySource["sales_invoice←sales_order"], 12);
     assert.equal(bySource["sales_invoice←none"], 13);
 
-    assert.equal(bySource["purchase_receipt←purchase_order"], 12);
+    assert.equal(bySource["purchase_receipt←purchase_order"], 14);
     assert.equal(bySource["purchase_receipt←none"], 13);
     assert.equal(bySource["purchase_invoice←purchase_receipt"], 8);
     assert.equal(bySource["purchase_invoice←purchase_order"], 8);
@@ -96,16 +109,7 @@ describe("sample-data corpus plan", () => {
     const byKey = Object.fromEntries(plan.docs.map((d) => [d.key, d]));
     for (const d of plan.docs) {
       if (!d.source) continue;
-      const srcKey =
-        d.source.kind === "quotation"
-          ? `Q-${pad2(d.source.index)}`
-          : d.source.kind === "sales_order"
-            ? `SO-${pad2(d.source.index)}`
-            : d.source.kind === "purchase_order"
-              ? `PO-${pad2(d.source.index)}`
-              : d.source.kind === "purchase_receipt"
-                ? `PR-${pad2(d.source.index)}`
-                : null;
+      const srcKey = sourcePlanKey(d.source);
       assert.ok(srcKey && byKey[srcKey], `missing source ${srcKey}`);
       assert.ok(
         byKey[srcKey].dayOffset >= d.dayOffset,
@@ -164,6 +168,33 @@ describe("sample-data corpus plan", () => {
   it("summarizePlan matches buildCorpusPlan.summary", () => {
     const plan = buildCorpusPlan();
     assert.deepEqual(summarizePlan(plan.docs), plan.summary);
+  });
+
+  it("T0 AP fixtures for OI-149 / OI-153 / OI-154", () => {
+    const plan = buildCorpusPlan();
+    assert.equal(plan.apFixtures.keys.length, AP_DOGFOOD_FIXTURE_KEYS.length);
+    for (const key of AP_DOGFOOD_FIXTURE_KEYS) {
+      const row = plan.docs.find((d) => d.key === key);
+      assert.ok(row, key);
+      assert.equal(row.asDraft, undefined);
+    }
+    const poMn = plan.docs.find((d) => d.key === "PO-MN");
+    assert.equal(poMn.logbookPoNo, "JE-88421");
+    assert.equal(poMn.dogfoodScenario, "oi149-po-pr");
+    const prMn = plan.docs.find((d) => d.key === "PR-MN");
+    assert.deepEqual(prMn.partialReceive, [{ lineIndex: 1, qty: 4 }]);
+    assert.equal(prMn.source.key, "PO-MN");
+    const poPp = plan.docs.find((d) => d.key === "PO-PP");
+    assert.equal(poPp.advancePayment.amount, 120);
+    assert.equal(poPp.advancePayment.manual, true);
+    const poLb = plan.docs.find((d) => d.key === "PO-LB");
+    assert.equal(poLb.logbookPoNo, "TO-5599");
+    const piFromMn = plan.docs.filter(
+      (d) =>
+        d.kind === "purchase_invoice" &&
+        (d.source?.key === "PO-MN" || d.source?.key === "PR-MN")
+    );
+    assert.equal(piFromMn.length, 0);
   });
 
   it("OI-115 tax mix: ~7/8 customers taxable, ~2/8 suppliers TW", () => {

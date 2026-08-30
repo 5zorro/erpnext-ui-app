@@ -73,7 +73,7 @@ export function toggleSourceSelection(selectedKeys, item) {
 /**
  * What to pull on Enter / primary button.
  * - Any checks → those items (NIC alone → nic; NIC+others never coexist).
- * - No checks → active row if selectable (single-select fallback).
+ * - No checks → implied NIC (highlight alone does not commit a PO/PR).
  * @param {SourceGroup[]} groups
  * @param {Iterable<string>|null|undefined} selectedKeys
  * @param {SourceItem|null|undefined} activeItem
@@ -94,13 +94,7 @@ export function resolveSourcesToCommit(groups, selectedKeys, activeItem) {
     if (!items.length) return { mode: "none", items: [], reason: "no_valid_selection" };
     return { mode: "merge", items };
   }
-  if (activeItem && activeItem.kind === "nic" && isSelectableSourceItem(activeItem)) {
-    return { mode: "nic", items: [activeItem] };
-  }
-  if (activeItem && isSelectableSourceItem(activeItem) && activeItem.kind !== "nic") {
-    return { mode: "merge", items: [activeItem] };
-  }
-  return { mode: "none", items: [], reason: "nothing_active" };
+  return { mode: "nic", items: [{ label: "NIC", kind: "nic" }] };
 }
 
 /**

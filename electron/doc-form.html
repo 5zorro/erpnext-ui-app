@@ -4,114 +4,17 @@
   <meta charset="utf-8" />
   <title>Document</title>
   <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="doc-skin.css" />
   <style>
-    html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #eef2f5; color: #1f2d3d; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
     .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
     .status { font-size: 12px; color: #64748b; }
     .status.warn { color: #b45309; }
     .status.err { color: #b91c1c; }
-    .toolbar { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; align-items: stretch; }
-    .tb-group {
-      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-      padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 8px;
-      background: #f8fafc;
-    }
-    .tb-group-label {
-      font-size: 10px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.04em; color: #64748b; margin-right: 2px;
-    }
-    .toolbar button, .line-actions button, .del {
-      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
-      padding: 7px 12px; font-size: 13px; cursor: pointer;
-    }
-    .toolbar button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
-    .toolbar button.ghost { background: #f8fafc; }
-    .toolbar button:disabled, .line-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
-    .dirty-pill {
-      font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px;
-      background: #fef9c3; color: #a16207; border: 1px solid #fde047;
-    }
-    .dirty-pill.is-dirty, .dirty-pill.tone-draft-dirty {
-      background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
-    }
-    .dirty-pill.tone-draft {
-      background: #fef9c3; color: #a16207; border: 1px solid #fde047;
-    }
-    .dirty-pill.tone-posted {
-      background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;
-    }
-    .dirty-pill.tone-posted-dirty {
-      background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;
-    }
-    .back-to-top-row {
-      display: flex; justify-content: flex-end; margin-top: 12px;
-    }
-    .back-to-top-row button {
-      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
-      padding: 8px 14px; font-size: 13px; cursor: pointer;
-    }
     .money-cents { text-decoration: underline; text-underline-offset: 2px; }
-    .commit-gate {
-      position: fixed; inset: 0; z-index: 200;
-      display: flex; align-items: center; justify-content: center;
-      padding: 20px; box-sizing: border-box;
-      background: transparent;
-    }
-    .commit-gate[hidden] { display: none !important; }
-    .commit-gate-backdrop {
-      position: absolute; inset: 0; z-index: 0;
-      background: rgba(15, 23, 42, .62);
-      backdrop-filter: blur(1px);
-      cursor: pointer;
-    }
-    .commit-gate-dialog {
-      position: relative; z-index: 1;
-      width: min(660px, 100%); max-height: calc(100vh - 40px); overflow: auto;
-      padding: 18px 20px; background: #fff; border: 1px solid #cbd5e1;
-      border-top: 4px solid #b45309; border-radius: 10px;
-      box-shadow: 0 24px 64px rgba(15, 23, 42, .38);
-      font-size: 13px;
-      cursor: default;
-    }
-    .commit-gate-title { display: block; margin-bottom: 4px; font-size: 17px; color: #1f2937; }
-    .commit-gate-copy { margin: 0; color: #475569; line-height: 1.45; }
-    .commit-gate-validation {
-      margin-top: 14px; padding: 11px 12px; border: 1px solid #cbd5e1;
-      border-left: 4px solid #64748b; border-radius: 7px; background: #f8fafc;
-    }
-    .commit-gate-validation.blocked {
-      border-color: #f59e0b; border-left-color: #b45309; background: #fffbeb;
-    }
-    .commit-gate-validation.ready {
-      border-color: #86efac; border-left-color: #15803d; background: #f0fdf4;
-    }
-    .commit-gate-validation-title { display: block; margin-bottom: 6px; font-size: 12px; }
-    .commit-gate-blockers { margin: 0; padding-left: 20px; color: #92400e; line-height: 1.55; }
-    .commit-gate .row {
-      display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px;
-    }
-    .commit-gate button {
-      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
-      padding: 8px 12px; font-size: 13px; cursor: pointer;
-    }
-    .commit-gate button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
-    .commit-gate button.ghost { background: #f8fafc; }
-    .commit-gate button:disabled { opacity: .42; cursor: not-allowed; }
-    .commit-gate button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 2px; }
-    .commit-gate .hint {
-      margin: 6px 0 0; font-size: 12px; color: #64748b; line-height: 1.4;
-    }
-    .commit-gate .hint.warn { color: #b45309; }
-    @media (prefers-reduced-motion: no-preference) {
-      .commit-gate-dialog { animation: gate-enter 120ms ease-out; }
-      @keyframes gate-enter {
-        from { opacity: 0; transform: translateY(5px) scale(.99); }
-        to { opacity: 1; transform: translateY(0) scale(1); }
-      }
-    }
-    .card { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .card { border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
     .addr-grid {
       display: grid;
@@ -141,18 +44,6 @@
     .field input:read-only, .field textarea:read-only, td .ro {
       background: #f8fafc; color: #475569; border: none; padding: 5px 2px;
     }
-    .memo { margin-top: 12px; }
-    .memo-head {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      margin-bottom: 4px; flex-wrap: wrap;
-    }
-    .memo-head label { margin: 0; }
-    .memo-head .attach {
-      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
-      padding: 5px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
-    }
-    .memo-head .attach:hover { background: #f1f5f9; }
-    .memo-head .attach:disabled { opacity: 0.55; cursor: not-allowed; }
     td.tot-cell .clear-qty {
       display: block; width: 100%; margin-top: 6px;
       border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
@@ -308,202 +199,538 @@
     details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
     details.assumptions summary { cursor: pointer; font-weight: 600; }
     details.assumptions ul { margin: 8px 0 0; padding-left: 18px; }
-    .link-wrap { position: relative; display: flex; gap: 4px; align-items: stretch; }
-    .link-wrap > input { flex: 1; min-width: 0; }
-    .link-btn {
-      border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px;
-      padding: 0 10px; cursor: pointer; font-size: 12px; color: #334155; flex-shrink: 0;
-    }
-    .link-btn:hover { background: #e2e8f0; }
-    .link-dd {
-      position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 20;
-      background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
-      max-height: 220px; overflow: auto; box-shadow: 0 8px 20px rgba(15,23,42,.12);
-    }
-    .link-opt {
-      display: block; width: 100%; text-align: left; border: none; background: #fff;
-      padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f1f5f9;
-    }
-    .link-opt:hover, .link-opt:focus { background: #eaf4ff; outline: none; }
-    .link-muted { padding: 10px; font-size: 12px; color: #64748b; }
-    .link-opt.active { background: #eaf4ff; }
-    .link-opt.link-action { font-style: italic; color: #1d4ed8; }
-    .link-opt.link-opt-muted { color: #94a3b8; }
     .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .blocked input:not([readonly]), .blocked textarea, .blocked .link-btn, .blocked .toolbar button.primary {
-      pointer-events: none; opacity: 0.55;
-    }
-    .src-back {
-      position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
-      display: flex; align-items: center; justify-content: center; padding: 16px;
-    }
     #panel-items table thead th.sortable {
       cursor: pointer; user-select: none; white-space: nowrap;
     }
     #panel-items table thead th.sortable:hover { background: #e2e8f0; }
     #panel-items table thead th.sortable.sorted { color: #0f172a; }
+    .taxes-table thead th.sortable {
+      cursor: pointer; user-select: none;
+    }
+    .taxes-table thead th.sortable:hover { background: #e2e8f0; }
+    .taxes-table thead th.sortable.sorted { color: #0f172a; }
     td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums; }
-    .src-box {
-      background: #fff; border-radius: 10px; width: min(720px, 100%); max-height: 80vh;
-      display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15,23,42,.25);
+    .imp-box { width: min(920px, 100%); }
+    .imp-body { padding: 12px 14px; }
+    .imp-hint, .imp-meta { font-size: 12px; color: #64748b; line-height: 1.4; margin: 0 0 8px; }
+    .imp-paste {
+      width: 100%; box-sizing: border-box; min-height: 140px; font-family: ui-monospace, monospace;
+      font-size: 12px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; resize: vertical;
     }
-    .src-title { padding: 12px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
-    .src-body { overflow: auto; padding: 8px 0; flex: 1; }
-    .src-group { padding: 6px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
-    .src-group.active { color: #0f172a; font-weight: 700; }
-    .src-item {
-      padding: 8px 14px; font-size: 13px; cursor: pointer; border: none; background: #fff;
-      width: 100%; text-align: left; display: block;
+    .imp-file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .imp-file-row button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px;
+      font-size: 13px; cursor: pointer;
     }
-    .src-item:hover, .src-item.active { background: #eaf4ff; }
-    .src-item.draft { color: #94a3b8; cursor: not-allowed; background: #f8fafc; }
-    .src-foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #e2e8f0; }
-    .src-foot button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
-    .src-foot button.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .imp-file-row .imp-preview-btn { background: #eaf4ff; border-color: #93c5fd; }
+    .imp-controls { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-bottom: 8px; }
+    .imp-check { font-size: 13px; color: #334155; cursor: pointer; }
+    .imp-warn { font-size: 12px; color: #b45309; margin: 4px 0; }
+    .imp-scroll { overflow: auto; max-height: 42vh; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .imp-preview { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .imp-preview th, .imp-preview td { border-bottom: 1px solid #f1f5f9; padding: 4px 6px; vertical-align: top; }
+    .imp-preview thead th { background: #f8fafc; position: sticky; top: 0; z-index: 1; }
+    .imp-preview select { font-size: 11px; max-width: 8rem; }
+    .imp-preview tr.imp-ignored td { opacity: 0.45; background: #f8fafc; }
+    .line-actions .imp-btn { border-color: #93c5fd; background: #f0f9ff; }
     .date-hint { font-size: 10px; color: #94a3b8; }
     @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
   </style>
+  <link rel="stylesheet" href="bill-dashboard.css" />
 </head>
 <body>
-  <div class="wrap" data-testid="doc-root">
-    <div class="banner">
-      <h1 id="doc-title">Document</h1>
-      <span class="status" id="status" data-testid="doc-status">Loading…</span>
-      <span class="banner-actions">
-        <button type="button" id="btn-retry" data-testid="doc-retry" hidden>Retry load</button>
-      </span>
-    </div>
-    <div class="toolbar" data-testid="doc-toolbar">
-      <div class="tb-group" data-testid="doc-toolbar-file" title="Keep, print, discard, or finalize this document">
-        <span class="tb-group-label">File</span>
-        <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="doc-dirty-pill">Draft · all saved</span>
-        <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
-          title="Print this document (save first if new).">Print</button>
-        <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
-          title="Attach file">Attach file</button>
-        <button type="button" id="btn-revert" data-testid="doc-revert"
-          title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
-        <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
-        <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
-      </div>
-      <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
-        <span class="tb-group-label">Navigate</span>
-        <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
-        <button type="button" id="btn-new" data-testid="doc-new">New</button>
-        <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
-        <button type="button" id="btn-refresh" data-testid="doc-refresh"
-          title="Re-read the open Vanilla form into this page (keeps your Doc edits). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
-        <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
-      </div>
-    </div>
-    <div class="commit-gate" id="commit-gate" data-testid="doc-commit-gate" hidden>
-      <div class="commit-gate-backdrop" id="commit-gate-backdrop"
-        data-testid="doc-gate-backdrop" aria-hidden="true"></div>
-      <section class="commit-gate-dialog" role="dialog" aria-modal="true"
-        aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
-        <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
-        <p class="commit-gate-copy" id="commit-gate-copy">
-          This decision must be resolved before you can continue.
-        </p>
-        <div class="commit-gate-validation" id="commit-gate-validation" data-testid="doc-gate-validation">
-          <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
-          <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="doc-gate-blockers"></ul>
-          <p class="hint" id="commit-gate-hint" data-testid="doc-commit-gate-hint"></p>
+  <div id="bill-shell" hidden>
+      <div class="wrap" data-testid="bill-root">
+        <button type="button" class="due-sticky" id="due-sticky" data-testid="bill-due-sticky" hidden
+          title="Amount Due does not match Grand total — click to focus Amount Due">
+          <span class="due-emoji" id="due-sticky-emoji">!</span>
+          <span class="due-money" id="due-sticky-money">—</span>
+          <span class="due-sticky-label">Amount Due</span>
+        </button>
+        <div class="banner">
+          <h1>Bill</h1>
+          <span class="doc-status-badge" id="doc-status-badge" data-testid="bill-doc-status" hidden></span>
+          <span class="status" id="status" data-testid="bill-status">Loading…</span>
+          <span class="banner-actions">
+            <button type="button" id="btn-retry" data-testid="bill-retry" hidden>Retry load</button>
+          </span>
         </div>
-        <div class="row">
-          <button type="button" data-gate="discard" data-testid="doc-gate-discard">Discard, then continue</button>
-          <button type="button" class="primary" data-gate="save" data-testid="doc-gate-save">Save draft, then continue</button>
-          <button type="button" data-gate="submit" data-testid="doc-gate-submit">Save &amp; submit, then continue</button>
-          <button type="button" class="ghost" data-gate="cancel" data-testid="doc-gate-cancel">Cancel</button>
-        </div>
-      </section>
-    </div>
-    <details class="assumptions" data-testid="doc-assumptions">
-      <summary>Assumptions this view makes</summary>
-      <ul id="assumptions-list"></ul>
-    </details>
-    <div class="card">
-      <div class="cols" id="header-cols">
-        <div id="header-left"></div>
-        <div id="header-right"></div>
-      </div>
-      <div class="addr-grid" id="header-addresses" data-testid="doc-header-addresses" hidden></div>
-      <div>
-        <div class="line-tabs" role="tablist" data-testid="doc-line-tabs" hidden>
-          <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
-            tabindex="-1" data-tab="items" data-testid="doc-tab-items">Items</button>
-          <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
-            tabindex="-1" data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
-        </div>
-        <div class="line-panel" id="panel-items" data-testid="doc-panel-items" role="tabpanel">
-          <table>
-            <thead>
-              <tr id="items-head-row"></tr>
-            </thead>
-            <tbody id="items-body" data-testid="doc-items"></tbody>
-            <tfoot id="line-totals" data-testid="doc-line-totals" hidden></tfoot>
-          </table>
-          <div class="line-actions">
-            <button type="button" id="btn-add-line" data-testid="doc-add-line">Add line</button>
+        <div class="toolbar" data-testid="bill-toolbar">
+          <div class="tb-group" data-testid="bill-toolbar-file" title="Keep, print, discard, or finalize this document">
+            <span class="tb-group-label">File</span>
+            <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="bill-dirty-pill">Draft · all saved</span>
+            <button type="button" class="ghost" id="btn-print" data-testid="bill-print"
+              title="Print this Bill (save first if new).">Print</button>
+            <button type="button" id="btn-revert" data-testid="bill-revert"
+              title="Discard unsaved edits (reload saved Bill, or start a fresh new Bill).">Revert unsaved changes</button>
+            <button type="button" class="primary" id="btn-save" data-testid="bill-save">Save draft</button>
+            <button type="button" id="btn-submit" data-testid="bill-submit">Save draft &amp; submit</button>
+          </div>
+          <div class="tb-group" data-testid="bill-toolbar-navigate" title="Find, open, or jump elsewhere">
+            <span class="tb-group-label">Navigate</span>
+            <button type="button" id="btn-find" data-testid="bill-find">Find Bill…</button>
+            <button type="button" id="btn-new" data-testid="bill-new">New Bill</button>
+            <button type="button" id="btn-select-po" data-testid="bill-select-po">Select PO / source</button>
+            <button type="button" id="btn-refresh" data-testid="bill-refresh"
+              title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
+            <button type="button" class="ghost" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
+            <button type="button" class="ghost" id="btn-caps" data-testid="bill-caps"
+              title="Default ALL-CAPS data entry — click to turn off for this page">⇪ CAPS: ON</button>
           </div>
         </div>
-        <div class="line-panel" id="panel-expenses" data-testid="doc-panel-expenses" role="tabpanel" hidden>
-          <p class="expense-note" data-testid="doc-expense-note"></p>
+        <div class="commit-gate" id="commit-gate" data-testid="bill-commit-gate" hidden>
+          <div class="commit-gate-backdrop" id="commit-gate-backdrop"
+            data-testid="bill-gate-backdrop" aria-hidden="true"></div>
+          <section class="commit-gate-dialog" role="dialog" aria-modal="true"
+            aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
+            <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
+            <p class="commit-gate-copy" id="commit-gate-copy">
+              This decision must be resolved before you can continue.
+            </p>
+            <div class="commit-gate-validation" id="commit-gate-validation" data-testid="bill-gate-validation">
+              <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
+              <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="bill-gate-blockers"></ul>
+              <p class="hint" id="commit-gate-hint" data-testid="bill-commit-gate-hint"></p>
+            </div>
+            <div class="row">
+              <button type="button" data-gate="discard" data-testid="bill-gate-discard">Discard, then continue</button>
+              <button type="button" class="primary" data-gate="save" data-testid="bill-gate-save">Save draft, then continue</button>
+              <button type="button" data-gate="submit" data-testid="bill-gate-submit">Save &amp; submit, then continue</button>
+              <button type="button" class="ghost" data-gate="cancel" data-testid="bill-gate-cancel">Cancel</button>
+            </div>
+          </section>
         </div>
-        <div class="taxes-block" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
-          <span class="taxes-title">Taxes and Charges</span>
-          <table class="taxes-table">
-            <thead>
-              <tr>
-                <th>Account</th><th>Description</th><th>Type</th>
-                <th class="num">Rate %</th><th class="num">Amount</th><th>Add/Deduct</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
-          </table>
-          <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
+        <details class="assumptions" data-testid="bill-assumptions">
+          <summary>Assumptions this view makes</summary>
+          <ul id="assumptions-list"></ul>
+          <p class="assumptions-subhead">Vanilla Bill tabs (vs Doc today)</p>
+          <p class="assumptions-subnote">
+            Desk still uses these tabs on the same Purchase Invoice. Already paid writes live in the
+            section below (not as a Vanilla tab clone).
+          </p>
+          <ul id="vanilla-tabs-list" data-testid="bill-vanilla-tabs"></ul>
+        </details>
+        <div class="card">
+          <section class="bill-section bill-section-doc" data-testid="bill-doc-section">
+          <div class="cols">
+            <div>
+              <div class="field"><label>Vendor Name</label><input id="f-vendor" data-field="supplier" data-testid="bill-vendor" autocomplete="off" /></div>
+              <div class="field">
+                <label for="f-date">Invoice date</label>
+                <input id="f-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="posting_date" data-testid="bill-date" autocomplete="off" />
+                <span class="date-hint">Set before Terms so due dates calculate from this invoice date.</span>
+              </div>
+              <div class="field">
+                <label for="f-billing-address">Remittance &amp; Billing Address</label>
+                <textarea id="f-billing-address" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="billing"
+                  data-testid="bill-billing-address" spellcheck="false"
+                  title="Click to pick Supplier Address (remittance / billing)."></textarea>
+              </div>
+              <div class="field"><label for="f-terms">Payment terms</label><input id="f-terms" data-field="payment_terms_template" data-testid="bill-terms" /></div>
+              <div class="field" id="due-date-field" data-testid="bill-due-date-field">
+                <label for="f-duedate">Bill Due Date</label>
+                <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
+                <span class="date-hint" id="due-date-hint" data-testid="bill-due-date-hint">Digits and / - . only · Tab once to leave · MM/DD fills nearest year</span>
+              </div>
+            </div>
+            <div>
+              <div class="field">
+                <label>Ref No. (Supplier Invoice No.)</label>
+                <div class="row bill-ref-row" data-testid="bill-ref-row">
+                  <input id="f-billno" data-field="bill_no" data-testid="bill-ref" autocomplete="off" />
+                  <span class="chip idle" id="ref-status" data-testid="bill-ref-chip"
+                    title="Soft check vs duplicates, PO logbook #, and vendor account #">
+                    <span class="due-emoji" id="ref-emoji" data-testid="bill-ref-emoji">·</span>
+                  </span>
+                </div>
+                <p class="ref-warn" id="ref-warn" data-testid="bill-ref-warn" hidden></p>
+              </div>
+              <div class="field">
+                <label>Amount Due</label>
+                <div class="row amount-due-row" data-testid="bill-amount-due-row">
+                  <input id="f-amountdue" class="money-due-input" data-testid="bill-amount-due"
+                    inputmode="decimal" autocomplete="off" placeholder="Vendor invoice total" />
+                  <span class="due-status idle" id="due-status" data-testid="bill-due-chip"
+                    title="Checksum vs Bill grand total">
+                    <span class="due-emoji" id="due-emoji" data-testid="bill-due-emoji">·</span>
+                    <span class="due-money" id="due-money" data-testid="bill-due-money">—</span>
+                  </span>
+                  <span class="due-grand" id="due-grand" data-testid="bill-due-grand"
+                    title="Bill grand total (checksum target)">Bill —</span>
+                </div>
+              </div>
+              <div id="linked-po-block" data-testid="bill-linked-pos" hidden></div>
+            </div>
+          </div>
+          <div class="addr-grid" data-testid="bill-address-grid">
             <div class="field">
-              <label for="f-tax-account">Account</label>
-              <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
+              <label for="f-ship-from">Ship from / supplier dispatch</label>
+              <textarea id="f-ship-from" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="ship_from"
+                data-testid="bill-ship-from" spellcheck="false"
+                title="Click to pick Dispatch Address (ship from / supplier dispatch)."></textarea>
             </div>
-            <div class="field" style="flex:0 0 120px;">
-              <label for="f-tax-amount">Amount</label>
-              <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+            <div class="addr-flow" aria-hidden="true" data-testid="bill-ship-arrow" title="Ship from → Ship to">⇒</div>
+            <div class="field">
+              <label for="f-ship-to">Ship to / receiving address</label>
+              <textarea id="f-ship-to" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="ship_to"
+                data-testid="bill-ship-to" spellcheck="false"
+                title="Click to pick Shipping Address (ship to / receiving)."></textarea>
             </div>
-            <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
           </div>
-          <div class="money-stack" data-testid="doc-money-stack">
-            <div class="ms-row">
-              <span class="ms-label">Item subtotal</span>
-              <span id="ms-items" data-testid="doc-ms-items">$0.00</span>
+          </section>
+          <section class="bill-section bill-section-lines" data-testid="bill-lines-section">
+            <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
+              <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+                tabindex="-1" data-tab="items" data-testid="bill-tab-items">Items</button>
+              <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+                tabindex="-1" data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
             </div>
-            <div class="ms-row">
-              <span class="ms-label">Taxes</span>
-              <span id="ms-taxes" data-testid="doc-ms-taxes">$0.00</span>
+            <div class="line-panel" id="panel-items" data-testid="bill-panel-items" role="tabpanel">
+            <table>
+              <thead>
+                <tr id="items-head-row">
+                  <th class="sortable sorted" data-sort="lineNo" title="Sort by Line">Line ▲</th>
+                  <th class="sortable" data-sort="poLine" title="Sort by PO line">PO line</th>
+                  <th class="sortable" data-sort="item_code" title="Sort by Item">Item</th>
+                  <th class="sortable" data-sort="description" title="Sort by Description">Description</th>
+                  <th class="sortable" data-sort="qty" title="Sort by Qty">Qty</th>
+                  <th class="sortable" data-sort="rate" title="Sort by Cost">Cost</th>
+                  <th class="sortable" data-sort="amount" title="Sort by Amount">Amount</th>
+                  <th class="sortable" data-sort="customer" title="Sort by Customer">Customer</th>
+                  <th class="sortable" data-sort="salesOrders" title="Sort by Sales order(s)">Sales order(s)</th>
+                  <th class="sortable" data-sort="project" title="Sort by Project">Project</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="items-body" data-testid="bill-items"></tbody>
+              <tfoot id="line-totals" data-testid="bill-line-totals" hidden>
+                <tr>
+                  <td colspan="4"></td>
+                  <td class="tot-cell">
+                    <span class="tot-label">Σ Qty</span><b id="tot-qty">0</b>
+                    <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="bill-clear-qty" tabindex="-1"
+                      title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
+                  </td>
+                  <td></td>
+                  <td class="tot-cell"><span class="tot-label">Item subtotal</span><b id="tot-amt">0.00</b></td>
+                  <td></td><td></td><td></td><td></td>
+                </tr>
+              </tfoot>
+            </table>
+            <div class="line-actions">
+              <button type="button" id="btn-add-line" data-testid="bill-add-line" tabindex="-1"
+                title="Mouse only — empty lines are added/removed automatically">Add line</button>
+              <button type="button" id="btn-add-source" data-testid="bill-add-source" tabindex="-1"
+                title="Same as Select PO / source in the toolbar (mouse only)">Add source</button>
+              <button type="button" class="imp-btn" id="btn-import-items" data-testid="bill-import-items" tabindex="-1"
+                title="Paste spreadsheet rows or browse a CSV, then map columns (mouse only)">Import lines…</button>
             </div>
-            <div class="ms-row grand">
-              <span class="ms-label">Grand total</span>
-              <span id="ms-grand" data-testid="doc-ms-grand">$0.00</span>
             </div>
-            <p class="ms-note" id="ms-note" data-testid="doc-ms-note" hidden></p>
+            <div class="line-panel" id="panel-expenses" data-testid="bill-panel-expenses" role="tabpanel" hidden>
+              <p class="expense-note" data-testid="bill-expense-note"></p>
+            </div>
+          </section>
+          <section class="bill-section bill-section-taxes" id="bill-taxes-block" data-testid="bill-taxes-block">
+            <div class="line-tabs line-tabs-static" role="presentation">
+              <span class="line-tab active" aria-current="page">Taxes and Charges</span>
+              <div class="line-tabs-tools">
+                <button type="button" class="linkish" id="btn-landed-cost" data-testid="bill-open-landed-cost" tabindex="-1"
+                  title="Open Vanilla Landed Cost Voucher (Qty / Amount / Manual distribute)">Landed Cost Voucher…</button>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr id="taxes-head-row">
+                  <th class="sortable sorted" data-tax-sort="lineNo" title="Sort by Line">Line ▲</th>
+                  <th class="sortable" data-tax-sort="account_head" title="Sort by Account">Account</th>
+                  <th class="sortable" data-tax-sort="description" title="Sort by Description">Description</th>
+                  <th class="sortable" data-tax-sort="charge_type" title="Sort by Type">Type</th>
+                  <th class="sortable num" data-tax-sort="rate" title="Sort by Rate">Rate %</th>
+                  <th class="sortable num" data-tax-sort="tax_amount" title="Sort by Amount">Amount</th>
+                  <th class="sortable" data-tax-sort="add_deduct_tax" title="Sort by Add/Deduct">Add/Deduct</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="taxes-body" data-testid="bill-taxes"></tbody>
+              <tfoot id="taxes-totals" data-testid="bill-taxes-totals" hidden>
+                <tr>
+                  <td colspan="5"></td>
+                  <td class="tot-cell num">
+                    <span class="tot-label">Taxes subtotal</span>
+                    <b id="tot-taxes" data-testid="bill-taxes-subtotal">0.00</b>
+                  </td>
+                  <td></td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+            <div class="line-actions" id="taxes-add" data-testid="bill-taxes-add">
+              <div class="inline-add-fields">
+                <div class="inline-field inline-field--account">
+                  <label for="f-tax-account">Account</label>
+                  <input id="f-tax-account" data-testid="bill-tax-account" autocomplete="off" />
+                </div>
+                <div class="inline-field inline-field--amount">
+                  <label for="f-tax-amount">Amount</label>
+                  <input id="f-tax-amount" data-testid="bill-tax-amount" inputmode="decimal" autocomplete="off" />
+                </div>
+              </div>
+              <button type="button" id="btn-add-tax" data-testid="bill-add-tax">Add tax/charge</button>
+            </div>
+          </section>
+          <section class="bill-section bill-section-summary" data-testid="bill-summary-section">
+            <div class="money-stack" data-testid="bill-money-stack">
+              <div class="ms-row">
+                <span class="ms-label">Item subtotal</span>
+                <span id="ms-items" data-testid="bill-ms-items">$0.00</span>
+              </div>
+              <div class="ms-row">
+                <span class="ms-label">Taxes</span>
+                <span id="ms-taxes" data-testid="bill-ms-taxes">$0.00</span>
+              </div>
+              <div class="ms-row grand">
+                <span class="ms-label">Grand total</span>
+                <span id="ms-grand" data-testid="bill-ms-grand">$0.00</span>
+              </div>
+              <p class="ms-note" id="ms-note" data-testid="bill-ms-note" hidden></p>
+            </div>
+          </section>
+            <section class="bill-section bill-section-payments" data-testid="bill-payments-section"
+              aria-label="Payment">
+            <section class="already-paid" id="already-paid" data-testid="bill-already-paid" aria-label="Already paid">
+              <div class="already-paid-head">
+                <div class="already-paid-question">
+                  <span class="already-paid-label">Already paid?</span>
+                  <span class="already-paid-hint">Saved on draft · Submit creates a Payment Entry</span>
+                </div>
+                <button type="button" id="f-is-paid" class="already-paid-switch" data-field="is_paid"
+                  data-testid="bill-is-paid" role="switch" aria-checked="false" aria-label="Already paid: No">
+                  <span class="switch-word switch-word-no">No</span>
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                  <span class="switch-word switch-word-yes">Yes</span>
+                </button>
+              </div>
+              <div class="already-paid-fields" id="already-paid-fields" data-testid="bill-already-paid-fields">
+                <div class="field">
+                  <label>Mode of Payment</label>
+                  <input id="f-mop" data-field="mode_of_payment" data-testid="bill-mode-of-payment" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label>Cash / Bank Account</label>
+                  <input id="f-cash-bank" data-field="cash_bank_account" data-testid="bill-cash-bank" autocomplete="off"
+                    title="Required when Already paid — Mode of Payment usually fills this from company defaults." />
+                </div>
+                <div class="field">
+                  <label>Paid Amount</label>
+                  <input id="f-paid-amount" class="money-due-input" data-field="paid_amount" data-testid="bill-paid-amount"
+                    inputmode="decimal" autocomplete="off" />
+                </div>
+              </div>
+            </section>
+            <div class="applied-payments" id="applied-payments" data-testid="bill-applied-payments" hidden
+              aria-label="Applied payments">
+              <span class="applied-payments-title">Applied payments</span>
+              <table class="applied-payments-table">
+                <thead>
+                  <tr>
+                    <th>Payment Entry</th>
+                    <th>Date</th>
+                    <th>Mode</th>
+                    <th class="num">Allocated</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="applied-payments-body" data-testid="bill-applied-payments-body"></tbody>
+              </table>
+              <p class="applied-payments-empty" id="applied-payments-empty" hidden>No Payment Entries linked yet.</p>
+            </div>
+            </section>
+          <section class="bill-section bill-section-notes" data-testid="bill-notes-section">
+            <div id="source-terms-block" class="source-terms-block" data-testid="bill-source-terms-block" hidden>
+              <label for="source-terms-body">Terms from sources (read-only)</label>
+              <pre id="source-terms-body" class="source-terms-body" data-testid="bill-source-terms-body" tabindex="-1"></pre>
+            </div>
+            <div class="field memo" data-testid="bill-memo-block">
+              <div class="memo-head">
+                <label for="f-memo">Remarks &amp; Freehand Memo</label>
+                <button type="button" class="attach" id="btn-attach" data-testid="bill-attach"
+                  title="Opens Vanilla Desk attach for this Bill (save draft first if new).">
+                  <svg class="attach-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                    <path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1.5 1.5 0 0 1-3 0V6h-1.5v9.5a3 3 0 0 0 6 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/>
+                  </svg>
+                  Attach file to this bill
+                </button>
+              </div>
+              <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
+            </div>
+          </section>
+            <div class="back-to-top-row">
+              <button type="button" id="btn-back-top" data-testid="bill-back-top"
+                title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
+            </div>
+            <p class="hint">
+              Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters).
+              Item subtotal is Σ line amounts; Taxes and Charges roll into Grand total.
+              Amount Due (header) must match Grand total — checksum chip shows $ difference; Bill $ beside it is the same target.
+              PO/PR source lines keep their descriptions (editable).
+            </p>
+        </div>
+      </div>
+      <div id="bill-toast" class="toast" data-testid="bill-toast" role="status" aria-live="polite" hidden></div>
+  </div>
+  <div id="doc-form-shell">
+  <div class="wrap" data-testid="doc-root">
+      <div class="banner">
+        <h1 id="doc-title">Document</h1>
+        <span class="status" id="status" data-testid="doc-status">Loading…</span>
+        <span class="banner-actions">
+          <button type="button" id="btn-retry" data-testid="doc-retry" hidden>Retry load</button>
+        </span>
+      </div>
+      <div class="toolbar" data-testid="doc-toolbar">
+        <div class="tb-group" data-testid="doc-toolbar-file" title="Keep, print, discard, or finalize this document">
+          <span class="tb-group-label">File</span>
+          <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="doc-dirty-pill">Draft · all saved</span>
+          <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
+            title="Print this document (save first if new).">Print</button>
+          <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
+            title="Attach file">Attach file</button>
+          <button type="button" id="btn-revert" data-testid="doc-revert"
+            title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
+          <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
+          <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
+        </div>
+        <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
+          <span class="tb-group-label">Navigate</span>
+          <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
+          <button type="button" id="btn-new" data-testid="doc-new">New</button>
+          <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
+          <button type="button" id="btn-refresh" data-testid="doc-refresh"
+            title="Re-read the open Vanilla form into this page (keeps your Doc edits). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
+          <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
+          <button type="button" class="ghost" id="btn-caps" data-testid="doc-caps"
+            title="Default ALL-CAPS data entry — click to turn off for this page">⇪ CAPS: ON</button>
+        </div>
+      </div>
+      <div class="commit-gate" id="commit-gate" data-testid="doc-commit-gate" hidden>
+        <div class="commit-gate-backdrop" id="commit-gate-backdrop"
+          data-testid="doc-gate-backdrop" aria-hidden="true"></div>
+        <section class="commit-gate-dialog" role="dialog" aria-modal="true"
+          aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
+          <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
+          <p class="commit-gate-copy" id="commit-gate-copy">
+            This decision must be resolved before you can continue.
+          </p>
+          <div class="commit-gate-validation" id="commit-gate-validation" data-testid="doc-gate-validation">
+            <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
+            <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="doc-gate-blockers"></ul>
+            <p class="hint" id="commit-gate-hint" data-testid="doc-commit-gate-hint"></p>
           </div>
-        </div>
-        <div class="field memo" id="memo-block" data-testid="doc-memo-block" hidden>
-          <div class="memo-head">
-            <label for="f-memo">Memo</label>
-            <button type="button" class="attach" id="btn-attach" data-testid="doc-attach">Attach file</button>
+          <div class="row">
+            <button type="button" data-gate="discard" data-testid="doc-gate-discard">Discard, then continue</button>
+            <button type="button" class="primary" data-gate="save" data-testid="doc-gate-save">Save draft, then continue</button>
+            <button type="button" data-gate="submit" data-testid="doc-gate-submit">Save &amp; submit, then continue</button>
+            <button type="button" class="ghost" data-gate="cancel" data-testid="doc-gate-cancel">Cancel</button>
           </div>
-          <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
+        </section>
+      </div>
+      <details class="assumptions" data-testid="doc-assumptions">
+        <summary>Assumptions this view makes</summary>
+        <ul id="assumptions-list"></ul>
+      </details>
+      <div class="card">
+        <div class="cols" id="header-cols">
+          <div id="header-left"></div>
+          <div id="header-right"></div>
         </div>
-        <div class="back-to-top-row">
-          <button type="button" id="btn-back-top" data-testid="doc-back-top"
-            title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
+        <div class="addr-grid" id="header-addresses" data-testid="doc-header-addresses" hidden></div>
+        <div>
+          <div class="line-tabs" role="tablist" data-testid="doc-line-tabs" hidden>
+            <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+              tabindex="-1" data-tab="items" data-testid="doc-tab-items">Items</button>
+            <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+              tabindex="-1" data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
+          </div>
+          <div class="line-panel" id="panel-items" data-testid="doc-panel-items" role="tabpanel">
+            <table>
+              <thead>
+                <tr id="items-head-row"></tr>
+              </thead>
+              <tbody id="items-body" data-testid="doc-items"></tbody>
+              <tfoot id="line-totals" data-testid="doc-line-totals" hidden></tfoot>
+            </table>
+            <div class="line-actions">
+              <button type="button" id="btn-add-line" data-testid="doc-add-line" tabindex="-1">Add line</button>
+              <button type="button" class="imp-btn" id="btn-import-items" data-testid="doc-import-items" tabindex="-1"
+                title="Paste spreadsheet rows or browse a CSV, then map columns (mouse only)">Import lines…</button>
+            </div>
+          </div>
+          <div class="line-panel" id="panel-expenses" data-testid="doc-panel-expenses" role="tabpanel" hidden>
+            <p class="expense-note" data-testid="doc-expense-note"></p>
+          </div>
+          <div class="taxes-block" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
+            <span class="taxes-title">Taxes and Charges</span>
+            <table class="taxes-table">
+              <thead>
+                <tr id="taxes-head-row"></tr>
+              </thead>
+              <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
+            </table>
+            <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
+              <div class="field">
+                <label for="f-tax-account">Account</label>
+                <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
+              </div>
+              <div class="field" style="flex:0 0 120px;">
+                <label for="f-tax-amount">Amount</label>
+                <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+              </div>
+              <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+            </div>
+            <div class="money-stack" data-testid="doc-money-stack">
+              <div class="ms-row">
+                <span class="ms-label">Item subtotal</span>
+                <span id="ms-items" data-testid="doc-ms-items">$0.00</span>
+              </div>
+              <div class="ms-row">
+                <span class="ms-label">Taxes</span>
+                <span id="ms-taxes" data-testid="doc-ms-taxes">$0.00</span>
+              </div>
+              <div class="ms-row grand">
+                <span class="ms-label">Grand total</span>
+                <span id="ms-grand" data-testid="doc-ms-grand">$0.00</span>
+              </div>
+              <p class="ms-note" id="ms-note" data-testid="doc-ms-note" hidden></p>
+            </div>
+          </div>
+          <div class="field memo" id="memo-block" data-testid="doc-memo-block" hidden>
+            <div id="source-terms-block" class="source-terms-block" data-testid="doc-source-terms-block" hidden>
+              <label for="source-terms-body">Terms from sources (read-only)</label>
+              <pre id="source-terms-body" class="source-terms-body" data-testid="doc-source-terms-body" tabindex="-1"></pre>
+            </div>
+            <div class="field terms-text" id="terms-block" data-testid="doc-terms-block" hidden>
+              <label for="f-terms-text">Terms and conditions</label>
+              <textarea id="f-terms-text" rows="3" data-field="terms" data-testid="doc-terms-text"></textarea>
+            </div>
+            <div class="memo-entry" id="memo-entry" hidden>
+              <div class="memo-head">
+                <label for="f-memo" id="memo-label">Memo</label>
+                <button type="button" class="attach" id="btn-attach" data-testid="doc-attach">Attach file</button>
+              </div>
+              <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
+            </div>
+          </div>
+          <div class="back-to-top-row">
+            <button type="button" id="btn-back-top" data-testid="doc-back-top"
+              title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
+          </div>
+          <p class="hint" id="doc-hint"></p>
         </div>
-        <p class="hint" id="doc-hint"></p>
       </div>
     </div>
   </div>
-  <div id="calc-overlay" hidden data-testid="doc-calc-overlay" role="status" aria-live="polite">
+<div id="calc-overlay" hidden data-testid="doc-calc-overlay" role="status" aria-live="polite">
     <div class="calc-history" id="calc-history" hidden data-testid="doc-calc-history"></div>
     <div class="calc-live">
       <div class="calc-expr" id="calc-expr"></div>
@@ -511,6 +738,6 @@
       <div class="calc-hint">Hover tape for session history · Enter / Tab commit · Esc cancel</div>
     </div>
   </div>
-  <script type="module" src="../src/doc-form-page.js"></script>
+  <script type="module" src="../src/doc-form-boot.js"></script>
 </body>
 </html>
