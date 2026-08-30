@@ -55,10 +55,12 @@ describe("pushHistory", () => {
       labels: { "purchase-invoice": "Bill" },
       detail: "INV R1; 7/21/2026",
       detailMuted: true,
+      copyRef: "R1",
     });
     assert.equal(h[0].label, "Bill");
     assert.equal(h[0].detail, "INV R1; 7/21/2026");
     assert.equal(h[0].detailMuted, true);
+    assert.equal(h[0].copyRef, "R1");
   });
 
   it("ignores routes without doctype", () => {

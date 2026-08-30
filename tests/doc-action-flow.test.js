@@ -42,6 +42,10 @@ describe("doc-action-flow", () => {
       "Supplier",
     );
     assert.equal(
+      linkDoctypeForDocField("payment_terms_template", PO_HEADER_FIELDS, PO_ITEM_COLS),
+      "Payment Terms Template",
+    );
+    assert.equal(
       linkDoctypeForDocField("sales_order", PO_HEADER_FIELDS, PO_ITEM_COLS),
       "Sales Order",
     );

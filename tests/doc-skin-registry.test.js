@@ -9,7 +9,7 @@ import {
 
 describe("DOC_SKIN_PROFILES", () => {
   it("registers bill, po, receipt", () => {
-    assert.equal(DOC_SKIN_PROFILES.bill.shell, "bill");
+    assert.equal(DOC_SKIN_PROFILES.bill.shell, "doc-form");
     assert.equal(DOC_SKIN_PROFILES.po.shell, "doc-form");
     assert.equal(DOC_SKIN_PROFILES.receipt.shell, "doc-form");
   });
@@ -21,8 +21,10 @@ describe("DOC_SKIN_PROFILES", () => {
     assert.equal(profileByDoctypeKey("purchase-invoice")?.id, "bill");
   });
 
-  it("docFormUiPayload only for doc-form shells", () => {
-    assert.equal(docFormUiPayload("bill"), null);
+  it("docFormUiPayload for all doc-form shells", () => {
+    const bill = docFormUiPayload("bill");
+    assert.equal(bill?.title, "Bill");
+    assert.equal(bill?.features.amountDue, true);
     const po = docFormUiPayload("po");
     assert.equal(po?.title, "Purchase Order");
     assert.equal(po?.features.amountDue, false);
@@ -32,12 +34,16 @@ describe("DOC_SKIN_PROFILES", () => {
     assert.equal(ir?.title, "Item Receipt");
     assert.equal(ir?.features.sourceModal, true);
     assert.equal(ir?.sourceLabel, "Select PO");
+    assert.match(String(ir?.memoLabel || ""), /Remarks.*Memo/);
+    assert.equal(po?.memoLabel, undefined);
   });
 
   it("PO excludes taxes/source; IR includes taxes/source/memo", () => {
     assert.equal(DOC_SKIN_PROFILES.po.features.taxes, false);
     assert.equal(DOC_SKIN_PROFILES.po.features.sourceModal, false);
     assert.equal(DOC_SKIN_PROFILES.po.features.memo, false);
+    assert.equal(DOC_SKIN_PROFILES.po.features.addressPicker, true);
+    assert.equal(DOC_SKIN_PROFILES.bill.features.addressPicker, true);
     assert.equal(DOC_SKIN_PROFILES.receipt.features.taxes, true);
     assert.equal(DOC_SKIN_PROFILES.receipt.features.memo, true);
   });

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("erpUi", {
   closeDiagnose: () => ipcRenderer.send("diagnose-dropdown-close"),
   openFeedback: () => ipcRenderer.invoke("open-feedback"),
   openNavIncident: () => ipcRenderer.send("open-nav-incident"),
+  openFocusIncident: () => ipcRenderer.send("open-focus-incident"),
   goHome: () => ipcRenderer.send("go-home"),
   openDocSkin: () => ipcRenderer.send("open-doc-skin"),
   openVanillaSkin: () => ipcRenderer.send("open-vanilla-skin"),

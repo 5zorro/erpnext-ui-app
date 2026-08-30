@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("erpDiagnose", {
   copy: () => ipcRenderer.invoke("copy-diagnose"),
   close: () => ipcRenderer.send("diagnose-dropdown-close"),
   refresh: () => ipcRenderer.invoke("get-diagnose"),
+  openNavIncident: () => ipcRenderer.send("open-nav-incident"),
+  openFocusIncident: () => ipcRenderer.send("open-focus-incident"),
   setupRemediation: () => ipcRenderer.invoke("health-remediation-setup"),
   notifyIt: () => ipcRenderer.invoke("health-remediation-notify"),
   runAutofix: () => ipcRenderer.invoke("health-remediation-autofix"),

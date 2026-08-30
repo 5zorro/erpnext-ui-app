@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  Golden Vanilla Purchase Order form snippet for input-count / scrape CI.
+  Representative control density for advertising N_v — extend from Desk dumps when captured.
+-->
+<html lang="en">
+<head><meta charset="utf-8" /><title>Purchase Order (Vanilla fixture)</title></head>
+<body>
+  <div class="form-layout" data-testid="vanilla-po-root">
+    <div class="page-head">
+      <button type="button" data-testid="v-menu">Menu</button>
+      <button type="button" data-testid="v-save">Save</button>
+      <button type="button" data-testid="v-submit">Submit</button>
+      <button type="button" data-testid="v-cancel">Cancel</button>
+      <button type="button" data-testid="v-print">Print</button>
+      <button type="button" data-testid="v-email">Email</button>
+      <button type="button" data-testid="v-jump">Jump to field</button>
+      <button type="button" data-testid="v-links">Links</button>
+      <button type="button" data-testid="v-duplicate">Duplicate</button>
+      <button type="button" data-testid="v-new">New</button>
+      <button type="button" data-testid="v-list">List View</button>
+      <button type="button" data-testid="v-dashboard">Dashboard</button>
+      <button type="button" data-testid="v-get-items">Get Items From</button>
+    </div>
+
+    <div class="form-tabs">
+      <button type="button" role="tab" data-testid="v-tab-details">Details</button>
+      <button type="button" role="tab" data-testid="v-tab-address">Address &amp; Contact</button>
+      <button type="button" role="tab" data-testid="v-tab-terms">Terms</button>
+      <button type="button" role="tab" data-testid="v-tab-more">More Info</button>
+      <button type="button" role="tab" data-testid="v-tab-connections">Connections</button>
+    </div>
+
+    <input data-fieldname="naming_series" data-testid="v-naming-series" />
+    <input data-fieldname="supplier" data-testid="v-supplier" />
+    <input data-fieldname="supplier_name" data-testid="v-supplier-name" />
+    <input data-fieldname="company" data-testid="v-company" />
+    <input data-fieldname="transaction_date" data-testid="v-transaction-date" inputmode="numeric" />
+    <input data-fieldname="schedule_date" data-testid="v-schedule-date" inputmode="numeric" />
+    <input data-fieldname="title" data-testid="v-title" />
+    <input data-fieldname="currency" data-testid="v-currency" />
+    <input data-fieldname="conversion_rate" data-testid="v-conversion-rate" inputmode="decimal" />
+    <input data-fieldname="buying_price_list" data-testid="v-price-list" />
+    <input data-fieldname="payment_terms_template" data-testid="v-payment-terms" />
+    <input data-fieldname="project" data-testid="v-project" />
+    <input data-fieldname="cost_center" data-testid="v-cost-center" />
+    <input data-fieldname="set_warehouse" data-testid="v-warehouse" />
+    <input data-fieldname="apply_tds" type="checkbox" data-testid="v-apply-tds" />
+    <input data-fieldname="ignore_pricing_rule" type="checkbox" data-testid="v-ignore-pricing" />
+    <textarea data-fieldname="shipping_address_display" data-testid="v-ship-to"></textarea>
+    <textarea data-fieldname="billing_address_display" data-testid="v-billing"></textarea>
+    <textarea data-fieldname="address_display" data-testid="v-ship-from"></textarea>
+    <textarea data-fieldname="terms" data-testid="v-terms"></textarea>
+
+    <input data-fieldname="item_code" data-testid="v-item-code" />
+    <textarea data-fieldname="description" data-testid="v-item-desc"></textarea>
+    <input data-fieldname="qty" data-testid="v-qty" inputmode="decimal" />
+    <input data-fieldname="uom" data-testid="v-uom" />
+    <input data-fieldname="rate" data-testid="v-rate" inputmode="decimal" />
+    <input data-fieldname="amount" data-testid="v-amount" inputmode="decimal" />
+    <input data-fieldname="schedule_date" data-testid="v-line-schedule" inputmode="numeric" />
+    <input data-fieldname="sales_order" data-testid="v-sales-order" />
+    <input data-fieldname="project" data-testid="v-item-project" />
+    <input data-fieldname="warehouse" data-testid="v-item-warehouse" />
+    <input data-fieldname="received_qty" data-testid="v-received-qty" inputmode="decimal" />
+    <button type="button" data-testid="v-add-row">Add Row</button>
+    <button type="button" data-testid="v-remove-row">Delete</button>
+
+    <input data-fieldname="letter_head" data-testid="v-letter-head" />
+    <input data-fieldname="language" data-testid="v-language" />
+    <input data-fieldname="status" data-testid="v-status" />
+    <input data-fieldname="amended_from" data-testid="v-amended-from" />
+    <button type="button" data-testid="v-view-ledger">View Ledger</button>
+    <button type="button" data-testid="v-create-pr">Create Purchase Receipt</button>
+    <button type="button" data-testid="v-refresh">Refresh</button>
+  </div>
+</body>
+</html>

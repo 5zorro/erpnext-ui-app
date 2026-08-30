@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DOC_WASH_BY_PROFILE,
   DOC_WASH_COLORS,
+  DOC_PAGE_CANVAS,
   DEFAULT_PATTERN_PREF,
   normalizePatternPref,
   patternAppliesToDesk,
@@ -36,6 +37,10 @@ describe("doc-wash (OI-125)", () => {
     assert.equal(DOC_WASH_COLORS.invoice, "#f6eaf2");
     assert.equal(DOC_WASH_COLORS.order, "#e8f4fc");
     assert.equal(DOC_WASH_COLORS.fulfill, "#fff4e0");
+  });
+
+  it("page canvas is neutral grey (layer 1); role wash is on chrome not body", () => {
+    assert.equal(DOC_PAGE_CANVAS, "#eef2f5");
   });
 
   it("normalizes pattern preference (default A/R)", () => {

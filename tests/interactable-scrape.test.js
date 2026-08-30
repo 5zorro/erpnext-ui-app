@@ -11,9 +11,11 @@ import {
   preprocessHtmlForScrape,
 } from "../src/interactable-scrape.js";
 import { BILL_DOC_CURATED } from "../src/inventories/bill-doc-inventory.js";
+import { DOC_FORM_CURATED_UNION } from "../src/inventories/doc-form-inventory.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const billHtml = readFileSync(join(root, "electron/bill.html"), "utf8");
+const docFormHtml = readFileSync(join(root, "electron/doc-form.html"), "utf8");
+const billHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
 const vanillaHtml = readFileSync(
   join(root, "tests/fixtures/bill-vanilla-form.fixture.html"),
   "utf8",
@@ -71,7 +73,7 @@ describe("interactable-scrape helpers", () => {
   });
 });
 
-describe("scrape Bill Doc electron/bill.html", () => {
+describe("scrape Bill Doc doc-form bill shell", () => {
   it("finds clerk-path interactables and skips address readonly", () => {
     const { items, count } = scrapeInteractables(billHtml);
     assert.ok(count >= 20, `expected dense toolbar+header, got ${count}`);
@@ -106,6 +108,28 @@ describe("scrape Vanilla PI fixture", () => {
     assert.ok(
       van.count > doc.count,
       `expected Vanilla fixture (${van.count}) > Doc static (${doc.count})`,
+    );
+  });
+});
+
+describe("scrape Doc-form electron/doc-form.html", () => {
+  it("finds toolbar + line chrome interactables", () => {
+    const { items, count } = scrapeInteractables(docFormHtml);
+    assert.ok(count >= 10, `expected toolbar+lines, got ${count}`);
+    const ids = new Set(items.map((i) => i.id));
+    assert.ok(ids.has("doc-save"));
+    assert.ok(ids.has("doc-caps"));
+    assert.equal(ids.has("doc-gate-save"), false, "hidden commit-gate excluded");
+    assert.equal(ids.has("doc-add-tax"), false, "hidden taxes block excluded");
+  });
+
+  it("curated union inventory covers every scraped id (completeness gate)", () => {
+    const { items } = scrapeInteractables(docFormHtml);
+    const missing = curatedMissingIds(items, DOC_FORM_CURATED_UNION);
+    assert.deepEqual(
+      missing,
+      [],
+      `curated Doc-form inventory missing scrape ids:\n  ${missing.join("\n  ")}`,
     );
   });
 });

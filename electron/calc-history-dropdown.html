@@ -65,7 +65,7 @@
     .calc-actions button:hover { background: #334155; color: #fff; }
     .calc-actions button.ok { color: #86efac; }
     .calc-ico { display: inline-flex; align-items: center; gap: 3px; }
-    .calc-ico svg { display: block; }
+    .calc-ico svg, .ui-ico svg { display: block; }
 
     .older-toggle {
       display: block; width: 100%; margin: 0 0 6px; text-align: left;
@@ -107,7 +107,7 @@
   </div>
   <script type="module">
     import { groupCalcHistoryForFlyout, splitCalcHistoryFlyoutSections } from "../src/calc/session-history.js";
-    import { copyTableIconHtml, copyTotalIconHtml } from "../src/calc/calc-icons.js";
+    import { copyTableIconHtml, copyTotalIconHtml, uiIconHtml } from "../src/ui-icons.js";
 
     const api = window.erpCalcHist;
     const emptyEl = document.getElementById("empty");

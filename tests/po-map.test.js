@@ -92,11 +92,18 @@ describe("PO header layout (Bill-like columns)", () => {
     const { left, right, addresses } = splitHeaderColumns(PO_HEADER_FIELDS);
     assert.deepEqual(
       left.map((f) => f.label),
-      ["Vendor", "Billing address"],
+      ["Vendor", "Customer (drop ship)", "Billing address"],
     );
     assert.deepEqual(
       right.map((f) => f.label),
-      ["Date", "Date Expected", "PO No.", "PO# (logbook)"],
+      [
+        "Date",
+        "Date Expected",
+        "PO No.",
+        "PO# (logbook)",
+        "Payment terms",
+        "Terms and conditions",
+      ],
     );
     assert.deepEqual(
       addresses.map((f) => f.addressRole),
@@ -172,7 +179,7 @@ describe("readPoItemRows", () => {
   it("maps item columns including Line, SO, Required By, and received qty", () => {
     const rows = readPoItemRows(sampleDoc);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, "SO-1", "2026-07-25", 20, 1]);
+    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, "SO-1", 0, "2026-07-25", 20, 1]);
   });
 });
 
@@ -181,6 +188,7 @@ describe("editable fields", () => {
     assert.equal(isEditablePoItemField("item_code"), true);
     assert.equal(isEditablePoItemField("sales_order"), true);
     assert.equal(isEditablePoItemField("schedule_date"), true);
+    assert.equal(isEditablePoItemField("delivered_by_supplier"), true);
     assert.equal(isEditablePoItemField("amount"), false);
   });
 

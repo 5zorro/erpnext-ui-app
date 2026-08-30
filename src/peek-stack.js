@@ -197,6 +197,57 @@ export function applyPeekTreeToHistory(history, stack, erpBase) {
 }
 
 /**
+ * Esc while soft-peeking: child → parent first; only resume parked Doc when the
+ * peek parent *is* that Doc (classic Bill→Tax). Stale park must not steal Esc
+ * from Payment Entry → Mode of Payment.
+ *
+ * @param {{
+ *   parked?: { route?: string, mode?: string }|null,
+ *   peekStack?: PeekStack|null,
+ *   currentRoute?: string,
+ *   erpBase?: string,
+ * }} [state]
+ * @returns {{ action: "return-parent"|"resume-park"|"disarm"|"none", route?: string }}
+ */
+export function resolveSoftPeekEscAction(state = {}) {
+  const erpBase = state.erpBase;
+  const here = state.currentRoute || "";
+  const parked = state.parked;
+  const stack = state.peekStack;
+
+  if (isActivePeekStack(stack)) {
+    const parent = stack.parent.route;
+    const onParent = !!(parent && here && routesReferToSameDoc(parent, here, erpBase));
+    const parkIsParent = !!(
+      parked &&
+      parked.route &&
+      parent &&
+      routesReferToSameDoc(parked.route, parent, erpBase)
+    );
+
+    if (!onParent) {
+      // On a child master (Tax Category, Mode of Payment, …).
+      if (parkIsParent) {
+        // Classic Bill→Tax: Esc restores Doc Bill in one step.
+        return { action: "resume-park", route: parked.route };
+      }
+      // Payment Entry → Mode of Payment (stale Bill park must not win).
+      return { action: "return-parent", route: parent };
+    }
+    // Already on peek parent.
+    if (parkIsParent) {
+      return { action: "resume-park", route: parked.route };
+    }
+    return { action: "disarm" };
+  }
+
+  if (parked && parked.route) {
+    return { action: "resume-park", route: parked.route };
+  }
+  return { action: "none" };
+}
+
+/**
  * In-SPA Desk hops: leaving a Bill/PO/IR form for a setup master starts the peek tree
  * even when we are already on Vanilla (no Doc park).
  * @param {PeekStack|null|undefined} stack
@@ -216,6 +267,34 @@ export function applyErpHopToPeekStack(stack, fromPath, toPath, opts = {}) {
   if (isSoftPeekRoute(to, opts.erpBase)) {
     const fromClass = classifyHistoryOpen(from, opts.erpBase);
     if (fromClass.mode === "doc-preferred" && fromClass.record) {
+      const next = beginPeekParent(stack, from, opts);
+      return pushPeekChild(next, to, opts);
+    }
+    // Payment Entry → Mode of Payment: re-parent to the live Vanilla form so Esc
+    // returns there. Sibling peeks under a Doc parent (Bill→Tax→Vendor) stay put —
+    // except Payment Entry / JE / Payment Order, which are their own Esc sessions.
+    if (
+      fromClass.mode === "vanilla-always" &&
+      fromClass.record &&
+      isSoftPeekRoute(from, opts.erpBase)
+    ) {
+      const SESSION_PARENT_DT = new Set([
+        "payment-entry",
+        "journal-entry",
+        "payment-order",
+        "payment-reconciliation",
+      ]);
+      if (!isActivePeekStack(stack)) {
+        const next = beginPeekParent(stack, from, opts);
+        return pushPeekChild(next, to, opts);
+      }
+      if (routesReferToSameDoc(stack.parent.route, from, opts.erpBase)) {
+        return pushPeekChild(stack, to, opts);
+      }
+      const parentClass = classifyHistoryOpen(stack.parent.route, opts.erpBase);
+      if (parentClass.mode === "doc-preferred" && !SESSION_PARENT_DT.has(fromClass.doctype)) {
+        return pushPeekChild(stack, to, opts);
+      }
       const next = beginPeekParent(stack, from, opts);
       return pushPeekChild(next, to, opts);
     }

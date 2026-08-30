@@ -4,8 +4,10 @@ import {
   isEmptyItemCode,
   shouldBlockDeleteLastItemRow,
   emptyItemRowCleanupAction,
+  itemRowDeleteAction,
   LAST_ITEM_ROW_TOAST,
   lastItemRowToast,
+  ITEM_ROW_CLEAR_FIELDS,
 } from "../src/bill-item-guard.js";
 
 describe("bill-item-guard", () => {
@@ -21,15 +23,25 @@ describe("bill-item-guard", () => {
     assert.equal(shouldBlockDeleteLastItemRow(2), false);
   });
 
+  it("× on last row clears; × with extras deletes", () => {
+    assert.deepEqual(itemRowDeleteAction(1), {
+      action: "clear",
+      reason: LAST_ITEM_ROW_TOAST,
+    });
+    assert.deepEqual(itemRowDeleteAction(3), { action: "delete" });
+  });
+
   it("deletes empty extras but keeps the last blank row", () => {
     assert.deepEqual(emptyItemRowCleanupAction(3, ""), { action: "delete" });
     assert.equal(emptyItemRowCleanupAction(1, "").action, "keep");
-    assert.match(emptyItemRowCleanupAction(1, "").reason || "", /at least one/i);
+    assert.match(emptyItemRowCleanupAction(1, "").reason || "", /at least 1 row/i);
     assert.equal(emptyItemRowCleanupAction(2, "SKU").action, "keep");
   });
 
-  it("exports toast copy", () => {
-    assert.match(LAST_ITEM_ROW_TOAST, /at least one item/i);
-    assert.match(lastItemRowToast("Purchase Order"), /Purchase Order/);
+  it("exports toast copy and clear-field list", () => {
+    assert.match(LAST_ITEM_ROW_TOAST, /at least 1 row on the items table/i);
+    assert.equal(lastItemRowToast("Purchase Order"), LAST_ITEM_ROW_TOAST);
+    assert.ok(ITEM_ROW_CLEAR_FIELDS.some((f) => f.field === "item_code"));
+    assert.ok(ITEM_ROW_CLEAR_FIELDS.some((f) => f.field === "qty" && f.value === 0));
   });
 });

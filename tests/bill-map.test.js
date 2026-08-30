@@ -13,6 +13,7 @@ import {
   billMoneyStack,
   readBillTaxRows,
   isEditableBillTaxField,
+  billShowsEditableTermsField,
   BILL_TAX_EDIT_FIELDS,
   stripHtml,
   sumBillLineQty,
@@ -23,6 +24,7 @@ import {
   isEditableBillItemField,
   BILL_ITEM_EDIT_FIELDS,
   BILL_ASSUMPTIONS,
+  BILL_VANILLA_TAB_NOTES,
   BILL_EXPENSE_NOTE,
   MUSEUM_BILL_ASSUMPTION_TOPICS,
   billAssumptionTopicsCovered,
@@ -31,6 +33,7 @@ import {
   packingSlipHashAfterClear,
   reconciliationReport,
   saveActionsBlockedByChecksum,
+  shouldShowAmountDueSticky,
   formatUsdAmount,
   uniqueLinkedPurchaseOrderNames,
   linkedPurchaseOrdersForBill,
@@ -70,16 +73,28 @@ describe("getBillAnchor", () => {
   });
 });
 
+describe("billShowsEditableTermsField", () => {
+  it("Doc Bill never shows editable freeform terms", () => {
+    assert.equal(billShowsEditableTermsField(), false);
+  });
+});
+
 describe("Bill header layout (OI-121 linked POs)", () => {
-  it("places billing + due date on left; ship addresses only in addr row", () => {
+  it("places invoice date before terms; ship addresses only in addr row", () => {
     const { left, right, addresses } = splitHeaderColumns(BILL_HEADER_FIELDS);
     assert.deepEqual(
       left.map((f) => f.label),
-      ["Vendor Name", "Billing address", "Terms", "Bill Due Date"],
+      [
+        "Vendor Name",
+        "Invoice date",
+        "Remittance & Billing Address",
+        "Payment terms",
+        "Bill Due Date",
+      ],
     );
     assert.deepEqual(
       right.map((f) => f.label),
-      ["Date", "Ref No. (Supplier Invoice No.)", "Amount Due"],
+      ["Ref No. (Supplier Invoice No.)", "Amount Due"],
     );
     assert.deepEqual(
       addresses.map((f) => f.addressRole),
@@ -121,10 +136,10 @@ describe("readBillHeader", () => {
   it("projects museum header labels", () => {
     const h = readBillHeader(sampleDoc);
     assert.equal(h["Vendor Name"], "Acme Hardware");
-    assert.equal(h["Billing address"], "123 Main\nTown");
-    assert.equal(h["Ship from"], "");
-    assert.equal(h["Ship to"], "");
-    assert.equal(h.Date, "2026-07-18");
+    assert.equal(h["Remittance & Billing Address"], "123 Main\nTown");
+    assert.equal(h["Ship from / supplier dispatch"], "");
+    assert.equal(h["Ship to / receiving address"], "");
+    assert.equal(h["Invoice date"], "2026-07-18");
     assert.equal(h.Memo, "Rush");
     assert.equal(h["Amount Due"], "");
   });
@@ -138,11 +153,17 @@ describe("readBillHeader", () => {
       address_display: "<p>Billing Desk<br>PO Box 1<br>Austin, TX 78701</p>",
     });
     assert.equal(
-      h["Ship from"],
+      h["Ship from / supplier dispatch"],
       "Three Little Pigs\nattn:AR clerk\n123 street addr\nCity, TX 77444-1234",
     );
-    assert.equal(h["Ship to"], "Our Warehouse\n9 Dock Rd\nHouston, TX 77002");
-    assert.equal(h["Billing address"], "Billing Desk\nPO Box 1\nAustin, TX 78701");
+    assert.equal(
+      h["Ship to / receiving address"],
+      "Our Warehouse\n9 Dock Rd\nHouston, TX 77002",
+    );
+    assert.equal(
+      h["Remittance & Billing Address"],
+      "Billing Desk\nPO Box 1\nAustin, TX 78701",
+    );
   });
 
   it("prefers scratch amount due", () => {
@@ -182,21 +203,20 @@ describe("amountDueChecksumStatus", () => {
 });
 
 describe("amountDueChecksumChip", () => {
-  it("splits emoji and money; shows dollar delta on mismatch", () => {
+  it("splits icon and money; shows dollar delta on mismatch", () => {
     const chip = amountDueChecksumChip(50, 40);
     assert.equal(chip.status, "mismatch");
-    assert.equal(chip.emoji, "!");
+    assert.equal(chip.icon, "alert");
     assert.match(chip.moneyText, /\$10\.00/);
-    assert.match(chip.text, /!/);
     assert.match(chip.title, /Off by/);
   });
 
   it("idle shows dash; match shows check and $0", () => {
     const idle = amountDueChecksumChip("", 10);
-    assert.equal(idle.emoji, "·");
+    assert.equal(idle.icon, "idle");
     assert.equal(idle.moneyText, "—");
     const match = amountDueChecksumChip(10, 10);
-    assert.equal(match.emoji, "✓");
+    assert.equal(match.icon, "check");
     assert.match(match.moneyText, /\$0\.00/);
   });
 });
@@ -304,7 +324,7 @@ describe("stripHtml", () => {
 });
 
 describe("writableBillHeaderFields", () => {
-  it("excludes read-only address", () => {
+  it("excludes read-only address displays; link fields still writable via gate", () => {
     const fields = writableBillHeaderFields().map((f) => f.field);
     assert.ok(fields.includes("supplier"));
     assert.ok(!fields.includes(null));
@@ -345,6 +365,18 @@ describe("BILL_ASSUMPTIONS museum topic parity", () => {
     }
     assert.match(BILL_EXPENSE_NOTE, /items-based/i);
     assert.match(BILL_EXPENSE_NOTE, /Taxes and Charges/i);
+  });
+
+  it("lists Vanilla Bill tabs for Payments brainstorm", () => {
+    assert.ok(BILL_VANILLA_TAB_NOTES.length >= 5);
+    const tabs = BILL_VANILLA_TAB_NOTES.map((t) => t.tab);
+    assert.ok(tabs.includes("Payments"));
+    assert.ok(tabs.includes("Payment Schedule"));
+    assert.ok(tabs.includes("Details"));
+    assert.match(
+      BILL_VANILLA_TAB_NOTES.find((t) => t.tab === "Payments").note,
+      /Already paid|is_paid/i,
+    );
   });
 });
 
@@ -388,6 +420,10 @@ describe("reconciliationReport / saveActionsBlockedByChecksum", () => {
     assert.equal(saveActionsBlockedByChecksum("mismatch"), true);
     assert.equal(saveActionsBlockedByChecksum("idle"), false);
     assert.equal(saveActionsBlockedByChecksum("match"), false);
+    assert.equal(shouldShowAmountDueSticky("mismatch", false), true);
+    assert.equal(shouldShowAmountDueSticky("mismatch", true), false);
+    assert.equal(shouldShowAmountDueSticky("match", false), false);
+    assert.equal(shouldShowAmountDueSticky("idle", false), false);
   });
 });
 

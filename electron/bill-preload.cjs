@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld("erpBill", {
   addTax: (accountHead, taxAmount, description) =>
     ipcRenderer.invoke("bill-add-tax", accountHead, taxAmount, description || ""),
   deleteTax: (rowIndex) => ipcRenderer.invoke("bill-delete-tax", rowIndex),
+  listPayments: () => ipcRenderer.invoke("bill-list-payments"),
+  listAddresses: (role) => ipcRenderer.invoke("bill-list-addresses", role || ""),
+  allocateCharge: (taxRowIndex, mode, custom) =>
+    ipcRenderer.invoke("bill-allocate-charge", taxRowIndex, mode || "amount", custom || []),
+  openLandedCost: () => ipcRenderer.invoke("bill-open-landed-cost"),
   attachFile: () => ipcRenderer.invoke("bill-attach-file"),
   save: (opts) => ipcRenderer.invoke("bill-save", opts || {}),
   listMandatory: () => ipcRenderer.invoke("bill-list-mandatory"),
@@ -28,7 +33,9 @@ contextBridge.exposeInMainWorld("erpBill", {
   newBill: () => ipcRenderer.invoke("bill-new"),
   printBill: () => ipcRenderer.invoke("bill-print"),
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),
+  checkAccountCompanies: () => ipcRenderer.invoke("bill-account-company-check"),
   listSources: (supplier) => ipcRenderer.invoke("bill-list-sources", supplier || ""),
+  fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
   /** Single (kind, name) or multi ([{ kind, name }, ...]). */
   mergeSource: (kindOrItems, name) =>
     Array.isArray(kindOrItems)
@@ -43,7 +50,9 @@ contextBridge.exposeInMainWorld("erpBill", {
   retryLoad: () => ipcRenderer.invoke("bill-retry-load"),
   openVanilla: () => ipcRenderer.send("bill-open-vanilla"),
   openVendorAdd: () => ipcRenderer.send("bill-open-vendor-add"),
+  openSupplierForm: (supplier) => ipcRenderer.invoke("bill-open-supplier-form", supplier || ""),
   openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
+  openPaymentTermsAdd: () => ipcRenderer.send("bill-open-payment-terms-add"),
   focusBillSurface: () => ipcRenderer.send("bill-focus-surface"),
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
   getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
@@ -67,4 +76,14 @@ contextBridge.exposeInMainWorld("erpBill", {
   },
   resolveNavGate: (token, proceed) =>
     ipcRenderer.send("bill-resolve-nav-gate", token, !!proceed),
+});
+
+contextBridge.exposeInMainWorld("erpFocusDebug", {
+  log: (event, detail, active) =>
+    ipcRenderer.send("focus-debug", {
+      event: event || "focus",
+      detail: detail != null ? String(detail) : "",
+      active: active && typeof active === "object" ? active : null,
+      surface: "bill",
+    }),
 });

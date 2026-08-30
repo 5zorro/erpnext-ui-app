@@ -1,45 +1,98 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
+/** @type {string|null} */
+let skinProfileId = null;
+
+function onProfileSnapshot(cb) {
+  const handler = (_e, snap) => {
+    if (snap && snap.profileId) skinProfileId = snap.profileId;
+    cb(snap);
+  };
+  ipcRenderer.on("doc-snapshot", handler);
+  return () => ipcRenderer.removeListener("doc-snapshot", handler);
+}
+
+async function ensureProfileId() {
+  if (skinProfileId) return skinProfileId;
+  const ui = await ipcRenderer.invoke("doc-get-ui");
+  skinProfileId = (ui && ui.profileId) || null;
+  return skinProfileId;
+}
+
+async function billActive() {
+  return (await ensureProfileId()) === "bill";
+}
+
+async function invokeSkin(billChannel, docChannel, ...args) {
+  return ipcRenderer.invoke((await billActive()) ? billChannel : docChannel, ...args);
+}
+
 contextBridge.exposeInMainWorld("erpDoc", {
   getUi: () => ipcRenderer.invoke("doc-get-ui"),
   getSnapshot: () => ipcRenderer.invoke("doc-get-snapshot"),
-  setHeader: (field, value) => ipcRenderer.invoke("doc-set-header", field, value),
+  setHeader: (field, value) => invokeSkin("bill-set-header", "doc-set-header", field, value),
   setDateExpected: (value) => ipcRenderer.invoke("doc-set-date-expected", value),
   setItem: (rowIndex, field, value) =>
-    ipcRenderer.invoke("doc-set-item", rowIndex, field, value),
-  addItem: () => ipcRenderer.invoke("doc-add-item"),
-  deleteItem: (rowIndex) => ipcRenderer.invoke("doc-delete-item", rowIndex),
-  clearAllQty: () => ipcRenderer.invoke("doc-clear-all-qty"),
+    invokeSkin("bill-set-item", "doc-set-item", rowIndex, field, value),
+  addItem: () => invokeSkin("bill-add-item", "doc-add-item"),
+  deleteItem: (rowIndex) => invokeSkin("bill-delete-item", "doc-delete-item", rowIndex),
+  clearAllQty: () => invokeSkin("bill-clear-all-qty", "doc-clear-all-qty"),
   setTax: (rowIndex, field, value) =>
-    ipcRenderer.invoke("doc-set-tax", rowIndex, field, value),
+    invokeSkin("bill-set-tax", "doc-set-tax", rowIndex, field, value),
   addTax: (accountHead, taxAmount, description) =>
-    ipcRenderer.invoke("doc-add-tax", accountHead, taxAmount, description || ""),
-  deleteTax: (rowIndex) => ipcRenderer.invoke("doc-delete-tax", rowIndex),
-  attachFile: () => ipcRenderer.invoke("doc-attach-file"),
-  save: (opts) => ipcRenderer.invoke("doc-save", opts || {}),
-  listMandatory: () => ipcRenderer.invoke("doc-list-mandatory"),
-  revertUnsaved: () => ipcRenderer.invoke("doc-revert-unsaved"),
-  findDocs: () => ipcRenderer.invoke("doc-find"),
+    invokeSkin("bill-add-tax", "doc-add-tax", accountHead, taxAmount, description || ""),
+  deleteTax: (rowIndex) => invokeSkin("bill-delete-tax", "doc-delete-tax", rowIndex),
+  attachFile: () => invokeSkin("bill-attach-file", "doc-attach-file"),
+  save: (opts) => invokeSkin("bill-save", "doc-save", opts || {}),
+  listMandatory: () => invokeSkin("bill-list-mandatory", "doc-list-mandatory"),
+  revertUnsaved: () => invokeSkin("bill-revert-unsaved", "doc-revert-unsaved"),
+  findDocs: () => invokeSkin("bill-find", "doc-find"),
   refocusListFilter: (fieldname) =>
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
-  newDoc: () => ipcRenderer.invoke("doc-new"),
-  printDoc: () => ipcRenderer.invoke("doc-print"),
-  searchLink: (doctype, txt) => ipcRenderer.invoke("doc-search-link", doctype, txt || ""),
-  listSources: (supplier) => ipcRenderer.invoke("doc-list-sources", supplier || ""),
-  mergeSource: (kind, name) => ipcRenderer.invoke("doc-merge-source", kind, name),
-  retryLoad: () => ipcRenderer.invoke("doc-retry-load"),
-  openVanilla: () => ipcRenderer.send("doc-open-vanilla"),
-  openVendorAdd: () => ipcRenderer.send("doc-open-vendor-add"),
-  focusSurface: () => ipcRenderer.send("doc-focus-surface"),
+  newDoc: () => invokeSkin("bill-new", "doc-new"),
+  printDoc: () => invokeSkin("bill-print", "doc-print"),
+  searchLink: (doctype, txt) => invokeSkin("bill-search-link", "doc-search-link", doctype, txt || ""),
+  listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
+  listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
+  mergeSource: async (kindOrItems, name) => {
+    if (Array.isArray(kindOrItems)) {
+      return ipcRenderer.invoke("bill-merge-sources", kindOrItems);
+    }
+    return invokeSkin("bill-merge-source", "doc-merge-source", kindOrItems, name);
+  },
+  fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
+  retryLoad: () => invokeSkin("bill-retry-load", "doc-retry-load"),
+  openVanilla: async () =>
+    ipcRenderer.send((await billActive()) ? "bill-open-vanilla" : "doc-open-vanilla"),
+  openVendorAdd: async () =>
+    ipcRenderer.send((await billActive()) ? "bill-open-vendor-add" : "doc-open-vendor-add"),
+  openPaymentTermsAdd: async () =>
+    ipcRenderer.send(
+      (await billActive()) ? "bill-open-payment-terms-add" : "doc-open-payment-terms-add",
+    ),
+  focusSurface: async () =>
+    ipcRenderer.send((await billActive()) ? "bill-focus-surface" : "doc-focus-surface"),
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
   getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
-  onSnapshot: (cb) => {
-    const handler = (_e, snap) => cb(snap);
-    ipcRenderer.on("doc-snapshot", handler);
-    return () => ipcRenderer.removeListener("doc-snapshot", handler);
-  },
+  // Bill-only
+  checkRef: (billNo) => ipcRenderer.invoke("bill-check-ref", billNo),
+  setAmountDue: (value, markEdited) =>
+    ipcRenderer.invoke("bill-set-amount-due", value, !!markEdited),
+  listPayments: () => ipcRenderer.invoke("bill-list-payments"),
+  allocateCharge: (taxRowIndex, mode, custom) =>
+    ipcRenderer.invoke("bill-allocate-charge", taxRowIndex, mode || "amount", custom || []),
+  openLandedCost: () => ipcRenderer.invoke("bill-open-landed-cost"),
+  checkAccountCompanies: () => ipcRenderer.invoke("bill-account-company-check"),
+  listSalesOrdersForPicker: (payload) => ipcRenderer.invoke("bill-so-picker-list", payload || {}),
+  listProjectsForPicker: (customer) => ipcRenderer.invoke("bill-list-projects", customer || ""),
+  applyLineAllocation: (rowIndex, payload) =>
+    ipcRenderer.invoke("bill-apply-line-allocation", rowIndex, payload || {}),
+  bridgeSalesOrderToPo: (payload) => ipcRenderer.invoke("bill-so-bridge-po", payload || {}),
+  openSupplierForm: (supplier) => ipcRenderer.invoke("bill-open-supplier-form", supplier || ""),
+  openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
+  onSnapshot: (cb) => onProfileSnapshot(cb),
   onOpenNavGate: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on("doc-open-nav-gate", handler);
@@ -52,4 +105,14 @@ contextBridge.exposeInMainWorld("erpDoc", {
   },
   resolveNavGate: (token, proceed) =>
     ipcRenderer.send("doc-resolve-nav-gate", token, !!proceed),
+});
+
+contextBridge.exposeInMainWorld("erpFocusDebug", {
+  log: (event, detail, active) =>
+    ipcRenderer.send("focus-debug", {
+      event: event || "focus",
+      detail: detail != null ? String(detail) : "",
+      active: active && typeof active === "object" ? active : null,
+      surface: "doc-form",
+    }),
 });

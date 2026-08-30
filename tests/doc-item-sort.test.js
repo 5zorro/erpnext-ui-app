@@ -34,4 +34,22 @@ describe("sortableHeadersFromCols / sortDocItemRowModels", () => {
     assert.equal(models[1].rowIndex, 0);
     assert.equal(models[1].cells[0], "1");
   });
+
+  it("multi-column sort then lineNo tie-break", () => {
+    const doc = {
+      items: [
+        { idx: 1, item_code: "B", qty: 2, rate: 1, amount: 2 },
+        { idx: 2, item_code: "A", qty: 2, rate: 1, amount: 2 },
+        { idx: 3, item_code: "C", qty: 1, rate: 1, amount: 1 },
+      ],
+    };
+    const models = sortDocItemRowModels(doc, PO_ITEM_COLS, readPoItemRows, [
+      { key: "amount", asc: false },
+      { key: "item_code", asc: true },
+    ]);
+    assert.deepEqual(
+      models.map((m) => m.cells[1]),
+      ["A", "B", "C"],
+    );
+  });
 });

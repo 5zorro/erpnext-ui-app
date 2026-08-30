@@ -383,7 +383,7 @@ export const DOGFOOD_AP_SOURCES = [
       legalName: "SAMPLE Vendor 01",
       address: ["100 Sample Way", "Provo, UT 84601"],
     },
-    docNo: "SMP-BILL-88",
+    docNo: "DOGFOOD-NIC-88",
     docDate: "07/15/2026",
     terms: "Net 30",
     lines: [
@@ -413,6 +413,102 @@ export const DOGFOOD_AP_SOURCES = [
     lines: [
       { sku: "SAMPLE-SKU-03", description: "Sample Item 03", qty: 6, rate: 21 },
     ],
+  },
+  {
+    id: "DF-13",
+    scenario: "Messy vendor spreadsheet paste — OI-132 Import lines",
+    kind: "purchase_order",
+    template: "grid",
+    dogfoodHint:
+      "Open generated DF-13 paste (.tsv/.csv). On PO/Bill: Import lines → ignore first 2 rows → map col D=SKU, C=append note, F=Qty, J=Extended (others ignored). Matches PO-DOG-3001 lines.",
+    vendor: {
+      legalName: "MA Inc.",
+      address: ["400 Industrial Blvd", "West Jordan, UT 84088"],
+    },
+    shipTo: {
+      name: "HECSANDBOX Receiving",
+      address: ["1 Warehouse Way", "Provo, UT 84601"],
+    },
+    docNo: "PO-DOG-3001",
+    docDate: "06/15/2026",
+    terms: "Net 45",
+    lines: [
+      { sku: "SAMPLE-SKU-07", description: "Sample Item 07", qty: 10, rate: 43 },
+      { sku: "SAMPLE-SKU-08", description: "Sample Item 08", qty: 10, rate: 10 },
+    ],
+  },
+  {
+    id: "DF-14",
+    scenario: "OI-149 — PO + partial IR same vendor (multi-source Bill dogfood)",
+    kind: "vendor_invoice",
+    template: "classic",
+    dogfoodHint:
+      "Sandbox: PO-MN (logbook JE-88421) + PR-MN partial receive — select BOTH in Bill source modal. Expect merge edge-case dogfood; do not re-use seeded SMP-V… bill_no. Paper ref ASI-MN-901.",
+    vendor: {
+      legalName: "SAMPLE Vendor 01",
+      accountNo: "CUST-44192",
+      address: ["100 Sample Way", "Provo, UT 84601"],
+    },
+    docNo: "ASI-MN-901",
+    docDate: "07/24/2026",
+    poNos: ["JE-88421"],
+    terms: "Net 30",
+    notes: [
+      "Matches ERP PO-MN / PR-MN after seed --reset.",
+      "Line 2 qty billed as partial receive (4 of 10).",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-01", description: "Sample Item 01", qty: 10, rate: 10 },
+      { sku: "SAMPLE-SKU-02", description: "Sample Item 02", qty: 4, rate: 15.5 },
+    ],
+  },
+  {
+    id: "DF-15",
+    scenario: "OI-153 — Vendor prepayment (pay before goods)",
+    kind: "purchase_order",
+    template: "ack",
+    dogfoodHint:
+      "Sandbox: PO-PP (logbook PP-2200) — create PE Pay $120 against PO before Bill (OI-153 manual step). PR-PP posted after goods arrive. Enter Bill from PR-PP; verify advance applied.",
+    vendor: {
+      legalName: "SAMPLE Vendor 02",
+      accountNo: "ACCT-998877",
+      address: ["200 Sample Blvd", "Provo, UT 84601"],
+    },
+    shipTo: {
+      name: "HECSANDBOX Receiving",
+      address: ["1 Warehouse Way", "Provo, UT 84601"],
+    },
+    docNo: "PP-2200",
+    docDate: "07/05/2026",
+    terms: "Prepay 50% before ship",
+    notes: [
+      "ADVANCE PAID $120.00 — card on file.",
+      "Do not pay again on Bill entry; apply advance in ERP.",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-03", description: "Sample Item 03", qty: 6, rate: 21 },
+      { sku: "SAMPLE-SKU-04", description: "Sample Item 04", qty: 3, rate: 26.5 },
+    ],
+  },
+  {
+    id: "DF-16",
+    scenario: "OI-154 — Logbook PO# Find (title TO-5599, not ERP name)",
+    kind: "purchase_order",
+    template: "ack",
+    dogfoodHint:
+      "Sandbox PO-LB only — PO Find should match logbook TO-5599 in title field (OI-121). ERP name will differ.",
+    vendor: {
+      legalName: "SAMPLE Vendor 03",
+      address: ["300 Sample Ln", "Provo, UT 84601"],
+    },
+    shipTo: {
+      name: "HECSANDBOX Receiving",
+      address: ["1 Warehouse Way", "Provo, UT 84601"],
+    },
+    docNo: "TO-5599",
+    docDate: "07/02/2026",
+    terms: "Net 30",
+    lines: [{ sku: "SAMPLE-SKU-05", description: "Sample Item 05", qty: 2, rate: 30 }],
   },
 ];
 

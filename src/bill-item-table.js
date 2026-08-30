@@ -9,6 +9,20 @@ import {
   lineAllocationForRow,
   normalizeLineAllocation,
 } from "./bill-line-allocation.js";
+import {
+  applyHeaderSortClick,
+  compareBySortSpecs,
+  normalizeSortSpecs,
+  sortHeaderArrow,
+  sortHeaderState,
+} from "./item-sort-specs.js";
+
+export {
+  applyHeaderSortClick,
+  normalizeSortSpecs,
+  sortHeaderArrow,
+  sortHeaderState,
+} from "./item-sort-specs.js";
 
 export const BILL_LINE_NO_FIELD = "__bill_line_no";
 export const PO_LINE_NO_FIELD = "__po_line_no";
@@ -158,36 +172,29 @@ export function readBillItemRowsWithAllocation(doc, byRow = {}, poMetaByRow = {}
 }
 
 /**
+ * Display-order sort. Tie-break is always bill line number (unique), ascending.
  * @param {ReturnType<typeof buildBillItemRowModels>} models
- * @param {string} sortKey
- * @param {boolean} asc
+ * @param {string|import("./item-sort-specs.js").SortSpec[]} sortKeyOrSpecs
+ * @param {boolean} [asc=true] ignored when sortKeyOrSpecs is a SortSpec[]
  */
-export function sortBillItemRowModels(models, sortKey, asc = true) {
-  const key = sortKey || "lineNo";
-  const dir = asc ? 1 : -1;
-  const sorted = [...models].sort((a, b) => {
-    const cmp = compareBillItemModels(a, b, key);
-    return cmp * dir;
-  });
-  return sorted;
-}
-
-/**
- * @param {object} a
- * @param {object} b
- * @param {string} sortKey
- */
-function compareBillItemModels(a, b, sortKey) {
-  const va = valueForSortKey(a, sortKey);
-  const vb = valueForSortKey(b, sortKey);
-  if (typeof va === "number" && typeof vb === "number") {
-    if (va === vb) return a.rowIndex - b.rowIndex;
-    return va - vb;
-  }
-  const sa = String(va).toLowerCase();
-  const sb = String(vb).toLowerCase();
-  if (sa === sb) return a.rowIndex - b.rowIndex;
-  return sa < sb ? -1 : 1;
+export function sortBillItemRowModels(models, sortKeyOrSpecs, asc = true) {
+  const list = Array.isArray(models) ? models : [];
+  /** @type {import("./item-sort-specs.js").SortSpec[]} */
+  const specs = Array.isArray(sortKeyOrSpecs)
+    ? normalizeSortSpecs(sortKeyOrSpecs)
+    : normalizeSortSpecs([{ key: sortKeyOrSpecs || "lineNo", asc }]);
+  return [...list].sort((a, b) =>
+    compareBySortSpecs(
+      a,
+      b,
+      specs,
+      (row, key) => valueForSortKey(row, key),
+      (row) => {
+        const n = Number(row.lineNo);
+        return Number.isFinite(n) && n > 0 ? n : Number(row.rowIndex) + 1;
+      },
+    ),
+  );
 }
 
 /**

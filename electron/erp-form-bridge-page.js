@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 10;
+  var VERSION = 13;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -658,6 +658,117 @@
     return needDesc || needRate;
   }
 
+  var SUPPLIER_PARTY_DETAIL_FIELDS = [
+    "supplier_name",
+    "supplier_address",
+    "address_display",
+    "shipping_address_display",
+    "dispatch_address_display",
+    "shipping_address",
+    "dispatch_address",
+    "payment_terms_template",
+  ];
+  var SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
+
+  function normalizeSupplierKey(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function supplierPartyBaseline(doc) {
+    var d = doc && typeof doc === "object" ? doc : {};
+    var out = { supplier: d.supplier };
+    for (var i = 0; i < SUPPLIER_PARTY_DETAIL_FIELDS.length; i++) {
+      var f = SUPPLIER_PARTY_DETAIL_FIELDS[i];
+      out[f] = d[f];
+    }
+    return out;
+  }
+
+  function supplierPartyDetailChanged(doc, baseline) {
+    var d = doc && typeof doc === "object" ? doc : {};
+    var base = baseline && typeof baseline === "object" ? baseline : {};
+    for (var i = 0; i < SUPPLIER_PARTY_DETAIL_FIELDS.length; i++) {
+      var field = SUPPLIER_PARTY_DETAIL_FIELDS[i];
+      if (stripHtml(d[field]) !== stripHtml(base[field])) return true;
+    }
+    return false;
+  }
+
+  var SUPPLIER_PARTY_META_FIELDS = ["supplier_name", "payment_terms_template"];
+  var SUPPLIER_ADDRESS_DISPLAY_FIELDS = [
+    "supplier_address",
+    "address_display",
+    "shipping_address_display",
+    "dispatch_address_display",
+    "shipping_address",
+    "dispatch_address",
+  ];
+  var SUPPLIER_PARTY_META_ONLY_GRACE_MS = 3000;
+
+  function hasSupplierAddressDisplaySignals(doc) {
+    var d = doc && typeof doc === "object" ? doc : {};
+    for (var i = 0; i < SUPPLIER_ADDRESS_DISPLAY_FIELDS.length; i++) {
+      if (stripHtml(d[SUPPLIER_ADDRESS_DISPLAY_FIELDS[i]])) return true;
+    }
+    return false;
+  }
+
+  function isSupplierPartyMetaOnlyChange(doc, baseline) {
+    var d = doc && typeof doc === "object" ? doc : {};
+    var base = baseline && typeof baseline === "object" ? baseline : {};
+    if (hasSupplierAddressDisplaySignals(d)) return false;
+    for (var m = 0; m < SUPPLIER_PARTY_META_FIELDS.length; m++) {
+      var mf = SUPPLIER_PARTY_META_FIELDS[m];
+      if (stripHtml(d[mf]) !== stripHtml(base[mf])) return true;
+    }
+    return false;
+  }
+
+  function isSupplierPartySettled(doc, ctx) {
+    ctx = ctx && typeof ctx === "object" ? ctx : {};
+    var d = doc && typeof doc === "object" ? doc : {};
+    var target = normalizeSupplierKey(ctx.targetSupplier != null ? ctx.targetSupplier : d.supplier);
+    if (!target || normalizeSupplierKey(d.supplier) !== target) return false;
+    var base = ctx.baseline && typeof ctx.baseline === "object" ? ctx.baseline : null;
+    if (hasSupplierAddressDisplaySignals(d)) return true;
+    if (ctx.allowMetaOnly) {
+      if (!base) return !!stripHtml(d.supplier_name);
+      if (supplierPartyDetailChanged(d, base)) return true;
+    }
+    if (base && normalizeSupplierKey(base.supplier) === target && hasSupplierAddressDisplaySignals(base)) {
+      return true;
+    }
+    return false;
+  }
+
+  async function waitForSupplierPartySettle(f, targetSupplier, baseline, maxWaitMs) {
+    maxWaitMs = maxWaitMs || SUPPLIER_PARTY_SETTLE_MAX_MS;
+    var deadline = Date.now() + maxWaitMs;
+    while (Date.now() < deadline) {
+      var remaining = deadline - Date.now();
+      var allowMetaOnly = remaining <= SUPPLIER_PARTY_META_ONLY_GRACE_MS;
+      if (isSupplierPartySettled(f.doc, { targetSupplier: targetSupplier, baseline: baseline, allowMetaOnly: allowMetaOnly })) {
+        if (!allowMetaOnly && isSupplierPartyMetaOnlyChange(f.doc, baseline)) {
+          await afterAjaxQuiet(Math.min(4000, Math.max(500, remaining)));
+          try {
+            f.refresh_fields([
+              "address_display",
+              "shipping_address_display",
+              "dispatch_address_display",
+              "supplier_address",
+              "shipping_address",
+              "dispatch_address",
+            ]);
+          } catch (eAddr) {}
+          continue;
+        }
+        return;
+      }
+      if (remaining <= 0) break;
+      await afterAjaxQuiet(Math.min(4000, Math.max(500, remaining)));
+    }
+  }
+
   /**
    * Wait until cur_frm matches doctype.
    * Events: form hooks, router, MutationObserver, one after_ajax pulse. Timeout = deadline only.
@@ -778,9 +889,13 @@
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
+        var partyBaseline = field === "supplier" ? supplierPartyBaseline(f.doc) : null;
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
+        if (field === "supplier") {
+          await waitForSupplierPartySettle(f, value, partyBaseline, SUPPLIER_PARTY_SETTLE_MAX_MS);
+        }
         try {
           f.refresh_fields([
             "address_display",
@@ -788,12 +903,19 @@
             "billing_address_display",
             "dispatch_address_display",
             "supplier_name",
+            "customer_name",
             "supplier_address",
             "shipping_address",
             "billing_address",
             "dispatch_address",
+            "customer",
             "payment_terms_template",
+            "terms",
             "due_date",
+            "is_paid",
+            "mode_of_payment",
+            "cash_bank_account",
+            "paid_amount",
           ]);
         } catch (e1) {
           try {
@@ -828,6 +950,7 @@
           description: true,
           sales_order: true,
           project: true,
+          delivered_by_supplier: true,
         };
         if (lightFields[field]) {
           try {
@@ -996,6 +1119,43 @@
     })();
   }
 
+  /**
+   * Blank the sole remaining items row (× when n===1). Keeps the row for Vanilla mandatory items.
+   * @param {number} rowIndex
+   * @param {Array<{ field: string, value: string|number }>} fields
+   */
+  function clearRow(rowIndex, fields) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        var row = (f.doc.items || [])[rowIndex];
+        if (!row || !row.name || !row.doctype) {
+          return { ok: false, reason: "Row missing — refresh and retry." };
+        }
+        var list = Array.isArray(fields) ? fields : [];
+        for (var i = 0; i < list.length; i++) {
+          var spec = list[i];
+          if (!spec || !spec.field) continue;
+          try {
+            await setValueAsync(row.doctype, row.name, spec.field, spec.value);
+          } catch (eField) {
+            /* field may not exist on this child doctype */
+          }
+        }
+        await afterAjaxQuiet();
+        try {
+          f.refresh_field("items");
+        } catch (e1) {}
+        await refreshTaxesAndTotals(f);
+        await afterAjaxQuiet();
+        return { ok: true, clearedLastRow: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
   var TAX_EDIT_FIELDS = {
     account_head: true,
     description: true,
@@ -1016,6 +1176,11 @@
         if (!row || !row.name || !row.doctype) {
           return { ok: false, reason: "Tax row missing — refresh and retry." };
         }
+        if (field === "tax_amount" && row.charge_type !== "Actual") {
+          await setValueAsync(row.doctype, row.name, "charge_type", "Actual");
+          row.charge_type = "Actual";
+          await afterAjaxQuiet();
+        }
         await setValueAsync(row.doctype, row.name, field, value);
         await afterAjaxQuiet();
         await refreshTaxesAndTotals(f);
@@ -1027,8 +1192,8 @@
     })();
   }
 
-  /** Thin cut: add Actual tax/charge row (account + amount). */
-  function addTaxRow(accountHead, taxAmount, description) {
+  /** Thin cut: add Actual tax/charge row (account + amount). Optional addDeduct: Add|Deduct. */
+  function addTaxRow(accountHead, taxAmount, description, addDeduct) {
     return (async function () {
       try {
         var f = window.cur_frm;
@@ -1037,6 +1202,7 @@
         if (!acct) return { ok: false, reason: "Account required." };
         var amt = Number(taxAmount);
         if (!Number.isFinite(amt)) return { ok: false, reason: "Tax amount required." };
+        var addOrDeduct = addDeduct === "Deduct" ? "Deduct" : "Add";
         var row = f.add_child("taxes");
         row.charge_type = "Actual";
         row.account_head = acct;
@@ -1044,11 +1210,12 @@
           ? String(description).trim()
           : acct;
         row.tax_amount = amt;
-        row.add_deduct_tax = "Add";
+        row.add_deduct_tax = addOrDeduct;
         row.category = "Total";
         f.refresh_field("taxes");
         // Drive ERP scripts via set_value so base_tax_amount / totals update.
         if (row.name && row.doctype) {
+          await setValueAsync(row.doctype, row.name, "add_deduct_tax", addOrDeduct);
           await setValueAsync(row.doctype, row.name, "tax_amount", amt);
         }
         await afterAjaxQuiet();
@@ -1097,6 +1264,7 @@
     setRow: setRow,
     mergeFromMapped: mergeFromMapped,
     zeroAllQty: zeroAllQty,
+    clearRow: clearRow,
     setTaxRow: setTaxRow,
     addTaxRow: addTaxRow,
     deleteTaxRow: deleteTaxRow,

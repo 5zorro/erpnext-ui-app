@@ -10,6 +10,7 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "diagnose-dropdown.html": "Diagnose popover (chrome ERP health)",
   "calc-history-dropdown.html": "Calculator history popover (left-rail Calculator button)",
   "nav-incident-dialog.html": "Fail-loud nav issue note (toolbar Nav issue)",
+  "focus-incident-dialog.html": "Fail-loud focus issue note (DB diagnose Focus issue)",
 });
 
 /**
@@ -18,8 +19,13 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
  */
 export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
   "home.html": "Doc Workflow Home (Home button / default Doc surface)",
-  "bill.html": "DOC_SKIN_INDEX bill → Purchase Invoice Doc skin",
-  "doc-form.html": "DOC_SKIN_INDEX po + receipt → shared Doc form shell",
+  "doc-form.html": "DOC_SKIN_INDEX bill + po + receipt → shared Doc form shell",
+});
+
+/** Legacy shells retained for reference; not loaded at runtime (tranche 10). */
+export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
+  "bill.html": "Legacy Bill shell — superseded by doc-form.html#bill-shell",
+  "bill-shell.fragment.html": "Bill DOM partial included by doc-form.html (tranche 10)",
 });
 
 /**
@@ -31,6 +37,7 @@ export function productionHtmlReachReason(basename) {
   return (
     PRODUCTION_HTML_ENTRYPOINTS[name] ||
     PRODUCTION_HTML_ALLOWLIST[name] ||
+    PRODUCTION_HTML_ALLOWLIST_EXTRA[name] ||
     null
   );
 }

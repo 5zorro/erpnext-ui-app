@@ -12,7 +12,8 @@
  * applied on their submitted PIs → Tax Withholding Details report.
  */
 
-export const SAMPLE_TAG = "ui-app-sample-v1";
+/** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
+export const SAMPLE_TAG = "ui-app-sample-v2";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
 export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
@@ -167,6 +168,7 @@ export function buildCorpusPlan(opts = {}) {
       chainIndex = poIndex;
     }
     const partyKey = suppliers[i % partyCounts.suppliers].key;
+    const vendorSlot = (suppliers.findIndex((s) => s.key === partyKey) % partyCounts.suppliers) + 1;
     docs.push(
       baseDoc(
         "purchase_invoice",
@@ -177,7 +179,8 @@ export function buildCorpusPlan(opts = {}) {
           partyKey,
           items: lineItems(items, i, 1 + (i % 3)),
           source,
-          billNo: `SMP-BILL-${pad2(i + 1)}`,
+          // Vendor-scoped refs — avoids OI-054 false positives when re-typing a generic SMP-BILL-NN.
+          billNo: `SMP-V${pad2(vendorSlot)}-INV-${pad2(i + 1)}`,
           updateStock: false,
           taxWithholding: !!supplierByKey[partyKey]?.taxWithholding,
         },
@@ -209,6 +212,8 @@ export function buildCorpusPlan(opts = {}) {
     items,
   });
 
+  appendApDogfoodFixtures(docs, { windowDays, suppliers, items, supplierByKey });
+
   return {
     tag,
     windowDays,
@@ -221,8 +226,116 @@ export function buildCorpusPlan(opts = {}) {
       withholdingSuppliers: suppliers.filter((s) => s.taxWithholding).length,
     },
     docs,
+    apFixtures: summarizeApFixtures(docs),
     summary: summarizePlan(docs),
   };
+}
+
+/** Extra submitted sandbox rows beyond DEFAULT_COUNTS (T0 AP fixtures). */
+export const AP_FIXTURE_EXTRA_COUNTS = Object.freeze({
+  purchase_order: 3,
+  purchase_receipt: 2,
+});
+
+/** Keys for T0 dogfood — ERP sandbox rows clerks pull in source modal / Find. */
+export const AP_DOGFOOD_FIXTURE_KEYS = Object.freeze([
+  "PO-MN",
+  "PR-MN",
+  "PO-PP",
+  "PR-PP",
+  "PO-LB",
+]);
+
+/**
+ * OI-103 / OI-149 / OI-153 / OI-102 / OI-154 sandbox fixtures (indices ≥900).
+ * @param {object[]} docs
+ * @param {{ windowDays: number, suppliers: object[], items: object[], supplierByKey: object }} ctx
+ */
+function appendApDogfoodFixtures(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const mnLines = lineItems(items, 90, 2);
+  mnLines[0].qty = 10;
+  mnLines[1].qty = 10;
+
+  // OI-149 + OI-102: same vendor PO + partial IR, neither billed — source modal PO+PR dogfood.
+  docs.push({
+    ...baseDoc("purchase_order", 900, windowDays, 0, {
+      partyKey: "SUP-00",
+      items: mnLines,
+      source: null,
+      logbookPoNo: "JE-88421",
+      dogfoodScenario: "oi149-po-pr",
+    }),
+    key: "PO-MN",
+    dayOffset: 18,
+  });
+  docs.push({
+    ...baseDoc("purchase_receipt", 900, windowDays, 1, {
+      partyKey: "SUP-00",
+      items: mnLines,
+      source: { kind: "purchase_order", key: "PO-MN" },
+      partialReceive: [{ lineIndex: 1, qty: 4 }],
+      dogfoodScenario: "oi149-po-pr",
+    }),
+    key: "PR-MN",
+    dayOffset: 12,
+  });
+
+  // OI-153: vendor prepayment — PO, advance PE (seed), then IR; Bill left open for clerk.
+  const ppLines = lineItems(items, 91, 2);
+  ppLines[0].qty = 6;
+  ppLines[1].qty = 3;
+  docs.push({
+    ...baseDoc("purchase_order", 901, windowDays, 0, {
+      partyKey: "SUP-01",
+      items: ppLines,
+      source: null,
+      logbookPoNo: "PP-2200",
+      advancePayment: { amount: 120, manual: true },
+      dogfoodScenario: "oi153-prepay",
+    }),
+    key: "PO-PP",
+    dayOffset: 22,
+  });
+  docs.push({
+    ...baseDoc("purchase_receipt", 901, windowDays, 1, {
+      partyKey: "SUP-01",
+      items: ppLines,
+      source: { kind: "purchase_order", key: "PO-PP" },
+      dogfoodScenario: "oi153-prepay",
+    }),
+    key: "PR-PP",
+    dayOffset: 10,
+  });
+
+  // OI-154 / OI-121: Find PO by logbook title, not ERP name.
+  docs.push({
+    ...baseDoc("purchase_order", 902, windowDays, 0, {
+      partyKey: "SUP-02",
+      items: lineItems(items, 92, 1),
+      source: null,
+      logbookPoNo: "TO-5599",
+      dogfoodScenario: "oi154-logbook-po",
+    }),
+    key: "PO-LB",
+    dayOffset: 25,
+  });
+}
+
+/** @param {object[]} docs */
+export function summarizeApFixtures(docs) {
+  const roles = AP_DOGFOOD_FIXTURE_KEYS.map((key) => {
+    const row = docs.find((d) => d.key === key);
+    return row
+      ? {
+          key,
+          kind: row.kind,
+          dogfoodScenario: row.dogfoodScenario || null,
+          logbookPoNo: row.logbookPoNo || null,
+        }
+      : null;
+  }).filter(Boolean);
+  return { keys: AP_DOGFOOD_FIXTURE_KEYS, rows: roles };
 }
 
 /**
@@ -262,7 +375,9 @@ function appendDraftDocs(docs, cfg) {
         updateStock: false,
       };
       if (kind === "purchase_invoice") {
-        extra.billNo = `SMP-DRAFT-${pad2(i + 1)}`;
+        const vendorSlot =
+          (buyingRotate.findIndex((s) => s.key === extra.partyKey) % buyingRotate.length) + 1;
+        extra.billNo = `SMP-V${pad2(vendorSlot)}-DRAFT-${pad2(i + 1)}`;
       }
       docs.push(draftDoc(kind, i, windowDays, extra));
     }

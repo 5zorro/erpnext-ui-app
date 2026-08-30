@@ -129,7 +129,7 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
     ]);
   });
 
-  it("PO ends with sales_order + schedule_date so Tab adds a row", () => {
+  it("PO ends with sales_order + drop ship + schedule_date so Tab adds a row", () => {
     const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
     assert.deepEqual(fields, [
       "item_code",
@@ -137,6 +137,7 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
       "qty",
       "rate",
       "sales_order",
+      "delivered_by_supplier",
       "schedule_date",
     ]);
     assert.deepEqual(nextItemFocusAfterEdit("schedule_date", 0, 1, { fields }), {

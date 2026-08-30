@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("erpHist", {
   navDebug: (event, detail) => ipcRenderer.send("nav-debug", event || "hist", detail || ""),
   openCalcHistory: (anchor) => ipcRenderer.send("open-calc-history", anchor || {}),
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
+  copyHistoryRef: (text) => ipcRenderer.invoke("history-copy-ref", text || ""),
   onHistory: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on("history", handler);

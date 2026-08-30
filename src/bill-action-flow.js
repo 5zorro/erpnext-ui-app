@@ -9,7 +9,7 @@ import { normalizeAppRoute, isNewDocRecord, routeInfo } from "./route-info.js";
 import { commitGateContinues } from "./bill-toolbar.js";
 
 /** @typedef {"idle"|"validating"|"saving"|"submitting"|"success"|"error"} CommitGatePhase */
-/** @typedef {"find"|"new"|"print"} CommitGateAction */
+/** @typedef {"find"|"new"|"print"|"edit-vendor-addresses"} CommitGateAction */
 /** @typedef {"discard"|"save"|"submit"|"cancel"} CommitGateChoice */
 /**
  * A gate trigger is whatever asked to leave the current dirty Bill: a toolbar
@@ -34,6 +34,8 @@ export function gateTriggerLabel(trigger) {
       return "New Bill";
     case "print":
       return "Print";
+    case "edit-vendor-addresses":
+      return "edit vendor addresses";
     default:
       return trigger.action || "continue";
   }

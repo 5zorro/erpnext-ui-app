@@ -9,11 +9,11 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Current dated working plan: `docs/implementation-plan-2026-07-29.md` (Vanilla Simplified /
-   OI-086 architecture-first; carryover dogfood from T1–T4 chrome polish).
-   Prior tranche `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP + Find focus /
-   lens/chrome dogfood). Flyout / shell ops (Drafts, diagnose, Feedback, lens prefs) shipped
-   2026-07-22 — see museum OI-060/046/048/062.
+3. Current dated working plan: `docs/implementation-plan-2026-08-30.md` (AP Doc skin backlog —
+   museum open items; sample corpus v2 + tranches T0–T17). Prior plan `implementation-plan-2026-07-29.md`
+   (Vanilla Simplified / OI-086) remains sibling until Simplified tranche reopens.
+   Nav instrumentation plan `implementation-plan-2026-08-19.md` (OI-127 / OI-126) — close when folded
+   into HANDOFF. Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
 4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
    `~/agent-harness/erpnext/doc-shell/open_items.md` — **not** mirrored into this public tree.
 
@@ -81,7 +81,7 @@ flowchart LR
 | DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
 | Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` view (peek tree under parent Doc, OI-128 A) |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
-| Nav incident log | `nav-incident.js` | Toolbar **Nav issue** (temporarily hidden on alpha); `userData/nav-incidents.log` |
+| Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
 | Chrome UI state | `chrome-state.js` | Toolbar highlight / home vs ERP |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
@@ -104,11 +104,15 @@ ERP Desk itself is unmodified — it will not show our tiles (by design).
 
 ### Dogfood debugging (5zorro → agent)
 
-1. Reproduce the bug.
-2. Click toolbar **ERP console** (detached DevTools for the Desk pane).
+1. When **navigation** feels wrong, open toolbar **DB** ping → **Nav issue** immediately
+   (or Ctrl+Shift+M). Type what happened and what you expected; Submit. That writes
+   `userData/nav-incidents.log` (typically `~/.config/erpnext-ui-app/` on Linux) plus a
+   `user-incident` line on `nav-debug.log`. The next agent should read those files first —
+   do not re-describe the bug in chat unless the log is missing.
+2. Reproduce if needed. Click toolbar **ERP console** (detached DevTools for the Desk pane).
 3. **Console:** copy errors; **Elements:** Copy selector or note `data-testid` on shell controls.
-4. Name the surface (ERP / Launcher / Recent / toolbar) + expected vs observed in one breath.
-   (Nav incident toolbar is temporarily hidden on alpha; logs still live under `userData/` if enabled later.)
+4. Name the surface (ERP / Launcher / Recent / toolbar) + expected vs observed in one breath
+   — or skip this if step 1 already captured it.
 
 ### Test strategy (locked 2026-07-16 — OI-049)
 
