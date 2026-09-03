@@ -5,59 +5,6 @@
       <span class="due-money" id="due-sticky-money">—</span>
       <span class="due-sticky-label">Amount Due</span>
     </button>
-    <div class="banner">
-      <h1>Bill</h1>
-      <span class="doc-status-badge" id="doc-status-badge" data-testid="bill-doc-status" hidden></span>
-      <span class="status" id="status" data-testid="bill-status">Loading…</span>
-      <span class="banner-actions">
-        <button type="button" id="btn-retry" data-testid="bill-retry" hidden>Retry load</button>
-      </span>
-    </div>
-    <div class="toolbar" data-testid="bill-toolbar">
-      <div class="tb-group" data-testid="bill-toolbar-file" title="Keep, print, discard, or finalize this document">
-        <span class="tb-group-label">File</span>
-        <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="bill-dirty-pill">Draft · all saved</span>
-        <button type="button" class="ghost" id="btn-print" data-testid="bill-print"
-          title="Print this Bill (save first if new).">Print</button>
-        <button type="button" id="btn-revert" data-testid="bill-revert"
-          title="Discard unsaved edits (reload saved Bill, or start a fresh new Bill).">Revert unsaved changes</button>
-        <button type="button" class="primary" id="btn-save" data-testid="bill-save">Save draft</button>
-        <button type="button" id="btn-submit" data-testid="bill-submit">Save draft &amp; submit</button>
-      </div>
-      <div class="tb-group" data-testid="bill-toolbar-navigate" title="Find, open, or jump elsewhere">
-        <span class="tb-group-label">Navigate</span>
-        <button type="button" id="btn-find" data-testid="bill-find">Find Bill…</button>
-        <button type="button" id="btn-new" data-testid="bill-new">New Bill</button>
-        <button type="button" id="btn-select-po" data-testid="bill-select-po">Select PO / source</button>
-        <button type="button" id="btn-refresh" data-testid="bill-refresh"
-          title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
-        <button type="button" class="ghost" id="btn-vanilla" data-testid="bill-vanilla">Open in Vanilla</button>
-        <button type="button" class="ghost" id="btn-caps" data-testid="bill-caps"
-          title="Default ALL-CAPS data entry — click to turn off for this page">⇪ CAPS: ON</button>
-      </div>
-    </div>
-    <div class="commit-gate" id="commit-gate" data-testid="bill-commit-gate" hidden>
-      <div class="commit-gate-backdrop" id="commit-gate-backdrop"
-        data-testid="bill-gate-backdrop" aria-hidden="true"></div>
-      <section class="commit-gate-dialog" role="dialog" aria-modal="true"
-        aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
-        <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
-        <p class="commit-gate-copy" id="commit-gate-copy">
-          This decision must be resolved before you can continue.
-        </p>
-        <div class="commit-gate-validation" id="commit-gate-validation" data-testid="bill-gate-validation">
-          <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
-          <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="bill-gate-blockers"></ul>
-          <p class="hint" id="commit-gate-hint" data-testid="bill-commit-gate-hint"></p>
-        </div>
-        <div class="row">
-          <button type="button" data-gate="discard" data-testid="bill-gate-discard">Discard, then continue</button>
-          <button type="button" class="primary" data-gate="save" data-testid="bill-gate-save">Save draft, then continue</button>
-          <button type="button" data-gate="submit" data-testid="bill-gate-submit">Save &amp; submit, then continue</button>
-          <button type="button" class="ghost" data-gate="cancel" data-testid="bill-gate-cancel">Cancel</button>
-        </div>
-      </section>
-    </div>
     <details class="assumptions" data-testid="bill-assumptions">
       <summary>Assumptions this view makes</summary>
       <ul id="assumptions-list"></ul>
@@ -144,7 +91,12 @@
             tabindex="-1" data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
         </div>
         <div class="line-panel" id="panel-items" data-testid="bill-panel-items" role="tabpanel">
-        <table>
+        <table class="items-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-po"><col class="c-item"><col class="c-desc">
+            <col class="c-qty"><col class="c-cost"><col class="c-amount">
+            <col class="c-cust"><col class="c-so"><col class="c-proj"><col class="c-act">
+          </colgroup>
           <thead>
             <tr id="items-head-row">
               <th class="sortable sorted" data-sort="lineNo" title="Sort by Line">Line ▲</th>
@@ -196,7 +148,12 @@
               title="Open Vanilla Landed Cost Voucher (Qty / Amount / Manual distribute)">Landed Cost Voucher…</button>
           </div>
         </div>
-        <table>
+        <table class="taxes-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-acct"><col class="c-desc">
+            <col class="c-type"><col class="c-rate"><col class="c-amount">
+            <col class="c-addded"><col class="c-act">
+          </colgroup>
           <thead>
             <tr id="taxes-head-row">
               <th class="sortable sorted" data-tax-sort="lineNo" title="Sort by Line">Line ▲</th>
@@ -287,7 +244,11 @@
         </section>
         <div class="applied-payments" id="applied-payments" data-testid="bill-applied-payments" hidden
           aria-label="Applied payments">
-          <span class="applied-payments-title">Applied payments</span>
+          <div class="applied-payments-head">
+            <span class="applied-payments-title">Applied payments</span>
+            <button type="button" class="linkish" id="btn-add-payment" data-testid="bill-add-payment" hidden
+              title="Open a draft Payment Entry in Desk (Esc returns here).">Add payment</button>
+          </div>
           <table class="applied-payments-table">
             <thead>
               <tr>
@@ -305,8 +266,7 @@
         </section>
       <section class="bill-section bill-section-notes" data-testid="bill-notes-section">
         <div id="source-terms-block" class="source-terms-block" data-testid="bill-source-terms-block" hidden>
-          <label for="source-terms-body">Terms from sources (read-only)</label>
-          <pre id="source-terms-body" class="source-terms-body" data-testid="bill-source-terms-body" tabindex="-1"></pre>
+          <div id="source-terms-fields" class="source-terms-fields" data-testid="bill-source-terms-fields"></div>
         </div>
         <div class="field memo" data-testid="bill-memo-block">
           <div class="memo-head">

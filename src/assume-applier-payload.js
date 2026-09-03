@@ -53,7 +53,7 @@ const SIMPLIFIED_CSS = `
   background: none; border: none; color: #fff; font-size: 18px;
   cursor: pointer; padding: 0 4px; line-height: 1;
 }
-.ss-body { overflow-y: auto; padding: 6px 12px; flex: 1; }
+.ss-body { overflow-y: auto; overflow-x: hidden; padding: 6px 12px; flex: 1; min-width: 0; }
 .ss-legend {
   font-size: 11px; color: #4b5563; background: #f3f6f9;
   border: 1px solid #e0e6ea; border-radius: 4px; padding: 8px 10px;
@@ -62,27 +62,31 @@ const SIMPLIFIED_CSS = `
 .ss-legend span { margin-right: 8px; }
 .ss-req { color: #c0392b; font-weight: bold; }
 .ss-row {
-  display: flex; align-items: flex-start; flex-wrap: wrap;
-  gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid #eee;
+  display: flex; align-items: center; flex-wrap: nowrap;
+  gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; min-width: 0;
 }
 .ss-flabel {
-  flex: 0 0 170px; cursor: pointer; font-weight: bold; color: #2c3e50;
-  padding-top: 4px;
+  flex: 0 0 160px; cursor: pointer; font-weight: bold; color: #2c3e50;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ss-flabel:hover { color: #2ca01c; text-decoration: underline; }
-.ss-veditor { flex: 1 1 200px; display: flex; flex-direction: column; gap: 2px; min-width: 170px; }
+.ss-veditor { flex: 1 1 0; min-width: 100px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .ss-val {
-  flex: 1 1 160px; border: 1px solid #c3c7cc; border-radius: 3px;
-  padding: 3px 6px; font: 12px system-ui,sans-serif;
+  width: 100%; border: 1px solid #c3c7cc; border-radius: 3px;
+  padding: 3px 6px; font: 12px system-ui,sans-serif; box-sizing: border-box;
 }
 .ss-vsource { font-size: 10px; color: #7a8189; min-height: 12px; }
 .ss-datewrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ss-custom { display: inline-flex; gap: 4px; align-items: center; }
 .ss-offset { width: 70px; border: 1px solid #c3c7cc; border-radius: 3px; padding: 2px 4px; }
-.ss-radios { display: flex; flex-wrap: wrap; gap: 4px 12px; flex: 0 0 auto; padding-left: 2px; }
+/* Radios stay on one line; scroll horizontally inside the modal rather than wrapping */
+.ss-radios {
+  flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 4px 12px;
+  padding-left: 2px; overflow-x: auto; max-width: 380px;
+}
 .ss-radio {
   font-size: 11px; display: flex; align-items: center; gap: 3px;
-  cursor: pointer; color: #2c3e50; white-space: nowrap;
+  cursor: pointer; color: #2c3e50; white-space: nowrap; flex-shrink: 0;
 }
 .ss-radio.ss-off { color: #7a8189; }
 .ss-foot {

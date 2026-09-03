@@ -137,6 +137,14 @@
       background-image: none;
     }
     .bill-section-notes .field { margin-bottom: 0; }
+    .bill-section-lines .doc-lines-title {
+      margin: 0 0 10px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      color: #64748b;
+    }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
     .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
     .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
@@ -149,6 +157,28 @@
     .field input:read-only, .field textarea:read-only, td .ro {
       background: #f8fafc; color: #475569; border: none; padding: 5px 2px;
     }
+    /* Borderless fields on white subsections — subtle lift (Bill + PO + IR). */
+    .bill-section .field input:read-only:not([data-wash-source]),
+    .bill-section .field textarea:read-only:not([data-wash-source]),
+    .bill-section .field input.addr-pick,
+    .bill-section .field textarea.addr-pick,
+    .bill-section .addr-grid textarea {
+      background: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 9px;
+      box-shadow:
+        0 0 0 1px rgba(15, 23, 42, 0.05),
+        0 1px 2px rgba(15, 23, 42, 0.06),
+        0 0 6px rgba(15, 23, 42, 0.04);
+    }
+    .bill-section .field input.addr-pick:not(:disabled):hover,
+    .bill-section .field textarea.addr-pick:not(:disabled):hover {
+      box-shadow:
+        0 0 0 1px rgba(15, 23, 42, 0.08),
+        0 2px 4px rgba(15, 23, 42, 0.08),
+        0 0 8px rgba(15, 23, 42, 0.05);
+    }
     .chip {
       display: inline-flex; align-items: center; justify-content: center;
       min-width: 28px; min-height: 28px; padding: 2px 8px; border-radius: 6px;
@@ -156,6 +186,7 @@
       white-space: nowrap; font-variant-numeric: tabular-nums;
     }
     .chip.idle { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
+    .chip.waiting { background: #e0f2fe; color: #0369a1; border-color: #7dd3fc; }
     .chip.match { background: #dcfce7; color: #166534; border-color: #86efac; }
     .chip.mismatch { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
     .chip.warn { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
@@ -167,6 +198,44 @@
     .ref-warn {
       margin: 0; font-size: 12px; color: #92400e; line-height: 1.35; white-space: pre-wrap;
     }
+    .ref-warn.is-clickable,
+    .bill-ref-row .chip.is-clickable {
+      cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+    }
+    .ref-warn.is-clickable:hover,
+    .bill-ref-row .chip.is-clickable:hover { filter: brightness(0.95); }
+    #linked-po-block .linked-source-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #linked-po-block .linked-source-row input {
+      flex: 1;
+      min-width: 0;
+    }
+    #linked-po-block .linked-source-peek-btn {
+      flex-shrink: 0;
+      min-width: 32px;
+      min-height: 32px;
+      padding: 4px 8px;
+      border: 1px solid #94a3b8;
+      border-radius: 6px;
+      background: #fff;
+      color: #0369a1;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #linked-po-block .linked-source-peek-btn:hover {
+      background: #e0f2fe;
+      border-color: #38bdf8;
+    }
+    #linked-po-block .linked-source-peek-btn:focus-visible {
+      outline: 2px solid #38bdf8;
+      outline-offset: 2px;
+    }
+    .ref-warn.is-waiting { color: #0369a1; }
     .bill-ref-row input { flex: 1; min-width: 0; }
     .toast {
       position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
@@ -177,6 +246,7 @@
       opacity: 0; pointer-events: none; transition: opacity 180ms ease;
     }
     .toast.show { opacity: 1; pointer-events: auto; }
+    .toast.is-action { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
     .toast.fade-out { opacity: 0; transition: opacity 600ms ease; }
     td.tot-cell .clear-qty {
       display: block; width: 100%; margin-top: 6px;
@@ -186,8 +256,46 @@
     td.tot-cell .clear-qty:hover { background: #f1f5f9; }
     td.tot-cell .clear-qty:disabled { opacity: 0.55; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; }
-    th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; white-space: nowrap; }
+    td.wrap-cell { white-space: normal; text-overflow: clip; }
+
+    /* Fixed-layout column sizing — scroll instead of reflowing the page (industry standard). */
+    #panel-items table, .bill-section-taxes table {
+      table-layout: fixed;
+      overflow: visible; /* td overflow:hidden does the clipping per-cell */
+    }
+    #panel-items { overflow-x: auto; }
+    #panel-items table { min-width: 760px; }
+    .bill-section-taxes { overflow-x: auto; }
+    .bill-section-taxes table { min-width: 520px; }
+
+    /* Items table column widths */
+    .items-tbl col.c-line   { width: 38px; }
+    .items-tbl col.c-po     { width: 54px; }
+    .items-tbl col.c-item   { width: 12%; }
+    /* c-desc: no width — absorbs remaining space in fixed layout */
+    .items-tbl col.c-qty    { width: 58px; }
+    .items-tbl col.c-cost   { width: 88px; }
+    .items-tbl col.c-amount { width: 96px; }
+    .items-tbl col.c-cust   { width: 10%; }
+    .items-tbl col.c-so     { width: 10%; }
+    .items-tbl col.c-proj   { width: 10%; }
+    .items-tbl col.c-act    { width: 32px; }
+
+    /* Taxes table column widths */
+    .taxes-tbl col.c-line   { width: 38px; }
+    .taxes-tbl col.c-acct   { width: 18%; }
+    /* c-desc: fill */
+    .taxes-tbl col.c-type   { width: 110px; }
+    .taxes-tbl col.c-rate   { width: 68px; }
+    .taxes-tbl col.c-amount { width: 88px; }
+    .taxes-tbl col.c-addded { width: 72px; }
+    .taxes-tbl col.c-act    { width: 32px; }
+
+    /* Numeric columns */
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
     .del { padding: 4px 8px; color: #991b1b; }
     .line-actions {
       display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 8px;
@@ -215,7 +323,6 @@
     tfoot#line-totals .tot-label {
       color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; margin-right: 4px;
     }
-    td.num { text-align: right; }
     #panel-items table thead th.sortable {
       cursor: pointer;
       user-select: none;
@@ -421,9 +528,12 @@
       box-shadow: 0 0 0 2px #86efac;
       transition: box-shadow 0.3s ease;
     }
+    .applied-payments-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      margin-bottom: 8px;
+    }
     .applied-payments-title {
       font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
-      display: block; margin-bottom: 8px;
     }
     .applied-payments-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .applied-payments-table th, .applied-payments-table td {
