@@ -5,6 +5,7 @@ import {
   collectReceiptSourceRefs,
   formatSourceTermsReadonly,
   hasSourceTermsToShow,
+  sourceTermsDisplayBlocks,
 } from "../src/doc-source-terms.js";
 
 describe("doc-source-terms", () => {
@@ -28,6 +29,35 @@ describe("doc-source-terms", () => {
     assert.deepEqual(refs, [{ kind: "po", name: "PO-9" }]);
   });
 
+  it("formatSourceTermsReadonly includes PR remarks", () => {
+    const text = formatSourceTermsReadonly(
+      [{ kind: "pr", name: "PR-2" }],
+      { "pr:PR-2": "" },
+      { "pr:PR-2": "Received on dock 3 — handle with care." },
+    );
+    assert.match(text, /Item Receipt remarks:\nReceived on dock 3/);
+  });
+
+  it("sourceTermsDisplayBlocks yields washed per-source fields", () => {
+    const blocks = sourceTermsDisplayBlocks(
+      [
+        { kind: "po", name: "PO-1" },
+        { kind: "pr", name: "PR-2" },
+      ],
+      {
+        "po:PO-1": "Freight included in rate.",
+        "pr:PR-2": "Handle with care",
+      },
+      { "pr:PR-2": "Dock 3 only." },
+    );
+    assert.equal(blocks.length, 3);
+    assert.equal(blocks[0].label, "PO terms");
+    assert.equal(blocks[0].washRole, "order");
+    assert.equal(blocks[1].label, "Item Receipt terms");
+    assert.equal(blocks[1].washRole, "fulfill");
+    assert.equal(blocks[2].label, "Item Receipt remarks");
+  });
+
   it("formatSourceTermsReadonly joins labeled blocks", () => {
     const text = formatSourceTermsReadonly(
       [
@@ -39,8 +69,8 @@ describe("doc-source-terms", () => {
         "pr:PR-2": "<p>Handle with care</p>",
       },
     );
-    assert.match(text, /PO PO-1:\nFreight included/);
-    assert.match(text, /Item Receipt PR-2:\nHandle with care/);
+    assert.match(text, /PO terms:\nFreight included/);
+    assert.match(text, /Item Receipt terms:\nHandle with care/);
   });
 
   it("hasSourceTermsToShow is false when all empty", () => {

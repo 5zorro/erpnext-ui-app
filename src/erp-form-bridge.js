@@ -6,10 +6,13 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 13;
+export const DOC_FORM_BRIDGE_VERSION = 20;
 
-/** Max wait for get_party_details after supplier set_value (bridge deadline only). */
+/** Max wait for address_display on supplier setHeader before snapshot (bridge deadline). */
 export const SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
+
+/** Bill header paints billing from this HTML field (not supplier_address link). */
+export const SUPPLIER_BILLING_DISPLAY_FIELD = "address_display";
 
 /** Fields written by ERPNext party-details ajax (exclude supplier link itself). */
 export const SUPPLIER_PARTY_DETAIL_FIELDS = Object.freeze([
@@ -74,6 +77,15 @@ export function supplierPartyDetailChanged(doc, baseline) {
     if (stripHtmlPlain(d[field]) !== stripHtmlPlain(base[field])) return true;
   }
   return false;
+}
+
+/**
+ * True when Bill billing textarea would paint (address_display HTML only).
+ * @param {object|null|undefined} doc
+ */
+export function hasSupplierBillingDisplay(doc) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  return stripHtmlPlain(d[SUPPLIER_BILLING_DISPLAY_FIELD]) !== "";
 }
 
 /**
@@ -146,6 +158,63 @@ export function supplierPartyQuietSliceMs(deadlineMs, nowMs = Date.now()) {
   const remaining = deadlineMs - nowMs;
   if (remaining <= 0) return 0;
   return Math.min(4000, Math.max(500, remaining));
+}
+
+/**
+ * Poll slice for supplier address snapshot wait (address-first, not generic after_ajax alone).
+ * @param {number} deadlineMs
+ * @param {number} [nowMs]
+ */
+export function supplierSnapshotWaitSliceMs(deadlineMs, nowMs = Date.now()) {
+  const remaining = deadlineMs - nowMs;
+  if (remaining <= 0) return 0;
+  return Math.min(500, Math.max(50, remaining));
+}
+
+/**
+ * @param {number} deadlineMs
+ * @param {number} [nowMs]
+ */
+export function supplierSnapshotAllowMetaOnly(deadlineMs, nowMs = Date.now()) {
+  return deadlineMs - nowMs <= SUPPLIER_PARTY_META_ONLY_GRACE_MS;
+}
+
+/**
+ * Snapshot gate for setHeader IPC — matches readBillHeader billing projection.
+ *
+ * @param {object|null|undefined} doc
+ * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean }} [ctx]
+ * @returns {{ ready: boolean, reason: string, field?: string }}
+ */
+export function supplierSnapshotReadyReason(doc, ctx = {}) {
+  const d = doc && typeof doc === "object" ? doc : {};
+  const target = normalizeSupplierKey(ctx.targetSupplier ?? d.supplier);
+  if (!target || normalizeSupplierKey(d.supplier) !== target) {
+    return { ready: false, reason: "supplier_mismatch" };
+  }
+  if (hasSupplierBillingDisplay(d)) {
+    return { ready: true, reason: "address_display", field: SUPPLIER_BILLING_DISPLAY_FIELD };
+  }
+  if (ctx.allowMetaOnlyAtDeadline) {
+    const metaOk = isSupplierPartySettled(doc, {
+      targetSupplier: target,
+      baseline: ctx.baseline,
+      allowMetaOnly: true,
+    });
+    if (metaOk) return { ready: true, reason: "meta_only_deadline", field: "" };
+  }
+  return { ready: false, reason: "waiting" };
+}
+
+/**
+ * Stricter than modal-open settle: snapshot only when address_display HTML exists,
+ * or meta-only grace at deadline (vendor with no address on file).
+ *
+ * @param {object|null|undefined} doc
+ * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean }} [ctx]
+ */
+export function supplierAddressSnapshotReady(doc, ctx = {}) {
+  return supplierSnapshotReadyReason(doc, ctx).ready;
 }
 
 /**

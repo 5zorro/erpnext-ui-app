@@ -9,6 +9,10 @@ import {
   sourceModalKeyAction,
   toggleSourceSelection,
   resolveSourcesToCommit,
+  findSourceItemByKey,
+  groupHasSelectableItem,
+  firstSelectableItemIndex,
+  nextSelectableGroupIndex,
 } from "./source-modal.js";
 import { logFocus } from "./focus-debug-client.js";
 import { uiIconHtml } from "./ui-icons.js";
@@ -20,6 +24,13 @@ import { uiIconHtml } from "./ui-icons.js";
 
 /**
  * @typedef {{
+ *   updateGroups: (groups: SourceGroup[]) => void,
+ *   applySlice: (sliceId: string, sliceGroup: SourceGroup, nextGroups?: SourceGroup[]) => void,
+ *   setSliceError: (sliceId: string, message: string) => void,
+ *   setLoadError: (message: string) => void,
+ * }} SourceModalController
+ *
+ * @typedef {{
  *   groups: SourceGroup[],
  *   mode?: "single" | "multi",
  *   testId?: string,
@@ -29,6 +40,7 @@ import { uiIconHtml } from "./ui-icons.js";
  *   focusSurface?: () => void,
  *   isOpenRef?: { current: boolean },
  *   onClose?: (kind: "choose"|"cancel"|"escape"|"backdrop") => void,
+ *   onController?: (controller: SourceModalController) => void,
  * }} SourceModalOptions
  */
 
@@ -40,20 +52,37 @@ function dismissLinkDropdowns() {
 
 /**
  * @param {SourceModalOptions} opts
- * @returns {boolean} false when already open
+ * @returns {Promise<{ ok: boolean, kind?: string, reason?: string }>}
  */
 export function showSourceModal(opts) {
   const openRef = opts.isOpenRef || { current: false };
-  if (openRef.current) return false;
-  openRef.current = true;
+  if (openRef.current) {
+    return Promise.resolve({ ok: false, reason: "already_open" });
+  }
+
+  return new Promise((resolve) => {
+    openRef.current = true;
+    let settled = false;
+    /** @param {{ ok: boolean, kind?: string, reason?: string }} payload */
+    function settle(payload) {
+      if (settled) return;
+      settled = true;
+      resolve(payload);
+    }
+
+    function finishClose(kind) {
+      if (opts.onClose) opts.onClose(kind);
+      settle({ ok: true, kind });
+    }
 
   const mode = opts.mode === "single" ? "single" : "multi";
-  const groups = opts.groups || [];
+  let groups = opts.groups || [];
   const setStatus = opts.setStatus || (() => {});
   let gi = 0;
   let ii = 0;
   /** @type {string[]} */
   let selectedKeys = [];
+  let loadError = "";
 
   const back = document.createElement("div");
   back.className = "src-back";
@@ -75,6 +104,7 @@ export function showSourceModal(opts) {
     : "";
 
   box.innerHTML = `<div class="src-title">${titleHint}</div>
+    <div class="src-load-error" hidden></div>
     <div class="src-body"></div>
     <div class="src-foot">
       <button type="button" class="primary" data-act="pick"${pickTestId}>${pickLabel}</button>
@@ -83,6 +113,7 @@ export function showSourceModal(opts) {
   back.appendChild(box);
   document.body.appendChild(back);
   const body = box.querySelector(".src-body");
+  const loadErrorEl = box.querySelector(".src-load-error");
   const pickBtn = box.querySelector('[data-act="pick"]');
 
   function activeItem() {
@@ -99,13 +130,29 @@ export function showSourceModal(opts) {
     else pickBtn.textContent = "Pull highlighted / selected";
   }
 
+  function paintLoadError() {
+    if (!loadErrorEl) return;
+    if (loadError) {
+      loadErrorEl.hidden = false;
+      loadErrorEl.textContent = loadError;
+    } else {
+      loadErrorEl.hidden = true;
+      loadErrorEl.textContent = "";
+    }
+  }
+
   function draw() {
     if (!body) return;
+    paintLoadError();
     body.innerHTML = "";
     groups.forEach((g, ggi) => {
       const h = document.createElement("div");
-      h.className = "src-group" + (ggi === gi ? " active" : "");
-      h.textContent = g.name;
+      h.className = "src-group" + (ggi === gi ? " active" : "") + (g.loading ? " loading" : "") + (g.error ? " error" : "");
+      h.textContent = g.loading
+        ? `${g.name} — still loading…`
+        : g.error
+          ? `${g.name} — ${g.error}`
+          : g.name;
       body.appendChild(h);
       g.items.forEach((it, iii) => {
         const key = sourceItemKey(it);
@@ -116,6 +163,7 @@ export function showSourceModal(opts) {
           "src-item" +
           (ggi === gi && iii === ii ? " active" : "") +
           (it.draft ? " draft" : "") +
+          (it.loading ? " loading" : "") +
           (checked ? " checked" : "");
         if (mode === "multi") {
           r.setAttribute("aria-checked", checked ? "true" : "false");
@@ -133,7 +181,7 @@ export function showSourceModal(opts) {
           r.textContent = it.label;
         }
         r.onclick = () => {
-          if (it.draft) return;
+          if (it.draft || it.loading) return;
           gi = ggi;
           ii = iii;
           if (mode === "multi") {
@@ -142,7 +190,7 @@ export function showSourceModal(opts) {
           draw();
         };
         r.ondblclick = () => {
-          if (it.draft) return;
+          if (it.draft || it.loading) return;
           gi = ggi;
           ii = iii;
           if (mode === "multi") {
@@ -159,7 +207,8 @@ export function showSourceModal(opts) {
     });
     updatePickLabel();
     body.querySelectorAll(".src-item").forEach((btn) => {
-      btn.tabIndex = btn.classList.contains("active") ? 0 : -1;
+      const selectable = !btn.classList.contains("draft") && !btn.classList.contains("loading");
+      btn.tabIndex = btn.classList.contains("active") && selectable ? 0 : -1;
     });
     const a = body.querySelector(".src-item.active");
     if (a && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
@@ -175,7 +224,7 @@ export function showSourceModal(opts) {
     logFocus("source-modal-close", kind);
     if (back.parentNode) back.parentNode.removeChild(back);
     logFocus("source-modal-unmounted", kind);
-    if (opts.onClose && !closeOpts.deferOnClose) opts.onClose(kind);
+    if (!closeOpts.deferOnClose) finishClose(kind);
   }
 
   async function choose() {
@@ -183,9 +232,12 @@ export function showSourceModal(opts) {
       const it = activeItem();
       if (!isSelectableSourceItem(it)) return;
       close("choose", { deferOnClose: true });
-      await opts.onChoose(it);
-      logFocus("source-modal-choose-done", it.kind || "");
-      if (opts.onClose) opts.onClose("choose");
+      try {
+        await opts.onChoose(it);
+        logFocus("source-modal-choose-done", it.kind || "");
+      } finally {
+        finishClose("choose");
+      }
       return;
     }
     const resolved = resolveSourcesToCommit(groups, selectedKeys, activeItem());
@@ -194,17 +246,20 @@ export function showSourceModal(opts) {
       return;
     }
     close("choose", { deferOnClose: true });
-    await opts.onChoose(resolved);
-    logFocus("source-modal-choose-done", resolved.mode || "");
-    if (opts.onClose) opts.onClose("choose");
+    try {
+      await opts.onChoose(resolved);
+      logFocus("source-modal-choose-done", resolved.mode || "");
+    } finally {
+      finishClose("choose");
+    }
   }
 
   function onKey(ev) {
     if (mode === "single") {
       if (ev.key === "Tab") {
         ev.preventDefault();
-        gi = (gi + (ev.shiftKey ? groups.length - 1 : 1)) % groups.length;
-        ii = 0;
+        gi = nextSelectableGroupIndex(groups, gi, ev.shiftKey ? -1 : 1);
+        ii = firstSelectableItemIndex(groups[gi]);
         draw();
       } else if (ev.key === "ArrowDown") {
         ev.preventDefault();
@@ -233,8 +288,8 @@ export function showSourceModal(opts) {
     if (act === "none") return;
     if (act === "tab") {
       ev.preventDefault();
-      gi = (gi + (ev.shiftKey ? groups.length - 1 : 1)) % groups.length;
-      ii = 0;
+      gi = nextSelectableGroupIndex(groups, gi, ev.shiftKey ? -1 : 1);
+      ii = firstSelectableItemIndex(groups[gi]);
       draw();
       return;
     }
@@ -322,6 +377,57 @@ export function showSourceModal(opts) {
       /* ignore */
     }
   }
+  if (opts.onController) {
+    opts.onController({
+      updateGroups(nextGroups) {
+        if (!openRef.current) return;
+        groups = Array.isArray(nextGroups) ? nextGroups : [];
+        gi = Math.min(gi, Math.max(0, groups.length - 1));
+        ii = 0;
+        selectedKeys = selectedKeys.filter((k) => findSourceItemByKey(k, groups));
+        loadError = "";
+        draw();
+      },
+      applySlice(sliceId, sliceGroup, nextGroups) {
+        if (!openRef.current) return;
+        if (Array.isArray(nextGroups)) {
+          groups = nextGroups;
+        } else if (sliceGroup) {
+          const idx = groups.findIndex((g) => g.id === sliceId);
+          if (idx >= 0) groups[idx] = sliceGroup;
+          else groups.push(sliceGroup);
+        }
+        gi = Math.min(gi, Math.max(0, groups.length - 1));
+        ii = 0;
+        draw();
+      },
+      setSliceError(sliceId, message) {
+        if (!openRef.current) return;
+        const msg = message != null ? String(message).trim() : "";
+        const idx = groups.findIndex((g) => g.id === sliceId);
+        if (idx >= 0) {
+          groups[idx] = {
+            ...groups[idx],
+            loading: false,
+            error: msg || "Load failed",
+            items: [
+              {
+                label: msg || "Load failed",
+                kind: "po",
+                draft: true,
+              },
+            ],
+          };
+        }
+        draw();
+      },
+      setLoadError(message) {
+        if (!openRef.current) return;
+        loadError = message != null ? String(message).trim() : "";
+        draw();
+      },
+    });
+  }
   draw();
   logFocus("source-modal-open", mode);
   setTimeout(focusModalKeyboard, 0);
@@ -329,5 +435,5 @@ export function showSourceModal(opts) {
   setStatus(
     mode === "single" ? "Choose a source (or NIC)." : "Space to check sources · Enter to pull (or NIC).",
   );
-  return true;
+  });
 }

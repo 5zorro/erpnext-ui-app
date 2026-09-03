@@ -4,11 +4,14 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("erpBill", {
   getSnapshot: () => ipcRenderer.invoke("bill-get-snapshot"),
   setHeader: (field, value) => ipcRenderer.invoke("bill-set-header", field, value),
-  checkRef: (billNo) => ipcRenderer.invoke("bill-check-ref", billNo),
+  checkRef: (billNo, opts) => ipcRenderer.invoke("bill-check-ref", billNo, opts || {}),
+  prefetchVendorRefs: (supplier) =>
+    ipcRenderer.invoke("bill-prefetch-vendor-refs", supplier || ""),
   setAmountDue: (value, markEdited) =>
     ipcRenderer.invoke("bill-set-amount-due", value, !!markEdited),
   setItem: (rowIndex, field, value) =>
     ipcRenderer.invoke("bill-set-item", rowIndex, field, value),
+  fetchPoLineCap: (rowIndex) => ipcRenderer.invoke("bill-fetch-po-line-cap", rowIndex),
   addItem: () => ipcRenderer.invoke("bill-add-item"),
   deleteItem: (rowIndex) => ipcRenderer.invoke("bill-delete-item", rowIndex),
   clearAllQty: () => ipcRenderer.invoke("bill-clear-all-qty"),
@@ -18,6 +21,7 @@ contextBridge.exposeInMainWorld("erpBill", {
     ipcRenderer.invoke("bill-add-tax", accountHead, taxAmount, description || ""),
   deleteTax: (rowIndex) => ipcRenderer.invoke("bill-delete-tax", rowIndex),
   listPayments: () => ipcRenderer.invoke("bill-list-payments"),
+  openAddPayment: () => ipcRenderer.invoke("bill-open-add-payment"),
   listAddresses: (role) => ipcRenderer.invoke("bill-list-addresses", role || ""),
   allocateCharge: (taxRowIndex, mode, custom) =>
     ipcRenderer.invoke("bill-allocate-charge", taxRowIndex, mode || "amount", custom || []),
@@ -26,7 +30,7 @@ contextBridge.exposeInMainWorld("erpBill", {
   save: (opts) => ipcRenderer.invoke("bill-save", opts || {}),
   listMandatory: () => ipcRenderer.invoke("bill-list-mandatory"),
   revertUnsaved: () => ipcRenderer.invoke("bill-revert-unsaved"),
-  findBills: () => ipcRenderer.invoke("bill-find"),
+  findBills: (prefill) => ipcRenderer.invoke("bill-find", prefill || {}),
   /** Re-assert ERP list filter focus after Find IPC returns (Bill chrome may steal OS focus). */
   refocusListFilter: (fieldname) =>
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "bill_no"),
@@ -35,6 +39,8 @@ contextBridge.exposeInMainWorld("erpBill", {
   searchLink: (doctype, txt) => ipcRenderer.invoke("bill-search-link", doctype, txt || ""),
   checkAccountCompanies: () => ipcRenderer.invoke("bill-account-company-check"),
   listSources: (supplier) => ipcRenderer.invoke("bill-list-sources", supplier || ""),
+  listSourceSlice: (supplier, sliceId) =>
+    ipcRenderer.invoke("bill-list-source-slice", supplier || "", sliceId || ""),
   fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
   /** Single (kind, name) or multi ([{ kind, name }, ...]). */
   mergeSource: (kindOrItems, name) =>
@@ -76,6 +82,7 @@ contextBridge.exposeInMainWorld("erpBill", {
   },
   resolveNavGate: (token, proceed) =>
     ipcRenderer.send("bill-resolve-nav-gate", token, !!proceed),
+  navDebug: (event, detail) => ipcRenderer.send("nav-debug", event || "bill", detail || ""),
 });
 
 contextBridge.exposeInMainWorld("erpFocusDebug", {

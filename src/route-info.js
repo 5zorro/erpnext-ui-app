@@ -51,6 +51,16 @@ export function isNewDocRecord(record) {
 }
 
 /**
+ * Generic ERP "new document" route (`…/new`) — clerk expects a blank draft, not an existing `new-*` tab.
+ * @param {string} routeOrUrl
+ * @param {string} [erpBase]
+ */
+export function isGenericNewDocRoute(routeOrUrl, erpBase) {
+  const n = normalizeAppRoute(routeOrUrl, erpBase);
+  return n.isNew && (!n.record || n.record === "new");
+}
+
+/**
  * Normalize Bill-ish paths so /desk/… and /app/… compare equal.
  * @param {string} routeOrUrl
  * @param {string} [erpBase]
@@ -98,6 +108,13 @@ export function routesReferToSameDoc(currentRoute, nextRoute, erpBase) {
   const a = normalizeAppRoute(currentRoute, erpBase);
   const b = normalizeAppRoute(nextRoute, erpBase);
   if (!a.doctype || a.doctype !== b.doctype) return false;
-  if (a.isNew && b.isNew) return true;
+  if (a.isNew && b.isNew) {
+    const recA = a.record || "new";
+    const recB = b.record || "new";
+    if (recA === recB) return true;
+    // In-flight: Frappe promotes `/new` → `new-doctype-…` (same draft).
+    if (recA === "new" && recB.startsWith("new-")) return true;
+    return false;
+  }
   return !!(a.record && a.record === b.record);
 }

@@ -139,6 +139,53 @@ export function linkedPurchaseOrdersForBill(doc, titles) {
   }));
 }
 
+/**
+ * Distinct Purchase Receipt ids linked on Bill item rows.
+ * @param {object|null|undefined} doc
+ * @returns {string[]}
+ */
+export function uniqueLinkedPurchaseReceiptNames(doc) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const pr = it && it.purchase_receipt != null ? String(it.purchase_receipt).trim() : "";
+    if (!pr || seen.has(pr)) continue;
+    seen.add(pr);
+    out.push(pr);
+  }
+  return out;
+}
+
+/**
+ * Pair linked Item Receipt ERP ids with packing-list / BOL ref (`lr_no`).
+ * @param {object|null|undefined} doc
+ * @param {Array<{ name?: string, lr_no?: string|null }>|Record<string, string>|null|undefined} refs
+ * @returns {Array<{ name: string, lrNo: string }>}
+ */
+export function linkedPurchaseReceiptsForBill(doc, refs) {
+  const names = uniqueLinkedPurchaseReceiptNames(doc);
+  /** @type {Record<string, string>} */
+  const byName = {};
+  if (refs && typeof refs === "object" && !Array.isArray(refs)) {
+    for (const [k, v] of Object.entries(refs)) {
+      if (k) byName[k] = v != null ? String(v) : "";
+    }
+  } else if (Array.isArray(refs)) {
+    for (const row of refs) {
+      if (!row || row.name == null) continue;
+      const n = String(row.name).trim();
+      if (!n) continue;
+      byName[n] = row.lr_no != null ? String(row.lr_no) : "";
+    }
+  }
+  return names.map((name) => ({
+    name,
+    lrNo: byName[name] != null ? byName[name] : "",
+  }));
+}
+
 export const BILL_MEMO_FIELD = "remarks";
 export const BILL_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
 

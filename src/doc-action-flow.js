@@ -9,6 +9,7 @@ import {
   commitGateSaveEnabled,
   reduceCommitGatePhase,
 } from "./bill-action-flow.js";
+import { docHasCommittedItemLine } from "./bill-item-guard.js";
 
 export {
   commitGateProgressLabel,
@@ -37,9 +38,8 @@ export function listDocFormSaveBlockers(ctx = {}) {
   if (!supplier) {
     blockers.push("Vendor (Supplier) is required.");
   }
-  const items = ctx.doc && Array.isArray(ctx.doc.items) ? ctx.doc.items : [];
-  if (!items.length) {
-    blockers.push("At least one Item line is required.");
+  if (!docHasCommittedItemLine(ctx.doc)) {
+    blockers.push("At least one Item line with an Item code is required.");
   }
   return blockers;
 }

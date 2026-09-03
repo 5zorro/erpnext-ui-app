@@ -11,6 +11,7 @@ import {
   listJitPaymentEntryBlockers,
   projectBillPaymentRows,
   billDocStatusBadge,
+  billCanAddPayment,
 } from "../src/bill-paid.js";
 
 describe("bill-paid (OI-135 draft is_paid → JIT PE)", () => {
@@ -122,5 +123,31 @@ describe("bill-paid (OI-135 draft is_paid → JIT PE)", () => {
       "paid",
     );
     assert.equal(billDocStatusBadge({ docstatus: 2 }).label, "Cancelled");
+  });
+
+  it("ignores stale status Draft when docstatus is submitted", () => {
+    const b = billDocStatusBadge({
+      docstatus: 1,
+      status: "Draft",
+      outstanding_amount: 100,
+    });
+    assert.notEqual(b.label, "Draft");
+    assert.equal(b.tone, "submitted");
+  });
+
+  it("billCanAddPayment allows submitted unpaid and blocks paid", () => {
+    assert.equal(
+      billCanAddPayment({ docstatus: 1, outstanding_amount: 50, status: "Unpaid" }),
+      true,
+    );
+    assert.equal(
+      billCanAddPayment({ docstatus: 1, outstanding_amount: 0, status: "Paid" }),
+      false,
+    );
+    assert.equal(billCanAddPayment({ docstatus: 0, outstanding_amount: 50 }), false);
+    assert.equal(
+      billCanAddPayment({ docstatus: 1, status: "Partly Paid", outstanding_amount: 10 }),
+      true,
+    );
   });
 });

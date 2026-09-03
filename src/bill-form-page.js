@@ -19,6 +19,7 @@ import {
   saveActionsBlockedByChecksum,
   shouldShowAmountDueSticky,
   linkedPurchaseOrdersForBill,
+  linkedPurchaseReceiptsForBill,
 } from "../src/bill-map.js";
 import { ALLOC_SALES_ORDERS_FIELD } from "../src/bill-line-allocation.js";
 import {
@@ -30,13 +31,30 @@ import {
   sortHeaderState,
 } from "../src/bill-item-table.js";
 import {
+  billFindPrefillFromDupeWarning,
+  billRefCheckHasDupeWarning,
+} from "../src/bill-find-prefill.js";
+import { billDueDateForPaint, dueDateMultiInstallmentHint, planDueDateScheduleSync } from "../src/bill-payment-schedule.js";
+import {
+  billRemarksPoSearchHint,
+  shouldPrefillBillRemarksFromPo,
+} from "../src/bill-remarks-po.js";
+import {
+  linkedSourcePeekRoute,
+  canSoftPeekLinkedSourceRoute,
+  linkedSourcePeekKindLabel,
+} from "../src/source-doc-peek.js";
+import {
   evaluateBillRef,
+  billRefWaitingForVendorResult,
+  resolveBillRefSupplier,
 } from "../src/bill-ref-check.js";
 import {
   isPaidChecked,
   isPaidToggleWrites,
   DEFAULT_CREDIT_CARD_MODE_OF_PAYMENT,
   billDocStatusBadge,
+  billCanAddPayment,
 } from "../src/bill-paid.js";
 import {
   isAllocatableChargeRow,
@@ -58,6 +76,16 @@ import {
   LAST_ITEM_ROW_TOAST,
   isEmptyItemCode,
 } from "../src/bill-item-guard.js";
+import {
+  billRowHasSource,
+  formatQtyForErp,
+  humanizeBillErpMessage,
+  isOverBillingError,
+  listOverbillCapCacheBlockers,
+  OVERBILL_CAP_CACHE_BLOCKER,
+  planBillLineQtySplit,
+  saveFailureIsOverBilling,
+} from "../src/bill-po-qty-split.js";
 import { billDueDateFieldMode } from "../src/bill-due-date.js";
 import {
   billAddressRoleMeta,
@@ -103,6 +131,10 @@ import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
 import { showSourceModal } from "../src/source-modal-ui.js";
 import {
+  runSourcePickerFlow,
+  mayAutoOpenSourcePicker,
+} from "../src/source-picker-flow.js";
+import {
   paintCommitGateValidation,
   setCommitGateBusy,
   commitGateTitleText,
@@ -113,12 +145,17 @@ import {
 import { shouldForceCapsOnElement, applyDocCapsValue } from "../src/doc-caps.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
-import { collectBillSourceRefs, formatSourceTermsReadonly } from "../src/doc-source-terms.js";
+import { collectBillSourceRefs, sourceTermsDisplayBlocks } from "../src/doc-source-terms.js";
+import { paintSourceTermsFields } from "../src/doc-source-terms-dom.js";
 import {
   valuesMeaningfullyEqual,
   dirtyCompareKindForField,
   normalizeEditableText,
 } from "../src/dirty-gate.js";
+import {
+  paintHeaderInputIfAllowed,
+  paintHeaderLinkInputIfAllowed,
+} from "../src/bill-header-paint.js";
 import {
   filterDateInputValue,
   isAllowedDateInputChar,
@@ -160,7 +197,11 @@ import {
   washRoleForSourceKind,
 } from "../src/doc-wash.js";
 import { wireItemImportButton } from "../src/item-import-ui.js";
+import { formatDueDateSettleLog } from "../src/bill-payment-terms-settle.js";
 import { installFocusRing, logFocus } from "../src/focus-debug-client.js";
+import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
+import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
+import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
 import {
   isTaxTableNavField,
@@ -200,6 +241,14 @@ export async function bootBillFormPage(api) {
   const linkMounted = new WeakMap();
   /** Prevent stacking multiple source modals. */
   const sourceModalOpenRef = { current: false };
+  /** One auto-open session per vendor link pick — closed flag is SSoT (source-picker-flow). */
+  /** @type {{ supplier: string, userClosed: boolean } | null} */
+  let vendorPickSourceSession = null;
+  /** Coalesce parallel openSourcePicker calls for same supplier. */
+  /** @type {Promise<{ ok?: boolean, kind?: string, reason?: string }|void>|null} */
+  let sourcePickerInflight = null;
+  /** @type {string} */
+  let sourcePickerInflightSupplier = "";
   let allocationPickerOpen = false;
   /** True while OI-140 → Stock allocate dialog is open (freeze tax × deletes). */
   let allocateChargeModalOpen = false;
@@ -207,6 +256,14 @@ export async function bootBillFormPage(api) {
   let lineAllocations = {};
   /** @type {Record<number, object>} */
   let poLineMeta = {};
+  /** @type {import("../src/bill-enrich-pending.js").BillEnrichPending|null} */
+  let lastEnrichPending = null;
+  /** @type {Array<{ name: string, title: string }>} */
+  let lastLinkedPos = [];
+  /** @type {Array<{ name: string, lrNo: string }>} */
+  let lastLinkedReceipts = [];
+  /** Last ERP doc name painted — detect Bill→Bill nav and force-clear stale header shell. */
+  let paintedBillDocName = "";
   /** @type {{ key: string, asc: boolean }} */
   /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
   let itemSortSpecs = [{ key: "lineNo", asc: true }];
@@ -228,6 +285,154 @@ export async function bootBillFormPage(api) {
       api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
   });
   
+  /**
+   * Max billable qty from enrich/merge cache only (OI-151 — no JIT fetch at qty commit or save).
+   * @param {number} ri
+   * @returns {number|null}
+   */
+  function cachedMaxBillableForRow(ri) {
+    const meta = poLineMeta[ri] ?? poLineMeta[String(ri)];
+    if (meta && meta.maxBillableQty != null) {
+      const n = Number(meta.maxBillableQty);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listPoCapCacheBlockers() {
+    return listOverbillCapCacheBlockers(
+      lastDoc && lastDoc.items,
+      (ri) => cachedMaxBillableForRow(ri),
+    );
+  }
+
+  /**
+   * Load maxBillableQty for a sourced row — poLineMeta cache only.
+   * @param {number} ri
+   * @returns {Promise<number|null>}
+   */
+  async function fetchMaxBillableForRow(ri) {
+    return cachedMaxBillableForRow(ri);
+  }
+
+  /**
+   * @param {number} ri
+   * @param {Extract<ReturnType<typeof planBillLineQtySplit>, { action: "split" }>} plan
+   */
+  async function executeSplitPlan(ri, plan) {
+    setStatus("Over PO limit — capping sourced line and adding NIC excess…");
+    const sourcedRes = await api.setItem(ri, "qty", formatQtyForErp(plan.sourcedQty));
+    if (!sourcedRes || !sourcedRes.ok) {
+      setStatus((sourcedRes && sourcedRes.reason) || "Could not cap PO line qty.", "err");
+      return { ok: false, handled: true };
+    }
+    noteUserEdit();
+    let doc = sourcedRes.doc;
+
+    const added = await api.addItem();
+    if (!added || !added.ok) {
+      paint(doc, amountDue);
+      setStatus(
+        (added && added.reason) || "Capped line but could not add excess row.",
+        "warn",
+      );
+      return { ok: false, handled: true, doc };
+    }
+    doc = added.doc;
+    const newRi =
+      doc && Array.isArray(doc.items) ? Math.max(0, doc.items.length - 1) : ri + 1;
+
+    /** @type {Array<[string, string]>} */
+    const steps = [
+      ["item_code", plan.itemCode],
+      ["qty", formatQtyForErp(plan.excessQty)],
+    ];
+    if (plan.rate != null && plan.rate !== "") steps.push(["rate", String(plan.rate)]);
+    if (plan.uom != null && String(plan.uom).trim() !== "") {
+      steps.push(["uom", String(plan.uom).trim()]);
+    }
+    if (plan.excessDescription) steps.push(["description", plan.excessDescription]);
+
+    for (const [field, value] of steps) {
+      const res = await api.setItem(newRi, field, value);
+      if (!res || !res.ok) {
+        paint(doc, amountDue);
+        setStatus(
+          (res && res.reason) || `Could not set ${field} on excess row.`,
+          "warn",
+        );
+        return { ok: false, handled: true, doc };
+      }
+      doc = res.doc;
+    }
+
+    noteUserEdit();
+    paint(doc, amountDue);
+    setStatus(
+      `Split: ${formatQtyForErp(plan.sourcedQty)} on PO line; +${formatQtyForErp(plan.excessQty)} on new NIC row — approval required.`,
+      "warn",
+    );
+    focusItemCell(newRi, "qty", { mode: CELL_MODE_NAV });
+    return { ok: true, handled: true, doc };
+  }
+
+  /**
+   * OI-151 P3 — cap PO/PR-sourced qty and auto-add NIC row for excess.
+   * @param {number} ri
+   * @param {string} rawQty
+   * @returns {Promise<boolean>} true when split/blocked handled (skip normal apply)
+   */
+  async function maybeSplitQtyOverPoLimit(ri, rawQty) {
+    if (!api || !lastDoc || !Array.isArray(lastDoc.items)) return false;
+    const row = lastDoc.items[ri];
+    if (!row || !billRowHasSource(row)) return false;
+
+    const cap = await fetchMaxBillableForRow(ri);
+    if (cap == null) {
+      setStatus(OVERBILL_CAP_CACHE_BLOCKER, "warn");
+      return true;
+    }
+    const plan = planBillLineQtySplit(row, cap, rawQty);
+    if (plan.action === "blocked") {
+      setStatus(plan.reason, "warn");
+      return true;
+    }
+    if (plan.action !== "split") return false;
+    if (!plan.itemCode) {
+      setStatus("Set Item before qty over PO limit.", "warn");
+      return true;
+    }
+    const res = await executeSplitPlan(ri, plan);
+    return res.handled;
+  }
+
+  /**
+   * Save-time repair when enrich missed caps — split every sourced row over PO limit.
+   * @returns {Promise<{ repaired: number }>}
+   */
+  async function repairAllOverbillRows() {
+    if (!api || !lastDoc || !Array.isArray(lastDoc.items)) return { repaired: 0 };
+    let repaired = 0;
+    let doc = lastDoc;
+    for (let ri = doc.items.length - 1; ri >= 0; ri -= 1) {
+      const row = doc.items[ri];
+      if (!row || !billRowHasSource(row)) continue;
+      const cap = await fetchMaxBillableForRow(ri);
+      const plan = planBillLineQtySplit(row, cap, row.qty);
+      if (plan.action !== "split" || !plan.itemCode) continue;
+      const res = await executeSplitPlan(ri, plan);
+      if (res.ok) {
+        repaired += 1;
+        if (res.doc) doc = res.doc;
+      }
+    }
+    if (repaired > 0) lastDoc = doc;
+    return { repaired };
+  }
+
   /**
    * @param {HTMLInputElement} inp
    * @param {{ kind: string, onCommit: (value: string) => void | Promise<void> }} opts
@@ -255,13 +460,14 @@ export async function bootBillFormPage(api) {
   
   const el = {
     status: document.getElementById("status"),
+    docTitle: document.getElementById("doc-title"),
     vendor: document.getElementById("f-vendor"),
     shipFrom: document.getElementById("f-ship-from"),
     shipTo: document.getElementById("f-ship-to"),
     billingAddress: document.getElementById("f-billing-address"),
     terms: document.getElementById("f-terms"),
     sourceTermsBlock: document.getElementById("source-terms-block"),
-    sourceTermsBody: document.getElementById("source-terms-body"),
+    sourceTermsFields: document.getElementById("source-terms-fields"),
     isPaid: document.getElementById("f-is-paid"),
     mop: document.getElementById("f-mop"),
     cashBank: document.getElementById("f-cash-bank"),
@@ -273,6 +479,7 @@ export async function bootBillFormPage(api) {
     appliedPayments: document.getElementById("applied-payments"),
     appliedPaymentsBody: document.getElementById("applied-payments-body"),
     appliedPaymentsEmpty: document.getElementById("applied-payments-empty"),
+    addPayment: document.getElementById("btn-add-payment"),
     landedCost: document.getElementById("btn-landed-cost"),
     date: document.getElementById("f-date"),
     billno: document.getElementById("f-billno"),
@@ -331,6 +538,7 @@ export async function bootBillFormPage(api) {
     panelExpenses: document.getElementById("panel-expenses"),
     expenseNote: document.querySelector("[data-testid='bill-expense-note']"),
   };
+  if (el.docTitle) el.docTitle.textContent = "Bill";
   
   function commitGateEls() {
     return {
@@ -442,6 +650,97 @@ export async function bootBillFormPage(api) {
     el.status.textContent = text;
     el.status.className = "status" + (cls ? " " + cls : "");
   }
+
+  function scrollStatusIntoView() {
+    if (el.status) {
+      try {
+        el.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch {
+        el.status.scrollIntoView();
+      }
+    }
+  }
+
+  function scrollToBillItems() {
+    if (el.tabItems && el.panelExpenses && el.panelExpenses.hidden === false) {
+      el.tabItems.click();
+    }
+    const target =
+      document.querySelector('[data-testid="bill-lines-section"]') || el.panelItems;
+    if (target) {
+      try {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {
+        target.scrollIntoView();
+      }
+    }
+  }
+
+  /**
+   * @param {string} text
+   * @param {(() => void)|null} [onClick]
+   * @param {number} [ms]
+   */
+  function showBlockingToast(text, onClick, ms = 8000) {
+    if (!el.toast) {
+      scrollStatusIntoView();
+      setStatus(text, "err");
+      return;
+    }
+    if (toastTimer) clearTimeout(toastTimer);
+    el.toast.hidden = false;
+    el.toast.textContent = text;
+    el.toast.classList.remove("fade-out");
+    el.toast.classList.add("show");
+    if (onClick) {
+      el.toast.classList.add("is-action");
+      el.toast.onclick = () => {
+        onClick();
+        scrollStatusIntoView();
+      };
+    } else {
+      el.toast.classList.remove("is-action");
+      el.toast.onclick = null;
+    }
+    toastTimer = setTimeout(() => {
+      el.toast.classList.add("fade-out");
+      el.toast.classList.remove("is-action");
+      el.toast.onclick = null;
+      toastTimer = setTimeout(() => {
+        el.toast.classList.remove("show", "fade-out");
+        el.toast.hidden = true;
+        el.toast.textContent = "";
+        toastTimer = null;
+      }, 650);
+    }, ms);
+  }
+
+  /**
+   * @param {string} reason
+   * @param {string[]|undefined} blockers
+   */
+  function announceSaveBlocker(reason, blockers) {
+    scrollStatusIntoView();
+    const rawTexts = [reason, ...(Array.isArray(blockers) ? blockers : [])]
+      .filter(Boolean)
+      .map(String);
+    const texts = rawTexts.map(humanizeBillErpMessage).filter(Boolean);
+    const msg = texts[0] || "Save blocked — fix validation issues.";
+    if (rawTexts.some((t) => t === OVERBILL_CAP_CACHE_BLOCKER)) {
+      showBlockingToast("PO limits still loading — wait for source columns, then Save again.", () => {
+        scrollToBillItems();
+      });
+    } else if (rawTexts.some(isOverBillingError)) {
+      showBlockingToast("Over PO limit — click to review items (excess must be a NIC row).", () => {
+        scrollToBillItems();
+      });
+    } else {
+      showBlockingToast("Blocking validation — click to see details at top.", () => {
+        scrollStatusIntoView();
+      });
+    }
+    setStatus(msg, "err");
+  }
   
   /** @type {ReturnType<typeof setTimeout>|null} */
   let toastTimer = null;
@@ -491,10 +790,6 @@ export async function bootBillFormPage(api) {
    * @param {number} rowIndex
    * @param {string} itemCode
    */
-  /**
-   * Leave the items table without parking on mouse-only Add line (tabindex -1).
-   * Empty-row cleanup used to focus Add line, which made it feel tabbable.
-   */
   function focusAfterLeavingItemsTable() {
     if (el.addLine) el.addLine.tabIndex = -1;
     try {
@@ -516,6 +811,12 @@ export async function bootBillFormPage(api) {
     } catch {
       /* ignore */
     }
+  }
+
+  function rowItemCodeAt(doc, rowIndex) {
+    const items = doc && Array.isArray(doc.items) ? doc.items : [];
+    const row = items[rowIndex];
+    return row && row.item_code != null ? String(row.item_code).trim() : "";
   }
   
   async function cleanupEmptyItemRow(rowIndex, itemCode) {
@@ -664,8 +965,13 @@ export async function bootBillFormPage(api) {
   async function runPendingAction(action, trigger = null) {
     if (!api) return;
     if (action === "find") {
-      setStatus("Opening Bill list…");
-      const res = await api.findBills();
+      const prefill =
+        trigger && trigger.findPrefill && typeof trigger.findPrefill === "object"
+          ? trigger.findPrefill
+          : {};
+      const hasPrefill = !!(prefill.billNo && String(prefill.billNo).trim());
+      setStatus(hasPrefill ? "Opening Bill list with Ref filter…" : "Opening Bill list…");
+      const res = await api.findBills(prefill);
       try {
         if (document.activeElement && typeof document.activeElement.blur === "function") {
           document.activeElement.blur();
@@ -685,6 +991,8 @@ export async function bootBillFormPage(api) {
       if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
       else if (res.focusOk === false || (post && post.ok === false)) {
         setStatus(res.reason || post?.reason || "Bill list opened (filter focus missed).", "warn");
+      } else if (res.prefilled) {
+        setStatus(res.reason || "Bill list opened with Ref / vendor filters.");
       } else setStatus("Bill list opened — type in Supplier Invoice No.");
       return;
     }
@@ -723,14 +1031,27 @@ export async function bootBillFormPage(api) {
     }
   }
   
-  async function requestToolbarAction(action) {
+  async function requestToolbarAction(action, extra = null) {
     if (!api) return;
+    const trigger =
+      extra && typeof extra === "object"
+        ? { kind: "toolbar", action, ...extra }
+        : { kind: "toolbar", action };
     if (!shouldOpenCommitGate(userEdited)) {
       hideCommitGate();
-      await runPendingAction(action);
+      await runPendingAction(action, trigger);
       return;
     }
-    openGate({ kind: "toolbar", action });
+    openGate(trigger);
+  }
+
+  function openFindFromRefDupeWarning() {
+    if (!billRefCheckHasDupeWarning(lastRefCheckResult)) return;
+    const billNo = el.billno ? el.billno.value : "";
+    const supplier = resolveSupplierForRefCheck();
+    const prefill = billFindPrefillFromDupeWarning({ billNo, supplier });
+    if (!prefill) return;
+    void requestToolbarAction("find", { findPrefill: prefill });
   }
   
   async function resolveCommitGate(choiceRaw) {
@@ -773,13 +1094,17 @@ export async function bootBillFormPage(api) {
         return;
       }
       userEdited = false;
-      paint(res.doc, res.amountDue != null ? res.amountDue : "");
-      paintDirtyPill();
+      const continuesToFind =
+        trigger.kind === "toolbar" && trigger.action === "find";
+      if (!continuesToFind) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : "");
+        paintDirtyPill();
+      }
     } else if (choice === "save" || choice === "submit") {
       const blockers = currentSaveBlockers();
       if (!commitGateSaveEnabled(blockers)) {
         refreshCommitGateHint();
-        setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
+        announceSaveBlocker(blockers[0] || "Fix save prerequisites first.", blockers);
         return;
       }
       reduceCommitGatePhase("idle", { type: "start-save", choice });
@@ -808,6 +1133,7 @@ export async function bootBillFormPage(api) {
         } else {
           paintCommitGateValidation(commitGateEls(), commitGateErpFailureView(reason));
         }
+        announceSaveBlocker(reason, saveRes && Array.isArray(saveRes.blockers) ? saveRes.blockers : undefined);
         return;
       }
     }
@@ -920,6 +1246,8 @@ export async function bootBillFormPage(api) {
   
   /** @type {number} */
   let refCheckSeq = 0;
+  /** @type {import("../src/bill-ref-check.js").BillRefCheckResult|null} */
+  let lastRefCheckResult = null;
   
   /**
    * Non-blocking Ref No. chip (OI-054 / OI-087). Never disables Save.
@@ -928,29 +1256,72 @@ export async function bootBillFormPage(api) {
    */
   function paintRefChip(result) {
     const r = result || evaluateBillRef("");
+    lastRefCheckResult = r;
     const submitted = !!(lastDoc && Number(lastDoc.docstatus) === 1);
+    const hasDupe = !submitted && billRefCheckHasDupeWarning(r);
     const warnText =
       r.status === "warn" && r.warnings && r.warnings.length
         ? r.warnings.map((w) => w.message + (w.detail ? ` — ${w.detail}` : "")).join("\n")
         : "";
     if (el.refStatus) {
       const tone =
-        r.status === "warn" ? "warn" : r.status === "ok" ? "ok" : "idle";
+        r.status === "warn"
+          ? "warn"
+          : r.status === "ok"
+            ? "ok"
+            : r.status === "waiting"
+              ? "waiting"
+              : "idle";
       el.refStatus.className =
-        "chip " + tone + (submitted && tone === "warn" ? " is-posted-muted" : "");
+        "chip " +
+        tone +
+        (submitted && tone === "warn" ? " is-posted-muted" : "") +
+        (hasDupe ? " is-clickable" : "");
       el.refStatus.title =
-        submitted && warnText ? warnText : r.title || warnText || "";
+        hasDupe
+          ? "Click to open Find Bills with this Ref and vendor prefilled"
+          : submitted && warnText
+            ? warnText
+            : r.title || warnText || "";
     }
     if (el.refEmoji) el.refEmoji.innerHTML = uiIconHtml(r.icon || "idle");
     if (el.refWarn) {
-      if (!submitted && warnText) {
+      const waitingMsg = r.status === "waiting" ? r.title || "" : "";
+      if (!submitted && (warnText || waitingMsg)) {
         el.refWarn.hidden = false;
-        el.refWarn.textContent = warnText;
+        el.refWarn.classList.toggle("is-waiting", r.status === "waiting");
+        el.refWarn.classList.toggle("is-clickable", hasDupe);
+        el.refWarn.title = hasDupe
+          ? "Click to open Find Bills with this Ref and vendor prefilled"
+          : "";
+        el.refWarn.textContent = warnText || waitingMsg;
       } else {
         el.refWarn.hidden = true;
+        el.refWarn.classList.remove("is-waiting", "is-clickable");
         el.refWarn.textContent = "";
+        el.refWarn.title = "";
       }
     }
+  }
+
+  function resolveSupplierForRefCheck() {
+    return resolveBillRefSupplier({
+      docSupplier: lastDoc && lastDoc.supplier,
+      domSupplier: el.vendor && el.vendor.value,
+      pendingPickSupplier: vendorPickSourceSession && vendorPickSourceSession.supplier,
+    });
+  }
+
+  function scheduleBillRefCheckAfterVendorCommit() {
+    if (!el.billno || !String(el.billno.value || "").trim()) return;
+    void runBillRefCheck(el.billno.value);
+  }
+
+  function prefetchVendorBillRefs(supplier) {
+    if (!api || !api.prefetchVendorRefs) return;
+    const sup = normalizeEditableText(supplier);
+    if (!sup) return;
+    void api.prefetchVendorRefs(sup);
   }
   
   async function runBillRefCheck(billNoOverride) {
@@ -965,12 +1336,18 @@ export async function bootBillFormPage(api) {
       paintRefChip(evaluateBillRef(""));
       return;
     }
+    const supplier = resolveSupplierForRefCheck();
+    if (!supplier) {
+      if (seq !== refCheckSeq) return;
+      paintRefChip(billRefWaitingForVendorResult());
+      return;
+    }
     if (!api || !api.checkRef) {
       paintRefChip(evaluateBillRef(typed));
       return;
     }
     try {
-      const res = await api.checkRef(typed);
+      const res = await api.checkRef(typed, { supplierHint: supplier });
       if (seq !== refCheckSeq) return;
       if (res && res.result) paintRefChip(res.result);
       else paintRefChip(evaluateBillRef(typed));
@@ -1459,7 +1836,7 @@ export async function bootBillFormPage(api) {
             if (col.label === "Amount") {
               return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
             }
-            if (col.label === "Line" || col.label === "PO line") {
+            if (col.label === "Line" || col.label === "Source line") {
               return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
             }
           }
@@ -1518,18 +1895,23 @@ export async function bootBillFormPage(api) {
       const focusAfterItemEdit = async (docAfter, cellValue) => {
         const rowCount =
           docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
-        const dest = nextItemFocusAfterEdit(field, ri, rowCount, { cellValue });
+        const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
+          cellValue,
+          rowItemCode: docAfter?.items?.[ri]?.item_code ?? lastDoc?.items?.[ri]?.item_code ?? "",
+          nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
+        });
         if (dest.deleteRow && dest.leaveTable) {
           if (!api || !editable()) return;
           const rowCountNow =
             lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+          const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
           if (shouldBlockDeleteLastItemRow(rowCountNow)) {
             showToast(LAST_ITEM_ROW_TOAST);
             focusAfterLeavingItemsTable();
             return;
           }
           setStatus("Removing empty line…");
-          const removed = await api.deleteItem(ri);
+          const removed = await api.deleteItem(deleteRi);
           if (removed && removed.ok) {
             noteUserEdit();
             paint(removed.doc, amountDue);
@@ -1579,7 +1961,12 @@ export async function bootBillFormPage(api) {
               await focusAfterItemEdit(res.doc, value);
             }
           } else {
-            setStatus((res && res.reason) || "Line update failed.", "err");
+            const reason = (res && res.reason) || "";
+            if (field === "qty" && isOverBillingError(reason)) {
+              const handled = await maybeSplitQtyOverPoLimit(ri, value);
+              if (handled) return;
+            }
+            setStatus(reason || "Line update failed.", "err");
             await refresh();
           }
         };
@@ -1635,6 +2022,10 @@ export async function bootBillFormPage(api) {
               const n = parseMoney(value);
               next = n == null ? "" : String(n);
               if (n != null) inp.value = formatGroupedNumber(n);
+            }
+            if (field === "qty") {
+              const handled = await maybeSplitQtyOverPoLimit(ri, next);
+              if (handled) return;
             }
             await apply(next);
           },
@@ -1751,7 +2142,11 @@ export async function bootBillFormPage(api) {
             const next = readCellValue();
             const rowCount =
               lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-            const dest = nextItemFocusAfterEdit(field, ri, rowCount, { cellValue: next });
+            const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
+              cellValue: next,
+              rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
+              nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
+            });
             if (dest.deleteRow && dest.leaveTable) {
               await focusAfterItemEdit(lastDoc, next);
               return;
@@ -1908,8 +2303,17 @@ export async function bootBillFormPage(api) {
   
   function paintDocStatusBadge(doc) {
     if (!el.docStatusBadge) return;
+    // Draft lifecycle is the File dirty-pill only — banner badge is payment/clearance after submit.
+    if (doc && isDraftBillDoc(doc)) {
+      el.docStatusBadge.hidden = true;
+      el.docStatusBadge.textContent = "";
+      el.docStatusBadge.className = "doc-status-badge";
+      el.docStatusBadge.removeAttribute("role");
+      el.docStatusBadge.tabIndex = -1;
+      return;
+    }
     const badge = billDocStatusBadge(doc);
-    if (!badge) {
+    if (!badge || badge.tone === "draft") {
       el.docStatusBadge.hidden = true;
       el.docStatusBadge.textContent = "";
       el.docStatusBadge.className = "doc-status-badge";
@@ -2101,6 +2505,11 @@ export async function bootBillFormPage(api) {
       return;
     }
     el.appliedPayments.hidden = false;
+    const canAdd = billCanAddPayment(doc);
+    if (el.addPayment) {
+      el.addPayment.hidden = !canAdd;
+      el.addPayment.disabled = !canAdd;
+    }
     if (!api || !api.listPayments) {
       if (el.appliedPaymentsEmpty) {
         el.appliedPaymentsEmpty.hidden = false;
@@ -2372,6 +2781,8 @@ export async function bootBillFormPage(api) {
         editable: true,
         modalAlreadyOpen: sourceModalOpenRef.current,
       });
+      vendorPickSourceSession = { supplier: normalizeEditableText(v), userClosed: false };
+      prefetchVendorBillRefs(v);
       setStatus("Setting vendor…");
       try {
         el.vendor?.blur();
@@ -2385,10 +2796,18 @@ export async function bootBillFormPage(api) {
         supplier: v,
         decision,
         setHeader: (field, value) => api.setHeader(field, value),
-        openSourcePicker,
+        openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
+          if (res && res.paymentTermsSettle) {
+            logFocus("bill-due-date-settle", formatDueDateSettleLog(res.paymentTermsSettle));
+          }
           noteUserEdit();
-          paint(res.doc || lastDoc, amountDue);
+          paint(res.doc || lastDoc, amountDue, {
+            caller: "setHeader",
+            forceDueDatePaint: !!(res.paymentTermsSettle && res.paymentTermsSettle.ok),
+          });
+          prefetchVendorBillRefs((res.doc && res.doc.supplier) || v);
+          scheduleBillRefCheckAfterVendorCommit();
           if (decision.open) setStatus("Choose a source (or NIC).");
         },
         onHeaderFailure: (res) => {
@@ -2398,6 +2817,7 @@ export async function bootBillFormPage(api) {
           setStatus(`Source modal skipped (${reason}).`, "warn");
         },
         onAfterFlow: async () => {
+          scheduleBillRefCheckAfterVendorCommit();
           await refreshIfSupplierAddressesMissing(lastDoc);
         },
       });
@@ -2406,9 +2826,25 @@ export async function bootBillFormPage(api) {
     );
     mountBillLinkPicker(el.terms, "Payment Terms Template", async (v) => {
       if (!api || !editable()) return;
+      const savedFocus = captureBillFocus();
       const res = await api.setHeader("payment_terms_template", v);
+      if (res && res.paymentTermsSettle) {
+        logFocus("bill-due-date-settle", formatDueDateSettleLog(res.paymentTermsSettle));
+      }
       if (res && res.ok && !res.skipped) noteUserEdit();
-      await refresh();
+      if (res && res.doc) {
+        paint(res.doc, amountDue, {
+          caller: "setHeader-terms",
+          linkedPos: lastLinkedPos,
+          linkedReceipts: lastLinkedReceipts,
+          lineAllocations,
+          poLineMeta,
+          enrichPending: lastEnrichPending,
+          preserveFocus: savedFocus,
+        });
+      } else {
+        await refresh({ preserveFocus: savedFocus });
+      }
     });
     if (el.mop) {
       mountBillLinkPicker(el.mop, "Mode of Payment", async (v) => {
@@ -2433,18 +2869,21 @@ export async function bootBillFormPage(api) {
   }
   
   /**
-   * Museum-parity source modal after vendor (T2).
+   * Source modal — SSoT in source-picker-flow.js (modal closes ∥ streamed slices).
    * @param {string} [supplier]
+   * @param {{ trigger?: "link_pick" | "blur" | "toolbar" | "unknown" }} [opts]
    */
-  async function openSourcePicker(supplier) {
-    if (!api || !api.listSources) {
+  async function openSourcePicker(supplier, opts = {}) {
+    const trigger = opts.trigger || "unknown";
+    const listSlice = api && api.listSourceSlice;
+    if (!api || !listSlice) {
       setStatus("Source picker API missing — restart the shell.", "err");
-      return;
+      return { ok: false, reason: "api_missing" };
     }
-    if (sourceModalOpenRef.current) return;
+    if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
     if (!editable()) {
       setStatus("Bill is not a draft — source picker locked.", "warn");
-      return;
+      return { ok: false, reason: "not_editable" };
     }
     const sup =
       normalizeEditableText(supplier) ||
@@ -2452,8 +2891,40 @@ export async function bootBillFormPage(api) {
       normalizeEditableText(el.vendor.value);
     if (!sup) {
       setStatus("Pick a vendor before Select PO / source.", "warn");
-      return;
+      return { ok: false, reason: "no_supplier" };
     }
+
+    if (trigger === "link_pick") {
+      /* session reset happens in link picker onPicked (explicit user pick only) */
+    } else if (trigger === "toolbar") {
+      vendorPickSourceSession = null;
+    }
+
+    const gate = mayAutoOpenSourcePicker(vendorPickSourceSession, sup, trigger);
+    if (!gate.ok) {
+      logFocus("source-modal-skip", `${trigger}:${gate.reason || "blocked"}`);
+      return { ok: false, reason: gate.reason || "blocked" };
+    }
+
+    if (sourcePickerInflight && sourcePickerInflightSupplier === sup && trigger !== "toolbar") {
+      return sourcePickerInflight;
+    }
+
+    sourcePickerInflightSupplier = sup;
+    sourcePickerInflight = runBillSourcePicker(sup, trigger).finally(() => {
+      if (sourcePickerInflightSupplier === sup) {
+        sourcePickerInflight = null;
+        sourcePickerInflightSupplier = "";
+      }
+    });
+    return sourcePickerInflight;
+  }
+
+  /**
+   * @param {string} sup
+   * @param {"link_pick" | "blur" | "toolbar" | "unknown"} trigger
+   */
+  async function runBillSourcePicker(sup, trigger) {
     try {
       el.vendor?.blur();
     } catch {
@@ -2463,61 +2934,85 @@ export async function bootBillFormPage(api) {
       dd.hidden = true;
     });
     setStatus("Loading open PO / Item Receipts…");
-    const res = await api.listSources(sup);
-    if (!res || !res.ok) {
-      setStatus((res && res.reason) || "Could not load sources.", "err");
-      return;
-    }
-    const groups = res.groups || [];
-    setStatus(`Sources loaded (${groups.length} groups) — Space to check · Enter to pull.`);
-    showSourceModal({
-      groups,
+
+    return runSourcePickerFlow({
+      supplier: sup,
+      trigger,
       mode: "multi",
-      testId: "bill-source-modal",
-      pickButtonTestId: "bill-source-pull",
-      isOpenRef: sourceModalOpenRef,
-      setStatus,
-      focusSurface: () => {
-        if (api && api.focusBillSurface) api.focusBillSurface();
-      },
-      onClose: (kind) => {
+      listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
+      log: (event, detail) => logFocus(event, detail || ""),
+      mayOpen: (vendor, trig) =>
+        mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+      onUserClose: (kind) => {
+        if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
+          vendorPickSourceSession.userClosed = true;
+        }
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
-      onChoose: async (choice) => {
-      const mode = choice && choice.mode;
-      const items = (choice && choice.items) || [];
-      if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
-        setStatus("No source — enter lines manually.");
-        return;
-      }
-      if (mode !== "merge" || !items.length) {
-        setStatus("Pick at least one source (Space to check), or NIC.", "warn");
-        return;
-      }
-      const labels = items.map((it) => it.name || it.kind).join(", ");
-      setStatus(`Pulling from ${labels}…`);
-      const payload = items.map((it) => ({ kind: it.kind, name: it.name }));
-      const merged =
-        payload.length === 1
-          ? await api.mergeSource(payload[0].kind, payload[0].name)
-          : await api.mergeSource(payload);
-      if (merged && merged.ok) {
-        noteUserEdit();
-        paint(merged.doc, amountDue);
-        setStatus(
-          payload.length === 1
-            ? `Pulled from ${payload[0].name}.`
-            : `Pulled from ${payload.length} sources.`,
-        );
-      } else {
-        setStatus((merged && merged.reason) || "Could not pull source.", "err");
-        await refresh();
-      }
+      onStreamComplete: ({ errors }) => {
+        if (errors.length && sourceModalOpenRef.current) {
+          setStatus(`Some sources failed to load (${errors.length}) — NIC still ok.`, "warn");
+        } else if (sourceModalOpenRef.current) {
+          setStatus("Sources loaded — Space to check · Enter to pull (or NIC).");
+        }
       },
+      showModal: (flowOpts) =>
+        showSourceModal({
+          ...flowOpts,
+          testId: "bill-source-modal",
+          pickButtonTestId: "bill-source-pull",
+          isOpenRef: sourceModalOpenRef,
+          setStatus,
+          focusSurface: () => {
+            if (api && api.focusBillSurface) api.focusBillSurface();
+          },
+          onChoose: async (choice) => {
+            const mode = choice && choice.mode;
+            const items = (choice && choice.items) || [];
+            if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
+              setStatus("No source — enter lines manually.");
+              return;
+            }
+            if (mode !== "merge" || !items.length) {
+              setStatus("Pick at least one source (Space to check), or NIC.", "warn");
+              return;
+            }
+            const labels = items.map((it) => it.name || it.kind).join(", ");
+            setStatus(`Pulling from ${labels}…`);
+            scheduleFocusInvoiceDateField();
+            const payload = items.map((it) => ({ kind: it.kind, name: it.name }));
+            const merged =
+              payload.length === 1
+                ? await api.mergeSource(payload[0].kind, payload[0].name)
+                : await api.mergeSource(payload);
+            if (merged && merged.ok) {
+              noteUserEdit();
+              paint(merged.doc, amountDue, {
+                linkedPos: merged.linkedPos,
+                linkedReceipts: merged.linkedReceipts,
+                poLineMeta: merged.poLineMeta,
+                lineAllocations: merged.lineAllocations,
+                forceDueDatePaint: !!(merged.paymentTermsSettle && merged.paymentTermsSettle.ok),
+              });
+              setStatus(
+                payload.length === 1
+                  ? `Pulled from ${payload[0].name}.`
+                  : `Pulled from ${payload.length} sources.`,
+              );
+            } else {
+              setStatus((merged && merged.reason) || "Could not pull source.", "err");
+              await refresh();
+            }
+          },
+        }),
     });
   }
   
   function scheduleFocusInvoiceDateField() {
+    if (!shouldScheduleInvoiceDateFocus(document.activeElement)) {
+      logFocus("schedule-invoice-date", "skip-user-moved");
+      return;
+    }
     logFocus("schedule-invoice-date", "start");
     try {
       if (api && api.focusBillSurface) api.focusBillSurface();
@@ -2525,6 +3020,7 @@ export async function bootBillFormPage(api) {
       /* ignore */
     }
     const tryFocus = () => {
+      if (!shouldScheduleInvoiceDateFocus(document.activeElement)) return;
       try {
         if (!el.date) return;
         el.date.focus({ preventScroll: false });
@@ -2801,6 +3297,7 @@ export async function bootBillFormPage(api) {
         if (res.lineAllocations) lineAllocations = res.lineAllocations;
         paint(res.doc, res.amountDue != null ? res.amountDue : amountDue, {
           linkedPos: res.linkedPos,
+          linkedReceipts: res.linkedReceipts,
           lineAllocations: res.lineAllocations,
           poLineMeta: res.poLineMeta,
         });
@@ -2895,23 +3392,86 @@ export async function bootBillFormPage(api) {
     setTimeout(tryFocus, 500);
   }
   
-  function paintLinkedPos(doc, linkedPos) {
+  async function requestLinkedSourcePeek(route, kind) {
+    if (!route || !canSoftPeekLinkedSourceRoute(route)) {
+      setStatus("Cannot peek this source — missing route.", "warn");
+      return;
+    }
+    if (!api || !api.softPeekRoute) {
+      setStatus("Peek API missing — restart the shell.", "err");
+      return;
+    }
+    const label = linkedSourcePeekKindLabel(kind);
+    if (api.logNav) api.logNav("linked-source-peek", route);
+    setStatus(`Opening ${label}…`);
+    try {
+      const res = await api.softPeekRoute(route);
+      if (res && res.ok === false) {
+        setStatus((res && res.reason) || "Peek failed.", "err");
+        return;
+      }
+      setStatus(`Peeking ${label} — Esc to return to Bill.`);
+    } catch (e) {
+      setStatus(String(e && e.message ? e.message : e) || "Peek failed.", "err");
+    }
+  }
+
+  function appendLinkedSourcePeekButton(container, route, kind, testId) {
+    if (!container || !route || !canSoftPeekLinkedSourceRoute(route)) return;
+    const label = linkedSourcePeekKindLabel(kind);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "linked-source-peek-btn";
+    btn.dataset.testid = testId;
+    btn.title = `Go to ${label} (peek — Esc to return to Bill)`;
+    btn.setAttribute("aria-label", `Peek ${label}`);
+    btn.textContent = "↗";
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void requestLinkedSourcePeek(route, kind);
+    });
+    container.append(btn);
+  }
+
+  function paintLinkedSourceInput(input, opts) {
+    const value = opts.value != null ? String(opts.value) : "";
+    input.value = opts.pending ? "" : value;
+    if (opts.pending) {
+      input.placeholder = LINKED_SOURCE_LOADING_PLACEHOLDER;
+      input.title = "Loading from linked source document…";
+      input.classList.add("source-field-loading");
+      input.dataset.enrichPending = "1";
+    } else {
+      input.placeholder = opts.emptyPlaceholder || "";
+      input.title = value ? opts.filledTitle || "" : opts.emptyTitle || "";
+      input.classList.remove("source-field-loading");
+      delete input.dataset.enrichPending;
+    }
+  }
+
+  function paintLinkedSources(doc, linkedPos, linkedReceipts, enrichPending) {
     const block = el.linkedPoBlock;
     if (!block) return;
-    const rows = linkedPurchaseOrdersForBill(doc, linkedPos || []);
+    const pending = enrichPending || lastEnrichPending || {};
+    const poRows = linkedPurchaseOrdersForBill(doc, linkedPos || []);
+    const prRows = linkedPurchaseReceiptsForBill(doc, linkedReceipts || []);
     block.replaceChildren();
-    if (!rows.length) {
+    if (!poRows.length && !prRows.length) {
       block.hidden = true;
       return;
     }
     block.hidden = false;
-    rows.forEach((row, i) => {
+    const poTitlePending = !!pending.linkedPos;
+    const prRefPending = !!pending.linkedReceipts;
+    poRows.forEach((row, i) => {
       const name = row && row.name != null ? String(row.name) : "";
       const title = row && row.title != null ? String(row.title) : "";
       const erpField = document.createElement("div");
       erpField.className = "field";
       const erpLabel = document.createElement("label");
-      erpLabel.textContent = rows.length > 1 ? `Purchase Order (${i + 1})` : "Purchase Order";
+      erpLabel.textContent =
+        poRows.length > 1 ? `Purchase Order (${i + 1})` : "Purchase Order";
       const erpInput = document.createElement("input");
       erpInput.type = "text";
       erpInput.readOnly = true;
@@ -2920,30 +3480,135 @@ export async function bootBillFormPage(api) {
       erpInput.dataset.testid = `bill-linked-po-name-${i}`;
       erpInput.title = "ERP Purchase Order id (series name). Read-only.";
       setWashSourceAttr(erpInput, washRoleForSourceKind("po"));
-      erpField.append(erpLabel, erpInput);
+      const erpRow = document.createElement("div");
+      erpRow.className = "row linked-source-row";
+      erpRow.append(erpInput);
+      const poRoute = linkedSourcePeekRoute("purchase-order", name);
+      appendLinkedSourcePeekButton(erpRow, poRoute, "purchase-order", `bill-linked-po-peek-${i}`);
+      erpField.append(erpLabel, erpRow);
       const logField = document.createElement("div");
       logField.className = "field";
       const logLabel = document.createElement("label");
-      logLabel.textContent = rows.length > 1 ? `PO# (logbook) (${i + 1})` : "PO# (logbook)";
+      logLabel.textContent =
+        poRows.length > 1 ? `PO# (logbook) (${i + 1})` : "PO# (logbook)";
       const logInput = document.createElement("input");
       logInput.type = "text";
       logInput.readOnly = true;
       logInput.tabIndex = -1;
-      logInput.value = title || "";
-      logInput.placeholder = title ? "" : "(no logbook PO# on linked PO — set Title on the PO)";
       logInput.dataset.testid = `bill-linked-po-title-${i}`;
-      logInput.title = title
-        ? "Logbook / salesman PO# from the linked Purchase Order Title field (OI-121). Read-only on Bill."
-        : "Linked PO has no Title (logbook PO#). Open the Purchase Order and fill PO# (logbook).";
+      paintLinkedSourceInput(logInput, {
+        value: title,
+        pending: poTitlePending && !title,
+        emptyPlaceholder: "(no logbook PO# on linked PO — set Title on the PO)",
+        emptyTitle:
+          "Linked PO has no Title (logbook PO#). Open the Purchase Order and fill PO# (logbook).",
+        filledTitle:
+          "Logbook / salesman PO# from the linked Purchase Order Title field (OI-121). Read-only on Bill.",
+      });
       setWashSourceAttr(logInput, washRoleForSourceKind("po"));
       logField.append(logLabel, logInput);
       block.append(erpField, logField);
     });
+    prRows.forEach((row, i) => {
+      const name = row && row.name != null ? String(row.name) : "";
+      const lrNo = row && row.lrNo != null ? String(row.lrNo) : "";
+      const erpField = document.createElement("div");
+      erpField.className = "field";
+      const erpLabel = document.createElement("label");
+      erpLabel.textContent =
+        prRows.length > 1 ? `Item Receipt (${i + 1})` : "Item Receipt";
+      const erpInput = document.createElement("input");
+      erpInput.type = "text";
+      erpInput.readOnly = true;
+      erpInput.tabIndex = -1;
+      erpInput.value = name;
+      erpInput.dataset.testid = `bill-linked-pr-name-${i}`;
+      erpInput.title = "ERP Item Receipt id. Read-only.";
+      setWashSourceAttr(erpInput, washRoleForSourceKind("pr"));
+      const erpRow = document.createElement("div");
+      erpRow.className = "row linked-source-row";
+      erpRow.append(erpInput);
+      const prRoute = linkedSourcePeekRoute("purchase-receipt", name);
+      appendLinkedSourcePeekButton(erpRow, prRoute, "purchase-receipt", `bill-linked-pr-peek-${i}`);
+      erpField.append(erpLabel, erpRow);
+      const refField = document.createElement("div");
+      refField.className = "field";
+      const refLabel = document.createElement("label");
+      refLabel.textContent =
+        prRows.length > 1 ? `Packing List / BOL Ref (${i + 1})` : "Packing List / BOL Ref";
+      const refInput = document.createElement("input");
+      refInput.type = "text";
+      refInput.readOnly = true;
+      refInput.tabIndex = -1;
+      refInput.dataset.testid = `bill-linked-pr-lr-${i}`;
+      paintLinkedSourceInput(refInput, {
+        value: lrNo,
+        pending: prRefPending && !lrNo,
+        emptyPlaceholder: "(no packing list / BOL ref on linked Item Receipt)",
+        emptyTitle: "(no packing list / BOL ref on linked Item Receipt)",
+        filledTitle: "Packing List / BOL Ref from the linked Item Receipt (lr_no). Read-only on Bill.",
+      });
+      setWashSourceAttr(refInput, washRoleForSourceKind("pr"));
+      refField.append(refLabel, refInput);
+      block.append(erpField, refField);
+    });
   }
   
+  async function maybePrefillRemarksFromLinkedPos(doc, poRows, opts = {}) {
+    if (!api || !editable() || !shouldPrefillBillRemarksFromPo(doc, poRows)) return;
+    if (!opts.linkedPosChanged) return;
+    const hint = billRemarksPoSearchHint(poRows);
+    if (!hint) return;
+    const res = await api.setHeader("remarks", hint);
+    if (res && res.ok) {
+      noteUserEdit();
+      if (el.memo) el.memo.value = hint;
+    }
+  }
+
+  function clearBillFormShellForLoad() {
+    const force = { forcePaint: true };
+    const blankLink = (input, field) => {
+      if (!input) return;
+      paintHeaderLinkInputIfAllowed(input, field, "", force);
+    };
+    const blank = (input, field) => {
+      if (!input) return;
+      paintHeaderInputIfAllowed(input, field, "", force);
+    };
+    blankLink(el.vendor, "supplier");
+    blankLink(el.terms, "payment_terms_template");
+    blank(el.date, "posting_date");
+    blank(el.billno, "bill_no");
+    blank(el.duedate, "due_date");
+    blank(el.memo, "remarks");
+    for (const node of [el.billingAddress, el.shipFrom, el.shipTo]) {
+      if (!node) continue;
+      node.value = "";
+      node.rows = addressTextareaRows("");
+    }
+    amountDue = "";
+    paintAmountDueInput();
+    paintAlreadyPaid({}, false);
+    paintDocStatusBadge(null);
+    paintRefChip(evaluateBillRef(""));
+    lineAllocations = {};
+    poLineMeta = {};
+    lastLinkedPos = [];
+    lastLinkedReceipts = [];
+    lastEnrichPending = null;
+    vendorPickSourceSession = null;
+    sourcePickerInflight = null;
+    sourcePickerInflightSupplier = "";
+    paintedBillDocName = "";
+    logFocus("paint-clear-shell", "loading");
+  }
+
   function paint(doc, scratchDue, opts = {}) {
     painting = true;
-    logFocus("paint-start", opts.focusVendor ? "focusVendor" : "");
+    const savedFocus = opts.preserveFocus ?? captureBillFocus();
+    const paintCaller = opts.caller || (opts.focusVendor ? "focusVendor" : "");
+    logFocus("paint-start", paintCaller);
     try {
     clearFieldCalc(amountDue);
     lastDoc = doc || null;
@@ -2955,28 +3620,61 @@ export async function bootBillFormPage(api) {
     if (opts.poLineMeta && typeof opts.poLineMeta === "object") {
       poLineMeta = opts.poLineMeta;
     }
+    if (opts.linkedPos !== undefined) {
+      lastLinkedPos = Array.isArray(opts.linkedPos) ? opts.linkedPos : [];
+    }
+    if (opts.linkedReceipts !== undefined) {
+      lastLinkedReceipts = Array.isArray(opts.linkedReceipts) ? opts.linkedReceipts : [];
+    }
+    if (opts.enrichPending !== undefined) {
+      lastEnrichPending =
+        opts.enrichPending && typeof opts.enrichPending === "object" ? opts.enrichPending : null;
+    }
     paintDirtyPill();
     if (!doc) {
       setFormBlocked(true, opts.reason || "No Purchase Invoice loaded in Vanilla yet.");
+      clearBillFormShellForLoad();
       el.items.innerHTML = "";
       paintLineTotals(null);
       if (el.taxesBody) el.taxesBody.innerHTML = "";
       paintMoneyStack(null);
       el.addLine.disabled = true;
       el.addLine.tabIndex = -1;
-    if (el.addSource) el.addSource.disabled = true;
-    if (el.importItems) el.importItems.disabled = true;
-    if (el.clearQty) el.clearQty.disabled = true;
-    if (el.attach) el.attach.disabled = true;
-    if (el.addTax) el.addTax.disabled = true;
-    paintLinkedPos(null, []);
-    paintChip();
-    return;
-  }
-  setFormBlocked(false);
+      if (el.addSource) el.addSource.disabled = true;
+      if (el.importItems) el.importItems.disabled = true;
+      if (el.clearQty) el.clearQty.disabled = true;
+      if (el.attach) el.attach.disabled = true;
+      if (el.addTax) el.addTax.disabled = true;
+      paintLinkedSources(null, [], []);
+      paintChip();
+      return;
+    }
+    setFormBlocked(false);
+    const nextDocName = String(doc.name || "");
+    const docIdentityChanged = nextDocName !== paintedBillDocName;
+    if (docIdentityChanged) {
+      vendorPickSourceSession = null;
+      sourcePickerInflight = null;
+      sourcePickerInflightSupplier = "";
+      logFocus("paint-doc-swap", `${paintedBillDocName || "(none)"} → ${nextDocName || "(none)"}`);
+    }
+    const headerForce = docIdentityChanged || !!opts.forceHeaderPaint;
     const h = readBillHeader(doc, { amountDue: amountDue || undefined });
-    el.vendor.value = h["Vendor Name"] ?? "";
-    el.vendor.dataset.linkCommitted = el.vendor.value;
+    const skipHeaderPaint = (field, reason) => {
+      if (field === "due_date" && el.duedate) {
+        const erpDue =
+          formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
+        logFocus(
+          "paint-skip-header",
+          `${field}:${reason} ui=${el.duedate.value || "(blank)"} erp=${erpDue || "(blank)"}`,
+        );
+        return;
+      }
+      logFocus("paint-skip-header", `${field}:${reason}`);
+    };
+    const headerPaintOpts = (field) =>
+      headerForce ? { forcePaint: true } : { onSkip: (reason) => skipHeaderPaint(field, reason) };
+    paintHeaderLinkInputIfAllowed(el.vendor, "supplier", h["Vendor Name"] ?? "", headerPaintOpts("supplier"));
     const paintAddr = (node, text) => {
       if (!node) return;
       const v = text ?? "";
@@ -2990,15 +3688,34 @@ export async function bootBillFormPage(api) {
       "paint-addr",
       String(h["Remittance & Billing Address"] ?? "").trim() ? "billing:painted" : "billing:blank",
     );
-    el.terms.value = h["Payment terms"] ?? "";
-    el.terms.dataset.linkCommitted = el.terms.value;
-    el.date.value = formatDocDateDisplay(h["Invoice date"] ?? "") || (h["Invoice date"] ?? "");
-    el.billno.value = h["Ref No. (Supplier Invoice No.)"] ?? "";
+    paintHeaderLinkInputIfAllowed(el.terms, "payment_terms_template", h["Payment terms"] ?? "", headerPaintOpts("payment_terms_template"));
+    paintHeaderInputIfAllowed(
+      el.date,
+      "posting_date",
+      formatDocDateDisplay(h["Invoice date"] ?? "") || (h["Invoice date"] ?? ""),
+      headerPaintOpts("posting_date"),
+    );
+    paintHeaderInputIfAllowed(el.billno, "bill_no", h["Ref No. (Supplier Invoice No.)"] ?? "", headerPaintOpts("bill_no"));
     // Amount Due is user scratch only — stay blank until they type (no grand_total seed).
     paintAmountDueInput();
-    el.duedate.value = formatDocDateDisplay(h["Bill Due Date"] ?? "") || (h["Bill Due Date"] ?? "");
-    paintLinkedPos(doc, opts.linkedPos);
-    el.memo.value = h.Memo ?? "";
+    const forceDueDatePaint =
+      headerForce || !!opts.forceDueDatePaint || paintCaller === "setHeader-terms";
+    const dueRaw = doc ? billDueDateForPaint(doc) : h["Bill Due Date"];
+    paintHeaderInputIfAllowed(
+      el.duedate,
+      "due_date",
+      formatDocDateDisplay(dueRaw ?? "") || (dueRaw ?? ""),
+      {
+        ...headerPaintOpts("due_date"),
+        forcePaint: forceDueDatePaint,
+      },
+    );
+    const linkedPosArg = opts.linkedPos ?? lastLinkedPos;
+    paintLinkedSources(doc, linkedPosArg, opts.linkedReceipts ?? lastLinkedReceipts, lastEnrichPending);
+    if (opts.linkedPos !== undefined) {
+      void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
+    }
+    paintHeaderInputIfAllowed(el.memo, "remarks", h.Memo ?? "", headerPaintOpts("remarks"));
     void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
     syncAddressPickers(canEdit);
@@ -3037,43 +3754,52 @@ export async function bootBillFormPage(api) {
       if (docCapsUi) docCapsUi.syncCapsButton();
       if (canEdit) focusVendorField();
     }
+    paintedBillDocName = nextDocName;
     } finally {
       painting = false;
       logFocus("paint-end", lastDoc && lastDoc.name ? String(lastDoc.name) : "");
+      restoreBillFocus(savedFocus, { allowFocusVendor: !!opts.focusVendor });
     }
   }
   
   async function refreshIfSupplierAddressesMissing(doc) {
     if (!api?.getSnapshot || !doc?.supplier) return;
     const h = readBillHeader(doc, { amountDue });
-    const billing = String(h["Remittance & Billing Address"] ?? "").trim();
-    if (billing) {
-      logFocus("paint-addr", "billing:ok");
+    const billingDoc = String(h["Remittance & Billing Address"] ?? "").trim();
+    const billingDom = el.billingAddress ? String(el.billingAddress.value ?? "").trim() : "";
+    if (billingDoc || billingDom) {
+      logFocus("paint-addr", billingDoc ? "billing:ok" : "billing:ok-dom");
       return;
     }
     logFocus("paint-addr", "billing:empty — deferred refresh");
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 150));
+    if (el.billingAddress && String(el.billingAddress.value ?? "").trim()) {
+      logFocus("paint-addr", "billing:ok-dom-after-wait");
+      return;
+    }
     const snap = await api.getSnapshot();
     if (!snap?.doc) {
       logFocus("paint-addr", "billing:still-empty");
       return;
     }
+    const h2 = readBillHeader(snap.doc, { amountDue: snap.amountDue ?? amountDue });
+    const billingSnap = String(h2["Remittance & Billing Address"] ?? "").trim();
+    if (!billingSnap) {
+      logFocus("paint-addr", "billing:still-empty");
+      return;
+    }
     paint(snap.doc, snap.amountDue ?? amountDue, {
+      caller: "deferred-addr-refresh",
       userEdited: true,
       linkedPos: snap.linkedPos,
+      linkedReceipts: snap.linkedReceipts,
       lineAllocations: snap.lineAllocations,
       poLineMeta: snap.poLineMeta,
     });
-    const h2 = readBillHeader(snap.doc, { amountDue });
-    logFocus(
-      "paint-addr",
-      String(h2["Remittance & Billing Address"] ?? "").trim()
-        ? "billing:ok-after-refresh"
-        : "billing:still-empty",
-    );
+    logFocus("paint-addr", "billing:ok-after-refresh");
   }
 
-  async function refresh() {
+  async function refresh(opts = {}) {
     if (!api) return;
     setStatus("Refreshing…");
     const snap = await api.getSnapshot();
@@ -3082,28 +3808,32 @@ export async function bootBillFormPage(api) {
       focusVendor: false,
       userEdited: snap && snap.userEdited,
       linkedPos: snap && snap.linkedPos,
+      linkedReceipts: snap && snap.linkedReceipts,
       lineAllocations: snap && snap.lineAllocations,
       poLineMeta: snap && snap.poLineMeta,
+      enrichPending: snap && snap.enrichPending,
+      preserveFocus: opts.preserveFocus,
+      caller: opts.caller || "refresh",
     });
     if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
   }
   
   async function paintSourceTerms(doc) {
-    if (!el.sourceTermsBlock || !el.sourceTermsBody || !api || !api.fetchSourceTerms) return;
+    if (!el.sourceTermsBlock || !el.sourceTermsFields || !api || !api.fetchSourceTerms) return;
     const refs = collectBillSourceRefs(doc);
     if (!refs.length) {
       el.sourceTermsBlock.hidden = true;
-      el.sourceTermsBody.textContent = "";
+      el.sourceTermsFields.replaceChildren();
       return;
     }
     const res = await api.fetchSourceTerms(refs);
-    const text = formatSourceTermsReadonly(refs, res && res.termsByKey);
-    if (!text) {
+    const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
+    if (!blocks.length) {
       el.sourceTermsBlock.hidden = true;
-      el.sourceTermsBody.textContent = "";
+      el.sourceTermsFields.replaceChildren();
       return;
     }
-    el.sourceTermsBody.textContent = text;
+    paintSourceTermsFields(el.sourceTermsFields, blocks);
     el.sourceTermsBlock.hidden = false;
   }
   
@@ -3138,6 +3868,12 @@ export async function bootBillFormPage(api) {
       const res = await api.setHeader(field, parsed.iso);
       if (res && res.skipped) return;
       if (res && res.ok) noteUserEdit();
+      const multiHint =
+        dueDateMultiInstallmentHint(res && res.dueDateScheduleSync) ||
+        dueDateMultiInstallmentHint(
+          planDueDateScheduleSync(res && res.doc ? res.doc : lastDoc, parsed.iso),
+        );
+      if (multiHint) setStatus(multiHint, "warn");
       await refresh();
       return;
     }
@@ -3169,8 +3905,14 @@ export async function bootBillFormPage(api) {
       if (decision.open) {
         if (res && res.ok) noteUserEdit();
         paint(res.doc || lastDoc, amountDue);
-        await openSourcePicker(next || (res && res.supplier));
+        prefetchVendorBillRefs(next || (res && res.supplier));
+        await openSourcePicker(next || (res && res.supplier), { trigger: "blur" });
+        scheduleBillRefCheckAfterVendorCommit();
         return;
+      }
+      if (res && res.ok) {
+        prefetchVendorBillRefs(next || (res && res.supplier));
+        scheduleBillRefCheckAfterVendorCommit();
       }
     }
     if (res && res.skipped) {
@@ -3238,12 +3980,25 @@ export async function bootBillFormPage(api) {
       }
       const blockers = currentSaveBlockers();
       if (!commitGateSaveEnabled(blockers)) {
-        setStatus(blockers[0] || "Fix Amount Due checksum before save.", "err");
+        announceSaveBlocker(blockers[0] || "Fix Amount Due checksum before save.", blockers);
         return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
+      }
+      const capBlockers = listPoCapCacheBlockers();
+      if (capBlockers.length) {
+        if (typeof api.navDebug === "function") {
+          api.navDebug("bill-overbill-cache-block-renderer", capBlockers[0]);
+        }
+        announceSaveBlocker(capBlockers[0], capBlockers);
+        return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
       const choice = submit ? "submit" : "save";
       setStatus(commitGateProgressLabel(choice));
-      const r = await api.save({ submit: !!submit });
+      let r = await api.save({ submit: !!submit });
+      const splitCount = r && typeof r.overbillRepaired === "number" ? r.overbillRepaired : 0;
+      if (splitCount > 0 && r && r.doc) {
+        noteUserEdit();
+        paint(r.doc, amountDue);
+      }
       if (r && r.ok) {
         userEdited = false;
         metaBlockers = [];
@@ -3251,6 +4006,9 @@ export async function bootBillFormPage(api) {
         paint(r.doc, amountDue);
         paintDirtyPill();
         let statusMsg = commitGateSuccessLabel(choice);
+        if (splitCount > 0) {
+          statusMsg += ` (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC).`;
+        }
         if (submit && r.jitPayment) {
           if (r.jitPayment.ok) {
             statusMsg = `Submitted · Payment Entry ${r.jitPayment.name || ""} created.`.trim();
@@ -3288,7 +4046,13 @@ export async function bootBillFormPage(api) {
         r,
         submit ? "Save & submit" : "Save draft",
       );
-      setStatus(reason, "err");
+      announceSaveBlocker(reason, r && Array.isArray(r.blockers) ? r.blockers : undefined);
+      if (splitCount > 0) {
+        setStatus(
+          `${reason} (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC — retry Save & submit).`,
+          "err",
+        );
+      }
       return {
         ok: false,
         reason,
@@ -3311,6 +4075,22 @@ export async function bootBillFormPage(api) {
       const res = await api.openLandedCost();
       if (!(res && res.ok)) {
         setStatus((res && res.reason) || "Could not open Landed Cost.", "err");
+      }
+    };
+  }
+
+  if (el.addPayment) {
+    el.addPayment.onclick = async () => {
+      if (!api || !api.openAddPayment) {
+        setStatus("Add payment API missing — restart the shell.", "err");
+        return;
+      }
+      setStatus("Opening Payment Entry…");
+      const res = await api.openAddPayment();
+      if (res && res.ok) {
+        setStatus(`Payment Entry ${res.name || ""} opened — Esc returns to this Bill.`.trim());
+      } else {
+        setStatus((res && res.reason) || "Could not open Payment Entry.", "err");
       }
     };
   }
@@ -3474,6 +4254,12 @@ export async function bootBillFormPage(api) {
     },
   });
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
+  if (el.refWarn) {
+    el.refWarn.addEventListener("click", () => openFindFromRefDupeWarning());
+  }
+  if (el.refStatus) {
+    el.refStatus.addEventListener("click", () => openFindFromRefDupeWarning());
+  }
   if (el.newBill) el.newBill.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");
   if (el.commitGate) {
@@ -3520,7 +4306,7 @@ export async function bootBillFormPage(api) {
       );
       return;
     }
-    openSourcePicker();
+    openSourcePicker(undefined, { trigger: "toolbar" });
   }
   
   document.getElementById("btn-select-po").onclick = () => openSelectSourceFromToolbar();
@@ -3652,12 +4438,16 @@ export async function bootBillFormPage(api) {
   if (api && api.onSnapshot) {
     api.onSnapshot((snap) =>
       paint(snap && snap.doc, snap && snap.amountDue, {
+        caller: snap && snap.enrichProgress ? "enrich-progress" : "onSnapshot",
         reason: snap && snap.reason,
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
         linkedPos: snap && snap.linkedPos,
+        linkedReceipts: snap && snap.linkedReceipts,
         lineAllocations: snap && snap.lineAllocations,
         poLineMeta: snap && snap.poLineMeta,
+        enrichPending: snap && snap.enrichPending,
+        preserveFocus: snap && snap.enrichProgress ? captureBillFocus() : undefined,
       }),
     );
   }

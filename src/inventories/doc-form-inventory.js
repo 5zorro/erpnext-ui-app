@@ -238,7 +238,6 @@ export function docFormCuratedForProfile(profileId) {
     rows.push(...taxLineTemplate());
     rows.push(
       { id: "doc-source-terms-block", kind: "section", modeSwitch: "none", notes: "IR source terms" },
-      { id: "doc-terms-text", kind: "textarea", modeSwitch: "none", notes: "Freeform terms" },
     );
   }
 

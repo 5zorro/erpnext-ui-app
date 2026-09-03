@@ -73,17 +73,36 @@ describe("readPoHeader", () => {
     assert.equal(h["Date Expected"], "2026-07-25");
   });
 
-  it("fills Billing when billing_address_display is present", () => {
+  it("fills Billing when billing_address_display is present and vendor set", () => {
     const h = readPoHeader({
       ...sampleDoc,
+      supplier: "ACME",
       billing_address_display: "<p>Co Bill<br>1 HQ<br>Dallas, TX 75201<br>United States</p>",
     });
     assert.equal(h["Billing address"], "Co Bill\n1 HQ\nDallas, TX 75201");
   });
 
+  it("hides address blocks until vendor is picked", () => {
+    const h = readPoHeader({
+      ...sampleDoc,
+      supplier: "",
+      billing_address_display: "<p>Co Bill<br>1 HQ</p>",
+      shipping_address_display: "<p>Warehouse</p>",
+      address_display: "<p>Vendor ship</p>",
+    });
+    assert.equal(h["Billing address"], "");
+    assert.equal(h["Ship to"], "");
+    assert.equal(h["Ship from"], "");
+  });
+
   it("prefers scratch Date Expected", () => {
     const h = readPoHeader(sampleDoc, { dateExpected: "2026-08-01" });
     assert.equal(h["Date Expected"], "2026-08-01");
+  });
+
+  it("projects freeform terms for footer (not header column)", () => {
+    const h = readPoHeader({ ...sampleDoc, terms: "<p>Net 30 freight prepaid</p>" });
+    assert.match(String(h["Terms and conditions"]), /freight prepaid/i);
   });
 });
 
@@ -92,7 +111,7 @@ describe("PO header layout (Bill-like columns)", () => {
     const { left, right, addresses } = splitHeaderColumns(PO_HEADER_FIELDS);
     assert.deepEqual(
       left.map((f) => f.label),
-      ["Vendor", "Customer (drop ship)", "Billing address"],
+      ["Vendor", "Billing address"],
     );
     assert.deepEqual(
       right.map((f) => f.label),
@@ -102,7 +121,6 @@ describe("PO header layout (Bill-like columns)", () => {
         "PO No.",
         "PO# (logbook)",
         "Payment terms",
-        "Terms and conditions",
       ],
     );
     assert.deepEqual(
@@ -179,7 +197,7 @@ describe("readPoItemRows", () => {
   it("maps item columns including Line, SO, Required By, and received qty", () => {
     const rows = readPoItemRows(sampleDoc);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, "SO-1", 0, "2026-07-25", 20, 1]);
+    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, "SO-1", "2026-07-25", 20, 1]);
   });
 });
 
@@ -188,7 +206,7 @@ describe("editable fields", () => {
     assert.equal(isEditablePoItemField("item_code"), true);
     assert.equal(isEditablePoItemField("sales_order"), true);
     assert.equal(isEditablePoItemField("schedule_date"), true);
-    assert.equal(isEditablePoItemField("delivered_by_supplier"), true);
+    assert.equal(isEditablePoItemField("delivered_by_supplier"), false);
     assert.equal(isEditablePoItemField("amount"), false);
   });
 

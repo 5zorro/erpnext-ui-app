@@ -24,8 +24,12 @@ export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
 
 /** Legacy shells retained for reference; not loaded at runtime (tranche 10). */
 export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
-  "bill.html": "Legacy Bill shell — superseded by doc-form.html#bill-shell",
-  "bill-shell.fragment.html": "Bill DOM partial included by doc-form.html (tranche 10)",
+  "bill.html": "Legacy Bill shell — superseded by doc-form.html (shared chrome + bill body)",
+  "bill-shell.fragment.html": "Bill body partial — assembled with doc-chrome.fragment.html",
+  "doc-chrome.fragment.html": "Shared AP entry chrome (banner, toolbar, commit gate)",
+  "doc-form-body.fragment.html": "PO/IR body partial — assembled into doc-form.html",
+  "doc-form.head.html": "doc-form.html head/styles partial for assemble script",
+  "doc-form.footer.html": "doc-form.html calc overlay + boot script partial",
 });
 
 /**

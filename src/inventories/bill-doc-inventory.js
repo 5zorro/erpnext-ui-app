@@ -19,18 +19,18 @@ import { BILL_ITEM_COLS } from "../bill-map.js";
 
 /** @type {readonly CuratedInteractable[]} */
 const BILL_DOC_STATIC = Object.freeze([
-  // Toolbar — File
-  { id: "bill-print", kind: "button", modeSwitch: "none" },
-  { id: "bill-revert", kind: "button", modeSwitch: "none" },
-  { id: "bill-save", kind: "button", modeSwitch: "none" },
-  { id: "bill-submit", kind: "button", modeSwitch: "none" },
+  // Toolbar — File (shared chrome; doc-* testids)
+  { id: "doc-print", kind: "button", modeSwitch: "none" },
+  { id: "doc-revert", kind: "button", modeSwitch: "none" },
+  { id: "doc-save", kind: "button", modeSwitch: "none" },
+  { id: "doc-submit", kind: "button", modeSwitch: "none" },
   // Toolbar — Navigate
-  { id: "bill-find", kind: "button", modeSwitch: "none" },
-  { id: "bill-new", kind: "button", modeSwitch: "none" },
+  { id: "doc-find", kind: "button", modeSwitch: "none" },
+  { id: "doc-new", kind: "button", modeSwitch: "none" },
   { id: "bill-select-po", kind: "button", modeSwitch: "none" },
   { id: "bill-assign-0", kind: "button", modeSwitch: "none" },
-  { id: "bill-refresh", kind: "button", modeSwitch: "none" },
-  { id: "bill-vanilla", kind: "button", modeSwitch: "none" },
+  { id: "doc-refresh", kind: "button", modeSwitch: "none" },
+  { id: "doc-vanilla", kind: "button", modeSwitch: "none" },
   // Assumptions disclosure
   { id: "bill-assumptions", kind: "disclosure", modeSwitch: "none", notes: "details/summary" },
   {
@@ -56,10 +56,10 @@ const BILL_DOC_STATIC = Object.freeze([
     notes: "Payment card wrapping Already paid + Applied payments",
   },
   {
-    id: "bill-doc-status",
+    id: "doc-status-badge",
     kind: "section",
     modeSwitch: "none",
-    notes: "Banner Paid/Draft status pill",
+    notes: "Banner Paid/Draft status pill (shared chrome)",
   },
   // Header fields
   { id: "bill-vendor", kind: "text", modeSwitch: "none" },
@@ -68,7 +68,7 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-ref", kind: "text", modeSwitch: "none" },
   { id: "bill-amount-due", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-due-date", kind: "date", modeSwitch: "date" },
-  { id: "bill-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
+  { id: "doc-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
   {
     id: "bill-lines-section",
     kind: "section",
@@ -177,6 +177,6 @@ export const BILL_DOC_CURATED = Object.freeze([
 export const BILL_DOC_INVENTORY_META = Object.freeze({
   anchor: "purchase-invoice",
   lens: "doc",
-  surface: "electron/doc-form.html#bill-shell",
+  surface: "electron/doc-form.html (doc-chrome + bill body)",
   doctype: "Purchase Invoice",
 });

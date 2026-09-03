@@ -25,6 +25,7 @@
     "erp:check": "bash ops/erp-host/upgrade-sandbox.sh --check",
     "erp:upgrade-sandbox": "bash ops/erp-host/upgrade-sandbox.sh --upgrade",
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
+    "start:chaos": "ERP_CHAOS_LAG_MS=250 ERP_CHAOS_LAG_PCT=45 electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage",
     "start:linux": "electron . --no-sandbox --disable-gpu --in-process-gpu --disable-dev-shm-usage"
   },
   "devDependencies": {

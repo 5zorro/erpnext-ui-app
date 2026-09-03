@@ -40,3 +40,16 @@ describe("doc-form CAPS control", () => {
     assert.match(docFormHtml, /id="btn-caps" data-testid="doc-caps"/);
   });
 });
+
+describe("bill-dashboard subsection chrome", () => {
+  it("defines borderless subsection inset on white bill-sections", () => {
+    assert.match(billDashboardCss, /\.bill-section \.field input\.addr-pick/);
+    assert.match(billDashboardCss, /box-shadow:/);
+  });
+
+  it("PO doc-form shell uses bill-section doc header wrapper", () => {
+    assert.match(docFormHtml, /data-testid="doc-header-section"/);
+    assert.match(docFormHtml, /bill-section-doc/);
+    assert.match(docFormHtml, /data-testid="doc-notes-section"/);
+  });
+});

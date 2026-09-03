@@ -151,12 +151,14 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     input.dataset.linkCommitted = v;
     dd.hidden = true;
     hi = -1;
-    try {
-      input.blur();
-    } catch {
-      /* ignore */
+    if (refocusAfterPick) {
+      try {
+        input.blur();
+      } catch {
+        /* ignore */
+      }
+      logFocus("link-pick-blur", doctype);
     }
-    logFocus("link-pick-blur", doctype);
     await onPicked(v);
     if (refocusAfterPick) {
       try {

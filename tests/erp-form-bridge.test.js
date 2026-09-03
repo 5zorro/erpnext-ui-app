@@ -21,6 +21,12 @@ import {
   hasSupplierAddressDisplaySignals,
   supplierPartyQuietSliceMs,
   SUPPLIER_PARTY_SETTLE_MAX_MS,
+  supplierSnapshotWaitSliceMs,
+  supplierSnapshotAllowMetaOnly,
+  supplierAddressSnapshotReady,
+  supplierSnapshotReadyReason,
+  hasSupplierBillingDisplay,
+  SUPPLIER_BILLING_DISPLAY_FIELD,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {
@@ -69,7 +75,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 13);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 20);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -199,6 +205,76 @@ describe("supplier party settle (parallel-safe setHeader)", () => {
     assert.equal(supplierPartyQuietSliceMs(1000, 900), 500);
     assert.equal(supplierPartyQuietSliceMs(Date.now() + 10000), 4000);
   });
+
+  it("snapshot wait slice is short poll cadence", () => {
+    assert.equal(supplierSnapshotWaitSliceMs(1000, 980), 50);
+    assert.equal(supplierSnapshotWaitSliceMs(Date.now() + 5000), 500);
+  });
+
+  it("supplierAddressSnapshotReady requires address_display HTML, not link alone", () => {
+    const baseline = supplierPartyBaseline({});
+    const linkOnly = {
+      supplier: "Alpine Supply",
+      supplier_name: "Alpine Supply Co",
+      supplier_address: "Alpine Supply-Billing",
+    };
+    assert.equal(hasSupplierBillingDisplay(linkOnly), false);
+    assert.equal(
+      supplierAddressSnapshotReady(linkOnly, {
+        targetSupplier: "Alpine Supply",
+        baseline,
+        allowMetaOnlyAtDeadline: false,
+      }),
+      false,
+    );
+    assert.equal(
+      supplierSnapshotReadyReason(linkOnly, {
+        targetSupplier: "Alpine Supply",
+        baseline,
+        allowMetaOnlyAtDeadline: false,
+      }).reason,
+      "waiting",
+    );
+  });
+
+  it("supplierAddressSnapshotReady requires address before deadline", () => {
+    const baseline = supplierPartyBaseline({});
+    const metaOnly = { supplier: "Alpine Supply", supplier_name: "Alpine Supply Co" };
+    assert.equal(
+      supplierAddressSnapshotReady(metaOnly, {
+        targetSupplier: "Alpine Supply",
+        baseline,
+        allowMetaOnlyAtDeadline: false,
+      }),
+      false,
+    );
+    assert.equal(
+      supplierAddressSnapshotReady(metaOnly, {
+        targetSupplier: "Alpine Supply",
+        baseline,
+        allowMetaOnlyAtDeadline: true,
+      }),
+      true,
+    );
+    const withAddr = {
+      supplier: "Alpine Supply",
+      address_display: "<p>1 Mountain Rd</p>",
+    };
+    assert.equal(
+      supplierAddressSnapshotReady(withAddr, {
+        targetSupplier: "Alpine Supply",
+        baseline,
+        allowMetaOnlyAtDeadline: false,
+      }),
+      true,
+    );
+  });
+
+  it("meta-only grace opens only near deadline", () => {
+    const deadline = Date.now() + 5000;
+    assert.equal(supplierSnapshotAllowMetaOnly(deadline), false);
+    assert.equal(supplierSnapshotAllowMetaOnly(deadline, deadline - 2500), true);
+  });
 });
 
 describe("erp-form-bridge-page save settle contract", () => {
@@ -215,7 +291,9 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 13/);
+    assert.match(page, /var VERSION = 19/);
+    assert.match(page, /waitForSupplierBillingSnapshot/);
+    assert.match(page, /hasSupplierBillingDisplay/);
     assert.match(page, /isSupplierPartyMetaOnlyChange/);
     assert.match(page, /clearRow:\s*clearRow/);
     assert.match(page, /SAVE_CALL_TIMEOUT_MS\s*=\s*12000/);

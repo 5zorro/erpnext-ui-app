@@ -11,6 +11,7 @@ import {
   isDraftPoDoc,
   PO_MULTIPLE_DATES_LABEL,
   poDateExpectedHeaderDisplay,
+  PO_CUSTOMER_DROPSHIP,
 } from "./po-map.js";
 import {
   readReceiptHeader,
@@ -52,8 +53,9 @@ import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, so
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
 import {
   collectSourceRefsForProfile,
-  formatSourceTermsReadonly,
+  sourceTermsDisplayBlocks,
 } from "./doc-source-terms.js";
+import { paintSourceTermsFields } from "./doc-source-terms-dom.js";
 import { FREEFORM_TERMS_LABEL, ERP_FREEFORM_TERMS_FIELD } from "./doc-terms-fields.js";
 import {
   valuesMeaningfullyEqual,
@@ -91,12 +93,18 @@ import {
 } from "./doc-action-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
 import { showSourceModal } from "./source-modal-ui.js";
+import {
+  runSourcePickerFlow,
+  mayAutoOpenSourcePicker,
+} from "./source-picker-flow.js";
 import { mountLinkPicker } from "./link-picker-ui.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
+import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
 import {
   paintCommitGateValidation,
   setCommitGateBusy,
   commitGateTitleText,
+  configureDirectSaveGateChrome,
   showCommitGate,
   hideCommitGateEl,
   wireCommitGateChrome,
@@ -124,9 +132,11 @@ import {
 } from "./doc-address.js";
 import {
   showAddressPickerModal,
+  updateAddressPickerModalRows,
   wireAddressPickerFields,
   syncAddressPickerLock,
 } from "./address-picker-ui.js";
+import { poFindPrefillFromDoc } from "./po-find-prefill.js";
 
 /** @type {typeof window.erpDoc|null} */
 let api = null;
@@ -154,6 +164,12 @@ let metaPreflightSeq = 0;
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
 const sourceModalOpenRef = { current: false };
+/** @type {{ supplier: string, userClosed: boolean } | null} */
+let vendorPickSourceSession = null;
+/** @type {Promise<{ ok?: boolean, kind?: string, reason?: string }|void>|null} */
+let sourcePickerInflight = null;
+/** @type {string} */
+let sourcePickerInflightSupplier = "";
 const addressPickerOpenRef = { current: false };
 /** Suppress blur cleanup while Tab/arrow handlers are mid-flight. */
 let itemTabGuard = false;
@@ -197,65 +213,80 @@ function publishCalcHistory(payload) {
   });
 }
 
-const el = {
-  status: document.getElementById("status"),
-  title: document.getElementById("doc-title"),
-  itemsHead: document.getElementById("items-head-row"),
-  items: document.getElementById("items-body"),
-  lineTotals: document.getElementById("line-totals"),
-  save: document.getElementById("btn-save"),
-  submit: document.getElementById("btn-submit"),
-  revert: document.getElementById("btn-revert"),
-  find: document.getElementById("btn-find"),
-  newDoc: document.getElementById("btn-new"),
-  print: document.getElementById("btn-print"),
-  dirtyPill: document.getElementById("dirty-pill"),
-  commitGate: document.getElementById("commit-gate"),
-  commitGateBackdrop: document.getElementById("commit-gate-backdrop"),
-  commitGateTitle: document.getElementById("commit-gate-title"),
-  commitGateValidation: document.getElementById("commit-gate-validation"),
-  commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
-  commitGateBlockers: document.getElementById("commit-gate-blockers"),
-  commitGateHint: document.getElementById("commit-gate-hint"),
-  addLine: document.getElementById("btn-add-line"),
-  importItems: document.getElementById("btn-import-items"),
-  clearQty: null,
-  attach: document.getElementById("btn-attach"),
-  attachToolbar: document.getElementById("btn-attach-toolbar"),
-  taxesBlock: document.getElementById("doc-taxes-block"),
-  taxesHead: document.getElementById("taxes-head-row"),
-  taxesBody: document.getElementById("taxes-body"),
-  taxesAdd: document.getElementById("taxes-add"),
-  taxAccount: document.getElementById("f-tax-account"),
-  taxAmount: document.getElementById("f-tax-amount"),
-  addTax: document.getElementById("btn-add-tax"),
-  msItems: document.getElementById("ms-items"),
-  msTaxes: document.getElementById("ms-taxes"),
-  msGrand: document.getElementById("ms-grand"),
-  msNote: document.getElementById("ms-note"),
-  lineTabs: document.querySelector("[data-testid='doc-line-tabs']"),
-  tabItems: document.getElementById("tab-items"),
-  tabExpenses: document.getElementById("tab-expenses"),
-  panelItems: document.getElementById("panel-items"),
-  panelExpenses: document.getElementById("panel-expenses"),
-  expenseNote: document.querySelector("[data-testid='doc-expense-note']"),
-  memoBlock: document.getElementById("memo-block"),
-  memoLabel: document.getElementById("memo-label"),
-  memoEntry: document.getElementById("memo-entry"),
-  memo: document.getElementById("f-memo"),
-  termsBlock: document.getElementById("terms-block"),
-  termsText: document.getElementById("f-terms-text"),
-  sourceTermsBlock: document.getElementById("source-terms-block"),
-  sourceTermsBody: document.getElementById("source-terms-body"),
-  hint: document.getElementById("doc-hint"),
-  selectSource: document.getElementById("btn-select-source"),
-  caps: document.getElementById("btn-caps"),
-  headerLeft: document.getElementById("header-left"),
-  headerRight: document.getElementById("header-right"),
-  headerAddresses: document.getElementById("header-addresses"),
-};
+/** @type {ReturnType<typeof buildDocFormEl> | null} */
+let el = null;
+
+function buildDocFormEl() {
+  return {
+    status: document.getElementById("status"),
+    title: document.getElementById("doc-title"),
+    itemsHead: document.getElementById("items-head-row"),
+    items: document.getElementById("items-body"),
+    lineTotals: document.getElementById("line-totals"),
+    save: document.getElementById("btn-save"),
+    submit: document.getElementById("btn-submit"),
+    revert: document.getElementById("btn-revert"),
+    find: document.getElementById("btn-find"),
+    newDoc: document.getElementById("btn-new"),
+    print: document.getElementById("btn-print"),
+    dirtyPill: document.getElementById("dirty-pill"),
+    commitGate: document.getElementById("commit-gate"),
+    commitGateBackdrop: document.getElementById("commit-gate-backdrop"),
+    commitGateTitle: document.getElementById("commit-gate-title"),
+    commitGateValidation: document.getElementById("commit-gate-validation"),
+    commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
+    commitGateBlockers: document.getElementById("commit-gate-blockers"),
+    commitGateHint: document.getElementById("commit-gate-hint"),
+    commitGateCopy: document.getElementById("commit-gate-copy"),
+    addLine: document.getElementById("btn-add-line"),
+    importItems: document.getElementById("btn-import-items"),
+    clearQty: null,
+    attach: document.getElementById("btn-attach"),
+    attachToolbar: document.getElementById("btn-attach-toolbar"),
+    taxesBlock: document.getElementById("doc-taxes-block"),
+    taxesHead: document.getElementById("taxes-head-row"),
+    taxesBody: document.getElementById("taxes-body"),
+    taxesAdd: document.getElementById("taxes-add"),
+    taxAccount: document.getElementById("f-tax-account"),
+    taxAmount: document.getElementById("f-tax-amount"),
+    addTax: document.getElementById("btn-add-tax"),
+    msItems: document.getElementById("ms-items"),
+    msTaxes: document.getElementById("ms-taxes"),
+    msGrand: document.getElementById("ms-grand"),
+    msNote: document.getElementById("ms-note"),
+    lineTabs: document.querySelector('[data-testid="doc-line-tabs"]'),
+    linesSection: document.querySelector('[data-testid="doc-lines-section"]'),
+    linesSectionTitle: document.getElementById("doc-lines-title"),
+    tabItems: document.getElementById("tab-items"),
+    tabExpenses: document.getElementById("tab-expenses"),
+    panelItems: document.getElementById("panel-items"),
+    panelExpenses: document.getElementById("panel-expenses"),
+    expenseNote: document.querySelector('[data-testid="doc-expense-note"]'),
+    notesSection: document.querySelector('[data-testid="doc-notes-section"]'),
+    memoBlock: document.getElementById("memo-block"),
+    memoLabel: document.getElementById("memo-label"),
+    memoEntry: document.getElementById("memo-entry"),
+    memo: document.getElementById("f-memo"),
+    termsBlock: document.getElementById("terms-block"),
+    termsText: document.getElementById("f-terms-text"),
+    sourceTermsBlock: document.getElementById("source-terms-block"),
+    sourceTermsFields: document.getElementById("source-terms-fields"),
+    hint: document.getElementById("doc-hint"),
+    selectSource: document.getElementById("btn-select-source"),
+    caps: document.getElementById("btn-caps"),
+    headerLeft: document.getElementById("header-left"),
+    headerRight: document.getElementById("header-right"),
+    headerAddresses: document.getElementById("header-addresses"),
+    retry: document.getElementById("btn-retry"),
+    refresh: document.getElementById("btn-refresh"),
+    vanilla: document.getElementById("btn-vanilla"),
+    backTop: document.getElementById("btn-back-top"),
+    assumptionsList: document.getElementById("assumptions-list"),
+  };
+}
 
 function commitGateEls() {
+  if (!el) return {};
   return {
     commitGate: el.commitGate,
     commitGateBackdrop: el.commitGateBackdrop,
@@ -271,8 +302,8 @@ function linkPickerDeps() {
   return { api, linkMounted, setStatus };
 }
 
-function mountDocLinkPicker(input, doctype, onPicked) {
-  mountLinkPicker(input, doctype, onPicked, linkPickerDeps());
+function mountDocLinkPicker(input, doctype, onPicked, pickOpts) {
+  mountLinkPicker(input, doctype, onPicked, linkPickerDeps(), pickOpts);
 }
 
 function mapHelpers() {
@@ -320,24 +351,24 @@ function docTitle() {
 }
 
 async function paintSourceTerms(doc) {
-  if (!ui?.features.sourceTerms || !el.sourceTermsBlock || !el.sourceTermsBody || !api?.fetchSourceTerms) {
+  if (!ui?.features.sourceTerms || !el.sourceTermsBlock || !el.sourceTermsFields || !api?.fetchSourceTerms) {
     if (el.sourceTermsBlock) el.sourceTermsBlock.hidden = true;
     return;
   }
   const refs = collectSourceRefsForProfile(ui.profileId, doc);
   if (!refs.length) {
     el.sourceTermsBlock.hidden = true;
-    el.sourceTermsBody.textContent = "";
+    el.sourceTermsFields.replaceChildren();
     return;
   }
   const res = await api.fetchSourceTerms(refs);
-  const text = formatSourceTermsReadonly(refs, res && res.termsByKey);
-  if (!text) {
+  const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
+  if (!blocks.length) {
     el.sourceTermsBlock.hidden = true;
-    el.sourceTermsBody.textContent = "";
+    el.sourceTermsFields.replaceChildren();
     return;
   }
-  el.sourceTermsBody.textContent = text;
+  paintSourceTermsFields(el.sourceTermsFields, blocks);
   el.sourceTermsBlock.hidden = false;
 }
 
@@ -345,6 +376,21 @@ function addressFieldPickable(meta) {
   if (!ui?.features.addressPicker || !meta?.addressRole) return false;
   const roleMeta = addressRoleMeta(ui.profileId, meta.addressRole);
   return !!(roleMeta?.pickable && roleMeta.linkField);
+}
+
+async function refreshShipToAddressPickerRows() {
+  if (!api?.listAddresses) return;
+  const res = await api.listAddresses("ship_to");
+  if (!(res && res.ok)) return;
+  updateAddressPickerModalRows(
+    "doc-addr-modal",
+    Array.isArray(res.rows) ? res.rows : [],
+    res.current,
+  );
+  const clearCustBtn = document.querySelector("#doc-addr-modal [data-customer-clear]");
+  if (clearCustBtn) {
+    clearCustBtn.disabled = !(lastDoc && String(lastDoc.customer || "").trim());
+  }
 }
 
 async function openDocAddressPicker(role) {
@@ -369,6 +415,54 @@ async function openDocAddressPicker(role) {
   }
   const meta = decision.meta || addressRoleMeta(ui.profileId, role);
   if (!meta) return;
+
+  const poShipTo =
+    ui.profileId === "po" && role === "ship_to"
+      ? {
+          label: PO_CUSTOMER_DROPSHIP.label,
+          hint: PO_CUSTOMER_DROPSHIP.hint,
+          value:
+            (lastDoc && (lastDoc.customer_name || lastDoc.customer)) ||
+            "",
+          editable: editable(),
+          mountPicker: (input) => {
+            mountDocLinkPicker(input, PO_CUSTOMER_DROPSHIP.linkDoctype, async (v) => {
+              if (!api || !editable()) return;
+              setStatus("Setting drop-ship customer…");
+              const resCust = await api.setHeader(PO_CUSTOMER_DROPSHIP.field, v);
+              if (resCust && resCust.ok && !resCust.skipped) {
+                noteUserEdit();
+                paint(resCust.doc || lastDoc, resCust.scratch || scratch);
+                input.value =
+                  (resCust.doc && (resCust.doc.customer_name || resCust.doc.customer)) ||
+                  v ||
+                  "";
+                input.dataset.linkCommitted = input.value;
+                await refreshShipToAddressPickerRows();
+                const clearCustBtn = document.querySelector("#doc-addr-modal [data-customer-clear]");
+                if (clearCustBtn) clearCustBtn.disabled = false;
+                setStatus("Customer set — pick ship-to address.");
+              } else if (resCust && resCust.skipped) {
+                input.value = input.dataset.linkCommitted || "";
+              } else {
+                setStatus((resCust && resCust.reason) || "Customer update failed.", "err");
+              }
+            });
+          },
+          onClear: async () => {
+            if (!api || !editable()) return;
+            const resClr = await api.setHeader(PO_CUSTOMER_DROPSHIP.field, "");
+            if (resClr && resClr.ok && !resClr.skipped) {
+              noteUserEdit();
+              paint(resClr.doc || lastDoc, resClr.scratch || scratch);
+              await refreshShipToAddressPickerRows();
+              setStatus("Drop-ship customer cleared.");
+            }
+          },
+          onCustomerChanged: refreshShipToAddressPickerRows,
+        }
+      : undefined;
+
   showAddressPickerModal({
     meta,
     rows: Array.isArray(res.rows) ? res.rows : [],
@@ -377,6 +471,7 @@ async function openDocAddressPicker(role) {
     isOpenRef: addressPickerOpenRef,
     setStatus,
     focusSurface: () => api.focusSurface?.(),
+    customerDropShip: poShipTo,
     onApply: async (linkField, addressName) => {
       if (!api || !linkField) return;
       setStatus(addressName ? "Setting address…" : "Clearing address…");
@@ -440,7 +535,14 @@ function setStatus(text, cls) {
 
 function paintDirtyPill() {
   if (!el.dirtyPill) return;
-  const isDraft = lastDoc ? mapHelpers().isDraft(lastDoc) : true;
+  if (!lastDoc) {
+    const loading = docLifecyclePill({ loading: true });
+    el.dirtyPill.textContent = loading.text;
+    el.dirtyPill.title = loading.title;
+    el.dirtyPill.className = "dirty-pill tone-" + loading.tone;
+    return;
+  }
+  const isDraft = mapHelpers().isDraft(lastDoc);
   const pill = docLifecyclePill({
     isDraft,
     userEdited,
@@ -469,8 +571,85 @@ function currentSaveBlockers() {
 
 function hideCommitGate() {
   pendingGate = null;
+  configureDirectSaveGateChrome(commitGateEls(), { active: false, copyEl: el.commitGateCopy });
   hideCommitGateEl(commitGateEls());
   setGateBusy(false);
+}
+
+function gateToolbarAction() {
+  if (!pendingGate) return "";
+  if (pendingGate.kind === "toolbar") return pendingGate.action;
+  if (pendingGate.kind === "direct-save") return "direct-save";
+  return "";
+}
+
+function openDirectSaveBlockedGate(blockers, opts = {}) {
+  pendingGate = { kind: "direct-save", submit: !!opts.submit };
+  if (el.commitGateTitle) {
+    el.commitGateTitle.textContent = opts.submit ? "Cannot submit yet" : "Cannot save yet";
+  }
+  configureDirectSaveGateChrome(commitGateEls(), {
+    submit: !!opts.submit,
+    active: true,
+    copyEl: el.commitGateCopy,
+  });
+  const title = docTitle();
+  if (opts.erpFailure) {
+    paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(opts.reason, title));
+  } else {
+    paintCommitGateValidation(commitGateEls(), {
+      blockers,
+      blocked: true,
+      title: "Save is blocked by:",
+      cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
+    });
+  }
+  setGateBusy(false);
+  showCommitGate(commitGateEls(), {
+    focusSurface: () => {
+      if (api && api.focusSurface) api.focusSurface();
+    },
+  });
+  void refreshMetaPreflight();
+}
+
+async function handleDirectSaveGateChoice(choice) {
+  const blockers = currentSaveBlockers();
+  if (!commitGateSaveEnabled(blockers)) {
+    refreshCommitGateHint();
+    setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
+    return;
+  }
+  reduceCommitGatePhase("idle", { type: "start-save", choice });
+  setGateBusy(true);
+  const saveRes = await doSave(choice === "submit");
+  if (!(saveRes && saveRes.ok)) {
+    const reason = (saveRes && saveRes.reason) || "Save failed.";
+    reduceCommitGatePhase("saving", { type: "error", reason });
+    setGateBusy(false);
+    if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
+      metaBlockers = saveRes.blockers;
+      paintCommitGateValidation(commitGateEls(), {
+        blockers: mergeSaveBlockers(
+          listDocFormSaveBlockers({
+            doc: lastDoc,
+            supplier: supplierInput() && supplierInput().value,
+          }),
+          saveRes.blockers,
+        ),
+        blocked: true,
+        title: "Save is blocked by:",
+        cancelHint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
+      });
+    } else {
+      paintCommitGateValidation(
+        commitGateEls(),
+        docCommitGateErpFailureView(reason, docTitle()),
+      );
+    }
+    return;
+  }
+  hideCommitGate();
 }
 
 function gateIsNewDoc() {
@@ -486,7 +665,7 @@ function gateIsNewDoc() {
 function setGateBusy(busy) {
   setCommitGateBusy(commitGateEls(), {
     busy,
-    toolbarAction: pendingGate && pendingGate.kind === "toolbar" ? pendingGate.action : "",
+    toolbarAction: gateToolbarAction(),
     isNewDoc: gateIsNewDoc(),
     docTitle: docTitle(),
     getSaveBlockers: currentSaveBlockers,
@@ -558,11 +737,17 @@ async function refreshMetaPreflight() {
   }
 }
 
+function docFindPrefill() {
+  if (!ui || ui.profileId !== "po" || !lastDoc) return {};
+  return poFindPrefillFromDoc(lastDoc) || {};
+}
+
 async function runPendingAction(action) {
   if (!api) return;
   if (action === "find") {
     setStatus(`Opening ${docTitle()} list…`);
-    const res = await api.findDocs();
+    const prefill = docFindPrefill();
+    const res = await api.findDocs(prefill);
     try {
       if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
@@ -581,7 +766,11 @@ async function runPendingAction(action) {
     if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
     else if (res.focusOk === false || (post && post.ok === false)) {
       setStatus(res.reason || post?.reason || "List opened (filter focus missed).", "warn");
-    } else setStatus(`${docTitle()} list opened — type in ID.`);
+    } else setStatus(
+      res.prefilled
+        ? `${docTitle()} list opened — logbook PO# prefilled.`
+        : `${docTitle()} list opened — type in PO# (logbook) or ID.`,
+    );
     return;
   }
   if (action === "new") {
@@ -617,6 +806,13 @@ async function resolveCommitGate(choiceRaw) {
   if (!trigger || !choice || choice === "cancel") {
     hideCommitGate();
     if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
+    return;
+  }
+
+  if (trigger.kind === "direct-save") {
+    if (choice === "save" || choice === "submit") {
+      await handleDirectSaveGateChoice(choice);
+    }
     return;
   }
 
@@ -761,6 +957,7 @@ async function cleanupEmptyItemRow(rowIndex, itemCode) {
     noteUserEdit();
     paint(removed.doc, removed.scratch || scratch);
     setStatus("Empty line removed.");
+    focusAfterLeavingItemsTable();
   } else if (removed && removed.blockedLastRow) {
     showToast(removed.reason || lastItemRowToast(docTitle()));
   }
@@ -803,6 +1000,10 @@ function captureFocusAnchor() {
  */
 function restoreFocusAnchor(anchor) {
   if (!anchor) return;
+  if (!shouldRestoreFocusAnchor(anchor, document.activeElement)) {
+    logFocus("restore-focus-anchor", "skip-user-moved");
+    return;
+  }
   logFocus("restore-focus-anchor", anchor.field || anchor.scratch || anchor.row || "");
   if (anchor.row != null && anchor.field) {
     focusItemCell(Number(anchor.row), anchor.field, { mode: CELL_MODE_NAV });
@@ -848,6 +1049,51 @@ function focusLastHeaderBeforeItems() {
     }
   }
   return false;
+}
+
+/** Leave items grid — forward Tab exit lands on the next section (terms/memo), not header row 0. */
+function focusAfterLeavingItemsTable() {
+  if (el.addLine) el.addLine.tabIndex = -1;
+  if (ui?.features?.termsField && el.termsText && !el.termsText.readOnly) {
+    try {
+      logFocus("focus-after-items", "terms");
+      el.termsText.focus();
+      return;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (ui?.features?.memo && el.memo && !el.memo.readOnly) {
+    try {
+      logFocus("focus-after-items", "memo");
+      el.memo.focus();
+      return;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (focusLastHeaderBeforeItems()) return;
+  try {
+    if (el.addTax && !el.addTax.disabled) {
+      el.addTax.focus();
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function rowItemCodeAt(doc, rowIndex) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  const row = items[rowIndex];
+  return row && row.item_code != null ? String(row.item_code).trim() : "";
 }
 
 function paintItemsHead() {
@@ -1204,34 +1450,26 @@ function paintItems(doc) {
       const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
         cellValue,
         fields: navFields,
+        rowItemCode: docAfter?.items?.[ri]?.item_code ?? "",
+        nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
       });
       if (dest.deleteRow && dest.leaveTable) {
         if (!api || !editable()) return;
         const rowCountNow =
           lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-        const leaveItemsFocus = () => {
-          if (el.addLine) el.addLine.tabIndex = -1;
-          try {
-            if (el.addTax && !el.addTax.disabled) {
-              el.addTax.focus();
-              return;
-            }
-          } catch {
-            /* ignore */
-          }
-        };
+        const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
         if (shouldBlockDeleteLastItemRow(rowCountNow)) {
           showToast(lastItemRowToast(docTitle()));
-          leaveItemsFocus();
+          focusAfterLeavingItemsTable();
           return;
         }
         setStatus("Removing empty line…");
-        const removed = await api.deleteItem(ri);
+        const removed = await api.deleteItem(deleteRi);
         if (removed && removed.ok) {
           noteUserEdit();
           paint(removed.doc, removed.scratch || scratch);
           setStatus("Left items table.");
-          leaveItemsFocus();
+          focusAfterLeavingItemsTable();
         } else if (removed && removed.blockedLastRow) {
           showToast(removed.reason || lastItemRowToast(docTitle()));
         } else {
@@ -1454,6 +1692,8 @@ function paintItems(doc) {
           const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
             cellValue: next,
             fields: navFields,
+            rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
+            nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
           });
           if (dest.deleteRow && dest.leaveTable) {
             await focusAfterItemEdit(lastDoc, next);
@@ -1762,7 +2002,9 @@ function buildHeaderFields(fields) {
     hint.className = "addr-hint";
     hint.style.gridColumn = "1 / -1";
     hint.textContent = ui.features.addressPicker
-      ? "Click an address to pick when enabled on this profile."
+      ? ui.profileId === "po"
+        ? "Click Ship from / Ship to to pick addresses. Drop-ship customer is set inside Ship to."
+        : "Click an address to pick when enabled on this profile."
       : "Read-only. Edit Ship from / Ship to / Billing on the document or party in Vanilla, then Refresh. Empty means ERP has no address linked yet (PO may lack a dedicated ship-from field).";
     el.headerAddresses.appendChild(hint);
   }
@@ -1791,11 +2033,12 @@ function ensureHeaderLinkPickers() {
             modalAlreadyOpen: sourceModalOpenRef.current,
           });
         setStatus("Setting vendor…");
+        vendorPickSourceSession = { supplier: normalizeEditableText(v), userClosed: false };
         await runVendorPickWithSourceModal({
           supplier: v,
           decision: decision || { open: false },
           setHeader: (field, value) => api.setHeader(field, value),
-          openSourcePicker,
+          openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
           onHeaderSuccess: (res) => {
             noteUserEdit();
             paint(res.doc || lastDoc, res.scratch || scratch);
@@ -1805,7 +2048,7 @@ function ensureHeaderLinkPickers() {
             setStatus((res && res.reason) || "Vendor update failed.", "err");
           },
         });
-      });
+      }, { refocusAfterPick: false });
     } else {
       mountDocLinkPicker(inp, meta.linkDoctype, async (v) => {
         if (!api || !editable()) return;
@@ -1817,15 +2060,17 @@ function ensureHeaderLinkPickers() {
   }
 }
 
-async function openSourcePicker(supplier) {
-  if (!api || !api.listSources || !ui || !ui.features.sourceModal) {
+async function openSourcePicker(supplier, opts = {}) {
+  const trigger = opts.trigger || "unknown";
+  const listSlice = api && api.listSourceSlice;
+  if (!listSlice || !ui || !ui.features.sourceModal) {
     setStatus("Source picker API missing — restart the shell.", "err");
-    return;
+    return { ok: false, reason: "api_missing" };
   }
-  if (sourceModalOpenRef.current) return;
+  if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
   if (!editable()) {
     setStatus(`${docTitle()} is not a draft — source picker locked.`, "warn");
-    return;
+    return { ok: false, reason: "not_editable" };
   }
   const supInp = supplierInput();
   const sup =
@@ -1834,53 +2079,124 @@ async function openSourcePicker(supplier) {
     normalizeEditableText(supInp && supInp.value);
   if (!sup) {
     setStatus(`Pick a vendor before ${ui.sourceLabel || "Select PO"}.`, "warn");
-    return;
+    return { ok: false, reason: "no_supplier" };
   }
+
+  if (trigger === "toolbar") {
+    vendorPickSourceSession = null;
+  }
+
+  const gate = mayAutoOpenSourcePicker(vendorPickSourceSession, sup, trigger);
+  if (!gate.ok) {
+    logFocus("source-modal-skip", `${trigger}:${gate.reason || "blocked"}`);
+    return { ok: false, reason: gate.reason || "blocked" };
+  }
+
+  if (sourcePickerInflight && sourcePickerInflightSupplier === sup && trigger !== "toolbar") {
+    return sourcePickerInflight;
+  }
+
+  sourcePickerInflightSupplier = sup;
+  sourcePickerInflight = runDocSourcePicker(sup, trigger).finally(() => {
+    if (sourcePickerInflightSupplier === sup) {
+      sourcePickerInflight = null;
+      sourcePickerInflightSupplier = "";
+    }
+  });
+  return sourcePickerInflight;
+}
+
+/**
+ * @param {string} sup
+ * @param {"link_pick" | "blur" | "toolbar" | "unknown"} trigger
+ */
+async function runDocSourcePicker(sup, trigger) {
   setStatus("Loading open Purchase Orders…");
-  const res = await api.listSources(sup);
-  if (!res || !res.ok) {
-    setStatus((res && res.reason) || "Could not load sources.", "err");
-    return;
-  }
-  const groups = res.groups || [];
-  setStatus(`Sources loaded (${groups.length} groups) — pick one.`);
-  showSourceModal({
-    groups,
+
+  return runSourcePickerFlow({
+    supplier: sup,
+    trigger,
     mode: "single",
-    testId: "doc-source-modal",
-    isOpenRef: sourceModalOpenRef,
-    setStatus,
-    focusSurface: () => {
-      if (api && api.focusSurface) api.focusSurface();
+    listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
+    log: (event, detail) => logFocus(event, detail || ""),
+    mayOpen: (vendor, trig) =>
+      mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+    onUserClose: () => {
+      if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
+        vendorPickSourceSession.userClosed = true;
+      }
     },
-    onChoose: async (it) => {
-    if (!it || it.kind === "nic") {
-      setStatus("No source — enter lines manually.");
-      const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
-      if (focusField) focusHeaderField(focusField);
-      return;
-    }
-    setStatus(`Pulling from ${it.name}…`);
-    const merged = await api.mergeSource(it.kind, it.name);
-    if (merged && merged.ok) {
-      noteUserEdit();
-      paint(merged.doc, merged.scratch || scratch);
-      setStatus(`Pulled from ${it.name}.`);
-    } else {
-      setStatus((merged && merged.reason) || "Could not pull source.", "err");
-      await refresh();
-    }
-    const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
-    if (focusField) focusHeaderField(focusField);
+    onStreamComplete: ({ errors }) => {
+      if (errors.length && sourceModalOpenRef.current) {
+        setStatus(`Some sources failed to load (${errors.length}).`, "warn");
+      } else if (sourceModalOpenRef.current) {
+        setStatus("Sources loaded — pick one.");
+      }
     },
+    showModal: (flowOpts) =>
+      showSourceModal({
+        ...flowOpts,
+        testId: "doc-source-modal",
+        isOpenRef: sourceModalOpenRef,
+        setStatus,
+        focusSurface: () => {
+          if (api && api.focusSurface) api.focusSurface();
+        },
+        onChoose: async (it) => {
+          if (!it || it.kind === "nic") {
+            setStatus("No source — enter lines manually.");
+            const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
+            if (focusField) focusHeaderField(focusField);
+            return;
+          }
+          setStatus(`Pulling from ${it.name}…`);
+          const merged = await api.mergeSource(it.kind, it.name);
+          if (merged && merged.ok) {
+            noteUserEdit();
+            paint(merged.doc, merged.scratch || scratch);
+            setStatus(`Pulled from ${it.name}.`);
+          } else {
+            setStatus((merged && merged.reason) || "Could not pull source.", "err");
+            await refresh();
+          }
+          const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
+          if (focusField) focusHeaderField(focusField);
+        },
+      }),
   });
 }
 
 function setFormBlocked(blocked, reason) {
   document.body.classList.toggle("blocked", !!blocked);
-  const retry = document.getElementById("btn-retry");
+  const retry = el.retry;
   if (retry) retry.hidden = !blocked;
   if (blocked && reason) setStatus(reason, "warn");
+  else if (!blocked && el.status) {
+    el.status.classList.remove("warn", "err");
+  }
+}
+
+/** Drop stale header/line paint when Vanilla doc is not loaded yet (home → new PO). */
+function clearPaintedForm() {
+  if (ui) {
+    for (const meta of ui.headerFields) {
+      const inp = headerInputs[meta.label];
+      if (!inp) continue;
+      inp.value = "";
+      if (meta.type === "date") inp.placeholder = "MM/DD/YYYY";
+      if (meta.linkDoctype) inp.dataset.linkCommitted = "";
+      if (meta.addressRole && inp.tagName === "TEXTAREA") {
+        inp.rows = addressTextareaRows("");
+      }
+    }
+  }
+  if (el.memo) el.memo.value = "";
+  if (el.termsText) el.termsText.value = "";
+  syncDocAddressPickers(false);
+  if (el.items) el.items.innerHTML = "";
+  if (el.taxesBody) el.taxesBody.innerHTML = "";
+  paintLineTotals(null);
+  paintMoneyStack(null);
 }
 
 function focusVendorField() {
@@ -1927,11 +2243,8 @@ function paint(doc, snapScratch, opts = {}) {
   paintDirtyPill();
 
   if (!doc || !ui) {
+    clearPaintedForm();
     setFormBlocked(true, opts.reason || `No ${docTitle()} loaded in Vanilla yet.`);
-    el.items.innerHTML = "";
-    paintLineTotals(null);
-    if (el.taxesBody) el.taxesBody.innerHTML = "";
-    paintMoneyStack(null);
     el.addLine.disabled = true;
     if (el.importItems) el.importItems.disabled = true;
     if (el.clearQty) el.clearQty.disabled = true;
@@ -2129,7 +2442,7 @@ async function onHeaderBlur(input) {
     if (decision.open) {
       if (res && res.ok) noteUserEdit();
       paint(res.doc || lastDoc, res.scratch || scratch);
-      await openSourcePicker(next || (res && res.supplier));
+      await openSourcePicker(next || (res && res.supplier), { trigger: "blur" });
       return;
     }
   }
@@ -2186,6 +2499,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
+      openDirectSaveBlockedGate(blockers, { submit });
       setStatus(blockers[0] || "Fix save prerequisites first.", "err");
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
@@ -2208,6 +2522,18 @@ async function doSave(submit) {
       submit ? "Save & submit" : "Save draft",
     );
     setStatus(reason, "err");
+    const mergedBlockers = mergeSaveBlockers(
+      listDocFormSaveBlockers({
+        doc: lastDoc,
+        supplier: supplierInput() && supplierInput().value,
+      }),
+      r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
+    );
+    openDirectSaveBlockedGate(mergedBlockers, {
+      submit,
+      erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
+      reason,
+    });
     return {
       ok: false,
       reason,
@@ -2286,7 +2612,7 @@ function applyUiConfig(config) {
   if (el.newDoc) el.newDoc.textContent = ui.newLabel;
   if (el.hint) el.hint.textContent = ui.hint || "";
 
-  const assumptionsUl = document.getElementById("assumptions-list");
+  const assumptionsUl = el.assumptionsList;
   if (assumptionsUl && Array.isArray(ui.assumptions)) {
     assumptionsUl.innerHTML = ui.assumptions.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
   }
@@ -2300,9 +2626,23 @@ function applyUiConfig(config) {
   paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
 
-  if (el.lineTabs) el.lineTabs.hidden = !ui.features.expensesTab;
+  if (el.lineTabs) {
+    el.lineTabs.hidden = !ui.features.expensesTab;
+    if (el.tabExpenses) el.tabExpenses.hidden = !ui.features.expensesTab;
+  }
+  if (el.linesSectionTitle) {
+    el.linesSectionTitle.hidden = !!ui.features.expensesTab;
+  }
+  if (el.termsBlock) {
+    const termsLabel = el.termsBlock.querySelector("label");
+    if (termsLabel) {
+      termsLabel.textContent =
+        ui.profileId === "po" ? "Freeform comments" : FREEFORM_TERMS_LABEL;
+    }
+  }
   if (el.taxesBlock) el.taxesBlock.hidden = !ui.features.taxes;
   const showNotes = !!(ui.features.memo || ui.features.termsField || ui.features.sourceTerms);
+  if (el.notesSection) el.notesSection.hidden = !showNotes;
   if (el.memoBlock) el.memoBlock.hidden = !showNotes;
   if (el.termsBlock) el.termsBlock.hidden = !ui.features.termsField;
   if (el.memoEntry) el.memoEntry.hidden = !ui.features.memo;
@@ -2342,16 +2682,17 @@ async function attachFileAction() {
 }
 
 function wireStaticControls() {
-  const btnRefresh = document.getElementById("btn-refresh");
+  const btnRefresh = el.refresh;
   if (btnRefresh) {
     btnRefresh.onclick = () => refresh();
     btnRefresh.title = REFRESH_BUTTON_TITLE;
   }
-  document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+  const btnVanilla = el.vanilla;
+  if (btnVanilla) btnVanilla.onclick = () => api && api.openVanilla();
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
   if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");
-  const btnBackTop = document.getElementById("btn-back-top");
+  const btnBackTop = el.backTop;
   if (btnBackTop) {
     btnBackTop.onclick = () => {
       focusFinalizeControl(el.submit);
@@ -2407,18 +2748,21 @@ function wireStaticControls() {
         );
         return;
       }
-      openSourcePicker();
+      openSourcePicker(undefined, { trigger: "toolbar" });
     };
   }
 
-  document.getElementById("btn-retry").onclick = async () => {
-    if (!api || !api.retryLoad) return;
-    setStatus(`Retrying Vanilla ${docTitle()} load…`);
-    await api.retryLoad();
-  };
+  const btnRetry = el.retry;
+  if (btnRetry) {
+    btnRetry.onclick = async () => {
+      if (!api || !api.retryLoad) return;
+      setStatus(`Retrying Vanilla ${docTitle()} load…`);
+      await api.retryLoad();
+    };
+  }
 
-  el.save.onclick = () => doSave(false);
-  el.submit.onclick = () => doSave(true);
+  if (el.save) el.save.onclick = () => doSave(false);
+  if (el.submit) el.submit.onclick = () => doSave(true);
 
   if (el.taxAccount) {
     mountDocLinkPicker(el.taxAccount, "Account", async (v) => {
@@ -2510,6 +2854,7 @@ async function ensureUiConfig() {
 
 export async function bootDocFormPage(injectedApi) {
   api = injectedApi;
+  el = buildDocFormEl();
   if (!api) {
     setStatus("Doc API unavailable — preload missing.", "err");
     return;

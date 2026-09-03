@@ -14,7 +14,8 @@ import {
  *   title: string,
  *   meta: { anchor: string, doctype: string, lens?: string, surface?: string, profileId?: string },
  *   docCurated: readonly { id: string, kind?: string, modeSwitch?: string, synthetic?: boolean }[],
- *   docHtmlPath: string,
+ *   docHtmlPath?: string,
+ *   docHtml?: string,
  *   vanillaFixturePath: string,
  * }} ReportConfig
  */
@@ -23,7 +24,9 @@ import {
  * @param {ReportConfig} cfg
  */
 export function printInputCountReport(cfg) {
-  const billHtml = readFileSync(cfg.docHtmlPath, "utf8");
+  const billHtml =
+    cfg.docHtml ??
+    readFileSync(cfg.docHtmlPath, "utf8");
   const vanillaHtml = readFileSync(cfg.vanillaFixturePath, "utf8");
 
   const docStatic = scrapeInteractables(billHtml);

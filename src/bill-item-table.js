@@ -27,13 +27,17 @@ export {
 export const BILL_LINE_NO_FIELD = "__bill_line_no";
 export const PO_LINE_NO_FIELD = "__po_line_no";
 
-/** @typedef {{
+/* * @typedef {{
  *   poName?: string,
  *   poLineIdx?: number|string,
  *   poDetail?: string,
+ *   prName?: string,
+ *   prLineIdx?: number|string,
+ *   prDetail?: string,
  *   salesOrder?: string,
  *   customer?: string,
  *   customerName?: string,
+ *   maxBillableQty?: number,
  * }} PoLineMeta */
 
 /**
@@ -41,7 +45,7 @@ export const PO_LINE_NO_FIELD = "__po_line_no";
  */
 export const BILL_LINE_META_COLS = Object.freeze([
   { label: "Line", field: BILL_LINE_NO_FIELD, displayOnly: true, readOnly: true, sortKey: "lineNo" },
-  { label: "PO line", field: PO_LINE_NO_FIELD, displayOnly: true, readOnly: true, sortKey: "poLine" },
+  { label: "Source line", field: PO_LINE_NO_FIELD, displayOnly: true, readOnly: true, sortKey: "poLine" },
 ]);
 
 /**
@@ -69,13 +73,23 @@ export function formatBillLineNumber(rowIndex, item) {
 }
 
 /**
- * PO line label — include PO name when multiple POs appear on the Bill.
+ * Source line label (PO Item idx or PR Item idx). Qualify with doc name when several sources.
  * @param {object|null|undefined} item
  * @param {PoLineMeta|null|undefined} meta
- * @param {boolean} multiPoOnBill
+ * @param {boolean} multiSourceOnBill
  */
-export function formatPoLineDisplay(item, meta, multiPoOnBill) {
+export function formatPoLineDisplay(item, meta, multiSourceOnBill) {
   const row = item && typeof item === "object" ? item : {};
+  const pr = (meta && meta.prName) || row.purchase_receipt || "";
+  const prLineIdx =
+    meta && meta.prLineIdx != null && meta.prLineIdx !== "" ? meta.prLineIdx : "";
+  if (pr || row.pr_detail) {
+    if (!pr && prLineIdx === "") return "";
+    if (multiSourceOnBill && pr) {
+      return prLineIdx !== "" ? `${pr} · L${prLineIdx}` : pr;
+    }
+    return prLineIdx !== "" ? `L${prLineIdx}` : pr;
+  }
   const po = (meta && meta.poName) || row.purchase_order || "";
   const lineIdx =
     meta && meta.poLineIdx != null && meta.poLineIdx !== ""
@@ -84,7 +98,7 @@ export function formatPoLineDisplay(item, meta, multiPoOnBill) {
         ? row.idx
         : "";
   if (!po && lineIdx === "") return "";
-  if (multiPoOnBill && po) {
+  if (multiSourceOnBill && po) {
     return lineIdx !== "" ? `${po} · L${lineIdx}` : po;
   }
   return lineIdx !== "" ? `L${lineIdx}` : po;
@@ -94,11 +108,24 @@ export function formatPoLineDisplay(item, meta, multiPoOnBill) {
  * @param {object|null|undefined} doc
  */
 export function billHasMultiplePurchaseOrders(doc) {
+  return billHasMultipleSourceDocs(doc);
+}
+
+/**
+ * More than one linked PO and/or Item Receipt on the Bill.
+ * @param {object|null|undefined} doc
+ */
+export function billHasMultipleSourceDocs(doc) {
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  const pos = new Set(
-    items.map((it) => (it && it.purchase_order ? String(it.purchase_order).trim() : "")).filter(Boolean),
-  );
-  return pos.size > 1;
+  const keys = new Set();
+  for (const it of items) {
+    if (!it) continue;
+    const po = it.purchase_order != null ? String(it.purchase_order).trim() : "";
+    const pr = it.purchase_receipt != null ? String(it.purchase_receipt).trim() : "";
+    if (po) keys.add(`po:${po}`);
+    if (pr) keys.add(`pr:${pr}`);
+  }
+  return keys.size > 1;
 }
 
 /**
@@ -129,7 +156,7 @@ export function mergeAllocationFromPoMeta(alloc, meta) {
  */
 export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}) {
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  const multiPo = billHasMultiplePurchaseOrders(doc);
+  const multiPo = billHasMultipleSourceDocs(doc);
   return items.map((it, idx) => {
     const row = it || {};
     const meta = poMetaByRow[idx] ?? poMetaByRow[String(idx)];
@@ -233,7 +260,7 @@ function valueForSortKey(model, sortKey) {
 /** @type {readonly { label: string, sortKey: string }[]} */
 export const BILL_ITEM_SORTABLE_HEADERS = Object.freeze([
   { label: "Line", sortKey: "lineNo" },
-  { label: "PO line", sortKey: "poLine" },
+  { label: "Source line", sortKey: "poLine" },
   { label: "Item", sortKey: "item_code" },
   { label: "Description", sortKey: "description" },
   { label: "Qty", sortKey: "qty" },

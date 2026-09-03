@@ -16,7 +16,7 @@ import { commitGateContinues } from "./bill-toolbar.js";
  * action (Find/New/Print) or a main-process navigation (Home/Vanilla/Recent).
  * Both drive the SAME in-page commit-gate — this is the SSoT that keeps them
  * from diverging into two dialogs.
- * @typedef {{ kind: "toolbar"|"nav", action?: CommitGateAction, navToken?: string, label?: string }} GateTrigger
+ * @typedef {{ kind: "toolbar"|"nav", action?: CommitGateAction, navToken?: string, label?: string, findPrefill?: { billNo?: string, supplier?: string } }} GateTrigger
  */
 
 /**

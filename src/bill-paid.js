@@ -179,6 +179,32 @@ export function projectBillPaymentRows(rows) {
 }
 
 /**
+ * Submitted Bill with balance still due — show “Add payment” (OI-139).
+ * @param {object|null|undefined} doc
+ * @returns {boolean}
+ */
+export function billCanAddPayment(doc) {
+  if (!doc || typeof doc !== "object") return false;
+  if (Number(doc.docstatus) !== 1) return false;
+  const badge = billDocStatusBadge(doc);
+  if (badge && (badge.tone === "paid" || badge.tone === "cancelled")) return false;
+  const outstanding = Number(doc.outstanding_amount);
+  if (Number.isFinite(outstanding)) return outstanding > 0.005;
+  const lower = String(doc.status || "").toLowerCase();
+  if (lower === "paid" || lower.includes("debit note")) return false;
+  if (
+    lower === "unpaid" ||
+    lower === "overdue" ||
+    lower.includes("partly") ||
+    lower.includes("partial")
+  ) {
+    return true;
+  }
+  // Submitted, outstanding not hydrated yet — show until proven paid.
+  return !!(badge && (badge.tone === "submitted" || badge.tone === "unpaid" || badge.tone === "partial"));
+}
+
+/**
  * Banner badge beside “Bill” (Vanilla-style status pill).
  * @param {object|null|undefined} doc
  * @returns {{ label: string, tone: "draft"|"submitted"|"paid"|"partial"|"unpaid"|"cancelled"|"neutral" }|null}
@@ -192,8 +218,13 @@ export function billDocStatusBadge(doc) {
     if (!name || /^new-/i.test(name)) return { label: "Draft", tone: "draft" };
     return { label: "Draft", tone: "draft" };
   }
-  const status = String(doc.status || "").trim();
-  const lower = status.toLowerCase();
+  let status = String(doc.status || "").trim();
+  let lower = status.toLowerCase();
+  // docstatus is authoritative — savedocs can return status "Draft" before ERP refreshes it.
+  if (lower === "draft") {
+    status = "";
+    lower = "";
+  }
   if (lower === "paid" || lower === "debit note issued") {
     return { label: status || "Paid", tone: "paid" };
   }

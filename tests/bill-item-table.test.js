@@ -131,9 +131,26 @@ describe("bill-item-table", () => {
       doc,
       { "POI-99": { idx: 2, sales_order: "SO-1" } },
       { "PO-1": { customer: "CUS-1", customer_name: "Acme" } },
+      {},
     );
     assert.equal(meta[0].poLineIdx, 2);
     assert.equal(meta[0].salesOrder, "SO-1");
     assert.equal(meta[0].customerName, "Acme");
+  });
+
+  it("formatPoLineDisplay shows PR line idx", () => {
+    const item = { purchase_receipt: "PR-1", pr_detail: "PRI-1" };
+    const meta = { prName: "PR-1", prLineIdx: 3 };
+    assert.equal(formatPoLineDisplay(item, meta, false), "L3");
+    assert.equal(formatPoLineDisplay(item, meta, true), "PR-1 · L3");
+  });
+
+  it("indexPoLineMeta maps pr_detail to row metadata", () => {
+    const doc = {
+      items: [{ purchase_receipt: "PR-1", pr_detail: "PRI-99" }],
+    };
+    const meta = indexPoLineMeta(doc, {}, {}, { "PRI-99": { idx: 5 } });
+    assert.equal(meta[0].prLineIdx, 5);
+    assert.equal(meta[0].prName, "PR-1");
   });
 });

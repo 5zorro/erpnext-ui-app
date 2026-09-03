@@ -26,10 +26,10 @@
 }
 
 /*
-  Layer 1 — page canvas (grey): behind toolbar, card, stamp.
-  Layer 2 — role wash: File / Navigate .tb-group + entry .card (see below).
-  Layer 3 — .bill-section (except summary): stay #fff in bill-dashboard.css / doc-form.
-  Grand-total .bill-section-summary is transparent so layer-2 wash shows through.
+  Layer 1 — page canvas (grey): html/body `--doc-page-canvas`.
+  Layer 2 — role wash on toolbar + .card (Bill=pink invoice, PO=blue order, IR=amber fulfill).
+  Layer 3 — white `.bill-section` subsections on the card (header, lines, taxes, notes).
+  Grand-total `.bill-section-summary` stays transparent so layer-2 wash shows through.
 */
 html[data-doc-role],
 html[data-doc-role] body {

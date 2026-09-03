@@ -7,6 +7,27 @@
 import { routeInfo, routesReferToSameDoc } from "./route-info.js";
 
 /**
+ * When shell is navigating to a doctype list (Find), stale in-SPA form URLs for the
+ * same doctype must not hijack back to Doc skin (OI-054 Find jump / OI-127).
+ *
+ * @param {string|null|undefined} intentPath /app/… path we meant to open
+ * @param {string} incomingUrl ERP URL or /app path from did-navigate
+ * @param {string} [erpBase]
+ * @returns {boolean}
+ */
+export function shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBase) {
+  if (!intentPath || !incomingUrl) return false;
+  const intent = routeInfo(intentPath, erpBase);
+  const incoming = routeInfo(incomingUrl, erpBase);
+  return !!(
+    intent.doctype &&
+    !intent.record &&
+    incoming.doctype === intent.doctype &&
+    incoming.record
+  );
+}
+
+/**
  * Whether an ERP URL event may update shell route / hijack while an intent is active.
  * Same doctype (incl. /new → new-*-hash) or same doc is accepted; cross-doctype is stale.
  *
@@ -18,6 +39,8 @@ import { routeInfo, routesReferToSameDoc } from "./route-info.js";
 export function shouldAcceptErpTrackNav(intentPath, incomingUrl, erpBase) {
   if (!intentPath) return true;
   if (typeof incomingUrl !== "string" || !incomingUrl) return false;
+  // List intent must not treat a stale same-doctype form URL as "arrived" (OI-054 Find).
+  if (shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBase)) return false;
   if (routesReferToSameDoc(intentPath, incomingUrl, erpBase)) return true;
   const intent = routeInfo(intentPath, erpBase);
   const incoming = routeInfo(incomingUrl, erpBase);
