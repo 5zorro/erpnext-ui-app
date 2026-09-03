@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("erpUi", {
   goHome: () => ipcRenderer.send("go-home"),
   openDocSkin: () => ipcRenderer.send("open-doc-skin"),
   openVanillaSkin: () => ipcRenderer.send("open-vanilla-skin"),
+  openSimplifiedSkin: () => ipcRenderer.send("open-simplified-skin"),
   dismissSoftPeek: () => ipcRenderer.send("soft-peek-esc"),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
   openExternal: (url) => ipcRenderer.send("open-external", url),
