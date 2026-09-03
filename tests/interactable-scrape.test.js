@@ -15,7 +15,9 @@ import { DOC_FORM_CURATED_UNION } from "../src/inventories/doc-form-inventory.js
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const docFormHtml = readFileSync(join(root, "electron/doc-form.html"), "utf8");
-const billHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
+const chromeHtml = readFileSync(join(root, "electron/doc-chrome.fragment.html"), "utf8");
+const billBodyHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
+const billHtml = chromeHtml + "\n" + billBodyHtml;
 const vanillaHtml = readFileSync(
   join(root, "tests/fixtures/bill-vanilla-form.fixture.html"),
   "utf8",
@@ -78,7 +80,7 @@ describe("scrape Bill Doc doc-form bill shell", () => {
     const { items, count } = scrapeInteractables(billHtml);
     assert.ok(count >= 20, `expected dense toolbar+header, got ${count}`);
     const ids = new Set(items.map((i) => i.id));
-    assert.ok(ids.has("bill-save"));
+    assert.ok(ids.has("doc-save"));
     assert.ok(ids.has("bill-vendor"));
     assert.ok(ids.has("bill-amount-due"));
     assert.ok(ids.has("bill-assumptions"));

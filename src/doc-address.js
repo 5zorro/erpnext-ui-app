@@ -83,7 +83,7 @@ export const PO_ADDRESS_ROLES = Object.freeze(
       label: "Ship to",
       party: "company",
       partyWhenCustomer: "customer",
-      title: "Pick ship-to (company, warehouse, or customer when drop-shipping)",
+      title: "Pick ship-to — drop-ship customer (optional) and receiving address",
       pickable: true,
     },
   ]),

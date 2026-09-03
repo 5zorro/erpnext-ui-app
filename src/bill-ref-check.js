@@ -28,7 +28,7 @@
  * }} BillRefWarning
  *
  * @typedef {{
- *   status: "idle"|"ok"|"warn",
+ *   status: "idle"|"ok"|"warn"|"waiting",
  *   icon: string,
  *   title: string,
  *   warnings: BillRefWarning[],
@@ -45,6 +45,46 @@
  */
 
 export const BILL_REF_PATTERN_WINDOW = 6;
+
+export const BILL_REF_WAITING_FOR_VENDOR_TITLE =
+  "Supplier ref no validation waiting for vendor";
+
+/**
+ * Shown when bill_no has text but supplier is not committed yet (ERP setHeader in flight).
+ * @returns {BillRefCheckResult}
+ */
+export function billRefWaitingForVendorResult() {
+  return {
+    status: "waiting",
+    icon: "clock",
+    title: BILL_REF_WAITING_FOR_VENDOR_TITLE,
+    warnings: [],
+  };
+}
+
+/**
+ * Resolve supplier for Ref No. checks — doc SSoT first, then renderer hints.
+ * @param {{
+ *   docSupplier?: string|null,
+ *   supplierHint?: string|null,
+ *   domSupplier?: string|null,
+ *   pendingPickSupplier?: string|null,
+ * }} ctx
+ * @returns {string}
+ */
+export function resolveBillRefSupplier(ctx = {}) {
+  const hints = [
+    ctx.docSupplier,
+    ctx.supplierHint,
+    ctx.domSupplier,
+    ctx.pendingPickSupplier,
+  ];
+  for (const h of hints) {
+    const s = h != null ? String(h).trim() : "";
+    if (s) return s;
+  }
+  return "";
+}
 
 /** Normalize for equality (trim, collapse space, case-insensitive). */
 export function normalizeBillRef(raw) {

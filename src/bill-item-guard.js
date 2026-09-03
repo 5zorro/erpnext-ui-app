@@ -43,6 +43,15 @@ export function isEmptyItemCode(itemCode) {
 }
 
 /**
+ * At least one items child row with a non-blank Item code (placeholder row does not count).
+ * @param {{ items?: Array<{ item_code?: string|number|null }>|null|undefined }|null|undefined} doc
+ */
+export function docHasCommittedItemLine(doc) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  return items.some((row) => row && !isEmptyItemCode(row.item_code));
+}
+
+/**
  * Block × *removal* when only one row remains (clear instead — see itemRowDeleteAction).
  * @param {number} rowCount
  */

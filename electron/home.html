@@ -66,6 +66,20 @@
     @media (max-width: 720px) {
       .wrap { grid-template-columns: 1fr; }
     }
+    .dev-strip {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 22px 14px; max-width: 1120px; margin: 0 auto;
+    }
+    .dev-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+      color: #94a3b8; padding: 2px 6px; border: 1px solid #e2e8f0;
+      border-radius: 4px; white-space: nowrap;
+    }
+    .dev-link {
+      border: 1px solid #e2e8f0; background: #fff; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; color: #475569; cursor: pointer;
+    }
+    .dev-link:hover { background: #f1f5f9; border-color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -73,6 +87,11 @@
   <div class="wrap" data-testid="home-tiles">
     <div class="col" id="left"></div>
     <div class="col" id="right"></div>
+  </div>
+  <div class="dev-strip" id="dev-strip" data-testid="home-dev-strip">
+    <span class="dev-label">Dev</span>
+    <button class="dev-link" id="mockup-a" title="Option A: Thin inject over Vanilla">Simplified mockup A — thin inject</button>
+    <button class="dev-link" id="mockup-b" title="Option B: Ground-up (Vanilla field parity)">Simplified mockup B — ground-up</button>
   </div>
   <script type="module">
     import { HOME_GROUPS } from "../src/home-tiles.js";
@@ -124,6 +143,9 @@
       [...HOME_GROUPS.left, ...HOME_GROUPS.right].flatMap((g) => g.tiles.map((t) => t.id)),
     );
     if (missing.length) console.warn("home tiles missing ui-icons:", missing.join(", "));
+
+    document.getElementById("mockup-a").onclick = () => api.openMockup("simplified-option-a-thin-inject.html");
+    document.getElementById("mockup-b").onclick = () => api.openMockup("simplified-option-b-ground-up.html");
   </script>
 </body>
 </html>

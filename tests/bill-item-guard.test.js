@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   isEmptyItemCode,
+  docHasCommittedItemLine,
   shouldBlockDeleteLastItemRow,
   emptyItemRowCleanupAction,
   itemRowDeleteAction,
@@ -15,6 +16,13 @@ describe("bill-item-guard", () => {
     assert.equal(isEmptyItemCode(""), true);
     assert.equal(isEmptyItemCode("  "), true);
     assert.equal(isEmptyItemCode("SKU-1"), false);
+  });
+
+  it("docHasCommittedItemLine ignores placeholder rows", () => {
+    assert.equal(docHasCommittedItemLine(null), false);
+    assert.equal(docHasCommittedItemLine({ items: [] }), false);
+    assert.equal(docHasCommittedItemLine({ items: [{ item_code: "" }] }), false);
+    assert.equal(docHasCommittedItemLine({ items: [{ item_code: "SKU-1" }] }), true);
   });
 
   it("blocks delete when only one row", () => {

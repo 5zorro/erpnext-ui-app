@@ -37,16 +37,6 @@ export const PO_HEADER_FIELDS = [
     column: "left",
   },
   {
-    label: "Customer (drop ship)",
-    field: "customer",
-    type: "text",
-    linkDoctype: "Customer",
-    display: "customer_name|customer",
-    column: "left",
-    validationHint:
-      "When set, Ship to lists this customer’s addresses. Line “Drop ship” marks vendor direct-to-customer.",
-  },
-  {
     label: "Billing address",
     field: null,
     type: "textarea",
@@ -87,14 +77,7 @@ export const PO_HEADER_FIELDS = [
     type: "text",
     linkDoctype: "Payment Terms Template",
     column: "right",
-    validationHint: "Payment Terms Template (Net 30, etc.). Not the same as Terms and conditions text below.",
-  },
-  {
-    label: FREEFORM_TERMS_LABEL,
-    field: ERP_FREEFORM_TERMS_FIELD,
-    type: "textarea",
-    column: "right",
-    validationHint: "Freeform PO terms — freight notes, special instructions for vendor/AP.",
+    validationHint: "Payment Terms Template (Net 30, etc.). Not the same as freeform comments below.",
   },
   {
     label: "Ship from",
@@ -118,12 +101,22 @@ export const PO_HEADER_FIELDS = [
   },
 ];
 
+/** Drop-ship customer — edited inside Ship to address modal (not header column). */
+export const PO_CUSTOMER_DROPSHIP = Object.freeze({
+  field: "customer",
+  label: "Customer (drop ship)",
+  linkDoctype: "Customer",
+  hint:
+    "Optional. When set, Ship to lists this customer’s delivery addresses for drop-ship POs.",
+});
+
 /** PO SPECS: no memo block. */
 export const PO_MEMO_FIELD = null;
 
 /**
  * Museum cols + Required By (schedule_date). ERP mandates it per row; Date Expected
  * stamps it, and the column lets clerks see/override (dogfood 2026-07-21).
+ * Drop ship is handled via Customer + Ship to address (not a per-line checkbox).
  * Leading Line = Purchase Order line number (ERP idx); headers are sortable (display-only).
  */
 export const PO_ITEM_COLS = [
@@ -139,12 +132,6 @@ export const PO_ITEM_COLS = [
   { label: "Qty", field: "qty", sortKey: "qty" },
   { label: "Rate", field: "rate", sortKey: "rate" },
   { label: "Sales Order", field: "sales_order", linkDoctype: "Sales Order", sortKey: "sales_order" },
-  {
-    label: "Drop ship",
-    field: "delivered_by_supplier",
-    type: "checkbox",
-    sortKey: "delivered_by_supplier",
-  },
   { label: "Required By", field: "schedule_date", type: "date", sortKey: "schedule_date" },
   { label: "Amount", field: null, displayOnly: true, sortKey: "amount" },
   {
@@ -171,7 +158,7 @@ export function isEditablePoItemField(field) {
 export const PO_ASSUMPTIONS = [
   "Pick a vendor before choosing an address.",
   "Save = saved as a Draft; you then Submit to issue the PO (2 steps).",
-  "Drop ship: set Customer, pick ship-to address, and tick Drop ship on lines when the vendor ships direct to your customer.",
+  "Drop ship: set Customer (optional) inside Ship to, then pick the receiving address.",
   "Warehouse defaults to Finished Goods.",
   "Pick a SKU and the item name, UOM, conversion factor, and a suggested rate auto-fill (rate stays editable).",
   "Required By is a planning date (when you need the goods) — it does NOT auto-close the PO when it passes; closing happens on full receipt/bill or via 'Mark as Closed'.",
@@ -295,15 +282,12 @@ export function readPoHeader(doc, scratch = {}) {
       out[meta.label] = d.supplier_name || d.supplier || "";
       continue;
     }
-    if (meta.display === "customer_name|customer") {
-      out[meta.label] = d.customer_name || d.customer || "";
-      continue;
-    }
-    if (meta.field === ERP_FREEFORM_TERMS_FIELD) {
-      out[meta.label] = plainTermsText(d[meta.field]);
-      continue;
-    }
     if (meta.addressRole && meta.display) {
+      const sup = String(d.supplier || "").trim();
+      if (!sup) {
+        out[meta.label] = "";
+        continue;
+      }
       out[meta.label] = formatAddressDisplay(d[meta.display]);
       continue;
     }
@@ -313,6 +297,7 @@ export function readPoHeader(doc, scratch = {}) {
     }
     out[meta.label] = d[meta.field] != null ? d[meta.field] : "";
   }
+  out[FREEFORM_TERMS_LABEL] = plainTermsText(d[ERP_FREEFORM_TERMS_FIELD]);
   return out;
 }
 
@@ -331,7 +316,6 @@ export function readPoItemRows(doc) {
       row.qty != null ? row.qty : "",
       row.rate != null ? row.rate : "",
       row.sales_order || "",
-      row.delivered_by_supplier ? 1 : 0,
       row.schedule_date || "",
       row.amount != null ? row.amount : "",
       row.received_qty != null ? row.received_qty : "",

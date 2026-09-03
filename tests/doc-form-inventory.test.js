@@ -18,11 +18,12 @@ describe("doc-form-inventory", () => {
     assert.equal(ids.has("doc-clear-qty"), true);
   });
 
-  it("Receipt inventory includes taxes, memo, and source chrome", () => {
+  it("Receipt inventory includes taxes, memo, and source chrome; no editable terms", () => {
     const ids = new Set(RECEIPT_DOC_CURATED.map((r) => r.id));
     assert.equal(ids.has("doc-add-tax"), true);
     assert.equal(ids.has("doc-select-source"), true);
     assert.equal(ids.has("doc-memo"), true);
+    assert.equal(ids.has("doc-terms-text"), false);
     assert.equal(ids.has("doc-tax-template:amount"), true);
     assert.equal(ids.has("doc-date-expected"), false);
   });

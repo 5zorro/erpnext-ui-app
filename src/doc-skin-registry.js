@@ -131,7 +131,7 @@ export const DOC_SKIN_PROFILES = {
       dateExpected: false,
       addressPicker: false,
       sourceTerms: true,
-      termsField: true,
+      termsField: false,
     },
     sourceKinds: ["po"],
   },

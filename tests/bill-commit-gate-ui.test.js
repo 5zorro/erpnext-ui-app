@@ -16,7 +16,7 @@ describe("Bill commit-gate modal contract", () => {
   it("blocks the Bill visually and exposes modal semantics", () => {
     assert.match(docSkinCss, /\.commit-gate\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s);
     assert.match(docFormHtml, /class="commit-gate-dialog" role="dialog" aria-modal="true"/);
-    assert.match(docFormHtml, /data-testid="bill-commit-gate"/);
+    assert.match(docFormHtml, /data-testid="doc-commit-gate"/);
   });
 
   it("shows save readiness before the action choices", () => {

@@ -125,6 +125,43 @@ export function hideCommitGateEl(els) {
   if (els.commitGate) els.commitGate.hidden = true;
 }
 
+const DIRECT_SAVE_GATE_LABELS = Object.freeze({
+  save: "Save draft",
+  submit: "Save & submit",
+});
+
+const NAV_GATE_LABELS = Object.freeze({
+  save: "Save draft, then continue",
+  submit: "Save & submit, then continue",
+});
+
+/**
+ * Direct Save / Submit toolbar path — hide discard and drop "then continue" copy.
+ * @param {CommitGateElements} els
+ * @param {{ submit?: boolean, active?: boolean, copyEl?: HTMLElement|null }} opts
+ */
+export function configureDirectSaveGateChrome(els, opts = {}) {
+  if (!els.commitGate) return;
+  const active = opts.active !== false;
+  els.commitGate.dataset.gateMode = active ? "direct-save" : "";
+  const discard = els.commitGate.querySelector("[data-gate='discard']");
+  const save = els.commitGate.querySelector("[data-gate='save']");
+  const submit = els.commitGate.querySelector("[data-gate='submit']");
+  const labels = active ? DIRECT_SAVE_GATE_LABELS : NAV_GATE_LABELS;
+  if (discard) discard.hidden = active;
+  if (save) save.textContent = labels.save;
+  if (submit) submit.textContent = labels.submit;
+  if (opts.copyEl) {
+    opts.copyEl.textContent = active
+      ? "Fix the issues below, then try Save draft or Save & submit again."
+      : "This decision must be resolved before you can continue.";
+  }
+  if (active && opts.submit && save) save.hidden = true;
+  else if (save) save.hidden = false;
+  if (active && !opts.submit && submit) submit.hidden = true;
+  else if (submit) submit.hidden = false;
+}
+
 /**
  * @param {CommitGateElements} els
  * @param {{ onResolveChoice: (choice: string|null) => void, onCancelOutside: () => void, trapTab?: boolean }} handlers

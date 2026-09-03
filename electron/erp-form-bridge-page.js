@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 13;
+  var VERSION = 19;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -356,6 +356,10 @@
         // Avoid hanging on ERPNext posting-date confirm (hidden under Doc skin).
         alignPostingDateLikeVanillaOk(f);
 
+        if (f.doc.doctype === "Purchase Invoice" || f.doc.doctype === "Sales Invoice") {
+          ensurePaymentScheduleBeforeSave(f);
+        }
+
         var pre = listMandatoryMissing();
         if (pre && pre.blockers && pre.blockers.length) {
           return {
@@ -669,6 +673,52 @@
     "payment_terms_template",
   ];
   var SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
+  var SUPPLIER_BILLING_DISPLAY_FIELD = "address_display";
+
+  function supplierSnapshotWaitSliceMs(deadlineMs, nowMs) {
+    nowMs = nowMs || Date.now();
+    var remaining = deadlineMs - nowMs;
+    if (remaining <= 0) return 0;
+    return Math.min(500, Math.max(50, remaining));
+  }
+
+  function supplierSnapshotAllowMetaOnly(deadlineMs, nowMs) {
+    nowMs = nowMs || Date.now();
+    return deadlineMs - nowMs <= SUPPLIER_PARTY_META_ONLY_GRACE_MS;
+  }
+
+  function hasSupplierBillingDisplay(doc) {
+    var d = doc && typeof doc === "object" ? doc : {};
+    return !!stripHtml(d[SUPPLIER_BILLING_DISPLAY_FIELD]);
+  }
+
+  function supplierSnapshotReadyReason(doc, ctx) {
+    ctx = ctx && typeof ctx === "object" ? ctx : {};
+    var d = doc && typeof doc === "object" ? doc : {};
+    var target = normalizeSupplierKey(ctx.targetSupplier != null ? ctx.targetSupplier : d.supplier);
+    if (!target || normalizeSupplierKey(d.supplier) !== target) {
+      return { ready: false, reason: "supplier_mismatch" };
+    }
+    if (hasSupplierBillingDisplay(d)) {
+      return { ready: true, reason: "address_display", field: SUPPLIER_BILLING_DISPLAY_FIELD };
+    }
+    if (ctx.allowMetaOnlyAtDeadline) {
+      if (
+        isSupplierPartySettled(d, {
+          targetSupplier: target,
+          baseline: ctx.baseline,
+          allowMetaOnly: true,
+        })
+      ) {
+        return { ready: true, reason: "meta_only_deadline", field: "" };
+      }
+    }
+    return { ready: false, reason: "waiting" };
+  }
+
+  function supplierAddressSnapshotReady(doc, ctx) {
+    return supplierSnapshotReadyReason(doc, ctx).ready;
+  }
 
   function normalizeSupplierKey(value) {
     return String(value == null ? "" : value).trim();
@@ -741,32 +791,110 @@
     return false;
   }
 
-  async function waitForSupplierPartySettle(f, targetSupplier, baseline, maxWaitMs) {
+  async function waitForSupplierBillingSnapshot(f, targetSupplier, baseline, maxWaitMs) {
     maxWaitMs = maxWaitMs || SUPPLIER_PARTY_SETTLE_MAX_MS;
     var deadline = Date.now() + maxWaitMs;
-    while (Date.now() < deadline) {
-      var remaining = deadline - Date.now();
-      var allowMetaOnly = remaining <= SUPPLIER_PARTY_META_ONLY_GRACE_MS;
-      if (isSupplierPartySettled(f.doc, { targetSupplier: targetSupplier, baseline: baseline, allowMetaOnly: allowMetaOnly })) {
-        if (!allowMetaOnly && isSupplierPartyMetaOnlyChange(f.doc, baseline)) {
-          await afterAjaxQuiet(Math.min(4000, Math.max(500, remaining)));
-          try {
-            f.refresh_fields([
-              "address_display",
-              "shipping_address_display",
-              "dispatch_address_display",
-              "supplier_address",
-              "shipping_address",
-              "dispatch_address",
-            ]);
-          } catch (eAddr) {}
-          continue;
-        }
-        return;
+    /** @type {Array<{ event: string, remaining?: number, ms?: number, field?: string }>} */
+    var timing = [];
+    var done = false;
+
+    function tryReady() {
+      if (done || !f || !f.doc) return null;
+      var now = Date.now();
+      var remaining = deadline - now;
+      if (remaining <= 0) return null;
+      var hit = supplierSnapshotReadyReason(f.doc, {
+        targetSupplier: targetSupplier,
+        baseline: baseline,
+        allowMetaOnlyAtDeadline: supplierSnapshotAllowMetaOnly(deadline, now),
+      });
+      if (hit.ready) {
+        return {
+          event: hit.reason,
+          field: hit.field || "",
+          remaining: remaining,
+        };
       }
-      if (remaining <= 0) break;
-      await afterAjaxQuiet(Math.min(4000, Math.max(500, remaining)));
+      return null;
     }
+
+    function cleanup(listeners) {
+      listeners = listeners || [];
+      for (var i = 0; i < listeners.length; i++) {
+        try {
+          listeners[i]();
+        } catch (eCl) {}
+      }
+    }
+
+    return new Promise(function (resolve) {
+      /** @type {Array<function(): void>} */
+      var listeners = [];
+
+      function finish(payload) {
+        if (done) return;
+        done = true;
+        cleanup(listeners);
+        if (payload) timing.push(payload);
+        else if (!timing.some(function (t) { return t.event === "timeout"; })) {
+          timing.push({ event: "timeout", remaining: 0 });
+        }
+        resolve({ ok: !!payload, timing: timing, last: payload || null });
+      }
+
+      function wake() {
+        var hit = tryReady();
+        if (hit) finish(hit);
+      }
+
+      try {
+        if (window.frappe && frappe.model && typeof frappe.model.on === "function" && f.doc && f.doc.name) {
+          var modelHandler = function (fieldname) {
+            if (
+              fieldname === SUPPLIER_BILLING_DISPLAY_FIELD ||
+              fieldname === "supplier_address" ||
+              fieldname === "supplier_name"
+            ) {
+              wake();
+            }
+          };
+          frappe.model.on(f.doctype, f.doc.name, modelHandler);
+          listeners.push(function () {
+            try {
+              if (frappe.model.off) frappe.model.off(f.doctype, f.doc.name, modelHandler);
+            } catch (eOff) {}
+          });
+        }
+      } catch (eModel) {}
+
+      try {
+        if (window.jQuery) {
+          var onRefresh = function (_ev, frm) {
+            if (frm === f) wake();
+          };
+          jQuery(document).on("form_refresh.supplierBillingSnap", onRefresh);
+          listeners.push(function () {
+            try {
+              jQuery(document).off("form_refresh.supplierBillingSnap", onRefresh);
+            } catch (eJr) {}
+          });
+        }
+      } catch (eFr) {}
+
+      (async function pollLoop() {
+        while (!done && Date.now() < deadline) {
+          var hit = tryReady();
+          if (hit) {
+            finish(hit);
+            return;
+          }
+          var slice = supplierSnapshotWaitSliceMs(deadline, Date.now());
+          timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
+          await afterAjaxQuiet(slice);
+        }
+        if (!done) finish(tryReady());
+      })();
+    });
   }
 
   /**
@@ -884,48 +1012,299 @@
     });
   }
 
+  async function waitForPaymentScheduleRows(f, timeoutMs) {
+    var start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        var sched = f && f.doc && f.doc.payment_schedule;
+        if (Array.isArray(sched) && sched.length) {
+          return { ok: true, rows: sched.length };
+        }
+      } catch (eW) {}
+      await afterAjaxQuiet(400);
+    }
+    return { ok: false, rows: 0, reason: "payment_schedule empty (timeout)" };
+  }
+
+  async function fetchPartyDueDate(f) {
+    try {
+      if (!f || !f.doc) return { due_date: null };
+      var party_type = f.doc.doctype === "Sales Invoice" ? "Customer" : "Supplier";
+      var party = f.doc.doctype === "Sales Invoice" ? f.doc.customer : f.doc.supplier;
+      if (!party) return { due_date: null };
+      var r = await frappe.call({
+        method: "erpnext.accounts.party.get_due_date",
+        args: {
+          posting_date: f.doc.posting_date,
+          party_type: party_type,
+          bill_date: f.doc.bill_date,
+          party: party,
+          company: f.doc.company,
+        },
+      });
+      return { due_date: r && r.message ? r.message : null };
+    } catch (eP) {
+      return { due_date: null, reason: String(eP && eP.message ? eP.message : eP) };
+    }
+  }
+
+  function syncScheduleFromHeaderDueDate(f, isoDueDate) {
+    try {
+      if (!f || !f.doc) return { ok: false, reason: "no form" };
+      var due = isoDueDate != null ? String(isoDueDate).trim() : "";
+      if (!due) return { ok: false, reason: "empty due_date" };
+      var sched = f.doc.payment_schedule;
+      if (!Array.isArray(sched)) sched = [];
+      var multiInstallment = sched.length > 1;
+      if (!sched.length) {
+        var child = frappe.model.add_child(f.doc, "Payment Schedule", "payment_schedule");
+        if (child) {
+          child.due_date = due;
+          child.payment_amount =
+            f.doc.grand_total != null && f.doc.grand_total !== ""
+              ? f.doc.grand_total
+              : f.doc.rounded_total || 0;
+        }
+      } else if (sched.length === 1) {
+        sched[0].due_date = due;
+      } else {
+        sched[sched.length - 1].due_date = due;
+      }
+      try {
+        f.refresh_field("payment_schedule");
+      } catch (eRf) {}
+      return {
+        ok: true,
+        rows: (f.doc.payment_schedule || []).length,
+        multiInstallment: multiInstallment,
+      };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  }
+
+  function ensurePaymentScheduleBeforeSave(f) {
+    try {
+      if (!f || !f.doc) return { ensured: false };
+      var dt = f.doc.doctype;
+      if (dt !== "Purchase Invoice" && dt !== "Sales Invoice") return { ensured: false };
+      var sched = f.doc.payment_schedule;
+      if (Array.isArray(sched) && sched.length > 0) return { ensured: false };
+      var due = f.doc.due_date != null ? String(f.doc.due_date).trim() : "";
+      if (!due) return { ensured: false };
+      var synced = syncScheduleFromHeaderDueDate(f, due);
+      return { ensured: !!(synced && synced.ok), sync: synced };
+    } catch (eEns) {
+      return { ensured: false, reason: String(eEns && eEns.message ? eEns.message : eEns) };
+    }
+  }
+
+  function syncHeaderDueDateFromSchedule(f) {
+    try {
+      if (!f || !f.doc) return false;
+      var sched = f.doc.payment_schedule;
+      if (!Array.isArray(sched) || !sched.length) return false;
+      var due = null;
+      for (var i = sched.length - 1; i >= 0; i--) {
+        if (sched[i] && sched[i].due_date) {
+          due = sched[i].due_date;
+          break;
+        }
+      }
+      if (!due) return false;
+      f.doc.due_date = due;
+      try {
+        f.refresh_field("due_date");
+      } catch (eRf) {}
+      return true;
+    } catch (eSync) {
+      return false;
+    }
+  }
+
+  async function maybeSettlePaymentTermsIfNeeded(f, trigger, baseline) {
+    if (!f || !f.doc) return null;
+    var dt = f.doc.doctype;
+    if (dt !== "Purchase Invoice" && dt !== "Sales Invoice") return null;
+    if (!f.doc.payment_terms_template) return null;
+    var base = baseline && typeof baseline === "object" ? baseline : {};
+    var termsChanged =
+      stripHtml(f.doc.payment_terms_template) !== stripHtml(base.payment_terms_template);
+    var dueEmpty = !stripHtml(f.doc.due_date);
+    var sched = f.doc.payment_schedule;
+    var schedEmpty = !Array.isArray(sched) || !sched.length;
+    if (!termsChanged && !dueEmpty && !schedEmpty) return null;
+    return await settlePaymentTermsAfterHeaderChange(f, "payment_terms_template");
+  }
+
+  async function settlePaymentTermsAfterHeaderChange(f, field) {
+    var meta = {
+      field: field,
+      terms: "",
+      posting_date: "",
+      schedule_rows: 0,
+      due_date: "",
+      source: "none",
+      waited_ms: 0,
+      ok: false,
+      reason: "",
+    };
+    if (!f || !f.doc) {
+      meta.reason = "no form";
+      return meta;
+    }
+    var dt = f.doc.doctype;
+    if (dt !== "Purchase Invoice" && dt !== "Sales Invoice") {
+      meta.reason = "not invoice";
+      return meta;
+    }
+    if (field !== "payment_terms_template" && field !== "posting_date") {
+      meta.reason = "not terms field";
+      return meta;
+    }
+    meta.terms = f.doc.payment_terms_template || "";
+    meta.posting_date = f.doc.posting_date || "";
+    try {
+      var t0 = Date.now();
+      if (field === "payment_terms_template" && f.doc.payment_terms_template) {
+        var retTerms = f.trigger("payment_terms_template");
+        if (retTerms && typeof retTerms.then === "function") await retTerms;
+        var waitSched = await waitForPaymentScheduleRows(f, 12000);
+        meta.waited_ms = Date.now() - t0;
+        meta.schedule_rows = waitSched.rows || 0;
+        if (!waitSched.ok) meta.reason = waitSched.reason || "schedule timeout";
+        if (syncHeaderDueDateFromSchedule(f)) {
+          meta.due_date = f.doc.due_date || "";
+          meta.source = "schedule";
+          meta.ok = !!meta.due_date;
+        }
+      } else if (field === "posting_date" && f.doc.posting_date) {
+        var retDate = f.trigger("posting_date");
+        if (retDate && typeof retDate.then === "function") await retDate;
+        await afterAjaxQuiet(4000);
+        if (f.doc.payment_terms_template) {
+          var retRecalc = f.trigger("payment_terms_template");
+          if (retRecalc && typeof retRecalc.then === "function") await retRecalc;
+          var waitSched2 = await waitForPaymentScheduleRows(f, 12000);
+          meta.waited_ms = Date.now() - t0;
+          meta.schedule_rows = waitSched2.rows || 0;
+          if (!waitSched2.ok) meta.reason = waitSched2.reason || "schedule timeout";
+          if (syncHeaderDueDateFromSchedule(f)) {
+            meta.due_date = f.doc.due_date || "";
+            meta.source = "schedule";
+            meta.ok = !!meta.due_date;
+          }
+        } else {
+          meta.waited_ms = Date.now() - t0;
+        }
+      }
+      if (!meta.ok && f.doc.payment_terms_template) {
+        var partyDue = await fetchPartyDueDate(f);
+        if (partyDue && partyDue.due_date) {
+          f.doc.due_date = partyDue.due_date;
+          try {
+            f.refresh_field("due_date");
+          } catch (eRf2) {}
+          meta.due_date = partyDue.due_date;
+          meta.source = "party";
+          meta.ok = true;
+          meta.reason = "";
+        } else if (!meta.reason) {
+          meta.reason = (partyDue && partyDue.reason) || "due_date still empty after settle";
+        }
+      }
+    } catch (eSettle) {
+      meta.reason = String(eSettle && eSettle.message ? eSettle.message : eSettle);
+    }
+    return meta;
+  }
+
   function setHeader(field, value) {
     return (async function () {
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
         var partyBaseline = field === "supplier" ? supplierPartyBaseline(f.doc) : null;
+        var supplierSnapshot = null;
+        var paymentTermsSettle = null;
+        var dueDateScheduleSync = null;
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
-        if (field === "supplier") {
-          await waitForSupplierPartySettle(f, value, partyBaseline, SUPPLIER_PARTY_SETTLE_MAX_MS);
+        if (field === "payment_terms_template" || field === "posting_date") {
+          paymentTermsSettle = await settlePaymentTermsAfterHeaderChange(f, field);
+        } else if (field === "due_date") {
+          dueDateScheduleSync = syncScheduleFromHeaderDueDate(f, value);
         }
-        try {
-          f.refresh_fields([
-            "address_display",
-            "shipping_address_display",
-            "billing_address_display",
-            "dispatch_address_display",
-            "supplier_name",
-            "customer_name",
-            "supplier_address",
-            "shipping_address",
-            "billing_address",
-            "dispatch_address",
-            "customer",
-            "payment_terms_template",
-            "terms",
-            "due_date",
-            "is_paid",
-            "mode_of_payment",
-            "cash_bank_account",
-            "paid_amount",
-          ]);
-        } catch (e1) {
+        if (field === "supplier") {
           try {
-            f.refresh_field("address_display");
-          } catch (e2) {}
+            f.refresh_fields([
+              "address_display",
+              "shipping_address_display",
+              "billing_address_display",
+              "dispatch_address_display",
+              "supplier_name",
+              "customer_name",
+              "supplier_address",
+              "shipping_address",
+              "billing_address",
+              "dispatch_address",
+              "customer",
+              "payment_terms_template",
+              "terms",
+              "due_date",
+              "is_paid",
+              "mode_of_payment",
+              "cash_bank_account",
+              "paid_amount",
+            ]);
+          } catch (eRf) {
+            try {
+              f.refresh_field("address_display");
+            } catch (eRf2) {}
+          }
+          supplierSnapshot = await waitForSupplierBillingSnapshot(
+            f,
+            value,
+            partyBaseline,
+            SUPPLIER_PARTY_SETTLE_MAX_MS,
+          );
+          paymentTermsSettle = await maybeSettlePaymentTermsIfNeeded(f, "supplier", partyBaseline);
+        } else {
+          try {
+            f.refresh_fields([
+              "address_display",
+              "shipping_address_display",
+              "billing_address_display",
+              "dispatch_address_display",
+              "supplier_name",
+              "customer_name",
+              "supplier_address",
+              "shipping_address",
+              "billing_address",
+              "dispatch_address",
+              "customer",
+              "payment_terms_template",
+              "terms",
+              "due_date",
+              "is_paid",
+              "mode_of_payment",
+              "cash_bank_account",
+              "paid_amount",
+            ]);
+          } catch (e1) {
+            try {
+              f.refresh_field("address_display");
+            } catch (e2) {}
+          }
         }
         return {
           ok: true,
           doc: JSON.parse(JSON.stringify(f.doc)),
           supplierPicked: field === "supplier",
+          supplierSnapshot: supplierSnapshot,
+          paymentTermsSettle: paymentTermsSettle,
+          dueDateScheduleSync: dueDateScheduleSync,
         };
       } catch (e) {
         return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -1040,7 +1419,7 @@
             if (skip.indexOf(k) < 0) row[k] = it[k];
           });
         });
-        ["bill_no", "payment_terms_template", "due_date"].forEach(function (fld) {
+        ["bill_no", "payment_terms_template"].forEach(function (fld) {
           if (src[fld]) f.doc[fld] = src[fld];
         });
         f.refresh_field("items");
@@ -1048,6 +1427,19 @@
           f.refresh_fields(["bill_no", "payment_terms_template", "due_date"]);
         } catch (e1) {}
         await afterAjaxQuiet();
+
+        var paymentTermsSettle = null;
+        if (f.doc.payment_terms_template) {
+          paymentTermsSettle = await settlePaymentTermsAfterHeaderChange(
+            f,
+            "payment_terms_template",
+          );
+        } else if (src.due_date) {
+          f.doc.due_date = src.due_date;
+          try {
+            f.refresh_field("due_date");
+          } catch (eDue) {}
+        }
 
         var items = f.doc.items || [];
         for (var i = 0; i < items.length; i++) {
@@ -1086,7 +1478,11 @@
         } catch (e3) {}
         await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
-        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+        return {
+          ok: true,
+          doc: JSON.parse(JSON.stringify(f.doc)),
+          paymentTermsSettle: paymentTermsSettle,
+        };
       } catch (e) {
         return { ok: false, reason: String(e && e.message ? e.message : e) };
       }
@@ -1256,6 +1652,44 @@
 
   installSaveWatch();
 
+  async function fetchPoLineMeta(poDetails, prDetails, poNames) {
+    try {
+      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+        return { ok: false, reason: "frappe not ready", poItems: [], poHeaders: [], prItems: [] };
+      }
+      var poItems = poDetails && poDetails.length
+        ? await frappe.db.get_list("Purchase Order Item", {
+            filters: [["name", "in", poDetails]],
+            fields: ["name", "idx", "sales_order", "customer", "parent", "qty", "rate", "amount", "billed_amt"],
+            limit: poDetails.length,
+          })
+        : [];
+      var prItems = prDetails && prDetails.length
+        ? await frappe.db.get_list("Purchase Receipt Item", {
+            filters: [["name", "in", prDetails]],
+            fields: ["name", "idx", "parent", "qty", "rate", "amount", "billed_amt"],
+            limit: prDetails.length,
+          })
+        : [];
+      var poHeaders = poNames && poNames.length
+        ? await frappe.db.get_list("Purchase Order", {
+            filters: [["name", "in", poNames]],
+            fields: ["name", "customer", "customer_name"],
+            limit: poNames.length,
+          })
+        : [];
+      return { ok: true, poItems: poItems || [], poHeaders: poHeaders || [], prItems: prItems || [] };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: String(e && e.message ? e.message : e),
+        poItems: [],
+        poHeaders: [],
+        prItems: [],
+      };
+    }
+  }
+
   window.__docFormBridge = {
     version: VERSION,
     waitForForm: waitForForm,
@@ -1269,6 +1703,7 @@
     addTaxRow: addTaxRow,
     deleteTaxRow: deleteTaxRow,
     afterAjaxQuiet: afterAjaxQuiet,
+    fetchPoLineMeta: fetchPoLineMeta,
     listMandatoryMissing: listMandatoryMissing,
     saveDoc: saveDoc,
     takeLastSavedDoc: takeLastSavedDoc,

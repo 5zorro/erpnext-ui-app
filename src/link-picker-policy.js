@@ -128,12 +128,28 @@ export function nextItemFieldAfterEdit(field, fields) {
 }
 
 /**
+ * Resolved Item code for Tab/focus policy (current cell when editing item_code).
+ * @param {string} field
+ * @param {{ cellValue?: string|number|null, rowItemCode?: string|number|null }} opts
+ * @returns {string|null} trimmed code, "" when known-empty, null when unknown
+ */
+export function effectiveRowItemCode(field, opts = {}) {
+  if (field === "item_code" && opts.cellValue != null) {
+    return String(opts.cellValue).trim();
+  }
+  if (opts.rowItemCode != null) {
+    return String(opts.rowItemCode).trim();
+  }
+  return null;
+}
+
+/**
  * Focus target after editing a Bill/PO/IR item cell (includes wrap to next row / add row /
  * leave+delete empty Item row).
  * @param {string} field
  * @param {number} rowIndex
  * @param {number} rowCount
- * @param {{ cellValue?: string|number|null, fields?: readonly string[] }} [opts] pass current cell value (Item empty → exit)
+ * @param {{ cellValue?: string|number|null, rowItemCode?: string|number|null, nextRowItemCode?: string|number|null, fields?: readonly string[] }} [opts] pass current cell value (Item empty → exit)
  * @returns {{
  *   rowIndex: number,
  *   field: string|null,
@@ -145,24 +161,34 @@ export function nextItemFieldAfterEdit(field, fields) {
 export function nextItemFocusAfterEdit(field, rowIndex, rowCount, opts = {}) {
   const ri = Number(rowIndex) || 0;
   const n = Math.max(0, Number(rowCount) || 0);
-  // Empty Item = invalid row identity — Tab leaves the table and drops the row.
-  if (field === "item_code") {
-    const raw = opts.cellValue != null ? String(opts.cellValue).trim() : null;
-    if (raw === "") {
-      return {
-        rowIndex: ri,
-        field: null,
-        addRow: false,
-        deleteRow: true,
-        leaveTable: true,
-      };
-    }
+  const itemCode = effectiveRowItemCode(field, opts);
+  // Empty Item = invalid row — Tab from any cell on that row exits (not only item_code).
+  if (itemCode === "") {
+    return {
+      rowIndex: ri,
+      field: null,
+      addRow: false,
+      deleteRow: true,
+      leaveTable: true,
+    };
   }
   const nextField = nextItemFieldAfterEdit(field, opts.fields);
   if (nextField) {
     return { rowIndex: ri, field: nextField, addRow: false, deleteRow: false, leaveTable: false };
   }
   if (n > 0 && ri < n - 1) {
+    const nextRowCode =
+      opts.nextRowItemCode != null ? String(opts.nextRowItemCode).trim() : null;
+    // Trailing blank line — skip focusing it; delete and leave the grid in one Tab.
+    if (nextRowCode === "" && ri + 1 === n - 1) {
+      return {
+        rowIndex: ri + 1,
+        field: null,
+        addRow: false,
+        deleteRow: true,
+        leaveTable: true,
+      };
+    }
     return {
       rowIndex: ri + 1,
       field: "item_code",

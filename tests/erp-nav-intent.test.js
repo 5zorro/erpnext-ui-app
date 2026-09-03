@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { shouldAcceptErpTrackNav, shouldClearErpNavIntent } from "../src/erp-nav-intent.js";
+import {
+  shouldAcceptErpTrackNav,
+  shouldClearErpNavIntent,
+  shouldBlockDocHijackForListIntent,
+} from "../src/erp-nav-intent.js";
 
 describe("shouldAcceptErpTrackNav", () => {
   it("accepts everything when no intent", () => {
@@ -22,6 +26,20 @@ describe("shouldAcceptErpTrackNav", () => {
       ),
       false,
     );
+  });
+
+  it("rejects stale PI form while intent is PI list (Find jump)", () => {
+    assert.equal(
+      shouldAcceptErpTrackNav(
+        "/app/purchase-invoice",
+        "/app/purchase-invoice/new-purchase-invoice-abc",
+      ),
+      false,
+    );
+  });
+
+  it("accepts PI list while intent is PI list", () => {
+    assert.equal(shouldAcceptErpTrackNav("/app/purchase-invoice", "/app/purchase-invoice"), true);
   });
 
   it("accepts same doc route", () => {
@@ -61,6 +79,46 @@ describe("shouldClearErpNavIntent", () => {
       shouldClearErpNavIntent("/app/purchase-order/new", "/app/purchase-invoice/ACC-1", {
         fromBrowser: true,
       }),
+      false,
+    );
+  });
+
+  it("does not clear list intent on stale same-doctype form browser event", () => {
+    assert.equal(
+      shouldClearErpNavIntent(
+        "/app/purchase-invoice",
+        "/app/purchase-invoice/new-purchase-invoice-abc",
+        { fromBrowser: true },
+      ),
+      false,
+    );
+  });
+});
+
+describe("shouldBlockDocHijackForListIntent", () => {
+  it("blocks stale Bill form while intent is PI list", () => {
+    assert.equal(
+      shouldBlockDocHijackForListIntent(
+        "/app/purchase-invoice",
+        "/app/purchase-invoice/new-purchase-invoice-abc",
+      ),
+      true,
+    );
+  });
+
+  it("allows unrelated doctype form", () => {
+    assert.equal(
+      shouldBlockDocHijackForListIntent("/app/purchase-invoice", "/app/purchase-order/PO-1"),
+      false,
+    );
+  });
+
+  it("allows when intent is also a form", () => {
+    assert.equal(
+      shouldBlockDocHijackForListIntent(
+        "/app/purchase-invoice/ACC-1",
+        "/app/purchase-invoice/ACC-1",
+      ),
       false,
     );
   });

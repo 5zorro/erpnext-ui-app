@@ -129,7 +129,7 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
     ]);
   });
 
-  it("PO ends with sales_order + drop ship + schedule_date so Tab adds a row", () => {
+  it("PO ends with sales_order + schedule_date so Tab adds a row", () => {
     const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
     assert.deepEqual(fields, [
       "item_code",
@@ -137,7 +137,6 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
       "qty",
       "rate",
       "sales_order",
-      "delivered_by_supplier",
       "schedule_date",
     ]);
     assert.deepEqual(nextItemFocusAfterEdit("schedule_date", 0, 1, { fields }), {
@@ -147,6 +146,41 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
       deleteRow: false,
       leaveTable: false,
     });
+  });
+
+  it("Tab on empty trailing PO row exits instead of stacking blank lines", () => {
+    const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
+    assert.deepEqual(
+      nextItemFocusAfterEdit("schedule_date", 1, 2, {
+        fields,
+        rowItemCode: "",
+      }),
+      {
+        rowIndex: 1,
+        field: null,
+        addRow: false,
+        deleteRow: true,
+        leaveTable: true,
+      },
+    );
+  });
+
+  it("Tab past last populated PO row skips trailing blank line (delete + leave)", () => {
+    const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
+    assert.deepEqual(
+      nextItemFocusAfterEdit("schedule_date", 1, 3, {
+        fields,
+        rowItemCode: "SKU-1",
+        nextRowItemCode: "",
+      }),
+      {
+        rowIndex: 2,
+        field: null,
+        addRow: false,
+        deleteRow: true,
+        leaveTable: true,
+      },
+    );
   });
 });
 

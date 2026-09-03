@@ -7,7 +7,9 @@ export function billApiFromErpDoc(api) {
   return {
     getSnapshot: () => api.getSnapshot(),
     setHeader: (field, value) => api.setHeader(field, value),
-    checkRef: (billNo) => api.checkRef(billNo),
+    checkRef: (billNo, opts) => api.checkRef(billNo, opts || {}),
+    prefetchVendorRefs: (supplier) =>
+      api.prefetchVendorRefs ? api.prefetchVendorRefs(supplier || "") : Promise.resolve({ ok: false }),
     setAmountDue: (value, markEdited) => api.setAmountDue(value, !!markEdited),
     setItem: (rowIndex, field, value) => api.setItem(rowIndex, field, value),
     addItem: () => api.addItem(),
@@ -18,6 +20,7 @@ export function billApiFromErpDoc(api) {
       api.addTax(accountHead, taxAmount, description || ""),
     deleteTax: (rowIndex) => api.deleteTax(rowIndex),
     listPayments: () => api.listPayments(),
+    openAddPayment: () => api.openAddPayment(),
     listAddresses: (role) => api.listAddresses(role || ""),
     allocateCharge: (taxRowIndex, mode, custom) =>
       api.allocateCharge(taxRowIndex, mode || "amount", custom || []),
@@ -26,13 +29,15 @@ export function billApiFromErpDoc(api) {
     save: (opts) => api.save(opts || {}),
     listMandatory: () => api.listMandatory(),
     revertUnsaved: () => api.revertUnsaved(),
-    findBills: () => api.findDocs(),
+    findBills: (prefill) => api.findDocs(prefill || {}),
     refocusListFilter: (fieldname) => api.refocusListFilter(fieldname || "bill_no"),
     newBill: () => api.newDoc(),
     printBill: () => api.printDoc(),
     searchLink: (doctype, txt) => api.searchLink(doctype, txt || ""),
     checkAccountCompanies: () => api.checkAccountCompanies(),
     listSources: (supplier) => api.listSources(supplier || ""),
+    listSourceSlice: (supplier, sliceId) =>
+      api.listSourceSlice ? api.listSourceSlice(supplier || "", sliceId || "") : Promise.resolve({ ok: false }),
     fetchSourceTerms: (refs) => api.fetchSourceTerms(refs || []),
     mergeSource: (kindOrItems, name) => api.mergeSource(kindOrItems, name),
     listSalesOrdersForPicker: (payload) => api.listSalesOrdersForPicker(payload || {}),
@@ -54,5 +59,8 @@ export function billApiFromErpDoc(api) {
     onOpenNavGate: (cb) => api.onOpenNavGate(cb),
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
+    softPeekRoute: (route) => api.softPeekRoute(route || ""),
+    logNav: (event, detail) =>
+      api.logNav ? api.logNav(event, detail) : undefined,
   };
 }

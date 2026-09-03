@@ -9,11 +9,12 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Current dated working plan: `docs/implementation-plan-2026-08-30.md` (AP Doc skin backlog —
-   museum open items; sample corpus v2 + tranches T0–T17). Prior plan `implementation-plan-2026-07-29.md`
-   (Vanilla Simplified / OI-086) remains sibling until Simplified tranche reopens.
-   Nav instrumentation plan `implementation-plan-2026-08-19.md` (OI-127 / OI-126) — close when folded
-   into HANDOFF. Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
+3. Dated working plans (create new when a museum OI tranche is promoted):
+   `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086). Nav instrumentation
+   `implementation-plan-2026-08-19.md` (OI-127 / OI-126) — close when folded into HANDOFF.
+   **Closed:** `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
+   runtime lessons in [docs/gotchas.md](docs/gotchas.md); remaining OIs in museum only.
+   Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
 4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
    `~/agent-harness/erpnext/doc-shell/open_items.md` — **not** mirrored into this public tree.
 
@@ -57,6 +58,7 @@ flowchart LR
 | `ops/sample-data/` | Sandbox-only bench seed runner (`npm run seed:sample`) |
 | `ops/input-count/` | Bill scrape dogfood report (`npm run report:input-count`) |
 | `ops/erp-host/` | Optional ERP host scripts: `ensure-erp-up.sh` (docker + ping; no UI); example autofix wrapper |
+| `docs/gotchas.md` | Runtime/architecture gotchas from dogfood (bill enrich, ERP IPC, nav) |
 | `docs/input-count-gotchas.md` | Measurement gotchas + dogfood checklist before Simplified mockups |
 | `docs/erp-unreachable.md` | ERP timeout: host `start-shell.sh` + IT notify/autofix setup in diagnose |
 | `docs/erpnext-schema-browse.md` | Safe MariaDB/DBeaver schema browse (read-only, one-hop recipe, Clean Core) |
@@ -65,6 +67,9 @@ flowchart LR
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
 | `docs/` | beta-slice, commit conventions, **dated** working plans |
 | Museum `~/agent-harness/erpnext/doc-shell/` | Reference only — layouts, OIs, lessons |
+| ERP source (in Docker) | `docker exec frappe_docker-backend-1 ls /home/frappe/frappe-bench/apps/` — frappe + erpnext + payments + hrms; read-only browse only (Clean Core) |
+| MariaDB | `localhost:3306` (Docker port-forward); read-only schema access — see `docs/erpnext-schema-browse.md` |
+| Docker compose | `~/erpnext/frappe_docker/` |
 
 ### Invariants (do not casually break)
 

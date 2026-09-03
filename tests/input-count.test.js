@@ -24,7 +24,9 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const docFormHtml = readFileSync(join(root, "electron/doc-form.html"), "utf8");
-const billHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
+const chromeHtml = readFileSync(join(root, "electron/doc-chrome.fragment.html"), "utf8");
+const billBodyHtml = readFileSync(join(root, "electron/bill-shell.fragment.html"), "utf8");
+const billHtml = chromeHtml + "\n" + billBodyHtml;
 const vanillaBillHtml = readFileSync(
   join(root, "tests/fixtures/bill-vanilla-form.fixture.html"),
   "utf8",
