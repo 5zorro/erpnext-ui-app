@@ -7569,6 +7569,12 @@ ipcMain.on("open-vanilla-skin", () => {
     return;
   }
   const info = routeInfo(currentRoute, ERP_BASE);
+  // Explicitly reset simplified pref to vanilla so ensureSimplifiedSkin won't re-inject
+  // after the page reloads. Must happen before showErp so the did-finish-load handler sees it.
+  if (info.doctype) {
+    lensPrefs = rememberLens(lensPrefs, info.doctype, "vanilla");
+    savePrefs();
+  }
   if (info.doctype && info.record) {
     const profile = profileByDoctypeKey(info.doctype);
     if (profile) {
@@ -7580,11 +7586,17 @@ ipcMain.on("open-vanilla-skin", () => {
 });
 ipcMain.on("open-simplified-skin", () => {
   const info = routeInfo(currentRoute, ERP_BASE);
-  if (surfaceMode !== "erp" || !info.doctype || !info.record) return;
+  if (!info.doctype || !info.record) return;
   lensPrefs = rememberLens(lensPrefs, info.doctype, "simplified");
   savePrefs();
-  sendUiState();
-  ensureSimplifiedSkin().catch(() => {});
+  if (surfaceMode === "erp") {
+    // Already on ERP surface — inject without a full reload.
+    sendUiState();
+    ensureSimplifiedSkin().catch(() => {});
+  } else {
+    // Doc skin or other surface — load ERP form then inject (ensureSimplifiedSkin fires on did-finish-load).
+    showErp(info.path || currentRoute, { forceLoad: true });
+  }
 });
 ipcMain.on("open-entry", (_e, doctypeKey) => openEntry(doctypeKey));
 ipcMain.on("open-erp", (_e, route) => {
