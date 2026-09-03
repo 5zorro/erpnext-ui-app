@@ -48,8 +48,9 @@
     <button type="button" class="btn" id="btn-home" data-testid="btn-home" title="Doc Workflow Home (tiles)">Home</button>
     <span class="lbl" id="lens-label">View this page as:</span>
     <div class="seg" role="tablist">
-      <button type="button" class="opt" id="lens-vanilla" data-testid="lens-vanilla" role="tab">Vanilla skin</button>
-      <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc skin</button>
+      <button type="button" class="opt" id="lens-vanilla" data-testid="lens-vanilla" role="tab">Vanilla</button>
+      <button type="button" class="opt" id="lens-simplified" data-testid="lens-simplified" role="tab" title="Simplified skin — Vanilla + field assumptions (hide / pre-fill common fields)" hidden>Simplified</button>
+      <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc</button>
     </div>
     <span class="peek-hint" id="peek-hint" hidden data-testid="soft-peek-hint"></span>
     <span class="spacer"></span>
@@ -66,6 +67,7 @@
     const healthEl = document.getElementById("health");
     const htext = healthEl.querySelector(".htext");
     const lensVanilla = document.getElementById("lens-vanilla");
+    const lensSimplified = document.getElementById("lens-simplified");
     const lensDoc = document.getElementById("lens-doc");
     const lensLabel = document.getElementById("lens-label");
     const peekHint = document.getElementById("peek-hint");
@@ -83,11 +85,16 @@
       const showingHome = !!s.showingHome;
       const onDocForm = !!(s.showingBill || s.showingDocForm);
       const docOk = s.docSkinAvailable !== false;
+      const activeLens = s.lens || "vanilla";
       softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
       lensLabel.hidden = false;
+      // Show Simplified tab when on ERP surface with a form (not home, not doc skin)
+      const onErpForm = !showingHome && !onDocForm;
+      lensSimplified.hidden = !onErpForm;
       lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
-      lensVanilla.classList.toggle("active", !showingHome && !onDocForm);
+      lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified");
+      lensSimplified.classList.toggle("active", onErpForm && activeLens === "simplified");
       if (peekHint) {
         const hint = softPeekActive && s.softPeekHint ? String(s.softPeekHint) : "";
         peekHint.hidden = !hint;
@@ -106,6 +113,7 @@
     };
     lensDoc.onclick = () => api && api.openDocSkin && api.openDocSkin();
     lensVanilla.onclick = () => api && api.openVanillaSkin && api.openVanillaSkin();
+    lensSimplified.onclick = () => api && api.openSimplifiedSkin && api.openSimplifiedSkin();
     healthEl.onclick = () => {
       if (!api) return;
       if (diagnoseOpen && api.closeDiagnose) api.closeDiagnose();
