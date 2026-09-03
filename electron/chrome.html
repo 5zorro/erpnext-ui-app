@@ -89,12 +89,13 @@
       softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
       lensLabel.hidden = false;
-      // Show Simplified tab when on ERP surface with a form (not home, not doc skin)
+      // Simplified tab visible whenever there is a doctype form in context (ERP or doc skin)
       const onErpForm = !showingHome && !onDocForm;
-      lensSimplified.hidden = !onErpForm;
+      const hasForm = !showingHome && (onErpForm || onDocForm);
+      lensSimplified.hidden = !hasForm;
       lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
       lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified");
-      lensSimplified.classList.toggle("active", onErpForm && activeLens === "simplified");
+      lensSimplified.classList.toggle("active", onDocForm ? false : onErpForm && activeLens === "simplified");
       if (peekHint) {
         const hint = softPeekActive && s.softPeekHint ? String(s.softPeekHint) : "";
         peekHint.hidden = !hint;
