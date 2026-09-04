@@ -76,7 +76,44 @@ After `npm start`, open the over-limit draft bill:
 
 ---
 
-## Template (append G2+)
+## G2 — Vanilla tab DOM for Simplified scroll-nav (2026-09-04)
+
+**Observed:** Simplified skin thin-injects onto Vanilla's rendered form, which still uses
+Frappe's native tab widget (Details / Payments / Address and Contact / Terms / More Info / …
+— `frm.layout.tabs`), not doc skin's own single-scroll section layout. 5zorro wants
+Simplified to read as one continuous scroll with a sticky jump nav + back-to-top
+(DocuSign-style), same as doc skin already is.
+
+**Expected:** All tab content stays in the DOM at all times (Frappe never unmounts inactive
+tabs) — only `display` is toggled. So "single scroll" = force every pane's `display` on at
+once and repurpose the existing sticky tab strip as jump links, rather than rebuilding
+anything.
+
+**Architecture / fix:** `frm.layout.tabs[i]` → `.wrapper` (the `.tab-pane`, id
+`{scrubbed-doctype}-{fieldname}`) and `.tab_link` (the `<li class="nav-item">`). Visibility
+is Bootstrap's `.tab-content > .tab-pane { display:none } .tab-content > .active { display:
+block }` (`node_modules/bootstrap/scss/_nav.scss`) — no `!important`, so a plain inline
+`el.style.display = "block"` on every non-hidden pane beats it without touching Frappe's own
+`active`/`hide` class bookkeeping (`Tab.toggle()`/`set_active()` in
+`frappe/public/js/frappe/form/tab.js`). `tab.hidden` (permission/empty-section) is legit —
+skip those. Rewire `.nav-link` clicks to `scrollIntoView` instead of `set_active()` (leave
+Frappe's own handler attached; harmless since ours doesn't fight the display override).
+Landed in `src/assume-applier-payload.js` (`installScrollNav`, `installBackToTop`) —
+IntersectionObserver scroll-spy highlights the current `.nav-link`; Esc-Esc (600ms window)
+and a floating `#ss-top` button both scroll `tabs[0].wrapper` into view.
+
+**Dogfood:** Open a Purchase Invoice under Simplified lens → all vanilla tab sections stack
+in one scroll; clicking a tab strip item scrolls to it (no more show/hide flash); scrolling
+highlights the matching tab; Esc twice back-to-top.
+
+**Do not regress:** Don't add `active` class to every pane to fake visibility — other Frappe
+code (`set_active_tab`, dashboard tab placement) assumes exactly one active tab exists. Keep
+using inline `style.display`, not a class, for the force-visible override. Doctypes with no
+tabbed layout (`frm.layout.tabs.length === 0`) must no-op cleanly — this is not Bill-specific.
+
+---
+
+## Template (append G3+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)

@@ -3269,7 +3269,7 @@ function showErp(route = "/desk", opts = {}) {
       }) &&
       (info.path || path).startsWith("/app/")
     ) {
-      erpForceReopenRoute(info.path || path).then(afterNav);
+      erpForceReopenRoute(info.path || path, { forceLoad: true }).then(afterNav);
       return;
     }
 
