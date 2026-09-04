@@ -30,13 +30,16 @@ npm run report:input-count  # field-count advertising report
 | `electron/home.html` | Doc Workflow Home (tiled launcher) |
 | `.cursor/rules/` | Cursor .mdc rules — also apply here (symlinks; gitignored) |
 
-## Active plans (2026-09-01)
+## Active plans (2026-09-03)
 
 - `docs/implementation-plan-2026-07-29.md` — Simplified skin (OI-086), Calculator C0–C3 landed
 - `docs/implementation-plan-2026-08-19.md` — Nav instrumentation (OI-126/127/128), all landed
+- `docs/implementation-plan-2026-09-03.md` — Doc Pay skin: economic batching of outstanding
+  Bills (OI-138 / OI-161) — planned, no code yet
 
 Next: **Simplified skin Option B (ground-up)** — S1 lens tab, then S2 form.
 Mockups at `docs/mockups/simplified-option-b-ground-up.html` (preferred) and `…-option-a-thin-inject.html`.
+Parallel track: Doc Pay skin research done (Packet 0); Packet 1 (`outstanding-bills.js`) next.
 
 ## Process rules
 

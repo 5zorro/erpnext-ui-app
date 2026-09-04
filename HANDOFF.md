@@ -12,6 +12,8 @@
 3. Dated working plans (create new when a museum OI tranche is promoted):
    `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086). Nav instrumentation
    `implementation-plan-2026-08-19.md` (OI-127 / OI-126) — close when folded into HANDOFF.
+   `implementation-plan-2026-09-03.md` (Doc Pay skin economic batching / OI-138 · OI-161) —
+   planned, no code yet.
    **Closed:** `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
    runtime lessons in [docs/gotchas.md](docs/gotchas.md); remaining OIs in museum only.
    Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
