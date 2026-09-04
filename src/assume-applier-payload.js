@@ -6,7 +6,9 @@
  * Idempotent: no-ops if already installed at the same version.
  */
 
-const VERSION = 1;
+import { SEED_PROFILES } from "./simplified-seed-profiles.js";
+
+const VERSION = 2;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -109,6 +111,23 @@ const SIMPLIFIED_CSS = `
   padding: 7px 10px; margin: 0 0 8px; font-size: 12px; color: #5a4b00;
 }
 .ss-empty { padding: 16px 4px; color: #777; font-style: italic; }
+
+/* == Scroll nav: single-scroll tabs + back-to-top == */
+.form-tab-content .tab-pane { scroll-margin-top: 54px; }
+.ss-tab-divider {
+  margin: 22px 0 10px; padding-top: 14px; border-top: 2px solid #e0e6ea;
+  font: 600 13px system-ui,sans-serif; color: #8d99a6;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+#ss-top {
+  position: fixed; right: 18px; bottom: 62px; z-index: 100000;
+  background: #4b5563; color: #fff; border: none; border-radius: 20px;
+  padding: 8px 14px; cursor: pointer; font: 12px system-ui,sans-serif;
+  box-shadow: 0 3px 10px rgba(0,0,0,.3); opacity: 0; pointer-events: none;
+  transition: opacity .15s, background .15s;
+}
+#ss-top.ss-visible { opacity: .82; pointer-events: auto; }
+#ss-top:hover { opacity: 1; background: #2ca01c; }
 `;
 
 /**
@@ -230,6 +249,7 @@ export function buildSimplifiedPayload() {
   const version = VERSION;
   const css = SIMPLIFIED_CSS;
   const coreInline = CORE_INLINE;
+  const seedProfiles = SEED_PROFILES;
 
   return `(function() {
   "use strict";
@@ -255,9 +275,22 @@ export function buildSimplifiedPayload() {
   if (!core) { console.warn("[simplified-skin] core failed to load"); return; }
 
   /* ---- Persistence ---- */
+  var SEED_PROFILES = ${JSON.stringify(seedProfiles)};
+  function seedProfile(doctype) {
+    var seed = SEED_PROFILES[doctype];
+    if (!seed) return null;
+    var fields = {};
+    Object.keys(seed).forEach(function(fn) {
+      fields[fn] = { value: null, placement: seed[fn], valueSource: "literal", expr: null };
+    });
+    return { doctype: doctype, fields: fields, presets: [] };
+  }
   function load(doctype) {
     var raw = null;
     try { raw = JSON.parse(window.localStorage.getItem(core.lsKey(doctype)) || "null"); } catch(e) {}
+    /* First run for this doctype (nothing ever saved) — start from the doc-skin-shaped
+       default instead of all-Normal. The first Save writes a real profile that wins after. */
+    if (!raw) raw = seedProfile(doctype);
     return core.normalizeProfile(raw, doctype);
   }
   function save(profile) {
@@ -299,9 +332,84 @@ export function buildSimplifiedPayload() {
     } catch(e) {}
   }
 
+  /* ---- Scroll nav: single continuous scroll instead of click-through tabs ----
+     Vanilla tabs (Details / Payments / Address and Contact / Terms / More Info / ...) keep
+     only the active tab-pane's display on; every other pane stays in the DOM, just
+     hidden. Force them all visible at once (inline style beats the stylesheet's
+     tab-content-greater-than-tab-pane display:none rule without touching Frappe's own
+     active/hide bookkeeping), keep the native sticky tab strip as the jump nav (rewire
+     its clicks to scroll instead of swap), and add scroll-spy + a floating back-to-top. */
+  function installScrollNav(frm) {
+    try {
+      if (!frm || !frm.layout || !frm.layout.tabs || !frm.layout.tabs.length) return;
+      var tabs = frm.layout.tabs;
+      tabs.forEach(function(tab, i) {
+        if (!tab || !tab.wrapper || tab.hidden) return;
+        var el = tab.wrapper.get(0);
+        if (!el) return;
+        el.style.display = "block";
+        if (i > 0 && !el.querySelector(":scope > .ss-tab-divider")) {
+          var div = document.createElement("div");
+          div.className = "ss-tab-divider";
+          div.textContent = tab.label || (tab.df && tab.df.label) || "";
+          el.prepend(div);
+        }
+        if (tab.tab_link) {
+          tab.tab_link.find(".nav-link").off("click.ssScrollNav").on("click.ssScrollNav", function() {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
+      });
+      if (frm.__ssScrollSpy) { try { frm.__ssScrollSpy.disconnect(); } catch(e) {} }
+      if (window.IntersectionObserver) {
+        var observer = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (!entry.isIntersecting) return;
+            tabs.forEach(function(tab) {
+              if (!tab || !tab.tab_link || !tab.wrapper) return;
+              var match = tab.wrapper.get(0) === entry.target;
+              tab.tab_link.find(".nav-link").toggleClass("active", match);
+            });
+          });
+        }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
+        tabs.forEach(function(tab) {
+          if (tab && tab.wrapper && tab.wrapper.get(0) && !tab.hidden) observer.observe(tab.wrapper.get(0));
+        });
+        frm.__ssScrollSpy = observer;
+      }
+      installBackToTop(tabs[0].wrapper.get(0));
+    } catch(e) {}
+  }
+
+  /* ---- Back to top: floating button + Esc-Esc ---- */
+  var backToTopTarget = null;
+  var lastEscAt = 0;
+  function scrollToTop() {
+    if (backToTopTarget) backToTopTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function installBackToTop(topEl) {
+    backToTopTarget = topEl || null;
+    if (document.getElementById("ss-top")) return;
+    var btn = document.createElement("button");
+    btn.id = "ss-top"; btn.type = "button"; btn.textContent = "↑ Top";
+    btn.onclick = scrollToTop;
+    document.body.appendChild(btn);
+    window.addEventListener("scroll", function() {
+      btn.classList.toggle("ss-visible", window.scrollY > 220);
+    }, { passive: true });
+    document.addEventListener("keydown", function(e) {
+      if (e.key !== "Escape") return;
+      var now = Date.now();
+      if (now - lastEscAt < 600) { scrollToTop(); lastEscAt = 0; }
+      else lastEscAt = now;
+    });
+  }
+
   /* ---- Applier ---- */
   function apply(frm) {
     if (!frm || !frm.doctype) return;
+    installScrollNav(frm);
     var profile = load(frm.doctype);
     var check = core.checkProfile(profile, frm.meta ? frm.meta.fields : []);
     if (!check.ok && window.frappe && frappe.show_alert) {
