@@ -153,7 +153,75 @@ assuming a fix is needed.
 
 ---
 
-## Template (append G4+)
+## G4 — Forced-visible tabs need Bootstrap's "show", and two click-time fights (2026-09-04)
+
+**Observed:** "All fonts, text, input box borders and shadows... render as the exact same
+color as the background" on every non-active tab under Simplified scroll-nav — text,
+borders, even the caret, fully present in the DOM but invisible. Separately: clicking a
+tab-strip nav-link *twice* first scrolled to the right section, then snapped back to the
+top — "de-renders the rest of the scroll" on click, confirmed scrolling alone wasn't the
+trigger.
+
+**Expected:** A forced-`display:block` pane should render normally; clicking its nav-link
+repeatedly should keep it in view, not toggle.
+
+**Architecture / fix — three separate, compounding causes, each traced live by driving the
+real Electron app through `E2E=1`'s `globalThis.__erpE2e.execInView(view, js)`
+(`e2e/helpers.js`) rather than guessing from source alone:**
+
+1. **Opacity, not just display.** Every `.tab-pane` also carries Bootstrap's `fade` class:
+   `.fade:not(.show){opacity:0}` (`node_modules/bootstrap/scss/_transitions.scss`) is a
+   *separate* gate from `display`. `Tab.set_active()` adds `show active` to the newly
+   active tab and **removes `show` — not just `active` — from every other one**. G2's fix
+   forced `display:block` but never re-added `show`, so every non-initially-active pane sat
+   at `opacity:0`: fully laid out, fully transparent. Fix: also `classList.add("show")`
+   (never `"active"` — see G2's own "do not regress").
+2. **Something un-shows it again, once, fast.** Even with `show` added, it vanished again
+   within ~100ms — too fast to be a later async refresh, and `apply()`/`installScrollNav`
+   only ran once (confirmed via breadcrumb logging inside the real code, not a
+   reimplementation). `Tab` isn't exposed as `frappe.ui.form.Tab` (only in
+   dead/commented-out code in `form.js`), so there's nothing to patch directly, and the
+   exact caller wasn't worth chasing further. Fix: out-persist it — a `MutationObserver` on
+   each section's `class` attribute that re-adds `show` the instant anything removes it.
+3. **A delegated click handler nobody's `off()` reaches.** `Layout.setup_events()`
+   (`frappe/public/js/frappe/form/layout.js`) binds a **second**, separate click handler —
+   delegated on `<ul id="form-tabs">` itself, not on the individual `.nav-link` buttons
+   where `Tab.setup_listeners()` binds its own (already correctly neutralized via
+   unnamespaced `off("click")` on the button). Delegation means `off("click")` on the
+   button never touches it. It has its own logic: if `.form-tab-content`'s own top has
+   scrolled above 100px from the viewport top, it calls `tabs_content.scrollIntoView()`
+   bare (no smooth/`block:start`) — a safety net for Frappe's own tiny native tab-switch
+   scroll, which our scroll-thousands-of-px navigation blows way past on the very first
+   click, so a second click's bubbled event re-triggers it and snaps back to the start.
+   Fix: `e.stopPropagation()` in the button-level handler — it fires first during bubble,
+   so stopping propagation there keeps the event from ever reaching the delegated one.
+
+Also found along the way and worth remembering on its own: **this Electron shell's ERP view
+does not use normal document-level scrolling.** `window.scrollY` /
+`document.documentElement.scrollTop` / `document.body.scrollTop` all read `0` throughout an
+entire `scrollIntoView({behavior:"smooth"})` animation that visibly moves elements by
+thousands of px (`getBoundingClientRect()` tracks it correctly) — `html`/`body` compute
+`overflow: visible`, so there is no CSSOM-recognized scrolling box for `scrollTop` to
+report, even though `scrollIntoView` still visibly works via some other Chromium-internal
+path. **Any code that needs to react to "the user scrolled" here must poll geometry
+(`getBoundingClientRect()`) — a `window`/`document` `scroll` event listener will not
+reliably fire.** `updateScrollNavActive`'s back-to-top visibility toggle currently still
+listens on `window`'s `scroll` event and inherits this weakness; not yet fixed.
+
+**Dogfood:** Open a Purchase Invoice under Simplified. Every tab-pane's text/borders should
+be visible (not just present) on scroll. Click a tab-strip nav-link 5 times in a row —
+should land and stay at the same scroll position every time, no snap-back.
+
+**Do not regress:** Don't assume `off("click")` on an element clears every handler that
+reacts to clicks on it — check for a delegated ancestor-level handler too (`stack` on an
+instrumented `scrollIntoView`/similar call will show it). Don't chase "why does a class
+disappear" by reasoning from source alone once the answer isn't obvious in a read or two —
+a `MutationObserver` breadcrumb log against the *real* injected code (not a hand-rolled
+re-simulation of it) settles it in one run.
+
+---
+
+## Template (append G5+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)
