@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
 
-const VERSION = 5;
+const VERSION = 9;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -383,7 +383,17 @@ export function buildSimplifiedPayload() {
      hidden. Force them all visible at once (inline style beats the stylesheet's
      tab-content-greater-than-tab-pane display:none rule without touching Frappe's own
      active/hide bookkeeping), keep the native sticky tab strip as the jump nav (rewire
-     its clicks to scroll instead of swap), and add scroll-spy + a floating back-to-top. */
+     its clicks to scroll instead of swap), and add scroll-spy + a floating back-to-top.
+     Each .tab-pane also carries Bootstrap's "fade" class: fade-not-show sets opacity to 0
+     (node_modules/bootstrap/scss/_transitions.scss) as a SEPARATE gate from display —
+     Tab.set_active() adds "show active" to the newly active tab and strips "show" (not
+     just "active") from every other one, so a forced-visible-but-not-"show" pane is fully
+     laid out yet fully transparent: text, borders, the caret, all render at opacity 0 over
+     the same background. Add "show" (never "active" — Tab.is_active()/set_active_tab()
+     assume exactly one) to every forced-visible pane to fix that. And don't just layer a
+     click handler on top of Frappe's original one on the nav-link: its own set_active()
+     still runs on click and un-shows every other pane again, so replace it outright
+     (off("click"), unnamespaced) instead of adding alongside it. */
   var scrollNavSections = [];
   function updateScrollNavActive() {
     if (!scrollNavSections.length) return;
@@ -406,6 +416,7 @@ export function buildSimplifiedPayload() {
         var el = tab.wrapper.get(0);
         if (!el) return;
         el.style.display = "block";
+        el.classList.add("show");
         if (i > 0 && !el.querySelector(":scope > .ss-tab-divider")) {
           var div = document.createElement("div");
           div.className = "ss-tab-divider";
@@ -414,12 +425,45 @@ export function buildSimplifiedPayload() {
         }
         if (tab.tab_link) {
           var link = tab.tab_link.find(".nav-link");
-          link.off("click.ssScrollNav").on("click.ssScrollNav", function() {
+          /* Unnamespaced off() — strips Frappe's own set_active() handler too, not just a
+             prior copy of this one. Layering ours on top of it left it running: clicking
+             still called set_active(), which un-shows every other pane. */
+          link.off("click").on("click.ssScrollNav", function(e) {
+            e.preventDefault();
+            /* Layout.setup_events() (frappe/public/js/frappe/form/layout.js) binds a
+               SEPARATE, delegated click handler on the <ul#form-tabs> container itself
+               (not the button — off("click") on the button never touched it): if
+               .form-tab-content's own top has scrolled above 100px from the viewport top,
+               it calls tabs_content.scrollIntoView() bare (no smooth/start), snapping the
+               whole container back to its start. Our scroll moves things by thousands of
+               px, so after the first click that condition is true and a second click
+               undoes it. stopPropagation keeps the click from ever reaching that handler. */
+            e.stopPropagation();
             el.scrollIntoView({ behavior: "smooth", block: "start" });
           });
           sections.push({ el: el, link: link });
         }
       });
+      /* Something in Frappe's own boot sequence (not click-triggered — traced with a
+         MutationObserver breadcrumb log; happens once, within the same tick, before any
+         click) calls Tab.set_active() on the initially-active tab independently of ours,
+         which un-shows every sibling again right after we add "show" back. Tab isn't
+         exposed as frappe.ui.form.Tab (only in dead/commented code) so there's nothing to
+         patch directly. Instead of chasing the exact caller, out-persist it: watch each
+         section's class attribute and re-add "show" the instant anything removes it. */
+      if (frm.__ssShowGuard) { try { frm.__ssShowGuard.disconnect(); } catch(e) {} }
+      if (window.MutationObserver) {
+        var showGuard = new MutationObserver(function(muts) {
+          muts.forEach(function(m) {
+            var el = m.target;
+            if (el.style.display === "block" && !el.classList.contains("show")) el.classList.add("show");
+          });
+        });
+        sections.forEach(function(item) {
+          showGuard.observe(item.el, { attributes: true, attributeFilter: ["class"] });
+        });
+        frm.__ssShowGuard = showGuard;
+      }
       /* Geometric scroll-spy (not IntersectionObserver's isIntersecting): a section that
          got squeezed short (e.g. most of its fields conditionally hidden) can sit entirely
          outside a narrow mid-viewport trigger band and never "intersect" — the observer
