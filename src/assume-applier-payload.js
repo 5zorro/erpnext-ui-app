@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
 
-const VERSION = 2;
+const VERSION = 3;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -93,14 +93,19 @@ const SIMPLIFIED_CSS = `
 .ss-radio.ss-off { color: #7a8189; }
 .ss-foot {
   padding: 10px 14px; border-top: 1px solid #ddd;
-  display: flex; gap: 8px; justify-content: flex-end;
+  display: flex; gap: 8px; justify-content: space-between; align-items: center;
 }
+.ss-foot-group { display: flex; gap: 8px; }
 .ss-btn {
   background: #2ca01c; color: #fff; border: none; border-radius: 4px;
   padding: 6px 14px; cursor: pointer; font: 13px system-ui,sans-serif;
 }
 .ss-btn:hover { filter: brightness(1.08); }
 .ss-btn-sec { background: #4b5563; }
+.ss-btn-src { background: #fff; color: #2c3e50; border: 1px solid #c3c7cc; }
+.ss-btn-src:hover { filter: none; background: #f3f6f9; }
+.ss-btn-src:disabled { color: #aab1b8; cursor: default; background: #fff; }
+.ss-btn-src:disabled:hover { background: #fff; }
 .ss-mini {
   font-size: 11px; padding: 2px 8px; border: 1px solid #2ca01c;
   background: #fff; color: #2ca01c; border-radius: 3px; cursor: pointer;
@@ -296,6 +301,18 @@ export function buildSimplifiedPayload() {
   function save(profile) {
     try { window.localStorage.setItem(core.lsKey(profile.doctype), JSON.stringify(profile)); }
     catch(e) { console.warn("[simplified-skin] save failed", e); }
+  }
+
+  /* ---- Doc-skin / custom source swap ----
+     "Use doc-skin assumptions" and "Use custom assumptions" swap the active profile without
+     losing the other side: whichever profile is about to be replaced is stashed under a
+     ":custom-backup" key first, so switching back restores it. */
+  function backupKey(doctype) { return core.lsKey(doctype) + ":custom-backup"; }
+  function loadBackup(doctype) {
+    try { return JSON.parse(window.localStorage.getItem(backupKey(doctype)) || "null"); } catch(e) { return null; }
+  }
+  function saveBackup(doctype, profile) {
+    try { window.localStorage.setItem(backupKey(doctype), JSON.stringify(profile)); } catch(e) {}
   }
 
   /* ---- Skip types for the bar field list ---- */
@@ -625,9 +642,42 @@ export function buildSimplifiedPayload() {
 
     /* Footer */
     var foot = document.createElement("div"); foot.className = "ss-foot";
+
+    /* Left group: swap which saved profile is active. Doc-skin defaults are the seed
+       (SEED_PROFILES); custom is whatever you last configured by hand. Switching stashes
+       the side you're leaving under a ":custom-backup" key first, so neither is lost. */
+    var footLeft = document.createElement("div"); footLeft.className = "ss-foot-group";
+    var useDocBtn = document.createElement("button"); useDocBtn.className = "ss-btn ss-btn-src"; useDocBtn.textContent = "Use doc-skin assumptions";
+    var useCustomBtn = document.createElement("button"); useCustomBtn.className = "ss-btn ss-btn-src"; useCustomBtn.textContent = "Use custom assumptions";
+    var hasSeed = !!SEED_PROFILES[frm.doctype];
+    if (!hasSeed) {
+      useDocBtn.disabled = true;
+      useDocBtn.title = "No doc-skin defaults recorded yet for " + frm.doctype + ".";
+    } else {
+      useDocBtn.title = "Switch to the quiet-and-locked defaults Doc " + (frm.doctype === "Purchase Invoice" ? "Bill" : frm.doctype) + " already assumes. Your current (custom) profile is kept — Use custom assumptions brings it back.";
+    }
+    useDocBtn.onclick = function() {
+      var seed = seedProfile(frm.doctype);
+      if (!seed) return;
+      saveBackup(frm.doctype, profile);
+      profile = core.normalizeProfile(seed, frm.doctype);
+      save(profile); apply(frm); close(); openBar(frm);
+    };
+    useCustomBtn.title = "Restore the assumptions you last set by hand for " + frm.doctype + " (saved automatically when you switch to doc-skin defaults).";
+    useCustomBtn.onclick = function() {
+      var backup = loadBackup(frm.doctype);
+      if (!backup) { alert("No saved custom assumptions yet for " + frm.doctype + " — nothing to restore."); return; }
+      profile = core.normalizeProfile(backup, frm.doctype);
+      save(profile); apply(frm); close(); openBar(frm);
+    };
+    footLeft.appendChild(useDocBtn); footLeft.appendChild(useCustomBtn);
+
+    var footRight = document.createElement("div"); footRight.className = "ss-foot-group";
     var apBtn = document.createElement("button"); apBtn.className = "ss-btn"; apBtn.textContent = "Apply now";
+    apBtn.title = "Save this profile and apply it to the open form right away.";
     apBtn.onclick = function() { save(profile); apply(frm); close(); };
     var exBtn = document.createElement("button"); exBtn.className = "ss-btn ss-btn-sec"; exBtn.textContent = "Export";
+    exBtn.title = "Download this profile as a JSON file. Assumptions live only in this browser's storage (never networked) — Export is how you back one up or move it to another machine.";
     exBtn.onclick = function() {
       save(profile);
       try {
@@ -638,6 +688,7 @@ export function buildSimplifiedPayload() {
       } catch(e) { console.warn("[simplified-skin] export failed", e); }
     };
     var imBtn = document.createElement("button"); imBtn.className = "ss-btn ss-btn-sec"; imBtn.textContent = "Import";
+    imBtn.title = "Load a profile JSON file exported earlier (this or another machine) and replace this doctype's assumptions with it.";
     imBtn.onclick = function() {
       var inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/json";
       inp.onchange = function() {
@@ -655,7 +706,8 @@ export function buildSimplifiedPayload() {
     };
     var clBtn = document.createElement("button"); clBtn.className = "ss-btn ss-btn-sec"; clBtn.textContent = "Close";
     clBtn.onclick = close;
-    foot.appendChild(apBtn); foot.appendChild(exBtn); foot.appendChild(imBtn); foot.appendChild(clBtn);
+    footRight.appendChild(apBtn); footRight.appendChild(exBtn); footRight.appendChild(imBtn); footRight.appendChild(clBtn);
+    foot.appendChild(footLeft); foot.appendChild(footRight);
     box.appendChild(foot);
     back.appendChild(box); document.body.appendChild(back);
     back.addEventListener("mousedown", function(e) { if (e.target === back) close(); });
