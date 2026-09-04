@@ -62,6 +62,12 @@ families**, not a single mega-diff.
 4. Leave the **write path** (Payment Entry / Payment Order creation from a chosen batch) as a named
    stretch packet, not required to close this tranche.
 
+> **Gate (5zorro 2026-09-03):** none of this is reviewable against real data until sample data
+> exists that actually exercises batching — "a vendor with a bill with 1 payment due every day for
+> 3 months." **Packet G** below builds that fixture and is a **prerequisite to dogfooding** Packets
+> 1–4 (pure unit tests can proceed in parallel against hand-built fixtures; the live Doc Pay skin
+> cannot be judged without it).
+
 Architecture unchanged: **Electron shell → HTTP → unmodified ERPNext**. This tranche adds one pure
 module and one new Doc-skin surface; no new ERP-side code (Clean Core — we call existing whitelisted
 methods only, never patch `apps/frappe` / `apps/erpnext`).
@@ -118,6 +124,76 @@ economics, suggestion — is new product surface, matching what 5zorro asked to 
 | Bill "already paid" (OI-135) | **Shipping separately** — JIT Payment Entry on Submit for card-at-entry Bills. Orthogonal: that's Bills paid *at entry*; this tranche is Bills **already submitted and outstanding**. |
 | Applied-payments table (OI-139) | **Shipping separately** — read-only PE list on a submitted Bill. Orthogonal (single-Bill view vs cross-vendor batch view). |
 | Cost-model prefs (APR / postage / per-check) | **Do not exist anywhere** — new SSoT, this tranche. |
+| Multi-installment sample data | **Does not exist** — `ops/sample-data/seed_corpus.py::_normalize_pi_dates` unconditionally clears `payment_schedule` and flattens every seeded Bill to a single 30-day due date. Zero bills in the sandbox today have more than one due date. **Packet G** fixes this for one dedicated fixture. |
+| Doc-skin Payment Entry | **Does not exist** — `DOC_SKIN_INDEX` (`src/lens-context.js`) only has `workflow-home` / `bill` / `po` / `receipt`. Payment Entry is Vanilla-only today (`/app/payment-entry/new`). 5zorro decided (2026-09-03): **Home tile is the only entry point this tranche** — no PE link point, Vanilla or Doc, this round (see Packet 4). |
+
+---
+
+## Packet G — Sample-data gate (blocking; 5zorro 2026-09-03)
+
+> Do this **before** Packet 1's IPC wiring is worth dogfooding. Packet 1–3's unit tests can use
+> hand-built fixtures and don't strictly need this, but nobody can look at the real Doc Pay skin
+> and judge the batching math without it — 5zorro named this the primary gate.
+
+### Business rule
+
+"A vendor with a bill with 1 payment due every day for 3 months" — one Purchase Invoice, one
+`payment_schedule` row per calendar day, ~90 rows, so the suggested-batch output (weekly-ish
+groups) is visually obvious against a flat list of 90 individual due dates.
+
+### Why today's seed can't show this
+
+`ops/sample-data/seed_corpus.py::_normalize_pi_dates` runs on **every** seeded Purchase Invoice:
+
+```python
+doc.due_date = add_days(getdate(posting), 30)
+if hasattr(doc, "payment_schedule"):
+    doc.set("payment_schedule", [])
+```
+
+So all ~25 existing sample Bills get a single flat 30-day due date and an **empty**
+`payment_schedule`. This must change for **one** new fixture without touching the other seeded
+Bills — other OIs' dogfood already depends on the existing 25 (OI-054 bill-ref, OI-131 vendor
+activity ranking, the OI-149/153/154 AP fixtures) staying exactly as they are.
+
+### Confirmed against the ERP controller (2026-09-03 read of `accounts_controller.py`)
+
+- `set_payment_schedule()` only auto-generates rows `if not self.get("payment_schedule")` — if we
+  populate the child table **before** `doc.insert()`, our rows are left alone.
+- `validate_payment_schedule_dates()` **throws on duplicate `due_date`s** within one doc's schedule
+  — daily rows are fine (each is a distinct calendar day) but confirms this fixture couldn't have
+  used, say, 90 rows all due "in 30 days."
+- `validate_payment_schedule_amount()` requires `payment_schedule` rows' `payment_amount` to sum to
+  `grand_total` (within field precision) — design the fixture so this is exact, not rounded.
+
+### Design
+
+| Piece | Detail |
+|---|---|
+| New supplier | `SUP-DAILY` — "SAMPLE Vendor Daily Payrun." Dedicated key, not reused, so this fixture never mixes with existing vendor-scoped dogfood (OI-054, OI-131, etc.). |
+| One Purchase Invoice | Single line, existing sample item, `qty: 90`, `rate: 50.00` → `grand_total = 4500.00` exactly — no fractional rounding to fight. |
+| `payment_schedule` | 90 rows. Row *i* (1..90): `due_date = posting_date + i days`; `payment_amount = base_payment_amount = outstanding = base_outstanding = 50.00`; `invoice_portion = 0` (percentage math not needed — amounts are set directly). |
+| Header `due_date` | Set to the **last** schedule row's date — same "last row wins" convention `bill-payment-schedule.js::headerDueDateFromPaymentSchedule` already uses, so this fixture is consistent with code that already exists rather than inventing a second rule. |
+| Submit | Must land `docstatus=1` — outstanding/ageing data (Accounts Payable report, Packet 1's source) only exists for submitted invoices. No Payment Entry against it, so the full $4,500 stays outstanding across all 90 rows. |
+| Optional, propose separately | 2–3 of the 90 rows also carrying `discount_type` / `discount` / `discount_date`, so Packet 2's discount-capture branch has one live fixture too, not only unit-test fixtures. **Confirm with 5zorro before adding** — the daily-due-date shape alone already answers the batching-visualization ask; don't grow this fixture's scope unasked. |
+
+With the default `groupWindowDays: 7` (Packet 2), 90 consecutive daily $50 bills should suggest
+roughly **13 weekly batches** — a shape 5zorro can eyeball directly against the raw 90-row list.
+
+### Code changes
+
+| File | Change |
+|---|---|
+| `src/sample-data/corpus-plan.js` | New `appendPaymentBatchFixture(docs, ctx)`, called alongside `appendApDogfoodFixtures`. Builds the `SUP-DAILY` supplier + one PI spec carrying an explicit `paymentSchedule: [{ dueDate, amount }, …]` array and `dogfoodScenario: "oi161-daily-payrun"`. Bump `SAMPLE_TAG` (`ui-app-sample-v2` → `v3`) — existing convention: shape change ⇒ new tag, `--reset` drops the old one. |
+| `ops/sample-data/seed_corpus.py` | In `_normalize_pi_dates` (or a guard just before it runs): if `spec.get("paymentSchedule")`, append those rows onto `doc.payment_schedule` and set `doc.due_date` to the last row's date **instead of** the existing wipe-and-flatten path. Every other Bill keeps today's behavior byte-for-byte. |
+| `tests/corpus-plan.test.js` (existing suite) | Extend: plan includes `SUP-DAILY`; schedule has 90 rows on 90 consecutive distinct calendar days; `payment_amount` sum equals `grand_total` exactly. |
+
+### Exit
+
+`CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset` produces one submitted Purchase Invoice under
+`SUP-DAILY` with 90 daily `payment_schedule` rows and nothing paid. 5zorro can open the Accounts
+Payable report today (pre-Packet-1) and already see 90 distinct due dates from one vendor; once
+Packet 1–2 land, the same fixture is what proves the batching math on the real Doc Pay skin.
 
 ---
 
@@ -280,6 +356,14 @@ existing Vanilla Payment Entry / Payment Order as the write path — see Packet 
 
 ### How
 
+### Entry points (locked 2026-09-03)
+
+**Home tile only, this tranche.** 5zorro's first instinct was also linking from inside Payment
+Entry, but there's no Doc-skin Payment Entry to link from today (`DOC_SKIN_INDEX` gap, see
+Baseline) — building one, or even a lightweight chrome affordance on the Vanilla PE route, is a
+separate decision deferred until there's dogfood signal on whether clerks actually want to jump
+there from PE. Do not add a second entry point this tranche.
+
 | Piece | Job |
 |---|---|
 | Home tile | New tile in the existing **Vendors** or **Banking** group (`src/home-tiles.js`) — e.g. `pay-outstanding` → `/pay-outstanding` (shell route, not `/app/...` — this is our own page, like `home.html`/`history.html`). Existing `pay-bills` / `checks` tiles stay as-is (direct-to-blank-PE escape hatch); this is a new, additive tile, not a replacement — do not remove clerk's fast path to a blank PE. |
@@ -295,6 +379,8 @@ existing Vanilla Payment Entry / Payment Order as the write path — see Packet 
   pre-filtered Payment Entry `Get Outstanding` — a link-out, not a shell-side write).
 - No list-scroll-position/return-to-list work (that's **OI-129**, explicitly parked until 5zorro
   dogfoods this and feels the same pain — do not pre-solve it here).
+- No Payment Entry link point (Vanilla chrome affordance or a future Doc-skin PE) — Home tile is
+  the only entry point this tranche (locked 2026-09-03, see Entry points above).
 
 ### Tests
 
@@ -334,6 +420,8 @@ header block above; do not fold their status into this table.)*
 ## Out of this tranche
 
 - Packet 5 (write path) — stretch, explicitly deferred pending dogfood.
+- Payment Entry entry point (Vanilla chrome affordance or a future Doc-skin PE) — Home tile only
+  this tranche; revisit after dogfood signal (locked 2026-09-03).
 - OI-129 (list return/scroll) — explicit no-build until 5zorro dogfoods this tranche's list.
 - OI-135 / OI-139 — shipping on their own tracks; only touched here by reusing shared shapes
   (`payment_schedule`), not by changing their code.
