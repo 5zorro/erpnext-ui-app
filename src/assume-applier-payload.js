@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
 
-const VERSION = 3;
+const VERSION = 5;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -116,6 +116,12 @@ const SIMPLIFIED_CSS = `
   padding: 7px 10px; margin: 0 0 8px; font-size: 12px; color: #5a4b00;
 }
 .ss-empty { padding: 16px 4px; color: #777; font-style: italic; }
+.ss-tab-header {
+  margin: 14px 0 2px; padding: 4px 0 4px; border-bottom: 1px solid #dde3e8;
+  font: 700 11px system-ui,sans-serif; color: #4b5563;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.ss-tab-header:first-child { margin-top: 0; }
 
 /* == Scroll nav: single-scroll tabs + back-to-top == */
 .form-tab-content .tab-pane { scroll-margin-top: 54px; }
@@ -322,7 +328,29 @@ export function buildSimplifiedPayload() {
   };
   function entryFields(frm) {
     var fields = (frm && frm.meta && frm.meta.fields) ? frm.meta.fields : [];
-    return fields.filter(function(f) { return f && f.fieldname && !SKIP_TYPES[f.fieldtype] && !f.hidden; });
+    /* Already-read-only fields (computed/fetched, e.g. Tax Id, grand_total, in_words) are
+       never a data-entry decision in Vanilla either — nothing to assume. Excluding them
+       here (not from SEED_PROFILES) fixes bar clutter for every doctype, not just Bill. */
+    return fields.filter(function(f) {
+      return f && f.fieldname && !SKIP_TYPES[f.fieldtype] && !f.hidden && !f.read_only;
+    });
+  }
+
+  /* fieldname -> vanilla Tab Break label ("Details", "Payments", ...) the field falls
+     under, so the bar can chunk a long flat list under the same headers Vanilla uses
+     instead of one undifferentiated wall of rows. tabbed=false for untabbed doctypes,
+     where a single synthetic header would be noise, not chunking. */
+  function fieldTabLabels(frm) {
+    var map = {};
+    var current = "Details";
+    var tabbed = false;
+    var all = (frm && frm.meta && frm.meta.fields) ? frm.meta.fields : [];
+    all.forEach(function(f) {
+      if (!f) return;
+      if (f.fieldtype === "Tab Break") { current = f.label || "Details"; tabbed = true; return; }
+      if (f.fieldname) map[f.fieldname] = current;
+    });
+    return { map: map, tabbed: tabbed };
   }
 
   /* ---- Visual helpers ---- */
@@ -356,10 +384,23 @@ export function buildSimplifiedPayload() {
      tab-content-greater-than-tab-pane display:none rule without touching Frappe's own
      active/hide bookkeeping), keep the native sticky tab strip as the jump nav (rewire
      its clicks to scroll instead of swap), and add scroll-spy + a floating back-to-top. */
+  var scrollNavSections = [];
+  function updateScrollNavActive() {
+    if (!scrollNavSections.length) return;
+    var headerOffset = 60;
+    var current = scrollNavSections[0];
+    scrollNavSections.forEach(function(item) {
+      if (item.el.getBoundingClientRect().top - headerOffset <= 0) current = item;
+    });
+    scrollNavSections.forEach(function(item) {
+      item.link.toggleClass("active", item === current);
+    });
+  }
   function installScrollNav(frm) {
     try {
       if (!frm || !frm.layout || !frm.layout.tabs || !frm.layout.tabs.length) return;
       var tabs = frm.layout.tabs;
+      var sections = [];
       tabs.forEach(function(tab, i) {
         if (!tab || !tab.wrapper || tab.hidden) return;
         var el = tab.wrapper.get(0);
@@ -372,48 +413,50 @@ export function buildSimplifiedPayload() {
           el.prepend(div);
         }
         if (tab.tab_link) {
-          tab.tab_link.find(".nav-link").off("click.ssScrollNav").on("click.ssScrollNav", function() {
+          var link = tab.tab_link.find(".nav-link");
+          link.off("click.ssScrollNav").on("click.ssScrollNav", function() {
             el.scrollIntoView({ behavior: "smooth", block: "start" });
           });
+          sections.push({ el: el, link: link });
         }
       });
-      if (frm.__ssScrollSpy) { try { frm.__ssScrollSpy.disconnect(); } catch(e) {} }
-      if (window.IntersectionObserver) {
-        var observer = new IntersectionObserver(function(entries) {
-          entries.forEach(function(entry) {
-            if (!entry.isIntersecting) return;
-            tabs.forEach(function(tab) {
-              if (!tab || !tab.tab_link || !tab.wrapper) return;
-              var match = tab.wrapper.get(0) === entry.target;
-              tab.tab_link.find(".nav-link").toggleClass("active", match);
-            });
-          });
-        }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
-        tabs.forEach(function(tab) {
-          if (tab && tab.wrapper && tab.wrapper.get(0) && !tab.hidden) observer.observe(tab.wrapper.get(0));
-        });
-        frm.__ssScrollSpy = observer;
-      }
+      /* Geometric scroll-spy (not IntersectionObserver's isIntersecting): a section that
+         got squeezed short (e.g. most of its fields conditionally hidden) can sit entirely
+         outside a narrow mid-viewport trigger band and never "intersect" — the observer
+         then leaves the *next*, taller section highlighted instead. Tracking "last section
+         whose top has scrolled past the sticky header" degrades gracefully regardless of
+         section height. */
+      scrollNavSections = sections;
+      updateScrollNavActive();
       installBackToTop(tabs[0].wrapper.get(0));
     } catch(e) {}
   }
 
-  /* ---- Back to top: floating button + Esc-Esc ---- */
+  /* ---- Back to top: floating button + Esc-Esc; also drives the scroll-spy above ---- */
   var backToTopTarget = null;
   var lastEscAt = 0;
+  var scrollListenerBound = false;
   function scrollToTop() {
     if (backToTopTarget) backToTopTarget.scrollIntoView({ behavior: "smooth", block: "start" });
     else window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function installBackToTop(topEl) {
     backToTopTarget = topEl || null;
-    if (document.getElementById("ss-top")) return;
-    var btn = document.createElement("button");
-    btn.id = "ss-top"; btn.type = "button"; btn.textContent = "↑ Top";
-    btn.onclick = scrollToTop;
-    document.body.appendChild(btn);
+    var btn = document.getElementById("ss-top");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "ss-top"; btn.type = "button"; btn.textContent = "↑ Top";
+      btn.onclick = scrollToTop;
+      document.body.appendChild(btn);
+    }
+    if (scrollListenerBound) return;
+    scrollListenerBound = true;
+    var ticking = false;
     window.addEventListener("scroll", function() {
       btn.classList.toggle("ss-visible", window.scrollY > 220);
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function() { updateScrollNavActive(); ticking = false; });
     }, { passive: true });
     document.addEventListener("keydown", function(e) {
       if (e.key !== "Escape") return;
@@ -449,6 +492,7 @@ export function buildSimplifiedPayload() {
       var blank = (existing === null || existing === undefined || existing === "");
       if (rv.apply && rv.value !== null && rv.value !== "" && (isNew || blank) && frm.set_value) {
         try { frm.set_value(fn, rv.value); } catch(e) {}
+        blank = false;
       }
       if (unsafe[fn]) return;
       try {
@@ -456,7 +500,12 @@ export function buildSimplifiedPayload() {
           frm.set_df_property(fn, "hidden", 1);
           return;
         }
-        frm.set_df_property(fn, "read_only", 1);
+        /* Only lock read_only when the field actually carries a value. ERPNext's own
+           Control.get_status() (base_control.js) hides a read_only field with an empty
+           value outright when System Settings "hide_empty_read_only_fields" is on — so a
+           seeded L1/L2 field with no literal value (the common case here) would silently
+           vanish instead of showing quiet-but-visible. Skip the lock rather than the field. */
+        if (!blank) frm.set_df_property(fn, "read_only", 1);
         frm.set_df_property(fn, "description", "Set as a general assumption — change it in ⚙ Assumptions.");
         if (pl === "L2") deemph(frm, fn, true);
         if (pl === "L1") prefillMark(frm, fn, true);
@@ -524,7 +573,18 @@ export function buildSimplifiedPayload() {
       body.appendChild(em);
     }
 
+    var tabInfo = fieldTabLabels(frm);
+    var lastTabHeader = null;
     fields.forEach(function(f) {
+      if (tabInfo.tabbed) {
+        var tabLabel = tabInfo.map[f.fieldname] || "Details";
+        if (tabLabel !== lastTabHeader) {
+          lastTabHeader = tabLabel;
+          var hdr = document.createElement("div"); hdr.className = "ss-tab-header";
+          hdr.textContent = tabLabel;
+          body.appendChild(hdr);
+        }
+      }
       var fn = f.fieldname;
       var row = document.createElement("div"); row.className = "ss-row";
 

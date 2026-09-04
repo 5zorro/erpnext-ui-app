@@ -113,7 +113,47 @@ tabbed layout (`frm.layout.tabs.length === 0`) must no-op cleanly — this is no
 
 ---
 
-## Template (append G3+)
+## G3 — read_only + no value silently hides a field (hide_empty_read_only_fields, 2026-09-04)
+
+**Observed:** 5zorro's doc-skin-seed assumptions (G2, L2 "quiet & locked" fields with no
+literal value — the seed only sets a placement, never a value) rendered as genuinely
+invisible (`getBoundingClientRect()` all-zero, `hide-control` class + `display:none`) on
+Purchase Invoice's Payments/Terms/More Info tabs, not just dimmed. Nav incident: "the
+section did not populate with details... it was hard to tell what I was supposed to see."
+
+**Expected:** L2 ("Quiet & locked") should mean visible-but-greyed-and-locked, per its own
+`PLACEMENT_UI` label ("filled, greyed, locked"). It should never make a field disappear.
+
+**Architecture / fix:** Frappe's `Control.get_status()`
+(`frappe/public/js/frappe/form/controls/base_control.js`) has a branch: if the resolved
+status is "Read" (i.e. `read_only`), the value is null, and System Settings
+`hide_empty_read_only_fields` is on, status downgrades to "None" → `refresh()` toggles
+`hide-control` (`display:none`) on the field wrapper. `apply()` in
+`src/assume-applier-payload.js` unconditionally called `frm.set_df_property(fn,
+"read_only", 1)` for any assumed field (L1 *and* L2, not just L2) — so any seeded/assumed
+field with no literal value collided with this setting and vanished outright. Fix: only set
+`read_only` when the field actually carries a value (freshly set via the assumption or
+already non-blank on the live doc); otherwise apply only the dim/detab visual treatment,
+leaving the field genuinely visible (and technically still editable — an acceptable
+trade-off vs. disappearing).
+
+Diagnosed live via a throwaway Playwright script driving the real Electron app through
+`E2E=1`'s `globalThis.__erpE2e.execInView("erp", js)` (see `e2e/helpers.js`) — injected
+`buildSimplifiedPayload()` into a fresh `/app/purchase-invoice/new`, then read
+`getBoundingClientRect()` + ancestor `hide-control`/`display` on specific fields. Faster and
+more precise than a screenshot for this class of bug (exact ancestor chain, not just
+"looks blank").
+
+**Do not regress:** Never lock (`read_only`) an assumed field that has no resolved value —
+check `hide_empty_read_only_fields` isn't silently eating it. A collapsed-looking section
+under scroll-nav is not automatically this bug, though — some ERPNext sections
+(`write_off`, `advances_section` on Purchase Invoice) are legitimately `collapsible: 1` and
+start collapsed with no content height in Vanilla too; check `df.collapsible` before
+assuming a fix is needed.
+
+---
+
+## Template (append G4+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)
