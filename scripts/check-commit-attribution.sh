@@ -22,8 +22,8 @@ check_text() {
     failed=1
   fi
 
-  if [[ "$text" =~ (^|[^a-z0-9])(sonnet|haiku|opus|fable)([^a-z0-9]|$) ]]; then
-    echo "ERROR: $label references a model codename (sonnet/haiku/opus/fable)." >&2
+  if [[ "$text" =~ (^|[^a-z0-9])(sonnet|haiku|opus|fable|cursor)([^a-z0-9]|$) ]]; then
+    echo "ERROR: $label references a model/tool codename (sonnet/haiku/opus/fable/cursor)." >&2
     failed=1
   fi
 }
