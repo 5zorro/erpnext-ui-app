@@ -4,7 +4,30 @@
  * in-page event must not flip currentRoute / Doc-hijack back to the Bill.
  */
 
-import { routeInfo, routesReferToSameDoc } from "./route-info.js";
+import { routeInfo, routesReferToSameDoc, normalizeAppRoute } from "./route-info.js";
+
+/**
+ * Arm-or-clear decision for an intentional shell navigation.
+ *
+ * Only `/app/…` destinations can be guarded: the guard matches on doctype, so a
+ * doctype-less destination (`/desk`, `/`, `/login`) would never accept its own
+ * arrival and would block every event for the whole timeout. Those destinations
+ * must therefore **clear** — leaving a stale intent armed is worse than no guard:
+ * it rejects the real arrival (currentRoute never updates, and the route poll
+ * cannot repair it) while still accepting late in-page events from the page we
+ * just left, which write the old route back.
+ *
+ * @param {string|null|undefined} destination route or URL we mean to open
+ * @param {string} [erpBase]
+ * @returns {{ action: "arm", path: string }|{ action: "clear" }}
+ */
+export function resolveErpNavIntent(destination, erpBase) {
+  const raw = destination == null ? "" : String(destination);
+  if (!raw) return { action: "clear" };
+  const path = normalizeAppRoute(raw, erpBase).path || raw;
+  if (!path.startsWith("/app/")) return { action: "clear" };
+  return { action: "arm", path };
+}
 
 /**
  * When shell is navigating to a doctype list (Find), stale in-SPA form URLs for the

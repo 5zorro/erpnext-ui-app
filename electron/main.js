@@ -19,6 +19,7 @@ import {
   filterHistoryForCompany,
   softPeekReturnLabel,
   shouldForceVanillaReopen,
+  shouldEscDismissSoftPeek,
   erpLivePathDiffers,
 } from "../src/history-nav.js";
 import {
@@ -34,7 +35,7 @@ import {
 import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
-import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent } from "../src/erp-nav-intent.js";
+import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent, resolveErpNavIntent } from "../src/erp-nav-intent.js";
 import {
   NAV_INCIDENT_NOTE_MAX,
   buildNavIncident,
@@ -211,7 +212,8 @@ import {
 } from "../src/doc-skin-registry.js";
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
-import { buildSimplifiedPayload } from "../src/assume-applier-payload.js";
+import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
+import { toolbarLensId, historyRailWidth } from "../src/chrome-state.js";
 import { poFindListFilterPayload, poFindPrefillFromLogbook } from "../src/po-find-prefill.js";
 import {
   BILL_FIND_TIMEOUT_MS,
@@ -246,7 +248,6 @@ const APP_VERSION = PKG.version || "0.0.0";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ERP_BASE = resolveErpBase(process.env);
 const OFF = { x: -20000, y: 0, width: 10, height: 10 };
-const HISTORY_WIDTH = 176;
 const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
   path.join(__dirname, "erp-form-bridge-page.js"),
   "utf8",
@@ -350,6 +351,10 @@ let billLoadPhase = BILL_LOAD_IDLE;
  * @type {import("../src/peek-stack.js").PeekStack|null}
  */
 let peekStack = null;
+/** True once the Simplified payload has been injected into the live ERP page. */
+let simplifiedSkinInstalled = false;
+/** Recent/Drafts rail collapsed to a grab strip (persisted; 4K-quarter windows). */
+let histCollapsed = false;
 /** Active company abbr from ERP (OI-118 history hygiene). */
 let sessionCompanyAbbr = "";
 
@@ -530,6 +535,7 @@ function loadPrefs() {
     calcHistory = markCalcHistoryPriorSession(
       pruneCalcHistory(Array.isArray(nav.calcHistory) ? nav.calcHistory : []),
     );
+    histCollapsed = !!nav.histCollapsed;
   } catch {
     shelvedDrafts = [];
     calcHistory = [];
@@ -560,7 +566,7 @@ function saveNavState() {
   try {
     fs.writeFileSync(
       navStatePath(),
-      JSON.stringify({ shelved: shelvedDrafts, calcHistory }, null, 0),
+      JSON.stringify({ shelved: shelvedDrafts, calcHistory, histCollapsed }, null, 0),
     );
   } catch {
     /* ignore */
@@ -777,17 +783,20 @@ function sendUiState() {
         livePath || currentRoute,
         ERP_BASE,
       );
-    const erpInfo = routeInfo(currentRoute, ERP_BASE);
-    const erpLens =
-      surfaceMode === "erp" && erpInfo.doctype && erpInfo.record
-        ? preferredLens(erpInfo.doctype, lensPrefs)
-        : null;
+    const lensId = toolbarLensId({
+      onDoc,
+      surfaceMode,
+      shellRoute: currentRoute,
+      liveErpPath: livePath,
+      lensPrefs,
+      erpBase: ERP_BASE,
+    });
     chrome.webContents.send("ui-state", {
       showingHome: showingHome(),
       showingBill: surfaceMode === "doc" && activeDocSkin === "bill",
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
-      lens: onDoc ? "doc" : erpLens === "simplified" ? "simplified" : "vanilla",
+      lens: lensId,
       docSkinAvailable,
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
@@ -808,6 +817,7 @@ function sendHistory() {
       items: applyPeekTreeToHistory(history, peekStack, ERP_BASE),
       shelved: shelvedDrafts,
       calcHistory,
+      collapsed: histCollapsed,
     });
   }
   pushCalcHistoryDropdown();
@@ -1585,16 +1595,26 @@ function returnToPeekParent() {
 async function armSoftPeekEscHook(armed) {
   if (!erp || erp.webContents.isDestroyed()) return;
   try {
+    // The gate itself is the pure, unit-tested predicate — serialized in rather than
+    // hand-copied, so tests/history-nav.test.js covers the rule that actually ships.
     await erp.webContents.executeJavaScript(`(function(){
       window.__erpUiSoftPeekArmed = ${armed ? "true" : "false"};
       if (window.__erpUiSoftPeekEscBound) return true;
       window.__erpUiSoftPeekEscBound = true;
+      var shouldEscDismissSoftPeek = ${shouldEscDismissSoftPeek.toString()};
       document.addEventListener("keydown", function (e) {
-        if (e.key !== "Escape" || !window.__erpUiSoftPeekArmed) return;
+        if (e.key !== "Escape") return;
+        var frappeDialogOpen = false;
         try {
-          if (window.cur_dialog && cur_dialog.display) return;
-          if (document.querySelector(".modal.show, .modal.in")) return;
-        } catch (err) {}
+          frappeDialogOpen = !!(
+            (window.cur_dialog && cur_dialog.display) ||
+            document.querySelector(".modal.show, .modal.in")
+          );
+        } catch (err) { frappeDialogOpen = false; }
+        if (!shouldEscDismissSoftPeek({
+          softPeekArmed: !!window.__erpUiSoftPeekArmed,
+          frappeDialogOpen: frappeDialogOpen,
+        })) return;
         e.preventDefault();
         e.stopPropagation();
         try {
@@ -1751,9 +1771,14 @@ function maybeRefreshCompanyAbbr() {
  * @param {string} path
  */
 function beginErpNavIntent(path) {
-  const n = normalizeAppRoute(path, ERP_BASE);
-  const p = n.path || path;
-  if (!p || !p.startsWith("/app/")) return;
+  const decision = resolveErpNavIntent(path, ERP_BASE);
+  if (decision.action !== "arm") {
+    // /desk, /, /login cannot be guarded by doctype — clear, never leave the old
+    // intent armed (it would reject this arrival and accept the page we just left).
+    clearErpNavIntent("unguardable destination");
+    return;
+  }
+  const p = decision.path;
   erpNavIntentPath = p;
   if (erpNavIntentTimer) clearTimeout(erpNavIntentTimer);
   erpNavIntentTimer = setTimeout(() => {
@@ -2133,15 +2158,42 @@ async function ensureErpFormBridge() {
  * Inject simplified-skin payload into the ERP WebContents (idempotent).
  * No-ops when the current route/lens is not "simplified".
  */
+/**
+ * Remove an injected Simplified skin. Leaving the lens must not depend on the page
+ * reloading — when that reload was skipped or raced, the toolbar said Vanilla while
+ * the ⚙ Assumptions button and dimmed fields stayed on screen (nav incidents
+ * 2026-09-03 / 2026-09-04).
+ */
+async function removeSimplifiedSkin() {
+  if (!simplifiedSkinInstalled) return;
+  simplifiedSkinInstalled = false;
+  if (!erp || erp.webContents.isDestroyed()) return;
+  try {
+    await erp.webContents.executeJavaScript(buildSimplifiedTeardown());
+    navDebug("simplified-skin", "removed");
+  } catch (e) {
+    navDebug("simplified-skin-err", `remove: ${String(e && e.message ? e.message : e)}`);
+  }
+}
+
 async function ensureSimplifiedSkin() {
   if (!erp || erp.webContents.isDestroyed()) return;
   if (surfaceMode !== "erp") return;
   const info = routeInfo(currentRoute, ERP_BASE);
-  if (!info.doctype || !info.record) return;
-  if (preferredLens(info.doctype, lensPrefs) !== "simplified") return;
+  const wantSimplified = !!(
+    info.doctype &&
+    info.record &&
+    preferredLens(info.doctype, lensPrefs) === "simplified"
+  );
+  if (!wantSimplified) {
+    // Every ERP nav / load is also a repair point for a skin that outlived its lens.
+    await removeSimplifiedSkin();
+    return;
+  }
   try {
     const payload = buildSimplifiedPayload();
     await erp.webContents.executeJavaScript(payload);
+    simplifiedSkinInstalled = true;
   } catch (e) {
     navDebug("simplified-skin-err", String(e && e.message ? e.message : e));
   }
@@ -2639,7 +2691,7 @@ function place() {
   if (!win || !chrome || !home || !erp || !hist || !bill || !docForm) return;
   const b = win.getContentBounds();
   const H = TAB_BAR_HEIGHT;
-  const HW = HISTORY_WIDTH;
+  const HW = historyRailWidth(histCollapsed);
   const main = {
     x: HW,
     y: H,
@@ -7598,6 +7650,8 @@ ipcMain.handle("soft-peek-route", async (_e, route) => {
   }
 });
 ipcMain.on("open-vanilla-skin", () => {
+  // Strip the skin now rather than trusting the reload below to erase it.
+  removeSimplifiedSkin().catch(() => {});
   // From Home (or no form in focus): always Vanilla Desk — do not reuse last form URL.
   // forceLoad required: erp WebContents often already has a prior page; without it
   // showErp("/desk") would skip navigation and flash the last Vanilla form.
@@ -7647,11 +7701,27 @@ ipcMain.on("nav-debug", (_e, event, detail) => {
 ipcMain.on("open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);
 });
+ipcMain.on("hist-collapse", (_e, collapsed) => {
+  const next = !!collapsed;
+  if (next === histCollapsed) return;
+  histCollapsed = next;
+  navDebug("hist-collapse", next ? "collapsed" : "expanded");
+  saveNavState();
+  place();
+  sendHistory();
+});
 ipcMain.on("open-mockup", (_e, name) => {
   if (typeof name !== "string" || !/^[\w-]+\.html$/.test(name)) return;
   const p = path.join(__dirname, "..", "docs", "mockups", name);
-  const w = new BrowserWindow({ width: 1200, height: 900, title: name });
-  w.loadFile(p);
+  // show:false + ready-to-show: a bare BrowserWindow can paint behind the maximized
+  // shell on Linux/WSL, which reads as "the mockup did not open" (incident 2026-09-01).
+  const w = new BrowserWindow({ width: 1200, height: 900, title: name, show: false });
+  w.once("ready-to-show", () => {
+    if (w.isDestroyed()) return;
+    w.show();
+    w.focus();
+  });
+  w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
 ipcMain.on("open-devtools", (_e, target) => {
   const map = { erp, chrome, home, hist, bill, docForm };
