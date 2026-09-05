@@ -221,7 +221,49 @@ re-simulation of it) settles it in one run.
 
 ---
 
-## Template (append G5+)
+## G5 — Seed-profile field matching is syntactic, not semantic (bill_date vs posting_date, 2026-09-04)
+
+**Observed:** Doc Bill's header shows one box labeled "Invoice date"; the vanilla field it
+should conceptually correspond to is `bill_date` (vanilla label "Supplier Invoice Date").
+The Simplified seed (`simplified-seed-profiles.js`) locked `bill_date` as L2 ("quiet &
+locked"), claiming doc skin already handles it — a false positive.
+
+**Expected:** A field doc skin already writes should be locked in Simplified; a field doc
+skin does *not* touch should stay Normal so the user can still reach it.
+
+**Architecture / fix:** Doc Bill's "Invoice date" box (`BILL_HEADER_FIELDS` in
+`bill-map.js`) actually writes to `posting_date` — not `bill_date` — a long-standing hotfix
+that reuses ERPNext's *required* Posting Date field so Doc Bill only needs a single date
+input, instead of asking the user to fill both `posting_date` (required, accounting date)
+and `bill_date` (optional, the vendor's own invoice date). The seed generator's rule is
+purely syntactic: "if a vanilla fieldname never appears as a `field:` value inside
+`BILL_HEADER_FIELDS`, doc skin doesn't surface it → lock it." `bill_date` never appears
+there (only `posting_date` does, wired to the "Invoice date" label), so the check read its
+absence as "not surfaced" and locked it — the opposite of the truth: `bill_date` is exactly
+the field the "Invoice date" concept *should* map to, and doc skin silently answers that
+concept somewhere else. Fix: removed `bill_date` from `PURCHASE_INVOICE_SEED`; documented
+the posting_date/bill_date split in the seed file's header comment so it isn't re-added by
+a future syntactic-only re-diff.
+
+**Generalize:** this class of false positive will recur for the other 8 target doctypes
+whenever a Doc skin box's *label* implies a vanilla field that its `field:` wiring doesn't
+actually use (renames, hotfixes, "reuse a required field to avoid asking twice"). A
+field-presence diff against `*_HEADER_FIELDS` catches fieldname matches only — it cannot
+see a label-level semantic relationship. When seeding a new doctype, cross-check each
+"not surfaced, seed L2" candidate against the doc skin's field *labels*, not just its
+fieldnames, before locking it.
+
+**Dogfood:** Open a Purchase Invoice under Simplified with no saved profile (or "Use
+doc-skin assumptions"). `bill_date` ("Supplier Invoice Date") should show as Normal, not
+locked.
+
+**Do not regress:** Don't reduce "doc skin already covers this field" to a single
+mechanical check (fieldname ∈ some `field:` list) without also asking whether a *different*
+field is standing in for the same user-facing concept via a documented hotfix.
+
+---
+
+## Template (append G6+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)

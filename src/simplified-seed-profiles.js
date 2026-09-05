@@ -23,6 +23,16 @@
  *   `billing_address`, `taxes_and_charges`, `status` — doc skin already writes through
  *   these via its own picker/display paths (OI-136 address picker, tax rows); hiding the
  *   raw vanilla field would cut off the fallback path those pickers rely on.
+ * - `bill_date` (vanilla label "Supplier Invoice Date") — Doc Bill's own header field
+ *   labeled "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes to `posting_date`
+ *   instead, a long-standing hotfix that reuses the required Posting Date field so Doc
+ *   Bill only needs one date input. `bill_date` is the vanilla field that concept should
+ *   map to, but the fieldNAME never appears in `BILL_HEADER_FIELDS` — an earlier pass here
+ *   read that absence as "not surfaced by doc skin" and seeded it L2, locking the one
+ *   field that actually embodies the "Invoice date" idea while doc skin quietly writes
+ *   its answer somewhere else. Leave it Normal until the posting_date/bill_date split is
+ *   resolved (see gotchas.md G5); do not re-seed it by re-running the same field-presence
+ *   check without accounting for label/field renames like this one.
  * - Any field already `hidden` or hidden-by-`Table`/`Button` fieldtype in the doctype
  *   JSON — nothing to quiet, it is not visible in Vanilla either.
  */
@@ -39,7 +49,6 @@ const PURCHASE_INVOICE_SEED = Object.freeze({
   on_hold: "L2",
   release_date: "L2",
   hold_comment: "L2",
-  bill_date: "L2",
   update_billed_amount_in_purchase_order: "L2",
   update_billed_amount_in_purchase_receipt: "L2",
   contact_person: "L2",
