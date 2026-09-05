@@ -213,7 +213,14 @@ import {
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
-import { toolbarLensId, historyRailWidth } from "../src/chrome-state.js";
+import { toolbarLensId, docTabState, historyRailWidth } from "../src/chrome-state.js";
+import {
+  submittedEntryFromDoc,
+  pushSubmittedDoc,
+  markSubmittedPriorSession,
+  submittedRowSummary,
+  submittedEntryRoute,
+} from "../src/submitted-docs.js";
 import { poFindListFilterPayload, poFindPrefillFromLogbook } from "../src/po-find-prefill.js";
 import {
   BILL_FIND_TIMEOUT_MS,
@@ -355,6 +362,8 @@ let peekStack = null;
 let simplifiedSkinInstalled = false;
 /** Recent/Drafts rail collapsed to a grab strip (persisted; 4K-quarter windows). */
 let histCollapsed = false;
+/** Submit-and-move-on trail: Drafts drops a doc on submit and Recent keeps one row per doctype. */
+let submittedDocs = [];
 /** Active company abbr from ERP (OI-118 history hygiene). */
 let sessionCompanyAbbr = "";
 
@@ -536,9 +545,13 @@ function loadPrefs() {
       pruneCalcHistory(Array.isArray(nav.calcHistory) ? nav.calcHistory : []),
     );
     histCollapsed = !!nav.histCollapsed;
+    submittedDocs = markSubmittedPriorSession(
+      Array.isArray(nav.submittedDocs) ? nav.submittedDocs : [],
+    );
   } catch {
     shelvedDrafts = [];
     calcHistory = [];
+    submittedDocs = [];
   }
   try {
     healthRemediation = normalizeHealthRemediationPrefs(
@@ -566,7 +579,7 @@ function saveNavState() {
   try {
     fs.writeFileSync(
       navStatePath(),
-      JSON.stringify({ shelved: shelvedDrafts, calcHistory, histCollapsed }, null, 0),
+      JSON.stringify({ shelved: shelvedDrafts, calcHistory, histCollapsed, submittedDocs }, null, 0),
     );
   } catch {
     /* ignore */
@@ -587,6 +600,17 @@ function noteCalcHistoryAppend(raw) {
 
 function noteShelvedFromSave(doctypeKey, doc) {
   shelvedDrafts = applySaveToShelved(shelvedDrafts, doctypeKey, doc);
+  // Same choke point drops it from Drafts (shelf is docstatus 0 only) — catch it on the way
+  // out so submit-and-move-on still leaves a trail.
+  const submitted = submittedEntryFromDoc(doctypeKey, doc, {
+    labels: DOCTYPE_LABELS,
+    copyRef: copyRefForDoc(doctypeKey, doc),
+  });
+  if (submitted) {
+    submittedDocs = pushSubmittedDoc(submittedDocs, submitted);
+    navDebug("submitted", `${submitted.doctypeKey} ${submitted.name}`);
+    pushSubmittedDropdown();
+  }
   saveNavState();
   sendHistory();
   // Unmute Recent form row once this draft is on the shelf (or drop mute if submitted).
@@ -771,8 +795,6 @@ function sendUiState() {
   if (chrome && !chrome.webContents.isDestroyed()) {
     const ctx = shellCtx();
     const onDoc = showingHome() || isDocLensSurface();
-    // OI-112: keep Doc tab on masters (Tax Category / tax template) so clerks can hop back.
-    const docSkinAvailable = true;
     const livePath = currentErpPathname();
     const peekingAway =
       surfaceMode === "erp" &&
@@ -791,13 +813,33 @@ function sendUiState() {
       lensPrefs,
       erpBase: ERP_BASE,
     });
+    // OI-112 kept the Doc tab live everywhere as a hop-back. It is now offered only for a
+    // Doc-skinnable record or a genuine one-step return (park / peek parent) — arriving on
+    // an unrelated Vanilla page from Home or a Find list has nothing to go back to.
+    const liveInfo = routeInfo(livePath || currentRoute, ERP_BASE);
+    const docTab = docTabState({
+      onDoc,
+      hasDocSkinnedRecord: !!(
+        liveInfo.doctype &&
+        liveInfo.record &&
+        profileByDoctypeKey(liveInfo.doctype)
+      ),
+      hasParkedDoc: !!(parkedDocSurface && parkedDocSurface.route),
+      hasPeekParent: isActivePeekStack(peekStack),
+      returnLabel: softPeekReturnLabel(
+        parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
+        isActivePeekStack(peekStack) ? peekStack.parent : null,
+        { currentRoute: livePath || currentRoute, erpBase: ERP_BASE },
+      ).replace(/^Esc · back to /, ""),
+    });
     chrome.webContents.send("ui-state", {
       showingHome: showingHome(),
       showingBill: surfaceMode === "doc" && activeDocSkin === "bill",
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
       lens: lensId,
-      docSkinAvailable,
+      docSkinAvailable: docTab.available,
+      docTabHint: docTab.hint,
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
@@ -818,6 +860,7 @@ function sendHistory() {
       shelved: shelvedDrafts,
       calcHistory,
       collapsed: histCollapsed,
+      submittedCount: submittedRowSummary(submittedDocs),
     });
   }
   pushCalcHistoryDropdown();
@@ -2711,6 +2754,8 @@ let diagnoseWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let calcHistoryWin = null;
 /** @type {import("electron").BrowserWindow|null} */
+let submittedWin = null;
+/** @type {import("electron").BrowserWindow|null} */
 let navIncidentWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let focusIncidentWin = null;
@@ -2997,7 +3042,10 @@ function openCalcHistoryDropdown(anchor = {}) {
   });
 
   const cb = win.getContentBounds();
-  const histBounds = hist && !hist.webContents.isDestroyed() ? hist.getBounds() : { x: 0, y: TAB_BAR_HEIGHT, width: HISTORY_WIDTH, height: 400 };
+  const histBounds =
+    hist && !hist.webContents.isDestroyed()
+      ? hist.getBounds()
+      : { x: 0, y: TAB_BAR_HEIGHT, width: historyRailWidth(histCollapsed), height: 400 };
   const ax = Number(anchor.x);
   const ay = Number(anchor.y);
   let x = Math.round(cb.x + histBounds.x + (Number.isFinite(ax) ? ax : histBounds.width) + 4);
@@ -3018,6 +3066,91 @@ function openCalcHistoryDropdown(anchor = {}) {
   bindTransientPopoverDismiss(calcHistoryWin, closeCalcHistoryDropdown);
   calcHistoryWin.on("closed", () => {
     calcHistoryWin = null;
+  });
+}
+
+function closeSubmittedDropdown() {
+  if (submittedWin && !submittedWin.isDestroyed()) {
+    try {
+      submittedWin.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  submittedWin = null;
+}
+
+function submittedPayload() {
+  return { submitted: submittedDocs.map((e) => ({ ...e })) };
+}
+
+function pushSubmittedDropdown() {
+  if (submittedWin && !submittedWin.isDestroyed()) {
+    submittedWin.webContents.send("submitted-data", submittedPayload());
+  }
+}
+
+/**
+ * Chronological panel for the single "Submitted" flyout row (calc-history sibling).
+ * @param {{ x?: number, y?: number, width?: number, height?: number }} [anchor] button rect in hist view coords
+ */
+function openSubmittedDropdown(anchor = {}) {
+  if (!win || win.isDestroyed()) return;
+  if (submittedWin && !submittedWin.isDestroyed()) {
+    pushSubmittedDropdown();
+    submittedWin.focus();
+    return;
+  }
+
+  const panelW = 340;
+  const panelH = 420;
+  submittedWin = new BrowserWindow({
+    parent: win,
+    modal: false,
+    frame: false,
+    show: false,
+    width: panelW,
+    height: panelH,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+    backgroundColor: "#1a252f",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "submitted-preload.cjs"),
+    },
+  });
+
+  const cb = win.getContentBounds();
+  const histBounds =
+    hist && !hist.webContents.isDestroyed()
+      ? hist.getBounds()
+      : { x: 0, y: TAB_BAR_HEIGHT, width: historyRailWidth(histCollapsed), height: 400 };
+  const ax = Number(anchor.x);
+  const ay = Number(anchor.y);
+  let x = Math.round(cb.x + histBounds.x + (Number.isFinite(ax) ? ax : histBounds.width) + 4);
+  let y = Math.round(cb.y + histBounds.y + (Number.isFinite(ay) ? ay : 8));
+  if (x + panelW > cb.x + cb.width - 8) x = Math.round(cb.x + cb.width - panelW - 8);
+  if (y + panelH > cb.y + cb.height - 8) y = Math.round(cb.y + cb.height - panelH - 8);
+  if (x < cb.x + 8) x = cb.x + 8;
+  if (y < cb.y + 8) y = cb.y + 8;
+  submittedWin.setPosition(Math.max(0, x), Math.max(0, y));
+
+  submittedWin.loadFile(path.join(__dirname, "submitted-dropdown.html"));
+  submittedWin.once("ready-to-show", () => {
+    if (!submittedWin || submittedWin.isDestroyed()) return;
+    submittedWin.webContents.send("submitted-data", submittedPayload());
+    submittedWin.show();
+    submittedWin.focus();
+  });
+  bindTransientPopoverDismiss(submittedWin, closeSubmittedDropdown);
+  submittedWin.on("closed", () => {
+    submittedWin = null;
   });
 }
 
@@ -4983,6 +5116,7 @@ function createWindow() {
   win.on("closed", () => {
     closeDiagnoseDropdown();
     closeNavIncidentDialog();
+    closeSubmittedDropdown();
     win = null;
     chrome = null;
     home = null;
@@ -7700,6 +7834,17 @@ ipcMain.on("nav-debug", (_e, event, detail) => {
 });
 ipcMain.on("open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);
+});
+ipcMain.on("open-submitted", (_e, anchor) => {
+  openSubmittedDropdown(anchor && typeof anchor === "object" ? anchor : {});
+});
+ipcMain.on("submitted-dropdown-close", () => closeSubmittedDropdown());
+ipcMain.on("submitted-open-doc", (_e, route) => {
+  const r = submittedEntryRoute({ route: typeof route === "string" ? route : "" }, ERP_BASE);
+  if (!r) return;
+  closeSubmittedDropdown();
+  navDebug("submitted-open", r);
+  openHistoryRoute(r);
 });
 ipcMain.on("hist-collapse", (_e, collapsed) => {
   const next = !!collapsed;

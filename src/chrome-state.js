@@ -21,6 +21,38 @@ export function historyRailWidth(collapsed) {
 }
 
 /**
+ * Should the toolbar show a **Doc** tab at all, and what will clicking it do?
+ *
+ * The tab is not a general escape hatch. It is offered when the page in front of you is
+ * a Doc-skinnable *record*, or when you are exactly **one step** away from a transaction
+ * entry form — i.e. you peeked at a master (edit Payment Terms from a Simplified Bill) and
+ * there is a parked Doc or a peek parent to go back to. Arriving on an unrelated Vanilla
+ * page from Home or from a Find/list route offers nothing to return to, so the tab is
+ * hidden rather than inventing a new Bill (nav incident 2026-09-05).
+ *
+ * Two steps out is deliberately not modelled: peek children are depth-1, and 5zorro's call
+ * is that re-entering the form is acceptable in that narrow case.
+ *
+ * @param {{
+ *   onDoc?: boolean,
+ *   hasDocSkinnedRecord?: boolean,
+ *   hasParkedDoc?: boolean,
+ *   hasPeekParent?: boolean,
+ *   returnLabel?: string,
+ * }} [state]
+ * @returns {{ available: boolean, hint: string }}
+ */
+export function docTabState(state = {}) {
+  if (state.onDoc) return { available: true, hint: "Doc skin" };
+  if (state.hasDocSkinnedRecord) return { available: true, hint: "Doc skin for this page" };
+  if (state.hasParkedDoc || state.hasPeekParent) {
+    const label = state.returnLabel != null ? String(state.returnLabel).trim() : "";
+    return { available: true, hint: label ? `Back to ${label}` : "Back to the form you came from" };
+  }
+  return { available: false, hint: "" };
+}
+
+/**
  * Which lens the toolbar should show as active.
  *
  * Reads the **live** ERP path in preference to the route the shell believes it is on:

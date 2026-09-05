@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("erpHist", {
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
   copyHistoryRef: (text) => ipcRenderer.invoke("history-copy-ref", text || ""),
   setCollapsed: (collapsed) => ipcRenderer.send("hist-collapse", !!collapsed),
+  openSubmitted: (anchor) => ipcRenderer.send("open-submitted", anchor || {}),
   onHistory: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on("history", handler);

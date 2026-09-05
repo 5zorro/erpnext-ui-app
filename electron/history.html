@@ -24,6 +24,7 @@
     body.rail-collapsed .older-toggle,
     body.rail-collapsed .older-panel,
     body.rail-collapsed #sec-drafts,
+    body.rail-collapsed #sec-submitted,
     body.rail-collapsed #sec-calc { display: none; }
     .head-drafts, .head-calc { margin-top: 8px; }
     ul { list-style: none; margin: 0; padding: 6px; }
@@ -99,6 +100,14 @@
     </div>
   </div>
 
+  <div id="sec-submitted">
+    <div class="head head-calc">Submitted</div>
+    <button type="button" class="calc-open-btn" id="submitted-open" data-testid="submitted-history-open">
+      Submitted this session
+      <span class="calc-open-sub" id="submitted-open-sub">Nothing submitted yet</span>
+    </button>
+  </div>
+
   <div id="sec-calc">
     <div class="head head-calc">Calculator</div>
     <button type="button" class="calc-open-btn" id="calc-open" data-testid="calc-history-open">
@@ -125,6 +134,8 @@
     const draftsOlderPanel = document.getElementById("drafts-older-panel");
     const calcOpenBtn = document.getElementById("calc-open");
     const calcOpenSub = document.getElementById("calc-open-sub");
+    const submittedBtn = document.getElementById("submitted-open");
+    const submittedSub = document.getElementById("submitted-open-sub");
     const railToggle = document.getElementById("rail-toggle");
     const api = window.erpHist;
     let olderOpen = false;
@@ -252,6 +263,11 @@
 
     olderToggle.onclick = () => setOlderOpen(!olderOpen);
     draftsOlderToggle.onclick = () => setDraftsOlderOpen(!draftsOlderOpen);
+    submittedBtn.onclick = () => {
+      if (!api || !api.openSubmitted) return;
+      const r = submittedBtn.getBoundingClientRect();
+      api.openSubmitted({ x: r.right, y: r.top, width: r.width, height: r.height });
+    };
     calcOpenBtn.onclick = () => {
       if (!api || !api.openCalcHistory) return;
       const r = calcOpenBtn.getBoundingClientRect();
@@ -273,6 +289,9 @@
       const calcRows = Array.isArray(payload) ? [] : (payload && payload.calcHistory) || [];
       if (!Array.isArray(payload) && payload && typeof payload.collapsed === "boolean") {
         paintRail(payload.collapsed);
+      }
+      if (!Array.isArray(payload) && payload && typeof payload.submittedCount === "string") {
+        submittedSub.textContent = payload.submittedCount;
       }
       calcCount = calcRows.length;
       updateCalcButton();

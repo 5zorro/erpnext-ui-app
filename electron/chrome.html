@@ -88,6 +88,8 @@
       const activeLens = s.lens || "vanilla";
       softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
+      // Says what the tab will actually do: skin this page, or hop back one step.
+      lensDoc.title = s.docTabHint || "Doc skin for this page";
       lensLabel.hidden = false;
       // Simplified tab visible whenever there is a doctype form in context (ERP or doc skin)
       const onErpForm = !showingHome && !onDocForm;
