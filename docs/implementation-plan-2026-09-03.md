@@ -288,11 +288,25 @@ scope, explicitly not more:
   a long weekend": the Friday **before** a Monday holiday, and the Friday **after** a Thursday
   holiday (e.g., the day after Thanksgiving). One rule covers both: a Friday is a blur day if the
   following Monday is a holiday **or** the preceding Thursday was a holiday.
-- **Direction of the shift**: when a date isn't payable, move **earlier** (previous valid business
-  day), not later. This is the same conservative call already locked for Packet 2 ("never batch
-  past the earliest due date… never pay late to save postage") — paying a day or two early costs
-  negligible float; paying after a bank holiday shut processing risks actual lateness. **Flagging
-  this direction explicitly for 5zorro to confirm** — the plain-English ask could be read either way.
+- **Direction of the shift, locked (5zorro 2026-09-05): earlier, always, as the default.** Real
+  vendor terms vary a lot more than a shared calendar can encode — some vendors hand out late fees
+  freely, some are relationship-based and forgiving, some may define terms like "net 30 but expect
+  7 days of postage" (or 2 days if the remittance address changes) or "next business day after net
+  30." **None of that granularity exists in Vanilla's data model** — confirmed directly (MariaDB
+  read-only, 2026-09-05): `Payment Term.due_date_based_on` and `.discount_validity_based_on` each
+  have exactly 3 options, all pure calendar-day/month arithmetic ("Day(s) after invoice date,"
+  "…after the end of the invoice month," "Month(s) after…") — no business-day or holiday concept.
+  `Supplier.payment_terms` is only a Link to a Payment Terms Template; the one free-text field
+  (`Purchase Invoice.terms`, a Text Editor) is print boilerplate, not data anything could safely
+  parse for a postage buffer. There's no mechanical way to pick up per-vendor nuance even if we
+  wanted to — so absent real per-vendor detail, always default to the conservative shift: pay the
+  last valid business day
+  **before** the due date, never later. This is also consistent with the tranche's existing rule
+  ("never batch past the earliest due date… never pay late to save postage"). Per-vendor overrides
+  (a postage-buffer days field, a "next business day after" flag) are a real future extension point
+  once that data is worth capturing — **not this packet**; `effectivePayByDate()`'s signature should
+  stay open to an optional per-call override later without a breaking change, but nothing to build
+  now.
 
 ### Shape
 
@@ -568,8 +582,13 @@ header block above; do not fold their status into this table.)*
 ## Out of this tranche
 
 - Packet 5 (write path) — stretch, explicitly deferred pending dogfood.
-- Payment Entry entry point (Vanilla chrome affordance or a future Doc-skin PE) — Home tile only
-  this tranche; revisit after dogfood signal (locked 2026-09-03).
+- The Doc-skin Payment Entry form's actual **build** (Packet 4b) — the **decision** to anchor there
+  (Home tile + PE form, AP only) is locked (2026-09-04); the build is deferred to its own follow-up
+  dated plan once Packet 4 is dogfooded.
+- Per-vendor payment-terms granularity (postage-buffer days, "next business day after net 30,"
+  remittance-address-dependent buffers) — Vanilla has no field for any of this (Packet 0); Packet 1b
+  defaults every vendor to the same conservative earlier-shift until real per-vendor detail is worth
+  capturing (locked 2026-09-05, see Packet 1b).
 - OI-129 (list return/scroll) — explicit no-build until 5zorro dogfoods this tranche's list.
 - OI-135 / OI-139 — shipping on their own tracks; only touched here by reusing shared shapes
   (`payment_schedule`), not by changing their code.
