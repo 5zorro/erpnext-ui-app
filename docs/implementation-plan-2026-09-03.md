@@ -234,10 +234,11 @@ economics helper can consume.
 ```js
 /**
  * @typedef {{
- *   invoice: string,          // Purchase Invoice name
- *   supplier: string,
+ *   invoice: string,          // Purchase Invoice name (report's voucher_no)
+ *   supplier: string,         // report's party (shared AR/AP engine field name)
  *   postingDate: string,      // ISO
  *   dueDate: string,          // ISO — header due_date (last installment; bill-payment-schedule.js convention)
+ *   invoiced: number,         // bill's own grand total (report's invoiced) — needed for % discount math, not just display
  *   outstanding: number,      // party currency
  *   currency: string,
  *   discountDate?: string,    // ISO — earliest payment_schedule row with a discount, if any
@@ -246,19 +247,26 @@ economics helper can consume.
  */
 ```
 
+Captured a real row from the live sandbox (`bench execute frappe.desk.query_report.run`, `SUP-DAILY`,
+2026-09-05) to confirm the report's actual field names rather than guessing — `voucher_no`, `party`,
+`posting_date`, `due_date`, `invoiced`, `outstanding`, `currency`, `age`, plus ageing `range0..range5`
+this packet doesn't need. Matches the typedef above field-for-field.
+
 ### How
 
 | Piece | Job |
 |---|---|
-| `normalizeAccountsPayableRow(reportRow)` | Map report column names → `OutstandingBillRow` (pure; fixture-driven — report column order is a known contract, test against a captured sample). |
-| `attachDiscountWindow(row, paymentScheduleRows)` | Pure merge: earliest schedule row with `discount_type`/`discount` set → `discountDate`/`discountAmount` on the row. Reuses the same `payment_schedule` shape as `bill-payment-schedule.js` — do not invent a second convention. |
+| `normalizeAccountsPayableRow(reportRow)` | Map report column names → `OutstandingBillRow` (pure; tested against the captured sample above). |
+| `attachDiscountWindow(row, paymentScheduleRows)` | Pure merge: earliest-`discount_date` schedule row with `discount_type`/`discount` set → `discountDate`/`discountAmount`. **Found while implementing, not in the original sketch:** `discount_type: "Percentage"` computes off the bill's **`invoiced`/grand total**, not the schedule row's own `payment_amount` — confirmed against ERPNext's own `payment_entry.py::apply_early_payment_discount` (`discount_amount = grand_total * discount/100`). A naive `payment_amount * discount/100` would be wrong for any multi-installment bill (right by coincidence for single-installment ones, which is why this is easy to miss). `discount_type: "Amount"` uses `discount` directly, no total needed. Reuses the same `payment_schedule` shape as `bill-payment-schedule.js` — do not invent a second convention. |
 | IPC (electron layer, not this packet) | One `get-outstanding-bills` call: report run + per-invoice `payment_schedule` fetch (batched `get_list` on `Payment Schedule` filtered by `parent in [...]`, one round trip, not N). |
 
 ### Tests
 
-`tests/outstanding-bills.test.js` — normalize a captured Accounts Payable report row fixture;
-discount-window attach with 0/1/many schedule rows; missing discount fields → `undefined`, not `0`
-(so the economics helper can tell "no discount offered" from "$0 discount").
+`tests/outstanding-bills.test.js` — normalize the captured Accounts Payable report row fixture above
+(both `SUP-DAILY` and `SUP-DAILY-LG`); discount-window attach with 0/1/many schedule rows; Percentage
+vs. Amount discount-type math (Percentage against `invoiced`, not `payment_amount`); multiple
+discount-bearing rows picks the **earliest** `discount_date`; missing discount fields → `undefined`,
+not `0` (so the economics helper can tell "no discount offered" from "$0 discount").
 
 ---
 
