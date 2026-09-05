@@ -4,6 +4,7 @@ import {
   HOME_GROUPS,
   HOME_TILES,
   AP_HOME_TILE_WASH,
+  SHELL_ROUTE_TILE_IDS,
   flattenHomeTiles,
   validateHomeTiles,
 } from "../src/home-tiles.js";
@@ -29,6 +30,7 @@ describe("HOME_GROUPS", () => {
         continue;
       }
       if (t.route === "/" || t.route === "/login") continue;
+      if (SHELL_ROUTE_TILE_IDS.includes(t.id)) continue; // OI-161: our own page, not an ERP form
       assert.ok(t.route.startsWith("/app/"), `${t.id} → ${t.route}`);
     }
   });
