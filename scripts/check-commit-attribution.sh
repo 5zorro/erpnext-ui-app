@@ -22,8 +22,8 @@ check_text() {
     failed=1
   fi
 
-  if [[ "$text" =~ (^|[^a-z0-9])(anthropic|chatgpt|claude|codex|copilot|deepseek|fable|gemini|gpt|grok|haiku|llama|mistral|openai|opus|qwen|sonnet)([^a-z0-9]|$) ]]; then
-    echo "ERROR: $label references a model codename." >&2
+  if [[ "$text" =~ (^|[^a-z0-9])(anthropic|chatgpt|claude|codex|copilot|deepseek|fable|gemini|gpt|grok|haiku|llama|mistral|openai|opus|qwen|sonnet|cursor)([^a-z0-9]|$) ]]; then
+    echo "ERROR: $label references a model/tool codename." >&2
     failed=1
   fi
 }
