@@ -91,10 +91,11 @@
       // Says what the tab will actually do: skin this page, or hop back one step.
       lensDoc.title = s.docTabHint || "Doc skin for this page";
       lensLabel.hidden = false;
-      // Simplified tab visible whenever there is a doctype form in context (ERP or doc skin)
+      // Main owns which lenses this page has (chrome-state.js lensTabsFor) — the toolbar must
+      // not guess. "Not home, not doc" used to count as a form, so Simplified showed on Desk,
+      // dashboards and list views alike (nav incident 2026-09-05).
       const onErpForm = !showingHome && !onDocForm;
-      const hasForm = !showingHome && (onErpForm || onDocForm);
-      lensSimplified.hidden = !hasForm;
+      lensSimplified.hidden = !s.simplifiedAvailable;
       lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
       lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified");
       lensSimplified.classList.toggle("active", onDocForm ? false : onErpForm && activeLens === "simplified");
