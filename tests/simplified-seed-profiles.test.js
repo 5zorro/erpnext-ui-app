@@ -28,6 +28,10 @@ const NEVER_SEEDED_PI = [
   "payment_terms_template",
   "remarks",
   "terms",
+  // bill_date ("Supplier Invoice Date") — Doc Bill's "Invoice date" box writes posting_date
+  // instead (hotfix reusing the required field); locking bill_date falsely claims doc skin
+  // already handles it. See simplified-seed-profiles.js header + gotchas.md G5.
+  "bill_date",
 ];
 
 test("every seeded placement is a valid non-vanilla PLACEMENTS value", () => {
