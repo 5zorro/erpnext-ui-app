@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   toolbarLensId,
   docTabState,
+  lensTabsFor,
   historyRailWidth,
   HISTORY_RAIL_WIDTH,
   HISTORY_RAIL_COLLAPSED_WIDTH,
@@ -20,13 +21,19 @@ describe("docTabState", () => {
   });
 
   it("offered one step out — peeked a master from a form", () => {
-    const peek = docTabState({ hasPeekParent: true, returnLabel: "Bill" });
+    const peek = docTabState({ peekParentIsDocSkinned: true, returnLabel: "Bill" });
     assert.equal(peek.available, true);
     assert.equal(peek.hint, "Back to Bill");
-    assert.equal(docTabState({ hasParkedDoc: true, returnLabel: "Purchase Order" }).hint,
+    assert.equal(docTabState({ parkedIsDocSkinned: true, returnLabel: "Purchase Order" }).hint,
       "Back to Purchase Order");
     // still offered without a usable label
-    assert.equal(docTabState({ hasParkedDoc: true }).available, true);
+    assert.equal(docTabState({ parkedIsDocSkinned: true }).available, true);
+  });
+
+  it("a peek parent that is not a Doc-skinnable record does not count", () => {
+    // nav incident 2026-09-05: peeking around a Payments dashboard made the dashboard the
+    // peek parent, which lit the Doc tab on a page with no skin.
+    assert.equal(docTabState({ peekParentIsDocSkinned: false }).available, false);
   });
 
   it("hidden on an unrelated Vanilla page with nothing to return to", () => {
@@ -124,5 +131,35 @@ describe("historyRailWidth", () => {
     assert.equal(historyRailWidth(false), HISTORY_RAIL_WIDTH);
     assert.equal(historyRailWidth(true), HISTORY_RAIL_COLLAPSED_WIDTH);
     assert.ok(HISTORY_RAIL_COLLAPSED_WIDTH > 0, "collapsed rail stays clickable");
+  });
+});
+
+describe("lensTabsFor", () => {
+  it("Vanilla only on an ordinary ERP page", () => {
+    assert.deepEqual(lensTabsFor({}), {
+      vanilla: true,
+      simplified: false,
+      doc: false,
+      docHint: "",
+    });
+  });
+
+  it("Bill record offers all three", () => {
+    const t = lensTabsFor({ hasDocSkinnedRecord: true, hasSimplifiedLens: true });
+    assert.deepEqual(
+      { vanilla: t.vanilla, simplified: t.simplified, doc: t.doc },
+      { vanilla: true, simplified: true, doc: true },
+    );
+  });
+
+  it("PO record offers Vanilla + Doc, no Simplified", () => {
+    const t = lensTabsFor({ hasDocSkinnedRecord: true, hasSimplifiedLens: false });
+    assert.equal(t.simplified, false);
+    assert.equal(t.doc, true);
+  });
+
+  it("a dashboard peeked from a Payments list offers Vanilla only", () => {
+    const t = lensTabsFor({ peekParentIsDocSkinned: false, hasSimplifiedLens: false });
+    assert.deepEqual(t, { vanilla: true, simplified: false, doc: false, docHint: "" });
   });
 });

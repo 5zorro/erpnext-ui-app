@@ -140,12 +140,29 @@ disk are marked *previous session*, so the "this session" counter stays honest).
 **Recent does not** — it is this session's trail by design, so the flyout legitimately opens
 empty after a restart while Drafts still lists work in progress.
 
-**Doc tab availability.** The Doc tab is not a general escape hatch: it appears for a
-Doc-skinnable *record*, or when you are exactly **one step** out (a parked Doc or a peek
-parent to return to — editing Payment Terms from a Simplified Bill keeps it). It is hidden
-on a Vanilla page reached from Home or from a Find/list route, where the only thing it could
-do is invent a new Bill. Rule + hint text live in `chrome-state.js` `docTabState()`.
-OI-112 — always-on Doc tab narrowed to this rule 2026-09-05.
+**Lens tabs are earned per page.** Vanilla is always there — it is the ERP itself. Every
+other tab must be earned by the page in front of you (`chrome-state.js` `lensTabsFor()`;
+the toolbar renders the answer, it never guesses):
+
+| Page | Tabs |
+|------|------|
+| Bill record | Vanilla · Simplified · Doc |
+| PO / IR record | Vanilla · Doc |
+| Desk, dashboards, lists, masters | Vanilla only |
+
+- **Simplified** needs a seeded doctype *and* an open record — availability derives from
+  `SEED_PROFILES` via `lens-context.js` `hasSimplifiedLens()`, so shipping a seed lights up
+  the tab and there is no second list to forget.
+- **Doc** appears for a Doc-skinnable record, or a genuine **one-step** return to one (a
+  parked Doc or a peek parent that is itself a Doc form — peeking a master while editing a
+  Bill keeps it). A peek parent that is just another Vanilla page does not qualify.
+- Which route answers "what am I looking at" differs by surface: on ERP the **live** page
+  wins (`currentRoute` lags), on the Doc surface `currentRoute` wins (the hidden ERP view
+  trails it — reading the live path there reports the *previous* document).
+- Clicking **Vanilla** while already on a Vanilla page with no other lens **stays put**; it
+  does not bounce to Desk.
+
+OI-112 — always-on Doc tab narrowed 2026-09-05; rule extended to the whole toolbar.
 
 ### Dogfood debugging (5zorro → agent)
 

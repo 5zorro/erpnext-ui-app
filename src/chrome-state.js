@@ -21,14 +21,16 @@ export function historyRailWidth(collapsed) {
 }
 
 /**
- * Should the toolbar show a **Doc** tab at all, and what will clicking it do?
+ * Which lens tabs the toolbar may show for the page in front of you.
  *
- * The tab is not a general escape hatch. It is offered when the page in front of you is
- * a Doc-skinnable *record*, or when you are exactly **one step** away from a transaction
- * entry form — i.e. you peeked at a master (edit Payment Terms from a Simplified Bill) and
- * there is a parked Doc or a peek parent to go back to. Arriving on an unrelated Vanilla
- * page from Home or from a Find/list route offers nothing to return to, so the tab is
- * hidden rather than inventing a new Bill (nav incident 2026-09-05).
+ * Vanilla is always available — it is the ERP itself. Every other tab must be earned by
+ * *this page*: Simplified only where the lens has a profile and a record to act on, Doc only
+ * for a Doc-skinnable record or a genuine **one-step** return to one (you peeked at a master
+ * while editing a Bill, so the parked Doc / peek parent is that Bill).
+ *
+ * The return target has to be a Doc-skinnable record, not merely "some peek parent": peeking
+ * from a Payments dashboard made the dashboard a peek parent and lit the Doc tab on a page
+ * with no skin at all (nav incident 2026-09-05).
  *
  * Two steps out is deliberately not modelled: peek children are depth-1, and 5zorro's call
  * is that re-entering the form is acceptable in that narrow case.
@@ -36,16 +38,33 @@ export function historyRailWidth(collapsed) {
  * @param {{
  *   onDoc?: boolean,
  *   hasDocSkinnedRecord?: boolean,
- *   hasParkedDoc?: boolean,
- *   hasPeekParent?: boolean,
+ *   hasSimplifiedLens?: boolean,
+ *   parkedIsDocSkinned?: boolean,
+ *   peekParentIsDocSkinned?: boolean,
  *   returnLabel?: string,
  * }} [state]
+ * @returns {{ vanilla: boolean, simplified: boolean, doc: boolean, docHint: string }}
+ */
+export function lensTabsFor(state = {}) {
+  const doc = docTabState(state);
+  return {
+    vanilla: true,
+    // On the Doc surface the ERP form behind it is still the Simplified target.
+    simplified: !!state.hasSimplifiedLens,
+    doc: doc.available,
+    docHint: doc.hint,
+  };
+}
+
+/**
+ * Doc tab availability + what clicking it will actually do. See {@link lensTabsFor}.
+ * @param {Parameters<typeof lensTabsFor>[0]} [state]
  * @returns {{ available: boolean, hint: string }}
  */
 export function docTabState(state = {}) {
   if (state.onDoc) return { available: true, hint: "Doc skin" };
   if (state.hasDocSkinnedRecord) return { available: true, hint: "Doc skin for this page" };
-  if (state.hasParkedDoc || state.hasPeekParent) {
+  if (state.parkedIsDocSkinned || state.peekParentIsDocSkinned) {
     const label = state.returnLabel != null ? String(state.returnLabel).trim() : "";
     return { available: true, hint: label ? `Back to ${label}` : "Back to the form you came from" };
   }

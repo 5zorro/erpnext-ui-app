@@ -53,7 +53,7 @@ import {
   serializeFocusIncidentLine,
 } from "../src/focus-incident.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
-import { resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
+import { resolveDocSkinTarget, DOC_FORM_DOCTYPES, hasSimplifiedLens } from "../src/lens-context.js";
 import { buildOutstandingBillRows } from "../src/outstanding-bills.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
@@ -219,7 +219,7 @@ import {
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
-import { toolbarLensId, docTabState, historyRailWidth } from "../src/chrome-state.js";
+import { toolbarLensId, lensTabsFor, historyRailWidth } from "../src/chrome-state.js";
 import {
   submittedEntryFromDoc,
   pushSubmittedDoc,
@@ -838,19 +838,34 @@ function sendUiState() {
       lensPrefs,
       erpBase: ERP_BASE,
     });
-    // OI-112 kept the Doc tab live everywhere as a hop-back. It is now offered only for a
-    // Doc-skinnable record or a genuine one-step return (park / peek parent) — arriving on
-    // an unrelated Vanilla page from Home or a Find list has nothing to go back to.
-    const liveInfo = routeInfo(livePath || currentRoute, ERP_BASE);
-    const docTab = docTabState({
+    // Every tab past Vanilla must be earned by *this* page: a Doc-skinnable record, a
+    // Simplified-ready doctype, or a genuine one-step return to a Doc form. A peek parent
+    // that is only some Vanilla page (a Payments dashboard) does not qualify — that lit the
+    // Doc tab on a page with no skin (nav incident 2026-09-05).
+    // Which route describes the document in front of the clerk: on the ERP surface the live
+    // page is the truth (currentRoute can lag), but on the Doc surface the shell owns the
+    // route and the hidden ERP view trails it — reading the live path there reports the
+    // *previous* document, which swapped Bill and PO lens tabs.
+    const contextInfo = routeInfo(
+      surfaceMode === "erp" ? livePath || currentRoute : currentRoute,
+      ERP_BASE,
+    );
+    const parkedInfo = parkedDocSurface && parkedDocSurface.route
+      ? routeInfo(parkedDocSurface.route, ERP_BASE)
+      : null;
+    const peekParentDt = isActivePeekStack(peekStack)
+      ? normalizeDoctypeKey(peekStack.parent.dt || routeInfo(peekStack.parent.route, ERP_BASE).doctype)
+      : "";
+    const lensTabs = lensTabsFor({
       onDoc,
       hasDocSkinnedRecord: !!(
-        liveInfo.doctype &&
-        liveInfo.record &&
-        profileByDoctypeKey(liveInfo.doctype)
+        contextInfo.doctype &&
+        contextInfo.record &&
+        profileByDoctypeKey(contextInfo.doctype)
       ),
-      hasParkedDoc: !!(parkedDocSurface && parkedDocSurface.route),
-      hasPeekParent: isActivePeekStack(peekStack),
+      hasSimplifiedLens: hasSimplifiedLens(contextInfo.doctype, contextInfo.record),
+      parkedIsDocSkinned: !!(parkedInfo && parkedInfo.doctype && profileByDoctypeKey(parkedInfo.doctype)),
+      peekParentIsDocSkinned: !!(peekParentDt && profileByDoctypeKey(peekParentDt)),
       returnLabel: softPeekReturnLabel(
         parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
         isActivePeekStack(peekStack) ? peekStack.parent : null,
@@ -863,8 +878,9 @@ function sendUiState() {
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
       lens: lensId,
-      docSkinAvailable: docTab.available,
-      docTabHint: docTab.hint,
+      docSkinAvailable: lensTabs.doc,
+      docTabHint: lensTabs.docHint,
+      simplifiedAvailable: lensTabs.simplified,
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
@@ -7904,6 +7920,16 @@ ipcMain.on("open-vanilla-skin", () => {
       showErp(info.path || currentRoute, { forceLoad: true });
       return;
     }
+  }
+  // Already looking at Vanilla on a page with no other lens: clicking Vanilla means "stay
+  // in Vanilla", not "go to Desk". Punting off a dashboard or list loses the clerk's place
+  // (nav incident 2026-09-05).
+  const livePath = currentErpPathname();
+  const here = normalizeAppRoute(livePath || currentRoute, ERP_BASE).path || "";
+  if (surfaceMode === "erp" && here && here !== "/desk" && here !== "/app") {
+    navDebug("open-vanilla-skin", `already vanilla — stay ${here}`);
+    sendUiState();
+    return;
   }
   showErp("/desk", { forceLoad: true });
 });
