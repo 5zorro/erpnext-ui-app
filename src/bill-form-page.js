@@ -3578,7 +3578,7 @@ export async function bootBillFormPage(api) {
     };
     blankLink(el.vendor, "supplier");
     blankLink(el.terms, "payment_terms_template");
-    blank(el.date, "posting_date");
+    blank(el.date, "bill_date");
     blank(el.billno, "bill_no");
     blank(el.duedate, "due_date");
     blank(el.memo, "remarks");
@@ -3691,9 +3691,9 @@ export async function bootBillFormPage(api) {
     paintHeaderLinkInputIfAllowed(el.terms, "payment_terms_template", h["Payment terms"] ?? "", headerPaintOpts("payment_terms_template"));
     paintHeaderInputIfAllowed(
       el.date,
-      "posting_date",
+      "bill_date",
       formatDocDateDisplay(h["Invoice date"] ?? "") || (h["Invoice date"] ?? ""),
-      headerPaintOpts("posting_date"),
+      headerPaintOpts("bill_date"),
     );
     paintHeaderInputIfAllowed(el.billno, "bill_no", h["Ref No. (Supplier Invoice No.)"] ?? "", headerPaintOpts("bill_no"));
     // Amount Due is user scratch only — stay blank until they type (no grand_total seed).
@@ -3849,7 +3849,7 @@ export async function bootBillFormPage(api) {
     const field = input.getAttribute("data-field");
     if (!field || !api || painting || !editable()) return;
   
-    if (field === "posting_date" || field === "due_date") {
+    if (field === "bill_date" || field === "due_date") {
       const raw = filterDateInputValue(input.value).trim();
       if (!raw) {
         input.value = formatDocDateDisplay(paintedHeaderValue(field)) || "";

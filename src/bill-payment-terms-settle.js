@@ -43,6 +43,6 @@ export function formatEnrichPendingLog(pending, round) {
 export function shouldSettlePaymentTermsAfterHeader(doctype, field) {
   const dt = doctype != null ? String(doctype).trim() : "";
   const fld = field != null ? String(field).trim() : "";
-  if (fld !== "payment_terms_template" && fld !== "posting_date") return false;
+  if (fld !== "payment_terms_template" && fld !== "bill_date") return false;
   return dt === "Purchase Invoice" || dt === "Sales Invoice";
 }

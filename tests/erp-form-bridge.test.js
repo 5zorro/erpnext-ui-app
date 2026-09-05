@@ -291,7 +291,7 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 19/);
+    assert.match(page, /var VERSION = 20/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     assert.match(page, /hasSupplierBillingDisplay/);
     assert.match(page, /isSupplierPartyMetaOnlyChange/);

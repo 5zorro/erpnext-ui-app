@@ -221,45 +221,66 @@ re-simulation of it) settles it in one run.
 
 ---
 
-## G5 — Seed-profile field matching is syntactic, not semantic (bill_date vs posting_date, 2026-09-04)
+## G5 — Doc Bill's "Invoice date" was wired to the wrong vanilla field (posting_date vs bill_date, 2026-09-04)
 
-**Observed:** Doc Bill's header shows one box labeled "Invoice date"; the vanilla field it
-should conceptually correspond to is `bill_date` (vanilla label "Supplier Invoice Date").
-The Simplified seed (`simplified-seed-profiles.js`) locked `bill_date` as L2 ("quiet &
-locked"), claiming doc skin already handles it — a false positive.
+**Observed:** Doc Bill's header shows a box labeled "Invoice date". The Simplified seed
+(`simplified-seed-profiles.js`) locked vanilla's `bill_date` field as L2 ("quiet &
+locked") on the theory that doc skin doesn't surface it. First pass here treated that as
+a seed bug and un-seeded `bill_date` to match what the code actually did. That was
+backwards: the seed's reasoning was correct, the *code* was the bug.
 
-**Expected:** A field doc skin already writes should be locked in Simplified; a field doc
-skin does *not* touch should stay Normal so the user can still reach it.
+**Expected:** Doc Bill's "Invoice date" input should write to whichever vanilla field
+vanilla itself treats as the invoice-date basis for credit-term due-date math, so a Bill
+made in Doc skin computes the same due date a Bill made in Vanilla would.
 
-**Architecture / fix:** Doc Bill's "Invoice date" box (`BILL_HEADER_FIELDS` in
-`bill-map.js`) actually writes to `posting_date` — not `bill_date` — a long-standing hotfix
-that reuses ERPNext's *required* Posting Date field so Doc Bill only needs a single date
-input, instead of asking the user to fill both `posting_date` (required, accounting date)
-and `bill_date` (optional, the vendor's own invoice date). The seed generator's rule is
-purely syntactic: "if a vanilla fieldname never appears as a `field:` value inside
-`BILL_HEADER_FIELDS`, doc skin doesn't surface it → lock it." `bill_date` never appears
-there (only `posting_date` does, wired to the "Invoice date" label), so the check read its
-absence as "not surfaced" and locked it — the opposite of the truth: `bill_date` is exactly
-the field the "Invoice date" concept *should* map to, and doc skin silently answers that
-concept somewhere else. Fix: removed `bill_date` from `PURCHASE_INVOICE_SEED`; documented
-the posting_date/bill_date split in the seed file's header comment so it isn't re-added by
-a future syntactic-only re-diff.
+**Root cause:** `BILL_HEADER_FIELDS` (`bill-map.js`) wired "Invoice date" to `posting_date`
+— not `bill_date` (vanilla label "Supplier Invoice Date") — reusing ERPNext's *required*
+accounting-date field so Doc Bill only needed one date input. Two independent pieces of
+vanilla source prove this was wrong:
+1. `accounts_controller.py`'s `set_payment_schedule()` / `get_due_date()`:
+   `date = bill_date or posting_date` — vanilla's own credit-term ("Net 30" etc.) due-date
+   calculation prefers `bill_date`, falling back to `posting_date` only when `bill_date` is
+   blank. Doc Bill never wrote `bill_date`, so vanilla's due-date math landed on
+   `posting_date` purely by that fallback, not because it was the intended basis.
+2. `erp-form-bridge-page.js`'s `alignPostingDateLikeVanillaOk()` — Doc Bill's own
+   save path — already force-resets `posting_date` to *today* before every save whenever
+   it differs (mirroring Vanilla's "posting date will change, OK?" confirm dialog, which
+   Doc skin auto-accepts since it can't click a hidden dialog). So whatever the user typed
+   into "Invoice date" was silently discarded and replaced with today's date at save time
+   for any Bill not saved same-day as its typed date — the field was barely functional.
 
-**Generalize:** this class of false positive will recur for the other 8 target doctypes
-whenever a Doc skin box's *label* implies a vanilla field that its `field:` wiring doesn't
-actually use (renames, hotfixes, "reuse a required field to avoid asking twice"). A
-field-presence diff against `*_HEADER_FIELDS` catches fieldname matches only — it cannot
-see a label-level semantic relationship. When seeding a new doctype, cross-check each
-"not surfaced, seed L2" candidate against the doc skin's field *labels*, not just its
-fieldnames, before locking it.
+**Fix:** repointed `BILL_HEADER_FIELDS`'s "Invoice date" to `bill_date`
+(`bill-map.js`). `posting_date` is no longer written by any Doc Bill input — it keeps its
+DocType default (`"Today"`) and the existing save-time realignment, which is now exactly
+right (accounting date = today; invoice date = whatever the vendor's invoice says).
+Updated every place that treated `"posting_date"` as "the Invoice-date input's fieldname"
+to say `"bill_date"` instead: `bill-form-page.js` (paint/read/blur dispatch),
+`bill-payment-terms-settle.js` + its inline mirror in `erp-form-bridge-page.js`
+(`settlePaymentTermsAfterHeaderChange`/`setHeader` — recompute due date/payment schedule
+on change), `dirty-gate.js` (date-kind comparison), `stale-focus-guard.js`
+(`shouldScheduleInvoiceDateFocus`), and the `data-field` attribute in `doc-form.html` /
+`bill-shell.fragment.html` (whose `data-testid="bill-date"` had quietly been telling the
+truth the whole time). Un-seeding `bill_date` in `simplified-seed-profiles.js` turned out
+to be correct after all — now for the right reason (doc skin genuinely writes it) instead
+of the original wrong one (it doesn't, so don't lock it). Bumped
+`erp-form-bridge-page.js` VERSION 19->20.
+
+**Generalize:** a Doc-skin box's *label* implying a vanilla field, and its `field:` wiring
+actually using a *different* one, is a real class of bug — not just a seeding-methodology
+gap. When cross-referencing `*_HEADER_FIELDS` against vanilla DocType JSON for the other 8
+target doctypes, check whether vanilla's own server-side calculations (due dates, GL
+posting, validations) key off the field the wiring *didn't* pick, the way `bill_date`
+turned out to be the true credit-term basis here.
 
 **Dogfood:** Open a Purchase Invoice under Simplified with no saved profile (or "Use
 doc-skin assumptions"). `bill_date` ("Supplier Invoice Date") should show as Normal, not
-locked.
+locked — because Doc Bill's "Invoice date" now genuinely writes it. On Doc Bill: type an
+Invoice date a few days in the past with a Payment Terms Template selected (e.g. Net 30);
+Bill Due Date should compute from the typed Invoice date, not from today.
 
-**Do not regress:** Don't reduce "doc skin already covers this field" to a single
-mechanical check (fieldname ∈ some `field:` list) without also asking whether a *different*
-field is standing in for the same user-facing concept via a documented hotfix.
+**Do not regress:** When a Doc-skin field mapping looks suspicious, check what vanilla's
+own server-side logic actually keys off before "fixing" the seed/downstream logic to match
+the existing mapping — the mapping itself may be the bug.
 
 ---
 

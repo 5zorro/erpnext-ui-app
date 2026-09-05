@@ -47,6 +47,6 @@ export function shouldScheduleInvoiceDateFocus(active) {
   if (isBodyFocus(active)) return true;
   if (!active || typeof active.getAttribute !== "function") return false;
   const field = active.getAttribute("data-field");
-  if (!field || field === "supplier" || field === "posting_date") return true;
+  if (!field || field === "supplier" || field === "bill_date") return true;
   return false;
 }

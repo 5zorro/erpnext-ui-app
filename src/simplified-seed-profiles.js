@@ -23,16 +23,17 @@
  *   `billing_address`, `taxes_and_charges`, `status` — doc skin already writes through
  *   these via its own picker/display paths (OI-136 address picker, tax rows); hiding the
  *   raw vanilla field would cut off the fallback path those pickers rely on.
- * - `bill_date` (vanilla label "Supplier Invoice Date") — Doc Bill's own header field
- *   labeled "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes to `posting_date`
- *   instead, a long-standing hotfix that reuses the required Posting Date field so Doc
- *   Bill only needs one date input. `bill_date` is the vanilla field that concept should
- *   map to, but the fieldNAME never appears in `BILL_HEADER_FIELDS` — an earlier pass here
- *   read that absence as "not surfaced by doc skin" and seeded it L2, locking the one
- *   field that actually embodies the "Invoice date" idea while doc skin quietly writes
- *   its answer somewhere else. Leave it Normal until the posting_date/bill_date split is
- *   resolved (see gotchas.md G5); do not re-seed it by re-running the same field-presence
- *   check without accounting for label/field renames like this one.
+ * - `bill_date` (vanilla label "Supplier Invoice Date") — Doc Bill's header field labeled
+ *   "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes here directly, matching
+ *   vanilla's own due-date-for-credit-terms basis (`accounts_controller.py`:
+ *   `date = bill_date or posting_date`). `posting_date` stays unseeded too (required field,
+ *   above) but Doc Bill no longer writes it at all — it keeps its DocType default ("Today")
+ *   and gets forced back to today at save time regardless (`alignPostingDateLikeVanillaOk`
+ *   in erp-form-bridge-page.js, mirroring Vanilla's own posting-date-confirm). See
+ *   gotchas.md G5 for the full history: an earlier pass here read `bill_date`'s absence
+ *   from `BILL_HEADER_FIELDS` as "not surfaced by doc skin" and seeded it L2 — at the time
+ *   correct about the code, but the code itself had "Invoice date" wired to the wrong
+ *   field; the real fix repointed `bill-map.js` at `bill_date`, not this seed.
  * - Any field already `hidden` or hidden-by-`Table`/`Button` fieldtype in the doctype
  *   JSON — nothing to quiet, it is not visible in Vanilla either.
  */

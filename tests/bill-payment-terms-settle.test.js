@@ -21,7 +21,7 @@ describe("bill-payment-terms-settle", () => {
       shouldSettlePaymentTermsAfterHeader("Purchase Invoice", "payment_terms_template"),
       true,
     );
-    assert.equal(shouldSettlePaymentTermsAfterHeader("Purchase Invoice", "posting_date"), true);
+    assert.equal(shouldSettlePaymentTermsAfterHeader("Purchase Invoice", "bill_date"), true);
     assert.equal(shouldSettlePaymentTermsAfterHeader("Purchase Order", "payment_terms_template"), false);
     assert.equal(shouldSettlePaymentTermsAfterHeader("Purchase Invoice", "supplier"), false);
   });
