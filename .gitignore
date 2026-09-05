@@ -40,5 +40,8 @@ localhost.har
 output.pdf
 ops/sample-data/dogfood-sources/generated/
 
+# Local agent orientation — not part of the public tree (HANDOFF.md is the tracked SSoT).
+CLAUDE.md
+
 # Legacy Bill shell (tranche 10) — SSoT: electron/bill-shell.fragment.html + doc-form.html
 electron/bill.html
