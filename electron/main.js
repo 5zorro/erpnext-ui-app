@@ -54,6 +54,12 @@ import {
 } from "../src/focus-incident.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import { resolveDocSkinTarget, DOC_FORM_DOCTYPES } from "../src/lens-context.js";
+import { buildOutstandingBillRows } from "../src/outstanding-bills.js";
+import {
+  DEFAULT_PAYMENT_BATCH_PREFS,
+  mergePaymentBatchPrefs,
+  validatePaymentBatchPrefs,
+} from "../src/payment-batch-prefs.js";
 import {
   routeInfo,
   routesReferToSameDoc,
@@ -286,6 +292,8 @@ let lastHealth = "unknown";
 let history = [];
 /** @type {Record<string, string>} */
 let lensPrefs = {};
+/** @type {import("../src/payment-batch-prefs.js").PaymentBatchPrefs} */
+let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
 let shelvedDrafts = [];
 /** @type {import("../src/calc/session-history.js").CalcHistoryEntry[]} */
@@ -525,6 +533,9 @@ function reloadDocFormShell() {
 function prefsPath() {
   return path.join(app.getPath("userData"), "lens-prefs.json");
 }
+function paymentBatchPrefsPath() {
+  return path.join(app.getPath("userData"), "payment-batch-prefs.json");
+}
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
 }
@@ -559,6 +570,20 @@ function loadPrefs() {
     );
   } catch {
     healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
+  }
+  try {
+    paymentBatchPrefs = mergePaymentBatchPrefs(
+      JSON.parse(fs.readFileSync(paymentBatchPrefsPath(), "utf8")),
+    );
+  } catch {
+    paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+  }
+}
+function savePaymentBatchPrefs() {
+  try {
+    fs.writeFileSync(paymentBatchPrefsPath(), JSON.stringify(paymentBatchPrefs));
+  } catch {
+    /* ignore */
   }
 }
 function saveHealthRemediation() {
@@ -4401,6 +4426,79 @@ async function listBillPaymentEntries(billName) {
 }
 
 /**
+ * OI-161 Packet 4: outstanding Bills across all AP vendors.
+ * Runs the existing Accounts Payable report (same engine Vanilla's report page uses — Clean
+ * Core, no reimplemented ageing math), then fetches each returned invoice's full document to
+ * read its `payment_schedule` child table. `buildOutstandingBillRows` (Packet 1) does the actual
+ * normalize/explode/discount-window work here in the main process — the erpEval script below
+ * only fetches raw rows.
+ *
+ * **Not a single batched query, found live 2026-09-05**: `frappe.client.get_list` on a child
+ * doctype ("Payment Schedule") silently strips every requested field except `name` — a known
+ * class of gotcha already flagged in this file (see `listBillPaymentEntries`'s comment on
+ * Payment Entry Reference). Fetching the *parent* document via `frappe.client.get` returns its
+ * child table fully populated, so this issues one `get` per invoice — concurrently, not
+ * sequentially — rather than the one-query design originally planned.
+ * @returns {Promise<{ ok: boolean, bills: import("../src/outstanding-bills.js").OutstandingBillRow[], reason?: string }>}
+ */
+async function fetchOutstandingBills() {
+  const raw = await erpEval(`(async () => {
+    try {
+      // Same company-resolution preference as ops/sample-data/seed_corpus.py::_resolve_company —
+      // a sandbox can have both "…SANDBOX…" and "…SANDBOX… (Demo)" companies; the demo one must
+      // never win by accident (found 2026-09-05: unfiltered AP report mixed both companies'
+      // vendors together on screen).
+      var companies = [];
+      try {
+        var companyResp = await frappe.call({
+          method: "frappe.client.get_list",
+          args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
+        });
+        companies = ((companyResp && companyResp.message) || []).map(function (c) { return c.name; });
+      } catch (eCompanies) {
+        companies = [];
+      }
+      var company =
+        companies.find(function (n) { return /sandbox/i.test(n) && n.indexOf("(Demo)") === -1; }) ||
+        (companies.length === 1 ? companies[0] : "") ||
+        (frappe.defaults && frappe.defaults.get_user_default && frappe.defaults.get_user_default("Company")) ||
+        "";
+      var reportArgs = { report_name: "Accounts Payable", filters: { party_type: "Supplier" } };
+      if (company) reportArgs.filters.company = company;
+      var report = await frappe.call({ method: "frappe.desk.query_report.run", args: reportArgs });
+      var rows = ((report && report.message && report.message.result) || []).filter(
+        function (r) { return r && r.voucher_no; },
+      );
+      var vouchers = rows.map(function (r) { return r.voucher_no; });
+      var schedulesByInvoice = {};
+      await Promise.all(vouchers.map(async function (name) {
+        try {
+          var doc = await frappe.call({
+            method: "frappe.client.get",
+            args: { doctype: "Purchase Invoice", name: name },
+          });
+          schedulesByInvoice[name] = (doc && doc.message && doc.message.payment_schedule) || [];
+        } catch (eDoc) {
+          schedulesByInvoice[name] = [];
+        }
+      }));
+      return { ok: true, rows: rows, schedulesByInvoice: schedulesByInvoice };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), rows: [], schedulesByInvoice: {} };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return { ok: false, reason: (raw && raw.reason) || "Could not load outstanding bills.", bills: [] };
+  }
+  const schedulesByInvoice = raw.schedulesByInvoice || {};
+  const bills = [];
+  for (const reportRow of raw.rows || []) {
+    bills.push(...buildOutstandingBillRows(reportRow, schedulesByInvoice[reportRow.voucher_no] || []));
+  }
+  return { ok: true, bills };
+}
+
+/**
  * Reload Purchase Invoice after JIT Payment Entry so status/outstanding match ledger.
  * @param {string} billName
  */
@@ -7867,6 +7965,50 @@ ipcMain.on("open-mockup", (_e, name) => {
     w.focus();
   });
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
+});
+let payOutstandingWin = null;
+ipcMain.on("open-pay-outstanding", () => {
+  if (payOutstandingWin && !payOutstandingWin.isDestroyed()) {
+    payOutstandingWin.show();
+    payOutstandingWin.focus();
+    return;
+  }
+  // OI-161 Packet 4: standalone window, not a new persistent surfaceMode — v1 is suggestion-only
+  // and doesn't need the chrome/history-rail coordination the main layout's views share; a
+  // dedicated surfaceMode is a reasonable upgrade once this is dogfooded (deliberately deferred).
+  payOutstandingWin = new BrowserWindow({
+    width: 1100,
+    height: 820,
+    title: "Pay Outstanding",
+    backgroundColor: "#eef2f5",
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "pay-outstanding-preload.cjs"),
+    },
+  });
+  payOutstandingWin.once("ready-to-show", () => {
+    if (payOutstandingWin.isDestroyed()) return;
+    payOutstandingWin.show();
+    payOutstandingWin.focus();
+  });
+  payOutstandingWin.on("closed", () => {
+    payOutstandingWin = null;
+  });
+  payOutstandingWin
+    .loadFile(path.join(__dirname, "pay-outstanding.html"))
+    .catch((e) => navDebug("open-pay-outstanding-err", String(e && e.message ? e.message : e)));
+});
+ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
+ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
+ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
+  const check = validatePaymentBatchPrefs(prefs);
+  if (!check.ok) return { ok: false, errors: check.errors, prefs: { ...paymentBatchPrefs } };
+  paymentBatchPrefs = mergePaymentBatchPrefs(prefs);
+  savePaymentBatchPrefs();
+  return { ok: true, prefs: { ...paymentBatchPrefs } };
 });
 ipcMain.on("open-devtools", (_e, target) => {
   const map = { erp, chrome, home, hist, bill, docForm };

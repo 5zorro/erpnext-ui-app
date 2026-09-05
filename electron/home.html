@@ -126,6 +126,9 @@
           } else if (t.id === "receipt-new" && api.openEntry) {
             b.title = "Receive Inventory (last lens; default Doc)";
             b.onclick = () => api.openEntry("purchase-receipt");
+          } else if (t.id === "pay-outstanding" && api.openPayOutstanding) {
+            b.title = "Suggested payment batches across outstanding Bills (OI-161)";
+            b.onclick = () => api.openPayOutstanding();
           } else {
             b.title = t.route;
             b.onclick = () => api && api.openErp(t.route);
