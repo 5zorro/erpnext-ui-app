@@ -77,6 +77,7 @@ methods only, never patch `apps/frappe` / `apps/erpnext`).
 flowchart LR
   subgraph pure ["src/ — pure, unit-tested"]
     Fetch["outstanding-bills.js\n(normalize AP rows)"]
+    Cal["bank-business-days.js\n(federal holidays + blur, Packet 1b)"]
     Econ["payment-batch-economics.js\n(suggest groups + rationale)"]
     Prefs["payment-batch-prefs.js\n(APR / postage / per-check SSoT)"]
   end
@@ -87,6 +88,7 @@ flowchart LR
   ERP["ERPNext HTTP API\n(existing whitelisted methods only)"]
   ERP -->|"query_report.run\nAccounts Payable"| Fetch
   Fetch --> Econ
+  Cal --> Econ
   Prefs --> Econ
   Econ --> Page
   Econ -.->|"Packet 4b, not built this tranche"| PEForm
@@ -260,6 +262,68 @@ discount-window attach with 0/1/many schedule rows; missing discount fields → 
 
 ---
 
+## Packet 1b — `src/bank-business-days.js` (pure: "not a processing day" calendar)
+
+### Why this exists (5zorro 2026-09-05)
+
+Packet 2's math as drafted below is silently wrong whenever a raw `dueDate` lands on a weekend or a
+bank holiday — it would suggest paying on a Sunday. 5zorro's framing: this doesn't need to be
+regulatory-grade (not a bank), **"federal holidays plus some blur… call it good enough."** Locked
+scope, explicitly not more:
+
+- **Weekends** (Sat/Sun).
+- **US federal holidays** (same 11-day list the Federal Reserve uses for ACH/wire processing) —
+  computed algorithmically per year (fixed dates + "nth weekday of month" dates), with the standard
+  observed-date shift (Saturday holiday → observed Friday, Sunday holiday → observed Monday). No
+  external data file, no year-by-year maintenance.
+- **Blur days** — 5zorro's two named examples, both are "a Friday adjacent to a holiday that creates
+  a long weekend": the Friday **before** a Monday holiday, and the Friday **after** a Thursday
+  holiday (e.g., the day after Thanksgiving). One rule covers both: a Friday is a blur day if the
+  following Monday is a holiday **or** the preceding Thursday was a holiday.
+- **Direction of the shift**: when a date isn't payable, move **earlier** (previous valid business
+  day), not later. This is the same conservative call already locked for Packet 2 ("never batch
+  past the earliest due date… never pay late to save postage") — paying a day or two early costs
+  negligible float; paying after a bank holiday shut processing risks actual lateness. **Flagging
+  this direction explicitly for 5zorro to confirm** — the plain-English ask could be read either way.
+
+### Shape
+
+```js
+/** @param {number} year @returns {Set<string>} ISO dates, observed-date shifted */
+export function usFederalHolidays(year) { ... }
+
+/** @param {string} isoDate @returns {boolean} */
+export function isWeekend(isoDate) { ... }
+export function isBankHoliday(isoDate) { ... }   // weekend OR federal holiday
+export function isBlurDay(isoDate) { ... }       // Friday adjacent to a holiday long weekend
+
+/**
+ * Last valid processing day on or before isoDate. If isoDate is already a normal business day
+ * (not weekend/holiday/blur), returns it unchanged.
+ * @param {string} isoDate
+ * @param {{ includeBlur?: boolean }} [opts]  // default true
+ * @returns {string} ISO date
+ */
+export function effectivePayByDate(isoDate, opts) { ... }
+```
+
+### Tests
+
+`tests/bank-business-days.test.js` — known federal holidays for a couple of concrete years
+(including an observed-Friday and an observed-Monday case); a Sunday due date shifts to the prior
+Friday (unless Friday is itself a holiday, then Thursday); the two named blur cases (Friday before a
+Monday holiday, Friday after Thanksgiving) both shift; `includeBlur: false` disables blur but keeps
+weekend/holiday shifting (so a future prefs toggle is possible without a second implementation).
+
+### How Packet 2 uses it
+
+Every bill's `dueDate` **and** `discountDate` (if present) run through `effectivePayByDate()` before
+any grouping/float math — the whole algorithm operates on effective dates, not raw ERP dates. This
+also fixes the pay-alone baseline: a bill due on a Sunday already has a nonzero "cost of paying on
+time" even with zero batching, and every downstream comparison needs that baseline right.
+
+---
+
 ## Packet 2 — `src/payment-batch-economics.js` (pure: the OI-161 math)
 
 ### Business rule (locked intent, from OI-161)
@@ -275,12 +339,13 @@ Concretely, for a same-vendor group of bills with due dates within a configurabl
 - **Float value of delaying** one bill from its own due date to an earlier **group** pay date =
   `amount * (apr / 365) * daysEarlier` — this is a **cost** of batching early (paying before you
   have to), not a savings. Batching only wins when `feesSavedByBatching > floatCostOfPayingEarly`.
-- Suggested pay date for a group = **earliest** due date among the batched bills (never later —
-  that would risk lateness on the earliest one).
-- A discount window (Packet 1's `discountDate`/`discountAmount`) **always wins** its own comparison
-  first: if `discountAmount > floatCostOfPayingEarly(thatBill, discountDate)`, suggest paying that
-  bill alone by `discountDate` regardless of batching (discount capture is usually the largest
-  single lever — do not let batching logic bury it).
+- Suggested pay date for a group = **earliest** *effective* due date among the batched bills, run
+  through Packet 1b's `effectivePayByDate()` (never later — that would risk lateness on the earliest
+  one, and never a weekend/holiday/blur day either).
+- A discount window (Packet 1's `discountDate`/`discountAmount`, also effective-date-shifted)
+  **always wins** its own comparison first: if `discountAmount > floatCostOfPayingEarly(thatBill,
+  discountDate)`, suggest paying that bill alone by `discountDate` regardless of batching (discount
+  capture is usually the largest single lever — do not let batching logic bury it).
 
 ### Signature
 
@@ -325,6 +390,10 @@ render — no separate "ungrouped" branch.
 4. Different suppliers never batch together (group key is always `supplier`).
 5. Bills outside `groupWindowDays` of each other don't batch even same-vendor.
 6. Empty `bills` → `{ groups: [] }`. Single bill → one `pay-alone` group, `netBenefit: 0`.
+7. A single bill due on a Sunday → `payOn` is the prior Friday (Packet 1b), with `floatCost` computed
+   against that shifted date, not the raw Sunday.
+8. Three bills whose raw earliest due date is a bank holiday → group `payOn` lands on the correct
+   prior business day, not the holiday.
 
 This is the packet the whole tranche hinges on — **auditable math**, per HANDOFF's "auditable how"
 rule. 5zorro should read the test table before this packet is called done; the `rationale` string
