@@ -80,13 +80,15 @@ flowchart LR
     Prefs["payment-batch-prefs.js\n(APR / postage / per-check SSoT)"]
   end
   subgraph shell ["Electron"]
-    Page["electron/pay-outstanding.html\n(Doc Pay skin v1)"]
+    Page["electron/pay-outstanding.html\n(Doc Pay skin v1 — Home tile anchor)"]
+    PEForm["Doc-skin Payment Entry, AP only\n(Packet 4b — shell TBD, decision only)"]
   end
   ERP["ERPNext HTTP API\n(existing whitelisted methods only)"]
   ERP -->|"query_report.run\nAccounts Payable"| Fetch
   Fetch --> Econ
   Prefs --> Econ
   Econ --> Page
+  Econ -.->|"Packet 4b, not built this tranche"| PEForm
   Page -.->|"v1: none — suggestion only"| Write["Payment Entry / Payment Order\n(stretch — not this tranche)"]
 ```
 
@@ -125,7 +127,7 @@ economics, suggestion — is new product surface, matching what 5zorro asked to 
 | Applied-payments table (OI-139) | **Shipping separately** — read-only PE list on a submitted Bill. Orthogonal (single-Bill view vs cross-vendor batch view). |
 | Cost-model prefs (APR / postage / per-check) | **Do not exist anywhere** — new SSoT, this tranche. |
 | Multi-installment sample data | **Does not exist** — `ops/sample-data/seed_corpus.py::_normalize_pi_dates` unconditionally clears `payment_schedule` and flattens every seeded Bill to a single 30-day due date. Zero bills in the sandbox today have more than one due date. **Packet G** fixes this for one dedicated fixture. |
-| Doc-skin Payment Entry | **Does not exist** — `DOC_SKIN_INDEX` (`src/lens-context.js`) only has `workflow-home` / `bill` / `po` / `receipt`. Payment Entry is Vanilla-only today (`/app/payment-entry/new`). 5zorro decided (2026-09-03): **Home tile is the only entry point this tranche** — no PE link point, Vanilla or Doc, this round (see Packet 4). |
+| Doc-skin Payment Entry | **Does not exist** — `DOC_SKIN_INDEX` (`src/lens-context.js`) only has `workflow-home` / `bill` / `po` / `receipt`. Payment Entry is Vanilla-only today (`/app/payment-entry/new`), and the doctype is shared by both AP (`payment_type: "Pay"`) and AR (`"Receive"`) flows. 5zorro decided (2026-09-04): **two entry points this tranche — Home tile AND a new Doc-skin Payment Entry form, AP only.** Rejected as anchors: the **Payments workspace** (bleeds AR ageing/reports into what should be an AP-only tool; AR gets its own doc skin later) and the **Payment Entry list/"Find" view** (it's an audit tool over already-created payments, not a bill-selection decision surface). See Packet 4 / new Packet 4b. |
 
 ---
 
@@ -356,13 +358,19 @@ existing Vanilla Payment Entry / Payment Order as the write path — see Packet 
 
 ### How
 
-### Entry points (locked 2026-09-03)
+### Entry points (locked 2026-09-04)
 
-**Home tile only, this tranche.** 5zorro's first instinct was also linking from inside Payment
-Entry, but there's no Doc-skin Payment Entry to link from today (`DOC_SKIN_INDEX` gap, see
-Baseline) — building one, or even a lightweight chrome affordance on the Vanilla PE route, is a
-separate decision deferred until there's dogfood signal on whether clerks actually want to jump
-there from PE. Do not add a second entry point this tranche.
+**Home tile + Doc-skin Payment Entry form, AP only.** 5zorro reviewed the candidates (Payments
+workspace, Payment Entry list, Payment Entry form) and ruled out the first two: the **Payments
+workspace** bleeds AR (ageing/reports for both AR and AP live on one page — a check run is AP-only,
+so a future AR doc skin is the right home for that surface, not this one); the **Payment Entry
+list/"Find" view** is an audit tool for locating already-created payments, not where a clerk decides
+which bills go on a check. The **Payment Entry form itself** is where Vanilla already does the real
+work this tranche wants to improve (`get_outstanding_invoices` → checkbox-select bills → one PE).
+5zorro's own framing: extending that form to show suggested groups across a vendor's open bills is
+"about the same" lift as the flow already there — see **Packet 4b** for what that anchor actually
+requires to build (bigger than a routing decision; do not conflate "locked as an anchor" with
+"built this tranche").
 
 | Piece | Job |
 |---|---|
@@ -379,14 +387,60 @@ there from PE. Do not add a second entry point this tranche.
   pre-filtered Payment Entry `Get Outstanding` — a link-out, not a shell-side write).
 - No list-scroll-position/return-to-list work (that's **OI-129**, explicitly parked until 5zorro
   dogfoods this and feels the same pain — do not pre-solve it here).
-- No Payment Entry link point (Vanilla chrome affordance or a future Doc-skin PE) — Home tile is
-  the only entry point this tranche (locked 2026-09-03, see Entry points above).
+- The Doc-skin Payment Entry form (Packet 4b) — locked as the second **anchor** (2026-09-04), but
+  its actual build (new shell branch in `doc-form.html`, or a dedicated file) is a separate, bigger
+  packet. This packet ships the Home-tile page only; do not block Packet 4 on Packet 4b.
 
 ### Tests
 
 Layer 1: none new beyond Packets 1–3 (this packet is presentation over already-tested pure data).
 Layer 3 (optional shell smoke): one `scaffold-pay-outstanding.spec.js` proving the route loads and
 renders group/chip DOM from injected fixture data — same pattern as other `scaffold-*` specs.
+
+---
+
+## Packet 4b — Doc-skin Payment Entry anchor (AP only) — decision landing zone, not a full build
+
+### Business rule (locked 2026-09-04)
+
+Home tile **and** the Payment Entry form are the two entry points (see Packet 4's "Entry points").
+Scope is explicitly **AP only** — this Doc skin activates for Pay-type Payment Entries; Receive-type
+(AR) stays Vanilla until AR gets its own doc skin (avoids the same workspace-level AR bleed 5zorro
+flagged when rejecting the Payments workspace as an anchor).
+
+### Honest sizing — why this isn't "add one `DOC_SKIN_INDEX` row"
+
+Bill / PO / Receipt all share `shell: "doc-form"` in `src/doc-skin-registry.js` — one HTML shell
+(`electron/doc-form.html`) templated by `headerFields` + `itemCols` + `features`, because all three
+are fundamentally "header + item grid + taxes" documents (`DOC_SKIN_PROFILES` in that file). Payment
+Entry has **no item grid** — its shape is party/bank/amount header fields + a References child table
+(`Payment Entry Reference`: `against_voucher_type`, `against_voucher`, `allocated_amount`) +
+Deductions. `doc-form.html` doesn't fit as-is; this needs either a new `shell` value with its own
+template branch, or a dedicated file — materially bigger than Packets 1–4, not a drop-in profile.
+
+### What this packet delivers **this tranche** (decision only)
+
+1. New `DOC_SKIN_INDEX` entry, **`ready: false`** — matches the existing convention for planned rows
+   ("keeps the map honest without showing a broken tab," per that file's own doc comment). Does not
+   ship a working tab yet.
+2. Open design question, flagged not resolved: `doctypes: ["payment-entry"], needsRecord: true` alone
+   can't distinguish AP from AR — `classifySurface`/`lookupDocSkin` key off route + doctype today,
+   never a field value. Gating on `payment_type == "Pay"` needs either (a) a query-param convention
+   on the Home tile's deep link (`pay-bills`/`checks` tiles already deep-link into
+   `/app/payment-entry/new` — extending that with `?party_type=Supplier` is the smallest step), or
+   (b) the toolbar re-evaluating once the form's `payment_type` field is actually set. Pick this when
+   Packet 4b's real build starts, not now.
+3. Content plan for the eventual build: reuse Packets 1–3 verbatim (`outstanding-bills.js`,
+   `payment-batch-economics.js`, `payment-batch-prefs.js`) scoped to the one vendor on the form.
+   Picking a suggested group still hands off to Vanilla's existing References allocation — no new
+   write logic beyond what Packets 4/5 already scope.
+
+### Recommended sequencing
+
+Ship Packet 4 (Home tile + standalone page) first and let 5zorro dogfood the suggestion math itself
+before committing to the Payment Entry form's actual layout. Packet 4b's honest size (new shell
+branch) argues for **its own follow-up dated plan** once that shape is clear, rather than guessing
+the "how" now — this section locks the **decision** (two entry points, AP only), not the **build**.
 
 ---
 
