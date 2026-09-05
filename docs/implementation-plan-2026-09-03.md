@@ -452,16 +452,20 @@ export const DEFAULT_PAYMENT_BATCH_PREFS = Object.freeze({
 });
 ```
 
-| Piece | Job |
-|---|---|
-| `src/payment-batch-prefs.js` | Defaults + `validatePaymentBatchPrefs(prefs)` (reject negative/NaN). Pure. |
-| Electron: `userData/payment-batch-prefs.json` | Persisted overrides, same read/merge/write pattern as `lens-prefs.json`. |
-| UI | Small settings affordance on the Doc Pay skin itself (not a separate settings page this tranche) — edit the three numbers inline, see suggestions re-flow live. |
+| Piece | Job | Status |
+|---|---|---|
+| `src/payment-batch-prefs.js` | `DEFAULT_PAYMENT_BATCH_PREFS` + `validatePaymentBatchPrefs(prefs)` → `{ ok, errors }` (every invalid field reported, not just the first — a settings UI can highlight each one) + `mergePaymentBatchPrefs(raw)` → always a complete `PaymentBatchPrefs`, each field falling back to its own default independently (mirrors the existing `normalizeHealthRemediationPrefs` pattern in `health-remediation.js`, not a new convention). Pure. | **Done 2026-09-05.** |
+| Electron: `userData/payment-batch-prefs.json` read/write | Same pattern as `main.js`'s existing `loadPrefs()`/`savePrefs()` for `lens-prefs.json` — raw `fs` read, `JSON.parse` in a try/catch, `mergePaymentBatchPrefs()` to sanitize. | **Deferred to Packet 4** — electron wiring lands with the rest of the Doc Pay skin's IPC, same as Packet 1's `get-outstanding-bills` call. |
+| UI | Small settings affordance on the Doc Pay skin itself (not a separate settings page this tranche) — edit the three numbers inline, see suggestions re-flow live. | **Deferred to Packet 4.** |
 
 ### Tests
 
-`tests/payment-batch-prefs.test.js` — defaults; validate rejects negative/NaN/missing; merge
-override over defaults (partial prefs object still yields a complete `PaymentBatchPrefs`).
+`tests/payment-batch-prefs.test.js` — defaults pass validation; validate rejects non-object,
+negative, NaN, `Infinity`, and missing fields (reporting *all* invalid fields at once, not just the
+first); zero is a legitimate value, not rejected; merge yields exactly the defaults with no
+overrides, a partial override still yields a complete `PaymentBatchPrefs`, an individually-invalid
+field falls back to its own default without discarding the rest of the object, unknown extra fields
+are ignored, non-object input falls back to full defaults, and the frozen default is never mutated.
 
 ---
 
