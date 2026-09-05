@@ -9,6 +9,7 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "history.html": "Recent / Drafts flyout (left rail)",
   "diagnose-dropdown.html": "Diagnose popover (chrome ERP health)",
   "calc-history-dropdown.html": "Calculator history popover (left-rail Calculator button)",
+  "submitted-dropdown.html": "Submitted-this-session popover (left-rail Submitted button)",
   "nav-incident-dialog.html": "Fail-loud nav issue note (toolbar Nav issue)",
   "focus-incident-dialog.html": "Fail-loud focus issue note (DB diagnose Focus issue)",
 });
