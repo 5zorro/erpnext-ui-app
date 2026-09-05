@@ -6,6 +6,7 @@ import {
   DEFAULT_DRAFTS_PER_KIND,
   AP_DOGFOOD_FIXTURE_KEYS,
   AP_FIXTURE_EXTRA_COUNTS,
+  PAYMENT_BATCH_FIXTURE_KEYS,
   buildCorpusPlan,
   dateForOffset,
   idleVendorPoPostingDate,
@@ -47,8 +48,8 @@ describe("sample-data corpus plan", () => {
       assert.equal(submitted.length, n + extra, `submitted docs ${kind}`);
       assert.equal(drafts.length, DEFAULT_DRAFTS_PER_KIND, `draft docs ${kind}`);
     }
-    assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 8);
-    assert.equal(plan.parties.suppliers.length, 10);
+    assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 10);
+    assert.equal(plan.parties.suppliers.length, 12);
     assert.equal(plan.parties.customers.length, 8);
     assert.equal(plan.parties.items.length, 12);
     assert.equal(plan.parties.projects.length, 4);
@@ -83,7 +84,8 @@ describe("sample-data corpus plan", () => {
     assert.equal(bySource["purchase_receipt←none"], 13);
     assert.equal(bySource["purchase_invoice←purchase_receipt"], 8);
     assert.equal(bySource["purchase_invoice←purchase_order"], 8);
-    assert.equal(bySource["purchase_invoice←none"], 9);
+    // +2 over the base 9: OI-161 Packet G's PI-DAILY / PI-DAILY-LG (create-from-nothing).
+    assert.equal(bySource["purchase_invoice←none"], 11);
   });
 
   it("leaves open POs for source-picker dogfood (20..24)", () => {
@@ -195,6 +197,49 @@ describe("sample-data corpus plan", () => {
         (d.source?.key === "PO-MN" || d.source?.key === "PR-MN")
     );
     assert.equal(piFromMn.length, 0);
+  });
+
+  it("OI-161 Packet G: daily payment-schedule fixture at two dollar scales", () => {
+    const plan = buildCorpusPlan();
+    assert.equal(PAYMENT_BATCH_FIXTURE_KEYS.length, 2);
+
+    const cases = [
+      { key: "PI-DAILY", partyKey: "SUP-DAILY", rate: 50.0, grandTotal: 4500.0 },
+      { key: "PI-DAILY-LG", partyKey: "SUP-DAILY-LG", rate: 2500.0, grandTotal: 225000.0 },
+    ];
+    for (const c of cases) {
+      const row = plan.docs.find((d) => d.key === c.key);
+      assert.ok(row, c.key);
+      assert.equal(row.kind, "purchase_invoice");
+      assert.equal(row.partyKey, c.partyKey);
+      assert.equal(row.source, null);
+      assert.equal(row.asDraft, undefined, "must be submitted, not a draft");
+      assert.equal(row.items.length, 1);
+      assert.equal(row.items[0].qty, 90);
+      assert.equal(row.items[0].rate, c.rate);
+
+      assert.equal(row.paymentSchedule.length, 90);
+      const amountSum = row.paymentSchedule.reduce((s, r) => s + r.amount, 0);
+      assert.ok(Math.abs(amountSum - c.grandTotal) < 1e-9, `${c.key} schedule sum ${amountSum}`);
+      for (const r of row.paymentSchedule) {
+        assert.equal(r.amount, c.rate);
+      }
+
+      // dayOffset resolves to 90 consecutive, distinct calendar days once given an asOf.
+      const dueDates = row.paymentSchedule.map((r) => dateForOffset("2026-09-05", r.dayOffset));
+      assert.equal(new Set(dueDates).size, 90, `${c.key} due dates must be distinct`);
+      const sorted = [...dueDates].sort();
+      assert.deepEqual(dueDates, sorted, `${c.key} schedule rows must already be in ascending date order`);
+
+      const postingDate = postingDateForDoc("2026-09-05", row);
+      assert.ok(dueDates[0] > postingDate, "first due date is after posting");
+    }
+
+    // Dedicated vendors — never reused by any other fixture or the 60-day rotation.
+    const dailyPis = plan.docs.filter(
+      (d) => d.kind === "purchase_invoice" && (d.partyKey === "SUP-DAILY" || d.partyKey === "SUP-DAILY-LG"),
+    );
+    assert.equal(dailyPis.length, 2);
   });
 
   it("OI-115 tax mix: ~7/8 customers taxable, ~2/8 suppliers TW", () => {

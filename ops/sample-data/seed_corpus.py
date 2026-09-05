@@ -545,7 +545,7 @@ def _create_one(
     _apply_tag_fields(doc, tag, key)
     _apply_doc_taxes(doc, kind, spec, party_map)
     if kind == "purchase_invoice":
-        _normalize_pi_dates(doc, posting)
+        _normalize_pi_dates(doc, posting, spec)
     doc.flags.ignore_permissions = True
     doc.insert()
     if cint(spec.get("asDraft")):
@@ -558,15 +558,35 @@ def _create_one(
     return doc.name
 
 
-def _normalize_pi_dates(doc, posting: str) -> None:
-    """Keep bill_date / due_date / schedule coherent after map-from-source (seed only)."""
+def _normalize_pi_dates(doc, posting: str, spec: dict) -> None:
+    """Keep bill_date / due_date / schedule coherent after map-from-source (seed only).
+
+    OI-161 Packet G: a spec carrying an explicit `paymentSchedule` (dueDate/amount pairs, already
+    resolved to calendar dates by emit-plan.js) gets those rows instead of the flat 30-day flatten —
+    every other Bill keeps today's behavior byte-for-byte.
+    """
     doc.posting_date = posting
     if hasattr(doc, "set_posting_time"):
         doc.set_posting_time = 1
     doc.bill_date = posting
-    doc.due_date = add_days(getdate(posting), 30)
-    if hasattr(doc, "payment_schedule"):
+    schedule = spec.get("paymentSchedule")
+    if schedule and hasattr(doc, "payment_schedule"):
         doc.set("payment_schedule", [])
+        for row in schedule:
+            doc.append(
+                "payment_schedule",
+                {
+                    "due_date": row["dueDate"],
+                    "invoice_portion": 0,
+                    "payment_amount": row["amount"],
+                    "outstanding": row["amount"],
+                },
+            )
+        doc.due_date = schedule[-1]["dueDate"]
+    else:
+        doc.due_date = add_days(getdate(posting), 30)
+        if hasattr(doc, "payment_schedule"):
+            doc.set("payment_schedule", [])
 
 
 def _apply_doc_taxes(doc, kind: str, spec: dict, party_map: dict) -> None:

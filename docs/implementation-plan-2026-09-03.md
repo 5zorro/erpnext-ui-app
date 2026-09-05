@@ -171,32 +171,48 @@ activity ranking, the OI-149/153/154 AP fixtures) staying exactly as they are.
 
 ### Design
 
-| Piece | Detail |
-|---|---|
-| New supplier | `SUP-DAILY` — "SAMPLE Vendor Daily Payrun." Dedicated key, not reused, so this fixture never mixes with existing vendor-scoped dogfood (OI-054, OI-131, etc.). |
-| One Purchase Invoice | Single line, existing sample item, `qty: 90`, `rate: 50.00` → `grand_total = 4500.00` exactly — no fractional rounding to fight. |
-| `payment_schedule` | 90 rows. Row *i* (1..90): `due_date = posting_date + i days`; `payment_amount = base_payment_amount = outstanding = base_outstanding = 50.00`; `invoice_portion = 0` (percentage math not needed — amounts are set directly). |
-| Header `due_date` | Set to the **last** schedule row's date — same "last row wins" convention `bill-payment-schedule.js::headerDueDateFromPaymentSchedule` already uses, so this fixture is consistent with code that already exists rather than inventing a second rule. |
-| Submit | Must land `docstatus=1` — outstanding/ageing data (Accounts Payable report, Packet 1's source) only exists for submitted invoices. No Payment Entry against it, so the full $4,500 stays outstanding across all 90 rows. |
-| Optional, propose separately | 2–3 of the 90 rows also carrying `discount_type` / `discount` / `discount_date`, so Packet 2's discount-capture branch has one live fixture too, not only unit-test fixtures. **Confirm with 5zorro before adding** — the daily-due-date shape alone already answers the batching-visualization ask; don't grow this fixture's scope unasked. |
+Two fixtures, same shape, different scale — 5zorro wants small-dollar and larger-dollar runs to
+both be dogfoodable (a flat $0.78+$0.05 fee matters a lot at $50/day and should matter ~nothing at
+$2,500/day; seeing both side by side in one Accounts Payable pull is itself a check on Packet 2's
+economics, not just a UI fixture).
 
-With the default `groupWindowDays: 7` (Packet 2), 90 consecutive daily $50 bills should suggest
-roughly **13 weekly batches** — a shape 5zorro can eyeball directly against the raw 90-row list.
+| Piece | Small (`SUP-DAILY`) | Large (`SUP-DAILY-LG`) |
+|---|---|---|
+| Supplier | `SUP-DAILY` — "SAMPLE Vendor Daily Payrun." | `SUP-DAILY-LG` — "SAMPLE Vendor Daily Payrun (Large)." |
+| One Purchase Invoice | `qty: 90`, `rate: 50.00` → `grand_total = 4500.00` exactly. | `qty: 90`, `rate: 2500.00` → `grand_total = 225000.00` exactly. |
+| `payment_schedule` | 90 rows, row *i*: `due_date = posting_date + i days`, `payment_amount = outstanding = 50.00`. | Same cadence, `payment_amount = outstanding = 2500.00`. |
+| Expected Packet 2 behavior | Batches into ~13 weekly groups (fee savings beat float cost at this scale). | Should **not** batch — float cost on $2,500/day swamps a $0.83 fee even at `groupWindowDays: 7`. Confirms the economics helper isn't just batching everything, it's actually pricing the tradeoff. |
+
+Both fixtures: `invoice_portion = 0` (amounts set directly, no percentage math); header `due_date` =
+**last** schedule row's date (`bill-payment-schedule.js::headerDueDateFromPaymentSchedule` "last row
+wins" convention — reuse, don't invent a second rule); must land `docstatus=1` so the full balance
+stays outstanding across all 90 rows (Accounts Payable report only sees submitted invoices).
+
+**Parked, not this packet** (5zorro 2026-09-05): 30 bills on one check (stress-tests Packet 2's
+per-group bill count, not its per-vendor scale) and applying credits in lieu of payment (a different
+data shape — credit notes / negative outstanding, not another `payment_schedule` row). Both are
+real Packet-2-adjacent stress tests once the basics are proven; do not build either into Packet G.
+
+Optional, propose separately: 2–3 of either fixture's 90 rows also carrying `discount_type` /
+`discount` / `discount_date`, so Packet 2's discount-capture branch has one live fixture too, not
+only unit-test fixtures. **Confirm with 5zorro before adding** — the daily shape alone already
+answers this packet's ask; don't grow scope unasked.
 
 ### Code changes
 
 | File | Change |
 |---|---|
-| `src/sample-data/corpus-plan.js` | New `appendPaymentBatchFixture(docs, ctx)`, called alongside `appendApDogfoodFixtures`. Builds the `SUP-DAILY` supplier + one PI spec carrying an explicit `paymentSchedule: [{ dueDate, amount }, …]` array and `dogfoodScenario: "oi161-daily-payrun"`. Bump `SAMPLE_TAG` (`ui-app-sample-v2` → `v3`) — existing convention: shape change ⇒ new tag, `--reset` drops the old one. |
+| `src/sample-data/corpus-plan.js` | New `appendPaymentBatchFixture(docs, ctx)`, called alongside `appendApDogfoodFixtures`. Builds **both** `SUP-DAILY` and `SUP-DAILY-LG` supplier + PI specs, each carrying an explicit `paymentSchedule: [{ dueDate, amount }, …]` array and a `dogfoodScenario` (`"oi161-daily-payrun-small"` / `"-large"`). Bump `SAMPLE_TAG` (`ui-app-sample-v2` → `v3`) — existing convention: shape change ⇒ new tag, `--reset` drops the old one. |
 | `ops/sample-data/seed_corpus.py` | In `_normalize_pi_dates` (or a guard just before it runs): if `spec.get("paymentSchedule")`, append those rows onto `doc.payment_schedule` and set `doc.due_date` to the last row's date **instead of** the existing wipe-and-flatten path. Every other Bill keeps today's behavior byte-for-byte. |
-| `tests/corpus-plan.test.js` (existing suite) | Extend: plan includes `SUP-DAILY`; schedule has 90 rows on 90 consecutive distinct calendar days; `payment_amount` sum equals `grand_total` exactly. |
+| `tests/corpus-plan.test.js` (existing suite) | Extend: plan includes both suppliers; each schedule has 90 rows on 90 consecutive distinct calendar days; `payment_amount` sum equals `grand_total` exactly for each. |
 
 ### Exit
 
-`CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset` produces one submitted Purchase Invoice under
-`SUP-DAILY` with 90 daily `payment_schedule` rows and nothing paid. 5zorro can open the Accounts
-Payable report today (pre-Packet-1) and already see 90 distinct due dates from one vendor; once
-Packet 1–2 land, the same fixture is what proves the batching math on the real Doc Pay skin.
+`CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset` produces two submitted Purchase Invoices —
+`SUP-DAILY` (90 × $50) and `SUP-DAILY-LG` (90 × $2,500) — each with 90 daily `payment_schedule` rows
+and nothing paid. 5zorro can open the Accounts Payable report today (pre-Packet-1) and already see
+180 distinct due-date rows across the two vendors; once Packet 1–2 land, this pair is what proves
+the batching math scales correctly (small batches, large doesn't) on the real Doc Pay skin.
 
 ---
 
