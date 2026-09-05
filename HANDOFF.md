@@ -89,7 +89,7 @@ flowchart LR
 |------------|----------------|------------------|
 | DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
 | Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` rail (peek tree under parent Doc, OI-128 A; collapsible) |
-| Submitted this session | `submitted-docs.js` | One rail row + running count → `submitted-dropdown.html` panel; the way back after submit-and-move-on (Drafts is `docstatus 0` only, Recent keeps one row per doctype) |
+| Submitted this session | `submitted-docs.js` | One rail row + running count → `submitted-dropdown.html` panel; the way back after submit-and-move-on (Drafts is `docstatus 0` only, Recent keeps one row per doctype). OI-162 — shipped 2026-09-05 |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
 | Nav intent guard | `erp-nav-intent.js` | Arm/clear around an intentional ERP nav so a late event from the page we left cannot rewrite `currentRoute` (G6) |
 | Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
@@ -145,6 +145,7 @@ Doc-skinnable *record*, or when you are exactly **one step** out (a parked Doc o
 parent to return to — editing Payment Terms from a Simplified Bill keeps it). It is hidden
 on a Vanilla page reached from Home or from a Find/list route, where the only thing it could
 do is invent a new Bill. Rule + hint text live in `chrome-state.js` `docTabState()`.
+OI-112 — always-on Doc tab narrowed to this rule 2026-09-05.
 
 ### Dogfood debugging (5zorro → agent)
 
