@@ -16,8 +16,8 @@
     }
     header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 20px; background: #fff; border-bottom: 1px solid #d6dee6;
-      position: sticky; top: 0; z-index: 2;
+      height: 52px; box-sizing: border-box; padding: 0 20px; background: #fff;
+      border-bottom: 1px solid #d6dee6; position: sticky; top: 0; z-index: 3;
     }
     h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
     .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #64748b; }
@@ -41,7 +41,18 @@
     }
     .pref-field input.invalid { border-color: #dc2626; background: #fef2f2; }
     #prefs-error { font-size: 11px; color: #dc2626; }
-    main { max-width: 1040px; margin: 0 auto; padding: 16px 20px 40px; }
+    main { max-width: 1040px; margin: 0 auto; padding: 0 20px 40px; }
+    .col-header-row {
+      display: grid; grid-template-columns: 1fr 96px 1fr; align-items: center;
+      height: 28px; box-sizing: border-box; margin: 0 0 10px;
+      background: var(--doc-page-canvas, #eef2f5); position: sticky; top: 52px; z-index: 2;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+    }
+    .col-header-left, .col-header-right { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+    .col-header-flow { text-align: center; }
+    .c-invoice { flex: 0 0 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .c-due, .c-sdate { flex: 1; }
+    .c-amt, .c-samt { flex: 0 0 84px; text-align: right; }
     #empty { padding: 40px 0; text-align: center; color: #64748b; font-size: 13px; }
     #load-error {
       margin: 12px 0; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5;
@@ -49,12 +60,13 @@
     }
     #load-error[hidden] { display: none; }
     .vendor-card {
-      background: #fff; border: 1px solid #d6dee6; border-radius: 10px; overflow: hidden;
+      background: #fff; border: 1px solid #d6dee6; border-radius: 10px;
       box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 18px;
     }
     .vendor-head {
       display: flex; align-items: baseline; justify-content: space-between;
-      padding: 10px 14px; background: #2c3e50; color: #fff;
+      padding: 10px 14px; background: #2c3e50; color: #fff; border-radius: 10px 10px 0 0;
+      position: sticky; top: 80px; z-index: 1;
     }
     .vendor-head .name { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
     .vendor-head .total { font-size: 12px; color: #cbd5e1; }
@@ -68,7 +80,7 @@
       display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 12px;
       border-bottom: 1px solid #f1f5f9;
     }
-    .bill-row { justify-content: space-between; cursor: pointer; }
+    .bill-row { cursor: pointer; }
     .bill-row:hover { background: #f8fafc; }
     .bill-row .due { color: #475569; font-variant-numeric: tabular-nums; }
     .bill-row .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -132,6 +144,18 @@
   <main>
     <div id="load-error" hidden></div>
     <div id="empty" hidden data-testid="pay-outstanding-empty">Nothing outstanding.</div>
+    <div class="col-header-row" id="col-header-row" hidden data-testid="flow-col-header">
+      <div class="col-header-left">
+        <span class="c-invoice">Invoice</span>
+        <span class="c-due">Payment date</span>
+        <span class="c-amt">Amount</span>
+      </div>
+      <div class="col-header-flow">Flow</div>
+      <div class="col-header-right">
+        <span class="c-sdate">Suggested date</span>
+        <span class="c-samt">Suggested amount</span>
+      </div>
+    </div>
     <div id="vendors" data-testid="pay-outstanding-vendors"></div>
   </main>
 
@@ -158,6 +182,7 @@
 
     const vendorsEl = document.getElementById("vendors");
     const emptyEl = document.getElementById("empty");
+    const colHeaderEl = document.getElementById("col-header-row");
     const loadErrorEl = document.getElementById("load-error");
     const prefsToggle = document.getElementById("prefs-toggle");
     const prefsPanel = document.getElementById("prefs-panel");
@@ -239,23 +264,31 @@
       row.dataset.testid = "bill-row";
       row.title = "Open this Bill in Vanilla";
 
-      const left = document.createElement("span");
-      left.className = "due";
-      left.textContent = bill.dueDate;
+      // Invoice first — a vendor's bills can each carry their own payment schedule, so which
+      // invoice a due date belongs to matters once more than one is on screen at once.
+      const invoice = document.createElement("span");
+      invoice.className = "c-invoice";
+      invoice.textContent = bill.invoice;
+      invoice.title = bill.invoice;
+
+      const due = document.createElement("span");
+      due.className = "due c-due";
+      due.textContent = bill.dueDate;
       if (bill.discountDate && bill.discountDate >= todayIso()) {
         const badge = document.createElement("span");
         badge.className = "discount-badge";
         badge.textContent = `−${money(bill.discountAmount)} by ${bill.discountDate}`;
-        left.appendChild(document.createTextNode(" "));
-        left.appendChild(badge);
+        due.appendChild(document.createTextNode(" "));
+        due.appendChild(badge);
       }
 
-      const right = document.createElement("span");
-      right.className = "amt";
-      right.textContent = money(bill.outstanding);
+      const amt = document.createElement("span");
+      amt.className = "amt c-amt";
+      amt.textContent = money(bill.outstanding);
 
-      row.appendChild(left);
-      row.appendChild(right);
+      row.appendChild(invoice);
+      row.appendChild(due);
+      row.appendChild(amt);
       row.onclick = () => {
         if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(bill.invoice)}`);
       };
@@ -271,6 +304,7 @@
       const top = document.createElement("div");
       top.className = "group-top";
       const label = document.createElement("span");
+      label.className = "c-sdate";
       label.style.display = "flex";
       label.style.alignItems = "center";
       label.style.gap = "6px";
@@ -284,7 +318,7 @@
       label.appendChild(payOn);
       top.appendChild(label);
       const amt = document.createElement("span");
-      amt.className = "group-amt";
+      amt.className = "group-amt c-samt";
       amt.textContent = money(group.totalAmount);
       top.appendChild(amt);
       wrap.appendChild(top);
@@ -453,10 +487,12 @@
       if (!allBills.length) {
         emptyEl.hidden = false;
         vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
         return;
       }
       emptyEl.hidden = true;
       vendorsEl.hidden = false;
+      colHeaderEl.hidden = false;
 
       const bySupplier = groupBySupplier(allBills);
       const earliest = (rows) => rows.reduce((min, b) => (min === null || b.dueDate < min ? b.dueDate : min), null);
