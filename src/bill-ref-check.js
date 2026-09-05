@@ -22,14 +22,14 @@
  * @typedef {{
  *   code: "duplicate"|"logbook_po"|"vendor_account"|"erp_po_name"|"pattern",
  *   severity: "soft"|"high",
- *   emoji: string,
+ *   icon: string,
  *   message: string,
  *   detail?: string,
  * }} BillRefWarning
  *
  * @typedef {{
- *   status: "idle"|"ok"|"warn",
- *   emoji: string,
+ *   status: "idle"|"ok"|"warn"|"waiting",
+ *   icon: string,
  *   title: string,
  *   warnings: BillRefWarning[],
  * }} BillRefCheckResult
@@ -45,6 +45,46 @@
  */
 
 export const BILL_REF_PATTERN_WINDOW = 6;
+
+export const BILL_REF_WAITING_FOR_VENDOR_TITLE =
+  "Supplier ref no validation waiting for vendor";
+
+/**
+ * Shown when bill_no has text but supplier is not committed yet (ERP setHeader in flight).
+ * @returns {BillRefCheckResult}
+ */
+export function billRefWaitingForVendorResult() {
+  return {
+    status: "waiting",
+    icon: "clock",
+    title: BILL_REF_WAITING_FOR_VENDOR_TITLE,
+    warnings: [],
+  };
+}
+
+/**
+ * Resolve supplier for Ref No. checks — doc SSoT first, then renderer hints.
+ * @param {{
+ *   docSupplier?: string|null,
+ *   supplierHint?: string|null,
+ *   domSupplier?: string|null,
+ *   pendingPickSupplier?: string|null,
+ * }} ctx
+ * @returns {string}
+ */
+export function resolveBillRefSupplier(ctx = {}) {
+  const hints = [
+    ctx.docSupplier,
+    ctx.supplierHint,
+    ctx.domSupplier,
+    ctx.pendingPickSupplier,
+  ];
+  for (const h of hints) {
+    const s = h != null ? String(h).trim() : "";
+    if (s) return s;
+  }
+  return "";
+}
 
 /** Normalize for equality (trim, collapse space, case-insensitive). */
 export function normalizeBillRef(raw) {
@@ -243,7 +283,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
   if (!ref) {
     return {
       status: "idle",
-      emoji: "·",
+      icon: "idle",
       title: "Type the supplier invoice number to run soft Ref checks",
       warnings: [],
     };
@@ -282,7 +322,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
     warnings.push({
       code: "duplicate",
       severity: high ? "high" : "soft",
-      emoji: high ? "⚠" : "◐",
+      icon: high ? "alert" : "partial",
       message: high
         ? `Possible duplicate — same Ref on ${hits.length} Bill(s) for this vendor`
         : `Possible duplicate — same Ref on ${hits.length} other Bill(s)`,
@@ -296,7 +336,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
     warnings.push({
       code: "logbook_po",
       severity: "soft",
-      emoji: "📋",
+      icon: "copy",
       message: "Looks like a PO logbook # (Title), not the supplier invoice number",
       detail: String(t).trim(),
     });
@@ -309,7 +349,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
     warnings.push({
       code: "erp_po_name",
       severity: "soft",
-      emoji: "📎",
+      icon: "paperclip",
       message: "Looks like an ERP Purchase Order id, not the supplier invoice number",
       detail: String(n).trim(),
     });
@@ -322,7 +362,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
     warnings.push({
       code: "vendor_account",
       severity: "soft",
-      emoji: "🏦",
+      icon: "bank",
       message:
         "Looks like your account # at this vendor (Customer Number / account), not an invoice #",
       detail: String(acct).trim(),
@@ -340,7 +380,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
     warnings.push({
       code: "pattern",
       severity: "soft",
-      emoji: "≠",
+      icon: "not-equal",
       message: `Not like the others — ${pattern.reasons.join("; ")}${droppedNote}`,
       detail: examples ? `Last ${Math.min(recent.length, BILL_REF_PATTERN_WINDOW)}: ${examples}` : undefined,
     });
@@ -349,7 +389,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
   if (!warnings.length) {
     return {
       status: "ok",
-      emoji: "✓",
+      icon: "check",
       title: "Ref No. looks consistent (no dupe / wrong-field / pattern flags)",
       warnings: [],
     };
@@ -359,7 +399,7 @@ export function evaluateBillRef(billNo, ctx = {}) {
   const primary = warnings.find((w) => w.severity === "high") || warnings[0];
   return {
     status: "warn",
-    emoji: primary.emoji,
+    icon: primary.icon,
     title,
     warnings,
   };

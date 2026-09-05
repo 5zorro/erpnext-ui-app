@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Document</title>
+  <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="doc-skin.css" />
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
+    .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .status { font-size: 12px; color: #64748b; }
+    .status.warn { color: #b45309; }
+    .status.err { color: #b91c1c; }
+    .money-cents { text-decoration: underline; text-underline-offset: 2px; }
+    .card { border: 1px solid #d6dee6; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+    .addr-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px 14px;
+      margin: 4px 0 12px;
+    }
+    .addr-grid textarea {
+      min-height: 4.8em;
+      resize: vertical;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      font-family: inherit;
+    }
+    .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
+    @media (max-width: 900px) {
+      .addr-grid { grid-template-columns: 1fr; }
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .field .row { display: flex; align-items: center; gap: 8px; }
+    .field input, .field textarea, td input {
+      border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 9px; font-size: 14px; width: 100%;
+      box-sizing: border-box; background: #fff;
+    }
+    td input { padding: 5px 6px; font-size: 13px; }
+    .field input:read-only, .field textarea:read-only, td .ro {
+      background: #f8fafc; color: #475569; border: none; padding: 5px 2px;
+    }
+    td.tot-cell .clear-qty {
+      display: block; width: 100%; margin-top: 6px;
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 4px 6px; font-size: 11px; cursor: pointer; color: #334155;
+    }
+    td.tot-cell .clear-qty:hover { background: #f1f5f9; }
+    td.tot-cell .clear-qty:disabled { opacity: 0.55; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b; }
+    .del { padding: 4px 8px; color: #991b1b; }
+    .line-actions { margin-top: 8px; }
+    tfoot#line-totals td {
+      border-bottom: none; padding-top: 10px; font-size: 13px; vertical-align: middle;
+      background: #f8fafc; border-top: 1px solid #cbd5e1;
+    }
+    tfoot#line-totals .tot-cell b { font-variant-numeric: tabular-nums; }
+    tfoot#line-totals .tot-label {
+      color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; margin-right: 4px;
+    }
+    td.num { text-align: right; }
+    .money-amt, .money-cost { font-variant-numeric: tabular-nums; }
+    .money-amt { display: block; text-align: right; }
+    input.money-cost { text-align: right; }
+    .ro.money-cost { display: block; text-align: right; }
+    #calc-overlay {
+      position: fixed; z-index: 40;
+      display: flex; flex-direction: column;
+      box-sizing: border-box;
+      background: #1e293b; color: #e2e8f0; border-radius: 8px;
+      padding: 6px 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .35);
+      font-variant-numeric: tabular-nums;
+      pointer-events: auto;
+      opacity: 0.62;
+      transition: opacity 120ms ease;
+    }
+    #calc-overlay:hover,
+    #calc-overlay.calc-expanded { opacity: 1; }
+    #calc-overlay[hidden] { display: none !important; }
+    #calc-overlay .calc-history {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      margin: 0 0 6px; padding: 0 0 6px; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-history[hidden] { display: none !important; }
+    #calc-overlay .calc-live { flex: 0 0 auto; }
+    #calc-overlay .calc-expr {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; color: #94a3b8; letter-spacing: .02em;
+      white-space: pre; line-height: 1.35;
+    }
+    #calc-overlay .calc-result {
+      margin-top: 4px; padding-top: 4px; border-top: 1px solid #334155;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px; font-weight: 700; letter-spacing: .02em;
+      white-space: pre;
+    }
+    #calc-overlay .calc-hint { margin-top: 4px; font-size: 9px; color: #64748b; line-height: 1.3; }
+    #calc-overlay .calc-hist-empty {
+      font-size: 10px; color: #64748b; padding: 4px 0; line-height: 1.35;
+    }
+    #calc-overlay .calc-hist-block {
+      padding: 6px 0; border-bottom: 1px solid #334155;
+    }
+    #calc-overlay .calc-hist-block:last-child { border-bottom: none; }
+    #calc-overlay .calc-hist-block.prior-session { opacity: 0.85; }
+    #calc-overlay .calc-hist-tape {
+      margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px; white-space: pre; color: #94a3b8; line-height: 1.3;
+    }
+    #calc-overlay .calc-hist-total {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; font-weight: 700; color: #e2e8f0; margin: 2px 0 4px;
+      white-space: pre;
+    }
+    #calc-overlay .calc-hist-actions {
+      display: flex; justify-content: flex-end; gap: 4px;
+    }
+    #calc-overlay .calc-hist-copy {
+      border: none; border-radius: 4px; padding: 2px 5px; font-size: 12px; line-height: 1.2;
+      cursor: pointer; background: #334155; color: #e2e8f0;
+    }
+    #calc-overlay .calc-hist-copy:hover { background: #475569; }
+    #calc-overlay .calc-ico {
+      display: inline-flex; align-items: center; gap: 2px; vertical-align: middle;
+    }
+    #calc-overlay .calc-ico svg { display: block; }
+    button.amount-back-in {
+      display: block; width: 100%; border: none; background: transparent;
+      padding: 5px 2px; margin: 0; text-align: right; cursor: pointer;
+      font: inherit; color: #64748b;
+    }
+    button.amount-back-in:hover { color: #1e293b; background: #f1f5f9; border-radius: 4px; }
+    button.amount-back-in:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+    td.num input.amount-back-in-input { text-align: right; }
+    .line-tabs {
+      display: flex; gap: 0; margin-top: 4px; border-bottom: 1px solid #e2e8f0;
+    }
+    .line-tab {
+      border: 1px solid transparent; border-bottom: none; background: transparent;
+      padding: 8px 14px; font-size: 13px; cursor: pointer; color: #64748b;
+      border-radius: 6px 6px 0 0; margin-bottom: -1px;
+    }
+    .line-tab:hover { color: #1f2d3d; background: #f8fafc; }
+    .line-tab.active {
+      color: #1f2d3d; font-weight: 600; background: #fff;
+      border-color: #e2e8f0 #e2e8f0 #fff;
+    }
+    .line-panel[hidden] { display: none !important; }
+    .expense-note {
+      margin: 14px 0 8px; padding: 12px 14px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;
+      line-height: 1.5; max-width: 42rem;
+    }
+    .expense-note a { color: #1d4ed8; cursor: pointer; }
+    .expense-note ol { margin: 8px 0 0; padding-left: 1.35rem; }
+    .expense-note li { margin: 6px 0; }
+    .taxes-block { margin-top: 14px; }
+    .taxes-block > .taxes-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+      display: block; margin-bottom: 6px;
+    }
+    .taxes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .taxes-table th, .taxes-table td {
+      border-bottom: 1px solid #e2e8f0; padding: 6px 4px; text-align: left; vertical-align: middle;
+    }
+    .taxes-table th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: #64748b;
+    }
+    .taxes-table .num { text-align: right; }
+    .taxes-add {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px;
+    }
+    .taxes-add .field { margin-bottom: 0; flex: 1; min-width: 140px; }
+    .taxes-add button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+    }
+    .money-stack {
+      margin-top: 12px; max-width: 320px; margin-left: auto;
+      border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px 12px;
+      font-size: 13px;
+    }
+    .money-stack .ms-row {
+      display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .money-stack .ms-row.grand {
+      border-top: 1px solid #cbd5e1; margin-top: 4px; padding-top: 8px; font-weight: 700;
+    }
+    .money-stack .ms-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+    .money-stack .ms-note { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.35; }
+    .hint { margin-top: 10px; font-size: 12px; color: #64748b; line-height: 1.4; }
+    details.assumptions { margin-bottom: 12px; font-size: 13px; color: #475569; }
+    details.assumptions summary { cursor: pointer; font-weight: 600; }
+    details.assumptions ul { margin: 8px 0 0; padding-left: 18px; }
+    .banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #panel-items table thead th.sortable {
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    #panel-items table thead th.sortable:hover { background: #e2e8f0; }
+    #panel-items table thead th.sortable.sorted { color: #0f172a; }
+    .taxes-table thead th.sortable {
+      cursor: pointer; user-select: none;
+    }
+    .taxes-table thead th.sortable:hover { background: #e2e8f0; }
+    .taxes-table thead th.sortable.sorted { color: #0f172a; }
+    td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums; }
+    .imp-box { width: min(920px, 100%); }
+    .imp-body { padding: 12px 14px; }
+    .imp-hint, .imp-meta { font-size: 12px; color: #64748b; line-height: 1.4; margin: 0 0 8px; }
+    .imp-paste {
+      width: 100%; box-sizing: border-box; min-height: 140px; font-family: ui-monospace, monospace;
+      font-size: 12px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; resize: vertical;
+    }
+    .imp-file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .imp-file-row button {
+      border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 7px 12px;
+      font-size: 13px; cursor: pointer;
+    }
+    .imp-file-row .imp-preview-btn { background: #eaf4ff; border-color: #93c5fd; }
+    .imp-controls { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-bottom: 8px; }
+    .imp-check { font-size: 13px; color: #334155; cursor: pointer; }
+    .imp-warn { font-size: 12px; color: #b45309; margin: 4px 0; }
+    .imp-scroll { overflow: auto; max-height: 42vh; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .imp-preview { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .imp-preview th, .imp-preview td { border-bottom: 1px solid #f1f5f9; padding: 4px 6px; vertical-align: top; }
+    .imp-preview thead th { background: #f8fafc; position: sticky; top: 0; z-index: 1; }
+    .imp-preview select { font-size: 11px; max-width: 8rem; }
+    .imp-preview tr.imp-ignored td { opacity: 0.45; background: #f8fafc; }
+    .line-actions .imp-btn { border-color: #93c5fd; background: #f0f9ff; }
+    .date-hint { font-size: 10px; color: #94a3b8; }
+    @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+  </style>
+  <link rel="stylesheet" href="bill-dashboard.css" />
+</head>

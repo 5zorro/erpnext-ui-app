@@ -56,6 +56,12 @@ describe("docLifecyclePill", () => {
     assert.match(pill.text, /Blank draft/i);
     assert.match(pill.text, /nothing to save/i);
   });
+
+  it("loading pill while Vanilla form is not ready", () => {
+    const pill = docLifecyclePill({ loading: true });
+    assert.equal(pill.text, "Loading…");
+    assert.equal(pill.tone, "loading");
+  });
 });
 
 describe("focusFinalizeControl", () => {
@@ -96,8 +102,8 @@ describe("racePromise / findListFocusField", () => {
   it("Find Bill focuses Supplier Invoice No.; PO/IR focus ID", () => {
     assert.equal(findListFocusField("purchase-invoice"), "bill_no");
     assert.equal(findListFocusLabel("purchase-invoice"), "Supplier Invoice No.");
-    assert.equal(findListFocusField("purchase-order"), "name");
-    assert.equal(findListFocusLabel("purchase-order"), "ID");
+    assert.equal(findListFocusField("purchase-order"), "title");
+    assert.equal(findListFocusLabel("purchase-order"), "PO# (logbook)");
     assert.equal(findListFocusField("purchase-receipt"), "name");
     assert.equal(findListFocusLabel("purchase-receipt"), "ID");
     assert.equal(findListFocusField("other"), null);

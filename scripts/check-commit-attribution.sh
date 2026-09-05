@@ -21,6 +21,11 @@ check_text() {
     echo "ERROR: $label contains a prohibited Gmail address or marker." >&2
     failed=1
   fi
+
+  if [[ "$text" =~ (^|[^a-z0-9])(anthropic|chatgpt|claude|codex|copilot|deepseek|fable|gemini|gpt|grok|haiku|llama|mistral|openai|opus|qwen|sonnet|cursor)([^a-z0-9]|$) ]]; then
+    echo "ERROR: $label references a model/tool codename." >&2
+    failed=1
+  fi
 }
 
 check_message_file() {

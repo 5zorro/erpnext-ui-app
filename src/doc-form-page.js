@@ -11,6 +11,7 @@ import {
   isDraftPoDoc,
   PO_MULTIPLE_DATES_LABEL,
   poDateExpectedHeaderDisplay,
+  PO_CUSTOMER_DROPSHIP,
 } from "./po-map.js";
 import {
   readReceiptHeader,
@@ -20,26 +21,20 @@ import {
   formatReceiptLineTotal,
   isDraftReceiptDoc,
 } from "./receipt-map.js";
-import { readBillTaxRows, billMoneyStack } from "./bill-map.js";
+import { billMoneyStack } from "./bill-map.js";
+import {
+  readBillTaxRowsForSort,
+  sortBillTaxRows,
+  DOC_TAX_SORTABLE_HEADERS,
+} from "./bill-tax-sort.js";
 import {
   formatGroupedNumber,
   formatUsdAmountHtml,
   parseMoney,
 } from "./money.js";
 import {
-  linkOptionLabel,
-  linkOptionClassNames,
-  withEmptySearchActions,
-  isCreateSupplierLinkAction,
-} from "./link-search.js";
-import {
-  initialLinkHighlightIndex,
-  nextLinkHighlightIndex,
-  resolveLinkPickIndex,
-  linkPickerKeyAction,
   nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
-  scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
 import {
   CELL_MODE_EDIT,
@@ -54,8 +49,14 @@ import {
   lastItemRowToast,
   shouldBlockDeleteLastItemRow,
 } from "./bill-item-guard.js";
-import { sortDocItemRowModels, sortableHeadersFromCols } from "./doc-item-sort.js";
-import { shouldOpenSourceModalAfterVendorPick } from "./bill-source-flow.js";
+import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./doc-item-sort.js";
+import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
+import {
+  collectSourceRefsForProfile,
+  sourceTermsDisplayBlocks,
+} from "./doc-source-terms.js";
+import { paintSourceTermsFields } from "./doc-source-terms-dom.js";
+import { FREEFORM_TERMS_LABEL, ERP_FREEFORM_TERMS_FIELD } from "./doc-terms-fields.js";
 import {
   valuesMeaningfullyEqual,
   dirtyCompareKindForField,
@@ -71,7 +72,6 @@ import {
   shouldOpenCommitGate,
   normalizeCommitGateChoice,
   commitGateAllowsAction,
-  commitGateChoiceEnabled,
 } from "./bill-toolbar.js";
 import {
   billExpensesTaxOrientation,
@@ -92,7 +92,23 @@ import {
   splitHeaderColumns,
 } from "./doc-action-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
-import { isSelectableSourceItem } from "./source-modal.js";
+import { showSourceModal } from "./source-modal-ui.js";
+import {
+  runSourcePickerFlow,
+  mayAutoOpenSourcePicker,
+} from "./source-picker-flow.js";
+import { mountLinkPicker } from "./link-picker-ui.js";
+import { installFocusRing, logFocus } from "./focus-debug-client.js";
+import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
+import {
+  paintCommitGateValidation,
+  setCommitGateBusy,
+  commitGateTitleText,
+  configureDirectSaveGateChrome,
+  showCommitGate,
+  hideCommitGateEl,
+  wireCommitGateChrome,
+} from "./doc-commit-gate-ui.js";
 import {
   docLifecyclePill,
   focusFinalizeControl,
@@ -108,8 +124,22 @@ import {
   applyDocWashToDocument,
   setWashSourceAttr,
 } from "./doc-wash.js";
+import { wireItemImportButton } from "./item-import-ui.js";
+import { wireDocCapsUi } from "./doc-caps-ui.js";
+import {
+  addressRoleMeta,
+  addressPickerOpenDecision,
+} from "./doc-address.js";
+import {
+  showAddressPickerModal,
+  updateAddressPickerModalRows,
+  wireAddressPickerFields,
+  syncAddressPickerLock,
+} from "./address-picker-ui.js";
+import { poFindPrefillFromDoc } from "./po-find-prefill.js";
 
-const api = window.erpDoc;
+/** @type {typeof window.erpDoc|null} */
+let api = null;
 
 /** @type {import("./doc-skin-registry.js").ReturnType<import("./doc-skin-registry.js").docFormUiPayload>} */
 let ui = null;
@@ -118,6 +148,10 @@ let lastDoc = null;
 let scratch = {};
 let painting = false;
 let userEdited = false;
+/** ALL-CAPS entry — default ON each doc open (OI-111); page toggle only. */
+let docCapsOn = true;
+/** @type {{ syncCapsButton: () => void }|null} */
+let docCapsUi = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -129,14 +163,25 @@ let metaBlockers = [];
 let metaPreflightSeq = 0;
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
-let sourceModalOpen = false;
+const sourceModalOpenRef = { current: false };
+/** @type {{ supplier: string, userClosed: boolean } | null} */
+let vendorPickSourceSession = null;
+/** @type {Promise<{ ok?: boolean, kind?: string, reason?: string }|void>|null} */
+let sourcePickerInflight = null;
+/** @type {string} */
+let sourcePickerInflightSupplier = "";
+const addressPickerOpenRef = { current: false };
 /** Suppress blur cleanup while Tab/arrow handlers are mid-flight. */
 let itemTabGuard = false;
 /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
 let itemCellMode = CELL_MODE_EDIT;
 /** @type {{ key: string, asc: boolean }} */
-let itemSort = { key: "lineNo", asc: true };
+/** @type {import("./item-sort-specs.js").SortSpec[]} */
+let itemSortSpecs = [{ key: "lineNo", asc: true }];
 let itemsHeadWired = false;
+/** @type {import("./item-sort-specs.js").SortSpec[]} */
+let taxSortSpecs = [{ key: "account_head", asc: true }];
+let taxesHeadWired = false;
 /** @type {Record<string, HTMLInputElement|HTMLTextAreaElement>} */
 const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
@@ -168,54 +213,98 @@ function publishCalcHistory(payload) {
   });
 }
 
-const el = {
-  status: document.getElementById("status"),
-  title: document.getElementById("doc-title"),
-  itemsHead: document.getElementById("items-head-row"),
-  items: document.getElementById("items-body"),
-  lineTotals: document.getElementById("line-totals"),
-  save: document.getElementById("btn-save"),
-  submit: document.getElementById("btn-submit"),
-  revert: document.getElementById("btn-revert"),
-  find: document.getElementById("btn-find"),
-  newDoc: document.getElementById("btn-new"),
-  print: document.getElementById("btn-print"),
-  dirtyPill: document.getElementById("dirty-pill"),
-  commitGate: document.getElementById("commit-gate"),
-  commitGateBackdrop: document.getElementById("commit-gate-backdrop"),
-  commitGateTitle: document.getElementById("commit-gate-title"),
-  commitGateValidation: document.getElementById("commit-gate-validation"),
-  commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
-  commitGateBlockers: document.getElementById("commit-gate-blockers"),
-  commitGateHint: document.getElementById("commit-gate-hint"),
-  addLine: document.getElementById("btn-add-line"),
-  clearQty: null,
-  attach: document.getElementById("btn-attach"),
-  attachToolbar: document.getElementById("btn-attach-toolbar"),
-  taxesBlock: document.getElementById("doc-taxes-block"),
-  taxesBody: document.getElementById("taxes-body"),
-  taxesAdd: document.getElementById("taxes-add"),
-  taxAccount: document.getElementById("f-tax-account"),
-  taxAmount: document.getElementById("f-tax-amount"),
-  addTax: document.getElementById("btn-add-tax"),
-  msItems: document.getElementById("ms-items"),
-  msTaxes: document.getElementById("ms-taxes"),
-  msGrand: document.getElementById("ms-grand"),
-  msNote: document.getElementById("ms-note"),
-  lineTabs: document.querySelector("[data-testid='doc-line-tabs']"),
-  tabItems: document.getElementById("tab-items"),
-  tabExpenses: document.getElementById("tab-expenses"),
-  panelItems: document.getElementById("panel-items"),
-  panelExpenses: document.getElementById("panel-expenses"),
-  expenseNote: document.querySelector("[data-testid='doc-expense-note']"),
-  memoBlock: document.getElementById("memo-block"),
-  memo: document.getElementById("f-memo"),
-  hint: document.getElementById("doc-hint"),
-  selectSource: document.getElementById("btn-select-source"),
-  headerLeft: document.getElementById("header-left"),
-  headerRight: document.getElementById("header-right"),
-  headerAddresses: document.getElementById("header-addresses"),
-};
+/** @type {ReturnType<typeof buildDocFormEl> | null} */
+let el = null;
+
+function buildDocFormEl() {
+  return {
+    status: document.getElementById("status"),
+    title: document.getElementById("doc-title"),
+    itemsHead: document.getElementById("items-head-row"),
+    items: document.getElementById("items-body"),
+    lineTotals: document.getElementById("line-totals"),
+    save: document.getElementById("btn-save"),
+    submit: document.getElementById("btn-submit"),
+    revert: document.getElementById("btn-revert"),
+    find: document.getElementById("btn-find"),
+    newDoc: document.getElementById("btn-new"),
+    print: document.getElementById("btn-print"),
+    dirtyPill: document.getElementById("dirty-pill"),
+    commitGate: document.getElementById("commit-gate"),
+    commitGateBackdrop: document.getElementById("commit-gate-backdrop"),
+    commitGateTitle: document.getElementById("commit-gate-title"),
+    commitGateValidation: document.getElementById("commit-gate-validation"),
+    commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
+    commitGateBlockers: document.getElementById("commit-gate-blockers"),
+    commitGateHint: document.getElementById("commit-gate-hint"),
+    commitGateCopy: document.getElementById("commit-gate-copy"),
+    addLine: document.getElementById("btn-add-line"),
+    importItems: document.getElementById("btn-import-items"),
+    clearQty: null,
+    attach: document.getElementById("btn-attach"),
+    attachToolbar: document.getElementById("btn-attach-toolbar"),
+    taxesBlock: document.getElementById("doc-taxes-block"),
+    taxesHead: document.getElementById("taxes-head-row"),
+    taxesBody: document.getElementById("taxes-body"),
+    taxesAdd: document.getElementById("taxes-add"),
+    taxAccount: document.getElementById("f-tax-account"),
+    taxAmount: document.getElementById("f-tax-amount"),
+    addTax: document.getElementById("btn-add-tax"),
+    msItems: document.getElementById("ms-items"),
+    msTaxes: document.getElementById("ms-taxes"),
+    msGrand: document.getElementById("ms-grand"),
+    msNote: document.getElementById("ms-note"),
+    lineTabs: document.querySelector('[data-testid="doc-line-tabs"]'),
+    linesSection: document.querySelector('[data-testid="doc-lines-section"]'),
+    linesSectionTitle: document.getElementById("doc-lines-title"),
+    tabItems: document.getElementById("tab-items"),
+    tabExpenses: document.getElementById("tab-expenses"),
+    panelItems: document.getElementById("panel-items"),
+    panelExpenses: document.getElementById("panel-expenses"),
+    expenseNote: document.querySelector('[data-testid="doc-expense-note"]'),
+    notesSection: document.querySelector('[data-testid="doc-notes-section"]'),
+    memoBlock: document.getElementById("memo-block"),
+    memoLabel: document.getElementById("memo-label"),
+    memoEntry: document.getElementById("memo-entry"),
+    memo: document.getElementById("f-memo"),
+    termsBlock: document.getElementById("terms-block"),
+    termsText: document.getElementById("f-terms-text"),
+    sourceTermsBlock: document.getElementById("source-terms-block"),
+    sourceTermsFields: document.getElementById("source-terms-fields"),
+    hint: document.getElementById("doc-hint"),
+    selectSource: document.getElementById("btn-select-source"),
+    caps: document.getElementById("btn-caps"),
+    headerLeft: document.getElementById("header-left"),
+    headerRight: document.getElementById("header-right"),
+    headerAddresses: document.getElementById("header-addresses"),
+    retry: document.getElementById("btn-retry"),
+    refresh: document.getElementById("btn-refresh"),
+    vanilla: document.getElementById("btn-vanilla"),
+    backTop: document.getElementById("btn-back-top"),
+    assumptionsList: document.getElementById("assumptions-list"),
+  };
+}
+
+function commitGateEls() {
+  if (!el) return {};
+  return {
+    commitGate: el.commitGate,
+    commitGateBackdrop: el.commitGateBackdrop,
+    commitGateTitle: el.commitGateTitle,
+    commitGateValidation: el.commitGateValidation,
+    commitGateValidationTitle: el.commitGateValidationTitle,
+    commitGateBlockers: el.commitGateBlockers,
+    commitGateHint: el.commitGateHint,
+  };
+}
+
+function linkPickerDeps() {
+  return { api, linkMounted, setStatus };
+}
+
+function mountDocLinkPicker(input, doctype, onPicked, pickOpts) {
+  mountLinkPicker(input, doctype, onPicked, linkPickerDeps(), pickOpts);
+}
 
 function mapHelpers() {
   if (!ui) {
@@ -261,6 +350,161 @@ function docTitle() {
   return (ui && ui.title) || "Document";
 }
 
+async function paintSourceTerms(doc) {
+  if (!ui?.features.sourceTerms || !el.sourceTermsBlock || !el.sourceTermsFields || !api?.fetchSourceTerms) {
+    if (el.sourceTermsBlock) el.sourceTermsBlock.hidden = true;
+    return;
+  }
+  const refs = collectSourceRefsForProfile(ui.profileId, doc);
+  if (!refs.length) {
+    el.sourceTermsBlock.hidden = true;
+    el.sourceTermsFields.replaceChildren();
+    return;
+  }
+  const res = await api.fetchSourceTerms(refs);
+  const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
+  if (!blocks.length) {
+    el.sourceTermsBlock.hidden = true;
+    el.sourceTermsFields.replaceChildren();
+    return;
+  }
+  paintSourceTermsFields(el.sourceTermsFields, blocks);
+  el.sourceTermsBlock.hidden = false;
+}
+
+function addressFieldPickable(meta) {
+  if (!ui?.features.addressPicker || !meta?.addressRole) return false;
+  const roleMeta = addressRoleMeta(ui.profileId, meta.addressRole);
+  return !!(roleMeta?.pickable && roleMeta.linkField);
+}
+
+async function refreshShipToAddressPickerRows() {
+  if (!api?.listAddresses) return;
+  const res = await api.listAddresses("ship_to");
+  if (!(res && res.ok)) return;
+  updateAddressPickerModalRows(
+    "doc-addr-modal",
+    Array.isArray(res.rows) ? res.rows : [],
+    res.current,
+  );
+  const clearCustBtn = document.querySelector("#doc-addr-modal [data-customer-clear]");
+  if (clearCustBtn) {
+    clearCustBtn.disabled = !(lastDoc && String(lastDoc.customer || "").trim());
+  }
+}
+
+async function openDocAddressPicker(role) {
+  if (!api || addressPickerOpenRef.current || !ui?.features.addressPicker) return;
+  const decision = addressPickerOpenDecision(lastDoc, ui.profileId, role, {
+    editable: editable(),
+    lockedReason: `${docTitle()} is not a draft — addresses locked.`,
+  });
+  if (!decision.open) {
+    setStatus(decision.reason || "Cannot pick address.", "warn");
+    return;
+  }
+  if (!api.listAddresses) {
+    setStatus("Address picker API missing — restart the shell.", "err");
+    return;
+  }
+  setStatus("Loading addresses…");
+  const res = await api.listAddresses(role);
+  if (!(res && res.ok)) {
+    setStatus((res && res.reason) || "Could not list addresses.", "err");
+    return;
+  }
+  const meta = decision.meta || addressRoleMeta(ui.profileId, role);
+  if (!meta) return;
+
+  const poShipTo =
+    ui.profileId === "po" && role === "ship_to"
+      ? {
+          label: PO_CUSTOMER_DROPSHIP.label,
+          hint: PO_CUSTOMER_DROPSHIP.hint,
+          value:
+            (lastDoc && (lastDoc.customer_name || lastDoc.customer)) ||
+            "",
+          editable: editable(),
+          mountPicker: (input) => {
+            mountDocLinkPicker(input, PO_CUSTOMER_DROPSHIP.linkDoctype, async (v) => {
+              if (!api || !editable()) return;
+              setStatus("Setting drop-ship customer…");
+              const resCust = await api.setHeader(PO_CUSTOMER_DROPSHIP.field, v);
+              if (resCust && resCust.ok && !resCust.skipped) {
+                noteUserEdit();
+                paint(resCust.doc || lastDoc, resCust.scratch || scratch);
+                input.value =
+                  (resCust.doc && (resCust.doc.customer_name || resCust.doc.customer)) ||
+                  v ||
+                  "";
+                input.dataset.linkCommitted = input.value;
+                await refreshShipToAddressPickerRows();
+                const clearCustBtn = document.querySelector("#doc-addr-modal [data-customer-clear]");
+                if (clearCustBtn) clearCustBtn.disabled = false;
+                setStatus("Customer set — pick ship-to address.");
+              } else if (resCust && resCust.skipped) {
+                input.value = input.dataset.linkCommitted || "";
+              } else {
+                setStatus((resCust && resCust.reason) || "Customer update failed.", "err");
+              }
+            });
+          },
+          onClear: async () => {
+            if (!api || !editable()) return;
+            const resClr = await api.setHeader(PO_CUSTOMER_DROPSHIP.field, "");
+            if (resClr && resClr.ok && !resClr.skipped) {
+              noteUserEdit();
+              paint(resClr.doc || lastDoc, resClr.scratch || scratch);
+              await refreshShipToAddressPickerRows();
+              setStatus("Drop-ship customer cleared.");
+            }
+          },
+          onCustomerChanged: refreshShipToAddressPickerRows,
+        }
+      : undefined;
+
+  showAddressPickerModal({
+    meta,
+    rows: Array.isArray(res.rows) ? res.rows : [],
+    current: res.current,
+    testId: "doc-addr-modal",
+    isOpenRef: addressPickerOpenRef,
+    setStatus,
+    focusSurface: () => api.focusSurface?.(),
+    customerDropShip: poShipTo,
+    onApply: async (linkField, addressName) => {
+      if (!api || !linkField) return;
+      setStatus(addressName ? "Setting address…" : "Clearing address…");
+      const res2 = await api.setHeader(linkField, addressName || "");
+      if (res2 && res2.ok) {
+        noteUserEdit();
+        paint(res2.doc || lastDoc, res2.scratch || scratch);
+        setStatus(addressName ? "Address updated." : "Address cleared.");
+      } else {
+        setStatus((res2 && res2.reason) || "Address update failed.", "err");
+      }
+    },
+  });
+}
+
+function wireDocAddressPickers() {
+  if (!ui?.features.addressPicker || !api?.listAddresses) return;
+  wireAddressPickerFields({
+    nodes: document.querySelectorAll("[data-addr-role].addr-pick"),
+    isEditable: editable,
+    onOpen: (role) => {
+      void openDocAddressPicker(role);
+    },
+    lockedMessage: `${docTitle()} is not a draft — addresses locked.`,
+    setStatus,
+  });
+}
+
+function syncDocAddressPickers(canEdit) {
+  if (!ui?.features.addressPicker) return;
+  syncAddressPickerLock(document.querySelectorAll("[data-addr-role].addr-pick"), canEdit);
+}
+
 function escapeHtml(v) {
   return String(v ?? "")
     .replace(/&/g, "&amp;")
@@ -291,7 +535,14 @@ function setStatus(text, cls) {
 
 function paintDirtyPill() {
   if (!el.dirtyPill) return;
-  const isDraft = lastDoc ? mapHelpers().isDraft(lastDoc) : true;
+  if (!lastDoc) {
+    const loading = docLifecyclePill({ loading: true });
+    el.dirtyPill.textContent = loading.text;
+    el.dirtyPill.title = loading.title;
+    el.dirtyPill.className = "dirty-pill tone-" + loading.tone;
+    return;
+  }
+  const isDraft = mapHelpers().isDraft(lastDoc);
   const pill = docLifecyclePill({
     isDraft,
     userEdited,
@@ -320,8 +571,85 @@ function currentSaveBlockers() {
 
 function hideCommitGate() {
   pendingGate = null;
-  if (el.commitGate) el.commitGate.hidden = true;
+  configureDirectSaveGateChrome(commitGateEls(), { active: false, copyEl: el.commitGateCopy });
+  hideCommitGateEl(commitGateEls());
   setGateBusy(false);
+}
+
+function gateToolbarAction() {
+  if (!pendingGate) return "";
+  if (pendingGate.kind === "toolbar") return pendingGate.action;
+  if (pendingGate.kind === "direct-save") return "direct-save";
+  return "";
+}
+
+function openDirectSaveBlockedGate(blockers, opts = {}) {
+  pendingGate = { kind: "direct-save", submit: !!opts.submit };
+  if (el.commitGateTitle) {
+    el.commitGateTitle.textContent = opts.submit ? "Cannot submit yet" : "Cannot save yet";
+  }
+  configureDirectSaveGateChrome(commitGateEls(), {
+    submit: !!opts.submit,
+    active: true,
+    copyEl: el.commitGateCopy,
+  });
+  const title = docTitle();
+  if (opts.erpFailure) {
+    paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(opts.reason, title));
+  } else {
+    paintCommitGateValidation(commitGateEls(), {
+      blockers,
+      blocked: true,
+      title: "Save is blocked by:",
+      cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
+    });
+  }
+  setGateBusy(false);
+  showCommitGate(commitGateEls(), {
+    focusSurface: () => {
+      if (api && api.focusSurface) api.focusSurface();
+    },
+  });
+  void refreshMetaPreflight();
+}
+
+async function handleDirectSaveGateChoice(choice) {
+  const blockers = currentSaveBlockers();
+  if (!commitGateSaveEnabled(blockers)) {
+    refreshCommitGateHint();
+    setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
+    return;
+  }
+  reduceCommitGatePhase("idle", { type: "start-save", choice });
+  setGateBusy(true);
+  const saveRes = await doSave(choice === "submit");
+  if (!(saveRes && saveRes.ok)) {
+    const reason = (saveRes && saveRes.reason) || "Save failed.";
+    reduceCommitGatePhase("saving", { type: "error", reason });
+    setGateBusy(false);
+    if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
+      metaBlockers = saveRes.blockers;
+      paintCommitGateValidation(commitGateEls(), {
+        blockers: mergeSaveBlockers(
+          listDocFormSaveBlockers({
+            doc: lastDoc,
+            supplier: supplierInput() && supplierInput().value,
+          }),
+          saveRes.blockers,
+        ),
+        blocked: true,
+        title: "Save is blocked by:",
+        cancelHint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
+      });
+    } else {
+      paintCommitGateValidation(
+        commitGateEls(),
+        docCommitGateErpFailureView(reason, docTitle()),
+      );
+    }
+    return;
+  }
+  hideCommitGate();
 }
 
 function gateIsNewDoc() {
@@ -335,73 +663,24 @@ function gateIsNewDoc() {
 }
 
 function setGateBusy(busy) {
-  if (!el.commitGate) return;
-  const action = pendingGate && pendingGate.kind === "toolbar" ? pendingGate.action : "";
-  const isNew = gateIsNewDoc();
-  el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
-    const choice = btn.getAttribute("data-gate");
-    if (busy) {
-      btn.disabled = true;
-      return;
-    }
-    if (!commitGateChoiceEnabled(action, choice, { isNew })) {
-      btn.disabled = true;
-      if (choice === "discard" && action === "print" && isNew) {
-        btn.title = `Discarding a new ${docTitle()} leaves nothing to print — Save draft or Cancel.`;
-      }
-      return;
-    }
-    btn.title = "";
-    if (choice === "save" || choice === "submit") {
-      btn.disabled = !commitGateSaveEnabled(currentSaveBlockers());
-    } else {
-      btn.disabled = false;
-    }
+  setCommitGateBusy(commitGateEls(), {
+    busy,
+    toolbarAction: gateToolbarAction(),
+    isNewDoc: gateIsNewDoc(),
+    docTitle: docTitle(),
+    getSaveBlockers: currentSaveBlockers,
   });
-}
-
-function paintCommitGateValidation(opts = {}) {
-  if (!el.commitGateHint) return;
-  const blockers = Array.isArray(opts.blockers) ? opts.blockers.filter(Boolean) : [];
-  const blocked = opts.blocked != null ? !!opts.blocked : blockers.length > 0;
-  const title = docTitle();
-  if (el.commitGateValidation) {
-    el.commitGateValidation.className =
-      "commit-gate-validation " + (blocked ? "blocked" : "ready");
-  }
-  if (el.commitGateValidationTitle) {
-    el.commitGateValidationTitle.textContent =
-      opts.title ||
-      (blocked ? "Save is blocked by:" : `${title} + live ERP meta preflight passed`);
-  }
-  if (el.commitGateBlockers) {
-    el.commitGateBlockers.replaceChildren(
-      ...blockers.map((blocker) => {
-        const item = document.createElement("li");
-        item.textContent = blocker;
-        return item;
-      }),
-    );
-    el.commitGateBlockers.hidden = blockers.length === 0;
-  }
-  el.commitGateHint.textContent =
-    opts.hint ||
-    (blocked
-      ? `Choose Cancel to return to the ${title} and fix these fields.`
-      : docCommitGateSaveWarning(blockers, title));
-  el.commitGateHint.className = "hint" + (blocked ? " warn" : "");
 }
 
 function refreshCommitGateHint() {
   const blockers = currentSaveBlockers();
   const title = docTitle();
-  paintCommitGateValidation({
+  paintCommitGateValidation(commitGateEls(), {
     blockers,
     blocked: blockers.length > 0,
     title: blockers.length ? "Save is blocked by:" : `${title} + live ERP meta preflight passed`,
-    hint: blockers.length
-      ? `Choose Cancel to return to the ${title} and fix these fields.`
-      : docCommitGateSaveWarning(blockers, title),
+    cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
+    saveWarning: () => docCommitGateSaveWarning(blockers, title),
   });
   setGateBusy(false);
 }
@@ -419,14 +698,15 @@ function openGate(trigger) {
   }
   pendingGate = trigger;
   if (el.commitGateTitle) {
-    el.commitGateTitle.textContent = `Unsaved changes — before ${docGateTriggerLabel(trigger, gateLabels())}`;
+    el.commitGateTitle.textContent = commitGateTitleText(
+      docGateTriggerLabel(trigger, gateLabels()),
+    );
   }
   refreshCommitGateHint();
-  if (el.commitGate) el.commitGate.hidden = false;
-  if (api && api.focusSurface) api.focusSurface();
-  requestAnimationFrame(() => {
-    const cancel = el.commitGate && el.commitGate.querySelector("[data-gate='cancel']");
-    if (cancel) cancel.focus();
+  showCommitGate(commitGateEls(), {
+    focusSurface: () => {
+      if (api && api.focusSurface) api.focusSurface();
+    },
   });
   void refreshMetaPreflight();
 }
@@ -457,11 +737,17 @@ async function refreshMetaPreflight() {
   }
 }
 
+function docFindPrefill() {
+  if (!ui || ui.profileId !== "po" || !lastDoc) return {};
+  return poFindPrefillFromDoc(lastDoc) || {};
+}
+
 async function runPendingAction(action) {
   if (!api) return;
   if (action === "find") {
     setStatus(`Opening ${docTitle()} list…`);
-    const res = await api.findDocs();
+    const prefill = docFindPrefill();
+    const res = await api.findDocs(prefill);
     try {
       if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
@@ -480,7 +766,11 @@ async function runPendingAction(action) {
     if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
     else if (res.focusOk === false || (post && post.ok === false)) {
       setStatus(res.reason || post?.reason || "List opened (filter focus missed).", "warn");
-    } else setStatus(`${docTitle()} list opened — type in ID.`);
+    } else setStatus(
+      res.prefilled
+        ? `${docTitle()} list opened — logbook PO# prefilled.`
+        : `${docTitle()} list opened — type in PO# (logbook) or ID.`,
+    );
     return;
   }
   if (action === "new") {
@@ -516,6 +806,13 @@ async function resolveCommitGate(choiceRaw) {
   if (!trigger || !choice || choice === "cancel") {
     hideCommitGate();
     if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
+    return;
+  }
+
+  if (trigger.kind === "direct-save") {
+    if (choice === "save" || choice === "submit") {
+      await handleDirectSaveGateChoice(choice);
+    }
     return;
   }
 
@@ -563,7 +860,7 @@ async function resolveCommitGate(choiceRaw) {
       setGateBusy(false);
       if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
         metaBlockers = saveRes.blockers;
-        paintCommitGateValidation({
+        paintCommitGateValidation(commitGateEls(), {
           blockers: mergeSaveBlockers(
             listDocFormSaveBlockers({
               doc: lastDoc,
@@ -576,7 +873,7 @@ async function resolveCommitGate(choiceRaw) {
           hint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
         });
       } else {
-        paintCommitGateValidation(docCommitGateErpFailureView(reason, docTitle()));
+        paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(reason, docTitle()));
       }
       return;
     }
@@ -588,143 +885,6 @@ async function resolveCommitGate(choiceRaw) {
   } else {
     await runPendingAction(trigger.action);
   }
-}
-
-function mountLinkPicker(input, doctype, onPicked) {
-  if (!input || linkMounted.get(input)) return;
-  linkMounted.set(input, true);
-  const wrap = document.createElement("div");
-  wrap.className = "link-wrap";
-  input.parentNode.insertBefore(wrap, input);
-  wrap.appendChild(input);
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "link-btn";
-  btn.textContent = "▾";
-  btn.title = `Search ${doctype}`;
-  btn.tabIndex = -1;
-  wrap.appendChild(btn);
-  const dd = document.createElement("div");
-  dd.className = "link-dd";
-  dd.hidden = true;
-  wrap.appendChild(dd);
-
-  let timer = null;
-  /** @type {HTMLButtonElement[]} */
-  let opts = [];
-  let hi = -1;
-
-  function setHi(i) {
-    opts.forEach((b) => b.classList.remove("active"));
-    hi = i;
-    if (hi >= 0 && opts[hi]) {
-      opts[hi].classList.add("active");
-      scrollLinkOptionIntoView(opts[hi]);
-    }
-  }
-
-  async function pickValue(v) {
-    if (isCreateSupplierLinkAction(v)) {
-      dd.hidden = true;
-      hi = -1;
-      if (api && api.openVendorAdd) {
-        setStatus("Opening Vendor add in Vanilla…");
-        api.openVendorAdd();
-      } else {
-        setStatus("Vendor add API missing — restart the shell.", "err");
-      }
-      return;
-    }
-    input.value = v;
-    dd.hidden = true;
-    hi = -1;
-    await onPicked(v);
-  }
-
-  async function runSearch(q) {
-    if (!api || !api.searchLink) {
-      dd.hidden = false;
-      dd.innerHTML = `<div class="link-muted">Search API missing — restart the shell.</div>`;
-      return;
-    }
-    dd.hidden = false;
-    dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
-    const res = await api.searchLink(doctype, q || "");
-    if (!res || !res.ok) {
-      dd.innerHTML = `<div class="link-muted">${escapeHtml((res && res.reason) || "Search failed — is Vanilla logged in?")}</div>`;
-      opts = [];
-      return;
-    }
-    const rows = withEmptySearchActions(res.results || [], doctype);
-    if (!rows.length) {
-      dd.innerHTML = `<div class="link-muted">No matches${q ? ` for “${escapeHtml(q)}”` : ""}</div>`;
-      opts = [];
-      return;
-    }
-    dd.innerHTML = rows
-      .map(
-        (o) =>
-          `<button type="button" class="${linkOptionClassNames(o)}" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(linkOptionLabel(o))}</button>`,
-      )
-      .join("");
-    opts = [...dd.querySelectorAll(".link-opt")];
-    hi = initialLinkHighlightIndex(opts.length);
-    if (hi === 0) {
-      opts[0].classList.add("active");
-      scrollLinkOptionIntoView(opts[0]);
-    }
-    opts.forEach((b) => {
-      b.onclick = async () => pickValue(b.getAttribute("data-value") || "");
-    });
-  }
-
-  input.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => runSearch(input.value), 280);
-  });
-  input.addEventListener("keydown", async (ev) => {
-    const act = linkPickerKeyAction(ev.key, {
-      dropdownOpen: !dd.hidden,
-      optionCount: opts.length,
-    });
-    if (act === "close") {
-      dd.hidden = true;
-      hi = -1;
-      return;
-    }
-    if (act === "search") {
-      ev.preventDefault();
-      await runSearch(input.value || "");
-      return;
-    }
-    if (act === "none") return;
-    if (act === "pick") {
-      ev.preventDefault();
-      const idx = resolveLinkPickIndex(hi, opts.length);
-      const pick = idx >= 0 ? opts[idx] : null;
-      if (pick) await pickValue(pick.getAttribute("data-value") || "");
-      else {
-        dd.hidden = true;
-        hi = -1;
-      }
-      return;
-    }
-    if (act === "move_down") {
-      ev.preventDefault();
-      setHi(nextLinkHighlightIndex(hi, opts.length, "down"));
-    }
-    if (act === "move_up") {
-      ev.preventDefault();
-      setHi(nextLinkHighlightIndex(hi, opts.length, "up"));
-    }
-  });
-  btn.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    runSearch(input.value || "");
-  });
-  document.addEventListener("click", (ev) => {
-    if (!wrap.contains(/** @type {Node} */ (ev.target))) dd.hidden = true;
-  });
 }
 
 function focusItemCell(rowIndex, field, opts = {}) {
@@ -797,6 +957,7 @@ async function cleanupEmptyItemRow(rowIndex, itemCode) {
     noteUserEdit();
     paint(removed.doc, removed.scratch || scratch);
     setStatus("Empty line removed.");
+    focusAfterLeavingItemsTable();
   } else if (removed && removed.blockedLastRow) {
     showToast(removed.reason || lastItemRowToast(docTitle()));
   }
@@ -804,6 +965,7 @@ async function cleanupEmptyItemRow(rowIndex, itemCode) {
 
 function focusHeaderField(fieldName) {
   if (!fieldName) return;
+  logFocus("focus-header", fieldName);
   const inp = document.querySelector(`[data-field="${fieldName}"]`);
   if (!inp) return;
   try {
@@ -838,6 +1000,11 @@ function captureFocusAnchor() {
  */
 function restoreFocusAnchor(anchor) {
   if (!anchor) return;
+  if (!shouldRestoreFocusAnchor(anchor, document.activeElement)) {
+    logFocus("restore-focus-anchor", "skip-user-moved");
+    return;
+  }
+  logFocus("restore-focus-anchor", anchor.field || anchor.scratch || anchor.row || "");
   if (anchor.row != null && anchor.field) {
     focusItemCell(Number(anchor.row), anchor.field, { mode: CELL_MODE_NAV });
     return;
@@ -884,6 +1051,51 @@ function focusLastHeaderBeforeItems() {
   return false;
 }
 
+/** Leave items grid — forward Tab exit lands on the next section (terms/memo), not header row 0. */
+function focusAfterLeavingItemsTable() {
+  if (el.addLine) el.addLine.tabIndex = -1;
+  if (ui?.features?.termsField && el.termsText && !el.termsText.readOnly) {
+    try {
+      logFocus("focus-after-items", "terms");
+      el.termsText.focus();
+      return;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (ui?.features?.memo && el.memo && !el.memo.readOnly) {
+    try {
+      logFocus("focus-after-items", "memo");
+      el.memo.focus();
+      return;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (focusLastHeaderBeforeItems()) return;
+  try {
+    if (el.addTax && !el.addTax.disabled) {
+      el.addTax.focus();
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function rowItemCodeAt(doc, rowIndex) {
+  const items = doc && Array.isArray(doc.items) ? doc.items : [];
+  const row = items[rowIndex];
+  return row && row.item_code != null ? String(row.item_code).trim() : "";
+}
+
 function paintItemsHead() {
   if (!el.itemsHead || !ui) return;
   const headers = sortableHeadersFromCols(ui.itemCols);
@@ -895,13 +1107,15 @@ function paintItemsHead() {
   el.itemsHead.innerHTML =
     headers
       .map((h) => {
-        const active = itemSort.key === h.sortKey;
-        const arrow = active ? (itemSort.asc ? " ▲" : " ▼") : "";
-        const title =
+        const st = sortHeaderState(itemSortSpecs, h.sortKey);
+        const arrow = sortHeaderArrow(itemSortSpecs, h.sortKey);
+        const tip =
           h.sortKey === "lineNo"
-            ? "Sort by Purchase Order line number"
-            : `Sort by ${h.label}`;
-        return `<th class="sortable${active ? " sorted" : ""}" data-sort="${escapeHtml(h.sortKey)}" title="${escapeHtml(title)}">${escapeHtml(h.label)}${arrow}</th>`;
+            ? "Sort by Purchase Order line number · Ctrl+click to add another column"
+            : st.active
+              ? `Sort by ${h.label} (${st.asc ? "asc" : "desc"}) · Ctrl+click to add another column`
+              : `Sort by ${h.label} · Ctrl+click to add a secondary sort`;
+        return `<th class="sortable${st.active ? " sorted" : ""}" data-sort="${escapeHtml(h.sortKey)}" title="${escapeHtml(tip)}">${escapeHtml(h.label)}${arrow}</th>`;
       })
       .join("") + "<th></th>";
   if (!itemsHeadWired) {
@@ -913,11 +1127,10 @@ function paintItemsHead() {
       if (!th) return;
       const key = th.getAttribute("data-sort");
       if (!key) return;
-      if (itemSort.key === key) itemSort.asc = !itemSort.asc;
-      else {
-        itemSort.key = key;
-        itemSort.asc = true;
-      }
+      itemSortSpecs = applyHeaderSortClick(itemSortSpecs, key, {
+        ctrlKey: !!ev.ctrlKey,
+        metaKey: !!ev.metaKey,
+      });
       paintItemsHead();
       if (lastDoc) paintItems(lastDoc);
     });
@@ -1006,9 +1219,37 @@ function paintMoneyStack(doc) {
   }
 }
 
+function paintTaxesHead() {
+  if (!el.taxesHead || !ui || !ui.features.taxes) return;
+  el.taxesHead.innerHTML =
+    DOC_TAX_SORTABLE_HEADERS.map((h) => {
+      const st = sortHeaderState(taxSortSpecs, h.sortKey);
+      const arrow = sortHeaderArrow(taxSortSpecs, h.sortKey);
+      const cls = ["sortable", st.active ? "sorted" : "", h.className || ""].filter(Boolean).join(" ");
+      return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
+    }).join("") + `<th></th>`;
+  if (!taxesHeadWired) {
+    taxesHeadWired = true;
+    el.taxesHead.addEventListener("click", (ev) => {
+      const th = /** @type {HTMLElement|null} */ (
+        /** @type {HTMLElement} */ (ev.target).closest("[data-tax-sort]")
+      );
+      if (!th) return;
+      const key = th.getAttribute("data-tax-sort");
+      if (!key) return;
+      taxSortSpecs = applyHeaderSortClick(taxSortSpecs, key, {
+        ctrlKey: !!ev.ctrlKey,
+        metaKey: !!ev.metaKey,
+      });
+      if (lastDoc) paintTaxes(lastDoc);
+    });
+  }
+}
+
 function paintTaxes(doc) {
   if (!el.taxesBody || !ui || !ui.features.taxes) return;
-  const rows = readBillTaxRows(doc);
+  paintTaxesHead();
+  const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
   const canEdit = editable();
   if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
   if (!rows.length) {
@@ -1067,7 +1308,7 @@ function paintTaxes(doc) {
       }
     };
     if (field === "account_head") {
-      mountLinkPicker(inp, "Account", apply);
+      mountDocLinkPicker(inp, "Account", apply);
     }
     if (field === "rate" || field === "tax_amount") {
       inp.addEventListener("focus", () => {
@@ -1118,8 +1359,7 @@ function paintItems(doc) {
     doc,
     cols,
     (d) => mapHelpers().readItemRows(d),
-    itemSort.key,
-    itemSort.asc,
+    itemSortSpecs,
   );
   const canEdit = editable();
   el.items.innerHTML = models
@@ -1150,6 +1390,13 @@ function paintItems(doc) {
             }
             return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-rate" /></td>`;
           }
+          if (col.type === "checkbox") {
+            const checked = val === 1 || val === true || val === "1";
+            if (!canEdit) {
+              return `<td class="num"><span class="ro">${checked ? "Yes" : "—"}</span></td>`;
+            }
+            return `<td class="num"><input type="checkbox" data-row="${ri}" data-field="${col.field}" data-check="1" ${checked ? "checked" : ""} data-testid="doc-cell-${ri}-${col.field}" title="Vendor delivers direct to customer" /></td>`;
+          }
           if (col.type === "date" || col.field === "schedule_date") {
             const shown = formatDocDateDisplay(val) || val || "";
             if (!canEdit) {
@@ -1160,9 +1407,10 @@ function paintItems(doc) {
           if (!canEdit) {
             return `<td><span class="ro">${escapeHtml(val)}</span></td>`;
           }
-          const type = col.field === "qty" ? "number" : "text";
-          const step = col.field === "qty" ? ' step="any"' : "";
-          return `<td><input type="${type}"${step} data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
+          if (col.field === "qty") {
+            return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-qty" /></td>`;
+          }
+          return `<td><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
         })
         .join("");
       const del = canEdit
@@ -1181,6 +1429,9 @@ function paintItems(doc) {
     const readCellValue = () => {
       const kind = dirtyCompareKindForField(field);
       let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
+      if (inp.type === "checkbox" || inp.dataset.check === "1") {
+        return inp.checked ? 1 : 0;
+      }
       if (field === "rate") {
         const n = parseMoney(inp.value);
         next = n == null ? "" : String(n);
@@ -1199,31 +1450,26 @@ function paintItems(doc) {
       const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
         cellValue,
         fields: navFields,
+        rowItemCode: docAfter?.items?.[ri]?.item_code ?? "",
+        nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
       });
       if (dest.deleteRow && dest.leaveTable) {
         if (!api || !editable()) return;
         const rowCountNow =
           lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
+        const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
         if (shouldBlockDeleteLastItemRow(rowCountNow)) {
           showToast(lastItemRowToast(docTitle()));
-          try {
-            if (el.addLine && !el.addLine.disabled) el.addLine.focus();
-          } catch {
-            /* ignore */
-          }
+          focusAfterLeavingItemsTable();
           return;
         }
         setStatus("Removing empty line…");
-        const removed = await api.deleteItem(ri);
+        const removed = await api.deleteItem(deleteRi);
         if (removed && removed.ok) {
           noteUserEdit();
           paint(removed.doc, removed.scratch || scratch);
           setStatus("Left items table.");
-          try {
-            if (el.addLine && !el.addLine.disabled) el.addLine.focus();
-          } catch {
-            /* ignore */
-          }
+          focusAfterLeavingItemsTable();
         } else if (removed && removed.blockedLastRow) {
           showToast(removed.reason || lastItemRowToast(docTitle()));
         } else {
@@ -1281,7 +1527,7 @@ function paintItems(doc) {
       }
     };
     if (linkDt) {
-      mountLinkPicker(inp, linkDt, apply);
+      mountDocLinkPicker(inp, linkDt, apply);
     }
     if (inp.dataset.date === "1") {
       wireDateField(inp);
@@ -1351,6 +1597,7 @@ function paintItems(doc) {
         valueLength: String(inp.value ?? "").length,
         linkDropdownOpen: isItemLinkDropdownOpen(inp),
         calcActive,
+        verticalArrowsAlwaysNav: field === "qty",
       });
 
       if (decision.action === "leave_edit") {
@@ -1445,6 +1692,8 @@ function paintItems(doc) {
           const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
             cellValue: next,
             fields: navFields,
+            rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
+            nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
           });
           if (dest.deleteRow && dest.leaveTable) {
             await focusAfterItemEdit(lastDoc, next);
@@ -1512,14 +1761,14 @@ function paintItems(doc) {
     btn.addEventListener("click", async () => {
       if (!api) return;
       const ri = Number(btn.getAttribute("data-del"));
-      const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-      if (shouldBlockDeleteLastItemRow(rowCount)) {
-        showToast(lastItemRowToast(docTitle()));
-        return;
-      }
       setStatus("Removing line…");
       const res = await api.deleteItem(ri);
-      if (res && res.ok) {
+      if (res && res.ok && res.clearedLastRow) {
+        noteUserEdit();
+        paint(res.doc, res.scratch || scratch);
+        showToast(res.reason || lastItemRowToast(docTitle()));
+        setStatus("Last line cleared.");
+      } else if (res && res.ok) {
         noteUserEdit();
         paint(res.doc, res.scratch || scratch);
         setStatus("Line removed.");
@@ -1645,18 +1894,26 @@ function buildHeaderFields(fields) {
 
   const mountReadOnlyControl = (meta, fieldEl) => {
     const multiline = !!(meta.multiline || meta.addressRole || meta.type === "textarea");
+    const pickable = addressFieldPickable(meta);
     const input = document.createElement(multiline ? "textarea" : "input");
     input.id = `f-${slugLabel(meta.label)}`;
     input.readOnly = true;
     input.tabIndex = -1;
     input.dataset.testid = `doc-header-${slugLabel(meta.label)}`;
-    if (meta.addressRole) input.dataset.addressRole = meta.addressRole;
+    if (meta.addressRole) {
+      input.dataset.addressRole = meta.addressRole;
+      input.setAttribute("data-addr-role", meta.addressRole);
+    }
     if (meta.sourceWashRole) setWashSourceAttr(input, meta.sourceWashRole);
     if (multiline) {
       input.rows = 4;
       input.spellcheck = false;
     }
-    if (meta.validationHint) input.title = meta.validationHint;
+    if (pickable) {
+      input.classList.add("addr-pick");
+      const roleMeta = addressRoleMeta(ui.profileId, meta.addressRole);
+      input.title = roleMeta?.title || meta.label;
+    } else if (meta.validationHint) input.title = meta.validationHint;
     else if (meta.addressRole) {
       input.title =
         "Read-only here. Set addresses on the document or party in Vanilla ERPNext, then Refresh.";
@@ -1702,6 +1959,17 @@ function buildHeaderFields(fields) {
         wireDateField(input);
         input.addEventListener("change", () => onHeaderBlur(input));
         headerInputs[meta.label] = input;
+      } else if (meta.type === "textarea") {
+        const input = document.createElement("textarea");
+        input.id = `f-${meta.field}`;
+        input.dataset.field = meta.field;
+        input.dataset.testid = `doc-${meta.field}`;
+        input.rows = 3;
+        input.spellcheck = true;
+        if (meta.validationHint) input.title = meta.validationHint;
+        field.appendChild(input);
+        input.addEventListener("change", () => onHeaderBlur(input));
+        headerInputs[meta.label] = input;
       } else {
         const input = document.createElement("input");
         input.id = `f-${meta.field}`;
@@ -1733,10 +2001,14 @@ function buildHeaderFields(fields) {
     const hint = document.createElement("span");
     hint.className = "addr-hint";
     hint.style.gridColumn = "1 / -1";
-    hint.textContent =
-      "Read-only. Edit Ship from / Ship to / Billing on the document or party in Vanilla, then Refresh. Empty means ERP has no address linked yet (PO may lack a dedicated ship-from field).";
+    hint.textContent = ui.features.addressPicker
+      ? ui.profileId === "po"
+        ? "Click Ship from / Ship to to pick addresses. Drop-ship customer is set inside Ship to."
+        : "Click an address to pick when enabled on this profile."
+      : "Read-only. Edit Ship from / Ship to / Billing on the document or party in Vanilla, then Refresh. Empty means ERP has no address linked yet (PO may lack a dedicated ship-from field).";
     el.headerAddresses.appendChild(hint);
   }
+  wireDocAddressPickers();
 }
 
 function ensureHeaderLinkPickers() {
@@ -1746,7 +2018,7 @@ function ensureHeaderLinkPickers() {
     const inp = headerInputs[meta.label];
     if (!inp || !meta.linkDoctype) continue;
     if (meta.field === "supplier") {
-      mountLinkPicker(inp, meta.linkDoctype, async (v) => {
+      mountDocLinkPicker(inp, meta.linkDoctype, async (v) => {
         if (!api) return;
         if (!editable()) {
           setStatus(`${docTitle()} is not a draft — cannot set vendor.`, "warn");
@@ -1758,25 +2030,27 @@ function ensureHeaderLinkPickers() {
             trigger: "link_pick",
             hasSupplier: !!normalizeEditableText(v),
             editable: true,
-            modalAlreadyOpen: sourceModalOpen,
+            modalAlreadyOpen: sourceModalOpenRef.current,
           });
         setStatus("Setting vendor…");
-        const modalPromise =
-          decision && decision.open
-            ? openSourcePicker(v)
-            : Promise.resolve();
-        const res = await api.setHeader("supplier", v);
-        if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc || lastDoc, res.scratch || scratch);
-          if (decision && decision.open) setStatus("Choose a source (or NIC).");
-        } else {
-          setStatus((res && res.reason) || "Vendor update failed.", "err");
-        }
-        await modalPromise;
-      });
+        vendorPickSourceSession = { supplier: normalizeEditableText(v), userClosed: false };
+        await runVendorPickWithSourceModal({
+          supplier: v,
+          decision: decision || { open: false },
+          setHeader: (field, value) => api.setHeader(field, value),
+          openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
+          onHeaderSuccess: (res) => {
+            noteUserEdit();
+            paint(res.doc || lastDoc, res.scratch || scratch);
+            if (decision && decision.open) setStatus("Choose a source (or NIC).");
+          },
+          onHeaderFailure: (res) => {
+            setStatus((res && res.reason) || "Vendor update failed.", "err");
+          },
+        });
+      }, { refocusAfterPick: false });
     } else {
-      mountLinkPicker(inp, meta.linkDoctype, async (v) => {
+      mountDocLinkPicker(inp, meta.linkDoctype, async (v) => {
         if (!api || !editable()) return;
         const res = await api.setHeader(meta.field, v);
         if (res && res.ok && !res.skipped) noteUserEdit();
@@ -1786,15 +2060,17 @@ function ensureHeaderLinkPickers() {
   }
 }
 
-async function openSourcePicker(supplier) {
-  if (!api || !api.listSources || !ui || !ui.features.sourceModal) {
+async function openSourcePicker(supplier, opts = {}) {
+  const trigger = opts.trigger || "unknown";
+  const listSlice = api && api.listSourceSlice;
+  if (!listSlice || !ui || !ui.features.sourceModal) {
     setStatus("Source picker API missing — restart the shell.", "err");
-    return;
+    return { ok: false, reason: "api_missing" };
   }
-  if (sourceModalOpen) return;
+  if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
   if (!editable()) {
     setStatus(`${docTitle()} is not a draft — source picker locked.`, "warn");
-    return;
+    return { ok: false, reason: "not_editable" };
   }
   const supInp = supplierInput();
   const sup =
@@ -1803,173 +2079,124 @@ async function openSourcePicker(supplier) {
     normalizeEditableText(supInp && supInp.value);
   if (!sup) {
     setStatus(`Pick a vendor before ${ui.sourceLabel || "Select PO"}.`, "warn");
-    return;
+    return { ok: false, reason: "no_supplier" };
   }
-  setStatus("Loading open Purchase Orders…");
-  const res = await api.listSources(sup);
-  if (!res || !res.ok) {
-    setStatus((res && res.reason) || "Could not load sources.", "err");
-    return;
+
+  if (trigger === "toolbar") {
+    vendorPickSourceSession = null;
   }
-  const groups = res.groups || [];
-  setStatus(`Sources loaded (${groups.length} groups) — pick one.`);
-  showSourceModal(groups, async (it) => {
-    if (!it || it.kind === "nic") {
-      setStatus("No source — enter lines manually.");
-      const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
-      if (focusField) focusHeaderField(focusField);
-      return;
+
+  const gate = mayAutoOpenSourcePicker(vendorPickSourceSession, sup, trigger);
+  if (!gate.ok) {
+    logFocus("source-modal-skip", `${trigger}:${gate.reason || "blocked"}`);
+    return { ok: false, reason: gate.reason || "blocked" };
+  }
+
+  if (sourcePickerInflight && sourcePickerInflightSupplier === sup && trigger !== "toolbar") {
+    return sourcePickerInflight;
+  }
+
+  sourcePickerInflightSupplier = sup;
+  sourcePickerInflight = runDocSourcePicker(sup, trigger).finally(() => {
+    if (sourcePickerInflightSupplier === sup) {
+      sourcePickerInflight = null;
+      sourcePickerInflightSupplier = "";
     }
-    setStatus(`Pulling from ${it.name}…`);
-    const merged = await api.mergeSource(it.kind, it.name);
-    if (merged && merged.ok) {
-      noteUserEdit();
-      paint(merged.doc, merged.scratch || scratch);
-      setStatus(`Pulled from ${it.name}.`);
-    } else {
-      setStatus((merged && merged.reason) || "Could not pull source.", "err");
-      await refresh();
-    }
-    const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
-    if (focusField) focusHeaderField(focusField);
   });
+  return sourcePickerInflight;
 }
 
-function showSourceModal(groups, onChoose) {
-  if (sourceModalOpen) return;
-  sourceModalOpen = true;
-  let gi = 0;
-  let ii = 0;
-  const back = document.createElement("div");
-  back.className = "src-back";
-  back.dataset.testid = "doc-source-modal";
-  const box = document.createElement("div");
-  box.className = "src-box";
-  box.tabIndex = -1;
-  box.setAttribute("role", "dialog");
-  box.setAttribute("aria-modal", "true");
-  box.setAttribute("aria-label", "Source Selection");
-  box.innerHTML = `<div class="src-title">Source Selection — Tab: group · ↑/↓: item · Enter: select</div>
-    <div class="src-body"></div>
-    <div class="src-foot">
-      <button type="button" class="primary" data-act="pick">Select this source</button>
-      <button type="button" data-act="cancel">Cancel</button>
-    </div>`;
-  back.appendChild(box);
-  document.body.appendChild(back);
-  const body = box.querySelector(".src-body");
-  const pickBtn = box.querySelector('[data-act="pick"]');
+/**
+ * @param {string} sup
+ * @param {"link_pick" | "blur" | "toolbar" | "unknown"} trigger
+ */
+async function runDocSourcePicker(sup, trigger) {
+  setStatus("Loading open Purchase Orders…");
 
-  function activeItem() {
-    return groups[gi] && groups[gi].items[ii];
-  }
-
-  function draw() {
-    body.innerHTML = "";
-    groups.forEach((g, ggi) => {
-      const h = document.createElement("div");
-      h.className = "src-group" + (ggi === gi ? " active" : "");
-      h.textContent = g.name;
-      body.appendChild(h);
-      g.items.forEach((it, iii) => {
-        const r = document.createElement("button");
-        r.type = "button";
-        r.className =
-          "src-item" +
-          (ggi === gi && iii === ii ? " active" : "") +
-          (it.draft ? " draft" : "");
-        r.textContent = it.label;
-        r.onclick = () => {
-          if (it.draft) return;
-          gi = ggi;
-          ii = iii;
-          draw();
-        };
-        r.ondblclick = () => {
-          if (!it.draft) choose();
-        };
-        body.appendChild(r);
-      });
-    });
-    const a = body.querySelector(".src-item.active");
-    if (a && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
-  }
-
-  function close() {
-    sourceModalOpen = false;
-    document.removeEventListener("keydown", onKey, true);
-    if (back.parentNode) back.parentNode.removeChild(back);
-  }
-
-  async function choose() {
-    const it = activeItem();
-    if (!isSelectableSourceItem(it)) return;
-    close();
-    await onChoose(it);
-  }
-
-  function onKey(ev) {
-    if (ev.key === "Tab") {
-      ev.preventDefault();
-      gi = (gi + (ev.shiftKey ? groups.length - 1 : 1)) % groups.length;
-      ii = 0;
-      draw();
-    } else if (ev.key === "ArrowDown") {
-      ev.preventDefault();
-      const items = groups[gi].items;
-      do {
-        ii = Math.min(items.length - 1, ii + 1);
-      } while (ii < items.length - 1 && items[ii].draft);
-      draw();
-    } else if (ev.key === "ArrowUp") {
-      ev.preventDefault();
-      do {
-        ii = Math.max(0, ii - 1);
-      } while (ii > 0 && groups[gi].items[ii].draft);
-      draw();
-    } else if (ev.key === "Enter") {
-      ev.preventDefault();
-      choose();
-    } else if (ev.key === "Escape") {
-      ev.preventDefault();
-      close();
-    }
-  }
-
-  document.addEventListener("keydown", onKey, true);
-  pickBtn.onclick = () => choose();
-  box.querySelector('[data-act="cancel"]').onclick = () => close();
-  back.addEventListener("click", (ev) => {
-    if (ev.target === back) close();
-  });
-  draw();
-
-  try {
-    if (api && api.focusSurface) api.focusSurface();
-  } catch {
-    /* ignore */
-  }
-  const focusModal = () => {
-    try {
-      pickBtn.focus();
-    } catch {
-      try {
-        box.focus();
-      } catch {
-        /* ignore */
+  return runSourcePickerFlow({
+    supplier: sup,
+    trigger,
+    mode: "single",
+    listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
+    log: (event, detail) => logFocus(event, detail || ""),
+    mayOpen: (vendor, trig) =>
+      mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+    onUserClose: () => {
+      if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
+        vendorPickSourceSession.userClosed = true;
       }
-    }
-  };
-  focusModal();
-  setTimeout(focusModal, 30);
-  setStatus("Choose a source (or NIC).");
+    },
+    onStreamComplete: ({ errors }) => {
+      if (errors.length && sourceModalOpenRef.current) {
+        setStatus(`Some sources failed to load (${errors.length}).`, "warn");
+      } else if (sourceModalOpenRef.current) {
+        setStatus("Sources loaded — pick one.");
+      }
+    },
+    showModal: (flowOpts) =>
+      showSourceModal({
+        ...flowOpts,
+        testId: "doc-source-modal",
+        isOpenRef: sourceModalOpenRef,
+        setStatus,
+        focusSurface: () => {
+          if (api && api.focusSurface) api.focusSurface();
+        },
+        onChoose: async (it) => {
+          if (!it || it.kind === "nic") {
+            setStatus("No source — enter lines manually.");
+            const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
+            if (focusField) focusHeaderField(focusField);
+            return;
+          }
+          setStatus(`Pulling from ${it.name}…`);
+          const merged = await api.mergeSource(it.kind, it.name);
+          if (merged && merged.ok) {
+            noteUserEdit();
+            paint(merged.doc, merged.scratch || scratch);
+            setStatus(`Pulled from ${it.name}.`);
+          } else {
+            setStatus((merged && merged.reason) || "Could not pull source.", "err");
+            await refresh();
+          }
+          const focusField = focusTargetAfterDocSourceModal(ui.profileId, "choose");
+          if (focusField) focusHeaderField(focusField);
+        },
+      }),
+  });
 }
 
 function setFormBlocked(blocked, reason) {
   document.body.classList.toggle("blocked", !!blocked);
-  const retry = document.getElementById("btn-retry");
+  const retry = el.retry;
   if (retry) retry.hidden = !blocked;
   if (blocked && reason) setStatus(reason, "warn");
+  else if (!blocked && el.status) {
+    el.status.classList.remove("warn", "err");
+  }
+}
+
+/** Drop stale header/line paint when Vanilla doc is not loaded yet (home → new PO). */
+function clearPaintedForm() {
+  if (ui) {
+    for (const meta of ui.headerFields) {
+      const inp = headerInputs[meta.label];
+      if (!inp) continue;
+      inp.value = "";
+      if (meta.type === "date") inp.placeholder = "MM/DD/YYYY";
+      if (meta.linkDoctype) inp.dataset.linkCommitted = "";
+      if (meta.addressRole && inp.tagName === "TEXTAREA") {
+        inp.rows = addressTextareaRows("");
+      }
+    }
+  }
+  if (el.memo) el.memo.value = "";
+  if (el.termsText) el.termsText.value = "";
+  syncDocAddressPickers(false);
+  if (el.items) el.items.innerHTML = "";
+  if (el.taxesBody) el.taxesBody.innerHTML = "";
+  paintLineTotals(null);
+  paintMoneyStack(null);
 }
 
 function focusVendorField() {
@@ -1996,7 +2223,9 @@ function focusVendorField() {
 function paintedHeaderValue(field) {
   if (!lastDoc) return "";
   if (field === "remarks") return lastDoc.remarks ?? "";
+  if (field === ERP_FREEFORM_TERMS_FIELD) return lastDoc[ERP_FREEFORM_TERMS_FIELD] ?? "";
   if (field === "supplier") return lastDoc.supplier_name || lastDoc.supplier || "";
+  if (field === "customer") return lastDoc.customer_name || lastDoc.customer || "";
   return lastDoc[field] != null ? lastDoc[field] : "";
 }
 
@@ -2006,6 +2235,7 @@ function paintedScratchDateExpected() {
 
 function paint(doc, snapScratch, opts = {}) {
   painting = true;
+  try {
   calcUi.clear();
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
@@ -2013,16 +2243,13 @@ function paint(doc, snapScratch, opts = {}) {
   paintDirtyPill();
 
   if (!doc || !ui) {
+    clearPaintedForm();
     setFormBlocked(true, opts.reason || `No ${docTitle()} loaded in Vanilla yet.`);
-    el.items.innerHTML = "";
-    paintLineTotals(null);
-    if (el.taxesBody) el.taxesBody.innerHTML = "";
-    paintMoneyStack(null);
     el.addLine.disabled = true;
+    if (el.importItems) el.importItems.disabled = true;
     if (el.clearQty) el.clearQty.disabled = true;
     if (el.attach) el.attach.disabled = true;
     if (el.addTax) el.addTax.disabled = true;
-    painting = false;
     return;
   }
 
@@ -2049,8 +2276,13 @@ function paint(doc, snapScratch, opts = {}) {
     }
     if (meta.type === "date") {
       inp.value = formatDocDateDisplay(val) || val;
+    } else if (meta.type === "textarea") {
+      inp.value = val;
     } else {
       inp.value = val;
+    }
+    if (meta.linkDoctype) {
+      inp.dataset.linkCommitted = String(inp.value || "");
     }
     if (meta.addressRole && inp.tagName === "TEXTAREA") {
       inp.rows = addressTextareaRows(String(val ?? ""));
@@ -2059,6 +2291,10 @@ function paint(doc, snapScratch, opts = {}) {
 
   if (ui.features.memo && el.memo && ui.memoField) {
     el.memo.value = h.Memo ?? lastDoc[ui.memoField] ?? "";
+  }
+  if (ui.features.termsField && el.termsText) {
+    el.termsText.value =
+      h[FREEFORM_TERMS_LABEL] ?? (lastDoc && lastDoc[ERP_FREEFORM_TERMS_FIELD]) ?? "";
   }
 
   const canEdit = editable();
@@ -2074,8 +2310,11 @@ function paint(doc, snapScratch, opts = {}) {
     }
   }
   if (el.memo) el.memo.readOnly = !canEdit;
+  if (el.termsText) el.termsText.readOnly = !canEdit;
+  syncDocAddressPickers(canEdit);
 
   el.addLine.disabled = !canEdit;
+  if (el.importItems) el.importItems.disabled = !canEdit;
   if (el.clearQty) el.clearQty.disabled = !canEdit;
   if (el.attach) el.attach.disabled = !canEdit;
   if (el.addTax) el.addTax.disabled = !canEdit;
@@ -2084,11 +2323,19 @@ function paint(doc, snapScratch, opts = {}) {
   paintTaxes(doc);
   ensureHeaderLinkPickers();
 
+  void paintSourceTerms(doc);
+
   const name = doc.name || "(new)";
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
-  painting = false;
+  if (opts.focusVendor) {
+    docCapsOn = true;
+    if (docCapsUi) docCapsUi.syncCapsButton();
+  }
   if (opts.focusVendor && canEdit) focusVendorField();
   void ensureAtLeastOneItemRow(doc);
+  } finally {
+    painting = false;
+  }
 }
 
 async function refresh() {
@@ -2188,14 +2435,14 @@ async function onHeaderBlur(input) {
       trigger: "blur",
       hasSupplier: !!normalizeEditableText(next),
       editable: editable(),
-      modalAlreadyOpen: sourceModalOpen,
+      modalAlreadyOpen: sourceModalOpenRef.current,
       setHeaderOk: !!(res && res.ok),
       setHeaderSkipped: !!(res && res.skipped),
     });
     if (decision.open) {
       if (res && res.ok) noteUserEdit();
       paint(res.doc || lastDoc, res.scratch || scratch);
-      await openSourcePicker(next || (res && res.supplier));
+      await openSourcePicker(next || (res && res.supplier), { trigger: "blur" });
       return;
     }
   }
@@ -2252,6 +2499,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
+      openDirectSaveBlockedGate(blockers, { submit });
       setStatus(blockers[0] || "Fix save prerequisites first.", "err");
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
@@ -2274,6 +2522,18 @@ async function doSave(submit) {
       submit ? "Save & submit" : "Save draft",
     );
     setStatus(reason, "err");
+    const mergedBlockers = mergeSaveBlockers(
+      listDocFormSaveBlockers({
+        doc: lastDoc,
+        supplier: supplierInput() && supplierInput().value,
+      }),
+      r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
+    );
+    openDirectSaveBlockedGate(mergedBlockers, {
+      submit,
+      erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
+      reason,
+    });
     return {
       ok: false,
       reason,
@@ -2352,21 +2612,41 @@ function applyUiConfig(config) {
   if (el.newDoc) el.newDoc.textContent = ui.newLabel;
   if (el.hint) el.hint.textContent = ui.hint || "";
 
-  const assumptionsUl = document.getElementById("assumptions-list");
+  const assumptionsUl = el.assumptionsList;
   if (assumptionsUl && Array.isArray(ui.assumptions)) {
     assumptionsUl.innerHTML = ui.assumptions.map((a) => `<li>${escapeHtml(a)}</li>`).join("");
   }
 
   buildHeaderFields(ui.headerFields);
 
-  itemSort = { key: "lineNo", asc: true };
+  itemSortSpecs = [{ key: "lineNo", asc: true }];
   itemsHeadWired = false;
+  taxSortSpecs = [{ key: "account_head", asc: true }];
+  taxesHeadWired = false;
   paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
 
-  if (el.lineTabs) el.lineTabs.hidden = !ui.features.expensesTab;
+  if (el.lineTabs) {
+    el.lineTabs.hidden = !ui.features.expensesTab;
+    if (el.tabExpenses) el.tabExpenses.hidden = !ui.features.expensesTab;
+  }
+  if (el.linesSectionTitle) {
+    el.linesSectionTitle.hidden = !!ui.features.expensesTab;
+  }
+  if (el.termsBlock) {
+    const termsLabel = el.termsBlock.querySelector("label");
+    if (termsLabel) {
+      termsLabel.textContent =
+        ui.profileId === "po" ? "Freeform comments" : FREEFORM_TERMS_LABEL;
+    }
+  }
   if (el.taxesBlock) el.taxesBlock.hidden = !ui.features.taxes;
-  if (el.memoBlock) el.memoBlock.hidden = !ui.features.memo;
+  const showNotes = !!(ui.features.memo || ui.features.termsField || ui.features.sourceTerms);
+  if (el.notesSection) el.notesSection.hidden = !showNotes;
+  if (el.memoBlock) el.memoBlock.hidden = !showNotes;
+  if (el.termsBlock) el.termsBlock.hidden = !ui.features.termsField;
+  if (el.memoEntry) el.memoEntry.hidden = !ui.features.memo;
+  if (el.memoLabel && ui.memoLabel) el.memoLabel.textContent = ui.memoLabel;
   if (el.selectSource) {
     el.selectSource.hidden = !ui.features.sourceModal;
     if (ui.sourceLabel) el.selectSource.textContent = ui.sourceLabel;
@@ -2402,16 +2682,17 @@ async function attachFileAction() {
 }
 
 function wireStaticControls() {
-  const btnRefresh = document.getElementById("btn-refresh");
+  const btnRefresh = el.refresh;
   if (btnRefresh) {
     btnRefresh.onclick = () => refresh();
     btnRefresh.title = REFRESH_BUTTON_TITLE;
   }
-  document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+  const btnVanilla = el.vanilla;
+  if (btnVanilla) btnVanilla.onclick = () => api && api.openVanilla();
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
   if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");
-  const btnBackTop = document.getElementById("btn-back-top");
+  const btnBackTop = el.backTop;
   if (btnBackTop) {
     btnBackTop.onclick = () => {
       focusFinalizeControl(el.submit);
@@ -2420,22 +2701,9 @@ function wireStaticControls() {
   }
 
   if (el.commitGate) {
-    el.commitGate.querySelectorAll("[data-gate]").forEach((btn) => {
-      btn.addEventListener("click", () => resolveCommitGate(btn.getAttribute("data-gate")));
-    });
-    const onBackdrop = (ev) => {
-      ev.preventDefault();
-      cancelCommitGateFromOutside();
-    };
-    if (el.commitGateBackdrop) {
-      el.commitGateBackdrop.addEventListener("mousedown", onBackdrop);
-      el.commitGateBackdrop.addEventListener("click", onBackdrop);
-    }
-    el.commitGate.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        cancelCommitGateFromOutside();
-      }
+    wireCommitGateChrome(commitGateEls(), {
+      onResolveChoice: (choice) => resolveCommitGate(choice),
+      onCancelOutside: () => cancelCommitGateFromOutside(),
     });
   }
 
@@ -2469,7 +2737,7 @@ function wireStaticControls() {
           normalizeEditableText(supInp && supInp.value)
         ),
         editable: editable(),
-        modalAlreadyOpen: sourceModalOpen,
+        modalAlreadyOpen: sourceModalOpenRef.current,
       });
       if (!decision.open) {
         setStatus(
@@ -2480,21 +2748,24 @@ function wireStaticControls() {
         );
         return;
       }
-      openSourcePicker();
+      openSourcePicker(undefined, { trigger: "toolbar" });
     };
   }
 
-  document.getElementById("btn-retry").onclick = async () => {
-    if (!api || !api.retryLoad) return;
-    setStatus(`Retrying Vanilla ${docTitle()} load…`);
-    await api.retryLoad();
-  };
+  const btnRetry = el.retry;
+  if (btnRetry) {
+    btnRetry.onclick = async () => {
+      if (!api || !api.retryLoad) return;
+      setStatus(`Retrying Vanilla ${docTitle()} load…`);
+      await api.retryLoad();
+    };
+  }
 
-  el.save.onclick = () => doSave(false);
-  el.submit.onclick = () => doSave(true);
+  if (el.save) el.save.onclick = () => doSave(false);
+  if (el.submit) el.submit.onclick = () => doSave(true);
 
   if (el.taxAccount) {
-    mountLinkPicker(el.taxAccount, "Account", async (v) => {
+    mountDocLinkPicker(el.taxAccount, "Account", async (v) => {
       el.taxAccount.value = v;
     });
   }
@@ -2537,11 +2808,30 @@ function wireStaticControls() {
     }
   };
 
+  wireItemImportButton({
+    button: el.importItems,
+    getItemCols: () => (ui ? ui.itemCols : []),
+    getApi: () => api,
+    isEditable: () => editable(),
+    getCurrentRowCount: () =>
+      lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0,
+    onApplied: (result) => {
+      noteUserEdit();
+      if (result.scratch) scratch = result.scratch;
+      paint(result.doc || lastDoc, result.scratch || scratch);
+    },
+    setStatus,
+    testId: "doc-import",
+  });
+
   if (el.attach) el.attach.onclick = () => attachFileAction();
   if (el.attachToolbar) el.attachToolbar.onclick = () => attachFileAction();
 
   if (el.memo) {
     el.memo.addEventListener("change", () => onHeaderBlur(el.memo));
+  }
+  if (el.termsText) {
+    el.termsText.addEventListener("change", () => onHeaderBlur(el.termsText));
   }
 }
 
@@ -2562,12 +2852,22 @@ async function ensureUiConfig() {
   return true;
 }
 
-async function boot() {
+export async function bootDocFormPage(injectedApi) {
+  api = injectedApi;
+  el = buildDocFormEl();
   if (!api) {
     setStatus("Doc API unavailable — preload missing.", "err");
     return;
   }
   wireStaticControls();
+
+  docCapsUi = wireDocCapsUi({
+    capsButton: el.caps,
+    getCapsOn: () => docCapsOn,
+    setCapsOn: (v) => {
+      docCapsOn = v;
+    },
+  });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");
   // Profile is null until main sets activeDocSkin; apply on first snapshot / refresh.
@@ -2610,6 +2910,5 @@ async function boot() {
 
   // Don't refresh until a skin is active — getSnapshot would fail with no profile.
   if (ui) await refresh();
+  installFocusRing();
 }
-
-boot();

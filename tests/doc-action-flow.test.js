@@ -13,13 +13,20 @@ describe("doc-action-flow", () => {
   it("listDocFormSaveBlockers — no Amount Due checksum", () => {
     assert.deepEqual(listDocFormSaveBlockers({}), [
       "Vendor (Supplier) is required.",
-      "At least one Item line is required.",
+      "At least one Item line with an Item code is required.",
     ]);
     const blockers = listDocFormSaveBlockers({
       supplier: "ACME",
       doc: { items: [{ item_code: "X" }] },
     });
     assert.equal(blockers.length, 0);
+    assert.deepEqual(
+      listDocFormSaveBlockers({
+        supplier: "ACME",
+        doc: { items: [{ item_code: "" }] },
+      }),
+      ["At least one Item line with an Item code is required."],
+    );
   });
 
   it("docGateTriggerLabel uses UI labels", () => {
@@ -40,6 +47,10 @@ describe("doc-action-flow", () => {
     assert.equal(
       linkDoctypeForDocField("supplier", PO_HEADER_FIELDS, PO_ITEM_COLS),
       "Supplier",
+    );
+    assert.equal(
+      linkDoctypeForDocField("payment_terms_template", PO_HEADER_FIELDS, PO_ITEM_COLS),
+      "Payment Terms Template",
     );
     assert.equal(
       linkDoctypeForDocField("sales_order", PO_HEADER_FIELDS, PO_ITEM_COLS),

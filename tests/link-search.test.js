@@ -8,7 +8,10 @@ import {
   linkDoctypeForBillField,
   withEmptySearchActions,
   isCreateSupplierLinkAction,
+  isCreatePaymentTermsLinkAction,
   LINK_ACTION_CREATE_SUPPLIER,
+  LINK_ACTION_CREATE_PAYMENT_TERMS,
+  PAYMENT_TERMS_TEMPLATE_DOCTYPE,
 } from "../src/link-search.js";
 
 describe("normalizeSearchLinkResults", () => {
@@ -87,9 +90,18 @@ describe("withEmptySearchActions", () => {
     assert.equal(isCreateSupplierLinkAction(out[0]), true);
   });
 
+  it("always offers Create new Payment Terms (even when templates exist)", () => {
+    const rows = [{ value: "Net 30", description: "Net 30" }];
+    const out = withEmptySearchActions(rows, PAYMENT_TERMS_TEMPLATE_DOCTYPE);
+    assert.equal(out.length, 2);
+    assert.equal(out[1].value, LINK_ACTION_CREATE_PAYMENT_TERMS);
+    assert.equal(isCreatePaymentTermsLinkAction(out[1]), true);
+    assert.equal(withEmptySearchActions([], PAYMENT_TERMS_TEMPLATE_DOCTYPE).length, 1);
+  });
+
   it("leaves non-empty and other doctypes alone", () => {
     const rows = [{ value: "A", description: "A" }];
-    assert.equal(withEmptySearchActions(rows, "Supplier"), rows);
+    assert.deepEqual(withEmptySearchActions(rows, "Supplier"), rows);
     assert.deepEqual(withEmptySearchActions([], "Item"), []);
   });
 });

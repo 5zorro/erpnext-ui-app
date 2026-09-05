@@ -62,7 +62,7 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
     company = _resolve_company()
     _assert_sandbox(company)
 
-    tag = plan.get("tag") or "ui-app-sample-v1"
+    tag = plan.get("tag") or "ui-app-sample-v2"
     as_of = as_of or plan.get("asOf") or nowdate()
     warehouse = _default_warehouse(company)
 
@@ -420,7 +420,10 @@ def _ensure_masters(
         name = p["name"]
         cust_key = p.get("customerKey")
         customer = out["customers"].get(cust_key) if cust_key else None
-        if not frappe.db.exists("Project", name):
+        erp_name = frappe.db.get_value("Project", {"project_name": name}, "name")
+        if not erp_name and frappe.db.exists("Project", name):
+            erp_name = name
+        if not erp_name:
             doc = frappe.get_doc(
                 {
                     "doctype": "Project",
@@ -430,12 +433,13 @@ def _ensure_masters(
                 }
             )
             doc.insert(ignore_permissions=True)
+            erp_name = doc.name
         else:
-            doc = frappe.get_doc("Project", name)
+            doc = frappe.get_doc("Project", erp_name)
             if customer and doc.customer != customer:
                 doc.customer = customer
                 doc.save(ignore_permissions=True)
-        out["projects"][p["key"]] = name
+        out["projects"][p["key"]] = erp_name
 
     frappe.db.commit()
     # Stash template on party_map via side channel for _create_one
@@ -530,7 +534,7 @@ def _create_one(
 
     source = spec.get("source")
     if source:
-        src_key = _plan_key(source["kind"], source["index"])
+        src_key = source.get("key") or _plan_key(source["kind"], source["index"])
         src_name = name_map.get(src_key)
         if not src_name:
             raise frappe.ValidationError(f"{key}: missing source {src_key} in name_map")
@@ -541,26 +545,48 @@ def _create_one(
     _apply_tag_fields(doc, tag, key)
     _apply_doc_taxes(doc, kind, spec, party_map)
     if kind == "purchase_invoice":
-        _normalize_pi_dates(doc, posting)
+        _normalize_pi_dates(doc, posting, spec)
     doc.flags.ignore_permissions = True
     doc.insert()
     if cint(spec.get("asDraft")):
         print(f"created draft {doc.doctype} {doc.name} ({key})")
         return doc.name
     doc.submit()
+    if kind == "purchase_order" and spec.get("advancePayment") and not cint(spec.get("asDraft")):
+        _try_advance_against_po(doc, spec, tag, posting)
     print(f"created {doc.doctype} {doc.name} ({key}) source={source}")
     return doc.name
 
 
-def _normalize_pi_dates(doc, posting: str) -> None:
-    """Keep bill_date / due_date / schedule coherent after map-from-source (seed only)."""
+def _normalize_pi_dates(doc, posting: str, spec: dict) -> None:
+    """Keep bill_date / due_date / schedule coherent after map-from-source (seed only).
+
+    OI-161 Packet G: a spec carrying an explicit `paymentSchedule` (dueDate/amount pairs, already
+    resolved to calendar dates by emit-plan.js) gets those rows instead of the flat 30-day flatten —
+    every other Bill keeps today's behavior byte-for-byte.
+    """
     doc.posting_date = posting
     if hasattr(doc, "set_posting_time"):
         doc.set_posting_time = 1
     doc.bill_date = posting
-    doc.due_date = add_days(getdate(posting), 30)
-    if hasattr(doc, "payment_schedule"):
+    schedule = spec.get("paymentSchedule")
+    if schedule and hasattr(doc, "payment_schedule"):
         doc.set("payment_schedule", [])
+        for row in schedule:
+            doc.append(
+                "payment_schedule",
+                {
+                    "due_date": row["dueDate"],
+                    "invoice_portion": 0,
+                    "payment_amount": row["amount"],
+                    "outstanding": row["amount"],
+                },
+            )
+        doc.due_date = schedule[-1]["dueDate"]
+    else:
+        doc.due_date = add_days(getdate(posting), 30)
+        if hasattr(doc, "payment_schedule"):
+            doc.set("payment_schedule", [])
 
 
 def _apply_doc_taxes(doc, kind: str, spec: dict, party_map: dict) -> None:
@@ -663,11 +689,23 @@ def _map_from_source(
 
     _stamp_dates(doc, kind, posting)
     _apply_tag_fields(doc, tag, key)
+    if spec.get("logbookPoNo") and kind == "purchase_order":
+        doc.title = str(spec["logbookPoNo"])
     if hasattr(doc, "set_warehouse") and not doc.set_warehouse:
         doc.set_warehouse = warehouse
     for row in doc.get("items") or []:
         if hasattr(row, "warehouse") and not row.warehouse:
             row.warehouse = warehouse
+    partial = spec.get("partialReceive") or []
+    for adj in partial:
+        idx = cint(adj.get("lineIndex", 0))
+        if 0 <= idx < len(doc.items or []):
+            doc.items[idx].qty = flt(adj.get("qty"))
+    if partial:
+        try:
+            doc.run_method("calculate_taxes_and_totals")
+        except Exception:
+            pass
     # Defence: never post a mapped child before its source document date
     src_dt = _doctype(source_kind)
     src_date_field = (
@@ -780,6 +818,8 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
     else:
         raise frappe.ValidationError(f"Unknown kind {kind}")
     _apply_tag_fields(doc, tag, spec["key"])
+    if spec.get("logbookPoNo") and kind == "purchase_order":
+        doc.title = str(spec["logbookPoNo"])
     return doc
 
 
@@ -807,9 +847,74 @@ def _stamp_dates(doc, kind: str, posting: str) -> None:
         doc.due_date = add_days(posting, 30)
 
 
+def _resolve_bank_account(company: str) -> str:
+    for account_type in ("Bank", "Cash"):
+        acct = frappe.db.get_value(
+            "Account",
+            {"company": company, "account_type": account_type, "is_group": 0},
+            "name",
+        )
+        if acct:
+            return acct
+    acct = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_type": ("in", ("Bank", "Cash")), "is_group": 0},
+        "name",
+    )
+    if not acct:
+        raise frappe.ValidationError(f"No Bank/Cash account for {company} (OI-153 advance PE)")
+    return acct
+
+
+def _try_advance_against_po(po_doc, spec: dict, tag: str, posting: str) -> str | None:
+    """OI-153: best-effort advance PE; clerk can create manually if site rejects allocation."""
+    adv = spec.get("advancePayment") or {}
+    amount = flt(adv.get("amount"))
+    if amount <= 0 or adv.get("manual"):
+        print(f"advance PE skipped (manual dogfood) for {spec.get('key')} amount={amount}")
+        return None
+    try:
+        return _create_advance_against_po(po_doc, spec, tag, posting)
+    except Exception as exc:  # pragma: no cover - ERPNext version variance
+        print(f"warn: advance PE for {spec.get('key')} failed ({exc}); create PE Pay manually in dogfood")
+        return None
+
+
+def _create_advance_against_po(po_doc, spec: dict, tag: str, posting: str) -> str | None:
+    """OI-153: supplier advance against submitted PO (Payment Entry, Pay)."""
+    adv = spec.get("advancePayment") or {}
+    amount = flt(adv.get("amount"))
+    if amount <= 0:
+        return None
+    pe_key = adv.get("key") or f"ADV-{spec.get('key', po_doc.name)}"
+    existing = _find_existing("Payment Entry", tag, pe_key)
+    if existing:
+        print(f"skip existing Payment Entry {existing} ({pe_key})")
+        return existing
+
+    from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+    pe = get_payment_entry("Purchase Order", po_doc.name, party_amount=amount)
+    pe.posting_date = posting
+    pe.set_posting_time = 1
+    pe.paid_amount = amount
+    pe.received_amount = amount
+    if pe.get("references"):
+        for row in pe.references:
+            if row.reference_doctype == "Purchase Order" and row.reference_name == po_doc.name:
+                row.allocated_amount = amount
+    _apply_tag_fields(pe, tag, pe_key)
+    pe.flags.ignore_permissions = True
+    pe.insert()
+    pe.submit()
+    print(f"created Payment Entry {pe.name} advance {amount} → PO {po_doc.name} ({pe_key})")
+    return pe.name
+
+
 def _reset_tagged(tag: str) -> int:
     """Cancel+delete sample docs tagged via title/remarks (children before parents)."""
     doctypes = [
+        "Payment Entry",
         "Purchase Invoice",
         "Purchase Receipt",
         "Purchase Order",

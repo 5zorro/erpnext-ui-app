@@ -127,6 +127,7 @@ export function shouldLeaveItemTableBackward(dest, direction) {
  *   valueLength?: number|null,
  *   linkDropdownOpen?: boolean,
  *   calcActive?: boolean,
+ *   verticalArrowsAlwaysNav?: boolean,
  * }} state
  * @returns {ItemTableKeyDecision}
  */
@@ -150,6 +151,17 @@ export function itemTableKeyDecision(state) {
       action: "tab",
       mode: CELL_MODE_NAV,
       direction: state.shiftKey ? "left" : "right",
+      preventDefault: true,
+      selectAll: true,
+    };
+  }
+
+  // Qty: no native spinner; ↑/↓ are navigation only (type exact qty on the 10-key).
+  if (state.verticalArrowsAlwaysNav && (key === "ArrowUp" || key === "ArrowDown")) {
+    return {
+      action: mode === CELL_MODE_EDIT ? "leave_edit_move" : "move",
+      mode: CELL_MODE_NAV,
+      direction: key === "ArrowUp" ? "up" : "down",
       preventDefault: true,
       selectAll: true,
     };

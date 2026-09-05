@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  shouldOpenSourceModalAfterVendorPick,
   focusTargetAfterSourceModal,
   mergeMethodForSourceKind,
   BILL_MERGE_SKIP_FIELDS,
@@ -12,84 +11,12 @@ import {
 } from "../src/bill-source-flow.js";
 import { valuesMeaningfullyEqual } from "../src/dirty-gate.js";
 
-describe("shouldOpenSourceModalAfterVendorPick", () => {
-  it("opens on link_pick even if setHeader not finished (approach A)", () => {
-    const r = shouldOpenSourceModalAfterVendorPick({
-      trigger: "link_pick",
-      hasSupplier: true,
-      editable: true,
-      setHeaderOk: null,
-    });
-    assert.equal(r.open, true);
-    assert.equal(r.reason, "vendor_link_pick");
-  });
-
-  it("opens on toolbar when supplier set", () => {
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "toolbar",
-        hasSupplier: true,
-        editable: true,
-      }).open,
-      true,
-    );
-  });
-
-  it("refuses without supplier, when not editable, or modal open", () => {
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "link_pick",
-        hasSupplier: false,
-        editable: true,
-      }).reason,
-      "no_supplier",
-    );
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "link_pick",
-        hasSupplier: true,
-        editable: false,
-      }).reason,
-      "not_editable",
-    );
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "link_pick",
-        hasSupplier: true,
-        editable: true,
-        modalAlreadyOpen: true,
-      }).reason,
-      "modal_already_open",
-    );
-  });
-
-  it("blur: skips noop; opens on successful commit", () => {
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "blur",
-        hasSupplier: true,
-        editable: true,
-        setHeaderSkipped: true,
-      }).open,
-      false,
-    );
-    assert.equal(
-      shouldOpenSourceModalAfterVendorPick({
-        trigger: "blur",
-        hasSupplier: true,
-        editable: true,
-        setHeaderOk: true,
-      }).open,
-      true,
-    );
-  });
-});
-
 describe("focusTargetAfterSourceModal", () => {
-  it("Terms after choose; none on cancel/esc", () => {
-    assert.equal(focusTargetAfterSourceModal("choose"), "terms");
-    assert.equal(focusTargetAfterSourceModal("cancel"), "none");
-    assert.equal(focusTargetAfterSourceModal("escape"), "none");
+  it("Invoice date after any close (choose, cancel, esc, backdrop)", () => {
+    assert.equal(focusTargetAfterSourceModal("choose"), "invoice_date");
+    assert.equal(focusTargetAfterSourceModal("cancel"), "invoice_date");
+    assert.equal(focusTargetAfterSourceModal("escape"), "invoice_date");
+    assert.equal(focusTargetAfterSourceModal("backdrop"), "invoice_date");
   });
 });
 

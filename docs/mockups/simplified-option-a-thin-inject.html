@@ -1,0 +1,671 @@
+<title>Simplified A — Thin Inject</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* ── Frappe ERP design tokens ───────────────────────────────── */
+:root {
+  --bg:         #f0f4f7;
+  --card:       #ffffff;
+  --border:     #d1d5da;
+  --txt:        #292929;
+  --muted:      #8d99a6;
+  --ctrl-bg:    #f7fafc;
+  --ctrl-bdr:   #cfd6de;
+  --primary:    #2490ef;
+  --primary-dk: #1a7bcf;
+  --sec-head:   #f5f7fa;
+  /* injection accent (Option A) */
+  --inj:        #d97706;
+  --inj-bg:     #fffbeb;
+  --inj-bdr:    #fbbf24;
+  /* assumption states */
+  --l2-txt:     #b0bec5;
+  --l2-bg:      #fafbfc;
+  --l2-bdr:     #e2e8f0;
+  /* picker affordance */
+  --pick:       #16a34a;
+  --pick-bg:    #f0fdf4;
+  /* meta chrome */
+  --meta-bg:    #1e293b;
+  --meta-txt:   #94a3b8;
+  --meta-hi:    #e2e8f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151c2b; --card: #1e2535; --border: #2d3748;
+    --txt: #e2e8f0; --muted: #64748b; --ctrl-bg: #1a2133;
+    --ctrl-bdr: #374151; --sec-head: #1a2133;
+    --l2-txt: #4a5568; --l2-bg: #171e2d; --l2-bdr: #2d3748;
+    --inj-bg: #1c1505; --pick-bg: #052e16;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151c2b; --card: #1e2535; --border: #2d3748;
+  --txt: #e2e8f0; --muted: #64748b; --ctrl-bg: #1a2133;
+  --ctrl-bdr: #374151; --sec-head: #1a2133;
+  --l2-txt: #4a5568; --l2-bg: #171e2d; --l2-bdr: #2d3748;
+  --inj-bg: #1c1505; --pick-bg: #052e16;
+}
+
+/* ── Reset / base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--txt); }
+button { font: inherit; cursor: pointer; }
+input, select, textarea { font: inherit; }
+
+/* ── Architecture banner ──────────────────────────────────── */
+.arch-strip {
+  background: var(--meta-bg); color: var(--meta-txt);
+  font: 500 11px/36px Inter, sans-serif; padding: 0 18px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.arch-strip .lbl { color: var(--meta-hi); font-weight: 600; }
+.arch-badge {
+  background: var(--inj); color: #fff; border-radius: 3px;
+  font-size: 10px; padding: 1px 7px; letter-spacing: .5px; font-weight: 700;
+  text-transform: uppercase;
+}
+.not-wired {
+  background: var(--inj-bg); border-bottom: 1px solid var(--inj-bdr);
+  font: 11px/28px Inter, sans-serif; color: #92400e;
+  padding: 0 18px; display: flex; gap: 6px; align-items: center;
+}
+
+/* ── Page head (Frappe) ───────────────────────────────────── */
+.page-head {
+  background: var(--card); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20;
+  height: 48px; display: flex; align-items: center; gap: 0;
+  padding: 0;
+}
+.ph-left {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; flex: 1; min-width: 0;
+}
+.breadcrumb { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.breadcrumb a { color: var(--muted); text-decoration: none; }
+.breadcrumb a:hover { color: var(--primary); }
+.sep { margin: 0 4px; }
+.doc-title {
+  font: 600 14px/1 "Segoe UI", sans-serif; color: var(--txt);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.status-pill {
+  font: 11px/18px "Segoe UI", sans-serif; padding: 0 8px;
+  border-radius: 10px; border: 1px solid; white-space: nowrap;
+}
+.pill-draft { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+.ph-right {
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+  flex-shrink: 0;
+}
+.btn { border: 1px solid var(--border); background: var(--card); color: var(--txt); border-radius: 5px; padding: 5px 10px; font-size: 12px; }
+.btn:hover { background: var(--ctrl-bg); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.btn-primary:hover { background: var(--primary-dk); border-color: var(--primary-dk); }
+
+/* Toggle (Simplified / All fields) — injected by shell */
+.mode-toggle {
+  display: flex; border: 1.5px solid var(--inj); border-radius: 5px; overflow: hidden;
+  font-size: 11px; flex-shrink: 0;
+}
+.mode-toggle button {
+  border: none; background: transparent; padding: 5px 10px;
+  color: var(--inj); font-weight: 600; line-height: 1;
+}
+.mode-toggle button.active { background: var(--inj); color: #fff; }
+/* small injected label */
+.inj-mark { font-size: 9px; color: var(--inj); font-style: italic; letter-spacing: .3px; }
+
+/* ── Tabs (Frappe) ────────────────────────────────────────── */
+.form-tabs-list {
+  background: var(--card); border-bottom: 1px solid var(--border);
+  display: flex; gap: 0; padding: 0 16px; overflow-x: auto;
+}
+.tab-btn {
+  border: none; background: transparent; padding: 10px 14px;
+  font-size: 13px; color: var(--muted); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  white-space: nowrap;
+}
+.tab-btn:hover { color: var(--txt); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+/* ── Main layout ──────────────────────────────────────────── */
+.layout-main { padding: 18px 16px 48px; max-width: 1100px; margin: 0 auto; }
+.layout-main-section {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden;
+}
+
+/* ── Form sections ────────────────────────────────────────── */
+.form-section { padding: 0 18px; }
+.form-section + .form-section { border-top: 1px solid var(--border); }
+.section-head {
+  font: 500 11px/1 Inter, sans-serif; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); padding: 14px 0 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-body { display: flex; flex-wrap: wrap; gap: 0; padding-bottom: 14px; }
+.frappe-control {
+  flex: 0 0 33.33%; padding: 6px 12px 6px 0;
+  min-width: 0;
+}
+.frappe-control.half { flex: 0 0 50%; }
+.frappe-control.full { flex: 0 0 100%; }
+.control-label {
+  font-size: 11px; color: var(--muted); margin-bottom: 3px;
+  display: flex; align-items: center; gap: 5px;
+}
+.reqd { color: #e53e3e; }
+.form-control {
+  width: 100%; border: 1px solid var(--ctrl-bdr); border-radius: 5px;
+  background: var(--ctrl-bg); color: var(--txt);
+  padding: 6px 8px; font-size: 13px; outline: none;
+  transition: border-color 120ms;
+}
+.form-control:focus { border-color: var(--primary); }
+.field-row { display: flex; gap: 5px; align-items: center; }
+.field-row .form-control { flex: 1; }
+
+/* Picker button (added affordance — injection) */
+.pick-btn {
+  flex-shrink: 0; border: 1.5px solid var(--inj-bdr); background: var(--inj-bg);
+  color: var(--inj); border-radius: 4px; padding: 5px 9px; font-size: 12px;
+  white-space: nowrap; font-weight: 600;
+}
+.pick-btn:hover { background: var(--inj); color: #fff; }
+
+/* ── Assumption states ────────────────────────────────────── */
+/* L1: pre-filled, tab-skipped — looks almost normal but label gets a small dot */
+.l1 .control-label::after { content: " ·"; color: var(--inj); font-weight: 700; }
+/* L2: quiet and locked */
+.l2 .control-label { color: var(--l2-txt); }
+.l2 .form-control { color: var(--l2-txt); background: var(--l2-bg); border-color: var(--l2-bdr); cursor: default; }
+.l2 .field-desc { font-size: 10px; color: var(--l2-txt); font-style: italic; margin-top: 2px; }
+/* L3: hidden */
+.l3 { display: none; }
+
+/* All-fields mode (override) */
+body.all-fields .l1 .control-label::after { content: ""; }
+body.all-fields .l2 .control-label { color: var(--muted); }
+body.all-fields .l2 .form-control { color: var(--txt); background: var(--ctrl-bg); border-color: var(--ctrl-bdr); cursor: text; }
+body.all-fields .l2 .field-desc { display: none; }
+body.all-fields .l3 { display: block; }
+
+/* ── Items table ──────────────────────────────────────────── */
+.items-wrap { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
+table.items-grid { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 700px; }
+.items-grid th { background: var(--sec-head); font: 500 11px/1 Inter, sans-serif; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); padding: 7px 6px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.items-grid td { padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.items-grid tr:last-child td { border-bottom: none; }
+.items-grid td input { width: 100%; border: 1px solid transparent; background: transparent; color: var(--txt); padding: 3px 4px; border-radius: 3px; }
+.items-grid td input:focus { border-color: var(--ctrl-bdr); background: var(--card); outline: none; }
+.items-grid .num { text-align: right; }
+.items-grid .num input { text-align: right; }
+/* dimmed columns (L2 equivalent in table) */
+.col-dim th, .col-dim td { color: var(--l2-txt); }
+body.all-fields .col-dim th, body.all-fields .col-dim td { color: inherit; }
+.items-pick { border: 1.5px solid var(--inj-bdr); background: var(--inj-bg); color: var(--inj); border-radius: 3px; padding: 2px 6px; font-size: 11px; white-space: nowrap; font-weight: 600; }
+.items-pick:hover { background: var(--inj); color: #fff; }
+.add-row-btn { border: 1px dashed var(--border); background: transparent; color: var(--muted); padding: 7px 12px; border-radius: 4px; font-size: 12px; margin-top: 8px; }
+.add-row-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+/* ── Money stack ──────────────────────────────────────────── */
+.money-stack { max-width: 300px; margin-left: auto; margin-top: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.money-row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.money-row:last-child { border-bottom: none; font-weight: 700; font-size: 14px; background: var(--sec-head); }
+.money-row .amt { font-variant-numeric: tabular-nums; }
+
+/* ── Floating ⚙ Assumptions button ───────────────────────── */
+.ss-aff {
+  position: fixed; right: 20px; bottom: 20px; z-index: 100;
+  background: var(--inj); color: #fff; border: none; border-radius: 20px;
+  padding: 9px 16px; font: 600 12px/1 Inter, sans-serif;
+  box-shadow: 0 3px 12px rgba(0,0,0,.25); letter-spacing: .3px;
+  transition: background 150ms;
+}
+.ss-aff:hover { background: #b45309; }
+
+/* ── Assumptions modal ────────────────────────────────────── */
+.modal-back {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.45); align-items: center; justify-content: center;
+}
+.modal-back.open { display: flex; }
+.modal-box {
+  background: var(--card); width: 860px; max-width: 96vw; max-height: 86vh;
+  border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; font-family: Inter, "Segoe UI", sans-serif;
+}
+.modal-head {
+  background: var(--meta-bg); color: var(--meta-hi);
+  padding: 12px 18px; border-radius: 8px 8px 0 0;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-head h3 { margin: 0; font: 600 14px/1 Inter, sans-serif; }
+.modal-head .close-btn { background: none; border: none; color: var(--meta-txt); font-size: 18px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.modal-body { overflow-y: auto; padding: 14px 18px; flex: 1; }
+.legend-box {
+  background: var(--ctrl-bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 9px 12px; font-size: 11px; color: var(--txt);
+  margin-bottom: 12px; line-height: 1.7;
+}
+.legend-box b { color: var(--primary); }
+.field-row-m {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.field-row-m:last-child { border-bottom: none; }
+.f-label { flex: 0 0 160px; font: 600 12px/1 Inter, sans-serif; color: var(--txt); }
+.f-value { flex: 1 1 160px; }
+.f-value input, .f-value select {
+  border: 1px solid var(--ctrl-bdr); border-radius: 4px; padding: 5px 7px;
+  background: var(--ctrl-bg); color: var(--txt); width: 100%; font: 12px Inter, sans-serif;
+}
+.f-radios { display: flex; gap: 12px; flex-wrap: wrap; flex: 0 0 auto; }
+.f-radio { display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; color: var(--txt); white-space: nowrap; }
+.f-radio input[type=radio] { accent-color: var(--inj); }
+.modal-foot {
+  padding: 10px 18px; border-top: 1px solid var(--border);
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.btn-apply { background: var(--inj); border: none; color: #fff; border-radius: 5px; padding: 7px 16px; font: 600 12px Inter, sans-serif; }
+.btn-apply:hover { background: #b45309; }
+.btn-close-m { background: var(--ctrl-bg); border: 1px solid var(--border); color: var(--muted); border-radius: 5px; padding: 7px 16px; font: 500 12px Inter, sans-serif; }
+
+/* ── Decision table ───────────────────────────────────────── */
+.dec-section {
+  max-width: 1100px; margin: 24px auto 0; padding: 0 16px 48px;
+  font-family: Inter, "Segoe UI", sans-serif;
+}
+.dec-section h2 { font: 600 16px/1 Inter, sans-serif; color: var(--txt); margin: 0 0 10px; }
+.dec-table { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.dec-table th { background: var(--meta-bg); color: var(--meta-hi); font: 600 11px/1 Inter, sans-serif; padding: 9px 12px; text-align: left; letter-spacing: .3px; text-transform: uppercase; }
+.dec-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--txt); }
+.dec-table tr:last-child td { border-bottom: none; }
+.dec-table td:first-child { font-weight: 600; color: var(--muted); width: 180px; }
+.good { color: #16a34a; }
+.bad { color: #dc2626; }
+.note { color: var(--muted); font-style: italic; }
+</style>
+
+<!-- ── Architecture banner ────────────────────────────────── -->
+<div class="arch-strip">
+  <span class="lbl">Option A</span>
+  <span class="arch-badge">Inject</span>
+  <span>Form body: live Vanilla WebContents — shell injects assumption CSS + JS into Frappe's DOM</span>
+  <span class="inj-mark">· amber = shell-injected affordances</span>
+</div>
+<div class="not-wired">
+  ⚠ Static mockup — not wired to ERP. Open via <code>home.html → Simplified mockup A</code>.
+</div>
+
+<!-- ── Page head ──────────────────────────────────────────── -->
+<div class="page-head">
+  <div class="ph-left">
+    <span class="breadcrumb">
+      <a href="#">Buying</a><span class="sep">›</span>
+      <a href="#">Purchase Invoice</a><span class="sep">›</span>
+      <span>ACC-PINV-2026-00091</span>
+    </span>
+    <span class="doc-title">ACC-PINV-2026-00091</span>
+    <span class="status-pill pill-draft">● Draft</span>
+  </div>
+  <div class="ph-right">
+    <!-- Injected toggle -->
+    <div class="mode-toggle" title="Injected by shell">
+      <button id="btn-simplified" class="active" onclick="setMode('simplified')">◈ Simplified</button>
+      <button id="btn-all" onclick="setMode('all')">All fields</button>
+    </div>
+    <button class="btn">⋮ Menu</button>
+    <button class="btn">Save</button>
+    <button class="btn btn-primary">Submit</button>
+  </div>
+</div>
+
+<!-- ── Tabs ───────────────────────────────────────────────── -->
+<div class="form-tabs-list">
+  <button class="tab-btn active">Details</button>
+  <button class="tab-btn">Connections</button>
+  <button class="tab-btn">More Info</button>
+  <button class="tab-btn">Terms</button>
+</div>
+
+<!-- ── Form card ──────────────────────────────────────────── -->
+<div class="layout-main">
+  <div class="layout-main-section">
+
+    <!-- Supplier section -->
+    <div class="form-section">
+      <div class="section-head">Supplier Details</div>
+      <div class="section-body">
+
+        <!-- L3 (hidden in simplified) -->
+        <div class="frappe-control l3" data-field="naming_series">
+          <div class="control-label">Naming Series</div>
+          <select class="form-control"><option>ACC-PINV-.YYYY.-</option></select>
+        </div>
+
+        <!-- Supplier — vanilla + injected picker -->
+        <div class="frappe-control">
+          <div class="control-label">Supplier <span class="reqd">*</span></div>
+          <div class="field-row">
+            <input class="form-control" value="Acme Suppliers Pvt. Ltd." readonly>
+            <button class="pick-btn" title="Shell-injected vendor picker">▾ search</button>
+          </div>
+        </div>
+
+        <!-- Invoice No — vanilla -->
+        <div class="frappe-control">
+          <div class="control-label">Invoice No.</div>
+          <input class="form-control" value="ACME-2026-0391">
+        </div>
+
+        <!-- Invoice Date — vanilla -->
+        <div class="frappe-control">
+          <div class="control-label">Invoice Date <span class="reqd">*</span></div>
+          <input class="form-control" type="date" value="2026-09-02">
+        </div>
+
+        <!-- Company — L2 -->
+        <div class="frappe-control l2" data-field="company">
+          <div class="control-label">Company</div>
+          <input class="form-control" value="ZORRO Enterprises" readonly>
+          <div class="field-desc">Set as a standing assumption — ⚙ Assumptions to change</div>
+        </div>
+
+        <!-- Posting Date — L1 -->
+        <div class="frappe-control l1" data-field="posting_date">
+          <div class="control-label">Posting Date</div>
+          <input class="form-control" value="2026-09-02">
+        </div>
+
+        <!-- Due Date — L1 -->
+        <div class="frappe-control l1" data-field="due_date">
+          <div class="control-label">Payment Due</div>
+          <input class="form-control" value="2026-10-02">
+        </div>
+
+        <!-- L3 hidden in simplified -->
+        <div class="frappe-control l3" data-field="currency">
+          <div class="control-label">Currency</div>
+          <select class="form-control"><option>INR</option></select>
+        </div>
+        <div class="frappe-control l3" data-field="conversion_rate">
+          <div class="control-label">Conversion Rate</div>
+          <input class="form-control" value="1.0">
+        </div>
+        <div class="frappe-control l3" data-field="buying_price_list">
+          <div class="control-label">Buying Price List</div>
+          <input class="form-control" value="Standard Buying">
+        </div>
+
+        <!-- Set Warehouse — L2 -->
+        <div class="frappe-control l2" data-field="set_warehouse">
+          <div class="control-label">Set Warehouse</div>
+          <input class="form-control" value="Main Warehouse" readonly>
+          <div class="field-desc">Set as a standing assumption</div>
+        </div>
+
+      </div><!-- /section-body -->
+    </div><!-- /supplier section -->
+
+    <!-- Items section -->
+    <div class="form-section">
+      <div class="section-head">Items</div>
+      <div class="section-body full" style="flex-direction:column; padding-bottom:14px;">
+        <div class="items-wrap">
+          <table class="items-grid">
+            <colgroup>
+              <col style="width:30px">
+              <col style="width:220px">
+              <col style="width:180px">
+              <col style="width:60px">
+              <col style="width:90px">
+              <col style="width:100px">
+              <col class="col-dim" style="width:130px">
+              <col class="col-dim" style="width:60px">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item Code</th>
+                <th>Description</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th class="num">Amount</th>
+                <th class="col-dim">Warehouse</th>
+                <th class="col-dim">UOM</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td>
+                  <div class="field-row">
+                    <input value="BOLT-M8×25-SS" style="flex:1">
+                    <button class="items-pick">▾</button>
+                  </div>
+                </td>
+                <td><input value="Stainless hex bolt M8×25mm" style="width:100%"></td>
+                <td><input value="200" style="width:100%"></td>
+                <td><input value="4.50" style="width:100%"></td>
+                <td class="num"><input value="900.00"></td>
+                <td class="col-dim"><input value="Main Warehouse" style="width:100%"></td>
+                <td class="col-dim"><input value="Nos" style="width:100%"></td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td>
+                  <div class="field-row">
+                    <input value="NUT-M8-SS" style="flex:1">
+                    <button class="items-pick">▾</button>
+                  </div>
+                </td>
+                <td><input value="Stainless hex nut M8" style="width:100%"></td>
+                <td><input value="200" style="width:100%"></td>
+                <td><input value="2.10" style="width:100%"></td>
+                <td class="num"><input value="420.00"></td>
+                <td class="col-dim"><input value="Main Warehouse" style="width:100%"></td>
+                <td class="col-dim"><input value="Nos" style="width:100%"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button class="add-row-btn">+ Add Row</button>
+
+        <div class="money-stack">
+          <div class="money-row"><span>Item Total</span><span class="amt">₹ 1,320.00</span></div>
+          <div class="money-row"><span>Taxes (18% GST)</span><span class="amt">₹ 237.60</span></div>
+          <div class="money-row"><span>Grand Total</span><span class="amt">₹ 1,557.60</span></div>
+        </div>
+      </div>
+    </div><!-- /items section -->
+
+  </div><!-- /layout-main-section -->
+</div><!-- /layout-main -->
+
+<!-- ── Floating assumptions button (injected by shell) ─────── -->
+<button class="ss-aff" onclick="openModal()">⚙ Assumptions</button>
+
+<!-- ── Assumptions modal ──────────────────────────────────── -->
+<div class="modal-back" id="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>⚙ Assumptions — Purchase Invoice</h3>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="legend-box">
+        <b>Normal</b> — off (vanilla). &nbsp;
+        <b>Pre-fill · skip Tab</b> — filled; Tab skips it; still editable. &nbsp;
+        <b>Quiet &amp; locked</b> — filled, greyed, locked (click to edit once). &nbsp;
+        <b>Hidden</b> — filled, removed from form entirely.
+      </div>
+      <div id="modal-fields"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-close-m" onclick="closeModal()">Cancel</button>
+      <button class="btn-apply" onclick="applyModal()">Apply now</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Decision table ─────────────────────────────────────── -->
+<div class="dec-section">
+  <h2>Architecture comparison — Option A: Thin inject</h2>
+  <div style="overflow-x:auto;">
+    <table class="dec-table">
+      <thead>
+        <tr>
+          <th>Dimension</th>
+          <th>Option A — Thin inject over Vanilla WC</th>
+          <th>Option B — Shell HTML (ground-up)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>What runs in the WC</td>
+          <td>Live ERPNext Desk — Frappe renders the form</td>
+          <td>Shell-owned HTML — we render everything</td>
+        </tr>
+        <tr>
+          <td>How assumptions apply</td>
+          <td>Shell injects <code>assume.js</code> + <code>assume.css</code> via <code>executeJavaScript</code>; touches <code>cur_frm</code></td>
+          <td>Assumption engine runs in shell; fields rendered conditionally — no injection</td>
+        </tr>
+        <tr>
+          <td>DOM stability</td>
+          <td class="bad">Frappe re-renders (navigation, refresh_fields, after_save) strip injected classes and DOM nodes. Applier must re-fire on every render.</td>
+          <td class="good">We own the DOM. No re-render strips our state.</td>
+        </tr>
+        <tr>
+          <td>Vanilla field parity</td>
+          <td class="good">Free — Frappe renders all fields; we only suppress/decorate them.</td>
+          <td class="bad">Must manually port each Frappe field to our HTML. New ERP fields require a code change.</td>
+        </tr>
+        <tr>
+          <td>Added pickers / affordances</td>
+          <td>Injected as DOM siblings. Must survive Frappe re-renders or be re-injected.</td>
+          <td class="good">Native — live alongside our bill-map, erp-form-bridge, commit-gate.</td>
+        </tr>
+        <tr>
+          <td>Maintenance over time</td>
+          <td class="bad">Frappe DOM selectors and <code>cur_frm</code> API drift across versions. Every Frappe update is a regression risk for injected state.</td>
+          <td class="good">Stable contract: we change our HTML when we choose to, not when Frappe does.</td>
+        </tr>
+        <tr>
+          <td>Initial build cost</td>
+          <td class="good">Low — wire assume.js into the session; no form rebuild.</td>
+          <td class="bad">Higher — author PI fields in our HTML, wire erp-form-bridge.</td>
+        </tr>
+        <tr>
+          <td>Recommendation</td>
+          <td class="note">Good for a quick functional demo (P1). Long-term maintenance cost grows with Frappe version drift.</td>
+          <td class="note">Preferred for production: stable, composable, matches our existing Bill/PO/IR architecture exactly.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ── Field profile (persisted in localStorage) ──────────────────
+const LS_KEY = "simplified-a-profile";
+const FIELD_DEFS = [
+  { fieldname: "naming_series",      label: "Naming Series",     fieldtype: "Select",  defaultPlacement: "L3", defaultValue: "ACC-PINV-.YYYY.-" },
+  { fieldname: "company",            label: "Company",           fieldtype: "Data",    defaultPlacement: "L2", defaultValue: "ZORRO Enterprises" },
+  { fieldname: "currency",           label: "Currency",          fieldtype: "Select",  defaultPlacement: "L3", defaultValue: "INR" },
+  { fieldname: "conversion_rate",    label: "Conversion Rate",   fieldtype: "Float",   defaultPlacement: "L3", defaultValue: "1.0" },
+  { fieldname: "buying_price_list",  label: "Buying Price List", fieldtype: "Data",    defaultPlacement: "L3", defaultValue: "Standard Buying" },
+  { fieldname: "posting_date",       label: "Posting Date",      fieldtype: "Date",    defaultPlacement: "L1", defaultValue: "Today" },
+  { fieldname: "due_date",           label: "Payment Due",       fieldtype: "Date",    defaultPlacement: "L1", defaultValue: "Today + 30 days" },
+  { fieldname: "set_warehouse",      label: "Set Warehouse",     fieldtype: "Data",    defaultPlacement: "L2", defaultValue: "Main Warehouse" },
+];
+
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch(e) { return {}; }
+}
+function saveProfile(p) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch(e) {}
+}
+let profile = loadProfile();
+
+function getPlacement(fn) {
+  const def = FIELD_DEFS.find(f => f.fieldname === fn);
+  return (profile[fn] && profile[fn].placement) || (def && def.defaultPlacement) || "vanilla";
+}
+
+// ── Mode toggle (simplified / all fields) ─────────────────────
+let isSimplified = true;
+function setMode(mode) {
+  isSimplified = (mode === "simplified");
+  document.body.classList.toggle("all-fields", !isSimplified);
+  document.getElementById("btn-simplified").classList.toggle("active", isSimplified);
+  document.getElementById("btn-all").classList.toggle("active", !isSimplified);
+}
+
+// ── Assumptions modal ──────────────────────────────────────────
+let modalState = {};
+
+function openModal() {
+  modalState = {};
+  FIELD_DEFS.forEach(f => { modalState[f.fieldname] = getPlacement(f.fieldname); });
+  renderModalFields();
+  document.getElementById("modal").classList.add("open");
+}
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+}
+function renderModalFields() {
+  const PLACEMENT_LABELS = {
+    vanilla: "Normal", L1: "Pre-fill · skip Tab", L2: "Quiet & locked", L3: "Hidden"
+  };
+  const container = document.getElementById("modal-fields");
+  container.innerHTML = "";
+  FIELD_DEFS.forEach(f => {
+    const row = document.createElement("div"); row.className = "field-row-m";
+    const lbl = document.createElement("div"); lbl.className = "f-label"; lbl.textContent = f.label;
+    const valWrap = document.createElement("div"); valWrap.className = "f-value";
+    const valInp = document.createElement("input");
+    valInp.value = (profile[f.fieldname] && profile[f.fieldname].value) || f.defaultValue || "";
+    valInp.onchange = e => { profile[f.fieldname] = profile[f.fieldname] || {}; profile[f.fieldname].value = e.target.value; };
+    valWrap.appendChild(valInp);
+    const radios = document.createElement("div"); radios.className = "f-radios";
+    ["vanilla","L1","L2","L3"].forEach(pl => {
+      const lbEl = document.createElement("label"); lbEl.className = "f-radio";
+      const inp = document.createElement("input"); inp.type = "radio"; inp.name = "pl_" + f.fieldname; inp.value = pl;
+      if (modalState[f.fieldname] === pl) inp.checked = true;
+      inp.onchange = () => { modalState[f.fieldname] = pl; };
+      lbEl.appendChild(inp); lbEl.appendChild(document.createTextNode(" " + PLACEMENT_LABELS[pl]));
+      radios.appendChild(lbEl);
+    });
+    row.appendChild(lbl); row.appendChild(valWrap); row.appendChild(radios);
+    container.appendChild(row);
+  });
+}
+function applyModal() {
+  FIELD_DEFS.forEach(f => {
+    profile[f.fieldname] = profile[f.fieldname] || {};
+    profile[f.fieldname].placement = modalState[f.fieldname];
+  });
+  saveProfile(profile);
+  applyPlacements();
+  closeModal();
+}
+function applyPlacements() {
+  FIELD_DEFS.forEach(f => {
+    const el = document.querySelector("[data-field='" + f.fieldname + "']");
+    if (!el) return;
+    const pl = getPlacement(f.fieldname);
+    el.classList.remove("l1","l2","l3");
+    if (pl !== "vanilla") el.classList.add(pl.toLowerCase());
+  });
+}
+applyPlacements();
+
+// Close modal on backdrop click
+document.getElementById("modal").addEventListener("click", function(e) {
+  if (e.target === this) closeModal();
+});
+</script>

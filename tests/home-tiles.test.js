@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import {
   HOME_GROUPS,
   HOME_TILES,
+  AP_HOME_TILE_WASH,
+  SHELL_ROUTE_TILE_IDS,
   flattenHomeTiles,
   validateHomeTiles,
 } from "../src/home-tiles.js";
+import { DOC_WASH_BY_PROFILE } from "../src/doc-wash.js";
 
 describe("HOME_GROUPS", () => {
   it("validates with unique ids and routes (except disabled)", () => {
@@ -27,12 +30,24 @@ describe("HOME_GROUPS", () => {
         continue;
       }
       if (t.route === "/" || t.route === "/login") continue;
+      if (SHELL_ROUTE_TILE_IDS.includes(t.id)) continue; // OI-161: our own page, not an ERP form
       assert.ok(t.route.startsWith("/app/"), `${t.id} → ${t.route}`);
     }
   });
 
   it("HOME_TILES matches flatten", () => {
     assert.equal(HOME_TILES.length, flattenHomeTiles().length);
+  });
+
+  it("AP vendor tiles carry doc wash roles (OI-125)", () => {
+    assert.deepEqual(AP_HOME_TILE_WASH["po-new"], DOC_WASH_BY_PROFILE.po.role);
+    assert.deepEqual(AP_HOME_TILE_WASH["receipt-new"], DOC_WASH_BY_PROFILE.receipt.role);
+    assert.deepEqual(AP_HOME_TILE_WASH["bill-new"], DOC_WASH_BY_PROFILE.bill.role);
+    assert.equal(AP_HOME_TILE_WASH["pay-bills"], "payment");
+    for (const [tileId, role] of Object.entries(AP_HOME_TILE_WASH)) {
+      const tile = flattenHomeTiles().find((t) => t.id === tileId);
+      assert.equal(tile?.washRole, role, tileId);
+    }
   });
 });
 

@@ -243,7 +243,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     museum: true,
     alpha: true,
     coverage: "tested",
-    pureModule: "bill-source-flow.js",
+    pureModule: "doc-source-flow.js",
     notes: "HAR: PR Item 403 killed listSources; enrich removed. Dogfood green 2026-07-18.",
   },
   {
@@ -252,11 +252,11 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     museum: true,
     alpha: true,
     coverage: "tested",
-    pureModule: "bill-source-flow.js + bill-toolbar.js",
+    pureModule: "doc-source-flow.js + bill-toolbar.js",
   },
   {
-    id: "source-focus-terms",
-    name: "Focus Terms after source choose",
+    id: "source-focus-invoice-date",
+    name: "Focus Invoice date after source choose",
     museum: true,
     alpha: true,
     coverage: "tested",

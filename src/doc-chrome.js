@@ -63,6 +63,13 @@ export function toolbarGroupForButton(buttonId) {
  * @returns {{ text: string, tone: "draft"|"draft-dirty"|"posted"|"posted-dirty", title: string }}
  */
 export function docLifecyclePill(state) {
+  if (state && state.loading) {
+    return {
+      text: "Loading…",
+      tone: "loading",
+      title: "Waiting for Vanilla form…",
+    };
+  }
   const isDraft = !!(state && state.isDraft);
   const userEdited = !!(state && state.userEdited);
   const isNewBlank = !!(state && state.isNewBlank);
@@ -203,7 +210,7 @@ export function findListFocusField(doctypeKey) {
     .toLowerCase()
     .replace(/_/g, "-");
   if (key === "purchase-invoice") return "bill_no";
-  if (key === "purchase-order") return "name";
+  if (key === "purchase-order") return "title";
   if (key === "purchase-receipt") return "name";
   return null;
 }
@@ -216,6 +223,7 @@ export function findListFocusField(doctypeKey) {
 export function findListFocusLabel(doctypeKey) {
   const field = findListFocusField(doctypeKey);
   if (field === "bill_no") return "Supplier Invoice No.";
+  if (field === "title") return "PO# (logbook)";
   if (field === "name") return "ID";
   return null;
 }

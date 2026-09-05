@@ -5,12 +5,16 @@
 import { vendorActivitySuffix } from "./vendor-activity.js";
 
 /**
- * @typedef {{ value: string, description: string, action?: string }} LinkOption
+ * @typedef {{ value: string, description: string, action?: string, activity?: string, company?: string, companyMismatch?: boolean }} LinkOption
  */
 
 /** Sentinel value: empty Supplier search → open Vanilla “new Supplier”. */
 export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
 export const LINK_ACTION_CREATE_PROJECT = "__doc_create_project__";
+/** Soft-peek Vanilla Payment Terms Template form (shared Bill · PO). */
+export const LINK_ACTION_CREATE_PAYMENT_TERMS = "__doc_create_payment_terms__";
+export const PAYMENT_TERMS_TEMPLATE_DOCTYPE = "Payment Terms Template";
+export const PAYMENT_TERMS_TEMPLATE_NEW_ROUTE = "/app/payment-terms-template/new";
 
 /**
  * Normalize frappe.desk.search.search_link (or list-like) payloads.
@@ -40,13 +44,24 @@ export function normalizeSearchLinkResults(message) {
 }
 
 /**
- * When Supplier search has no rows, offer a single “Go to Vendor add…” action.
+ * When Link search has no rows (or always for Terms), offer create-via-peek actions.
  * @param {LinkOption[]} rows
  * @param {string} doctype
  * @returns {LinkOption[]}
  */
 export function withEmptySearchActions(rows, doctype) {
-  const list = Array.isArray(rows) ? rows : [];
+  const list = Array.isArray(rows) ? [...rows] : [];
+  if (doctype === PAYMENT_TERMS_TEMPLATE_DOCTYPE) {
+    // Always offer create — Vanilla Link also lets clerks add Terms when templates already exist.
+    if (!list.some((o) => isCreatePaymentTermsLinkAction(o))) {
+      list.push({
+        value: LINK_ACTION_CREATE_PAYMENT_TERMS,
+        description: "Create new Payment Terms…",
+        action: "create_payment_terms",
+      });
+    }
+    return list;
+  }
   if (list.length) return list;
   if (doctype === "Supplier") {
     return [
@@ -80,6 +95,29 @@ export function isCreateSupplierLinkAction(optOrValue) {
 }
 
 /**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreatePaymentTermsLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_PAYMENT_TERMS;
+  return (
+    optOrValue.value === LINK_ACTION_CREATE_PAYMENT_TERMS ||
+    optOrValue.action === "create_payment_terms"
+  );
+}
+
+/**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreateProjectLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_PROJECT;
+  return optOrValue.value === LINK_ACTION_CREATE_PROJECT || optOrValue.action === "create_project";
+}
+
+/**
  * Client-side refine (when ERP returns a broad list or for offline fixtures).
  * @param {LinkOption[]} options
  * @param {string} query
@@ -96,7 +134,9 @@ export function filterLinkOptions(options, query, opts = {}) {
   const scored = [];
   for (const o of list) {
     if (!o || !o.value) continue;
-    if (isCreateSupplierLinkAction(o)) continue;
+    if (isCreateSupplierLinkAction(o) || isCreatePaymentTermsLinkAction(o) || isCreateProjectLinkAction(o)) {
+      continue;
+    }
     const hay = `${o.value} ${o.description || ""}`.toLowerCase();
     if (!hay.includes(q)) continue;
     const starts = o.value.toLowerCase().startsWith(q) || (o.description || "").toLowerCase().startsWith(q);
@@ -113,12 +153,19 @@ export function filterLinkOptions(options, query, opts = {}) {
 export function linkOptionLabel(opt) {
   if (!opt || !opt.value) return "";
   if (isCreateSupplierLinkAction(opt)) return opt.description || "Go to Vendor add…";
+  if (isCreatePaymentTermsLinkAction(opt)) return opt.description || "Create new Payment Terms…";
+  if (isCreateProjectLinkAction(opt)) return opt.description || "Create Project…";
   let label = opt.description || opt.value;
   if (opt.description && opt.description !== opt.value) {
     label = `${opt.description} (${opt.value})`;
   }
   const suf = vendorActivitySuffix(opt.activity);
-  return suf ? `${label} · ${suf}` : label;
+  if (suf) label = `${label} · ${suf}`;
+  if (opt.companyMismatch) {
+    const co = opt.company ? String(opt.company).trim() : "";
+    label = co ? `${label} · other company (${co})` : `${label} · other company`;
+  }
+  return label;
 }
 
 /**
@@ -127,8 +174,17 @@ export function linkOptionLabel(opt) {
  */
 export function linkOptionClassNames(opt) {
   const bits = ["link-opt"];
-  if (isCreateSupplierLinkAction(opt)) bits.push("link-action");
-  if (opt && (opt.activity === "idle" || opt.activity === "never")) bits.push("link-opt-muted");
+  if (
+    isCreateSupplierLinkAction(opt) ||
+    isCreatePaymentTermsLinkAction(opt) ||
+    isCreateProjectLinkAction(opt)
+  ) {
+    bits.push("link-action");
+  }
+  if (opt && (opt.activity === "idle" || opt.activity === "never" || opt.companyMismatch)) {
+    bits.push("link-opt-muted");
+  }
+  if (opt && opt.companyMismatch) bits.push("link-opt-company-mismatch");
   return bits.join(" ");
 }
 
@@ -140,6 +196,8 @@ export const BILL_LINK_DOCTYPES = {
   project: "Project",
   account_head: "Account",
   sales_order: "Sales Order",
+  mode_of_payment: "Mode of Payment",
+  cash_bank_account: "Account",
 };
 
 /**

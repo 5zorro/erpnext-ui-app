@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DOGFOOD_AP_SOURCES, listDogfoodSourceIndex } from "../../src/sample-data/dogfood-ap-sources.js";
 import { renderDogfoodSourceHtml } from "../../src/sample-data/render-dogfood-html.js";
+import { buildMessyImportPaste, MESSY_VENDOR_11COL } from "../../src/sample-data/dogfood-import-paste.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(__dirname, "dogfood-sources", "generated");
@@ -30,6 +31,32 @@ for (const doc of DOGFOOD_AP_SOURCES) {
   fs.writeFileSync(htmlPath, html, "utf8");
   written.push({ id: doc.id, html: htmlName });
   console.log("wrote", htmlName);
+
+  if (doc.id === "DF-13") {
+    const paste = buildMessyImportPaste(doc);
+    const tsvName = `${base}_import_paste.tsv`;
+    const csvName = `${base}_import_paste.csv`;
+    fs.writeFileSync(path.join(outDir, tsvName), paste.tsv, "utf8");
+    fs.writeFileSync(path.join(outDir, csvName), paste.csv, "utf8");
+    const mapLines = Object.entries(paste.suggestedMap)
+      .map(
+        ([col, target]) =>
+          `- Column ${Number(col) + 1} (${MESSY_VENDOR_11COL.headerRow[Number(col)] || "?"}) → **${target}**`,
+      )
+      .join("\n");
+    const readme = `# DF-13 Import lines dogfood paste
+
+Ignore first **${paste.ignoreLeadingRows}** rows, then map:
+
+${mapLines}
+
+All other columns stay **(ignore column)**.
+
+Files: \`${tsvName}\`, \`${csvName}\`
+`;
+    fs.writeFileSync(path.join(outDir, `${base}_import_README.md`), readme, "utf8");
+    console.log("wrote", tsvName, csvName);
+  }
 }
 
 const indexRows = listDogfoodSourceIndex()

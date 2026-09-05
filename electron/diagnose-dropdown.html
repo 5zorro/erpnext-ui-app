@@ -27,6 +27,12 @@
     .btn.ghost:hover { background: #243140; color: #fff; }
     .btn.primary { background: #1f6feb; }
     .btn.primary:hover { background: #388bfd; }
+    .btn.loud {
+      background: #b45309; color: #fff; font-weight: 700; letter-spacing: .2px;
+    }
+    .btn.loud:hover { background: #c2410c; color: #fff; }
+    .btn.loud.focus { background: #0369a1; }
+    .btn.loud.focus:hover { background: #0284c7; }
     .btn[hidden] { display: none !important; }
     .hint { color: #6b8299; font-size: 11px; margin-top: 4px; }
     .remediation-hint { color: #9fb3c8; font-size: 11px; margin: 0 0 8px; }
@@ -44,6 +50,10 @@
       <button type="button" class="btn" id="btn-setup" hidden>Set up how IT wants to handle this…</button>
     </div>
     <div class="row">
+      <button type="button" class="btn loud" id="btn-nav-issue" data-testid="btn-nav-issue"
+        title="Log a navigation issue with a note (Ctrl+Shift+M). Click as soon as something feels wrong — snapshot freezes now.">Nav issue</button>
+      <button type="button" class="btn loud focus" id="btn-focus-issue" data-testid="btn-focus-issue"
+        title="Log a keyboard/focus issue with a note (Ctrl+Shift+F). Includes rolling focus trail.">Focus issue</button>
       <button type="button" class="btn" id="btn-copy">Copy all</button>
       <button type="button" class="btn ghost" id="btn-close">Close</button>
     </div>
@@ -83,6 +93,12 @@
       }
     }
 
+    document.getElementById("btn-nav-issue").onclick = () => {
+      if (api && api.openNavIncident) api.openNavIncident();
+    };
+    document.getElementById("btn-focus-issue").onclick = () => {
+      if (api && api.openFocusIncident) api.openFocusIncident();
+    };
     document.getElementById("btn-copy").onclick = () => api && api.copy();
     document.getElementById("btn-close").onclick = () => api && api.close();
     btnSetup.onclick = async () => {
@@ -99,6 +115,16 @@
       afterAction(await api.runAutofix());
     };
     document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        e.preventDefault();
+        if (api && api.openNavIncident) api.openNavIncident();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "F" || e.key === "f")) {
+        e.preventDefault();
+        if (api && api.openFocusIncident) api.openFocusIncident();
+        return;
+      }
       if (e.key === "Escape" && api) api.close();
     });
 

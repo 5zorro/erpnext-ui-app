@@ -6,8 +6,8 @@
  */
 
 /**
- * @typedef {{ label: string, kind: "nic" | "po" | "pr", name?: string, draft?: boolean }} SourceItem
- * @typedef {{ name: string, items: SourceItem[] }} SourceGroup
+ * @typedef {{ label: string, kind: "nic" | "po" | "pr", name?: string, draft?: boolean, loading?: boolean }} SourceItem
+ * @typedef {{ id?: string, name: string, items: SourceItem[], loading?: boolean, error?: string }} SourceGroup
  */
 
 /**
@@ -73,7 +73,7 @@ export function toggleSourceSelection(selectedKeys, item) {
 /**
  * What to pull on Enter / primary button.
  * - Any checks → those items (NIC alone → nic; NIC+others never coexist).
- * - No checks → active row if selectable (single-select fallback).
+ * - No checks → implied NIC (highlight alone does not commit a PO/PR).
  * @param {SourceGroup[]} groups
  * @param {Iterable<string>|null|undefined} selectedKeys
  * @param {SourceItem|null|undefined} activeItem
@@ -94,13 +94,7 @@ export function resolveSourcesToCommit(groups, selectedKeys, activeItem) {
     if (!items.length) return { mode: "none", items: [], reason: "no_valid_selection" };
     return { mode: "merge", items };
   }
-  if (activeItem && activeItem.kind === "nic" && isSelectableSourceItem(activeItem)) {
-    return { mode: "nic", items: [activeItem] };
-  }
-  if (activeItem && isSelectableSourceItem(activeItem) && activeItem.kind !== "nic") {
-    return { mode: "merge", items: [activeItem] };
-  }
-  return { mode: "none", items: [], reason: "nothing_active" };
+  return { mode: "nic", items: [{ label: "NIC", kind: "nic" }] };
 }
 
 /**
@@ -233,30 +227,35 @@ export function buildBillSourceGroups(lists = {}) {
   /** @type {SourceGroup[]} */
   const groups = [
     {
+      id: "nic",
       name: "Not in computer (NIC)",
       items: [{ label: "NIC — enter this Bill manually (no source)", kind: "nic" }],
     },
   ];
   if (pos.length) {
     groups.push({
+      id: "po_submitted",
       name: `Purchase Orders — submitted (${pos.length})`,
       items: pos.map((p) => sourceItemFromRow(p, "po", false)),
     });
   }
   if (prs.length) {
     groups.push({
+      id: "pr_submitted",
       name: `Item Receipts — submitted (${prs.length})`,
       items: prs.map((p) => sourceItemFromRow(p, "pr", false)),
     });
   }
   if (posD.length) {
     groups.push({
+      id: "po_draft",
       name: "Purchase Orders — draft (not selectable)",
       items: posD.map((p) => sourceItemFromRow(p, "po", true)),
     });
   }
   if (prsD.length) {
     groups.push({
+      id: "pr_draft",
       name: "Item Receipts — draft (not selectable)",
       items: prsD.map((p) => sourceItemFromRow(p, "pr", true)),
     });
@@ -269,5 +268,44 @@ export function buildBillSourceGroups(lists = {}) {
  * @returns {boolean}
  */
 export function isSelectableSourceItem(it) {
-  return !!(it && !it.draft);
+  return !!(it && !it.draft && !it.loading);
+}
+
+/**
+ * @param {SourceGroup|null|undefined} group
+ * @returns {boolean}
+ */
+export function groupHasSelectableItem(group) {
+  return !!(group && Array.isArray(group.items) && group.items.some(isSelectableSourceItem));
+}
+
+/**
+ * @param {SourceGroup|null|undefined} group
+ * @returns {number}
+ */
+export function firstSelectableItemIndex(group) {
+  const items = group && Array.isArray(group.items) ? group.items : [];
+  for (let i = 0; i < items.length; i++) {
+    if (isSelectableSourceItem(items[i])) return i;
+  }
+  return 0;
+}
+
+/**
+ * Tab order: skip groups with no selectable rows (draft-only / loading placeholders).
+ * @param {SourceGroup[]} groups
+ * @param {number} fromGi
+ * @param {number} dir 1 forward, -1 backward
+ * @returns {number}
+ */
+export function nextSelectableGroupIndex(groups, fromGi, dir) {
+  const list = Array.isArray(groups) ? groups : [];
+  const n = list.length;
+  if (n === 0) return 0;
+  const step = dir >= 0 ? 1 : -1;
+  for (let i = 1; i <= n; i++) {
+    const idx = (fromGi + step * i + n * 16) % n;
+    if (groupHasSelectableItem(list[idx])) return idx;
+  }
+  return fromGi;
 }

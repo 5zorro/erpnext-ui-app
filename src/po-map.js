@@ -4,6 +4,13 @@
  */
 
 import { relabelTerm } from "./doc-terms.js";
+import {
+  ERP_PAYMENT_TERMS_FIELD,
+  ERP_FREEFORM_TERMS_FIELD,
+  PAYMENT_TERMS_HEADER_LABEL,
+  FREEFORM_TERMS_LABEL,
+  plainTermsText,
+} from "./doc-terms-fields.js";
 import { stripHtml, sumBillLineQty, sumBillLineAmount, formatBillLineTotal } from "./bill-map.js";
 import { formatAddressDisplay } from "./address-format.js";
 import { formatDocLineNumber } from "./doc-item-sort.js";
@@ -65,6 +72,14 @@ export const PO_HEADER_FIELDS = [
     validationHint: "Your logbook PO# (ERP title). Editable on drafts — distinct from ERP PO No.",
   },
   {
+    label: PAYMENT_TERMS_HEADER_LABEL,
+    field: ERP_PAYMENT_TERMS_FIELD,
+    type: "text",
+    linkDoctype: "Payment Terms Template",
+    column: "right",
+    validationHint: "Payment Terms Template (Net 30, etc.). Not the same as freeform comments below.",
+  },
+  {
     label: "Ship from",
     field: null,
     type: "textarea",
@@ -86,12 +101,22 @@ export const PO_HEADER_FIELDS = [
   },
 ];
 
+/** Drop-ship customer — edited inside Ship to address modal (not header column). */
+export const PO_CUSTOMER_DROPSHIP = Object.freeze({
+  field: "customer",
+  label: "Customer (drop ship)",
+  linkDoctype: "Customer",
+  hint:
+    "Optional. When set, Ship to lists this customer’s delivery addresses for drop-ship POs.",
+});
+
 /** PO SPECS: no memo block. */
 export const PO_MEMO_FIELD = null;
 
 /**
  * Museum cols + Required By (schedule_date). ERP mandates it per row; Date Expected
  * stamps it, and the column lets clerks see/override (dogfood 2026-07-21).
+ * Drop ship is handled via Customer + Ship to address (not a per-line checkbox).
  * Leading Line = Purchase Order line number (ERP idx); headers are sortable (display-only).
  */
 export const PO_ITEM_COLS = [
@@ -131,7 +156,9 @@ export function isEditablePoItemField(field) {
 }
 
 export const PO_ASSUMPTIONS = [
+  "Pick a vendor before choosing an address.",
   "Save = saved as a Draft; you then Submit to issue the PO (2 steps).",
+  "Drop ship: set Customer (optional) inside Ship to, then pick the receiving address.",
   "Warehouse defaults to Finished Goods.",
   "Pick a SKU and the item name, UOM, conversion factor, and a suggested rate auto-fill (rate stays editable).",
   "Required By is a planning date (when you need the goods) — it does NOT auto-close the PO when it passes; closing happens on full receipt/bill or via 'Mark as Closed'.",
@@ -256,6 +283,11 @@ export function readPoHeader(doc, scratch = {}) {
       continue;
     }
     if (meta.addressRole && meta.display) {
+      const sup = String(d.supplier || "").trim();
+      if (!sup) {
+        out[meta.label] = "";
+        continue;
+      }
       out[meta.label] = formatAddressDisplay(d[meta.display]);
       continue;
     }
@@ -265,6 +297,7 @@ export function readPoHeader(doc, scratch = {}) {
     }
     out[meta.label] = d[meta.field] != null ? d[meta.field] : "";
   }
+  out[FREEFORM_TERMS_LABEL] = plainTermsText(d[ERP_FREEFORM_TERMS_FIELD]);
   return out;
 }
 

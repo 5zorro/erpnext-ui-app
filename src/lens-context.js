@@ -17,6 +17,30 @@
  */
 
 import { normalizeDoctypeKey } from "./lens-prefs.js";
+import { SEED_PROFILES } from "./simplified-seed-profiles.js";
+
+/**
+ * Doctypes the Simplified lens is actually ready for — derived from the shipped seed
+ * profiles so the toolbar cannot advertise a lens that has nothing configured behind it.
+ * Adding a doctype to SEED_PROFILES lights up its tab; there is no second list to forget.
+ * @type {Set<string>}
+ */
+export const SIMPLIFIED_DOCTYPES = new Set(
+  Object.keys(SEED_PROFILES).map((dt) => normalizeDoctypeKey(dt)),
+);
+
+/**
+ * Simplified needs a concrete form: it applies field assumptions to an open document,
+ * so a list, dashboard or Desk page has nothing for it to act on.
+ * @param {string|null|undefined} doctype
+ * @param {string|null|undefined} record
+ * @returns {boolean}
+ */
+export function hasSimplifiedLens(doctype, record) {
+  const key = normalizeDoctypeKey(doctype);
+  if (!key || !record) return false;
+  return SIMPLIFIED_DOCTYPES.has(key);
+}
 
 /**
  * @typedef {{ kind: "workflow-home" }} DocSkinHomeTarget

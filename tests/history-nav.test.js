@@ -130,6 +130,17 @@ describe("softPeekReturnLabel / shouldEscDismissSoftPeek", () => {
     );
   });
 
+  it("prefers peek parent over parked Bill while on a Mode of Payment child", () => {
+    assert.equal(
+      softPeekReturnLabel(
+        { mode: "bill", route: "/app/purchase-invoice/ACC-1" },
+        { dt: "payment-entry", route: "/app/payment-entry/new-pe-1", label: "New Payment Entry" },
+        { currentRoute: "/app/mode-of-payment/Credit%20Card" },
+      ),
+      "Esc · back to Payment Entry",
+    );
+  });
+
   it("Esc dismisses only when armed and no Frappe dialog", () => {
     assert.equal(shouldEscDismissSoftPeek({ softPeekArmed: true, frappeDialogOpen: false }), true);
     assert.equal(shouldEscDismissSoftPeek({ softPeekArmed: true, frappeDialogOpen: true }), false);

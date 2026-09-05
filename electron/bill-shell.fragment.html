@@ -1,0 +1,297 @@
+  <div class="wrap" data-testid="bill-root">
+    <button type="button" class="due-sticky" id="due-sticky" data-testid="bill-due-sticky" hidden
+      title="Amount Due does not match Grand total — click to focus Amount Due">
+      <span class="due-emoji" id="due-sticky-emoji">!</span>
+      <span class="due-money" id="due-sticky-money">—</span>
+      <span class="due-sticky-label">Amount Due</span>
+    </button>
+    <details class="assumptions" data-testid="bill-assumptions">
+      <summary>Assumptions this view makes</summary>
+      <ul id="assumptions-list"></ul>
+      <p class="assumptions-subhead">Vanilla Bill tabs (vs Doc today)</p>
+      <p class="assumptions-subnote">
+        Desk still uses these tabs on the same Purchase Invoice. Already paid writes live in the
+        section below (not as a Vanilla tab clone).
+      </p>
+      <ul id="vanilla-tabs-list" data-testid="bill-vanilla-tabs"></ul>
+    </details>
+    <div class="card">
+      <section class="bill-section bill-section-doc" data-testid="bill-doc-section">
+      <div class="cols">
+        <div>
+          <div class="field"><label>Vendor Name</label><input id="f-vendor" data-field="supplier" data-testid="bill-vendor" autocomplete="off" /></div>
+          <div class="field">
+            <label for="f-date">Invoice date</label>
+            <input id="f-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="bill_date" data-testid="bill-date" autocomplete="off" />
+            <span class="date-hint">Set before Terms so due dates calculate from this invoice date.</span>
+          </div>
+          <div class="field">
+            <label for="f-billing-address">Remittance &amp; Billing Address</label>
+            <textarea id="f-billing-address" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="billing"
+              data-testid="bill-billing-address" spellcheck="false"
+              title="Click to pick Supplier Address (remittance / billing)."></textarea>
+          </div>
+          <div class="field"><label for="f-terms">Payment terms</label><input id="f-terms" data-field="payment_terms_template" data-testid="bill-terms" /></div>
+          <div class="field" id="due-date-field" data-testid="bill-due-date-field">
+            <label for="f-duedate">Bill Due Date</label>
+            <input id="f-duedate" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-field="due_date" data-testid="bill-due-date" autocomplete="off" />
+            <span class="date-hint" id="due-date-hint" data-testid="bill-due-date-hint">Digits and / - . only · Tab once to leave · MM/DD fills nearest year</span>
+          </div>
+        </div>
+        <div>
+          <div class="field">
+            <label>Ref No. (Supplier Invoice No.)</label>
+            <div class="row bill-ref-row" data-testid="bill-ref-row">
+              <input id="f-billno" data-field="bill_no" data-testid="bill-ref" autocomplete="off" />
+              <span class="chip idle" id="ref-status" data-testid="bill-ref-chip"
+                title="Soft check vs duplicates, PO logbook #, and vendor account #">
+                <span class="due-emoji" id="ref-emoji" data-testid="bill-ref-emoji">·</span>
+              </span>
+            </div>
+            <p class="ref-warn" id="ref-warn" data-testid="bill-ref-warn" hidden></p>
+          </div>
+          <div class="field">
+            <label>Amount Due</label>
+            <div class="row amount-due-row" data-testid="bill-amount-due-row">
+              <input id="f-amountdue" class="money-due-input" data-testid="bill-amount-due"
+                inputmode="decimal" autocomplete="off" placeholder="Vendor invoice total" />
+              <span class="due-status idle" id="due-status" data-testid="bill-due-chip"
+                title="Checksum vs Bill grand total">
+                <span class="due-emoji" id="due-emoji" data-testid="bill-due-emoji">·</span>
+                <span class="due-money" id="due-money" data-testid="bill-due-money">—</span>
+              </span>
+              <span class="due-grand" id="due-grand" data-testid="bill-due-grand"
+                title="Bill grand total (checksum target)">Bill —</span>
+            </div>
+          </div>
+          <div id="linked-po-block" data-testid="bill-linked-pos" hidden></div>
+        </div>
+      </div>
+      <div class="addr-grid" data-testid="bill-address-grid">
+        <div class="field">
+          <label for="f-ship-from">Ship from / supplier dispatch</label>
+          <textarea id="f-ship-from" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="ship_from"
+            data-testid="bill-ship-from" spellcheck="false"
+            title="Click to pick Dispatch Address (ship from / supplier dispatch)."></textarea>
+        </div>
+        <div class="addr-flow" aria-hidden="true" data-testid="bill-ship-arrow" title="Ship from → Ship to">⇒</div>
+        <div class="field">
+          <label for="f-ship-to">Ship to / receiving address</label>
+          <textarea id="f-ship-to" class="addr-pick" readonly tabindex="-1" rows="4" data-addr-role="ship_to"
+            data-testid="bill-ship-to" spellcheck="false"
+            title="Click to pick Shipping Address (ship to / receiving)."></textarea>
+        </div>
+      </div>
+      </section>
+      <section class="bill-section bill-section-lines" data-testid="bill-lines-section">
+        <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
+          <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+            tabindex="-1" data-tab="items" data-testid="bill-tab-items">Items</button>
+          <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+            tabindex="-1" data-tab="expenses" data-testid="bill-tab-expenses">Expenses</button>
+        </div>
+        <div class="line-panel" id="panel-items" data-testid="bill-panel-items" role="tabpanel">
+        <table class="items-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-po"><col class="c-item"><col class="c-desc">
+            <col class="c-qty"><col class="c-cost"><col class="c-amount">
+            <col class="c-cust"><col class="c-so"><col class="c-proj"><col class="c-act">
+          </colgroup>
+          <thead>
+            <tr id="items-head-row">
+              <th class="sortable sorted" data-sort="lineNo" title="Sort by Line">Line ▲</th>
+              <th class="sortable" data-sort="poLine" title="Sort by PO line">PO line</th>
+              <th class="sortable" data-sort="item_code" title="Sort by Item">Item</th>
+              <th class="sortable" data-sort="description" title="Sort by Description">Description</th>
+              <th class="sortable" data-sort="qty" title="Sort by Qty">Qty</th>
+              <th class="sortable" data-sort="rate" title="Sort by Cost">Cost</th>
+              <th class="sortable" data-sort="amount" title="Sort by Amount">Amount</th>
+              <th class="sortable" data-sort="customer" title="Sort by Customer">Customer</th>
+              <th class="sortable" data-sort="salesOrders" title="Sort by Sales order(s)">Sales order(s)</th>
+              <th class="sortable" data-sort="project" title="Sort by Project">Project</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="items-body" data-testid="bill-items"></tbody>
+          <tfoot id="line-totals" data-testid="bill-line-totals" hidden>
+            <tr>
+              <td colspan="4"></td>
+              <td class="tot-cell">
+                <span class="tot-label">Σ Qty</span><b id="tot-qty">0</b>
+                <button type="button" class="clear-qty" id="btn-clear-qty" data-testid="bill-clear-qty" tabindex="-1"
+                  title="Set every line quantity to 0 (packing-slip hash check). Descriptions and costs stay.">Clear all qty</button>
+              </td>
+              <td></td>
+              <td class="tot-cell"><span class="tot-label">Item subtotal</span><b id="tot-amt">0.00</b></td>
+              <td></td><td></td><td></td><td></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div class="line-actions">
+          <button type="button" id="btn-add-line" data-testid="bill-add-line" tabindex="-1"
+            title="Mouse only — empty lines are added/removed automatically">Add line</button>
+          <button type="button" id="btn-add-source" data-testid="bill-add-source" tabindex="-1"
+            title="Same as Select PO / source in the toolbar (mouse only)">Add source</button>
+          <button type="button" class="imp-btn" id="btn-import-items" data-testid="bill-import-items" tabindex="-1"
+            title="Paste spreadsheet rows or browse a CSV, then map columns (mouse only)">Import lines…</button>
+        </div>
+        </div>
+        <div class="line-panel" id="panel-expenses" data-testid="bill-panel-expenses" role="tabpanel" hidden>
+          <p class="expense-note" data-testid="bill-expense-note"></p>
+        </div>
+      </section>
+      <section class="bill-section bill-section-taxes" id="bill-taxes-block" data-testid="bill-taxes-block">
+        <div class="line-tabs line-tabs-static" role="presentation">
+          <span class="line-tab active" aria-current="page">Taxes and Charges</span>
+          <div class="line-tabs-tools">
+            <button type="button" class="linkish" id="btn-landed-cost" data-testid="bill-open-landed-cost" tabindex="-1"
+              title="Open Vanilla Landed Cost Voucher (Qty / Amount / Manual distribute)">Landed Cost Voucher…</button>
+          </div>
+        </div>
+        <table class="taxes-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-acct"><col class="c-desc">
+            <col class="c-type"><col class="c-rate"><col class="c-amount">
+            <col class="c-addded"><col class="c-act">
+          </colgroup>
+          <thead>
+            <tr id="taxes-head-row">
+              <th class="sortable sorted" data-tax-sort="lineNo" title="Sort by Line">Line ▲</th>
+              <th class="sortable" data-tax-sort="account_head" title="Sort by Account">Account</th>
+              <th class="sortable" data-tax-sort="description" title="Sort by Description">Description</th>
+              <th class="sortable" data-tax-sort="charge_type" title="Sort by Type">Type</th>
+              <th class="sortable num" data-tax-sort="rate" title="Sort by Rate">Rate %</th>
+              <th class="sortable num" data-tax-sort="tax_amount" title="Sort by Amount">Amount</th>
+              <th class="sortable" data-tax-sort="add_deduct_tax" title="Sort by Add/Deduct">Add/Deduct</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="taxes-body" data-testid="bill-taxes"></tbody>
+          <tfoot id="taxes-totals" data-testid="bill-taxes-totals" hidden>
+            <tr>
+              <td colspan="5"></td>
+              <td class="tot-cell num">
+                <span class="tot-label">Taxes subtotal</span>
+                <b id="tot-taxes" data-testid="bill-taxes-subtotal">0.00</b>
+              </td>
+              <td></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div class="line-actions" id="taxes-add" data-testid="bill-taxes-add">
+          <div class="inline-add-fields">
+            <div class="inline-field inline-field--account">
+              <label for="f-tax-account">Account</label>
+              <input id="f-tax-account" data-testid="bill-tax-account" autocomplete="off" />
+            </div>
+            <div class="inline-field inline-field--amount">
+              <label for="f-tax-amount">Amount</label>
+              <input id="f-tax-amount" data-testid="bill-tax-amount" inputmode="decimal" autocomplete="off" />
+            </div>
+          </div>
+          <button type="button" id="btn-add-tax" data-testid="bill-add-tax">Add tax/charge</button>
+        </div>
+      </section>
+      <section class="bill-section bill-section-summary" data-testid="bill-summary-section">
+        <div class="money-stack" data-testid="bill-money-stack">
+          <div class="ms-row">
+            <span class="ms-label">Item subtotal</span>
+            <span id="ms-items" data-testid="bill-ms-items">$0.00</span>
+          </div>
+          <div class="ms-row">
+            <span class="ms-label">Taxes</span>
+            <span id="ms-taxes" data-testid="bill-ms-taxes">$0.00</span>
+          </div>
+          <div class="ms-row grand">
+            <span class="ms-label">Grand total</span>
+            <span id="ms-grand" data-testid="bill-ms-grand">$0.00</span>
+          </div>
+          <p class="ms-note" id="ms-note" data-testid="bill-ms-note" hidden></p>
+        </div>
+      </section>
+        <section class="bill-section bill-section-payments" data-testid="bill-payments-section"
+          aria-label="Payment">
+        <section class="already-paid" id="already-paid" data-testid="bill-already-paid" aria-label="Already paid">
+          <div class="already-paid-head">
+            <div class="already-paid-question">
+              <span class="already-paid-label">Already paid?</span>
+              <span class="already-paid-hint">Saved on draft · Submit creates a Payment Entry</span>
+            </div>
+            <button type="button" id="f-is-paid" class="already-paid-switch" data-field="is_paid"
+              data-testid="bill-is-paid" role="switch" aria-checked="false" aria-label="Already paid: No">
+              <span class="switch-word switch-word-no">No</span>
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span class="switch-word switch-word-yes">Yes</span>
+            </button>
+          </div>
+          <div class="already-paid-fields" id="already-paid-fields" data-testid="bill-already-paid-fields">
+            <div class="field">
+              <label>Mode of Payment</label>
+              <input id="f-mop" data-field="mode_of_payment" data-testid="bill-mode-of-payment" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label>Cash / Bank Account</label>
+              <input id="f-cash-bank" data-field="cash_bank_account" data-testid="bill-cash-bank" autocomplete="off"
+                title="Required when Already paid — Mode of Payment usually fills this from company defaults." />
+            </div>
+            <div class="field">
+              <label>Paid Amount</label>
+              <input id="f-paid-amount" class="money-due-input" data-field="paid_amount" data-testid="bill-paid-amount"
+                inputmode="decimal" autocomplete="off" />
+            </div>
+          </div>
+        </section>
+        <div class="applied-payments" id="applied-payments" data-testid="bill-applied-payments" hidden
+          aria-label="Applied payments">
+          <div class="applied-payments-head">
+            <span class="applied-payments-title">Applied payments</span>
+            <button type="button" class="linkish" id="btn-add-payment" data-testid="bill-add-payment" hidden
+              title="Open a draft Payment Entry in Desk (Esc returns here).">Add payment</button>
+          </div>
+          <table class="applied-payments-table">
+            <thead>
+              <tr>
+                <th>Payment Entry</th>
+                <th>Date</th>
+                <th>Mode</th>
+                <th class="num">Allocated</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="applied-payments-body" data-testid="bill-applied-payments-body"></tbody>
+          </table>
+          <p class="applied-payments-empty" id="applied-payments-empty" hidden>No Payment Entries linked yet.</p>
+        </div>
+        </section>
+      <section class="bill-section bill-section-notes" data-testid="bill-notes-section">
+        <div id="source-terms-block" class="source-terms-block" data-testid="bill-source-terms-block" hidden>
+          <div id="source-terms-fields" class="source-terms-fields" data-testid="bill-source-terms-fields"></div>
+        </div>
+        <div class="field memo" data-testid="bill-memo-block">
+          <div class="memo-head">
+            <label for="f-memo">Remarks &amp; Freehand Memo</label>
+            <button type="button" class="attach" id="btn-attach" data-testid="bill-attach"
+              title="Opens Vanilla Desk attach for this Bill (save draft first if new).">
+              <svg class="attach-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1.5 1.5 0 0 1-3 0V6h-1.5v9.5a3 3 0 0 0 6 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/>
+              </svg>
+              Attach file to this bill
+            </button>
+          </div>
+          <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
+        </div>
+      </section>
+        <div class="back-to-top-row">
+          <button type="button" id="btn-back-top" data-testid="bill-back-top"
+            title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
+        </div>
+        <p class="hint">
+          Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters).
+          Item subtotal is Σ line amounts; Taxes and Charges roll into Grand total.
+          Amount Due (header) must match Grand total — checksum chip shows $ difference; Bill $ beside it is the same target.
+          PO/PR source lines keep their descriptions (editable).
+        </p>
+    </div>
+  </div>
+  <div id="bill-toast" class="toast" data-testid="bill-toast" role="status" aria-live="polite" hidden></div>

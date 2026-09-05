@@ -147,6 +147,41 @@ describe("itemNavFieldsFromCols / PO Tab order", () => {
       leaveTable: false,
     });
   });
+
+  it("Tab on empty trailing PO row exits instead of stacking blank lines", () => {
+    const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
+    assert.deepEqual(
+      nextItemFocusAfterEdit("schedule_date", 1, 2, {
+        fields,
+        rowItemCode: "",
+      }),
+      {
+        rowIndex: 1,
+        field: null,
+        addRow: false,
+        deleteRow: true,
+        leaveTable: true,
+      },
+    );
+  });
+
+  it("Tab past last populated PO row skips trailing blank line (delete + leave)", () => {
+    const fields = itemNavFieldsFromCols(PO_ITEM_COLS);
+    assert.deepEqual(
+      nextItemFocusAfterEdit("schedule_date", 1, 3, {
+        fields,
+        rowItemCode: "SKU-1",
+        nextRowItemCode: "",
+      }),
+      {
+        rowIndex: 2,
+        field: null,
+        addRow: false,
+        deleteRow: true,
+        leaveTable: true,
+      },
+    );
+  });
 });
 
 describe("scrollLinkOptionIntoView", () => {
