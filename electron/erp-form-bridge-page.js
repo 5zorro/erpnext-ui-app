@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 19;
+  var VERSION = 20;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1158,12 +1158,12 @@
       meta.reason = "not invoice";
       return meta;
     }
-    if (field !== "payment_terms_template" && field !== "posting_date") {
+    if (field !== "payment_terms_template" && field !== "bill_date") {
       meta.reason = "not terms field";
       return meta;
     }
     meta.terms = f.doc.payment_terms_template || "";
-    meta.posting_date = f.doc.posting_date || "";
+    meta.posting_date = f.doc.bill_date || f.doc.posting_date || "";
     try {
       var t0 = Date.now();
       if (field === "payment_terms_template" && f.doc.payment_terms_template) {
@@ -1178,8 +1178,8 @@
           meta.source = "schedule";
           meta.ok = !!meta.due_date;
         }
-      } else if (field === "posting_date" && f.doc.posting_date) {
-        var retDate = f.trigger("posting_date");
+      } else if (field === "bill_date" && f.doc.bill_date) {
+        var retDate = f.trigger("bill_date");
         if (retDate && typeof retDate.then === "function") await retDate;
         await afterAjaxQuiet(4000);
         if (f.doc.payment_terms_template) {
@@ -1231,7 +1231,7 @@
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
-        if (field === "payment_terms_template" || field === "posting_date") {
+        if (field === "payment_terms_template" || field === "bill_date") {
           paymentTermsSettle = await settlePaymentTermsAfterHeaderChange(f, field);
         } else if (field === "due_date") {
           dueDateScheduleSync = syncScheduleFromHeaderDueDate(f, value);

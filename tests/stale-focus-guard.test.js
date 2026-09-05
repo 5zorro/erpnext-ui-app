@@ -37,7 +37,7 @@ describe("stale-focus-guard", () => {
     );
     assert.equal(
       shouldScheduleInvoiceDateFocus({
-        getAttribute: (k) => (k === "data-field" ? "posting_date" : null),
+        getAttribute: (k) => (k === "data-field" ? "bill_date" : null),
       }),
       true,
     );

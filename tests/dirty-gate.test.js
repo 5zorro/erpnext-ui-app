@@ -47,6 +47,7 @@ describe("valuesMeaningfullyEqual", () => {
     assert.equal(dirtyCompareKindForField("qty"), "number");
     assert.equal(dirtyCompareKindForField("__amount_due"), "number");
     assert.equal(dirtyCompareKindForField("posting_date"), "date");
+    assert.equal(dirtyCompareKindForField("bill_date"), "date");
     assert.equal(dirtyCompareKindForField("supplier"), "text");
   });
 

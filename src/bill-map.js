@@ -41,7 +41,7 @@ export const BILL_HEADER_FIELDS = [
     display: "supplier_name|supplier",
     column: "left",
   },
-  { label: "Invoice date", field: "posting_date", type: "date", column: "left" },
+  { label: "Invoice date", field: "bill_date", type: "date", column: "left" },
   {
     label: "Remittance & Billing Address",
     field: null,
