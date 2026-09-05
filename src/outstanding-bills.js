@@ -7,7 +7,8 @@
 
 /**
  * @typedef {{
- *   invoice: string,          // Purchase Invoice name (report's voucher_no)
+ *   invoice: string,          // Purchase Invoice name (report's voucher_no) — NOT always unique; see installmentKey
+ *   installmentKey: string,   // unique per row: `invoice` normally, `${invoice}#${n}` for an exploded installment
  *   supplier: string,         // report's party (shared AR/AP engine field name)
  *   postingDate: string,      // ISO
  *   dueDate: string,          // ISO — header due_date (last installment; bill-payment-schedule.js convention)
@@ -25,8 +26,10 @@
  */
 export function normalizeAccountsPayableRow(reportRow) {
   const r = reportRow || {};
+  const invoice = strOrEmpty(r.voucher_no ?? r.name);
   return {
-    invoice: strOrEmpty(r.voucher_no ?? r.name),
+    invoice,
+    installmentKey: invoice,
     supplier: strOrEmpty(r.party ?? r.supplier_name),
     postingDate: strOrEmpty(r.posting_date),
     dueDate: strOrEmpty(r.due_date),
@@ -69,6 +72,70 @@ export function attachDiscountWindow(row, paymentScheduleRows) {
     discountDate: strOrEmpty(win.discount_date),
     discountAmount,
   };
+}
+
+/**
+ * The Accounts Payable report is invoice-level: one row per Purchase Invoice, header `due_date`
+ * (last installment), full remaining `outstanding`. A multi-installment Bill's earlier due dates
+ * are invisible to a batching engine unless exploded here — confirmed against Packet G's
+ * SUP-DAILY fixture, whose whole point (90 distinct payable obligations) collapsed to one $4,500
+ * row due on the last day when run straight through `normalizeAccountsPayableRow`.
+ *
+ * Returns `null` when there's only one distinct unpaid `due_date` (the common case, including
+ * every single-installment Bill) — the caller should use `attachDiscountWindow(row, ...)` instead,
+ * unchanged. When there are ≥2 distinct due dates, returns one row per unpaid installment with its
+ * own `outstanding` and its own discount fields (from *that* schedule row — not "earliest across
+ * the whole invoice," which stops being correct once installments are split apart).
+ *
+ * @param {OutstandingBillRow} row
+ * @param {Array<{
+ *   due_date?: string,
+ *   outstanding?: number,
+ *   discount_date?: string,
+ *   discount_type?: "Percentage"|"Amount",
+ *   discount?: number,
+ * }>} paymentScheduleRows
+ * @returns {OutstandingBillRow[]|null}
+ */
+export function explodeInstallments(row, paymentScheduleRows) {
+  const unpaid = (Array.isArray(paymentScheduleRows) ? paymentScheduleRows : [])
+    .filter((s) => s && s.due_date && Number(s.outstanding) > 0);
+  const distinctDates = new Set(unpaid.map((s) => String(s.due_date)));
+  if (distinctDates.size < 2) return null;
+
+  return unpaid
+    .slice()
+    .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))
+    .map((s, i) => {
+      const installment = {
+        ...row,
+        installmentKey: `${row.invoice}#${i + 1}`,
+        dueDate: strOrEmpty(s.due_date),
+        outstanding: round2(Number(s.outstanding)),
+      };
+      if (s.discount_date && Number(s.discount) > 0) {
+        installment.discountDate = strOrEmpty(s.discount_date);
+        installment.discountAmount =
+          s.discount_type === "Amount"
+            ? round2(Number(s.discount))
+            : round2(row.invoiced * (Number(s.discount) / 100));
+      }
+      return installment;
+    });
+}
+
+/**
+ * Convenience entry point — what Packet 4's IPC layer should call per invoice, so nobody forgets
+ * the explode step. Pure; `reportRow`/`paymentScheduleRows` are the raw shapes from ERP HTTP calls.
+ * @param {object} reportRow
+ * @param {Parameters<typeof explodeInstallments>[1]} paymentScheduleRows
+ * @returns {OutstandingBillRow[]}
+ */
+export function buildOutstandingBillRows(reportRow, paymentScheduleRows) {
+  const base = normalizeAccountsPayableRow(reportRow);
+  const exploded = explodeInstallments(base, paymentScheduleRows);
+  if (exploded) return exploded;
+  return [attachDiscountWindow(base, paymentScheduleRows)];
 }
 
 /** @param {unknown} v */
