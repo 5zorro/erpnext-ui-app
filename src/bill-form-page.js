@@ -3814,6 +3814,7 @@ export async function bootBillFormPage(api) {
       enrichPending: snap && snap.enrichPending,
       preserveFocus: opts.preserveFocus,
       caller: opts.caller || "refresh",
+      forceDueDatePaint: !!opts.forceDueDatePaint,
     });
     if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
   }
@@ -3868,13 +3869,22 @@ export async function bootBillFormPage(api) {
       const res = await api.setHeader(field, parsed.iso);
       if (res && res.skipped) return;
       if (res && res.ok) noteUserEdit();
+      if (res && res.paymentTermsSettle) {
+        logFocus("bill-due-date-settle", formatDueDateSettleLog(res.paymentTermsSettle));
+      }
       const multiHint =
         dueDateMultiInstallmentHint(res && res.dueDateScheduleSync) ||
         dueDateMultiInstallmentHint(
           planDueDateScheduleSync(res && res.doc ? res.doc : lastDoc, parsed.iso),
         );
       if (multiHint) setStatus(multiHint, "warn");
-      await refresh();
+      // A settled Invoice date re-derives Bill Due Date on the ERP side (vanilla keys credit
+      // terms off bill_date, falling back to posting_date). Without forcing the paint, the
+      // due-date box keeps whatever it showed before — it reads as a user edit and wins over
+      // the freshly computed value (focus incident 2026-09-05: ui=10/04 vs erp=09/30).
+      await refresh({
+        forceDueDatePaint: !!(res && res.paymentTermsSettle && res.paymentTermsSettle.ok),
+      });
       return;
     }
   
