@@ -82,8 +82,8 @@ flowchart LR
     Prefs["payment-batch-prefs.js\n(APR / postage / per-check SSoT)"]
   end
   subgraph shell ["Electron"]
-    Page["electron/pay-outstanding.html\n(Doc Pay skin v1 — Home tile anchor)"]
-    PEForm["Doc-skin Payment Entry, AP only\n(Packet 4b — shell TBD, decision only)"]
+    Page["electron/pay-outstanding.html\nsurfaceMode: pay-outstanding (in-window)\nHome tile trigger — shipped"]
+    PEForm["Same content, anchored to\nPayment Entry doc skin instead\n(Packet 4b — refined, not built)"]
   end
   ERP["ERPNext HTTP API\n(existing whitelisted methods only)"]
   ERP -->|"query_report.run\nAccounts Payable"| Fetch
@@ -91,8 +91,8 @@ flowchart LR
   Cal --> Econ
   Prefs --> Econ
   Econ --> Page
-  Econ -.->|"Packet 4b, not built this tranche"| PEForm
-  Page -.->|"v1: none — suggestion only"| Write["Payment Entry / Payment Order\n(stretch — not this tranche)"]
+  Page -.->|"Packet 4b: re-anchor + filter (have) + creation modal (new write, not built)"| PEForm
+  PEForm -.->|"modal creates"| Write["Payment Entry\n(Packet 4b's modal — real write, not built)"]
 ```
 
 ---
@@ -481,93 +481,122 @@ existing Vanilla Payment Entry / Payment Order as the write path — see Packet 
 
 ### How
 
-### Entry points (locked 2026-09-04)
+### Entry points (locked 2026-09-04, **hosting revised 2026-09-05**)
 
-**Home tile + Doc-skin Payment Entry form, AP only.** 5zorro reviewed the candidates (Payments
-workspace, Payment Entry list, Payment Entry form) and ruled out the first two: the **Payments
-workspace** bleeds AR (ageing/reports for both AR and AP live on one page — a check run is AP-only,
-so a future AR doc skin is the right home for that surface, not this one); the **Payment Entry
-list/"Find" view** is an audit tool for locating already-created payments, not where a clerk decides
-which bills go on a check. The **Payment Entry form itself** is where Vanilla already does the real
-work this tranche wants to improve (`get_outstanding_invoices` → checkbox-select bills → one PE).
-5zorro's own framing: extending that form to show suggested groups across a vendor's open bills is
-"about the same" lift as the flow already there — see **Packet 4b** for what that anchor actually
-requires to build (bigger than a routing decision; do not conflate "locked as an anchor" with
-"built this tranche").
+**Home tile, in-window** — not a popup. First shipped (2026-09-05) as a standalone `BrowserWindow`
+(same pattern as `open-mockup`); 5zorro's stated vision for the whole app overruled that the same
+day: **"stay in window unless I spawn a second all-purpose window."** Reworked to a persistent
+`WebContentsView` + a new `surfaceMode: "pay-outstanding"`, wired through `place()`/`showHome()`'s
+exact existing pattern (`showPayOutstanding()`) — the same mechanism Bill/PO/Receipt already use,
+just without going through `DOC_SKIN_INDEX` (this surface is triggered directly by the Home tile,
+not by intercepting a Vanilla navigation, so it doesn't need route-matching). This is now recorded
+as **HANDOFF.md invariant 6** ("One window") — durable, not tranche-scoped.
+
+5zorro also named the durable **doc-skin scope boundary**: doc skins live only on the transaction-
+entry forms (PO, IR, Bill, Payment Entry, SO, Sales Invoice, Quotation, Journal Entry) — never
+spread across list views, reports, or other Vanilla surfaces. Also now HANDOFF invariant 6.
+
+**Where this leaves the Payment-Entry anchor (Packet 4b):** 5zorro's refined vision (2026-09-05) —
+Payment Entry becomes the *real* anchor, with an optional **filter by vendor or invoice** narrowing
+the same flow view down to one vendor, and a **modal** on a suggested group that creates the actual
+Payment Entry (folding Packet 5's write path in). The vendor/invoice filter already shipped on
+today's Home-triggered surface (`#filter-input`, vendor-scoped — matching by vendor name or one of
+its invoice names still shows that vendor's whole bill set, since slicing it would break
+`paymentBatchEconomics`' grouping math). **Not yet done:** actually anchoring to Payment Entry
+(today's trigger is still the Home tile only) and the creation modal. See **Packet 4b** below,
+updated with this refined shape.
 
 | Piece | Job |
 |---|---|
-| Home tile | New tile in the existing **Vendors** or **Banking** group (`src/home-tiles.js`) — e.g. `pay-outstanding` → `/pay-outstanding` (shell route, not `/app/...` — this is our own page, like `home.html`/`history.html`). Existing `pay-bills` / `checks` tiles stay as-is (direct-to-blank-PE escape hatch); this is a new, additive tile, not a replacement — do not remove clerk's fast path to a blank PE. |
-| List (top level) | Grouped by **vendor**, each vendor section sorted by earliest due date. Row: invoice, due date, outstanding amount, discount badge if `discountDate` set and not yet passed. |
-| Suggested-batch chip | On groups where `paymentBatchEconomics` returned `reason: "batch"` or `"discount-capture"` with `netBenefit > 0`: an inline chip (e.g. "Batch 3 → pay Mon, save $0.52") that expands to show the `rationale` string plus a bill-by-bill breakdown. Collapsed by default; **no auto-select, no auto-submit** (OI-161 rule 5, "suggestion only v1"). |
-| Prefs affordance | Small gear/inline control (Packet 3) — editing APR/postage/per-check re-runs `paymentBatchEconomics` client-side (data already fetched; this is pure re-computation, no re-fetch). |
-| Empty state | No outstanding bills → plain "Nothing outstanding" — do not show a chip UI with nothing in it. |
+| Home tile | `pay-outstanding` tile in the **Vendors** group (`src/home-tiles.js`), route `/pay-outstanding` (shell-only marker, not a real `/app/...` path — `SHELL_ROUTE_TILE_IDS` documents the exception). Existing `pay-bills` / `checks` tiles stay as-is (direct-to-blank-PE escape hatch); this is additive. |
+| List (top level) | Grouped by **vendor**, sorted by earliest due date. **Three-stage Sankey** (added in dogfood): Invoice (blue, structural) → Payment Schedule installment (Payment date / Amount, sortable by date or invoice) → Proposed payment (Suggested date / Suggested amount, colored by `paymentBatchEconomics`' reason). Sticky page header, sticky column-label header, sticky per-vendor header. |
+| Filter | `#filter-input` — vendor name or invoice name substring, vendor-scoped (see above). |
+| Suggested-payment node | Click to expand: `rationale` string + bill-by-bill breakdown. Collapsed by default; **no auto-select, no auto-submit** (OI-161 rule 5, "suggestion only v1"). |
+| Prefs affordance | `⚙ Assumptions` panel (Packet 3) — editing APR/postage/per-check/window re-runs `paymentBatchEconomics` client-side, no re-fetch. |
+| Empty state | No outstanding bills → "Nothing outstanding"; no filter matches → "No vendor or invoice matches …". |
 
 ### Explicitly NOT this packet
 
-- No checkbox multi-select → "Pay Now" action. No Payment Entry / Payment Order creation. Clicking
-  a bill or a group is **informational** this tranche (maybe deep-links to the Vanilla Bill or a
-  pre-filtered Payment Entry `Get Outstanding` — a link-out, not a shell-side write).
+- No checkbox multi-select → "Pay Now" action. No Payment Entry / Payment Order creation yet — that's
+  the modal described above, now folded into **Packet 4b** rather than Packet 5 standing alone.
+  Clicking a group today only deep-links to a blank Vanilla Payment Entry (`Open Payment Entry
+  (Get Outstanding Invoices) →`) or the Bill itself — a link-out, not a shell-side write.
 - No list-scroll-position/return-to-list work (that's **OI-129**, explicitly parked until 5zorro
   dogfoods this and feels the same pain — do not pre-solve it here).
-- The Doc-skin Payment Entry form (Packet 4b) — locked as the second **anchor** (2026-09-04), but
-  its actual build (new shell branch in `doc-form.html`, or a dedicated file) is a separate, bigger
-  packet. This packet ships the Home-tile page only; do not block Packet 4 on Packet 4b.
+- Anchoring to the actual Payment Entry form (today's only trigger is the Home tile) and the
+  creation modal — **Packet 4b**, still not built; see its updated shape below.
 
 ### Tests
 
 Layer 1: none new beyond Packets 1–3 (this packet is presentation over already-tested pure data).
-Layer 3 (optional shell smoke): one `scaffold-pay-outstanding.spec.js` proving the route loads and
-renders group/chip DOM from injected fixture data — same pattern as other `scaffold-*` specs.
+Layer 3: `scaffold-pay-outstanding.spec.js` — Home tile → `surfaceMode` flips to `"pay-outstanding"`
+→ real vendor cards/groups/ribbons render from live ERP data → rationale expands on click → Home
+button (chrome toolbar) returns `surfaceMode` to `"home"`. Driven via `execInView`, like every other
+persistent view (WebContentsView is not a reliable Playwright Page — e2e/GOTCHAS.md #1).
 
 ---
 
-## Packet 4b — Doc-skin Payment Entry anchor (AP only) — decision landing zone, not a full build
+## Packet 4b — Doc-skin Payment Entry anchor (AP only) — refined 2026-09-05, still not built
 
-### Business rule (locked 2026-09-04)
+### Business rule (refined 2026-09-05)
 
-Home tile **and** the Payment Entry form are the two entry points (see Packet 4's "Entry points").
-Scope is explicitly **AP only** — this Doc skin activates for Pay-type Payment Entries; Receive-type
-(AR) stays Vanilla until AR gets its own doc skin (avoids the same workspace-level AR bleed 5zorro
-flagged when rejecting the Payments workspace as an anchor).
+Payment Entry becomes the *real* anchor, replacing the Home tile as the primary entry point (Home
+tile likely stays too, as a fast path — not decided). Shape 5zorro described:
 
-### Honest sizing — why this isn't "add one `DOC_SKIN_INDEX` row"
+- The same three-stage flow view (Packet 4, already shipped) renders **inside** the Payment Entry
+  doc skin — "the Bill doc skin morphed from just form entry to closer to a dashboard; I was hoping
+  this 'payment entry' would be kinda like a dashboard for the form entry." The dashboard *is* the
+  primary content; raw field entry is secondary.
+- **Filter by vendor or invoice** narrows the same view to one vendor — already shipped on today's
+  Home-triggered surface (`#filter-input`), reusable here as-is.
+- A **modal** on a suggested group's node collects whatever's needed and creates the actual Payment
+  Entry — folding Packet 5's write path into this packet rather than keeping it a separate stretch.
 
-Bill / PO / Receipt all share `shell: "doc-form"` in `src/doc-skin-registry.js` — one HTML shell
-(`electron/doc-form.html`) templated by `headerFields` + `itemCols` + `features`, because all three
-are fundamentally "header + item grid + taxes" documents (`DOC_SKIN_PROFILES` in that file). Payment
-Entry has **no item grid** — its shape is party/bank/amount header fields + a References child table
-(`Payment Entry Reference`: `against_voucher_type`, `against_voucher`, `allocated_amount`) +
-Deductions. `doc-form.html` doesn't fit as-is; this needs either a new `shell` value with its own
-template branch, or a dedicated file — materially bigger than Packets 1–4, not a drop-in profile.
+Scope stays **AP only** — this Doc skin activates for Pay-type Payment Entries; Receive-type (AR)
+stays Vanilla until AR gets its own doc skin (consistent with HANDOFF invariant 6's transaction-
+entry-forms-only scope, and avoids the same AR bleed 5zorro flagged when rejecting the Payments
+workspace as an anchor for Packet 4).
 
-### What this packet delivers **this tranche** (decision only)
+### What's already true, and what still isn't (honest status, 2026-09-05)
 
-1. New `DOC_SKIN_INDEX` entry, **`ready: false`** — matches the existing convention for planned rows
-   ("keeps the map honest without showing a broken tab," per that file's own doc comment). Does not
-   ship a working tab yet.
-2. Open design question, flagged not resolved: `doctypes: ["payment-entry"], needsRecord: true` alone
-   can't distinguish AP from AR — `classifySurface`/`lookupDocSkin` key off route + doctype today,
-   never a field value. Gating on `payment_type == "Pay"` needs either (a) a query-param convention
-   on the Home tile's deep link (`pay-bills`/`checks` tiles already deep-link into
-   `/app/payment-entry/new` — extending that with `?party_type=Supplier` is the smallest step), or
-   (b) the toolbar re-evaluating once the form's `payment_type` field is actually set. Pick this when
-   Packet 4b's real build starts, not now.
-3. Content plan for the eventual build: reuse Packets 1–3 verbatim (`outstanding-bills.js`,
-   `payment-batch-economics.js`, `payment-batch-prefs.js`) scoped to the one vendor on the form.
-   Picking a suggested group still hands off to Vanilla's existing References allocation — no new
-   write logic beyond what Packets 4/5 already scope.
+- **Already shipped, reusable as-is:** the three-stage flow view, the vendor/invoice filter, the
+  prefs panel, sort toggle — all pure presentation over already-tested Packets 1–3 data, currently
+  hosted on the Home-triggered `pay-outstanding` surface.
+- **Still not built:** actually anchoring this content to the Payment Entry *form* (today's only
+  trigger is the Home tile — `DOC_SKIN_INDEX` has no `payment-entry` entry), and the creation modal
+  (a real ERP write — nothing in this tranche has written to ERP yet; Clean Core still means calling
+  existing whitelisted methods only, e.g. `frappe.client.insert`/PE's own `frappe.call` methods, and
+  reusing whatever write pattern the existing JIT-Payment-Entry code (OI-135) already established
+  rather than inventing a second one).
+- **Sizing note stands:** Bill/PO/Receipt share `shell: "doc-form"` in `src/doc-skin-registry.js` —
+  one HTML shell (`electron/doc-form.html`) templated for "header + item grid + taxes" documents.
+  Payment Entry has no item grid; confirmed live (2026-09-05) that `doc-form.html` doesn't reload per
+  doctype at all — it's a persistent SPA reconfigured via `docFormUiPayload()`, so bolting a
+  dashboard-shaped mode onto it means either a real branch inside an already-large file, or (cleaner,
+  lower-risk to Bill/PO/Receipt) its own persistent `WebContentsView`, the same pattern Packet 4's
+  `payOutstanding` view now uses. Reusing `pay-outstanding.html`'s content directly is the likely
+  path — this packet is mostly *hosting* + *filter* + *modal*, not new dashboard content.
+- **Not resolved:** distinguishing AP from AR if this ever also needs to intercept a *raw* Vanilla
+  `/app/payment-entry/new` navigation (not just a Home-tile trigger) — `classifySurface`/
+  `lookupDocSkin` key off route + doctype only, never a field value like `payment_type`. Deferred
+  until/unless that interception is actually wanted; today's trigger (Home tile, soon Payment-Entry-
+  anchored) doesn't need it.
 
 ### Recommended sequencing
 
-Ship Packet 4 (Home tile + standalone page) first and let 5zorro dogfood the suggestion math itself
-before committing to the Payment Entry form's actual layout. Packet 4b's honest size (new shell
-branch) argues for **its own follow-up dated plan** once that shape is clear, rather than guessing
-the "how" now — this section locks the **decision** (two entry points, AP only), not the **build**.
+Two separable steps, not one big change: (1) anchor the already-built dashboard content to Payment
+Entry (hosting + filter wiring — no new writes), (2) the creation modal (a real write — deserves its
+own review, separate commit, and a check of OI-135's existing write pattern before inventing a new
+one). Do (1) first; do not block it on (2).
 
 ---
 
 ## Packet 5 (stretch — not required to close this tranche) — the write path
+
+**Update 2026-09-05:** dogfood signal arrived faster than expected — 5zorro wants the write path
+folded into **Packet 4b's creation modal** rather than kept as an independent stretch. This section's
+three options are still the real menu for *how* that modal actually writes; keep evaluating them
+here, just under Packet 4b's umbrella now, not as a separate later packet.
 
 Only start after Packet 4 has been dogfooded and 5zorro has actually used the suggestions for a few
 real payment runs. Options to evaluate then, **not decided now**:

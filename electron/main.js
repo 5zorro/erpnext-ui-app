@@ -277,6 +277,8 @@ let bill = null;
 let docForm = null;
 let erp = null;
 let hist = null;
+/** OI-161 Packet 4 (v2): Home-triggered dashboard, hosted in-window like every other surface. */
+let payOutstanding = null;
 /** @type {SurfaceMode} */
 let surfaceMode = "home";
 /** @type {DocFormSkinId|null} */
@@ -784,7 +786,7 @@ function syncE2eApi() {
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
-      const map = { chrome, home, hist, erp, bill, docForm };
+      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding };
       const view = map[name];
       if (!view || view.webContents.isDestroyed()) {
         return Promise.reject(new Error(`view not ready: ${name}`));
@@ -2772,7 +2774,7 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
 }
 
 function place() {
-  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm) return;
+  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding) return;
   const b = win.getContentBounds();
   const H = TAB_BAR_HEIGHT;
   const HW = historyRailWidth(histCollapsed);
@@ -2788,6 +2790,7 @@ function place() {
   bill.setBounds(OFF);
   docForm.setBounds(surfaceMode === "doc" ? main : OFF);
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
+  payOutstanding.setBounds(surfaceMode === "pay-outstanding" ? main : OFF);
 }
 
 /** @type {BrowserWindow|null} */
@@ -3381,6 +3384,28 @@ function showHome() {
     armSoftPeekEscHook(false).catch(() => {});
     surfaceMode = "home";
     place();
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+  });
+}
+
+/**
+ * OI-161: Home's "Pay Outstanding" tile — in-window surface, not a popup (5zorro 2026-09-05:
+ * "stay in window unless I spawn a second all-purpose window"). Triggered directly by the tile,
+ * not by intercepting a Vanilla navigation — it doesn't need DOC_SKIN_INDEX/lens-context routing.
+ * Reloads the page fresh each time so it always reflects current ERP state.
+ */
+function showPayOutstanding() {
+  gateDirtyThen(() => {
+    collapsePeekStackHard("home");
+    parkedDocSurface = null;
+    armSoftPeekEscHook(false).catch(() => {});
+    surfaceMode = "pay-outstanding";
+    place();
+    if (payOutstanding && !payOutstanding.webContents.isDestroyed()) {
+      payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
+    }
     sendUiState();
     sendHistory();
     syncE2eApi();
@@ -5179,6 +5204,13 @@ function createWindow() {
       focusOnNavigation: false,
     },
   });
+  payOutstanding = new WebContentsView({
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "pay-outstanding-preload.cjs"),
+    },
+  });
 
   applyWebContentsListenerBudget(erp.webContents);
   applyWebContentsListenerBudget(docForm.webContents);
@@ -5189,6 +5221,7 @@ function createWindow() {
   win.contentView.addChildView(bill);
   win.contentView.addChildView(docForm);
   win.contentView.addChildView(erp);
+  win.contentView.addChildView(payOutstanding);
 
   chrome.webContents.loadFile(path.join(__dirname, "chrome.html"));
   home.webContents.loadFile(path.join(__dirname, "home.html"));
@@ -5196,6 +5229,7 @@ function createWindow() {
   docForm.webContents.loadFile(path.join(__dirname, "doc-form.html"));
   hist.webContents.loadFile(path.join(__dirname, "history.html"));
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
+  payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
 
   if (process.env.E2E === "1") {
     win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
@@ -7992,41 +8026,7 @@ ipcMain.on("open-mockup", (_e, name) => {
   });
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
-let payOutstandingWin = null;
-ipcMain.on("open-pay-outstanding", () => {
-  if (payOutstandingWin && !payOutstandingWin.isDestroyed()) {
-    payOutstandingWin.show();
-    payOutstandingWin.focus();
-    return;
-  }
-  // OI-161 Packet 4: standalone window, not a new persistent surfaceMode — v1 is suggestion-only
-  // and doesn't need the chrome/history-rail coordination the main layout's views share; a
-  // dedicated surfaceMode is a reasonable upgrade once this is dogfooded (deliberately deferred).
-  payOutstandingWin = new BrowserWindow({
-    width: 1100,
-    height: 820,
-    title: "Pay Outstanding",
-    backgroundColor: "#eef2f5",
-    show: false,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, "pay-outstanding-preload.cjs"),
-    },
-  });
-  payOutstandingWin.once("ready-to-show", () => {
-    if (payOutstandingWin.isDestroyed()) return;
-    payOutstandingWin.show();
-    payOutstandingWin.focus();
-  });
-  payOutstandingWin.on("closed", () => {
-    payOutstandingWin = null;
-  });
-  payOutstandingWin
-    .loadFile(path.join(__dirname, "pay-outstanding.html"))
-    .catch((e) => navDebug("open-pay-outstanding-err", String(e && e.message ? e.message : e)));
-});
+ipcMain.on("open-pay-outstanding", () => showPayOutstanding());
 ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
 ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
@@ -8037,7 +8037,7 @@ ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
   return { ok: true, prefs: { ...paymentBatchPrefs } };
 });
 ipcMain.on("open-devtools", (_e, target) => {
-  const map = { erp, chrome, home, hist, bill, docForm };
+  const map = { erp, chrome, home, hist, bill, docForm, payOutstanding };
   const key = typeof target === "string" && map[target] ? target : "erp";
   const view = map[key];
   if (view && !view.webContents.isDestroyed()) {

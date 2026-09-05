@@ -20,7 +20,13 @@
       height: 52px; box-sizing: border-box; padding: 0 20px; background: #fff;
       border-bottom: 1px solid #d6dee6; position: sticky; top: 0; z-index: 3;
     }
-    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
+    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; flex: 0 0 auto; }
+    .filter-input {
+      flex: 0 1 260px; margin: 0 16px; padding: 6px 10px; border: 1px solid #d6dee6;
+      border-radius: 6px; font-size: 12px; background: #f8fafc;
+    }
+    .filter-input:focus { outline: none; border-color: #60a5fa; background: #fff; }
+    #empty.no-match { color: #94a3b8; }
     .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #64748b; }
     .legend-item { display: flex; align-items: center; gap: 5px; }
     .legend-swatch { width: 14px; height: 4px; border-radius: 2px; }
@@ -131,6 +137,13 @@
 <body>
   <header>
     <h1 data-testid="pay-outstanding-title">Pay Outstanding</h1>
+    <input
+      type="search"
+      id="filter-input"
+      class="filter-input"
+      placeholder="Filter by vendor or invoice…"
+      data-testid="filter-input"
+    />
     <div class="hdr-actions">
       <div class="legend" aria-hidden="true">
         <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-batch)"></span>Batch</span>
@@ -205,6 +218,7 @@
     let prefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
     /** @type {"date"|"invoice"} */
     let scheduleSortMode = "date";
+    let filterText = "";
 
     const vendorsEl = document.getElementById("vendors");
     const emptyEl = document.getElementById("empty");
@@ -292,6 +306,18 @@
     }
     sortDateBtn.onclick = () => setSortMode("date");
     sortInvoiceBtn.onclick = () => setSortMode("invoice");
+
+    /** Filter by vendor (substring, case-insensitive) or invoice name — optional, empty = all. */
+    function matchesFilter(bill, filter) {
+      if (!filter) return true;
+      const f = filter.toLowerCase();
+      return bill.supplier.toLowerCase().includes(f) || bill.invoice.toLowerCase().includes(f);
+    }
+    const filterInput = document.getElementById("filter-input");
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value.trim();
+      render();
+    });
     for (const input of Object.values(prefInputs)) {
       input.addEventListener("change", onPrefsChanged);
     }
@@ -657,19 +683,36 @@
       vendorsEl.innerHTML = "";
       if (!allBills.length) {
         emptyEl.hidden = false;
+        emptyEl.classList.remove("no-match");
+        emptyEl.textContent = "Nothing outstanding.";
+        vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
+        return;
+      }
+
+      // Filter is vendor-scoped, not bill-scoped: matching by vendor name OR one of its invoice
+      // names still shows that vendor's *whole* bill set, unfiltered internally -- slicing a
+      // vendor's own bills would break paymentBatchEconomics' grouping math.
+      const bySupplier = groupBySupplier(allBills);
+      const suppliers = [...bySupplier.keys()].filter(
+        (supplier) => !filterText || bySupplier.get(supplier).some((b) => matchesFilter(b, filterText)),
+      );
+
+      if (!suppliers.length) {
+        emptyEl.hidden = false;
+        emptyEl.classList.add("no-match");
+        emptyEl.textContent = `No vendor or invoice matches "${filterText}".`;
         vendorsEl.hidden = true;
         colHeaderEl.hidden = true;
         return;
       }
       emptyEl.hidden = true;
+      emptyEl.classList.remove("no-match");
       vendorsEl.hidden = false;
       colHeaderEl.hidden = false;
 
-      const bySupplier = groupBySupplier(allBills);
       const earliest = (rows) => rows.reduce((min, b) => (min === null || b.dueDate < min ? b.dueDate : min), null);
-      const suppliers = [...bySupplier.keys()].sort((a, b) =>
-        (earliest(bySupplier.get(a)) || "").localeCompare(earliest(bySupplier.get(b)) || ""),
-      );
+      suppliers.sort((a, b) => (earliest(bySupplier.get(a)) || "").localeCompare(earliest(bySupplier.get(b)) || ""));
 
       for (const supplier of suppliers) {
         const bills = bySupplier.get(supplier);

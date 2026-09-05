@@ -1,11 +1,12 @@
 /**
- * Scaffold — OI-161 Doc Pay skin (Packet 4).
- * Unlike chrome/home/hist/erp, pay-outstanding.html is a standalone BrowserWindow, not a
- * WebContentsView — Playwright sees it as a real `window` event / Page, no execInView needed
- * once it's open. Getting there still goes through the real Home tile click (execInView "home").
+ * Scaffold — OI-161 Doc Pay skin (Packet 4, v2).
+ * pay-outstanding.html is now a persistent WebContentsView (surfaceMode "pay-outstanding"),
+ * hosted in the main window like chrome/home/hist/erp/docForm -- not a standalone popup
+ * (5zorro 2026-09-05: "stay in window unless I spawn a second all-purpose window"). Drive it via
+ * execInView, same as every other view (gotcha #1: WebContentsView is not a reliable Page).
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, e2eCall, waitForE2eApi } from "./helpers.js";
+import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 
 test.describe("scaffold: pay outstanding", () => {
   /** @type {import('@playwright/test').ElectronApplication | undefined} */
@@ -16,7 +17,7 @@ test.describe("scaffold: pay outstanding", () => {
     app = undefined;
   });
 
-  test("Home tile opens a standalone window with vendor-grouped flow diagrams", async () => {
+  test("Home tile shows the in-window dashboard; Home button returns to Home", async () => {
     test.setTimeout(90_000);
     try {
       app = await launchShell();
@@ -62,38 +63,73 @@ test.describe("scaffold: pay outstanding", () => {
       }
     }
 
-    const winPromise = app.waitForEvent("window");
     await e2eCall(
       app,
       "execInView",
       "home",
       `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
     );
-    const payWin = await winPromise;
-    await payWin.waitForLoadState("domcontentloaded");
 
-    await expect(payWin.locator('[data-testid="pay-outstanding-title"]')).toHaveText("Pay Outstanding");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+
+    const title = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelector('[data-testid="pay-outstanding-title"]')?.textContent || ""`,
+    );
+    expect(title).toBe("Pay Outstanding");
 
     // SUP-DAILY / SUP-DAILY-LG (Packet G) should always be present in the sandbox.
     await expect
-      .poll(async () => payWin.locator('[data-testid="vendor-card"]').count(), { timeout: 20_000 })
+      .poll(
+        async () =>
+          e2eCall(app, "execInView", "payOutstanding", `document.querySelectorAll('[data-testid="vendor-card"]').length`),
+        { timeout: 20_000 },
+      )
       .toBeGreaterThan(0);
 
-    const groupCount = await payWin.locator('[data-testid="group-node"]').count();
+    const groupCount = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelectorAll('[data-testid="group-node"]').length`,
+    );
     expect(groupCount).toBeGreaterThan(0);
 
     // Expand one group's rationale (collapsed by default per OI-161 "suggestion only").
-    const firstGroup = payWin.locator('[data-testid="group-node"]').first();
-    const rationale = payWin.locator('[data-testid="group-rationale"]').first();
-    await expect(rationale).toBeHidden();
-    await firstGroup.click();
-    await expect(rationale).toBeVisible();
-    if (process.env.SCAFFOLD_SCREENSHOT) {
-      await payWin.screenshot({ path: process.env.SCAFFOLD_SCREENSHOT, fullPage: true });
-    }
+    const beforeHidden = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelector('[data-testid="group-rationale"]').hidden`,
+    );
+    expect(beforeHidden).toBe(true);
+    await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelector('[data-testid="group-node"]').click(); true`,
+    );
+    const afterHidden = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelector('[data-testid="group-rationale"]').hidden`,
+    );
+    expect(afterHidden).toBe(false);
 
-    // The Sankey ribbon layer actually drew something.
-    const ribbonCount = await payWin.locator("svg.flow-svg path").count();
+    // The Sankey ribbon layers actually drew something.
+    const ribbonCount = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelectorAll('svg.flow-svg path').length`,
+    );
     expect(ribbonCount).toBeGreaterThan(0);
+
+    // Home button (always-visible chrome toolbar) returns to Home from this surface too.
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
   });
 });

@@ -82,6 +82,14 @@ flowchart LR
 3. **Pure first** — new behavior lands in `src/` + `tests/` before Electron wiring.
 4. **One configured ERP base** — `src/config.js` / env; panels must not invent a second server URL.
 5. **AGPL public tree** — process/license in ADR-0002. **Commits:** agents/harness may commit freely on local branches (checkpoints OK). **Pushes:** only 5zorro (5zorro) pushes to GitHub.
+6. **One window** (5zorro 2026-09-05) — the whole app stays in the single main window (chrome +
+   history rail + a `surfaceMode`-switched `WebContentsView`), never a popup, unless the user
+   deliberately spawns a second *all-purpose* window (not a feature-specific one). A tile/action
+   that wants its own "page" gets a new `surfaceMode` value + persistent view (see `place()` /
+   `showHome()` / `showPayOutstanding()` in `main.js` for the pattern), not a `new BrowserWindow`.
+   Doc skins themselves stay scoped to the **transaction-entry forms** — Purchase Order, Item
+   Receipt, Bill, Payment Entry, Sales Order, Sales Invoice, Quotation, Journal Entry — not spread
+   across list views, reports, or other Vanilla surfaces.
 
 ### Extension points (where new work plugs in)
 
