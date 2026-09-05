@@ -2369,13 +2369,27 @@ async function recentVendorBillRefs(supplier, excludeName, limit = 6) {
 /** @type {Map<string, { refs: string[], at: number }>} */
 const vendorRecentRefsCache = new Map();
 
+/** Hint only (soft dupe nudge, not the hard existingBillsWithRef check) — short TTL is fine. */
+const VENDOR_REFS_CACHE_TTL_MS = 60_000;
+
 /**
  * @param {string} supplier
  * @returns {string[]|null}
  */
 function cachedRecentVendorRefs(supplier) {
   const hit = vendorRecentRefsCache.get(supplier);
-  return hit && Array.isArray(hit.refs) ? hit.refs : null;
+  if (!hit || !Array.isArray(hit.refs)) return null;
+  if (Date.now() - hit.at > VENDOR_REFS_CACHE_TTL_MS) {
+    vendorRecentRefsCache.delete(supplier);
+    return null;
+  }
+  return hit.refs;
+}
+
+/** Drop a supplier's cached refs so the next check/prefetch re-fetches fresh. */
+function invalidateVendorRecentRefsCache(supplier) {
+  const sup = supplier != null ? String(supplier).trim() : "";
+  if (sup) vendorRecentRefsCache.delete(sup);
 }
 
 /**
@@ -3190,6 +3204,17 @@ function showErp(route = "/desk", opts = {}) {
   const go = () => {
     const cur = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
     const alreadyOnErp = !!(cur && isAllowedErpUrl(ERP_BASE, cur));
+    // "On the ERP origin" is not "at /desk" — a parked Vanilla list/doc route also
+    // satisfies alreadyOnErp. The bare-/desk fast path below must not skip the actual
+    // navigation unless the webContents is already sitting at the desk root itself
+    // (Frappe settles there as either "/app" or "/desk" depending on version/redirect).
+    const curNorm = cur ? normalizeAppRoute(cur, ERP_BASE) : null;
+    const alreadyAtDeskRoot = !!(
+      alreadyOnErp &&
+      curNorm &&
+      !curNorm.doctype &&
+      (curNorm.path === "/desk" || curNorm.path === "/app")
+    );
     const sameRoute =
       routesReferToSameDoc(currentRoute, path, ERP_BASE) ||
       (!!cur && routesReferToSameDoc(cur, path, ERP_BASE));
@@ -3273,7 +3298,7 @@ function showErp(route = "/desk", opts = {}) {
       return;
     }
 
-    if (opts.forceLoad || path !== "/desk" || !alreadyOnErp) {
+    if (opts.forceLoad || path !== "/desk" || !alreadyAtDeskRoot) {
       void loadErpUrl(target).then(() => {
         trackNav(target, { fromBrowser: false });
         afterNav();
@@ -5363,6 +5388,13 @@ ipcMain.handle("bill-set-amount-due", async (_e, value, markEdited) => {
 
 /**
  * One ERP get_list per source slice — separate erpEval so renderer can stream categories.
+ * Deliberately uncached, unlike vendorRecentRefsCache: `per_billed` is live server state
+ * that any bill anywhere can change, so a stale cache here risks showing an already-fully-
+ * billed PO/PR as available (double-billing), not just a stale UI hint.
+ * TODO: research how concurrent users updating Bills might invalidate a cache here (e.g.
+ * another open window/session merging against the same PO). Not an issue today — doc skin
+ * mostly targets small firms with a single AP clerk — but revisit before caching this if
+ * multi-user use becomes real.
  * @param {string} supplier
  * @param {string} sliceId
  */
@@ -7134,6 +7166,11 @@ async function saveDocFormFromErp(opts = {}) {
     };
     const profile = activeDocProfile();
     if (profile) noteShelvedFromSave(profile.doctypeKey, raw.doc);
+    // This save just changed what "recent refs for this vendor" means — drop the stale hint
+    // cache instead of waiting out its TTL (raw.doc.bill_no is the ref that just got added).
+    if (raw.doc && raw.doc.doctype === "Purchase Invoice") {
+      invalidateVendorRecentRefsCache(raw.doc.supplier);
+    }
   }
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
