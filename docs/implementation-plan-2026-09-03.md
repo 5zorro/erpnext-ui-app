@@ -259,6 +259,14 @@ this packet doesn't need. Matches the typedef above field-for-field.
 | `normalizeAccountsPayableRow(reportRow)` | Map report column names → `OutstandingBillRow` (pure; tested against the captured sample above). |
 | `attachDiscountWindow(row, paymentScheduleRows)` | Pure merge: earliest-`discount_date` schedule row with `discount_type`/`discount` set → `discountDate`/`discountAmount`. **Found while implementing, not in the original sketch:** `discount_type: "Percentage"` computes off the bill's **`invoiced`/grand total**, not the schedule row's own `payment_amount` — confirmed against ERPNext's own `payment_entry.py::apply_early_payment_discount` (`discount_amount = grand_total * discount/100`). A naive `payment_amount * discount/100` would be wrong for any multi-installment bill (right by coincidence for single-installment ones, which is why this is easy to miss). `discount_type: "Amount"` uses `discount` directly, no total needed. Reuses the same `payment_schedule` shape as `bill-payment-schedule.js` — do not invent a second convention. |
 | IPC (electron layer, not this packet) | One `get-outstanding-bills` call: report run + per-invoice `payment_schedule` fetch (batched `get_list` on `Payment Schedule` filtered by `parent in [...]`, one round trip, not N). |
+| `explodeInstallments(row, paymentScheduleRows)` | **Added 2026-09-05 — found by running Packet 2 against the real Packet G fixture, not anticipated in the original sketch.** The Accounts Payable report is invoice-level: one row per Purchase Invoice, header `due_date` (last installment), full remaining `outstanding`. Fed straight through, `SUP-DAILY`'s 90 daily installments collapsed to **one** $4,500 bill due 2026-10-20 — the fixture's entire point (90 distinct payable obligations to batch) was invisible to Packet 2. Any real multi-installment Bill has this same problem, not just the fixture. When ≥2 unpaid schedule rows carry **distinct** `due_date`s, this returns one `OutstandingBillRow` per unpaid installment (its own `due_date`, its own `outstanding`, its own `discountDate`/`discountAmount` computed from *that row's* `discount_type`/`discount` — **not** `attachDiscountWindow`'s "earliest across the whole invoice," which stops being correct once installments are split apart). Returns `null` when there's only one distinct due date (the common case — nothing to explode); caller falls back to `attachDiscountWindow(row, paymentScheduleRows)` as before, unchanged. |
+| `buildOutstandingBillRows(reportRow, paymentScheduleRows)` | New convenience entry point combining the three above — this is what Packet 4's IPC layer should call per invoice, not the individual pieces, so nobody forgets the explode step. |
+
+**Typedef change:** every `OutstandingBillRow` now also carries `installmentKey: string` — unique per
+row (`invoice` for a non-exploded bill, `${invoice}#${n}` for an exploded installment). `invoice`
+alone stopped being a safe unique key once one invoice can produce several rows; `installmentKey` is
+what Packet 2's `bills: string[]` output uses, `invoice` is still there whenever code needs the real
+ERP document name back (e.g. a future write path).
 
 ### Tests
 
@@ -266,7 +274,10 @@ this packet doesn't need. Matches the typedef above field-for-field.
 (both `SUP-DAILY` and `SUP-DAILY-LG`); discount-window attach with 0/1/many schedule rows; Percentage
 vs. Amount discount-type math (Percentage against `invoiced`, not `payment_amount`); multiple
 discount-bearing rows picks the **earliest** `discount_date`; missing discount fields → `undefined`,
-not `0` (so the economics helper can tell "no discount offered" from "$0 discount").
+not `0` (so the economics helper can tell "no discount offered" from "$0 discount"); explode with 1
+distinct due date → `null` (no-op); explode with many distinct due dates → one row per unpaid
+installment with its own amount and its own discount fields; paid-off installments (`outstanding: 0`)
+excluded; run against the real captured `SUP-DAILY` fixture (90 installments) end to end.
 
 ---
 
@@ -382,7 +393,7 @@ Concretely, for a same-vendor group of bills with due dates within a configurabl
  * @returns {{
  *   groups: Array<{
  *     supplier: string,
- *     bills: string[],          // invoice names
+ *     bills: string[],          // installmentKeys (Packet 1) — unique per row, not always == invoice name
  *     payOn: string,            // ISO — earliest due date in group, or a discount date if that wins
  *     totalAmount: number,
  *     feesSaved: number,        // vs paying each bill separately
