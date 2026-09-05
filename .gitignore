@@ -37,7 +37,5 @@ localhost.har
 output.pdf
 ops/sample-data/dogfood-sources/generated/
 
-AGENT_CONVENTIONS.md
-
 # Legacy Bill shell (tranche 10) — SSoT: electron/bill-shell.fragment.html + doc-form.html
 electron/bill.html
