@@ -67,7 +67,9 @@ test.describe("scaffold: toolbar chrome", () => {
     expect(await e2eGet(app, "showingHome")).toBe(true);
 
     await e2eCall(app, "openErp", "/desk");
-    expect(await e2eGet(app, "showingHome")).toBe(false);
+    // __erpE2e is a snapshot rebuilt by syncE2eApi() once the load settles — poll it,
+    // never read it straight after an async nav.
+    await expect.poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 }).toBe(false);
 
     // Doc skin tab → Doc Workflow Home (same as Home button until Bill Doc form ships)
     await e2eCall(
@@ -81,7 +83,9 @@ test.describe("scaffold: toolbar chrome", () => {
       .toBe(true);
 
     await e2eCall(app, "openErp", "/desk");
-    expect(await e2eGet(app, "showingHome")).toBe(false);
+    // __erpE2e is a snapshot rebuilt by syncE2eApi() once the load settles — poll it,
+    // never read it straight after an async nav.
+    await expect.poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 }).toBe(false);
 
     await e2eCall(
       app,

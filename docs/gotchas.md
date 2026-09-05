@@ -284,7 +284,49 @@ the existing mapping — the mapping itself may be the bug.
 
 ---
 
-## Template (append G6+)
+## G6 — A stale nav intent is worse than no guard (2026-09-05)
+
+**Observed:** From Doc Home, clicking **Vanilla** landed back on the previous Vanilla list
+("payment entry find") instead of Desk (nav incident 2026-09-05). Related: the toolbar lens
+chip did not flip (2026-09-03), and the Simplified ⚙ Assumptions button stayed on screen
+after switching to Vanilla (2026-09-04, logged twice).
+
+**Expected:** The shell's `currentRoute` tracks where the ERP WebContents actually is, and
+every consumer of it (toolbar lens chip, Simplified injection gate, Recent flyout) agrees.
+
+**Architecture / fix:** `beginErpNavIntent()` guards an intentional shell nav so a late
+`did-navigate` from the page we just left cannot overwrite `currentRoute`. It only armed for
+`/app/…` paths — and for anything else (`/desk`, `/`, `/login`) it returned **without
+clearing the intent already armed**. Proven against `src/erp-nav-intent.js`: with a stale
+`/app/payment-entry` intent still armed, `shouldAcceptErpTrackNav` **rejects the real arrival
+at Desk** (so `currentRoute` never updates, and `pollErpRoute` cannot repair it because it
+calls the same guarded `trackNav`) while **accepting a late event from the old page**, which
+writes the old route back. The window is the full 15s intent timeout.
+
+Arming a `/desk` intent instead would be worse, not better: the guard matches on doctype, and
+a doctype-less intent never accepts its own arrival, so it would never clear and would block
+every event for the whole timeout (there is a unit test pinning this). The fix is therefore
+**clear, never leave stale** — `resolveErpNavIntent()` returns arm-or-clear and `main.js`
+obeys it.
+
+Two consumers were repaired at the same time, because a lying `currentRoute` is only visible
+through them: the toolbar chip now derives from the **live** ERP path via
+`toolbarLensId()` (`src/chrome-state.js`), and the Simplified skin now has a real
+`destroy()` so leaving the lens no longer depends on a page reload actually happening
+(`ensureSimplifiedSkin` tears down whenever the lens is not simplified, making every ERP
+nav a repair point).
+
+**Dogfood:** From Doc Home click Vanilla → Desk home, not the last list. On a Simplified
+Bill click Vanilla → the ⚙ button and every dimmed field disappear immediately, and the
+toolbar chip reads Vanilla.
+
+**Do not regress:** A guard that can be armed must have a defined "cannot guard this" branch.
+Returning early from an arming function leaves the *previous* guard live — which is not
+"no guard", it is a guard pointed at the wrong target.
+
+---
+
+## Template (append G7+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)

@@ -10,11 +10,13 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
-   `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086). Nav instrumentation
-   `implementation-plan-2026-08-19.md` (OI-127 / OI-126) — close when folded into HANDOFF.
+   `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086).
    `implementation-plan-2026-09-03.md` (Doc Pay skin economic batching / OI-138 · OI-161) —
    planned, no code yet.
-   **Closed:** `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
+   **Closed:** `implementation-plan-2026-08-19.md` (nav instrumentation OI-126/127/128 A,
+   2026-09-05) — map folded into **Navigation spine** below; residuals live on as museum
+   OI-128 (peek granularity) and OI-040 (concurrent instances, parked).
+   `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
    runtime lessons in [docs/gotchas.md](docs/gotchas.md); remaining OIs in museum only.
    Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
 4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
@@ -86,10 +88,11 @@ flowchart LR
 | Capability | Pure module(s) | Electron surface |
 |------------|----------------|------------------|
 | DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
-| Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` view (peek tree under parent Doc, OI-128 A) |
+| Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` rail (peek tree under parent Doc, OI-128 A; collapsible) |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
+| Nav intent guard | `erp-nav-intent.js` | Arm/clear around an intentional ERP nav so a late event from the page we left cannot rewrite `currentRoute` (G6) |
 | Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
-| Chrome UI state | `chrome-state.js` | Toolbar highlight / home vs ERP |
+| Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
@@ -108,6 +111,32 @@ flowchart LR
 Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
 **Vanilla skin** → ERP `/desk`. Site root `/` is a tile under Shell.
 ERP Desk itself is unmodified — it will not show our tiles (by design).
+
+### Navigation spine (OI-126 map — folded from the 2026-08-19 plan)
+
+One window, one ERP WebContents SPA, one `surfaceMode` (`home | doc | erp`), one
+`dirtyState`. **Approach A only:** Recent draws nested peeks under the parent Doc on that
+single view. Approach B (overlay WebContents) is out; C (warm pool of N SPAs) stays parked
+on museum **OI-040**.
+
+| Vanilla Desk job | Shell mechanism | Status after the OI-127 incident corpus |
+|------------------|-----------------|------------------------------------------|
+| Same-SPA hop to a master, typing survives | soft-peek + Doc park/rebind | **Confirmed** — OI-112 strike 1 closed; rebind misses not seen since |
+| Peek a Link without leaving the form | coarse surface swap + peek tree (depth 1) | **Open** — in-Doc overlay is still museum OI-128 |
+| Second live client (browser tab) | singleton `dirtyState`; unmanaged `window.open` | **Open** — parked on OI-040; incident snapshots count guest windows |
+| Browser Back | Esc dismisses peek; Recent is a deduped resume | **Confirmed** — do not mash Back into Recent |
+| "Where am I?" (toolbar lens chip) | `toolbarLensId()` from the **live** ERP path | **Repaired 2026-09-05** — believed route could lag the page (G6) |
+
+**`currentRoute` is a claim, not a fact.** It is set optimistically at nav time and
+reconciled from browser events, so anything user-visible that reads it (lens chip,
+Simplified injection gate, Recent rows) must tolerate it lagging — see `docs/gotchas.md` G6.
+Guarding those events is `erp-nav-intent.js`; the guard must always resolve to arm **or**
+clear, never "leave the last one armed".
+
+**Persistence contract** (`userData/nav-state.json`): Drafts, Calculator history and the
+rail's collapsed state survive restart (calc rows are marked *Previous session*).
+**Recent does not** — it is this session's trail by design, so the flyout legitimately opens
+empty after a restart while Drafts still lists work in progress.
 
 ### Dogfood debugging (5zorro → agent)
 
@@ -156,7 +185,7 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `peek-stack.test.js` | Nested peeks under parent Doc; collapse vs Esc-keep; flyout tree decorate | Flyout tree is visual; collapse wired in `main.js` |
 | `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
 | `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
-| `chrome-state.test.js` | Pure reducer | **Gap** — not required in e2e yet (main uses its own `showingHome` flag) |
+| `chrome-state.test.js` | Toolbar lens chip (live path beats stale route); rail width | `scaffold-chrome` (lens buttons; `showingHome` polled, never read bare) |
 | `money.test.js` | Nickel rounding | **Gap** — no UI wire yet (OI-042) |
 | `doc-terms.test.js` | QB-style relabel / reverse | Used by Bill Doc labels |
 | `bill-map.test.js` | Header/items; amount-due checksum | Bill view (`bill.html`) |

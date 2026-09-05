@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
 
-const VERSION = 10;
+const VERSION = 11;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -480,6 +480,11 @@ export function buildSimplifiedPayload() {
   var backToTopTarget = null;
   var lastEscAt = 0;
   var scrollListenerBound = false;
+  var onWindowScroll = null;
+  var onEscKeydown = null;
+  /* fieldname -> docfield props as Vanilla had them, so destroy() can put them back */
+  var appliedFields = {};
+  var destroyed = false;
   function scrollToTop() {
     if (backToTopTarget) backToTopTarget.scrollIntoView({ behavior: "smooth", block: "start" });
     else window.scrollTo({ top: 0, behavior: "smooth" });
@@ -496,22 +501,34 @@ export function buildSimplifiedPayload() {
     if (scrollListenerBound) return;
     scrollListenerBound = true;
     var ticking = false;
-    window.addEventListener("scroll", function() {
+    onWindowScroll = function() {
       btn.classList.toggle("ss-visible", window.scrollY > 220);
       if (ticking) return;
       ticking = true;
       window.requestAnimationFrame(function() { updateScrollNavActive(); ticking = false; });
-    }, { passive: true });
-    document.addEventListener("keydown", function(e) {
+    };
+    onEscKeydown = function(e) {
       if (e.key !== "Escape") return;
       var now = Date.now();
       if (now - lastEscAt < 600) { scrollToTop(); lastEscAt = 0; }
       else lastEscAt = now;
-    });
+    };
+    window.addEventListener("scroll", onWindowScroll, { passive: true });
+    document.addEventListener("keydown", onEscKeydown);
   }
 
   /* ---- Applier ---- */
+  function rememberOriginal(frm, fn) {
+    if (appliedFields[fn]) return;
+    var df = null;
+    try { df = frm.get_docfield ? frm.get_docfield(fn) : null; } catch(e) {}
+    appliedFields[fn] = df
+      ? { hidden: df.hidden, read_only: df.read_only, description: df.description }
+      : { hidden: 0, read_only: 0, description: "" };
+  }
+
   function apply(frm) {
+    if (destroyed) return;
     if (!frm || !frm.doctype) return;
     installScrollNav(frm);
     var profile = load(frm.doctype);
@@ -540,6 +557,7 @@ export function buildSimplifiedPayload() {
       }
       if (unsafe[fn]) return;
       try {
+        rememberOriginal(frm, fn);
         if (pl === "L3") {
           frm.set_df_property(fn, "hidden", 1);
           return;
@@ -867,6 +885,58 @@ export function buildSimplifiedPayload() {
     installFloatingButton();
   }, 100);
 
+  /* ---- Teardown ----
+     Switching to Vanilla used to rely entirely on the page reloading to erase this
+     skin. When that reload was skipped or raced (nav incidents 2026-09-03/04), the
+     toolbar said Vanilla while the assumptions button and every dimmed/locked field
+     were still on screen. destroy() makes leaving the lens explicit instead.
+     Frappe's own tab click handlers were removed by installScrollNav and only a
+     reload restores them, so main still reloads — this just stops the skin from
+     surviving a reload that does not happen. */
+  function destroy() {
+    destroyed = true;
+    var frm = window.cur_frm;
+
+    if (onWindowScroll) { try { window.removeEventListener("scroll", onWindowScroll); } catch(e) {} }
+    if (onEscKeydown) { try { document.removeEventListener("keydown", onEscKeydown); } catch(e) {} }
+    onWindowScroll = null;
+    onEscKeydown = null;
+    scrollListenerBound = false;
+    scrollNavSections = [];
+
+    if (frm && frm.__ssShowGuard) {
+      try { frm.__ssShowGuard.disconnect(); } catch(e) {}
+      frm.__ssShowGuard = null;
+    }
+
+    ["ss-aff", "ss-top", "ss-back", "ss-injected-css"].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+    Array.prototype.slice
+      .call(document.querySelectorAll(".ss-tab-divider, .ss-tab-header"))
+      .forEach(function(el) { if (el.parentNode) el.parentNode.removeChild(el); });
+
+    if (frm) {
+      Object.keys(appliedFields).forEach(function(fn) {
+        var orig = appliedFields[fn];
+        try {
+          frm.set_df_property(fn, "hidden", orig.hidden || 0);
+          frm.set_df_property(fn, "read_only", orig.read_only || 0);
+          frm.set_df_property(fn, "description", orig.description || "");
+          deemph(frm, fn, false);
+          prefillMark(frm, fn, false);
+          detab(frm, fn, false);
+        } catch(e) {}
+      });
+      try { if (frm.refresh_fields) frm.refresh_fields(); } catch(e) {}
+    }
+    appliedFields = {};
+    delete window.__simplifiedSkin;
+    console.log("[simplified-skin] removed");
+    return { ok: true };
+  }
+
   /* ---- Public API ---- */
   window.__simplifiedSkin = {
     version: VERSION,
@@ -874,8 +944,33 @@ export function buildSimplifiedPayload() {
     openBar: openBar,
     load: load,
     save: save,
+    destroy: destroy,
   };
 
   console.log("[simplified-skin] installed v" + VERSION);
 })();`;
+}
+
+/**
+ * Remove an injected Simplified skin from the ERP page (no-op when absent).
+ * Separate from buildSimplifiedPayload so leaving the lens never depends on a reload.
+ * @returns {string} JS safe to run via webContents.executeJavaScript()
+ */
+export function buildSimplifiedTeardown() {
+  return `(function(){
+  try {
+    if (window.__simplifiedSkin && typeof window.__simplifiedSkin.destroy === "function") {
+      return window.__simplifiedSkin.destroy();
+    }
+    /* Older injected build with no destroy(): strip what we can still see. */
+    ["ss-aff", "ss-top", "ss-back", "ss-injected-css"].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+    delete window.__simplifiedSkin;
+    return { ok: true, legacy: true };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+})()`;
 }

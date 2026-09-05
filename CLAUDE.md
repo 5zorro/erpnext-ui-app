@@ -33,7 +33,7 @@ npm run report:input-count  # field-count advertising report
 ## Active plans (2026-09-03)
 
 - `docs/implementation-plan-2026-07-29.md` — Simplified skin (OI-086), Calculator C0–C3 landed
-- `docs/implementation-plan-2026-08-19.md` — Nav instrumentation (OI-126/127/128), all landed
+- Nav instrumentation (OI-126/127/128 A) closed 2026-09-05 — spine folded into HANDOFF § Navigation spine
 - `docs/implementation-plan-2026-09-03.md` — Doc Pay skin: economic batching of outstanding
   Bills (OI-138 / OI-161) — planned, no code yet
 

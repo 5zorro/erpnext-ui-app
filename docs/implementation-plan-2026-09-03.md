@@ -4,7 +4,8 @@
 > When this tranche's durable facts live in HANDOFF / OI status / CHANGELOG, **delete this file**.
 >
 > **Started:** 2026-09-03 · **Does not supersede** `implementation-plan-2026-07-29.md` (Simplified /
-> OI-086) or `implementation-plan-2026-08-19.md` (Nav instrumentation) — both stay open in parallel.
+> OI-086), which stays open in parallel. (Nav instrumentation `implementation-plan-2026-08-19.md`
+> closed 2026-09-05 — spine folded into HANDOFF § Navigation spine.)
 > **Repo:** `erpnext-ui-app` · **Museum:** `~/agent-harness/erpnext/doc-shell/open_items.md`
 > **Primary OIs:** **OI-138** (Doc Pay skin: outstanding Bills grouped by vendor + payment date —
 > brainstorm 2026-08-25) · **OI-161** (Payment batching economics: postage + daily interest vs due
