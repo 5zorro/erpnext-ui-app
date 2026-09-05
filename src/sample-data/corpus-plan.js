@@ -13,7 +13,7 @@
  */
 
 /** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
-export const SAMPLE_TAG = "ui-app-sample-v2";
+export const SAMPLE_TAG = "ui-app-sample-v3";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
 export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
@@ -76,6 +76,12 @@ export function buildCorpusPlan(opts = {}) {
   suppliers.push(
     { key: "SUP-IDLE", name: "SAMPLE Vendor Idle", taxWithholding: false, activity: "idle" },
     { key: "SUP-NEVER", name: "SAMPLE Vendor Never", taxWithholding: false, activity: "never" },
+  );
+  // OI-161 / Packet G: dedicated vendors for the daily-payment-schedule batching fixture —
+  // small and large dollar scale, so Packet 2's economics can be dogfooded at both.
+  suppliers.push(
+    { key: "SUP-DAILY", name: "SAMPLE Vendor Daily Payrun", taxWithholding: false },
+    { key: "SUP-DAILY-LG", name: "SAMPLE Vendor Daily Payrun Large", taxWithholding: false },
   );
   const items = Array.from({ length: partyCounts.items }, (_, i) => ({
     key: `ITM-${pad2(i)}`,
@@ -213,6 +219,7 @@ export function buildCorpusPlan(opts = {}) {
   });
 
   appendApDogfoodFixtures(docs, { windowDays, suppliers, items, supplierByKey });
+  appendPaymentBatchFixture(docs, { windowDays, items });
 
   return {
     tag,
@@ -231,11 +238,15 @@ export function buildCorpusPlan(opts = {}) {
   };
 }
 
-/** Extra submitted sandbox rows beyond DEFAULT_COUNTS (T0 AP fixtures). */
+/** Extra submitted sandbox rows beyond DEFAULT_COUNTS (T0 AP fixtures + OI-161 Packet G). */
 export const AP_FIXTURE_EXTRA_COUNTS = Object.freeze({
   purchase_order: 3,
   purchase_receipt: 2,
+  purchase_invoice: 2,
 });
+
+/** OI-161 Packet G: one daily-payment-schedule Bill per dollar scale. */
+export const PAYMENT_BATCH_FIXTURE_KEYS = Object.freeze(["PI-DAILY", "PI-DAILY-LG"]);
 
 /** Keys for T0 dogfood — ERP sandbox rows clerks pull in source modal / Find. */
 export const AP_DOGFOOD_FIXTURE_KEYS = Object.freeze([
@@ -320,6 +331,57 @@ function appendApDogfoodFixtures(docs, ctx) {
     key: "PO-LB",
     dayOffset: 25,
   });
+}
+
+/**
+ * OI-161 Packet G (sample-data gate): "a vendor with a bill with 1 payment due every day for
+ * 3 months" — one Purchase Invoice per dollar scale, each carrying 90 explicit `payment_schedule`
+ * rows (one per calendar day) instead of the flat 30-day due date every other seeded Bill gets.
+ * Two scales (small $50/day, large $2,500/day) so Packet 2's economics helper is dogfoodable at
+ * both — small should batch under default prefs, large should not (float cost swamps a flat fee).
+ *
+ * `dayOffset` on each schedule row is relative (days before/after the corpus's `asOf`, resolved by
+ * `emit-plan.js` the same way doc-level `dayOffset` is) — this function stays asOf-agnostic and pure.
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number, items: object[] }} ctx
+ */
+function appendPaymentBatchFixture(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const dailyItem = items[0];
+  const scheduleLength = 90;
+  // Posting 45 days before asOf spreads the 90 daily due dates from ~44 days overdue to ~45 days
+  // out — both ageing buckets exercised, not just future-due.
+  const postingDayOffset = 45;
+
+  const scales = [
+    { partyKey: "SUP-DAILY", rate: 50.0, index: 903, key: "PI-DAILY", scenario: "oi161-daily-payrun-small" },
+    { partyKey: "SUP-DAILY-LG", rate: 2500.0, index: 904, key: "PI-DAILY-LG", scenario: "oi161-daily-payrun-large" },
+  ];
+
+  for (const scale of scales) {
+    // Row i (0-indexed) is due `posting + (i+1)` days → dayOffset = postingDayOffset - (i+1).
+    // Ascending array order = ascending due date, so the last row is the latest (header due_date
+    // "last row wins" convention, same as bill-payment-schedule.js::headerDueDateFromPaymentSchedule).
+    const paymentSchedule = Array.from({ length: scheduleLength }, (_, i) => ({
+      dayOffset: postingDayOffset - (i + 1),
+      amount: scale.rate,
+    }));
+    docs.push({
+      ...baseDoc("purchase_invoice", scale.index, windowDays, 2, {
+        partyKey: scale.partyKey,
+        items: [{ itemKey: dailyItem.key, qty: scheduleLength, rate: scale.rate, salesOrderRef: null }],
+        source: null,
+        billNo: `SMP-${scale.partyKey}-INV-01`,
+        updateStock: false,
+        taxWithholding: false,
+        paymentSchedule,
+        dogfoodScenario: scale.scenario,
+      }),
+      key: scale.key,
+      dayOffset: postingDayOffset,
+    });
+  }
 }
 
 /** @param {object[]} docs */
