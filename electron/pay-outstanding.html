@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pay Outstanding</title>
+  <link rel="stylesheet" href="doc-wash.css" />
+  <style>
+    :root {
+      --flow-batch: var(--accent-payment, #009e73);
+      --flow-discount: #e69f00;
+      --flow-alone: #94a3b8;
+      --flow-invoice: #60a5fa;
+    }
+    html, body {
+      margin: 0; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px; box-sizing: border-box; padding: 0 20px; background: #fff;
+      border-bottom: 1px solid #d6dee6; position: sticky; top: 0; z-index: 3;
+    }
+    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; flex: 0 0 auto; }
+    .filter-input {
+      flex: 0 1 260px; margin: 0 16px; padding: 6px 10px; border: 1px solid #d6dee6;
+      border-radius: 6px; font-size: 12px; background: #f8fafc;
+    }
+    .filter-input:focus { outline: none; border-color: #60a5fa; background: #fff; }
+    #empty.no-match { color: #94a3b8; }
+    .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #64748b; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-swatch { width: 14px; height: 4px; border-radius: 2px; }
+    .hdr-actions { display: flex; align-items: center; gap: 10px; }
+    #prefs-toggle {
+      border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
+    #prefs-toggle:hover { background: #eef2f5; }
+    .sort-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; }
+    .sort-btn {
+      border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 6px;
+      padding: 5px 10px; font-size: 11px; cursor: pointer;
+    }
+    .sort-btn:hover { background: #eef2f5; }
+    .sort-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    #prefs-panel {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+      padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #d6dee6;
+    }
+    #prefs-panel[hidden] { display: none; }
+    .pref-field { display: flex; flex-direction: column; gap: 3px; }
+    .pref-field label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .pref-field input {
+      width: 90px; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px;
+    }
+    .pref-field input.invalid { border-color: #dc2626; background: #fef2f2; }
+    #prefs-error { font-size: 11px; color: #dc2626; }
+    main { max-width: 1040px; margin: 0 auto; padding: 0 20px 40px; }
+    .col-header-row {
+      display: grid; grid-template-columns: 150px 64px 1fr 96px 1fr; align-items: center;
+      height: 28px; box-sizing: border-box; margin: 0 0 10px;
+      background: var(--doc-page-canvas, #eef2f5); position: sticky; top: 52px; z-index: 2;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+    }
+    .col-header-invoice { padding: 0 12px; }
+    .col-header-left, .col-header-right { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+    .col-header-flow { text-align: center; }
+    .c-due, .c-sdate { flex: 1; }
+    .c-amt, .c-samt { flex: 0 0 84px; text-align: right; }
+    #empty { padding: 40px 0; text-align: center; color: #64748b; font-size: 13px; }
+    #load-error {
+      margin: 12px 0; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5;
+      border-radius: 8px; color: #991b1b; font-size: 12px;
+    }
+    #load-error[hidden] { display: none; }
+    .vendor-card {
+      background: #fff; border: 1px solid #d6dee6; border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 18px;
+    }
+    .vendor-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding: 10px 14px; background: #2c3e50; color: #fff; border-radius: 10px 10px 0 0;
+      position: sticky; top: 80px; z-index: 1;
+    }
+    .vendor-head .name { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+    .vendor-head .total { font-size: 12px; color: #cbd5e1; }
+    .flow-grid {
+      display: grid; grid-template-columns: 150px 64px 1fr 96px 1fr; align-items: stretch;
+    }
+    .col-bills, .col-groups, .col-invoices { display: flex; flex-direction: column; }
+    .col-groups, .col-invoices { align-items: stretch; }
+    .group-wrap, .invoice-wrap { position: relative; }
+    .invoice-node {
+      display: flex; flex-direction: column; justify-content: center; padding: 6px 12px;
+      cursor: pointer; border-bottom: 1px solid #f1f5f9; gap: 2px; background: #f8fbff;
+    }
+    .invoice-node:hover { background: #eef6ff; }
+    .invoice-name {
+      font-size: 11px; font-weight: 600; color: #1f2d3d; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .invoice-sub { font-size: 10px; color: #64748b; }
+    .row {
+      display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 12px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .bill-row { cursor: pointer; }
+    .bill-row:hover { background: #f8fafc; }
+    .bill-row .due { color: #475569; font-variant-numeric: tabular-nums; }
+    .bill-row .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .discount-badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e;
+      white-space: nowrap;
+    }
+    .group-node {
+      display: flex; flex-direction: column; justify-content: center; padding: 6px 12px;
+      cursor: pointer; border-bottom: 1px solid #f1f5f9; gap: 2px;
+    }
+    .group-node:hover { background: #f8fafc; }
+    .group-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .group-payon { font-size: 12px; font-weight: 600; color: #1f2d3d; font-variant-numeric: tabular-nums; }
+    .group-amt { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .reason-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .group-sub { font-size: 10px; color: #64748b; }
+    .rationale {
+      font-size: 11px; color: #334155; background: #fff; border: 1px solid #d6dee6;
+      padding: 8px 12px; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.12);
+      position: absolute; top: 100%; left: 8px; right: 8px; z-index: 5; border-radius: 0 0 8px 8px;
+    }
+    .rationale[hidden] { display: none; }
+    .rationale .member-bills { margin-top: 4px; color: #64748b; }
+    .view-link { color: #0072b2; text-decoration: none; font-size: 11px; }
+    .view-link:hover { text-decoration: underline; }
+    svg.flow-svg { display: block; width: 100%; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 data-testid="pay-outstanding-title">Pay Outstanding</h1>
+    <input
+      type="search"
+      id="filter-input"
+      class="filter-input"
+      placeholder="Filter by vendor or invoice…"
+      data-testid="filter-input"
+    />
+    <div class="hdr-actions">
+      <div class="legend" aria-hidden="true">
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-batch)"></span>Batch</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-discount)"></span>Discount capture</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-alone)"></span>Pay alone</span>
+      </div>
+      <div class="sort-toggle" role="group" aria-label="Sort schedule by">
+        Sort:
+        <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
+        <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
+      </div>
+      <button type="button" id="prefs-toggle" aria-expanded="false">⚙ Assumptions</button>
+    </div>
+  </header>
+  <div id="prefs-panel" hidden>
+    <div class="pref-field">
+      <label for="pref-apr">APR %</label>
+      <input type="number" id="pref-apr" step="0.1" min="0" data-testid="pref-apr" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-postage">Postage $</label>
+      <input type="number" id="pref-postage" step="0.01" min="0" data-testid="pref-postage" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-percheck">Per-check $</label>
+      <input type="number" id="pref-percheck" step="0.01" min="0" data-testid="pref-percheck" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-window">Batch window (days)</label>
+      <input type="number" id="pref-window" step="1" min="0" data-testid="pref-window" />
+    </div>
+    <span id="prefs-error"></span>
+  </div>
+  <main>
+    <div id="load-error" hidden></div>
+    <div id="empty" hidden data-testid="pay-outstanding-empty">Nothing outstanding.</div>
+    <div class="col-header-row" id="col-header-row" hidden data-testid="flow-col-header">
+      <div class="col-header-invoice">Invoice</div>
+      <div class="col-header-flow">Flow</div>
+      <div class="col-header-left">
+        <span class="c-due">Payment date</span>
+        <span class="c-amt">Amount</span>
+      </div>
+      <div class="col-header-flow">Flow</div>
+      <div class="col-header-right">
+        <span class="c-sdate">Suggested date</span>
+        <span class="c-samt">Suggested amount</span>
+      </div>
+    </div>
+    <div id="vendors" data-testid="pay-outstanding-vendors"></div>
+  </main>
+
+  <script type="module">
+    import { paymentBatchEconomics } from "../src/payment-batch-economics.js";
+    import {
+      DEFAULT_PAYMENT_BATCH_PREFS,
+      mergePaymentBatchPrefs,
+      validatePaymentBatchPrefs,
+    } from "../src/payment-batch-prefs.js";
+
+    const api = window.erpPayOutstanding;
+    const ROW_HEIGHT = 34;
+    const MIN_STROKE = 2;
+    const MAX_STROKE = 16;
+    const REASON_COLOR = {
+      batch: "var(--flow-batch)",
+      "discount-capture": "var(--flow-discount)",
+      "pay-alone": "var(--flow-alone)",
+    };
+
+    let allBills = [];
+    let prefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+    /** @type {"date"|"invoice"} */
+    let scheduleSortMode = "date";
+    let filterText = "";
+
+    const vendorsEl = document.getElementById("vendors");
+    const emptyEl = document.getElementById("empty");
+    const colHeaderEl = document.getElementById("col-header-row");
+    const loadErrorEl = document.getElementById("load-error");
+    const prefsToggle = document.getElementById("prefs-toggle");
+    const prefsPanel = document.getElementById("prefs-panel");
+    const prefsError = document.getElementById("prefs-error");
+    const prefInputs = {
+      apr: document.getElementById("pref-apr"),
+      postage: document.getElementById("pref-postage"),
+      perCheck: document.getElementById("pref-percheck"),
+      groupWindowDays: document.getElementById("pref-window"),
+    };
+
+    function money(n) {
+      return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
+    function todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+
+    function groupBySupplier(bills) {
+      const map = new Map();
+      for (const b of bills) {
+        if (!map.has(b.supplier)) map.set(b.supplier, []);
+        map.get(b.supplier).push(b);
+      }
+      return map;
+    }
+
+    function paintPrefsInputs() {
+      prefInputs.apr.value = Math.round(prefs.apr * 1000) / 10; // decimal -> %
+      prefInputs.postage.value = prefs.postage;
+      prefInputs.perCheck.value = prefs.perCheck;
+      prefInputs.groupWindowDays.value = prefs.groupWindowDays;
+    }
+
+    function readPrefsFromInputs() {
+      return {
+        apr: Number(prefInputs.apr.value) / 100,
+        postage: Number(prefInputs.postage.value),
+        perCheck: Number(prefInputs.perCheck.value),
+        groupWindowDays: Number(prefInputs.groupWindowDays.value),
+      };
+    }
+
+    async function onPrefsChanged() {
+      const candidate = readPrefsFromInputs();
+      const check = validatePaymentBatchPrefs(candidate);
+      for (const key of Object.keys(prefInputs)) prefInputs[key].classList.remove("invalid");
+      if (!check.ok) {
+        prefsError.textContent = check.errors.join("; ");
+        for (const err of check.errors) {
+          const field = err.split(" ")[0];
+          if (prefInputs[field]) prefInputs[field].classList.add("invalid");
+        }
+        return;
+      }
+      prefsError.textContent = "";
+      prefs = candidate;
+      render(); // client-side re-compute only — bills already fetched, no re-fetch (Packet 3)
+      if (api && api.setPrefs) {
+        const saved = await api.setPrefs(prefs).catch(() => null);
+        if (saved && saved.ok) prefs = saved.prefs;
+      }
+    }
+
+    prefsToggle.onclick = () => {
+      const open = prefsPanel.hidden;
+      prefsPanel.hidden = !open;
+      prefsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+
+    const sortDateBtn = document.getElementById("sort-date");
+    const sortInvoiceBtn = document.getElementById("sort-invoice");
+    function setSortMode(mode) {
+      if (mode === scheduleSortMode) return;
+      scheduleSortMode = mode;
+      sortDateBtn.classList.toggle("active", mode === "date");
+      sortInvoiceBtn.classList.toggle("active", mode === "invoice");
+      render(); // re-derives billY from the new order — both ribbon layers re-align automatically
+    }
+    sortDateBtn.onclick = () => setSortMode("date");
+    sortInvoiceBtn.onclick = () => setSortMode("invoice");
+
+    /** Filter by vendor (substring, case-insensitive) or invoice name — optional, empty = all. */
+    function matchesFilter(bill, filter) {
+      if (!filter) return true;
+      const f = filter.toLowerCase();
+      return bill.supplier.toLowerCase().includes(f) || bill.invoice.toLowerCase().includes(f);
+    }
+    const filterInput = document.getElementById("filter-input");
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value.trim();
+      render();
+    });
+    for (const input of Object.values(prefInputs)) {
+      input.addEventListener("change", onPrefsChanged);
+    }
+
+    function billRowEl(bill) {
+      const row = document.createElement("div");
+      row.className = "row bill-row";
+      row.dataset.testid = "bill-row";
+      row.title = `Open ${bill.invoice} in Vanilla`;
+
+      const due = document.createElement("span");
+      due.className = "due c-due";
+      due.textContent = bill.dueDate;
+      if (bill.discountDate && bill.discountDate >= todayIso()) {
+        const badge = document.createElement("span");
+        badge.className = "discount-badge";
+        badge.textContent = `−${money(bill.discountAmount)} by ${bill.discountDate}`;
+        due.appendChild(document.createTextNode(" "));
+        due.appendChild(badge);
+      }
+
+      const amt = document.createElement("span");
+      amt.className = "amt c-amt";
+      amt.textContent = money(bill.outstanding);
+
+      row.appendChild(due);
+      row.appendChild(amt);
+      row.onclick = () => {
+        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(bill.invoice)}`);
+      };
+      return row;
+    }
+
+    /**
+     * One node per unique invoice, ordered by first appearance in `orderedBills` — this keeps
+     * the invoice column consistent with whichever schedule sort is active (date or invoice)
+     * without the two ever needing separate ordering logic.
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} orderedBills
+     */
+    function groupByInvoiceInOrder(orderedBills) {
+      const order = [];
+      const rowsByInvoice = new Map();
+      for (const b of orderedBills) {
+        if (!rowsByInvoice.has(b.invoice)) {
+          rowsByInvoice.set(b.invoice, []);
+          order.push(b.invoice);
+        }
+        rowsByInvoice.get(b.invoice).push(b);
+      }
+      return order.map((invoice) => ({
+        invoice,
+        rows: rowsByInvoice.get(invoice),
+        total: rowsByInvoice.get(invoice).reduce((s, r) => s + r.outstanding, 0),
+      }));
+    }
+
+    function invoiceNodeEl(inv) {
+      const wrap = document.createElement("div");
+      wrap.className = "invoice-node";
+      wrap.dataset.testid = "invoice-node";
+      wrap.title = `Open ${inv.invoice} in Vanilla`;
+
+      const name = document.createElement("div");
+      name.className = "invoice-name";
+      name.textContent = inv.invoice;
+      wrap.appendChild(name);
+
+      const sub = document.createElement("div");
+      sub.className = "invoice-sub";
+      sub.textContent =
+        inv.rows.length > 1 ? `${inv.rows.length} installments · ${money(inv.total)}` : money(inv.total);
+      wrap.appendChild(sub);
+
+      wrap.onclick = () => {
+        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(inv.invoice)}`);
+      };
+      return wrap;
+    }
+
+    function groupNodeEl(group) {
+      const wrap = document.createElement("div");
+      wrap.className = "group-node";
+      wrap.dataset.testid = "group-node";
+      wrap.dataset.reason = group.reason;
+
+      const top = document.createElement("div");
+      top.className = "group-top";
+      const label = document.createElement("span");
+      label.className = "c-sdate";
+      label.style.display = "flex";
+      label.style.alignItems = "center";
+      label.style.gap = "6px";
+      const dot = document.createElement("span");
+      dot.className = "reason-dot";
+      dot.style.background = REASON_COLOR[group.reason] || REASON_COLOR["pay-alone"];
+      label.appendChild(dot);
+      const payOn = document.createElement("span");
+      payOn.className = "group-payon";
+      payOn.textContent = group.payOn;
+      label.appendChild(payOn);
+      top.appendChild(label);
+      const amt = document.createElement("span");
+      amt.className = "group-amt c-samt";
+      amt.textContent = money(group.totalAmount);
+      top.appendChild(amt);
+      wrap.appendChild(top);
+
+      const sub = document.createElement("div");
+      sub.className = "group-sub";
+      sub.textContent =
+        group.bills.length > 1 ? `${group.bills.length} bills → one payment` : "Proposed payment";
+      wrap.appendChild(sub);
+
+      const rationale = document.createElement("div");
+      rationale.className = "rationale";
+      rationale.hidden = true;
+      rationale.dataset.testid = "group-rationale";
+      const text = document.createElement("div");
+      text.textContent = group.rationale;
+      rationale.appendChild(text);
+      if (group.bills.length > 1) {
+        const members = document.createElement("div");
+        members.className = "member-bills";
+        members.textContent = `Bills: ${group.bills.join(", ")}`;
+        rationale.appendChild(members);
+      }
+      const link = document.createElement("a");
+      link.className = "view-link";
+      link.href = "#";
+      link.textContent = "Open Payment Entry (Get Outstanding Invoices) →";
+      link.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (api && api.openErp) api.openErp("/app/payment-entry/new");
+      };
+      rationale.appendChild(document.createElement("br"));
+      rationale.appendChild(link);
+
+      wrap.onclick = () => {
+        rationale.hidden = !rationale.hidden;
+      };
+      return { node: wrap, rationale };
+    }
+
+    /** Ribbon path: horizontal-ish cubic bezier from (x1,y1) to (x2,y2). */
+    function ribbonPath(x1, y1, x2, y2) {
+      const midX = (x1 + x2) / 2;
+      return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+    }
+
+    /**
+     * A ribbon layer between a set of aggregate "spans" (each fanning its members out/in across
+     * its own y0..y1) and a set of discrete row points keyed by installmentKey. Used for both
+     * ribbon layers (invoice -> schedule, spans on the left; schedule -> groups, spans on the
+     * right) so the fan-out/fan-in math lives in exactly one place.
+     * @param {{
+     *   spans: Array<{ y0: number, y1: number, keys: string[], reason?: string }>,
+     *   pointY: Map<string, number>,
+     *   amountByKey: Map<string, number>,
+     *   height: number,
+     *   width: number,
+     *   spanSide: "left"|"right",
+     *   strokeFor: (amount: number) => number,
+     *   colorFor: (span: object) => string,
+     *   opacity: number,
+     * }} args
+     */
+    function buildRibbonSvg({ spans, pointY, amountByKey, height, width, spanSide, strokeFor, colorFor, opacity }) {
+      const svgNs = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNs, "svg");
+      svg.setAttribute("class", "flow-svg");
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.style.height = `${height}px`;
+
+      for (const span of spans) {
+        let used = span.y0;
+        for (const key of span.keys) {
+          const py = pointY.has(key) ? pointY.get(key) : (span.y0 + span.y1) / 2;
+          const amount = amountByKey.get(key) || 0;
+          const stroke = strokeFor(amount);
+          const sy = Math.min(span.y1, used + stroke / 2);
+          used += Math.max(stroke, 4);
+          const spanX = spanSide === "left" ? 0 : width;
+          const pointX = spanSide === "left" ? width : 0;
+          const path = document.createElementNS(svgNs, "path");
+          path.setAttribute(
+            "d",
+            spanSide === "left" ? ribbonPath(spanX, sy, pointX, py) : ribbonPath(pointX, py, spanX, sy),
+          );
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", colorFor(span));
+          path.setAttribute("stroke-width", String(stroke));
+          path.setAttribute("stroke-opacity", String(opacity));
+          path.setAttribute("vector-effect", "non-scaling-stroke");
+          svg.appendChild(path);
+        }
+      }
+      return svg;
+    }
+
+    /**
+     * "date": globally chronological (today's default). "invoice": each invoice's installments
+     * grouped contiguously (still date-ordered within the invoice) -- ribbons still render
+     * correctly either way since they're computed from installmentKey -> Y, not from an assumed
+     * order.
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills
+     * @param {"date"|"invoice"} mode
+     */
+    function sortBillsForSchedule(bills, mode) {
+      if (mode === "invoice") {
+        return bills.slice().sort((a, b) => a.invoice.localeCompare(b.invoice) || a.dueDate.localeCompare(b.dueDate));
+      }
+      return bills.slice().sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    }
+
+    function renderVendorCard(supplier, bills, groups) {
+      const card = document.createElement("div");
+      card.className = "vendor-card";
+      card.dataset.testid = "vendor-card";
+
+      const head = document.createElement("div");
+      head.className = "vendor-head";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = supplier;
+      const total = document.createElement("span");
+      total.className = "total";
+      total.textContent = `${bills.length} bill${bills.length === 1 ? "" : "s"} · ${money(
+        bills.reduce((s, b) => s + b.outstanding, 0),
+      )} outstanding`;
+      head.appendChild(name);
+      head.appendChild(total);
+      card.appendChild(head);
+
+      const grid = document.createElement("div");
+      grid.className = "flow-grid";
+
+      const sortedBills = sortBillsForSchedule(bills, scheduleSortMode);
+      const sortedGroups = groups.slice().sort((a, b) => a.payOn.localeCompare(b.payOn));
+
+      const colBills = document.createElement("div");
+      colBills.className = "col-bills";
+      const billY = new Map(); // installmentKey -> center Y (within the flow-grid's own coordinate space)
+      sortedBills.forEach((bill, i) => {
+        const row = billRowEl(bill);
+        row.style.height = `${ROW_HEIGHT}px`;
+        colBills.appendChild(row);
+        billY.set(bill.installmentKey, i * ROW_HEIGHT + ROW_HEIGHT / 2);
+      });
+
+      const scheduleHeight = sortedBills.length * ROW_HEIGHT;
+      const vendorTotal = bills.reduce((s, b) => s + b.outstanding, 0) || 1;
+      // installmentKey -> outstanding, for ribbon stroke width on both ribbon layers below.
+      const billAmountByKey = new Map(bills.map((b) => [b.installmentKey, b.outstanding]));
+      function strokeFor(amount) {
+        const share = vendorTotal > 0 ? amount / vendorTotal : 0;
+        const scaled = share * MAX_STROKE * 4; // heuristic scale; clamped below regardless
+        return Math.min(MAX_STROKE, Math.max(MIN_STROKE, scaled));
+      }
+
+      // Invoice column — one node per unique invoice, ordered to match the active schedule sort
+      // (groupByInvoiceInOrder derives order from `sortedBills`, so date vs invoice sort both
+      // "just work" without separate ordering logic here).
+      const invoiceList = groupByInvoiceInOrder(sortedBills);
+      const colInvoices = document.createElement("div");
+      colInvoices.className = "col-invoices";
+      const invoiceSpans = []; // { y0, y1, invoice: invoiceListEntry }
+      {
+        let cur = 0;
+        const totalShare = invoiceList.reduce((s, e) => s + e.total, 0) || 1;
+        const targetH = Math.max(scheduleHeight, invoiceList.length * ROW_HEIGHT);
+        for (const entry of invoiceList) {
+          const h = Math.max(ROW_HEIGHT, (entry.total / totalShare) * targetH);
+          invoiceSpans.push({ y0: cur, y1: cur + h, invoice: entry });
+          cur += h;
+        }
+      }
+      const invoiceColHeight = invoiceSpans.reduce((m, s) => Math.max(m, s.y1), 0);
+      for (const span of invoiceSpans) {
+        const wrap = document.createElement("div");
+        wrap.className = "invoice-wrap";
+        wrap.style.height = `${span.y1 - span.y0}px`;
+        const node = invoiceNodeEl(span.invoice);
+        node.style.height = "100%";
+        wrap.appendChild(node);
+        colInvoices.appendChild(wrap);
+      }
+
+      // Groups column (right) — unchanged shape, still keyed off installmentKey.
+      const colGroups = document.createElement("div");
+      colGroups.className = "col-groups";
+      const groupSpans = []; // { y0, y1, group }
+      {
+        let cur = 0;
+        const totalShare = sortedGroups.reduce((s, g) => s + g.totalAmount, 0) || 1;
+        const targetH = Math.max(scheduleHeight, sortedGroups.length * ROW_HEIGHT);
+        for (const g of sortedGroups) {
+          const h = Math.max(ROW_HEIGHT, (g.totalAmount / totalShare) * targetH);
+          groupSpans.push({ y0: cur, y1: cur + h, group: g });
+          cur += h;
+        }
+      }
+      const groupColHeight = groupSpans.reduce((m, s) => Math.max(m, s.y1), 0);
+      for (const span of groupSpans) {
+        const built = groupNodeEl(span.group);
+        const wrap = document.createElement("div");
+        wrap.className = "group-wrap";
+        wrap.style.height = `${span.y1 - span.y0}px`;
+        built.node.style.height = "100%";
+        wrap.appendChild(built.node);
+        wrap.appendChild(built.rationale); // absolutely positioned — expanding it never shifts layout
+        colGroups.appendChild(wrap);
+      }
+
+      // One shared height for both ribbon layers so everything in this vendor's row lines up.
+      const flowHeight = Math.max(scheduleHeight, invoiceColHeight, groupColHeight, ROW_HEIGHT);
+
+      // Ribbon 1: invoice (span, fans out) -> schedule row (point). Neutral "structural" color —
+      // this layer shows grouping, not the economics decision (that's ribbon 2's job).
+      const invoiceRibbonSvg = buildRibbonSvg({
+        spans: invoiceSpans.map((s) => ({ y0: s.y0, y1: s.y1, keys: s.invoice.rows.map((r) => r.installmentKey) })),
+        pointY: billY,
+        amountByKey: billAmountByKey,
+        height: flowHeight,
+        width: 64,
+        spanSide: "left",
+        strokeFor,
+        colorFor: () => "var(--flow-invoice)",
+        opacity: 0.4,
+      });
+
+      // Ribbon 2: schedule row (point) -> group (span, fans in). Colored by suggestion reason —
+      // this is the actual economics decision the tool exists to show.
+      const groupRibbonSvg = buildRibbonSvg({
+        spans: groupSpans.map((s) => ({ y0: s.y0, y1: s.y1, keys: s.group.bills, reason: s.group.reason })),
+        pointY: billY,
+        amountByKey: billAmountByKey,
+        height: flowHeight,
+        width: 96,
+        spanSide: "right",
+        strokeFor,
+        colorFor: (span) => REASON_COLOR[span.reason] || REASON_COLOR["pay-alone"],
+        opacity: 0.55,
+      });
+
+      grid.appendChild(colInvoices);
+      grid.appendChild(invoiceRibbonSvg);
+      grid.appendChild(colBills);
+      grid.appendChild(groupRibbonSvg);
+      grid.appendChild(colGroups);
+      card.appendChild(grid);
+
+      return card;
+    }
+
+    function showError(message) {
+      loadErrorEl.hidden = !message;
+      loadErrorEl.textContent = message || "";
+    }
+
+    function render() {
+      vendorsEl.innerHTML = "";
+      if (!allBills.length) {
+        emptyEl.hidden = false;
+        emptyEl.classList.remove("no-match");
+        emptyEl.textContent = "Nothing outstanding.";
+        vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
+        return;
+      }
+
+      // Filter is vendor-scoped, not bill-scoped: matching by vendor name OR one of its invoice
+      // names still shows that vendor's *whole* bill set, unfiltered internally -- slicing a
+      // vendor's own bills would break paymentBatchEconomics' grouping math.
+      const bySupplier = groupBySupplier(allBills);
+      const suppliers = [...bySupplier.keys()].filter(
+        (supplier) => !filterText || bySupplier.get(supplier).some((b) => matchesFilter(b, filterText)),
+      );
+
+      if (!suppliers.length) {
+        emptyEl.hidden = false;
+        emptyEl.classList.add("no-match");
+        emptyEl.textContent = `No vendor or invoice matches "${filterText}".`;
+        vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
+        return;
+      }
+      emptyEl.hidden = true;
+      emptyEl.classList.remove("no-match");
+      vendorsEl.hidden = false;
+      colHeaderEl.hidden = false;
+
+      const earliest = (rows) => rows.reduce((min, b) => (min === null || b.dueDate < min ? b.dueDate : min), null);
+      suppliers.sort((a, b) => (earliest(bySupplier.get(a)) || "").localeCompare(earliest(bySupplier.get(b)) || ""));
+
+      for (const supplier of suppliers) {
+        const bills = bySupplier.get(supplier);
+        const { groups } = paymentBatchEconomics({
+          bills,
+          perPaymentFee: prefs.postage + prefs.perCheck,
+          apr: prefs.apr,
+          groupWindowDays: prefs.groupWindowDays,
+        });
+        vendorsEl.appendChild(renderVendorCard(supplier, bills, groups));
+      }
+    }
+
+    async function init() {
+      prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);
+      paintPrefsInputs();
+      if (!api || !api.getOutstandingBills) {
+        showError("Shell bridge unavailable — cannot load outstanding bills.");
+        render();
+        return;
+      }
+      const result = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
+      allBills = (result && result.ok && result.bills) || [];
+      if (!result || !result.ok) showError((result && result.reason) || "Could not load outstanding bills.");
+      render();
+    }
+
+    init();
+  </script>
+</body>
+</html>

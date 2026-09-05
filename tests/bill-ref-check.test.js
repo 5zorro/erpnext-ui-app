@@ -6,6 +6,9 @@ import {
   evaluateBillRef,
   billRefContextFromSnapshot,
   compareBillRefToRecentPattern,
+  billRefWaitingForVendorResult,
+  resolveBillRefSupplier,
+  BILL_REF_WAITING_FOR_VENDOR_TITLE,
 } from "../src/bill-ref-check.js";
 
 describe("bill-ref-check", () => {
@@ -107,5 +110,35 @@ describe("bill-ref-check", () => {
     const cmp = compareBillRefToRecentPattern("SO-123895", recent);
     assert.equal(cmp.ok, true);
     assert.equal(cmp.droppedOutlier, "FIN CHRGE-001");
+  });
+
+  it("billRefWaitingForVendorResult uses field-specific copy", () => {
+    const r = billRefWaitingForVendorResult();
+    assert.equal(r.status, "waiting");
+    assert.equal(r.title, BILL_REF_WAITING_FOR_VENDOR_TITLE);
+    assert.match(r.title, /Supplier ref no validation/i);
+  });
+
+  it("resolveBillRefSupplier prefers doc then hints", () => {
+    assert.equal(
+      resolveBillRefSupplier({
+        docSupplier: "Doc Vendor",
+        domSupplier: "DOM Vendor",
+        pendingPickSupplier: "Pick Vendor",
+      }),
+      "Doc Vendor",
+    );
+    assert.equal(
+      resolveBillRefSupplier({
+        domSupplier: "DOM Vendor",
+        pendingPickSupplier: "Pick Vendor",
+      }),
+      "DOM Vendor",
+    );
+    assert.equal(
+      resolveBillRefSupplier({ pendingPickSupplier: "Pick Vendor" }),
+      "Pick Vendor",
+    );
+    assert.equal(resolveBillRefSupplier({}), "");
   });
 });

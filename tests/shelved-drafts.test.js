@@ -150,6 +150,7 @@ describe("shelved push / split / applySave", () => {
     let list = applySaveToShelved([], "purchase-invoice", draft, { now: "2026-07-21T12:00:00Z" });
     assert.equal(list.length, 1);
     assert.equal(list[0].route, "/app/purchase-invoice/ACC-1");
+    assert.equal(list[0].copyRef, "R1");
     list = applySaveToShelved(list, "purchase-invoice", { ...draft, docstatus: 1 });
     assert.equal(list.length, 0);
   });

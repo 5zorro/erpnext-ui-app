@@ -11,7 +11,14 @@ import {
   resolveSourcesToCommit,
   combineMappedBillSources,
   sourceModalKeyAction,
+  groupHasSelectableItem,
+  firstSelectableItemIndex,
+  nextSelectableGroupIndex,
 } from "../src/source-modal.js";
+import {
+  buildBillSourceLoadingGroups,
+  SOURCE_LIST_SLICE_DEFS,
+} from "../src/source-list-slices.js";
 
 describe("buildBillSourceGroups", () => {
   it("always includes NIC and greys drafts", () => {
@@ -100,7 +107,7 @@ describe("source multi-select", () => {
     assert.deepEqual(sel, ["po:PO-A"]);
   });
 
-  it("Enter with checks merges those; without checks uses active", () => {
+  it("Enter with checks merges those; empty selection implies NIC", () => {
     const multi = resolveSourcesToCommit(groups, ["po:PO-A", "po:PO-B"], {
       kind: "pr",
       name: "PR-1",
@@ -110,9 +117,8 @@ describe("source multi-select", () => {
       multi.items.map((i) => i.name),
       ["PO-A", "PO-B"],
     );
-    const single = resolveSourcesToCommit(groups, [], { kind: "po", name: "PO-B" });
-    assert.equal(single.mode, "merge");
-    assert.equal(single.items[0].name, "PO-B");
+    const impliedNic = resolveSourcesToCommit(groups, [], { kind: "po", name: "PO-B" });
+    assert.equal(impliedNic.mode, "nic");
     const nic = resolveSourcesToCommit(groups, ["nic"], { kind: "po", name: "PO-A" });
     assert.equal(nic.mode, "nic");
   });
@@ -133,5 +139,50 @@ describe("source multi-select", () => {
     assert.equal(sourceModalKeyAction(" "), "toggle");
     assert.equal(sourceModalKeyAction("Enter"), "finalize");
     assert.equal(sourceModalKeyAction("Escape"), "cancel");
+  });
+});
+
+describe("source modal tab order", () => {
+  it("skips draft-only groups when tabbing", () => {
+    const groups = [
+      {
+        id: "nic",
+        name: "NIC",
+        items: [{ label: "NIC", kind: "nic" }],
+      },
+      {
+        id: "po_draft",
+        name: "Purchase Orders — draft (not selectable)",
+        items: [{ label: "No draft rows", kind: "po", draft: true }],
+      },
+    ];
+    assert.equal(groupHasSelectableItem(groups[1]), false);
+    assert.equal(nextSelectableGroupIndex(groups, 0, 1), 0);
+    assert.equal(nextSelectableGroupIndex(groups, 1, 1), 0);
+  });
+
+  it("firstSelectableItemIndex skips draft rows", () => {
+    const g = {
+      name: "PO draft",
+      items: [
+        { label: "No draft rows", kind: "po", draft: true },
+        { label: "PO-1", kind: "po", name: "PO-1" },
+      ],
+    };
+    assert.equal(firstSelectableItemIndex(g), 1);
+  });
+});
+
+describe("buildBillSourceLoadingGroups", () => {
+  it("includes NIC and loading placeholders per category", () => {
+    const g = buildBillSourceLoadingGroups();
+    assert.equal(g[0].items[0].kind, "nic");
+    assert.equal(isSelectableSourceItem(g[0].items[0]), true);
+    assert.equal(g.length, 1 + SOURCE_LIST_SLICE_DEFS.length);
+    for (let i = 1; i < g.length; i++) {
+      assert.equal(g[i].loading, true);
+      assert.equal(g[i].items[0].loading, true);
+      assert.equal(isSelectableSourceItem(g[i].items[0]), false);
+    }
   });
 });

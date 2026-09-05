@@ -2,6 +2,21 @@
  * Doc-skin item grid sort (PO / shared) — display order only; ERP rowIndex stays for writes.
  */
 
+import {
+  applyHeaderSortClick,
+  compareBySortSpecs,
+  normalizeSortSpecs,
+  sortHeaderArrow,
+  sortHeaderState,
+} from "./item-sort-specs.js";
+
+export {
+  applyHeaderSortClick,
+  normalizeSortSpecs,
+  sortHeaderArrow,
+  sortHeaderState,
+} from "./item-sort-specs.js";
+
 /**
  * @param {number} rowIndex
  * @param {object|null|undefined} item
@@ -28,37 +43,44 @@ export function sortableHeadersFromCols(cols) {
  * @param {object|null|undefined} doc
  * @param {Array<{ sortKey?: string }>|null|undefined} cols
  * @param {(doc: object|null|undefined) => Array<Array<string|number>>} readRows
- * @param {string} sortKey
- * @param {boolean} [asc=true]
+ * @param {string|import("./item-sort-specs.js").SortSpec[]} sortKeyOrSpecs
+ * @param {boolean} [asc=true] ignored when sortKeyOrSpecs is a SortSpec[]
  * @returns {Array<{ rowIndex: number, cells: Array<string|number> }>}
  */
-export function sortDocItemRowModels(doc, cols, readRows, sortKey, asc = true) {
+export function sortDocItemRowModels(doc, cols, readRows, sortKeyOrSpecs, asc = true) {
   const rows = typeof readRows === "function" ? readRows(doc) : [];
   const list = Array.isArray(rows) ? rows : [];
   const colList = Array.isArray(cols) ? cols : [];
-  const key = sortKey || (colList[0] && colList[0].sortKey) || "lineNo";
-  const ci = colList.findIndex((c) => c && c.sortKey === key);
-  const dir = asc ? 1 : -1;
-  /** @type {Array<{ rowIndex: number, cells: Array<string|number> }>} */
-  const models = list.map((cells, rowIndex) => ({
-    rowIndex,
-    cells: Array.isArray(cells) ? cells : [],
-  }));
-  models.sort((a, b) => {
-    const va = ci >= 0 ? a.cells[ci] : a.rowIndex;
-    const vb = ci >= 0 ? b.cells[ci] : b.rowIndex;
-    const na = Number(va);
-    const nb = Number(vb);
-    let cmp = 0;
-    if (Number.isFinite(na) && Number.isFinite(nb) && String(va).trim() !== "" && String(vb).trim() !== "") {
-      cmp = na - nb;
-    } else {
-      const sa = String(va ?? "").toLowerCase();
-      const sb = String(vb ?? "").toLowerCase();
-      cmp = sa < sb ? -1 : sa > sb ? 1 : 0;
-    }
-    if (cmp === 0) return a.rowIndex - b.rowIndex;
-    return cmp * dir;
+  /** @type {import("./item-sort-specs.js").SortSpec[]} */
+  const specs = Array.isArray(sortKeyOrSpecs)
+    ? normalizeSortSpecs(sortKeyOrSpecs)
+    : normalizeSortSpecs([{ key: sortKeyOrSpecs || "lineNo", asc }]);
+
+  /** @type {Array<{ rowIndex: number, cells: Array<string|number>, lineNo: number }>} */
+  const models = list.map((cells, rowIndex) => {
+    const cellList = Array.isArray(cells) ? cells : [];
+    const lineCi = colList.findIndex((c) => c && c.sortKey === "lineNo");
+    const lineRaw = lineCi >= 0 ? cellList[lineCi] : rowIndex + 1;
+    const lineNo = Number(lineRaw);
+    return {
+      rowIndex,
+      cells: cellList,
+      lineNo: Number.isFinite(lineNo) && lineNo > 0 ? lineNo : rowIndex + 1,
+    };
   });
-  return models;
+
+  models.sort((a, b) =>
+    compareBySortSpecs(
+      a,
+      b,
+      specs,
+      (row, key) => {
+        if (key === "lineNo") return row.lineNo;
+        const ci = colList.findIndex((c) => c && c.sortKey === key);
+        return ci >= 0 ? row.cells[ci] : row.rowIndex;
+      },
+      (row) => row.lineNo,
+    ),
+  );
+  return models.map(({ rowIndex, cells }) => ({ rowIndex, cells }));
 }

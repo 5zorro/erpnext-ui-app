@@ -40,7 +40,18 @@ CONFIRM_SAMPLE_SEED=1 npm run seed:sample
 CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset
 ```
 
-Idempotent without `--reset`: skips docs whose `remarks` already contain `[ui-app-sample-v1]`.
+Idempotent without `--reset`: skips docs whose `remarks` already contain the current tag
+(`ui-app-sample-v2` — see `SAMPLE_TAG` in `corpus-plan.js`).
+
+**Dupe-check dogfood (OI-054 / OI-087):** After you have typed seeded `bill_no` values once, a
+**soft reset** avoids stale duplicate warnings:
+
+```bash
+CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset
+npm run dogfood:ap-sources   # refresh HTML paper sources (gitignored output)
+```
+
+Use **fresh refs** (`DOGFOOD-…`) when manually testing entry — not the seeded `SMP-V…-INV-…` series.
 
 ## Link graph (summary)
 
@@ -52,6 +63,16 @@ Idempotent without `--reset`: skips docs whose `remarks` already contain `[ui-ap
 | PI | 8 ← PR, 8 ← PO | 9 | PO 20–24 open (no PR/PI) |
 
 Every 4th PO also sets `sales_order` on lines (SO picker on PO).
+
+**T0 AP fixtures (v2 tag, after `--reset`):**
+
+| Plan key | OI | Role |
+|----------|-----|------|
+| `PO-MN` / `PR-MN` | OI-149, OI-102 | Same vendor; partial IR; **unbilled** — Bill source modal PO+PR |
+| `PO-PP` / `PR-PP` | OI-153 | PO + full IR; **manual PE Pay $120** against PO before Bill (auto-seed best-effort) |
+| `PO-LB` | OI-154, OI-121 | Logbook title **TO-5599** (Find by title, not ERP name) |
+
+Paper sources **DF-14…DF-16** in `dogfood-ap-sources.js` match these sandbox rows.
 
 **OI-131 picker fixtures:** `SAMPLE Vendor Idle` (one submitted PO older than the 60-day window) and `SAMPLE Vendor Never` (no PO). Not used in the create-from-source rotation. Re-seed to pick them in the Doc vendor dropdown.
 
@@ -72,3 +93,8 @@ npm run dogfood:ap-sources:pdf
 Output: `ops/sample-data/dogfood-sources/generated/` (gitignored). Catalog SSoT:
 `src/sample-data/dogfood-ap-sources.js` (OI-103 scenarios 1–8 + packing / partial /
 house-of-brands extras). This path does **not** post to MariaDB.
+
+**OI-132 Import lines:** `DF-13` also emits `DF-13_purchase_order_import_paste.tsv` /
+`.csv` — messy 11-column vendor export (2 junk header rows). Use **Import lines…** on
+PO/Bill: ignore first 2 rows; map SKU, Vendor note (append), Qty, Extended; ignore the rest.
+See generated `*_import_README.md` beside the paste files.

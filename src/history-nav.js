@@ -2,7 +2,7 @@
  * Recent / Doc-lens navigation policy (OI-112 / OI-113 / OI-118).
  * Pure helpers — Electron main decides surfaces; this decides *intent*.
  */
-import { routeInfo, normalizeAppRoute } from "./route-info.js";
+import { routeInfo, normalizeAppRoute, routesReferToSameDoc } from "./route-info.js";
 import { profileByDoctypeKey } from "./doc-skin-registry.js";
 import { normalizeDoctypeKey } from "./lens-prefs.js";
 
@@ -218,25 +218,48 @@ export function pickFallbackDocRoute(history, opts = {}) {
 
 /**
  * Toolbar / a11y hint while a Doc form is parked under a Vanilla soft-peek,
- * or while a Vanilla-to-Vanilla peek has a parent Bill/PO/IR.
- * @param {{ mode?: string, skinId?: string|null }|null|undefined} parked
- * @param {{ dt?: string, route?: string }|null|undefined} [peekParent]
+ * or while a Vanilla-to-Vanilla peek has a parent (Payment Entry → Mode of Payment).
+ * When on a peek *child*, prefer the peek parent label even if a Doc is also parked
+ * (stale Bill park must not say "back to Bill" while Esc returns to Payment Entry).
+ * @param {{ mode?: string, skinId?: string|null, route?: string }|null|undefined} parked
+ * @param {{ dt?: string, route?: string, label?: string }|null|undefined} [peekParent]
+ * @param {{ currentRoute?: string, erpBase?: string }} [opts]
  * @returns {string} empty when not peeking
  */
-export function softPeekReturnLabel(parked, peekParent) {
+export function softPeekReturnLabel(parked, peekParent, opts = {}) {
+  const current = opts.currentRoute != null ? String(opts.currentRoute) : "";
+  const erpBase = opts.erpBase;
+  if (
+    peekParent &&
+    peekParent.route &&
+    current &&
+    !routesReferToSameDoc(peekParent.route, current, erpBase)
+  ) {
+    return softPeekLabelForPeekParent(peekParent);
+  }
   if (parked && parked.mode) {
-    if (parked.mode === "bill") return "Esc · back to Bill";
+    if (parked.skinId === "bill" || parked.mode === "bill") return "Esc · back to Bill";
     if (parked.mode === "doc" && parked.skinId === "po") return "Esc · back to Purchase Order";
     if (parked.mode === "doc" && parked.skinId === "receipt") return "Esc · back to Item Receipt";
     if (parked.mode === "doc") return "Esc · back to Doc";
     return "Esc · back";
   }
+  if (peekParent && peekParent.route) return softPeekLabelForPeekParent(peekParent);
+  return "";
+}
+
+/**
+ * @param {{ dt?: string, label?: string }|null|undefined} peekParent
+ */
+export function softPeekLabelForPeekParent(peekParent) {
   const dt = peekParent && peekParent.dt ? String(peekParent.dt) : "";
   if (dt === "purchase-invoice") return "Esc · back to Bill";
   if (dt === "purchase-order") return "Esc · back to Purchase Order";
   if (dt === "purchase-receipt") return "Esc · back to Item Receipt";
-  if (peekParent && peekParent.route) return "Esc · back";
-  return "";
+  if (dt === "payment-entry") return "Esc · back to Payment Entry";
+  if (dt === "mode-of-payment") return "Esc · back to Mode of Payment";
+  if (peekParent && peekParent.label) return `Esc · back to ${peekParent.label}`;
+  return "Esc · back";
 }
 
 /**

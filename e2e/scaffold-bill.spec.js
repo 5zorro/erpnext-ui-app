@@ -25,14 +25,16 @@ test.describe("scaffold: Doc Bill view", () => {
     await waitForE2eApi(app);
 
     await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    // getActiveDocSkin is a function on __erpE2e — e2eGet reads properties, so it must
+    // be invoked with e2eCall (a function value cannot cross the bridge; it arrives undefined).
     await expect
-      .poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 })
+      .poll(async () => e2eCall(app, "getActiveDocSkin"), { timeout: 15_000 })
       .toBe("bill");
 
     const title = await e2eCall(
       app,
       "execInView",
-      "bill",
+      "docForm",
       `document.querySelector('[data-testid="bill-root"]') ? "ok" : ""`,
     );
     expect(title).toBe("ok");
@@ -40,9 +42,10 @@ test.describe("scaffold: Doc Bill view", () => {
     const chip = await e2eCall(
       app,
       "execInView",
-      "bill",
+      "docForm",
       `document.querySelector('[data-testid="bill-due-chip"]')?.className || ""`,
     );
-    expect(chip).toMatch(/chip/);
+    // class is "due-status <state>" (idle/match/mismatch) — the word "chip" is only in the testid.
+    expect(chip).toMatch(/due-status/);
   });
 });

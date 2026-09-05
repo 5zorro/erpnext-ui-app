@@ -40,6 +40,14 @@ describe("dogfood AP sources", () => {
     assert.equal(sourceGrandTotal(d), sourceSubtotal(d) + expectedTax);
   });
 
+  it("includes T0 multi-source and prepay paper (DF-14…16)", () => {
+    assert.ok(DOGFOOD_AP_SOURCES.some((d) => d.id === "DF-14"));
+    assert.ok(DOGFOOD_AP_SOURCES.some((d) => d.id === "DF-15"));
+    assert.ok(DOGFOOD_AP_SOURCES.some((d) => d.id === "DF-16"));
+    const df14 = DOGFOOD_AP_SOURCES.find((d) => d.id === "DF-14");
+    assert.match(df14.dogfoodHint, /PO-MN/);
+  });
+
   it("index length matches catalog", () => {
     assert.equal(listDogfoodSourceIndex().length, DOGFOOD_AP_SOURCES.length);
   });

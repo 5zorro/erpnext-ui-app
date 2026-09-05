@@ -1,0 +1,59 @@
+<!-- SSoT: AP entry chrome shared by Bill + PO + IR (tranche 10+). Assembled into doc-form.html via scripts/assemble-doc-form-html.js -->
+<div id="doc-chrome" class="doc-chrome" data-testid="doc-chrome">
+  <div class="banner">
+    <h1 id="doc-title">Document</h1>
+    <span class="doc-status-badge" id="doc-status-badge" data-testid="doc-status-badge" hidden></span>
+    <span class="status" id="status" data-testid="doc-status">Loading…</span>
+    <span class="banner-actions">
+      <button type="button" id="btn-retry" data-testid="doc-retry" hidden>Retry load</button>
+    </span>
+  </div>
+  <div class="toolbar" data-testid="doc-toolbar">
+    <div class="tb-group" data-testid="doc-toolbar-file" title="Keep, print, discard, or finalize this document">
+      <span class="tb-group-label">File</span>
+      <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="doc-dirty-pill">Draft · all saved</span>
+      <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
+        title="Print this document (save first if new).">Print</button>
+      <button type="button" class="ghost" id="btn-attach-toolbar" data-testid="doc-attach-toolbar" hidden
+        title="Attach file">Attach file</button>
+      <button type="button" id="btn-revert" data-testid="doc-revert"
+        title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
+      <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
+      <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
+    </div>
+    <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
+      <span class="tb-group-label">Navigate</span>
+      <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
+      <button type="button" id="btn-new" data-testid="doc-new">New</button>
+      <button type="button" id="btn-select-po" data-testid="bill-select-po" hidden>Select PO / source</button>
+      <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
+      <button type="button" id="btn-refresh" data-testid="doc-refresh"
+        title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due on Bill). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
+      <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Vanilla</button>
+      <button type="button" class="ghost" id="btn-caps" data-testid="doc-caps"
+        title="Default ALL-CAPS data entry — click to turn off for this page">⇪ CAPS: ON</button>
+    </div>
+  </div>
+  <div class="commit-gate" id="commit-gate" data-testid="doc-commit-gate" hidden>
+    <div class="commit-gate-backdrop" id="commit-gate-backdrop"
+      data-testid="doc-gate-backdrop" aria-hidden="true"></div>
+    <section class="commit-gate-dialog" role="dialog" aria-modal="true"
+      aria-labelledby="commit-gate-title" aria-describedby="commit-gate-copy commit-gate-hint">
+      <strong class="commit-gate-title" id="commit-gate-title">Unsaved changes</strong>
+      <p class="commit-gate-copy" id="commit-gate-copy">
+        This decision must be resolved before you can continue.
+      </p>
+      <div class="commit-gate-validation" id="commit-gate-validation" data-testid="doc-gate-validation">
+        <strong class="commit-gate-validation-title" id="commit-gate-validation-title">Save readiness</strong>
+        <ul class="commit-gate-blockers" id="commit-gate-blockers" data-testid="doc-gate-blockers"></ul>
+        <p class="hint" id="commit-gate-hint" data-testid="doc-commit-gate-hint"></p>
+      </div>
+      <div class="row">
+        <button type="button" data-gate="discard" data-testid="doc-gate-discard">Discard, then continue</button>
+        <button type="button" class="primary" data-gate="save" data-testid="doc-gate-save">Save draft, then continue</button>
+        <button type="button" data-gate="submit" data-testid="doc-gate-submit">Save &amp; submit, then continue</button>
+        <button type="button" class="ghost" data-gate="cancel" data-testid="doc-gate-cancel">Cancel</button>
+      </div>
+    </section>
+  </div>
+</div>

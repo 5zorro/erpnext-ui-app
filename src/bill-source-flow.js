@@ -1,7 +1,9 @@
 /**
- * Bill source-flow contracts — when to open the source modal, merge rules, focus after choose.
- * Extracted so CI fails if dogfood trigger policy drifts (see bug-bounty-source-modal-vendor-pick).
+ * Bill source-flow contracts — merge rules, focus after choose, header copy on map.
+ * Vendor-pick trigger policy is shared with Item Receipt in doc-source-flow.js.
  */
+
+export { shouldOpenSourceModalAfterVendorPick } from "./doc-source-flow.js";
 
 /** Child/header keys never copied from mapped PO/PR → Bill (museum mergeFromSource). */
 export const BILL_MERGE_SKIP_FIELDS = Object.freeze([
@@ -39,50 +41,19 @@ export function mergeMethodForSourceKind(kind) {
 }
 
 /**
- * Product contract (approach A): open source modal on an explicit vendor *pick* event,
- * without waiting for ERP set_value / ajax quiet. Do not open on free-type blur no-ops.
- *
- * @param {{
- *   trigger: "link_pick" | "toolbar" | "blur" | "unknown",
- *   hasSupplier: boolean,
- *   editable?: boolean,
- *   modalAlreadyOpen?: boolean,
- *   setHeaderOk?: boolean | null,
- *   setHeaderSkipped?: boolean,
- * }} ctx
- * @returns {{ open: boolean, reason: string }}
- */
-export function shouldOpenSourceModalAfterVendorPick(ctx) {
-  const c = ctx && typeof ctx === "object" ? ctx : {};
-  if (c.modalAlreadyOpen) return { open: false, reason: "modal_already_open" };
-  if (c.editable === false) return { open: false, reason: "not_editable" };
-  if (!c.hasSupplier) return { open: false, reason: "no_supplier" };
-
-  if (c.trigger === "toolbar") {
-    return { open: true, reason: "toolbar_select_po" };
-  }
-  if (c.trigger === "link_pick") {
-    // UI-event first — setHeader outcome must not gate the open.
-    return { open: true, reason: "vendor_link_pick" };
-  }
-  if (c.trigger === "blur") {
-    // Free-type blur: only if a write actually happened (or skipped-but-flagged pick path).
-    if (c.setHeaderOk === false) return { open: false, reason: "set_header_failed" };
-    if (c.setHeaderSkipped && c.setHeaderOk !== true) {
-      return { open: false, reason: "blur_noop" };
-    }
-    return { open: true, reason: "vendor_blur_commit" };
-  }
-  return { open: false, reason: "unknown_trigger" };
-}
-
-/**
- * After source choose (including NIC), focus Terms. Cancel/Esc → stay (no forced focus).
- * @param {"choose"|"cancel"|"escape"} closeKind
- * @returns {"terms"|"none"}
+ * After source modal closes, focus Invoice date (next field after Vendor on Bill).
+ * @param {"choose"|"cancel"|"escape"|"backdrop"|string} closeKind
+ * @returns {"invoice_date"|"none"}
  */
 export function focusTargetAfterSourceModal(closeKind) {
-  if (closeKind === "choose") return "terms";
+  if (
+    closeKind === "choose" ||
+    closeKind === "cancel" ||
+    closeKind === "escape" ||
+    closeKind === "backdrop"
+  ) {
+    return "invoice_date";
+  }
   return "none";
 }
 

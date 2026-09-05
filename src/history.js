@@ -7,6 +7,7 @@ import {
   decorateHistoryEntry,
   shouldOmitHistoryRoute,
 } from "./history-nav.js";
+import { copyRefForDoc } from "./history-copy-ref.js";
 
 export const HISTORY_CAP = 12;
 /** M1.5: visible in Recent; remainder goes under Older (collapsed). */
@@ -75,6 +76,7 @@ export function splitHistory(list, opts = {}) {
  *   slot?: string,
  *   detail?: string,
  *   detailMuted?: boolean,
+ *   copyRef?: string,
  *   kind?: "doc"|"setup",
  * }} HistoryEntry
  */
@@ -89,6 +91,7 @@ export function splitHistory(list, opts = {}) {
  *   detail?: string,
  *   detailMuted?: boolean,
  *   labelOverride?: string,
+ *   copyRef?: string,
  *   companyAbbr?: string|null,
  * }} [opts]
  * @returns {HistoryEntry[]} new list (does not mutate input)
@@ -116,6 +119,8 @@ export function pushHistory(list, routeOrUrl, opts = {}) {
     detail = String(record);
   }
 
+  const copyRef = opts.copyRef != null ? String(opts.copyRef).trim() : "";
+
   const entry = decorateHistoryEntry(
     {
       route: path.startsWith("/") ? path : `/${path}`,
@@ -124,6 +129,7 @@ export function pushHistory(list, routeOrUrl, opts = {}) {
       slot,
       detail,
       detailMuted: !!(detail && opts.detailMuted),
+      copyRef,
     },
     opts.erpBase,
   );

@@ -54,25 +54,22 @@ test.describe("scaffold: toolbar chrome", () => {
           !!document.querySelector('[data-testid="btn-home"]'),
           !!health,
           !!document.querySelector('[data-testid="btn-devtools"]'),
-          (() => {
-            const n = document.querySelector('[data-testid="btn-nav-issue"]');
-            // Present in DOM but temporarily hidden for alpha clones.
-            return !!(n && n.hidden);
-          })(),
           !!document.querySelector('[data-testid="lens-vanilla"]'),
           htext ? htext.textContent : ""
         ]);
       })()`,
     );
-    const [hasHome, hasHealth, hasDevtools, navIssueHidden, hasVanilla, healthText] = JSON.parse(ids);
-    expect(hasHome && hasHealth && hasDevtools && navIssueHidden && hasVanilla).toBe(true);
-    expect(healthText).toMatch(/^DB [✓✗…]/);
+    const [hasHome, hasHealth, hasDevtools, hasVanilla, healthText] = JSON.parse(ids);
+    expect(hasHome && hasHealth && hasDevtools && hasVanilla).toBe(true);
+    expect(healthText).toMatch(/^DB/);
 
     // Starts on Doc Workflow Home
     expect(await e2eGet(app, "showingHome")).toBe(true);
 
     await e2eCall(app, "openErp", "/desk");
-    expect(await e2eGet(app, "showingHome")).toBe(false);
+    // __erpE2e is a snapshot rebuilt by syncE2eApi() once the load settles — poll it,
+    // never read it straight after an async nav.
+    await expect.poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 }).toBe(false);
 
     // Doc skin tab → Doc Workflow Home (same as Home button until Bill Doc form ships)
     await e2eCall(
@@ -86,7 +83,9 @@ test.describe("scaffold: toolbar chrome", () => {
       .toBe(true);
 
     await e2eCall(app, "openErp", "/desk");
-    expect(await e2eGet(app, "showingHome")).toBe(false);
+    // __erpE2e is a snapshot rebuilt by syncE2eApi() once the load settles — poll it,
+    // never read it straight after an async nav.
+    await expect.poll(async () => e2eGet(app, "showingHome"), { timeout: 10_000 }).toBe(false);
 
     await e2eCall(
       app,

@@ -48,15 +48,13 @@
     <button type="button" class="btn" id="btn-home" data-testid="btn-home" title="Doc Workflow Home (tiles)">Home</button>
     <span class="lbl" id="lens-label">View this page as:</span>
     <div class="seg" role="tablist">
-      <button type="button" class="opt" id="lens-vanilla" data-testid="lens-vanilla" role="tab">Vanilla skin</button>
-      <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc skin</button>
+      <button type="button" class="opt" id="lens-vanilla" data-testid="lens-vanilla" role="tab">Vanilla</button>
+      <button type="button" class="opt" id="lens-simplified" data-testid="lens-simplified" role="tab" title="Simplified skin — Vanilla + field assumptions (hide / pre-fill common fields)" hidden>Simplified</button>
+      <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Doc skin for this page" role="tab">Doc</button>
     </div>
     <span class="peek-hint" id="peek-hint" hidden data-testid="soft-peek-hint"></span>
-    <!-- ponytail: temporarily hidden for alpha clones; re-enable when dogfood nav logging is wanted again -->
-    <button type="button" class="btn loud" id="btn-nav-issue" data-testid="btn-nav-issue" hidden
-      title="Log a navigation issue with a note (Ctrl+Shift+M). Click as soon as something feels wrong — snapshot freezes now.">Nav issue</button>
     <span class="spacer"></span>
-    <button type="button" class="health" id="health" data-testid="health" title="Click for connection details" aria-haspopup="dialog" aria-expanded="false">
+    <button type="button" class="health" id="health" data-testid="health" title="Connection details · Nav issue lives here (or Ctrl+Shift+M)" aria-haspopup="dialog" aria-expanded="false">
       <span class="dot" aria-hidden="true"></span>
       <span class="htext">DB …</span>
     </button>
@@ -69,6 +67,7 @@
     const healthEl = document.getElementById("health");
     const htext = healthEl.querySelector(".htext");
     const lensVanilla = document.getElementById("lens-vanilla");
+    const lensSimplified = document.getElementById("lens-simplified");
     const lensDoc = document.getElementById("lens-doc");
     const lensLabel = document.getElementById("lens-label");
     const peekHint = document.getElementById("peek-hint");
@@ -79,18 +78,27 @@
     function setHealth(status) {
       healthEl.classList.toggle("ok", status === "ok");
       healthEl.classList.toggle("bad", status === "bad");
-      htext.textContent = status === "ok" ? "DB ✓" : status === "bad" ? "DB ✗" : "DB …";
+      htext.textContent = status === "ok" ? "DB" : status === "bad" ? "DB" : "DB …";
     }
 
     function applyUiState(s) {
       const showingHome = !!s.showingHome;
       const onDocForm = !!(s.showingBill || s.showingDocForm);
       const docOk = s.docSkinAvailable !== false;
+      const activeLens = s.lens || "vanilla";
       softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
+      // Says what the tab will actually do: skin this page, or hop back one step.
+      lensDoc.title = s.docTabHint || "Doc skin for this page";
       lensLabel.hidden = false;
+      // Main owns which lenses this page has (chrome-state.js lensTabsFor) — the toolbar must
+      // not guess. "Not home, not doc" used to count as a form, so Simplified showed on Desk,
+      // dashboards and list views alike (nav incident 2026-09-05).
+      const onErpForm = !showingHome && !onDocForm;
+      lensSimplified.hidden = !s.simplifiedAvailable;
       lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
-      lensVanilla.classList.toggle("active", !showingHome && !onDocForm);
+      lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified");
+      lensSimplified.classList.toggle("active", onDocForm ? false : onErpForm && activeLens === "simplified");
       if (peekHint) {
         const hint = softPeekActive && s.softPeekHint ? String(s.softPeekHint) : "";
         peekHint.hidden = !hint;
@@ -104,16 +112,12 @@
     }
 
     document.getElementById("btn-home").onclick = () => api && api.goHome();
-    document.getElementById("btn-nav-issue").onclick = () => {
-      const btn = document.getElementById("btn-nav-issue");
-      if (btn && btn.hidden) return;
-      if (api && api.openNavIncident) api.openNavIncident();
-    };
     document.getElementById("btn-feedback").onclick = () => {
       if (api && api.openFeedback) api.openFeedback();
     };
     lensDoc.onclick = () => api && api.openDocSkin && api.openDocSkin();
     lensVanilla.onclick = () => api && api.openVanillaSkin && api.openVanillaSkin();
+    lensSimplified.onclick = () => api && api.openSimplifiedSkin && api.openSimplifiedSkin();
     healthEl.onclick = () => {
       if (!api) return;
       if (diagnoseOpen && api.closeDiagnose) api.closeDiagnose();
@@ -136,10 +140,8 @@
     }
 
     document.addEventListener("keydown", (e) => {
+      // Shortcut still works from chrome; primary entry is DB diagnose → Nav issue.
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "M" || e.key === "m")) {
-        // Temporarily disabled with the toolbar button (alpha clones).
-        const btn = document.getElementById("btn-nav-issue");
-        if (btn && btn.hidden) return;
         e.preventDefault();
         if (api && api.openNavIncident) api.openNavIncident();
         return;

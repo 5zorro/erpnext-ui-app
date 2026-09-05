@@ -26,4 +26,21 @@
  *
  * 7. Native OS dialogs
  *    Playwright does not intercept Electron dialog.* — stub via evaluate if we add them later.
+ *
+ * 8. e2eGet reads properties; e2eCall invokes functions
+ *    __erpE2e mixes both. A function-valued key (getActiveDocSkin, currentRoute, getHistory,
+ *    viewBounds, …) read through e2eGet cannot be structured-cloned, so it silently arrives
+ *    as `undefined` — the assertion then fails for a reason that looks like a product bug.
+ *    Found 2026-09-05: scaffold-bill polled e2eGet("getActiveDocSkin") for 15s against a
+ *    Doc skin that had opened correctly the whole time.
+ *
+ * 9. __erpE2e is a snapshot, not a live view
+ *    Value keys (showingHome, surfaceMode, lastHealth) are re-captured by syncE2eApi() when
+ *    a nav settles. Reading one straight after an async e2eCall races the load — poll with
+ *    expect.poll instead of asserting once.
+ *
+ * 10. Layer 3 is not a merge gate, so it rots silently
+ *    Run `npm run test:e2e:xvfb` when touching shell wiring. It was 2/6 red for an unknown
+ *    stretch before 2026-09-05 — all three failures were stale assertions (7/8/9 above),
+ *    none were product defects.
  */

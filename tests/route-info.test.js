@@ -5,6 +5,7 @@ import {
   titleizeDoctype,
   isNewDocRecord,
   normalizeAppRoute,
+  isGenericNewDocRoute,
   routesReferToSameDoc,
   isDocListRoute,
 } from "../src/route-info.js";
@@ -57,6 +58,14 @@ describe("isNewDocRecord / normalizeAppRoute", () => {
     assert.equal(n.doctype, "purchase-invoice");
     assert.equal(n.isNew, true);
   });
+
+  it("isGenericNewDocRoute detects /new only", () => {
+    assert.equal(isGenericNewDocRoute("/app/purchase-order/new"), true);
+    assert.equal(
+      isGenericNewDocRoute("/app/purchase-order/new-purchase-order-abc"),
+      false,
+    );
+  });
 });
 
 describe("routesReferToSameDoc", () => {
@@ -70,13 +79,33 @@ describe("routesReferToSameDoc", () => {
     );
   });
 
-  it("matches any two new-bill routes (Recent must not reload)", () => {
+  it("matches /new promotion to new-* (same in-flight draft)", () => {
+    assert.equal(
+      routesReferToSameDoc(
+        "/app/purchase-invoice/new",
+        "/app/purchase-invoice/new-purchase-invoice-abc",
+      ),
+      true,
+    );
+  });
+
+  it("does not match generic /new to a different existing new-* draft", () => {
+    assert.equal(
+      routesReferToSameDoc(
+        "/app/purchase-order/new-purchase-order-abc",
+        "/app/purchase-order/new",
+      ),
+      false,
+    );
+  });
+
+  it("does not match two different new-* drafts", () => {
     assert.equal(
       routesReferToSameDoc(
         "/app/purchase-invoice/new-purchase-invoice-abc",
-        "/app/purchase-invoice/new",
+        "/app/purchase-invoice/new-purchase-invoice-xyz",
       ),
-      true,
+      false,
     );
   });
 

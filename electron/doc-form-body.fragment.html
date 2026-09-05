@@ -1,0 +1,99 @@
+<div class="wrap" data-testid="doc-root">
+<details class="assumptions" data-testid="doc-assumptions">
+        <summary>Assumptions this view makes</summary>
+        <ul id="assumptions-list"></ul>
+      </details>
+      <div class="card">
+        <section class="bill-section bill-section-doc" data-testid="doc-header-section">
+          <div class="cols" id="header-cols">
+            <div id="header-left"></div>
+            <div id="header-right"></div>
+          </div>
+          <div class="addr-grid" id="header-addresses" data-testid="doc-header-addresses" hidden></div>
+        </section>
+        <section class="bill-section bill-section-lines" data-testid="doc-lines-section">
+          <h2 class="doc-lines-title" id="doc-lines-title" data-testid="doc-lines-title" hidden>Items</h2>
+          <div class="line-tabs" role="tablist" data-testid="doc-line-tabs" hidden>
+            <button type="button" class="line-tab active" role="tab" id="tab-items" aria-selected="true"
+              tabindex="-1" data-tab="items" data-testid="doc-tab-items">Items</button>
+            <button type="button" class="line-tab" role="tab" id="tab-expenses" aria-selected="false"
+              tabindex="-1" data-tab="expenses" data-testid="doc-tab-expenses">Expenses</button>
+          </div>
+          <div class="line-panel" id="panel-items" data-testid="doc-panel-items" role="tabpanel">
+            <table>
+              <thead>
+                <tr id="items-head-row"></tr>
+              </thead>
+              <tbody id="items-body" data-testid="doc-items"></tbody>
+              <tfoot id="line-totals" data-testid="doc-line-totals" hidden></tfoot>
+            </table>
+            <div class="line-actions">
+              <button type="button" id="btn-add-line" data-testid="doc-add-line" tabindex="-1">Add line</button>
+              <button type="button" class="imp-btn" id="btn-import-items" data-testid="doc-import-items" tabindex="-1"
+                title="Paste spreadsheet rows or browse a CSV, then map columns (mouse only)">Import lines…</button>
+            </div>
+          </div>
+          <div class="line-panel" id="panel-expenses" data-testid="doc-panel-expenses" role="tabpanel" hidden>
+            <p class="expense-note" data-testid="doc-expense-note"></p>
+          </div>
+        </section>
+        <section class="bill-section bill-section-taxes" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
+            <span class="taxes-title">Taxes and Charges</span>
+            <table class="taxes-table">
+              <thead>
+                <tr id="taxes-head-row"></tr>
+              </thead>
+              <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
+            </table>
+            <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
+              <div class="field">
+                <label for="f-tax-account">Account</label>
+                <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
+              </div>
+              <div class="field" style="flex:0 0 120px;">
+                <label for="f-tax-amount">Amount</label>
+                <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+              </div>
+              <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+            </div>
+            <div class="money-stack" data-testid="doc-money-stack">
+              <div class="ms-row">
+                <span class="ms-label">Item subtotal</span>
+                <span id="ms-items" data-testid="doc-ms-items">$0.00</span>
+              </div>
+              <div class="ms-row">
+                <span class="ms-label">Taxes</span>
+                <span id="ms-taxes" data-testid="doc-ms-taxes">$0.00</span>
+              </div>
+              <div class="ms-row grand">
+                <span class="ms-label">Grand total</span>
+                <span id="ms-grand" data-testid="doc-ms-grand">$0.00</span>
+              </div>
+              <p class="ms-note" id="ms-note" data-testid="doc-ms-note" hidden></p>
+            </div>
+        </section>
+        <section class="bill-section bill-section-notes" data-testid="doc-notes-section">
+          <div class="field memo" id="memo-block" data-testid="doc-memo-block" hidden>
+            <div id="source-terms-block" class="source-terms-block" data-testid="doc-source-terms-block" hidden>
+              <div id="source-terms-fields" class="source-terms-fields" data-testid="doc-source-terms-fields"></div>
+            </div>
+            <div class="field terms-text" id="terms-block" data-testid="doc-terms-block" hidden>
+              <label for="f-terms-text">Terms and conditions</label>
+              <textarea id="f-terms-text" rows="3" data-field="terms" data-testid="doc-terms-text"></textarea>
+            </div>
+            <div class="memo-entry" id="memo-entry" hidden>
+              <div class="memo-head">
+                <label for="f-memo" id="memo-label">Memo</label>
+                <button type="button" class="attach" id="btn-attach" data-testid="doc-attach">Attach file</button>
+              </div>
+              <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
+            </div>
+          </div>
+        </section>
+          <div class="back-to-top-row">
+            <button type="button" id="btn-back-top" data-testid="doc-back-top"
+              title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
+          </div>
+          <p class="hint" id="doc-hint"></p>
+        </div>
+</div>

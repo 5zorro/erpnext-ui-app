@@ -21,6 +21,11 @@ check_text() {
     echo "ERROR: $label contains a prohibited Gmail address or marker." >&2
     failed=1
   fi
+
+  if [[ "$text" =~ (^|[^a-z0-9])(sonnet|haiku|opus|fable|cursor)([^a-z0-9]|$) ]]; then
+    echo "ERROR: $label references a model/tool codename (sonnet/haiku/opus/fable/cursor)." >&2
+    failed=1
+  fi
 }
 
 check_message_file() {

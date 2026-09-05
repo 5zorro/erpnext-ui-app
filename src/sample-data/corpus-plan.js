@@ -12,7 +12,8 @@
  * applied on their submitted PIs → Tax Withholding Details report.
  */
 
-export const SAMPLE_TAG = "ui-app-sample-v1";
+/** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
+export const SAMPLE_TAG = "ui-app-sample-v3";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
 export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
@@ -75,6 +76,12 @@ export function buildCorpusPlan(opts = {}) {
   suppliers.push(
     { key: "SUP-IDLE", name: "SAMPLE Vendor Idle", taxWithholding: false, activity: "idle" },
     { key: "SUP-NEVER", name: "SAMPLE Vendor Never", taxWithholding: false, activity: "never" },
+  );
+  // OI-161 / Packet G: dedicated vendors for the daily-payment-schedule batching fixture —
+  // small and large dollar scale, so Packet 2's economics can be dogfooded at both.
+  suppliers.push(
+    { key: "SUP-DAILY", name: "SAMPLE Vendor Daily Payrun", taxWithholding: false },
+    { key: "SUP-DAILY-LG", name: "SAMPLE Vendor Daily Payrun Large", taxWithholding: false },
   );
   const items = Array.from({ length: partyCounts.items }, (_, i) => ({
     key: `ITM-${pad2(i)}`,
@@ -167,6 +174,7 @@ export function buildCorpusPlan(opts = {}) {
       chainIndex = poIndex;
     }
     const partyKey = suppliers[i % partyCounts.suppliers].key;
+    const vendorSlot = (suppliers.findIndex((s) => s.key === partyKey) % partyCounts.suppliers) + 1;
     docs.push(
       baseDoc(
         "purchase_invoice",
@@ -177,7 +185,8 @@ export function buildCorpusPlan(opts = {}) {
           partyKey,
           items: lineItems(items, i, 1 + (i % 3)),
           source,
-          billNo: `SMP-BILL-${pad2(i + 1)}`,
+          // Vendor-scoped refs — avoids OI-054 false positives when re-typing a generic SMP-BILL-NN.
+          billNo: `SMP-V${pad2(vendorSlot)}-INV-${pad2(i + 1)}`,
           updateStock: false,
           taxWithholding: !!supplierByKey[partyKey]?.taxWithholding,
         },
@@ -209,6 +218,9 @@ export function buildCorpusPlan(opts = {}) {
     items,
   });
 
+  appendApDogfoodFixtures(docs, { windowDays, suppliers, items, supplierByKey });
+  appendPaymentBatchFixture(docs, { windowDays, items });
+
   return {
     tag,
     windowDays,
@@ -221,8 +233,171 @@ export function buildCorpusPlan(opts = {}) {
       withholdingSuppliers: suppliers.filter((s) => s.taxWithholding).length,
     },
     docs,
+    apFixtures: summarizeApFixtures(docs),
     summary: summarizePlan(docs),
   };
+}
+
+/** Extra submitted sandbox rows beyond DEFAULT_COUNTS (T0 AP fixtures + OI-161 Packet G). */
+export const AP_FIXTURE_EXTRA_COUNTS = Object.freeze({
+  purchase_order: 3,
+  purchase_receipt: 2,
+  purchase_invoice: 2,
+});
+
+/** OI-161 Packet G: one daily-payment-schedule Bill per dollar scale. */
+export const PAYMENT_BATCH_FIXTURE_KEYS = Object.freeze(["PI-DAILY", "PI-DAILY-LG"]);
+
+/** Keys for T0 dogfood — ERP sandbox rows clerks pull in source modal / Find. */
+export const AP_DOGFOOD_FIXTURE_KEYS = Object.freeze([
+  "PO-MN",
+  "PR-MN",
+  "PO-PP",
+  "PR-PP",
+  "PO-LB",
+]);
+
+/**
+ * OI-103 / OI-149 / OI-153 / OI-102 / OI-154 sandbox fixtures (indices ≥900).
+ * @param {object[]} docs
+ * @param {{ windowDays: number, suppliers: object[], items: object[], supplierByKey: object }} ctx
+ */
+function appendApDogfoodFixtures(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const mnLines = lineItems(items, 90, 2);
+  mnLines[0].qty = 10;
+  mnLines[1].qty = 10;
+
+  // OI-149 + OI-102: same vendor PO + partial IR, neither billed — source modal PO+PR dogfood.
+  docs.push({
+    ...baseDoc("purchase_order", 900, windowDays, 0, {
+      partyKey: "SUP-00",
+      items: mnLines,
+      source: null,
+      logbookPoNo: "JE-88421",
+      dogfoodScenario: "oi149-po-pr",
+    }),
+    key: "PO-MN",
+    dayOffset: 18,
+  });
+  docs.push({
+    ...baseDoc("purchase_receipt", 900, windowDays, 1, {
+      partyKey: "SUP-00",
+      items: mnLines,
+      source: { kind: "purchase_order", key: "PO-MN" },
+      partialReceive: [{ lineIndex: 1, qty: 4 }],
+      dogfoodScenario: "oi149-po-pr",
+    }),
+    key: "PR-MN",
+    dayOffset: 12,
+  });
+
+  // OI-153: vendor prepayment — PO, advance PE (seed), then IR; Bill left open for clerk.
+  const ppLines = lineItems(items, 91, 2);
+  ppLines[0].qty = 6;
+  ppLines[1].qty = 3;
+  docs.push({
+    ...baseDoc("purchase_order", 901, windowDays, 0, {
+      partyKey: "SUP-01",
+      items: ppLines,
+      source: null,
+      logbookPoNo: "PP-2200",
+      advancePayment: { amount: 120, manual: true },
+      dogfoodScenario: "oi153-prepay",
+    }),
+    key: "PO-PP",
+    dayOffset: 22,
+  });
+  docs.push({
+    ...baseDoc("purchase_receipt", 901, windowDays, 1, {
+      partyKey: "SUP-01",
+      items: ppLines,
+      source: { kind: "purchase_order", key: "PO-PP" },
+      dogfoodScenario: "oi153-prepay",
+    }),
+    key: "PR-PP",
+    dayOffset: 10,
+  });
+
+  // OI-154 / OI-121: Find PO by logbook title, not ERP name.
+  docs.push({
+    ...baseDoc("purchase_order", 902, windowDays, 0, {
+      partyKey: "SUP-02",
+      items: lineItems(items, 92, 1),
+      source: null,
+      logbookPoNo: "TO-5599",
+      dogfoodScenario: "oi154-logbook-po",
+    }),
+    key: "PO-LB",
+    dayOffset: 25,
+  });
+}
+
+/**
+ * OI-161 Packet G (sample-data gate): "a vendor with a bill with 1 payment due every day for
+ * 3 months" — one Purchase Invoice per dollar scale, each carrying 90 explicit `payment_schedule`
+ * rows (one per calendar day) instead of the flat 30-day due date every other seeded Bill gets.
+ * Two scales (small $50/day, large $2,500/day) so Packet 2's economics helper is dogfoodable at
+ * both — small should batch under default prefs, large should not (float cost swamps a flat fee).
+ *
+ * `dayOffset` on each schedule row is relative (days before/after the corpus's `asOf`, resolved by
+ * `emit-plan.js` the same way doc-level `dayOffset` is) — this function stays asOf-agnostic and pure.
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number, items: object[] }} ctx
+ */
+function appendPaymentBatchFixture(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const dailyItem = items[0];
+  const scheduleLength = 90;
+  // Posting 45 days before asOf spreads the 90 daily due dates from ~44 days overdue to ~45 days
+  // out — both ageing buckets exercised, not just future-due.
+  const postingDayOffset = 45;
+
+  const scales = [
+    { partyKey: "SUP-DAILY", rate: 50.0, index: 903, key: "PI-DAILY", scenario: "oi161-daily-payrun-small" },
+    { partyKey: "SUP-DAILY-LG", rate: 2500.0, index: 904, key: "PI-DAILY-LG", scenario: "oi161-daily-payrun-large" },
+  ];
+
+  for (const scale of scales) {
+    // Row i (0-indexed) is due `posting + (i+1)` days → dayOffset = postingDayOffset - (i+1).
+    // Ascending array order = ascending due date, so the last row is the latest (header due_date
+    // "last row wins" convention, same as bill-payment-schedule.js::headerDueDateFromPaymentSchedule).
+    const paymentSchedule = Array.from({ length: scheduleLength }, (_, i) => ({
+      dayOffset: postingDayOffset - (i + 1),
+      amount: scale.rate,
+    }));
+    docs.push({
+      ...baseDoc("purchase_invoice", scale.index, windowDays, 2, {
+        partyKey: scale.partyKey,
+        items: [{ itemKey: dailyItem.key, qty: scheduleLength, rate: scale.rate, salesOrderRef: null }],
+        source: null,
+        billNo: `SMP-${scale.partyKey}-INV-01`,
+        updateStock: false,
+        taxWithholding: false,
+        paymentSchedule,
+        dogfoodScenario: scale.scenario,
+      }),
+      key: scale.key,
+      dayOffset: postingDayOffset,
+    });
+  }
+}
+
+/** @param {object[]} docs */
+export function summarizeApFixtures(docs) {
+  const roles = AP_DOGFOOD_FIXTURE_KEYS.map((key) => {
+    const row = docs.find((d) => d.key === key);
+    return row
+      ? {
+          key,
+          kind: row.kind,
+          dogfoodScenario: row.dogfoodScenario || null,
+          logbookPoNo: row.logbookPoNo || null,
+        }
+      : null;
+  }).filter(Boolean);
+  return { keys: AP_DOGFOOD_FIXTURE_KEYS, rows: roles };
 }
 
 /**
@@ -262,7 +437,9 @@ function appendDraftDocs(docs, cfg) {
         updateStock: false,
       };
       if (kind === "purchase_invoice") {
-        extra.billNo = `SMP-DRAFT-${pad2(i + 1)}`;
+        const vendorSlot =
+          (buyingRotate.findIndex((s) => s.key === extra.partyKey) % buyingRotate.length) + 1;
+        extra.billNo = `SMP-V${pad2(vendorSlot)}-DRAFT-${pad2(i + 1)}`;
       }
       docs.push(draftDoc(kind, i, windowDays, extra));
     }

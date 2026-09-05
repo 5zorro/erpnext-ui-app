@@ -44,6 +44,21 @@ describe("commit attribution policy", () => {
     assert.match(result.stderr, /Gmail address or marker/i);
   });
 
+  it("rejects model/tool codenames case-insensitively", () => {
+    for (const word of ["Sonnet", "Haiku", "Opus", "Fable", "Cursor"]) {
+      const result = scanMessage(`fix: something involving ${word}\n`);
+      assert.equal(result.status, 1, word);
+      assert.match(result.stderr, /model\/tool codename/i, word);
+    }
+  });
+
+  it("does not false-positive on ordinary words containing those substrings", () => {
+    assert.equal(scanMessage("fix: opusculent typo in the changelog\n").status, 0);
+    assert.equal(scanMessage("fix: composite of opuses in the report\n").status, 0);
+    assert.equal(scanMessage("fix: precursor state was stale on reload\n").status, 0);
+    assert.equal(scanMessage("chore: gitignore .cursorrules\n").status, 0);
+  });
+
   it("checks author and committer metadata across a range", () => {
     const dir = mkdtempSync(join(tmpdir(), "commit-policy-git-"));
     assert.equal(git(dir, ["init", "-q"]).status, 0);

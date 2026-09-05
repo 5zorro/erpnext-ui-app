@@ -13,7 +13,7 @@ import {
   isCalcEligibleField,
 } from "./field-calc.js";
 import { calcHistoryTapeOrder } from "./session-history.js";
-import { copyTableIconHtml, copyTotalIconHtml } from "./calc-icons.js";
+import { copyTableIconHtml, copyTotalIconHtml, uiIconHtml } from "../ui-icons.js";
 import { padDisplayToFooting, stripCalcDisplayPad, footingAlignMetrics, formatAlignedFootingLine } from "./calc-engine.js";
 
 export { calcHistoryTapeOrder } from "./session-history.js";
@@ -252,7 +252,7 @@ export function createFieldCalcUi(els) {
           try {
             const r = await els.copyHistory(e.id, mode);
             const ok = !!(r && r.ok);
-            btn.textContent = ok ? "✓" : "!";
+            btn.innerHTML = ok ? uiIconHtml("check", { size: 12 }) : uiIconHtml("alert", { size: 12 });
             setTimeout(() => {
               btn.innerHTML = iconHtml;
             }, 900);

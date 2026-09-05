@@ -1,0 +1,605 @@
+<title>Table Column Sizing</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --chrome: #1e293b;
+    --chrome-text: #e2e8f0;
+    --accent: #2490ef;
+    --amber: #f59e0b;
+    --amber-bg: #fffbeb;
+    --amber-border: #fde68a;
+    --border: #e2e8f0;
+    --border-inner: #f1f5f9;
+    --text: #1e293b;
+    --text-2: #475569;
+    --text-3: #94a3b8;
+    --num-bg: #f8fafc;
+    --green: #059669;
+    --red: #dc2626;
+    --tag-bg: #e0f2fe;
+    --tag-text: #0369a1;
+    --mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    --radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --chrome: #0f172a;
+      --chrome-text: #cbd5e1;
+      --border: #334155;
+      --border-inner: #1e293b;
+      --text: #e2e8f0;
+      --text-2: #94a3b8;
+      --text-3: #475569;
+      --num-bg: #1a2840;
+      --amber-bg: #1c1505;
+      --amber-border: #78350f;
+      --tag-bg: #0c2d4a;
+      --tag-text: #7dd3fc;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --chrome: #0f172a;
+    --chrome-text: #cbd5e1;
+    --border: #334155;
+    --border-inner: #1e293b;
+    --text: #e2e8f0;
+    --text-2: #94a3b8;
+    --text-3: #475569;
+    --num-bg: #1a2840;
+    --amber-bg: #1c1505;
+    --amber-border: #78350f;
+    --tag-bg: #0c2d4a;
+    --tag-text: #7dd3fc;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.5 system-ui, "Segoe UI", sans-serif; margin: 0; }
+
+  /* ── sticky toolbar ── */
+  .toolbar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--chrome); color: var(--chrome-text);
+    padding: 0 20px; display: flex; align-items: center; gap: 20px;
+    height: 48px; border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  .toolbar-brand { font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .toolbar-sub { font-size: 11px; color: #64748b; white-space: nowrap; }
+  .toolbar-spacer { flex: 1; }
+  .toolbar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+  .toolbar input[type=range] { width: 180px; accent-color: var(--accent); cursor: pointer; }
+  .toolbar .width-val { font-family: var(--mono); font-size: 12px; color: var(--accent); min-width: 50px; }
+  .toolbar .guide-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: #94a3b8; }
+  .toolbar .guide-toggle input { accent-color: var(--amber); cursor: pointer; }
+
+  /* ── page layout ── */
+  .page { padding: 24px 20px 48px; max-width: 1300px; margin: 0 auto; }
+  .intro { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 24px; }
+  .intro h1 { margin: 0 0 6px; font-size: 16px; }
+  .intro p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+
+  /* ── section ── */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; overflow: hidden; }
+  .section-head {
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+  }
+  .section-title { font-weight: 600; font-size: 13px; }
+  .section-desc { font-size: 12px; color: var(--text-2); }
+  .section-body { padding: 0; overflow: hidden; }
+
+  /* ── annotation bar (column guide) ── */
+  .guide-bar {
+    display: flex; align-items: stretch; border-bottom: 1px solid var(--amber-border);
+    background: var(--amber-bg); font-family: var(--mono); font-size: 10px;
+    overflow: hidden; transition: max-height .2s;
+  }
+  .guide-bar.hidden { display: none; }
+  .guide-seg {
+    padding: 5px 4px; border-right: 1px solid var(--amber-border);
+    display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+    flex-shrink: 0;
+  }
+  .guide-seg:last-child { border-right: none; }
+  .guide-seg .seg-name { color: var(--amber); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .guide-seg .seg-rule { color: #92400e; white-space: nowrap; }
+  :root[data-theme="dark"] .guide-seg .seg-rule,
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .guide-seg .seg-rule { color: #fcd34d; } }
+
+  /* ── table container ── */
+  .tbl-wrap { overflow-x: auto; resize: none; }
+  .tbl-wrap table {
+    border-collapse: collapse; font-size: 13px;
+    table-layout: fixed; width: 100%;
+  }
+  .tbl-wrap table:not(.payments-tbl):not(.assumptions-tbl) { min-width: 760px; }
+  .tbl-wrap .payments-tbl { min-width: 420px; }
+  th, td {
+    border-bottom: 1px solid var(--border-inner); padding: 6px 6px;
+    text-align: left; vertical-align: middle; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis;
+  }
+  td.wrap-ok { white-space: normal; text-overflow: clip; word-break: break-word; }
+  th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+    color: var(--text-3); font-weight: 600; background: var(--bg);
+    position: sticky; top: 48px;
+    font-family: system-ui, "Segoe UI", sans-serif;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; background: var(--num-bg); }
+  tfoot td { border-top: 2px solid var(--border); border-bottom: none; font-weight: 600; background: var(--bg); }
+  tfoot td.num { font-family: var(--mono); font-size: 12px; }
+  tr:hover td { background: #f8fafc; }
+  :root[data-theme="dark"] tr:hover td, tr:hover td.num { background: #1a2840; }
+
+  /* items table column widths */
+  .items-tbl { min-width: 760px; }
+  .items-tbl col.c-line   { width: 38px; }
+  .items-tbl col.c-po     { width: 54px; }
+  .items-tbl col.c-item   { width: 12%; }
+  .items-tbl col.c-desc   { }          /* auto — gets remaining */
+  .items-tbl col.c-qty    { width: 58px; }
+  .items-tbl col.c-cost   { width: 88px; }
+  .items-tbl col.c-amount { width: 96px; }
+  .items-tbl col.c-cust   { width: 10%; }
+  .items-tbl col.c-so     { width: 10%; }
+  .items-tbl col.c-proj   { width: 10%; }
+  .items-tbl col.c-act    { width: 32px; }
+
+  /* taxes table column widths */
+  .taxes-tbl { min-width: 520px; }
+  .taxes-tbl col.c-line   { width: 38px; }
+  .taxes-tbl col.c-acct   { width: 18%; }
+  .taxes-tbl col.c-desc   { }          /* auto — fill */
+  .taxes-tbl col.c-type   { width: 110px; }
+  .taxes-tbl col.c-rate   { width: 68px; }
+  .taxes-tbl col.c-amount { width: 88px; }
+  .taxes-tbl col.c-addded { width: 72px; }
+  .taxes-tbl col.c-act    { width: 32px; }
+
+  /* payments table */
+  .payments-tbl { min-width: 420px; }
+  .payments-tbl col.c-pe     { }       /* fill */
+  .payments-tbl col.c-date   { width: 92px; }
+  .payments-tbl col.c-mode   { width: 100px; }
+  .payments-tbl col.c-alloc  { width: 96px; }
+  .payments-tbl col.c-status { width: 88px; }
+
+  /* status pills */
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill-g { background: #d1fae5; color: #065f46; }
+  .pill-b { background: #dbeafe; color: #1e40af; }
+  .pill-y { background: #fef3c7; color: #92400e; }
+  :root[data-theme="dark"] .pill-g { background: #064e3b; color: #6ee7b7; }
+  :root[data-theme="dark"] .pill-b { background: #1e3a5f; color: #93c5fd; }
+  :root[data-theme="dark"] .pill-y { background: #451a03; color: #fcd34d; }
+
+  /* icon button */
+  .act-btn { background: none; border: none; cursor: pointer; color: var(--text-3); padding: 2px 4px; border-radius: 4px; font-size: 14px; }
+  .act-btn:hover { color: var(--text); background: var(--border); }
+
+  /* tfoot summary row */
+  tfoot .tot-label { font-size: 10px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-3); margin-right: 4px; }
+
+  /* ── assumptions flex layout ── */
+  .assume-section-body { padding: 10px 16px 16px; }
+  .assume-legend {
+    font-size: 11px; color: var(--text-2); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    margin-bottom: 10px; line-height: 1.8;
+  }
+  .assume-row {
+    display: flex; align-items: center; flex-wrap: nowrap;
+    gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border-inner);
+    min-width: 0;
+  }
+  .assume-flabel {
+    flex: 0 0 160px; font-weight: 600; font-size: 13px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .assume-veditor {
+    flex: 1 1 0; min-width: 100px; overflow: hidden;
+  }
+  .assume-veditor input, .assume-veditor select {
+    width: 100%; border: 1px solid var(--border); border-radius: 4px;
+    padding: 4px 7px; font-size: 12px; background: var(--surface); color: var(--text);
+  }
+  .assume-radios {
+    flex: 0 0 auto; display: flex; gap: 6px 14px; flex-wrap: nowrap;
+    white-space: nowrap; overflow-x: auto; min-width: 0;
+  }
+  .assume-radio { font-size: 11px; display: flex; align-items: center; gap: 3px; cursor: pointer; }
+  .assume-radio.off { color: var(--text-3); }
+  .assume-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .assume-wrap-inner { overflow-x: auto; min-width: 0; }
+
+  /* responsive guide text on dark */
+  :root[data-theme="dark"] .guide-seg .seg-name { color: #fbbf24; }
+
+  /* ── rule legend below each table ── */
+  .rule-legend {
+    border-top: 1px solid var(--border); padding: 10px 16px;
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    background: var(--bg);
+  }
+  .rule-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--mono); font-size: 11px;
+    background: var(--tag-bg); color: var(--tag-text);
+    border-radius: 4px; padding: 2px 7px;
+  }
+  .rule-tag .rt-col { font-weight: 600; }
+  .rule-tag .rt-rule { color: var(--text-3); }
+</style>
+
+<div class="toolbar">
+  <span class="toolbar-brand">Column Sizing Reference</span>
+  <span class="toolbar-sub">Items · Taxes · Payments · Assumptions</span>
+  <span class="toolbar-spacer"></span>
+  <label for="width-slider">Container width</label>
+  <input id="width-slider" type="range" min="420" max="1280" value="900" step="10">
+  <span class="width-val" id="width-val">900px</span>
+  <label class="guide-toggle"><input type="checkbox" id="guide-toggle" checked> Column guides</label>
+</div>
+
+<div class="page">
+  <div class="intro">
+    <h1>Table Column Sizing — Industry Standard: <code>table-layout: fixed</code> + semantic column roles</h1>
+    <p>
+      Fixed columns have explicit <code>px</code> widths. Percentage columns shrink/grow proportionally with the container.
+      The <strong>description/fill</strong> column has no width set — in fixed layout it absorbs whatever space remains after all
+      other columns are satisfied. The container uses <code>overflow-x: auto</code> so a <code>min-width</code> on the table
+      prevents columns from collapsing below readable thresholds. Numeric columns use <code>font-variant-numeric: tabular-nums</code>
+      and right-align. Drag the slider above to see how the tables respond.
+    </p>
+  </div>
+
+  <!-- ── ITEMS TABLE ── -->
+  <div class="section" id="sec-items">
+    <div class="section-head">
+      <span class="section-title">Items Table</span>
+      <span class="section-desc">11 columns · Bill doc skin + doc-form.html · <code>min-width: 760px</code></span>
+    </div>
+    <div class="section-body">
+      <div class="guide-bar" id="guide-items">
+        <!-- populated by JS -->
+      </div>
+      <div class="tbl-wrap" id="wrap-items">
+        <table class="items-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-po"><col class="c-item"><col class="c-desc">
+            <col class="c-qty"><col class="c-cost"><col class="c-amount">
+            <col class="c-cust"><col class="c-so"><col class="c-proj"><col class="c-act">
+          </colgroup>
+          <thead>
+            <tr>
+              <th title="Line number">Line</th>
+              <th title="PO source line index">PO line</th>
+              <th>Item</th>
+              <th class="wrap-ok">Description</th>
+              <th class="num">Qty</th>
+              <th class="num">Cost</th>
+              <th class="num">Amount</th>
+              <th>Customer</th>
+              <th>Sales order(s)</th>
+              <th>Project</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td><td>1</td>
+              <td>WIDGET-XL-2026</td>
+              <td class="wrap-ok">Heavy-duty industrial widget, powder-coated, galvanized bracket</td>
+              <td class="num">500.000</td><td class="num">12.50</td><td class="num">6,250.00</td>
+              <td>Acme Corp</td><td>SO-2026-00042</td><td>PROJ-EAST</td>
+              <td><button class="act-btn" tabindex="-1">⋯</button></td>
+            </tr>
+            <tr>
+              <td>2</td><td>2</td>
+              <td>BOLT-M8×40</td>
+              <td class="wrap-ok">M8×40 stainless hex bolt, grade A4-80</td>
+              <td class="num">2,000.000</td><td class="num">0.28</td><td class="num">560.00</td>
+              <td>Acme Corp</td><td>SO-2026-00042</td><td>PROJ-EAST</td>
+              <td><button class="act-btn" tabindex="-1">⋯</button></td>
+            </tr>
+            <tr>
+              <td>3</td><td>—</td>
+              <td>SHIP-HANDLING</td>
+              <td class="wrap-ok">Freight and handling charge per vendor invoice</td>
+              <td class="num">1.000</td><td class="num">185.00</td><td class="num">185.00</td>
+              <td></td><td></td><td></td>
+              <td><button class="act-btn" tabindex="-1">⋯</button></td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4"></td>
+              <td class="num"><span class="tot-label">Σ Qty</span>2,501</td>
+              <td></td>
+              <td class="num"><span class="tot-label">Subtotal</span>6,995.00</td>
+              <td colspan="4"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="rule-legend">
+        <span class="rule-tag"><span class="rt-col">Line</span><span class="rt-rule">38px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">PO line</span><span class="rt-rule">54px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Item</span><span class="rt-rule">12% pct</span></span>
+        <span class="rule-tag" style="background:#dcfce7;color:#166534"><span class="rt-col">Description</span><span class="rt-rule">auto fill (remaining)</span></span>
+        <span class="rule-tag"><span class="rt-col">Qty</span><span class="rt-rule">58px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Cost</span><span class="rt-rule">88px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Amount</span><span class="rt-rule">96px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Customer</span><span class="rt-rule">10% pct</span></span>
+        <span class="rule-tag"><span class="rt-col">Sales order(s)</span><span class="rt-rule">10% pct</span></span>
+        <span class="rule-tag"><span class="rt-col">Project</span><span class="rt-rule">10% pct</span></span>
+        <span class="rule-tag"><span class="rt-col">Actions</span><span class="rt-rule">32px fixed</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAXES TABLE ── -->
+  <div class="section" id="sec-taxes">
+    <div class="section-head">
+      <span class="section-title">Taxes and Charges Table</span>
+      <span class="section-desc">8 columns · Bill doc skin + doc-form.html · <code>min-width: 520px</code></span>
+    </div>
+    <div class="section-body">
+      <div class="guide-bar" id="guide-taxes"></div>
+      <div class="tbl-wrap" id="wrap-taxes">
+        <table class="taxes-tbl">
+          <colgroup>
+            <col class="c-line"><col class="c-acct"><col class="c-desc">
+            <col class="c-type"><col class="c-rate"><col class="c-amount">
+            <col class="c-addded"><col class="c-act">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Line</th><th>Account</th><th class="wrap-ok">Description</th>
+              <th>Type</th><th class="num">Rate %</th><th class="num">Amount</th>
+              <th>Add/Deduct</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td><td>Freight In</td>
+              <td class="wrap-ok">Inbound freight charge allocated to receipt</td>
+              <td>Actual</td><td class="num">—</td><td class="num">185.00</td>
+              <td>Add</td><td><button class="act-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td>2</td><td>GST 10%</td>
+              <td class="wrap-ok">Goods and Services Tax (standard rate)</td>
+              <td>On Net Total</td><td class="num">10.00</td><td class="num">718.50</td>
+              <td>Add</td><td><button class="act-btn">⋯</button></td>
+            </tr>
+          </tbody>
+          <tfoot id="taxes-totals">
+            <tr>
+              <td colspan="5"><span class="tot-label">Total taxes</span></td>
+              <td class="num">903.50</td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="rule-legend">
+        <span class="rule-tag"><span class="rt-col">Line</span><span class="rt-rule">38px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Account</span><span class="rt-rule">18% pct</span></span>
+        <span class="rule-tag" style="background:#dcfce7;color:#166534"><span class="rt-col">Description</span><span class="rt-rule">auto fill</span></span>
+        <span class="rule-tag"><span class="rt-col">Type</span><span class="rt-rule">110px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Rate %</span><span class="rt-rule">68px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Amount</span><span class="rt-rule">88px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Add/Deduct</span><span class="rt-rule">72px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Actions</span><span class="rt-rule">32px fixed</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PAYMENTS TABLE ── -->
+  <div class="section" id="sec-payments">
+    <div class="section-head">
+      <span class="section-title">Applied Payments Table</span>
+      <span class="section-desc">5 columns · Already-paid panel · <code>min-width: 420px</code></span>
+    </div>
+    <div class="section-body">
+      <div class="guide-bar" id="guide-payments"></div>
+      <div class="tbl-wrap" id="wrap-payments">
+        <table class="payments-tbl">
+          <colgroup>
+            <col class="c-pe"><col class="c-date"><col class="c-mode">
+            <col class="c-alloc"><col class="c-status">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Payment Entry</th><th>Date</th><th>Mode</th>
+              <th class="num">Allocated</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ACC-PAY-2026-00042</td><td>2026-08-15</td><td>Bank Transfer</td>
+              <td class="num">4,200.00</td>
+              <td><span class="pill pill-g">Reconciled</span></td>
+            </tr>
+            <tr>
+              <td>ACC-PAY-2026-00051</td><td>2026-09-01</td><td>Cheque</td>
+              <td class="num">2,795.50</td>
+              <td><span class="pill pill-b">Submitted</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="rule-legend">
+        <span class="rule-tag" style="background:#dcfce7;color:#166534"><span class="rt-col">Payment Entry</span><span class="rt-rule">auto fill</span></span>
+        <span class="rule-tag"><span class="rt-col">Date</span><span class="rt-rule">92px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Mode</span><span class="rt-rule">100px fixed</span></span>
+        <span class="rule-tag"><span class="rt-col">Allocated</span><span class="rt-rule">96px fixed num</span></span>
+        <span class="rule-tag"><span class="rt-col">Status</span><span class="rt-rule">88px fixed</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ASSUMPTIONS MODAL LAYOUT ── -->
+  <div class="section" id="sec-assume">
+    <div class="section-head">
+      <span class="section-title">Assumptions Modal Row Layout</span>
+      <span class="section-desc">Flex (not table) — label fixed · value editor flex-fill · radios shrink-to-content</span>
+    </div>
+    <div class="section-body">
+      <div class="guide-bar" id="guide-assume"></div>
+      <div id="wrap-assume" class="assume-section-body">
+        <div class="assume-legend">
+          <b>Field settings:</b>
+          <span><b>Normal</b> = off.</span>
+          <span><b>Pre-fill · skip Tab</b> = filled; Tab skips it.</span>
+          <span><b>Quiet &amp; locked</b> = filled, greyed, locked (default).</span>
+          <span><b>Hidden</b> = removed from form.</span>
+        </div>
+        <div class="assume-wrap">
+          <div class="assume-wrap-inner">
+            <div class="assume-row">
+              <div class="assume-flabel">Company</div>
+              <div class="assume-veditor"><input type="text" value="ACME Manufacturing Pty Ltd" readonly></div>
+              <div class="assume-radios">
+                <label class="assume-radio off"><input type="radio" name="r-company" checked> Normal</label>
+                <label class="assume-radio"><input type="radio" name="r-company"> Pre-fill · skip Tab</label>
+                <label class="assume-radio"><input type="radio" name="r-company"> Quiet &amp; locked</label>
+                <label class="assume-radio"><input type="radio" name="r-company"> Hidden</label>
+              </div>
+            </div>
+            <div class="assume-row">
+              <div class="assume-flabel">Posting Date</div>
+              <div class="assume-veditor">
+                <select>
+                  <option>Today</option>
+                  <option>Yesterday</option>
+                  <option>Start of month</option>
+                </select>
+              </div>
+              <div class="assume-radios">
+                <label class="assume-radio off"><input type="radio" name="r-date"> Normal</label>
+                <label class="assume-radio off"><input type="radio" name="r-date"> Pre-fill · skip Tab</label>
+                <label class="assume-radio"><input type="radio" name="r-date" checked> Quiet &amp; locked</label>
+                <label class="assume-radio"><input type="radio" name="r-date"> Hidden</label>
+              </div>
+            </div>
+            <div class="assume-row">
+              <div class="assume-flabel">Warehouse</div>
+              <div class="assume-veditor"><input type="text" value="Stores - ACME" readonly></div>
+              <div class="assume-radios">
+                <label class="assume-radio off"><input type="radio" name="r-wh"> Normal</label>
+                <label class="assume-radio off"><input type="radio" name="r-wh"> Pre-fill · skip Tab</label>
+                <label class="assume-radio off"><input type="radio" name="r-wh"> Quiet &amp; locked</label>
+                <label class="assume-radio"><input type="radio" name="r-wh" checked> Hidden</label>
+              </div>
+            </div>
+            <div class="assume-row">
+              <div class="assume-flabel">Currency</div>
+              <div class="assume-veditor">
+                <select>
+                  <option>AUD</option><option>USD</option><option>EUR</option>
+                </select>
+              </div>
+              <div class="assume-radios">
+                <label class="assume-radio off"><input type="radio" name="r-cur"> Normal</label>
+                <label class="assume-radio"><input type="radio" name="r-cur" checked> Pre-fill · skip Tab</label>
+                <label class="assume-radio off"><input type="radio" name="r-cur"> Quiet &amp; locked</label>
+                <label class="assume-radio off"><input type="radio" name="r-cur"> Hidden</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="rule-legend">
+        <span class="rule-tag"><span class="rt-col">Label</span><span class="rt-rule">flex: 0 0 160px</span></span>
+        <span class="rule-tag" style="background:#dcfce7;color:#166534"><span class="rt-col">Value editor</span><span class="rt-rule">flex: 1 1 0; min-width: 100px</span></span>
+        <span class="rule-tag"><span class="rt-col">Placement radios</span><span class="rt-rule">flex: 0 0 auto; overflow-x: auto</span></span>
+        <span class="rule-tag"><span class="rt-col">Row</span><span class="rt-rule">flex; no-wrap; overflow-x: auto on inner</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const slider = document.getElementById("width-slider");
+  const widthVal = document.getElementById("width-val");
+  const guideToggle = document.getElementById("guide-toggle");
+
+  const wraps = ["items", "taxes", "payments", "assume"];
+  function applyWidth(w) {
+    widthVal.textContent = w + "px";
+    document.getElementById("wrap-items").style.width = w + "px";
+    document.getElementById("wrap-taxes").style.width = w + "px";
+    document.getElementById("wrap-payments").style.width = w + "px";
+    document.getElementById("wrap-assume").style.width = w + "px";
+  }
+  slider.addEventListener("input", () => applyWidth(+slider.value));
+  applyWidth(+slider.value);
+
+  function toggleGuides(show) {
+    document.querySelectorAll(".guide-bar").forEach(b => b.classList.toggle("hidden", !show));
+  }
+  guideToggle.addEventListener("change", () => toggleGuides(guideToggle.checked));
+
+  /* build annotation bars from col elements */
+  function buildGuide(tableSelector, barId, defs) {
+    const bar = document.getElementById(barId);
+    bar.innerHTML = "";
+    defs.forEach(d => {
+      const seg = document.createElement("div");
+      seg.className = "guide-seg";
+      seg.style.width = d.w;
+      if (!d.w || d.w === "auto") { seg.style.flex = "1"; seg.style.width = ""; }
+      seg.innerHTML = `<span class="seg-name">${d.name}</span><span class="seg-rule">${d.rule}</span>`;
+      bar.appendChild(seg);
+    });
+  }
+
+  buildGuide(".items-tbl", "guide-items", [
+    {name:"Line", w:"38px", rule:"38px"},
+    {name:"PO", w:"54px", rule:"54px"},
+    {name:"Item", w:"12%", rule:"12%"},
+    {name:"Description", w:null, rule:"fill"},
+    {name:"Qty", w:"58px", rule:"58px·num"},
+    {name:"Cost", w:"88px", rule:"88px·num"},
+    {name:"Amount", w:"96px", rule:"96px·num"},
+    {name:"Customer", w:"10%", rule:"10%"},
+    {name:"Sales order(s)", w:"10%", rule:"10%"},
+    {name:"Project", w:"10%", rule:"10%"},
+    {name:"⋯", w:"32px", rule:"32px"},
+  ]);
+  buildGuide(".taxes-tbl", "guide-taxes", [
+    {name:"Line", w:"38px", rule:"38px"},
+    {name:"Account", w:"18%", rule:"18%"},
+    {name:"Description", w:null, rule:"fill"},
+    {name:"Type", w:"110px", rule:"110px"},
+    {name:"Rate %", w:"68px", rule:"68px·num"},
+    {name:"Amount", w:"88px", rule:"88px·num"},
+    {name:"Add/Ded", w:"72px", rule:"72px"},
+    {name:"⋯", w:"32px", rule:"32px"},
+  ]);
+  buildGuide(".payments-tbl", "guide-payments", [
+    {name:"Payment Entry", w:null, rule:"fill"},
+    {name:"Date", w:"92px", rule:"92px"},
+    {name:"Mode", w:"100px", rule:"100px"},
+    {name:"Allocated", w:"96px", rule:"96px·num"},
+    {name:"Status", w:"88px", rule:"88px"},
+  ]);
+
+  /* assumptions guide — flex layout so hand-coded */
+  const assumeBar = document.getElementById("guide-assume");
+  assumeBar.innerHTML = `
+    <div class="guide-seg" style="flex:0 0 160px"><span class="seg-name">Label</span><span class="seg-rule">0 0 160px</span></div>
+    <div class="guide-seg" style="flex:1"><span class="seg-name">Value editor</span><span class="seg-rule">1 1 0 fill</span></div>
+    <div class="guide-seg" style="flex:0 0 auto"><span class="seg-name">Placement radios</span><span class="seg-rule">0 0 auto scroll</span></div>
+  `;
+
+  toggleGuides(guideToggle.checked);
+</script>

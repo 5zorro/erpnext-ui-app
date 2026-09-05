@@ -369,6 +369,7 @@ flowchart LR
 | **D-CurrencyUX** | OI-092 research malformed money |
 | **D-SaveEmphasis** | OI-093 post–Save draft button emphasis |
 | **D-E2E** | Layer-2 |
+| **D-CreditNote** | OI-082 (open — discovery) + OI-147 (open — discovery, extends OI-082) — AP credit/debit note on Bill Doc skin (`is_return` / `return_against`); **must promote into the next dated plan at closeout, do not drop** |
 
 > **D-Calc removed** — promoted to **Packet C** (OI-018).
 

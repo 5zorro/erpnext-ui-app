@@ -4,7 +4,51 @@
  * in-page event must not flip currentRoute / Doc-hijack back to the Bill.
  */
 
-import { routeInfo, routesReferToSameDoc } from "./route-info.js";
+import { routeInfo, routesReferToSameDoc, normalizeAppRoute } from "./route-info.js";
+
+/**
+ * Arm-or-clear decision for an intentional shell navigation.
+ *
+ * Only `/app/…` destinations can be guarded: the guard matches on doctype, so a
+ * doctype-less destination (`/desk`, `/`, `/login`) would never accept its own
+ * arrival and would block every event for the whole timeout. Those destinations
+ * must therefore **clear** — leaving a stale intent armed is worse than no guard:
+ * it rejects the real arrival (currentRoute never updates, and the route poll
+ * cannot repair it) while still accepting late in-page events from the page we
+ * just left, which write the old route back.
+ *
+ * @param {string|null|undefined} destination route or URL we mean to open
+ * @param {string} [erpBase]
+ * @returns {{ action: "arm", path: string }|{ action: "clear" }}
+ */
+export function resolveErpNavIntent(destination, erpBase) {
+  const raw = destination == null ? "" : String(destination);
+  if (!raw) return { action: "clear" };
+  const path = normalizeAppRoute(raw, erpBase).path || raw;
+  if (!path.startsWith("/app/")) return { action: "clear" };
+  return { action: "arm", path };
+}
+
+/**
+ * When shell is navigating to a doctype list (Find), stale in-SPA form URLs for the
+ * same doctype must not hijack back to Doc skin (OI-054 Find jump / OI-127).
+ *
+ * @param {string|null|undefined} intentPath /app/… path we meant to open
+ * @param {string} incomingUrl ERP URL or /app path from did-navigate
+ * @param {string} [erpBase]
+ * @returns {boolean}
+ */
+export function shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBase) {
+  if (!intentPath || !incomingUrl) return false;
+  const intent = routeInfo(intentPath, erpBase);
+  const incoming = routeInfo(incomingUrl, erpBase);
+  return !!(
+    intent.doctype &&
+    !intent.record &&
+    incoming.doctype === intent.doctype &&
+    incoming.record
+  );
+}
 
 /**
  * Whether an ERP URL event may update shell route / hijack while an intent is active.
@@ -18,6 +62,8 @@ import { routeInfo, routesReferToSameDoc } from "./route-info.js";
 export function shouldAcceptErpTrackNav(intentPath, incomingUrl, erpBase) {
   if (!intentPath) return true;
   if (typeof incomingUrl !== "string" || !incomingUrl) return false;
+  // List intent must not treat a stale same-doctype form URL as "arrived" (OI-054 Find).
+  if (shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBase)) return false;
   if (routesReferToSameDoc(intentPath, incomingUrl, erpBase)) return true;
   const intent = routeInfo(intentPath, erpBase);
   const incoming = routeInfo(incomingUrl, erpBase);

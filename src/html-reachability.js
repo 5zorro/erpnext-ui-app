@@ -9,7 +9,10 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "history.html": "Recent / Drafts flyout (left rail)",
   "diagnose-dropdown.html": "Diagnose popover (chrome ERP health)",
   "calc-history-dropdown.html": "Calculator history popover (left-rail Calculator button)",
+  "submitted-dropdown.html": "Submitted-this-session popover (left-rail Submitted button)",
   "nav-incident-dialog.html": "Fail-loud nav issue note (toolbar Nav issue)",
+  "focus-incident-dialog.html": "Fail-loud focus issue note (DB diagnose Focus issue)",
+  "pay-outstanding.html": "OI-161 Doc Pay skin — standalone window from Home's Pay Outstanding tile",
 });
 
 /**
@@ -18,8 +21,17 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
  */
 export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
   "home.html": "Doc Workflow Home (Home button / default Doc surface)",
-  "bill.html": "DOC_SKIN_INDEX bill → Purchase Invoice Doc skin",
-  "doc-form.html": "DOC_SKIN_INDEX po + receipt → shared Doc form shell",
+  "doc-form.html": "DOC_SKIN_INDEX bill + po + receipt → shared Doc form shell",
+});
+
+/** Legacy shells retained for reference; not loaded at runtime (tranche 10). */
+export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
+  "bill.html": "Legacy Bill shell — superseded by doc-form.html (shared chrome + bill body)",
+  "bill-shell.fragment.html": "Bill body partial — assembled with doc-chrome.fragment.html",
+  "doc-chrome.fragment.html": "Shared AP entry chrome (banner, toolbar, commit gate)",
+  "doc-form-body.fragment.html": "PO/IR body partial — assembled into doc-form.html",
+  "doc-form.head.html": "doc-form.html head/styles partial for assemble script",
+  "doc-form.footer.html": "doc-form.html calc overlay + boot script partial",
 });
 
 /**
@@ -31,6 +43,7 @@ export function productionHtmlReachReason(basename) {
   return (
     PRODUCTION_HTML_ENTRYPOINTS[name] ||
     PRODUCTION_HTML_ALLOWLIST[name] ||
+    PRODUCTION_HTML_ALLOWLIST_EXTRA[name] ||
     null
   );
 }

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Submitted this session</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%; background: #1a252f; color: #e2e8f0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1.4;
+      overflow: hidden;
+    }
+    .wrap {
+      box-sizing: border-box; height: 100%; padding: 12px 12px 10px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    h3 { margin: 0; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: #9fb3c8; }
+    .count { font-size: 20px; font-weight: 700; color: #86efac; line-height: 1; }
+    .count-sub { font-size: 10px; color: #6b8299; text-transform: uppercase; letter-spacing: .4px; }
+    .btn {
+      color: #9fb3c8; background: transparent; border: none; padding: 6px 10px;
+      font-size: 12px; cursor: pointer; border-radius: 6px;
+    }
+    .btn:hover { background: #243140; color: #fff; }
+    .empty { padding: 16px 4px; color: #6b8299; line-height: 1.45; }
+    .scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { margin: 0 0 4px; }
+    li button.row {
+      width: 100%; text-align: left; background: #1e293b; border: 1px solid #334155;
+      color: #e2e8f0; border-radius: 6px; padding: 8px 10px; cursor: pointer;
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    li button.row:hover { background: #2c3e50; border-color: #455a73; }
+    li button.row.prior { border-style: dashed; opacity: .85; }
+    .row-label { font-weight: 600; flex: 0 0 auto; }
+    .row-detail {
+      color: #9fb3c8; flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .row-time { color: #6b8299; font-size: 10px; flex: 0 0 auto; }
+    .sep {
+      margin: 10px 0 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .45px;
+      color: #6b8299; border-top: 1px solid #334155; padding-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h3>Submitted</h3>
+        <div><span class="count" id="count">0</span> <span class="count-sub">this session</span></div>
+      </div>
+      <button type="button" class="btn" id="close" data-testid="submitted-close">Close</button>
+    </div>
+    <div class="scroll">
+      <div class="empty" id="empty" hidden>
+        Nothing submitted yet this session. Submitted Bills, Purchase Orders and Payment
+        Entries land here so you can get back to one without going through Find.
+      </div>
+      <ul id="list"></ul>
+    </div>
+  </div>
+
+  <script type="module">
+    const api = window.erpSubmitted;
+    const listEl = document.getElementById("list");
+    const emptyEl = document.getElementById("empty");
+    const countEl = document.getElementById("count");
+
+    function timeText(at) {
+      if (!at) return "";
+      const d = new Date(at);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    function render(payload) {
+      const rows = (payload && payload.submitted) || [];
+      countEl.textContent = String(rows.filter((r) => !r.priorSession).length);
+      listEl.replaceChildren();
+      emptyEl.hidden = rows.length > 0;
+
+      let priorMarked = false;
+      rows.forEach((r) => {
+        if (r.priorSession && !priorMarked) {
+          priorMarked = true;
+          const sep = document.createElement("li");
+          sep.className = "sep";
+          sep.textContent = "Earlier sessions";
+          listEl.appendChild(sep);
+        }
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "row" + (r.priorSession ? " prior" : "");
+        b.dataset.testid = "submitted-row";
+        b.title = r.route || "";
+
+        const label = document.createElement("span");
+        label.className = "row-label";
+        label.textContent = r.label || r.doctypeKey || "Document";
+        const detail = document.createElement("span");
+        detail.className = "row-detail";
+        detail.textContent = r.detail || r.name || "";
+        const time = document.createElement("span");
+        time.className = "row-time";
+        time.textContent = r.priorSession ? "" : timeText(r.at);
+
+        b.append(label, detail, time);
+        b.onclick = () => api && api.open(r.route);
+        li.appendChild(b);
+        listEl.appendChild(li);
+      });
+    }
+
+    document.getElementById("close").onclick = () => api && api.close();
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && api) api.close();
+    });
+    if (api) api.onData(render);
+    render({ submitted: [] });
+  </script>
+</body>
+</html>
