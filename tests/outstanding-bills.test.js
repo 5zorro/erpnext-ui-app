@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeAccountsPayableRow, attachDiscountWindow } from "../src/outstanding-bills.js";
+import {
+  normalizeAccountsPayableRow,
+  attachDiscountWindow,
+  explodeInstallments,
+  buildOutstandingBillRows,
+} from "../src/outstanding-bills.js";
 
 // Captured live from the sandbox (bench execute frappe.desk.query_report.run, report_name=
 // "Accounts Payable", 2026-09-05) against OI-161 Packet G's SUP-DAILY / SUP-DAILY-LG fixtures —
@@ -39,6 +44,7 @@ describe("outstanding-bills: normalizeAccountsPayableRow", () => {
     const row = normalizeAccountsPayableRow(CAPTURED_SMALL_ROW);
     assert.deepEqual(row, {
       invoice: "ACC-PINV-2026-00229",
+      installmentKey: "ACC-PINV-2026-00229",
       supplier: "SAMPLE Vendor Daily Payrun",
       postingDate: "2026-07-22",
       dueDate: "2026-10-20",
@@ -73,6 +79,7 @@ describe("outstanding-bills: normalizeAccountsPayableRow", () => {
     const row = normalizeAccountsPayableRow({});
     assert.deepEqual(row, {
       invoice: "",
+      installmentKey: "",
       supplier: "",
       postingDate: "",
       dueDate: "",
@@ -135,3 +142,142 @@ describe("outstanding-bills: attachDiscountWindow", () => {
     assert.deepEqual(baseRow, before);
   });
 });
+
+describe("outstanding-bills: explodeInstallments (OI-161 Packet G finding, 2026-09-05)", () => {
+  const row = normalizeAccountsPayableRow(CAPTURED_SMALL_ROW); // invoice ACC-PINV-2026-00229, invoiced 4500
+
+  it("one distinct due date -> null (nothing to explode, use attachDiscountWindow instead)", () => {
+    assert.equal(explodeInstallments(row, [{ due_date: "2026-10-20", outstanding: 4500 }]), null);
+  });
+
+  it("two schedule rows on the same due date -> still null", () => {
+    assert.equal(
+      explodeInstallments(row, [
+        { due_date: "2026-10-20", outstanding: 2000 },
+        { due_date: "2026-10-20", outstanding: 2500 },
+      ]),
+      null,
+    );
+  });
+
+  it("no schedule rows -> null", () => {
+    assert.equal(explodeInstallments(row, []), null);
+  });
+
+  it("multiple distinct due dates -> one row per installment, sorted ascending, unique keys", () => {
+    const out = explodeInstallments(row, [
+      { due_date: "2026-08-02", outstanding: 100 },
+      { due_date: "2026-08-01", outstanding: 100 },
+      { due_date: "2026-08-03", outstanding: 100 },
+    ]);
+    assert.equal(out.length, 3);
+    assert.deepEqual(
+      out.map((r) => r.dueDate),
+      ["2026-08-01", "2026-08-02", "2026-08-03"],
+    );
+    assert.deepEqual(
+      out.map((r) => r.installmentKey),
+      ["ACC-PINV-2026-00229#1", "ACC-PINV-2026-00229#2", "ACC-PINV-2026-00229#3"],
+    );
+    assert.ok(out.every((r) => r.invoice === "ACC-PINV-2026-00229"), "invoice stays the real ERP doc name");
+    assert.ok(out.every((r) => r.outstanding === 100));
+    assert.ok(out.every((r) => r.discountAmount === undefined));
+  });
+
+  it("excludes paid-off installments (outstanding: 0)", () => {
+    const out = explodeInstallments(row, [
+      { due_date: "2026-08-01", outstanding: 0 }, // already paid
+      { due_date: "2026-08-02", outstanding: 100 },
+      { due_date: "2026-08-03", outstanding: 100 },
+    ]);
+    assert.equal(out.length, 2);
+    assert.deepEqual(
+      out.map((r) => r.dueDate),
+      ["2026-08-02", "2026-08-03"],
+    );
+  });
+
+  it("per-installment discount fields, not 'earliest across the whole invoice'", () => {
+    const out = explodeInstallments(row, [
+      { due_date: "2026-08-01", outstanding: 100 },
+      {
+        due_date: "2026-08-02",
+        outstanding: 100,
+        discount_type: "Percentage",
+        discount: 2,
+        discount_date: "2026-07-25",
+      },
+      { due_date: "2026-08-03", outstanding: 100 },
+    ]);
+    const [row1, row2, row3] = out;
+    assert.equal(row1.discountAmount, undefined, "no discount on this installment");
+    assert.equal(row2.discountDate, "2026-07-25");
+    assert.equal(row2.discountAmount, 90, "4500 (invoiced) * 2%, not 100 * 2%");
+    assert.equal(row3.discountAmount, undefined);
+  });
+
+  it("Amount discount type on an exploded installment", () => {
+    const out = explodeInstallments(row, [
+      { due_date: "2026-08-01", outstanding: 100, discount_type: "Amount", discount: 3.5, discount_date: "2026-07-25" },
+      { due_date: "2026-08-02", outstanding: 100 },
+    ]);
+    assert.equal(out[0].discountAmount, 3.5);
+  });
+
+  it("does not mutate the input row", () => {
+    const before = { ...row };
+    explodeInstallments(row, [
+      { due_date: "2026-08-01", outstanding: 100 },
+      { due_date: "2026-08-02", outstanding: 100 },
+    ]);
+    assert.deepEqual(row, before);
+  });
+});
+
+describe("outstanding-bills: buildOutstandingBillRows", () => {
+  it("single-installment bill -> one row, same as attachDiscountWindow", () => {
+    const rows = buildOutstandingBillRows(CAPTURED_SMALL_ROW, [
+      { due_date: "2026-10-20", outstanding: 4500 },
+    ]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].installmentKey, "ACC-PINV-2026-00229");
+    assert.equal(rows[0].discountAmount, undefined);
+  });
+
+  it("multi-installment bill -> exploded rows", () => {
+    const rows = buildOutstandingBillRows(CAPTURED_SMALL_ROW, [
+      { due_date: "2026-08-01", outstanding: 2000 },
+      { due_date: "2026-09-01", outstanding: 2500 },
+    ]);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((r) => r.installmentKey),
+      ["ACC-PINV-2026-00229#1", "ACC-PINV-2026-00229#2"],
+    );
+  });
+
+  it("end to end against the real captured SUP-DAILY fixture (90 daily installments)", () => {
+    // Captured live via read-only MariaDB (2026-09-05) against Packet G's SUP-DAILY Bill: 90 rows,
+    // $50.00 each, one per calendar day, 2026-07-23 through 2026-10-20 — exactly Packet G's design.
+    const schedule = Array.from({ length: 90 }, (_, i) => ({
+      due_date: dateForOffsetFromJuly23(i),
+      outstanding: 50.0,
+    }));
+    const rows = buildOutstandingBillRows(CAPTURED_SMALL_ROW, schedule);
+    assert.equal(rows.length, 90, "the fixture's whole point — 90 distinct payable obligations, not 1");
+    assert.equal(rows[0].dueDate, "2026-07-23");
+    assert.equal(rows[89].dueDate, "2026-10-20");
+    assert.equal(new Set(rows.map((r) => r.installmentKey)).size, 90);
+    const total = rows.reduce((s, r) => s + r.outstanding, 0);
+    assert.ok(Math.abs(total - 4500) < 1e-9);
+  });
+});
+
+/** July 23, 2026 + n days, as an ISO string (no library — this file has no other date math). */
+function dateForOffsetFromJuly23(n) {
+  const d = new Date(Date.UTC(2026, 6, 23 + n));
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
