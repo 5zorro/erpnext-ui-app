@@ -36,70 +36,21 @@ describe("doc-skin.css shared chrome", () => {
   });
 });
 
-/**
- * Extract top-level rule selectors from a CSS source (comments stripped, one level of
- * @media descended into, other at-rules skipped as non-selector). Used to compare the
- * *actual selector vocabulary* of two files generically, rather than hardcoding a list
- * that would silently stop covering new rules as doc-fields.css grows (Packet 4b step 2+
- * will add the check/ACH document's own shared classes to it).
- */
-function extractSelectors(css) {
-  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  const selectors = [];
-  function scan(str) {
-    let i = 0;
-    while (i < str.length) {
-      while (i < str.length && /\s/.test(str[i])) i++;
-      if (i >= str.length) break;
-      const brace = str.indexOf("{", i);
-      if (brace === -1) break;
-      const head = str.slice(i, brace).trim();
-      let depth = 1;
-      let j = brace + 1;
-      while (depth > 0 && j < str.length) {
-        if (str[j] === "{") depth++;
-        else if (str[j] === "}") depth--;
-        j++;
-      }
-      if (head.startsWith("@media")) {
-        scan(str.slice(brace + 1, j - 1));
-      } else if (!head.startsWith("@")) {
-        selectors.push(head.replace(/\s+/g, " "));
-      }
-      i = j;
-    }
-  }
-  scan(text);
-  return selectors;
-}
-
 describe("doc-fields.css shared field/layout CSS (Packet 4b step 1, 2026-09-05)", () => {
-  it("is linked from doc-form shell, after bill-dashboard.css (load-order fix, 2026-09-06)", () => {
-    // Deliberately last: bill-dashboard.css used to load after doc-fields.css's
-    // predecessor (the inline <style> block), so when it silently redefined 96 of
-    // those rules, its copy won every conflict without anyone noticing (6 of the 96
-    // had drifted before this was caught -- see the Packet 4b step-1 commit). Loading
-    // doc-fields.css last means any future accidental re-declaration in
-    // bill-dashboard.css is now the one that loses, not the one that silently wins.
-    // This does not license bill-dashboard.css to override doc-fields.css on purpose
-    // either -- see the next test, which still fails on any redefinition, win or lose.
+  it("is linked from doc-form shell, before bill-dashboard.css (business logic, 2026-09-06)", () => {
+    // bill-dashboard.css loads LAST, deliberately: it is not only a Doc skin for a
+    // transaction-entry form, it is also the dashboard for the individual voucher-packet
+    // controls (the Bill is the final approval act of that packet) -- 5zorro's framing.
+    // That role means it is *expected* to override a shared doc-fields.css rule on
+    // purpose sometimes, not just inherit it. (An earlier pass here flipped this order
+    // to make redefinition impossible, treating any override as a bug to prevent --
+    // wrong call, reverted the same day once the actual business rule was stated.)
+    // What still isn't licensed is *undocumented* drift (a rule silently diverging
+    // because nobody knew there were two copies) -- that's a review/authorship problem,
+    // not a cascade-order one, and doesn't have an automated guard here; see the
+    // Packet 4b step-1 commit's 6-selector drift for what that looked like in practice.
     const links = [...docFormHtml.matchAll(/href="([\w.-]+\.css)"/g)].map((m) => m[1]);
-    assert.deepEqual(links, ["doc-wash.css", "doc-skin.css", "bill-dashboard.css", "doc-fields.css"]);
-  });
-
-  it("no doc-fields.css selector is ever redefined in bill-dashboard.css", () => {
-    // Comprehensive version of the old 4-selector spot check: walks every selector
-    // doc-fields.css actually defines (114 today) rather than a hand-picked handful,
-    // so a future duplicate can't slip in just because nobody thought to name it here.
-    const fieldsSelectors = extractSelectors(docFieldsCss);
-    assert.ok(fieldsSelectors.length > 100, `expected 100+ selectors, got ${fieldsSelectors.length}`);
-    const bdSelectors = new Set(extractSelectors(billDashboardCss));
-    const reintroduced = fieldsSelectors.filter((s) => bdSelectors.has(s));
-    assert.deepEqual(
-      reintroduced,
-      [],
-      `bill-dashboard.css must never redefine a doc-fields.css selector (found: ${reintroduced.join(", ")})`,
-    );
+    assert.deepEqual(links, ["doc-wash.css", "doc-skin.css", "doc-fields.css", "bill-dashboard.css"]);
   });
 
   it("defines the component vocabulary the check/ACH document (Packet 4b) will reuse", () => {
