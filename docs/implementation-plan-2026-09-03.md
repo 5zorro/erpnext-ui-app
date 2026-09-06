@@ -763,6 +763,35 @@ turned out to hide a real bug, twice:**
   (`.doc-status-badge` tones, due-date badges, etc.) and nothing else. `doc-form.html` regenerated
   via `scripts/assemble-doc-form-html.js` (no manual edits to the generated file).
 
+**Root-cause follow-up (5zorro 2026-09-06) — the symptom was fixed above; the mechanism that let
+it happen wasn't, until now.** Removing today's 96 duplicates left the actual hazard standing:
+`bill-dashboard.css` still loaded **after** `doc-fields.css`, so any rule it redefined there would
+still win the cascade tie silently — the exact mechanism that let 6 of the 96 drift unnoticed.
+5zorro's framing: *"make the bill dashboard no longer overwrite the shared tool."* Fixed two ways,
+belt and suspenders, not just one:
+
+- **Cascade order swapped** — `bill-dashboard.css` now loads *before* `doc-fields.css` in
+  `doc-form.head.html`, so a future accidental redefinition loses the tie instead of winning it.
+  Confirmed zero selector overlap between the two files before making the swap (a no-op for
+  today's rendering, purely a guard against tomorrow's).
+- **Comprehensive test guard** — `tests/doc-skin-css.test.js`'s old check was a hardcoded list of
+  4 selectors (`.field`/`.card`/`.cols`/`.taxes-table`), which would silently stop covering
+  anything as `doc-fields.css` grows. Replaced with a generic one that extracts every selector
+  `doc-fields.css` actually defines (114 today, self-maintaining) and fails if `bill-dashboard.css`
+  defines any of them — regardless of which side the cascade order would currently favor. Verified
+  the guard actually catches a regression (not just passes trivially): reintroduced `.field` into
+  `bill-dashboard.css`, confirmed the assertion failed and named the offending selector, reverted.
+
+Deliberately **not** done: migrating all four linked stylesheets (`doc-wash.css`, `doc-skin.css`,
+`bill-dashboard.css`, `doc-fields.css`) to CSS Cascade Layers (`@layer`), which would make
+precedence independent of `<link>` order entirely (immune to a future reordering silently
+reintroducing the hazard) — the more airtight fix, and worth it if this class of bug recurs, but a
+4-file migration is materially more surface than "make the bill dashboard no longer overwrite the
+shared tool" asked for today, and layering only two of the four files risks the "any unlayered rule
+always beats any layered rule" cascade-layers pitfall (`doc-wash.css` / `doc-skin.css` would need
+auditing too). Named here so it doesn't have to be rediscovered if 5zorro wants the fuller fix
+later.
+
 ### Home tile decisions (5zorro 2026-09-05, third pass — resolved)
 
 **The dedicated `pay-outstanding` Home tile is removed once Payment Entry is a real anchor.**
