@@ -1034,11 +1034,57 @@ column specs** — the same split `BILL_ITEM_COLS` / `PO_ITEM_COLS` / `RECEIPT_I
 
 ### Tests
 
-- `item-col-widths.test.js` — clamping, distribution, auto-fit, prefs round-trip, override-only persistence.
-- `doc-skin-css.test.js` — bleed custom property present; `.cell-text` / `focus-within` rules present;
-  `[data-nav-focus]` actually styled (regression guard against it going dead again).
-- Row-builder assertions live with the existing page-module tests; the DOM itself stays out of the
-  Layer-1 gate per the locked test strategy.
+- `item-table-layout.test.js` (53) — clamping, distribution, auto-fit, prefs round-trip,
+  override-only persistence, strict numeric coercion.
+- `item-col-resize.test.js` (25) — column identity, width policy, wiring into both painters,
+  totality on a missing table.
+- `doc-skin-css.test.js` — bleed custom property, `.cell-text` / `focus-within` rules, frozen-column
+  offsets, and a guard that no density rule may touch `white-space` / `overflow-wrap`.
+- The DOM itself stays out of the Layer-1 gate per the locked test strategy; browser behaviour was
+  checked with a throwaway Playwright harness (see closeout).
+
+### Closeout — all four steps shipped 2026-09-06
+
+| Step | Commit | Outcome |
+|---|---|---|
+| pure layer | `57ed926` | `src/item-table-layout.js` — gutter, widths, density, distribution |
+| A1 bleed | `7ab1c2f` | lines/taxes span the viewport; header + notes stay in the paper column |
+| B display layer | `0230a8b` | cells read as wrapped text at rest; mode became visible |
+| C widths | `4b4294f` | measured, distributed, drag-resizable, per-profile overrides |
+| D frozen + density | `cb2b458` | leading columns freeze; compact/standard/comfortable |
+| taxes | `24c4abe` | the same treatment for the tax grids |
+
+**Measured, at 1600px.** Item column 128px (12% of the paper column) → 188px from the bleed alone →
+354px once measured from content. A long item code went from one clipped line to four wrapped lines,
+fully visible. Column widths now sum to the panel exactly (1570px), where before the static colgroup
+left 335px of dead space. At 700px the grid scrolls and the first three columns hold station.
+
+**Six defects found during the work, all by the harness or the existing gates, not by inspection:**
+
+1. `Number(null) === 0`, so a corrupt stored width became a real 40px column instead of "no value" —
+   caught by a junk-input test, fixed with strict coercion. This is exactly the promise the module
+   exists to keep, so it now has its own regression block.
+2. PO/IR's items table has **no colgroup at all**; under `table-layout: fixed` that gave every column
+   an identical share. Step C generates the colgroup rather than assuming one.
+3. PO/IR's unsorted header branch emits no `data-sort`, so those columns fell back to the generic
+   rule — costing Description its `flex` and leaving the bleed full of dead space.
+4. The drag preview was handed `colRuleFor()`'s `{minPx,maxPx}` where the clamp expects `{min,max}`,
+   so a drag ignored the column's own ceiling and persisted 495px against a 420px cap.
+5. Fixed columns ignored their own header: "PO line" in 54px rendered "PO LI…" — the exact
+   unreadability this packet exists to remove. A fixed width is now floored by its header.
+6. doc-form's tax headers sort under `data-tax-sort`, not `data-sort`, so every tax column was
+   falling back to a label slug and losing its sizing rule.
+
+Plus one regression caught by measurement rather than by eye: `min-height` on a content-box text
+layer stacks with its padding, which grew *every* short row by ~11px (40 → 51). `box-sizing:
+border-box` restored it.
+
+**Not done, deliberately.** `src/item-table-nav.js`'s state machine is untouched — it is pure,
+tested, and its caret-boundary rules keep working because `selectionStart` / `selectionEnd` /
+`value.length` are only read while an input is focused, which under the display layer is exactly
+edit mode. The "arrows never leave edit mode, only Enter/Tab/Escape do" simplification discussed on
+2026-09-06 (which would *delete* code) was not attempted; it is a behaviour change, not a
+readability fix, and wants its own dogfood signal.
 
 ---
 
