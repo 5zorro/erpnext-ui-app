@@ -796,6 +796,31 @@ doc-fields-dry-audit.html` review:**
 | `.line-actions` | **Deferred — no context yet.** | No code change; current shared value stands. |
 | `.line-tabs` | **Deferred — no context yet.** | No code change; current shared value stands. |
 
+**`th`/`td` — deeper finding (5zorro 2026-09-06): the real bug isn't a CSS choice at all.**
+5zorro's next observation: *"There are item numbers longer than the input box and wrapping does not
+increase row height. This is a real problem with both doc-skin default and bill-dashboard default."*
+Confirmed against the actual renderers, not assumed:
+
+- `item_code` renders as a plain `<input type="text">` in **both** grids — `src/bill-form-page.js`'s
+  and `src/doc-form-page.js`'s item-row builders each fall through to the same generic
+  `<td><input … value="${escapeHtml(val)}" /></td>` branch, independently implemented per doctype.
+- **A native `<input>` cannot wrap its value text under any CSS** — this is browser behavior, not a
+  stylesheet property. `white-space`/`overflow`/`text-overflow` on the `<td>` or the input change how
+  overflow is *clipped*, never whether it wraps, so the row can never grow to fit a long code no
+  matter which `th`/`td` value (this file's or bill-dashboard.css's) is active. That's exactly why
+  5zorro sees the same symptom under both — the drifted CSS was never the actual constraint for this
+  specific column; it was already the wrong axis to be deciding on for `item_code` specifically.
+- 5zorro's directional call: **Bill's items table should end up genuinely different from PO/IR's**
+  (not just inherit whatever's shared) — consistent with the capstone-dashboard business logic
+  already recorded above — but *what* that divergence should be is blocked on this widget question,
+  not on picking a `th`/`td` value. **No fix attempted; none asked for ("I don't see a fix right
+  now").** Real directions that exist for later, named but not evaluated or decided: ellipsis +
+  native `title` tooltip on the input (cheap, no row growth); click-to-edit (read-only wrapped
+  `<span>` by default, swap to `<input>` on focus — bigger change, real UX shift); a `rows="1"`
+  auto-growing `<textarea>` styled as a single-line input (lets the row genuinely grow, but reworks
+  Enter-key/multi-line editing behavior). None of these is which `th`/`td` copy wins — that question
+  is now understood to be orthogonal to this bug, not a step toward fixing it.
+
 Residual: revisit `th`/`td`/`.line-actions`/`.line-tabs` once 5zorro has decided what "best" means
 for the items-grid table — log under **Dogfood residuals** below when that happens, not before.
 
@@ -865,6 +890,7 @@ header block above; do not fold their status into this table.)*
 | Family | Status | Notes |
 |---|---|---|
 | Items-grid table look (`th`/`td`/`.line-actions`/`.line-tabs`) | **Open — deferred, needs 5zorro's "best" decision first** | Shared by Bill/PO/IR via `doc-fields.css`; current (truncating) value stands until 5zorro decides what "best" means for the items grid (see Packet 4b step-1 closeout, cascade-order correction). Not blocking any other packet. |
+| `item_code` cell doesn't wrap long codes, row height can't grow | **Open — root cause found, no fix decided or attempted** | Not a CSS/th-td question: `item_code` is a native `<input>` in both `bill-form-page.js` and `doc-form-page.js`'s row builders, and inputs never wrap value text regardless of stylesheet. Options named (tooltip-on-truncate / click-to-edit / auto-growing textarea) but not evaluated. See Packet 4b step-1 closeout for the full diagnosis. |
 
 ---
 
