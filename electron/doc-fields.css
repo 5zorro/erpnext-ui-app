@@ -362,3 +362,27 @@ td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums
 @media (max-width: 720px) {
   .cols { grid-template-columns: 1fr; }
 }
+
+/* ── Packet T (5zorro 2026-09-06) — the line grid reads first ────────────────
+   Business rule: readable is the default state, not a mode you enable. Inside
+   the items/taxes grids the document metaphor yields; it still governs the
+   header, addresses, totals and notes.                                       */
+
+:root {
+  /* Set from JS (scrollbarGutterPx). 0 is correct for overlay scrollbars, and
+     is a safe fallback if the wiring never runs — the bleed just reaches the
+     scrollbar edge instead of stopping short of it. */
+  --doc-bleed-gutter: 0px;
+}
+
+/* A1 — line sections break out of the 1100px document column to the viewport.
+   Same negative-margin idiom already used by .bill-section .line-tabs.
+   Side padding stays 14px on purpose: .line-tabs' -14px pull depends on it. */
+.bill-section-lines,
+.bill-section-taxes {
+  box-sizing: border-box;
+  width: calc(100vw - var(--doc-bleed-gutter));
+  margin-inline: calc(50% - 50vw + (var(--doc-bleed-gutter) / 2));
+  border-inline: none;
+  border-radius: 0;
+}
