@@ -171,3 +171,38 @@ describe("Packet T D — density control", () => {
     assert.doesNotThrow(() => mountDensityControl({ table: null, button: null, storage: null }));
   });
 });
+
+describe("Packet T — the taxes grid gets the same treatment", () => {
+  it("reads the taxes grid's own sort attribute", () => {
+    // doc-form's tax headers use data-tax-sort, not data-sort; without this the
+    // tax columns fall back to label slugs and lose their rules.
+    assert.match(resizeSrc, /th\.getAttribute\("data-sort"\) \|\| th\.getAttribute\("data-tax-sort"\)/);
+  });
+
+  it("tax account and description cells wrap like item cells", () => {
+    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      for (const field of ["account_head", "description"]) {
+        assert.match(
+          page,
+          new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(r\\.${field}\\)\\}</span>`),
+          `${label} tax ${field} does not wrap`,
+        );
+      }
+    }
+  });
+
+  it("tax cells keep their resting text in sync", () => {
+    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      assert.match(page, /const taxCellText = inp\.closest\("td\.cell-wrap"\)\?\.querySelector\("\.cell-text"\);/, label);
+    }
+  });
+
+  it("the taxes grid opts out of frozen columns", () => {
+    // The sticky CSS is scoped to #panel-items, so the taxes grid would only be
+    // carrying inert state.
+    assert.match(resizeSrc, /if \(!opts \|\| opts\.sticky !== false\) applyStickyOffsets/);
+    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      assert.match(page, /sticky: false/, `${label} taxes still request sticky`);
+    }
+  });
+});
