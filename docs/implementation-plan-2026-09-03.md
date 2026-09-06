@@ -882,6 +882,166 @@ suggestions clerks actually act on.
 
 ---
 
+## Packet T — Item/tax table readability (5zorro 2026-09-06, architecture locked)
+
+Closes the two "Dogfood residuals" rows below (items-grid look; `item_code` can't wrap).
+
+### Business rule (5zorro's framing, verbatim intent)
+
+> "I don't really care too much about the paper metaphor while I'm in the middle of wrangling a
+> table. I want the table to be easy to read/understand with as little fussing with 'user toggles'
+> as possible. I want user toggles to be available, sure, but I don't want to have to use them to
+> simply read my work."
+
+Two consequences that override earlier design instincts in this file:
+
+1. **Readable is the default state, not a mode you enable.** A width/wrap/density toggle may exist,
+   but no toggle may be *required* to read a line you just typed.
+2. **The paper metaphor yields inside the line grid.** The document framing still governs the
+   header, addresses, totals and notes; it does not govern the items/taxes tables.
+
+### The fact that ordered the work
+
+**While a cell's resting widget is `<input>`, the browser cannot see the data.** An input's intrinsic
+width comes from its `size` attribute (default ~20 chars), not from its value. So `table-layout: auto`
+would size columns by input defaults rather than content — which is *why* `bill-dashboard.css`
+hardcodes px/% column widths today. That is a forced move, not a style choice.
+
+Therefore no automatic sizing strategy (CSS or JS-measuring-the-DOM) can work until a cell renders
+its value as real text at rest. Everything else in this packet depends on that, so it goes first.
+
+### Refinement: a display *layer*, not a widget *swap* (decided during implementation)
+
+The obvious reading of "display/edit split" is AG-Grid-style: render a `<div>` at rest and swap in an
+`<input>` on focus. Rejected after reading the call sites. The input is the anchor for the link
+picker (`item_code`), the calculator overlay (`rate`/`qty`), the per-cell keydown/blur/change
+bindings bound in one post-paint loop, and every `data-testid`. Swapping the widget means
+re-attaching all of that to elements created on demand, and re-entering the `focusItemCell` retry
+dance (`requestAnimationFrame` + `setTimeout`) against elements that may not exist yet.
+
+**What ships instead:** the input never leaves the DOM. Each affected cell gains a sibling text layer
+that carries the value as wrappable text and *drives the row height*; the input is absolutely
+positioned over it, transparent at rest and opaque on focus.
+
+| | Widget swap | Display layer (chosen) |
+|---|---|---|
+| Wraps + grows row height | yes | yes |
+| Content measurable for auto-fit | yes | yes |
+| Existing bindings/testids survive untouched | no | **yes** |
+| Link picker / calculator anchoring survives | needs rework | **untouched** |
+| `focusItemCell` selector survives | no | **yes** |
+
+Same user-visible outcome; the risk is in CSS rather than in re-wiring six event paths.
+
+**Scope of the layer:** only the *generic text* branch of the row builders — in practice `item_code`,
+`description`, and editable allocation text columns. Deliberately **not** `qty`/`rate` (short numeric
+values, right-aligned, calculator-anchored), not `Amount`, not the line-meta or read-only `.ro` cells.
+Those get wrapping CSS where useful but keep their current single-line structure.
+
+### A1 — full-bleed line sections by default
+
+`.bill-section` is `padding: 12px 14px 14px` inside `.wrap { max-width: 1100px; padding: 16px 18px }`.
+Three escalating breakout stops; **A1 ships the third as the default** for the items and taxes
+sections only:
+
+| Stop | Mechanism | Gain @1600px |
+|---|---|---|
+| section edge | `margin-inline: -14px` | +28px |
+| wrap edge | also cancel `.wrap` padding | +64px |
+| **viewport (shipped)** | `width: 100vw; margin-inline: calc(50% - 50vw)` | **~+500px** |
+
+The negative-margin breakout idiom is already in this codebase (`.bill-section .line-tabs`
+uses `margin: -12px -14px 0`), so this is consistent, not novel.
+
+`100vw` includes the scrollbar gutter on some platforms; guarded with a `--bleed` custom property so
+the value is defined in one place and can be clamped if jitter shows up in dogfood.
+
+### B — the display layer (the keystone)
+
+Row builder emits, for generic text columns only:
+
+```html
+<td class="cell-wrap">
+  <span class="cell-text">…full value, wraps…</span>
+  <input type="text" data-row data-field … />   <!-- unchanged attrs/testid -->
+</td>
+```
+
+CSS: `td.cell-wrap { position: relative }`, `.cell-text` in flow with
+`white-space: pre-wrap; overflow-wrap: anywhere` (so a long unbroken item code breaks mid-token),
+input `position: absolute; inset: 0; opacity: 0`, and `td.cell-wrap:focus-within input { opacity: 1 }`
+with an opaque background so it covers the text while editing.
+
+Text/input sync: the text layer is only visible when the input is *not* focused, so mid-edit drift is
+invisible; it is refreshed on `input` anyway so a repaint is never required for correctness.
+
+### C — content-driven widths, drag-resize as the override
+
+Only works after B (see "the fact that ordered the work").
+
+- New pure module `src/item-col-widths.js`: min/max clamping, distributing available width,
+  auto-fit from measured text widths, and prefs (de)serialization. Injectable `storage` in the
+  `doc-wash.js` style — no direct `localStorage` reach from pure code.
+- DOM side: a grab handle on each `<th>`'s right edge, pointer capture, writes `col.style.width`
+  on the existing `<colgroup>`. Double-click a handle = auto-fit that column.
+- **Only explicit overrides persist.** A column the user never dragged stays auto — so the default
+  stays content-driven and a stale saved width can never make the table unreadable.
+
+The `<colgroup>` + `table-layout: fixed` already in the markup is exactly the structure resizing
+wants: set one `<col>` width, one relayout pass, no per-cell work.
+
+### D — wide-mode ergonomics
+
+- Sticky Line + Item columns (`position: sticky; left: 0`) — matters *more* under A1, because
+  wide-by-default means more horizontal scrolling. Today only `.imp-preview thead th` is sticky;
+  the items table has no sticky anything.
+- Density control (compact/standard/comfortable). This is the one legitimate **toggle** —
+  available, never load-bearing for reading.
+
+### Explicitly dropped from the earlier draft of this packet
+
+- **A width toggle with the document as default.** Backwards under the business rule above: full-bleed
+  is the default, and the toggle (if built) returns you to narrow.
+- **Auto-fit measured from row-model strings via canvas `measureText`, before B.** It was a workaround
+  for not being able to measure the DOM; B makes the DOM measurable and costs less than first priced.
+- **Airtable-style "don't auto-grow rows, ship a row-height toggle."** That caution only exists
+  because an input forces reading and editing through one widget. Under the display layer, cells wrap
+  *at rest* and go single-line *while focused* — the one row not wrapping is the row under the cursor,
+  so rows do not jump while typing. Auto-growth is correct here.
+- **Adopting a grid library** (AG Grid / Handsontable / TanStack / Glide). Weight (AG Grid ~1MB+),
+  a visual identity that fights the skin, **Handsontable is not free for commercial use**, and
+  third-party components do not unit-test the way the locked Layer-1 gate expects. The pure decision
+  function + `colgroup` + fixed layout already covers most of a grid's core.
+
+### Mode visibility (folded in, not a separate rung)
+
+`inp.dataset.navFocus = "1"` is set in nav mode by both page modules and **no stylesheet reads it** —
+nav and edit look pixel-identical, so the only way to discover the mode is to press an arrow and see
+what happened. That is the "janky up/down/left/right" complaint. Styling `[data-nav-focus]` is ~5
+lines of CSS and lands with B (the cell already changes appearance on focus, so the two cues reinforce
+rather than compete).
+
+Not changed here: `src/item-table-nav.js`'s state machine. It is pure, tested, and its caret-boundary
+rules keep working because `selectionStart` / `selectionEnd` / `value.length` are only read while an
+input is focused — which under the display layer is exactly edit mode.
+
+### Shared mechanism, per-doctype specs
+
+Bill and PO/IR have independent row builders (`src/bill-form-page.js`, `src/doc-form-page.js`), so
+each change lands twice unless the mechanism is shared. 5zorro's standing intent is that Bill's items
+table *should* be allowed to diverge from PO/IR's. Shape that follows: **shared mechanism, per-doctype
+column specs** — the same split `BILL_ITEM_COLS` / `PO_ITEM_COLS` / `RECEIPT_ITEM_COLS` already implies.
+
+### Tests
+
+- `item-col-widths.test.js` — clamping, distribution, auto-fit, prefs round-trip, override-only persistence.
+- `doc-skin-css.test.js` — bleed custom property present; `.cell-text` / `focus-within` rules present;
+  `[data-nav-focus]` actually styled (regression guard against it going dead again).
+- Row-builder assertions live with the existing page-module tests; the DOM itself stays out of the
+  Layer-1 gate per the locked test strategy.
+
+---
+
 ## Dogfood residuals
 
 *(New tranche — nothing carried over into this file. Related-but-out-of-scope OIs are listed in the
@@ -889,8 +1049,8 @@ header block above; do not fold their status into this table.)*
 
 | Family | Status | Notes |
 |---|---|---|
-| Items-grid table look (`th`/`td`/`.line-actions`/`.line-tabs`) | **Open — deferred, needs 5zorro's "best" decision first** | Shared by Bill/PO/IR via `doc-fields.css`; current (truncating) value stands until 5zorro decides what "best" means for the items grid (see Packet 4b step-1 closeout, cascade-order correction). Not blocking any other packet. |
-| `item_code` cell doesn't wrap long codes, row height can't grow | **Open — root cause found, no fix decided or attempted** | Not a CSS/th-td question: `item_code` is a native `<input>` in both `bill-form-page.js` and `doc-form-page.js`'s row builders, and inputs never wrap value text regardless of stylesheet. Options named (tooltip-on-truncate / click-to-edit / auto-growing textarea) but not evaluated. See Packet 4b step-1 closeout for the full diagnosis. |
+| Items-grid table look (`th`/`td`/`.line-actions`/`.line-tabs`) | **Answered by Packet T (2026-09-06)** | "Best" got decided by the readability brief, not by picking a winner between the two drifted values: the grid is content-driven and full-bleed by default (Packet T A1/B/C). The `th`/`td` truncation pair stops mattering for the text columns, which no longer rely on cell-level clipping. `.line-actions`/`.line-tabs` still untouched — never had a reported problem. |
+| `item_code` cell doesn't wrap long codes, row height can't grow | **Fixed by Packet T step B (2026-09-06)** | Not a CSS/th-td question: `item_code` is a native `<input>` in both `bill-form-page.js` and `doc-form-page.js`'s row builders, and inputs never wrap value text regardless of stylesheet. Resolved with a display layer (wrappable text sibling drives row height; input overlays it) rather than the widget swap or textarea options originally named — see Packet T. |
 
 ---
 
