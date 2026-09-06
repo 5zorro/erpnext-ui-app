@@ -386,3 +386,70 @@ td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums
   border-inline: none;
   border-radius: 0;
 }
+
+/* B — cells read as wrapped text at rest; the editor overlays them on demand.
+   The input never leaves the DOM, so every existing per-cell binding, the link
+   picker, the calculator overlay and every data-testid keep working untouched.
+   (A widget swap would have to re-attach all of that to elements created on
+   demand — same visible result, far more moving parts.) */
+
+td.cell-wrap {
+  position: relative;
+  white-space: normal;
+  overflow: visible;
+  vertical-align: top;
+}
+
+td.cell-wrap > .cell-text {
+  display: block;
+  /* border-box so min-height *is* the input's rendered height -- otherwise the
+     padding is added on top and every short row silently gets ~11px taller. */
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 6px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  /* A long unbroken item code has no break opportunity; `anywhere` gives it one
+     rather than letting it decide the column's width. */
+  overflow-wrap: anywhere;
+  color: #1f2d3d;
+}
+
+/* The editor is either the input itself or the .link-wrap the picker moves it
+   into (item_code). The child combinator keeps the input *inside* .link-wrap
+   on its normal flex layout. */
+td.cell-wrap > input,
+td.cell-wrap > .link-wrap {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+td.cell-wrap:focus-within > input,
+td.cell-wrap:focus-within > .link-wrap {
+  opacity: 1;
+}
+
+/* Nav mode keeps the wrapped text readable — you are moving, not typing. */
+[data-cell-mode="nav"] td.cell-wrap:focus-within > input,
+[data-cell-mode="nav"] td.cell-wrap:focus-within > .link-wrap {
+  opacity: 0;
+}
+
+/* Mode visibility. `data-nav-focus` could never do this job: it is deleted on
+   focus (a one-shot handoff to the focus handler), so by paint time it is gone.
+   The mode is mirrored onto the tbody as data-cell-mode instead. */
+td.cell-wrap:focus-within {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+[data-cell-mode="nav"] td.cell-wrap:focus-within {
+  background: #eff6ff;
+}
+
+/* Rows can be multi-line now, so the grid aligns to the first line like a
+   spreadsheet rather than centring short cells against tall ones. */
+#panel-items tbody td {
+  vertical-align: top;
+}
