@@ -723,6 +723,7 @@ than showing an AP check — consistent with "lens tabs are earned per page."
 ### Sequencing (each step independently reviewable)
 
 1. **Extract `doc-fields.css`** from `doc-form.head.html`. Reversible, no behavior change.
+   **Done 2026-09-05.**
 2. **`check-doc.fragment.html`** + assemble-script wiring + **drawer mount** on the dashboard,
    read-only first (render a chosen batch as a check; no writes).
 3. **Dirty-gate** extension for a dirty `pay-outstanding` surface.
@@ -730,6 +731,37 @@ than showing an AP check — consistent with "lens tabs are earned per page."
 5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
 
 Do 1–3 before 4. Do not block 1–2 on the write path.
+
+**Step 1 closeout (self-critique, per this plan's own process template) — the mechanical move
+turned out to hide a real bug, twice:**
+
+- The "two files, one clean" picture this section originally described was wrong (see the CSS
+  section's own correction above): `bill-dashboard.css` already duplicated ~96 of
+  `doc-form.head.html`'s 114 component rules, and 6 of those duplicates had **silently drifted**
+  from the inline copy (`.addr-grid`, `.line-actions`, `.line-tabs`, `.money-stack`, `th`/`td` —
+  real property differences, not formatting noise). Resolved by treating `bill-dashboard.css`'s
+  version as authoritative for every shared key (it loaded last, so it was what actually
+  rendered) rather than "fixing" it to match the stale inline copy — the "don't match buggy code"
+  problem, just aimed at CSS instead of logic.
+- **Caught before landing, not after:** a first construction pass extracted 2 of the 114 rules
+  (`.addr-grid` at a 900px breakpoint, `.cols` at 720px — both genuinely present in
+  `doc-form.head.html`'s own `<style>` block, missed on manual read since an early grep pass
+  filtered out lines starting with `@`) **without their `@media` wrapper**, which would have made
+  both permanently single-column at every viewport width, not just narrow ones — a real, shippable
+  regression on Bill/PO/IR. Found by parsing the generated file back and diffing every rule against
+  its authoritative source (114/114 exact matches required, not spot-checked), not by visual
+  inspection. Fixed before any file was written to the repo.
+- Verification method: every one of the 114 moved rules diffed byte-for-byte (whitespace-normalized)
+  against its authoritative source both before writing and after; the 96 rules left behind in
+  `bill-dashboard.css` diffed to confirm zero were altered. `tests/doc-skin-css.test.js` extended
+  with a regression guard for the exact `@media`-loss class of bug, plus positive coverage that
+  `doc-fields.css` defines the vocabulary Packet 4b's check document needs. `npm test`: 933 pass
+  (was 928 immediately prior; the other 5 are from a concurrent unrelated commit).
+- Net: `doc-fields.css` (new, 114 rules) is the single source for `.card`/`.field`/`.cols`/
+  `.taxes-table` and friends; `doc-form.head.html`'s inline `<style>` block is gone (replaced by
+  one `<link>`); `bill-dashboard.css` keeps its ~156 genuinely Bill-only rules
+  (`.doc-status-badge` tones, due-date badges, etc.) and nothing else. `doc-form.html` regenerated
+  via `scripts/assemble-doc-form-html.js` (no manual edits to the generated file).
 
 ### Home tile decisions (5zorro 2026-09-05, third pass — resolved)
 
