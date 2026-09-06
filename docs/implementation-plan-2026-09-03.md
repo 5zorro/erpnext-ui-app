@@ -731,12 +731,39 @@ than showing an AP check — consistent with "lens tabs are earned per page."
 
 Do 1–3 before 4. Do not block 1–2 on the write path.
 
-### Still open (5zorro's call, not agent's)
+### Home tile decisions (5zorro 2026-09-05, third pass — resolved)
 
-- Does the **Home tile survive** once Payment Entry is a real anchor, or does `pay-outstanding`
-  become PE-only? (Tile currently the only trigger; carrying tile intent above assumes it stays.)
-- Whether `pay-bills` / `checks` / `receive-pay` collapse into fewer tiles once direction is
-  remembered.
+**The dedicated `pay-outstanding` Home tile is removed once Payment Entry is a real anchor.**
+Not deferred, not kept as a fast path — PE *is* the anchor, so a second door to the same
+dashboard is redundant. Removal happens at Packet 4b **step 5** (full-page mount + `isNew`
+routing land), not before — the tile is still the only trigger until then. Tracked here so
+step 5's scope explicitly includes deleting the `pay-outstanding` tile row from
+`src/home-tiles.js`'s Vendors group (and its `SHELL_ROUTE_TILE_IDS` entry), not just adding
+the new anchor beside it.
+
+**Tiles do NOT collapse.** 5zorro's framing: Home is a **document-flow / process-flow** map,
+not a doctype index — so AP and AR each keep their own "Payment" tile (Vendors group / Customers
+group) even though both alias the same underlying `payment_type` on one shared ERP doctype. This
+is the tile-level expression of the same principle Packet 4b already applies to the toolbar (AP
+and AR are different *processes* sharing one *doctype*, never blurred into one surface). Net
+effect on `src/home-tiles.js`: `pay-bills` (Vendors) and `receive-pay` (Customers) stay two tiles,
+each supplying the **tile intent** signal Packet 4b's direction-prefs resolution order already
+names as the strongest signal (`payment-direction-prefs.js` § resolution order, row 1) — this
+decision is what makes that row correct, not just convenient.
+
+**Question raised while answering the above (5zorro 2026-09-05) — checked against the real
+controller rather than left as a guess:** can a Payment Entry be created **without** a source Bill
+or Sales Invoice? **Yes — confirmed** (read of `payment_entry.py`, 2026-09-05). `references` is a
+plain `Table` field, not `reqd`; `validate()`'s chain calls `validate_reference_documents()` and
+`validate_allocated_amount()`, both of which open `if not self.references: return`, and
+`on_submit()`'s only hard gate is `difference_amount == 0` (trivially true for a fully-unallocated
+payment — nothing about reference count). Zero-reference Payment Entries are ordinary ERPNext
+usage (advances, deposits without an invoice yet), not an edge case the controller merely
+tolerates.
+
+**Conclusion: the Banking group's `checks` tile ("Write Checks" → blank `/app/payment-entry/new`)
+is a valid standalone entry point as-is.** No redirect to a "Bill entry, already paid" flow needed
+— that would have been solving a problem the controller doesn't have. Closed; no residual row.
 
 ---
 
