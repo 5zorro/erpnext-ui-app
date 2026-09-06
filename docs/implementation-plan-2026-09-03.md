@@ -726,7 +726,7 @@ than showing an AP check — consistent with "lens tabs are earned per page."
    **Done 2026-09-05.**
 2. **`check-doc.fragment.html`** + assemble-script wiring + **drawer mount** on the dashboard,
    read-only first (render a chosen batch as a check; no writes). **Done 2026-09-06.**
-3. **Dirty-gate** extension for a dirty `pay-outstanding` surface.
+3. **Dirty-gate** extension for a dirty `pay-outstanding` surface. **Done 2026-09-06.**
 4. **Write path** in the drawer (reusing OI-135's pattern) — own commit, own review.
 5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
 
@@ -803,6 +803,45 @@ thinner than Step 1's, but one real design question surfaced during the build, n
   `npm test`: 1041 pass (was 1030 immediately prior). `tests/html-reachability.test.js`'s OI-067 gate
   required curating the two new HTML files (`pay-outstanding.src.html`, `check-doc.fragment.html`) —
   working as intended, same as the interactable-inventory gate catching Packet T's new buttons.
+
+**Step 3 closeout (2026-09-06) — the guard rail built ahead of the road it protects:**
+
+- Confirmed precisely, matching the architecture note above: `gateDirtyThen()` (`main.js:3256`
+  when this was written 2026-09-05, still there) took the `"not on Doc lens"` fast path for any
+  `surfaceMode` other than `"doc"`. Left alone, Step 4's write path would ship a drawer that can
+  hold real input with **no** protection on day one — the fast path would silently discard it on
+  Home, Recent, or any ERP nav. Building the gate now, before there is anything to lose, means
+  Step 4 lands already covered instead of needing its own follow-up hardening pass.
+- **New pure predicate**, not a special case bolted onto the Doc one: `shouldGateSurfaceNavigation
+  (currentSurfaceMode, targetSurfaceMode, dirty)` in `src/dirty-gate.js` — gates only when the
+  current surface *is* the target *and* it's dirty, so a dirty flag left over from a surface the
+  user already left by some other path can never block unrelated navigation. Generic on purpose:
+  a second such surface (the eventual full-page `payment-doc.html` mount, or any future
+  independently-dirtyable surface) reuses this rather than getting its own predicate.
+  `tests/dirty-gate.test.js` +5 (target/dirty combinations, stale-flag-after-surface-change,
+  junk-value coercion).
+- **Main-process wiring**: `payOutstandingDirty` (module-level, mirrors `dirtyState`'s existing
+  shape), `isPayOutstandingDirtySurface()` next to `isDocLensSurface()`, and one new branch inside
+  `gateDirtyThen()` — every existing call site (`showHome`, `showPayOutstanding`, ERP nav, opening
+  a Bill/PO/IR) is protected through this single choke point, no call site touched individually.
+  `set-pay-outstanding-dirty` IPC + `erpPayOutstanding.setDirty(dirty)` preload method — Step 4's
+  write path calls this on input/save/discard; nothing calls it yet, since nothing is editable.
+- **No in-page commit-gate for this surface** (that's Doc's own machinery, driven by a real Save
+  action the drawer doesn't have until Step 4) — `gatePayOutstandingDirtyThen()` is a plain native
+  `dialog.showMessageBox` with two buttons, "Discard and continue" / "Stay". No "Save" option: there
+  is nothing to save yet, and offering one would lie about what the button does.
+- **Verification went further than this plan's own Doc-lens native fallback ever got**: e2e/GOTCHAS.md
+  #7 notes Playwright cannot intercept `dialog.*` — true, so the new test in
+  `e2e/scaffold-pay-outstanding.spec.js` stubs `dialog.showMessageBox` itself via `app.evaluate`
+  before driving the real flow against the real sandbox ERP: clean drawer → Home proceeds, zero
+  dialog calls; dirty drawer → Home prompts, "Stay" keeps the surface, "Discard and continue"
+  proceeds *and* clears the flag (confirmed by reopening and leaving again with no further prompt —
+  a stale dirty flag surviving a resolved gate was the exact failure mode this exists to prevent).
+  Both `scaffold-pay-outstanding.spec.js` tests pass under `xvfb-run` against the live sandbox.
+  `npm test`: 1046 pass (was 1041).
+- Not built, deliberately: no in-page prompt UI for this surface (would need its own design pass,
+  and there's no Save action yet to make "Save and continue" meaningful) — a native dialog is the
+  honest tool for what exists today. Revisit if Step 4's write path makes a plain dialog feel thin.
 
 **Cascade-order correction (5zorro 2026-09-06) — a same-day reversal, recorded so it isn't
 rediscovered as a mystery later.** Immediately after Step 1 landed, a pass here swapped
