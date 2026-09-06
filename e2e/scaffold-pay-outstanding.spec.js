@@ -132,4 +132,108 @@ test.describe("scaffold: pay outstanding", () => {
     await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
   });
+
+  test("Packet 4b step 3: a dirty check drawer gates Home navigation with Stay/Discard", async () => {
+    test.setTimeout(90_000);
+    try {
+      app = await launchShell();
+    } catch (err) {
+      test.skip(true, `launch skip-OK: ${err?.message || err}`);
+      return;
+    }
+    await waitForE2eApi(app);
+
+    const erpUrl = await e2eCall(app, "getErpUrl");
+    if (/\/login\b/.test(erpUrl)) {
+      const pwd = process.env.E2E_ERP_PASSWORD || "admin";
+      await e2eCall(
+        app,
+        "execInView",
+        "erp",
+        `fetch("/api/method/login", {
+           method: "POST",
+           headers: { "Content-Type": "application/x-www-form-urlencoded" },
+           body: "usr=Administrator&pwd=" + encodeURIComponent(${JSON.stringify(pwd)}),
+           credentials: "include",
+         }).then((r) => r.json())`,
+      );
+      await e2eCall(app, "openErp", "/desk");
+      const loggedIn = await expect
+        .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+        .toMatch(/\/desk\b/)
+        .then(() => true)
+        .catch(() => false);
+      if (!loggedIn) {
+        test.skip(true, "sandbox login skip-OK: E2E_ERP_PASSWORD doesn't match this environment");
+        return;
+      }
+    }
+
+    // Stub the native dialog (gotcha #7: Playwright cannot intercept dialog.* directly) so the
+    // gate's Stay/Discard prompt is answerable from the test instead of hanging forever.
+    await app.evaluate(({ dialog }) => {
+      globalThis.__dialogCalls = [];
+      globalThis.__dialogResponse = 1; // default: "Stay"
+      dialog.showMessageBox = (...args) => {
+        const opts = args.length > 1 ? args[1] : args[0];
+        globalThis.__dialogCalls.push(opts);
+        return Promise.resolve({ response: globalThis.__dialogResponse });
+      };
+    });
+
+    await e2eCall(
+      app,
+      "execInView",
+      "home",
+      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
+    );
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+
+    // Not dirty yet — Home must proceed with no prompt at all (this is the pre-step-3 behavior,
+    // still the correct one for a clean drawer).
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
+    let dialogCalls = await app.evaluate(() => globalThis.__dialogCalls.length);
+    expect(dialogCalls).toBe(0);
+
+    // Back to Pay Outstanding, mark the drawer dirty (no real input exists yet — this is the
+    // renderer-side call step 4's write path will make on an actual field change), then try to
+    // leave via Home: must prompt, and "Stay" must keep the surface put.
+    await e2eCall(
+      app,
+      "execInView",
+      "home",
+      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
+    );
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "payOutstanding", `window.erpPayOutstanding.setDirty(true); true`);
+
+    await app.evaluate(() => { globalThis.__dialogResponse = 1; }); // "Stay"
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
+    await expect
+      .poll(async () => app.evaluate(() => globalThis.__dialogCalls.length), { timeout: 10_000 })
+      .toBe(1);
+    expect(await e2eGet(app, "surfaceMode")).toBe("pay-outstanding");
+
+    // Same dirty drawer, this time "Discard and continue" — navigation must proceed.
+    await app.evaluate(() => { globalThis.__dialogResponse = 0; }); // "Discard and continue"
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
+    dialogCalls = await app.evaluate(() => globalThis.__dialogCalls.length);
+    expect(dialogCalls).toBe(2);
+
+    // The discard must have cleared the flag — reopening Pay Outstanding and leaving again
+    // proceeds with no further prompt (a stale dirty flag must not survive a resolved gate).
+    await e2eCall(
+      app,
+      "execInView",
+      "home",
+      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
+    );
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
+    dialogCalls = await app.evaluate(() => globalThis.__dialogCalls.length);
+    expect(dialogCalls).toBe(2);
+  });
 });

@@ -118,6 +118,7 @@ import {
 } from "../src/feedback-url.js";
 import {
   shouldGateNavigation,
+  shouldGateSurfaceNavigation,
   finishLensApply,
   markUserEdited,
   captureBaseline,
@@ -348,6 +349,13 @@ let dirtyState = {
   baselineJson: null,
   doc: null,
 };
+/**
+ * Packet 4b step 3: the pay-outstanding check-preview drawer, self-reported dirty by the
+ * renderer (set-pay-outstanding-dirty) -- the first non-Doc surface that can hold unsaved
+ * input. No renderer call sets this true yet (the drawer is read-only until step 4's write
+ * path); the gate is wired ahead of that so the write path lands with protection already live.
+ */
+let payOutstandingDirty = false;
 /** Shell scratch: customer + multi-SO per Bill line (ERP PI item has no SO column). */
 /** @type {Record<string, Record<number, import("../src/bill-line-allocation.js").LineAllocation>>} */
 let billLineAllocationsByDoc = {};
@@ -496,6 +504,11 @@ function collectNavIncidentContext() {
 
 function isDocLensSurface() {
   return surfaceMode === "doc";
+}
+
+/** Packet 4b step 3 — the pay-outstanding drawer's own dirty-gate condition. */
+function isPayOutstandingDirtySurface() {
+  return shouldGateSurfaceNavigation(surfaceMode, "pay-outstanding", payOutstandingDirty);
 }
 
 function activeDocProfile() {
@@ -3255,6 +3268,10 @@ let activeNavGate = null; // { token, settle(proceed) }
 
 async function gateDirtyThen(doNav) {
   if (!isDocLensSurface()) {
+    if (isPayOutstandingDirtySurface()) {
+      await gatePayOutstandingDirtyThen(doNav);
+      return;
+    }
     navDebug("gate-skip", "not on Doc lens");
     doNav();
     return;
@@ -3377,6 +3394,39 @@ async function nativeGateFallback(doNav) {
   doNav();
 }
 
+/**
+ * Packet 4b step 3 — the pay-outstanding check-preview drawer's own leave gate. No in-page
+ * commit-gate exists for this surface yet (that's Doc's own machinery, driven by an actual
+ * Save action the drawer doesn't have until step 4's write path), so this is a plain native
+ * prompt: discard the unsaved preview, or stay. Not a save option -- there is nothing to save.
+ */
+async function gatePayOutstandingDirtyThen(doNav) {
+  navDebug("gate-open", "unsaved check preview — Discard/Stay in Pay Outstanding");
+  let response = 1;
+  try {
+    const r = await dialog.showMessageBox(win, {
+      type: "question",
+      noLink: true,
+      defaultId: 1,
+      cancelId: 1,
+      buttons: ["Discard and continue", "Stay"],
+      title: "Unsaved check",
+      message: "This payment preview has unsaved changes.",
+      detail: "Discard the check preview, or stay on Pay Outstanding.",
+    });
+    response = r.response;
+  } catch {
+    return;
+  }
+  if (response !== 0) {
+    navDebug("gate-cancel", "stayed on Pay Outstanding");
+    return;
+  }
+  navDebug("gate-proceed", "discarded check preview, continuing nav");
+  payOutstandingDirty = false;
+  doNav();
+}
+
 function showHome() {
   gateDirtyThen(() => {
     collapsePeekStackHard("home");
@@ -3403,6 +3453,10 @@ function showPayOutstanding() {
     armSoftPeekEscHook(false).catch(() => {});
     surfaceMode = "pay-outstanding";
     place();
+    // A fresh load always starts clean -- reset here too, not just on the gate's own discard
+    // path, so a future caller that reaches this without going through the gate can't leave
+    // payOutstandingDirty stuck true against a page that no longer has the drawer open.
+    payOutstandingDirty = false;
     if (payOutstanding && !payOutstanding.webContents.isDestroyed()) {
       payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
     }
@@ -8035,6 +8089,9 @@ ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
   paymentBatchPrefs = mergePaymentBatchPrefs(prefs);
   savePaymentBatchPrefs();
   return { ok: true, prefs: { ...paymentBatchPrefs } };
+});
+ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
+  payOutstandingDirty = !!dirty;
 });
 ipcMain.on("open-devtools", (_e, target) => {
   const map = { erp, chrome, home, hist, bill, docForm, payOutstanding };

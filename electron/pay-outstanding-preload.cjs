@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   getPrefs: () => ipcRenderer.invoke("get-payment-batch-prefs"),
   setPrefs: (prefs) => ipcRenderer.invoke("set-payment-batch-prefs", prefs),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
+  setDirty: (dirty) => ipcRenderer.send("set-pay-outstanding-dirty", !!dirty),
 });
