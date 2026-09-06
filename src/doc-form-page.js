@@ -1152,7 +1152,7 @@ function sizeTaxColumns() {
     if (!table) return;
     const tableKey = taxesTableKey();
     mountColResize(table, { tableKey, onChange: sizeTaxColumns });
-    autoSizeItemColumns(table, { tableKey });
+    autoSizeItemColumns(table, { tableKey, sticky: false });
   } catch {
     /* ignore */
   }
@@ -1342,8 +1342,8 @@ function paintTaxes(doc) {
       const amtShown =
         r.tax_amount === "" || r.tax_amount == null ? "" : formatGroupedNumber(r.tax_amount);
       return `<tr data-taxidx="${r.idx}">
-        <td><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
-        <td><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
+        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
+        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
         <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="doc-tax-${r.idx}-rate" /></td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="doc-tax-${r.idx}-amount" /></td>
@@ -1360,6 +1360,15 @@ function paintTaxes(doc) {
   sizeTaxColumns();
 
   el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
+    // Same resting-text sync as the items grid (Packet T step B).
+    const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+    if (taxCellText) {
+      const syncTaxCellText = () => {
+        taxCellText.textContent = inp.value;
+      };
+      inp.addEventListener("input", syncTaxCellText);
+      inp.addEventListener("change", syncTaxCellText);
+    }
     const field = inp.getAttribute("data-tax-field");
     const ri = Number(inp.getAttribute("data-tax-row"));
     const apply = async (value) => {

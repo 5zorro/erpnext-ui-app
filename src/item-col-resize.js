@@ -67,7 +67,8 @@ function colKeyFor(th, index, count) {
   // bleed full of dead space.
   const explicit = th.getAttribute("data-col-key");
   if (explicit) return explicit;
-  const sort = th.getAttribute("data-sort");
+  // The taxes grids sort under their own attribute name.
+  const sort = th.getAttribute("data-sort") || th.getAttribute("data-tax-sort");
   if (sort) return sort;
   if (index === count - 1) return "__action";
   const label = (th.textContent || "").trim().toLowerCase().replace(/\s+/g, "-");
@@ -173,7 +174,12 @@ function measureDemands(table, heads) {
  * are never recomputed away.
  *
  * @param {HTMLTableElement|null} table
- * @param {{ tableKey: string, storage?: object|null, availablePx?: number|null }} opts
+ * @param {{
+ *   tableKey: string,
+ *   storage?: object|null,
+ *   availablePx?: number|null,
+ *   sticky?: boolean,
+ * }} opts
  * @returns {Record<string, number>} applied widths
  */
 export function autoSizeItemColumns(table, opts) {
@@ -219,7 +225,9 @@ export function autoSizeItemColumns(table, opts) {
     const px = key ? widths[key] : null;
     if (px) c.style.width = `${px}px`;
   });
-  applyStickyOffsets(table, heads, widths);
+  // Freezing is an items-grid affordance (the CSS is scoped to #panel-items);
+  // the taxes grid opts out rather than carrying inert sticky state.
+  if (!opts || opts.sticky !== false) applyStickyOffsets(table, heads, widths);
   return widths;
 }
 

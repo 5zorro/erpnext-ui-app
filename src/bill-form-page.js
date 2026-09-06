@@ -1563,8 +1563,8 @@ export async function bootBillFormPage(api) {
             : formatGroupedNumber(r.tax_amount);
         return `<tr data-taxidx="${r.idx}">
           <td><span class="ro">${escapeHtml(String(r.lineNo))}</span></td>
-          <td><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
-          <td><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
           <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
@@ -1584,6 +1584,15 @@ export async function bootBillFormPage(api) {
     sizeTaxColumns();
   
     el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
+      // Same resting-text sync as the items grid (Packet T step B).
+      const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+      if (taxCellText) {
+        const syncTaxCellText = () => {
+          taxCellText.textContent = inp.value;
+        };
+        inp.addEventListener("input", syncTaxCellText);
+        inp.addEventListener("change", syncTaxCellText);
+      }
       const field = inp.getAttribute("data-tax-field");
       const ri = Number(inp.getAttribute("data-tax-row"));
       inp.tabIndex = -1;
@@ -1833,7 +1842,7 @@ export async function bootBillFormPage(api) {
           el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
         if (!table) return;
         mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
-        autoSizeItemColumns(table, { tableKey: "bill-taxes" });
+        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false });
       } catch {
         /* ignore */
       }
