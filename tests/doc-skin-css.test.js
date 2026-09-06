@@ -12,6 +12,7 @@ const billFormPage = readFileSync(
 );
 const docSkinCss = readFileSync(join(electronDir, "doc-skin.css"), "utf8");
 const billDashboardCss = readFileSync(join(electronDir, "bill-dashboard.css"), "utf8");
+const docFieldsCss = readFileSync(join(electronDir, "doc-fields.css"), "utf8");
 
 describe("doc-skin.css shared chrome", () => {
   it("is linked from doc-form shell (Bill + PO/IR)", () => {
@@ -32,6 +33,51 @@ describe("doc-skin.css shared chrome", () => {
     assert.doesNotMatch(docFormHtml, /\.commit-gate\s*\{[^}]*position:\s*fixed;/s);
     assert.doesNotMatch(billDashboardCss, /\.commit-gate\s*\{[^}]*position:\s*fixed;/s);
     assert.doesNotMatch(docFormHtml, /\.src-back\s*\{/);
+  });
+});
+
+describe("doc-fields.css shared field/layout CSS (Packet 4b step 1, 2026-09-05)", () => {
+  it("is linked from doc-form shell, after doc-skin.css and before bill-dashboard.css", () => {
+    const links = [...docFormHtml.matchAll(/href="([\w.-]+\.css)"/g)].map((m) => m[1]);
+    assert.deepEqual(links, ["doc-wash.css", "doc-skin.css", "doc-fields.css", "bill-dashboard.css"]);
+  });
+
+  it("defines the component vocabulary the check/ACH document (Packet 4b) will reuse", () => {
+    assert.match(docFieldsCss, /\.card\s*\{/);
+    assert.match(docFieldsCss, /\.field\s*\{/);
+    assert.match(docFieldsCss, /\.cols\s*\{/);
+    assert.match(docFieldsCss, /\.taxes-table\s*\{/);
+    assert.match(docFieldsCss, /\.money-stack\s*\{/);
+  });
+
+  it("keeps its two responsive rules media-scoped, not promoted to unconditional overrides", () => {
+    // Regression guard: an earlier consolidation pass extracted these two rules'
+    // inner text without their @media wrapper, which would have made .addr-grid
+    // and .cols permanently single-column at every viewport width, not just narrow
+    // ones. Caught by parse-back verification before it ever reached this file.
+    assert.match(
+      docFieldsCss,
+      /@media \(max-width:\s*900px\)\s*\{\s*\.addr-grid\s*\{\s*grid-template-columns:\s*1fr;\s*\}\s*\}/,
+    );
+    assert.match(
+      docFieldsCss,
+      /@media \(max-width:\s*720px\)\s*\{\s*\.cols\s*\{\s*grid-template-columns:\s*1fr;\s*\}\s*\}/,
+    );
+    // And the un-scoped, multi-column base rules must still stand alone (not
+    // themselves accidentally wrapped in a media query).
+    assert.match(docFieldsCss, /^\.cols \{ display: grid;/m);
+    assert.match(docFieldsCss, /^\.addr-grid \{\n {2}display: grid;/m);
+  });
+
+  it("is the single source for .card/.field/.cols -- no longer duplicated in bill-dashboard.css", () => {
+    assert.doesNotMatch(billDashboardCss, /^\.field \{/m);
+    assert.doesNotMatch(billDashboardCss, /^\.card \{/m);
+    assert.doesNotMatch(billDashboardCss, /^\.cols \{/m);
+    assert.doesNotMatch(billDashboardCss, /^\.taxes-table \{/m);
+  });
+
+  it("does not duplicate the field/card/cols vocabulary inline in doc-form.html", () => {
+    assert.doesNotMatch(docFormHtml, /<style>/);
   });
 });
 
