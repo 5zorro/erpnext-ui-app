@@ -229,6 +229,23 @@ export async function bootBillFormPage(api) {
   let taxTabGuard = false;
   /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
   let itemCellMode = CELL_MODE_EDIT;
+
+  /**
+   * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
+   * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
+   * (it is a one-shot handoff to the focus handler), so nothing survives for a
+   * stylesheet to match on.
+   * @param {"edit"|"nav"} mode
+   */
+  function setItemCellMode(mode) {
+    itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+    try {
+      if (el && el.items) el.items.dataset.cellMode = itemCellMode;
+    } catch {
+      /* mode mirroring is cosmetic; never let it break navigation */
+    }
+  }
+
   let userEdited = false;
   /** @type {"find"|"new"|"print"|null} */
   let pendingGate = null; // GateTrigger | null — SSoT for the one commit-gate
@@ -1371,7 +1388,7 @@ export async function bootBillFormPage(api) {
   
   function focusItemCell(rowIndex, field, opts = {}) {
     const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-    itemCellMode = mode;
+    setItemCellMode(mode);
     const wantSelect =
       opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
     const tryFocus = () => {
@@ -1858,13 +1875,13 @@ export async function bootBillFormPage(api) {
             return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="bill-cell-${ri}-rate" /></td>`;
           }
           if (!canEdit) {
-            return `<td><span class="ro">${escapeHtml(val)}</span></td>`;
+            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
           }
           // Qty: text + decimal keypad — no spinner; ↑/↓ navigate rows only.
           if (col.field === "qty") {
             return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-qty" /></td>`;
           }
-          return `<td><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
+          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
         }).join("");
         const del = canEdit
           ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
@@ -1876,6 +1893,18 @@ export async function bootBillFormPage(api) {
     paintLineTotals(doc);
   
     el.items.querySelectorAll("input[data-row]").forEach((inp) => {
+      // Keep the resting text layer in step with the editor. The text is hidden
+      // while the input has focus, so this is not load-bearing for correctness
+      // mid-edit -- it is here so a cell reads right the instant you leave it,
+      // without waiting for a repaint that may never come.
+      const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+      if (cellText) {
+        const syncCellText = () => {
+          cellText.textContent = inp.value;
+        };
+        inp.addEventListener("input", syncCellText);
+        inp.addEventListener("change", syncCellText);
+      }
       const field = inp.getAttribute("data-field");
       const ri = Number(inp.getAttribute("data-row"));
       const linkDt = linkDoctypeForBillField(field);
@@ -1982,10 +2011,10 @@ export async function bootBillFormPage(api) {
       }
       inp.addEventListener("focus", () => {
         if (inp.dataset.navFocus === "1") {
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           delete inp.dataset.navFocus;
         } else {
-          itemCellMode = CELL_MODE_EDIT;
+          setItemCellMode(CELL_MODE_EDIT);
         }
       });
       if (field === "item_code") {
@@ -2052,7 +2081,7 @@ export async function bootBillFormPage(api) {
   
         if (decision.action === "leave_edit") {
           if (decision.preventDefault) ev.preventDefault();
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           try {
             if (typeof inp.select === "function") inp.select();
           } catch {
@@ -2062,7 +2091,7 @@ export async function bootBillFormPage(api) {
         }
   
         if (decision.action === "enter_edit") {
-          itemCellMode = CELL_MODE_EDIT;
+          setItemCellMode(CELL_MODE_EDIT);
           if (ev.key === "F2") {
             ev.preventDefault();
             try {
@@ -2086,7 +2115,7 @@ export async function bootBillFormPage(api) {
           decision.action === "leave_edit_move" ||
           (decision.action === "tab" && decision.direction === "left")
         ) {
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           itemTabGuard = true;
           void (async () => {
             try {
@@ -2135,7 +2164,7 @@ export async function bootBillFormPage(api) {
   
         if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
         ev.preventDefault();
-        itemCellMode = CELL_MODE_NAV;
+        setItemCellMode(CELL_MODE_NAV);
         itemTabGuard = true;
         void (async () => {
           try {

@@ -10,6 +10,10 @@ const billFormPage = readFileSync(
   join(fileURLToPath(new URL("../src/bill-form-page.js", import.meta.url))),
   "utf8",
 );
+const docFormPage = readFileSync(
+  join(fileURLToPath(new URL("../src/doc-form-page.js", import.meta.url))),
+  "utf8",
+);
 const docSkinCss = readFileSync(join(electronDir, "doc-skin.css"), "utf8");
 const billDashboardCss = readFileSync(join(electronDir, "bill-dashboard.css"), "utf8");
 const docFieldsCss = readFileSync(join(electronDir, "doc-fields.css"), "utf8");
@@ -108,6 +112,85 @@ describe("Packet T — line-grid readability CSS (2026-09-06)", () => {
     // edges. Changing the sections' inline padding would silently unhook that.
     assert.match(billDashboardCss, /\.bill-section \{[^}]*padding: 12px 14px 14px;/s);
     assert.doesNotMatch(docFieldsCss, /\.bill-section-(lines|taxes)[^{]*\{[^}]*padding-inline:/s);
+  });
+});
+
+describe("Packet T step B — display layer (2026-09-06)", () => {
+  it("gives the resting text layer a real break opportunity", () => {
+    // A long unbroken item code has none of its own; without `anywhere` it
+    // would dictate the column width instead of wrapping inside it.
+    assert.match(docFieldsCss, /td\.cell-wrap > \.cell-text \{[^}]*overflow-wrap: anywhere;/s);
+    assert.match(docFieldsCss, /td\.cell-wrap > \.cell-text \{[^}]*white-space: pre-wrap;/s);
+  });
+
+  it("sizes the text layer border-box so short rows keep their height", () => {
+    // Regression: with content-box, min-height + padding stack and every short
+    // row grows ~11px. Measured 40 -> 51 -> 40 when this was added.
+    assert.match(docFieldsCss, /td\.cell-wrap > \.cell-text \{[^}]*box-sizing: border-box;/s);
+  });
+
+  it("overlays both editor shapes — a bare input and the picker's .link-wrap", () => {
+    // mountLinkPicker() inserts a positioned .link-wrap between the td and the
+    // input for item_code, so targeting only `input` would miss precisely the
+    // column with the worst readability problem.
+    assert.match(docFieldsCss, /td\.cell-wrap > input,\s*\ntd\.cell-wrap > \.link-wrap \{/);
+    assert.match(
+      docFieldsCss,
+      /td\.cell-wrap:focus-within > input,\s*\ntd\.cell-wrap:focus-within > \.link-wrap \{\s*opacity: 1;/,
+    );
+  });
+
+  it("keeps the wrapped text readable in nav mode", () => {
+    // Nav mode is for moving, not typing: the editor stays transparent so you
+    // can still read the cell you are sitting on.
+    assert.match(
+      docFieldsCss,
+      /\[data-cell-mode="nav"\] td\.cell-wrap:focus-within > input,[\s\S]*?opacity: 0;/,
+    );
+  });
+
+  it("makes the cell mode visible (the old dead data-nav-focus job)", () => {
+    assert.match(docFieldsCss, /td\.cell-wrap:focus-within \{[^}]*outline: 2px solid/s);
+    assert.match(docFieldsCss, /\[data-cell-mode="nav"\] td\.cell-wrap:focus-within \{[^}]*background:/s);
+  });
+
+  it("both row builders emit the display layer, and keep their testids", () => {
+    for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      const prefix = label === "bill" ? "bill" : "doc";
+      assert.match(
+        src,
+        new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(val\\)\\}</span>`),
+        `${label} row builder lost its text layer`,
+      );
+      assert.match(
+        src,
+        new RegExp(`data-testid="${prefix}-cell-\\$\\{ri\\}-\\$\\{col\\.field\\}"`),
+        `${label} row builder lost its cell testid`,
+      );
+    }
+  });
+
+  it("read-only cells wrap too — reading a submitted doc is still reading", () => {
+    for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      assert.match(
+        src,
+        /<td class="cell-wrap"><span class="cell-text ro">/,
+        `${label} read-only branch does not wrap`,
+      );
+    }
+  });
+
+  it("mirrors the cell mode to the DOM through a single setter", () => {
+    // The mode used to live only in a module-local variable, so no stylesheet
+    // could see it. Every assignment must go through the setter or the CSS
+    // silently desyncs from the real mode.
+    for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      assert.match(src, /function setItemCellMode\(mode\) \{/, `${label} has no setter`);
+      assert.match(src, /el\.items\.dataset\.cellMode = itemCellMode;/, `${label} does not mirror`);
+      // Only the setter itself may assign the variable directly.
+      const direct = [...src.matchAll(/^\s*itemCellMode = /gm)];
+      assert.equal(direct.length, 1, `${label} has ${direct.length} raw itemCellMode assignments`);
+    }
   });
 });
 
