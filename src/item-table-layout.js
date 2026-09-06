@@ -254,3 +254,138 @@ export function defaultTableStorage() {
   }
   return null;
 }
+
+/**
+ * @typedef {{
+ *   key: string,
+ *   demandPx?: number,
+ *   minPx?: number,
+ *   maxPx?: number,
+ *   fixedPx?: number,
+ *   flex?: boolean,
+ * }} ColDemand
+ */
+
+/**
+ * Turn per-column content demand into actual column widths.
+ *
+ * Precedence, highest first: a user-dragged override, a `fixedPx` column
+ * (line/qty/cost/amount — numeric columns whose width is a function of their
+ * format, not their data), then measured demand clamped to the column's bounds.
+ *
+ * Overflow is absorbed by shrinking only the columns that have slack above
+ * their own minimum, proportionally to how much slack each has, so a column
+ * already at its minimum is never squeezed further and a single greedy column
+ * gives back the most. Surplus goes to `flex` columns (in practice Description),
+ * which is what makes the table fill the bleed rather than leaving dead space.
+ *
+ * @param {ColDemand[]} cols
+ * @param {number} availablePx
+ * @param {Record<string, number>} [overrides] user-dragged widths; win outright
+ * @returns {Record<string, number>} column key -> integer px
+ */
+export function distributeColWidths(cols, availablePx, overrides = {}) {
+  /** @type {Record<string, number>} */
+  const out = {};
+  if (!Array.isArray(cols) || cols.length === 0) return out;
+
+  const available = toFiniteNumber(availablePx);
+  const over = overrides && typeof overrides === "object" ? overrides : {};
+
+  /** @type {{ key: string, width: number, min: number, locked: boolean, flex: boolean }[]} */
+  const resolved = [];
+
+  for (const col of cols) {
+    if (!col || typeof col.key !== "string" || !col.key) continue;
+    const min = toFiniteNumber(col.minPx) ?? MIN_COL_WIDTH_PX;
+    const max = toFiniteNumber(col.maxPx) ?? MAX_COL_WIDTH_PX;
+    const bounds = { min, max };
+
+    const override = clampColWidthPx(over[col.key], bounds);
+    const fixed = toFiniteNumber(col.fixedPx);
+
+    let width;
+    let locked;
+    if (override != null) {
+      width = override;
+      locked = true;
+    } else if (fixed != null) {
+      // A declared fixed width is not negotiated, so the *global* 40px floor
+      // must not apply: c-line is 38px and c-act 32px by design. Only the
+      // column's own explicit bounds constrain it.
+      width = clampColWidthPx(fixed, { min: toFiniteNumber(col.minPx) ?? 1, max }) ?? fixed;
+      locked = true;
+    } else {
+      width = clampColWidthPx(col.demandPx, bounds) ?? min;
+      locked = false;
+    }
+    resolved.push({ key: col.key, width, min: Math.min(min, max), locked, flex: col.flex === true });
+  }
+
+  if (resolved.length === 0) return out;
+
+  if (available != null && available > 0) {
+    const total = resolved.reduce((sum, c) => sum + c.width, 0);
+
+    if (total > available) {
+      // Shrink proportionally to each column's slack above its own minimum.
+      // The ratio is computed once from the original slack: decrementing a
+      // running total inside the loop would hand later columns a bigger share
+      // than their slack warrants.
+      const excess = total - available;
+      const shrinkable = resolved.filter((c) => !c.locked && c.width > c.min);
+      const slack = shrinkable.reduce((sum, c) => sum + (c.width - c.min), 0);
+      if (slack > 0) {
+        const ratio = Math.min(1, excess / slack);
+        for (const c of shrinkable) c.width -= (c.width - c.min) * ratio;
+      }
+      // If excess still exceeds total slack every column is at its minimum and
+      // the table legitimately overflows -- #panel-items scrolls it.
+    } else if (total < available) {
+      const surplus = available - total;
+      const flexers = resolved.filter((c) => !c.locked && c.flex);
+      if (flexers.length > 0) {
+        const each = surplus / flexers.length;
+        for (const c of flexers) c.width += each;
+      }
+    }
+  }
+
+  for (const c of resolved) out[c.key] = Math.max(1, Math.round(c.width));
+  return out;
+}
+
+/**
+ * Per-column sizing rules, keyed by the column's sort key (which both row
+ * builders already emit as `th[data-sort]`).
+ *
+ * Numeric columns are `fixedPx`: their width is a function of their *format*
+ * (a money column is as wide as "1,234,567.89" whatever the data says), so
+ * measuring them wastes width that Description can use. Text columns are
+ * measured and clamped. Description is the single `flex` column, so it absorbs
+ * whatever the bleed hands back.
+ */
+const COL_RULES = Object.freeze({
+  lineNo: { fixedPx: 38, minPx: 30 },
+  poLine: { fixedPx: 54, minPx: 40 },
+  item_code: { minPx: 90, maxPx: 420 },
+  description: { minPx: 120, maxPx: 900, flex: true },
+  qty: { fixedPx: 58, minPx: 48 },
+  rate: { fixedPx: 88, minPx: 70 },
+  amount: { fixedPx: 96, minPx: 76 },
+  __action: { fixedPx: 32, minPx: 28 },
+});
+
+/** Text columns with no explicit rule (customer, project, sales orders, …). */
+export const DEFAULT_COL_RULE = Object.freeze({ minPx: 70, maxPx: 260 });
+
+/**
+ * @param {string|null|undefined} key column sort key
+ * @returns {{ minPx: number, maxPx?: number, fixedPx?: number, flex?: boolean }}
+ */
+export function colRuleFor(key) {
+  if (typeof key === "string" && Object.prototype.hasOwnProperty.call(COL_RULES, key)) {
+    return { ...DEFAULT_COL_RULE, ...COL_RULES[key] };
+  }
+  return { ...DEFAULT_COL_RULE };
+}
