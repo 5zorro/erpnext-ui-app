@@ -10,6 +10,7 @@ import {
   MIN_COL_WIDTH_PX,
   autoFitWidthPx,
   clampColWidthPx,
+  distributeColWidths,
   draggedColWidthPx,
   normalizeDensity,
   normalizeTableKey,
@@ -276,5 +277,103 @@ describe("numeric coercion is strict (regression: Number(null) === 0)", () => {
 
   it("still accepts numeric strings, which storage round-trips can produce", () => {
     assert.equal(clampColWidthPx("220"), 220);
+  });
+});
+
+describe("distributeColWidths (Packet T C — content-driven widths)", () => {
+  const cols = () => [
+    { key: "line", fixedPx: 38, minPx: 30 },
+    { key: "item", demandPx: 400, minPx: 90, maxPx: 420 },
+    { key: "desc", demandPx: 100, minPx: 120, maxPx: 900, flex: true },
+    { key: "act", fixedPx: 32, minPx: 28 },
+  ];
+  const sum = (w) => Object.values(w).reduce((a, b) => a + b, 0);
+
+  it("fills exactly the available width when there is room", () => {
+    const w = distributeColWidths(cols(), 800);
+    assert.equal(sum(w), 800);
+  });
+
+  it("gives surplus to flex columns, not to greedy ones", () => {
+    const w = distributeColWidths(cols(), 800);
+    assert.equal(w.item, 400, "item should stop at its demand");
+    assert.equal(w.desc, 330, "desc should absorb the remainder");
+  });
+
+  it("honours a declared fixed width without applying the global 40px floor", () => {
+    // c-line is 38px and c-act 32px by design; a fixed width is declared, not
+    // negotiated, so MIN_COL_WIDTH_PX must not silently widen them.
+    const w = distributeColWidths(cols(), 800);
+    assert.equal(w.line, 38);
+    assert.equal(w.act, 32);
+  });
+
+  it("shrinks to fit, taking most from the column with the most slack", () => {
+    const w = distributeColWidths(cols(), 300);
+    assert.equal(sum(w), 300);
+    assert.equal(w.line, 38, "fixed columns are not shrunk");
+    assert.equal(w.act, 32);
+    assert.equal(w.desc, 120, "desc was already at its minimum, so it is not squeezed");
+    assert.equal(w.item, 110, "item had all the slack, so item gave it all back");
+  });
+
+  it("stops at every column's minimum and lets the table overflow (it scrolls)", () => {
+    const w = distributeColWidths(cols(), 100);
+    assert.equal(w.item, 90);
+    assert.equal(w.desc, 120);
+    assert.ok(sum(w) > 100, "a crushed table overflows rather than going sub-minimum");
+  });
+
+  it("shrink is proportional to slack, not to width", () => {
+    // Two columns of equal width but different minimums: the one with more
+    // slack must give back more. A width-proportional shrink would take equally
+    // and push the tighter column under its minimum.
+    const w = distributeColWidths(
+      [
+        { key: "roomy", demandPx: 300, minPx: 100 },
+        { key: "tight", demandPx: 300, minPx: 280 },
+      ],
+      500,
+    );
+    assert.equal(sum(w), 500);
+    assert.ok(w.tight >= 280, "tight column stayed at or above its minimum");
+    assert.ok(300 - w.roomy > 300 - w.tight, "roomy column gave back more");
+  });
+
+  it("a user override wins over measured demand and is not shrunk", () => {
+    const w = distributeColWidths(cols(), 300, { item: 200 });
+    assert.equal(w.item, 200, "override survives an overflowing table");
+  });
+
+  it("an override still respects the column's own bounds", () => {
+    const w = distributeColWidths(cols(), 800, { item: 9999 });
+    assert.equal(w.item, 420, "clamped to the column max");
+  });
+
+  it("clamps measured demand to the column's bounds", () => {
+    const w = distributeColWidths([{ key: "a", demandPx: 5000, minPx: 50, maxPx: 200 }], 1000);
+    assert.equal(w.a, 200);
+    const tiny = distributeColWidths([{ key: "a", demandPx: 1, minPx: 50, maxPx: 200 }], 1000);
+    assert.equal(tiny.a, 50);
+  });
+
+  it("works with no available width given (pure demand mode)", () => {
+    const w = distributeColWidths(cols(), null);
+    assert.equal(w.item, 400);
+    assert.equal(w.desc, 120, "no surplus to hand out, so desc sits at its minimum");
+  });
+
+  it("is total on junk input", () => {
+    assert.deepEqual(distributeColWidths(null, 800), {});
+    assert.deepEqual(distributeColWidths([], 800), {});
+    assert.deepEqual(distributeColWidths([{ nokey: 1 }, null], 800), {});
+  });
+
+  it("never emits a zero or negative width", () => {
+    const w = distributeColWidths(
+      [{ key: "a", demandPx: 100, minPx: 1 }, { key: "b", demandPx: 100, minPx: 1 }],
+      2,
+    );
+    for (const [k, px] of Object.entries(w)) assert.ok(px >= 1, `${k} was ${px}`);
   });
 });

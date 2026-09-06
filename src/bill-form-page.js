@@ -120,6 +120,7 @@ import {
 import {
   nextItemFocusAfterEdit,
 } from "../src/link-picker-policy.js";
+import { autoSizeItemColumns, mountColResize } from "./item-col-resize.js";
 import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
@@ -1576,6 +1577,7 @@ export async function bootBillFormPage(api) {
         </tr>`;
       })
       .join("");
+    sizeTaxColumns();
   
     el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
       const field = inp.getAttribute("data-tax-field");
@@ -1803,6 +1805,35 @@ export async function bootBillFormPage(api) {
     paintMoneyStack(doc);
   }
   
+
+    /**
+     * Packet T C — size the line grid from its content, then arm the drag
+     * handles. Runs after every repaint because the header row is rebuilt each
+     * time; both calls are idempotent.
+     */
+    function sizeItemColumns() {
+      try {
+        const table = el.items && el.items.closest ? el.items.closest("table") : null;
+        if (!table) return;
+        mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
+        autoSizeItemColumns(table, { tableKey: "bill-items" });
+      } catch {
+        /* column sizing is presentation; never let it break a repaint */
+      }
+    }
+
+    function sizeTaxColumns() {
+      try {
+        const table =
+          el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
+        if (!table) return;
+        mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
+        autoSizeItemColumns(table, { tableKey: "bill-taxes" });
+      } catch {
+        /* ignore */
+      }
+    }
+
   function paintItemsHead() {
     const thead = document.getElementById("items-head-row");
     if (!thead) return;
@@ -1891,6 +1922,7 @@ export async function bootBillFormPage(api) {
       .join("");
   
     paintLineTotals(doc);
+    sizeItemColumns();
   
     el.items.querySelectorAll("input[data-row]").forEach((inp) => {
       // Keep the resting text layer in step with the editor. The text is hidden

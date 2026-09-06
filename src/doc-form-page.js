@@ -36,6 +36,7 @@ import {
   nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
 } from "./link-picker-policy.js";
+import { autoSizeItemColumns, mountColResize } from "./item-col-resize.js";
 import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
@@ -1113,12 +1114,56 @@ function rowItemCodeAt(doc, rowIndex) {
   return row && row.item_code != null ? String(row.item_code).trim() : "";
 }
 
+/**
+ * Packet T C — size the line grid from its content, then arm the drag handles.
+ * Runs after every repaint because the header row is rebuilt each time; both
+ * calls are idempotent. Keyed by profile so PO and Item Receipt keep their own
+ * column widths.
+ */
+function itemsTableKey() {
+  return `${(ui && ui.profileId) || "doc"}-items`;
+}
+
+function taxesTableKey() {
+  return `${(ui && ui.profileId) || "doc"}-taxes`;
+}
+
+function sizeItemColumns() {
+  try {
+    const table = el && el.items && el.items.closest ? el.items.closest("table") : null;
+    if (!table) return;
+    const tableKey = itemsTableKey();
+    mountColResize(table, { tableKey, onChange: sizeItemColumns });
+    autoSizeItemColumns(table, { tableKey });
+  } catch {
+    /* column sizing is presentation; never let it break a repaint */
+  }
+}
+
+function sizeTaxColumns() {
+  try {
+    const table =
+      el && el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
+    if (!table) return;
+    const tableKey = taxesTableKey();
+    mountColResize(table, { tableKey, onChange: sizeTaxColumns });
+    autoSizeItemColumns(table, { tableKey });
+  } catch {
+    /* ignore */
+  }
+}
+
 function paintItemsHead() {
   if (!el.itemsHead || !ui) return;
   const headers = sortableHeadersFromCols(ui.itemCols);
   if (!headers.length) {
     el.itemsHead.innerHTML =
-      ui.itemCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
+      ui.itemCols
+        .map(
+          (c) =>
+            `<th data-col-key="${escapeHtml(c.field || c.label || "")}">${escapeHtml(c.label)}</th>`,
+        )
+        .join("") + "<th></th>";
     return;
   }
   el.itemsHead.innerHTML =
@@ -1307,6 +1352,7 @@ function paintTaxes(doc) {
       </tr>`;
     })
     .join("");
+  sizeTaxColumns();
 
   el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
     const field = inp.getAttribute("data-tax-field");
@@ -1438,6 +1484,7 @@ function paintItems(doc) {
     .join("");
 
   paintLineTotals(doc);
+  sizeItemColumns();
 
   el.items.querySelectorAll("input[data-row]").forEach((inp) => {
     // Keep the resting text layer in step with the editor. The text is hidden
