@@ -155,8 +155,13 @@ the toolbar renders the answer, it never guesses):
 | Page | Tabs |
 |------|------|
 | Bill record | Vanilla · Simplified · Doc |
-| PO / IR record | Vanilla · Doc |
+| PO record | Vanilla · Simplified · Doc |
+| IR (Purchase Receipt) record | Vanilla · Simplified · Doc |
 | Desk, dashboards, lists, masters | Vanilla only |
+
+(2026-09-05: Simplified's seed now covers all three anchored doc-skin doctypes, not just
+Bill — see `simplified-seed-profiles.js`. Any future doctype with a Doc skin but no seed
+yet stays Vanilla + Doc only, same rule as before.)
 
 - **Simplified** needs a seeded doctype *and* an open record — availability derives from
   `SEED_PROFILES` via `lens-context.js` `hasSimplifiedLens()`, so shipping a seed lights up
