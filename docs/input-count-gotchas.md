@@ -59,6 +59,13 @@ Live Purchase Invoice may add section collapses, child-table chrome, custom fiel
 workspace buttons. **Dogfood:** Tab a blank PI in Vanilla on sandbox; if your mental
 count is far from ~65, capture a Desk HTML dump and replace/extend the fixture.
 
+The fixture also has no per-tab `hidden`/panel markup (checked 2026-09-06): fields from
+every tab (Details, Payments, Terms, More Info, Connections) sit flat and unhidden in one
+file, so \(N_v\) already counts every tab flattened, not what a real one-tab-at-a-time
+Desk session shows at once. \(N_s\) (G11) is a direct subset of this same list, so it
+inherits the flattening rather than suffering a separate penalty from it — but the
+absolute numbers for **both** still overstate what a clerk sees on any one tab.
+
 ### G2 — Blank vs sourced not split yet
 
 Both bar sides currently use the same inventory. Sourced Bill (from simple PO) should
