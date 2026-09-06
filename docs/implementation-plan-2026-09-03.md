@@ -725,7 +725,7 @@ than showing an AP check — consistent with "lens tabs are earned per page."
 1. **Extract `doc-fields.css`** from `doc-form.head.html`. Reversible, no behavior change.
    **Done 2026-09-05.**
 2. **`check-doc.fragment.html`** + assemble-script wiring + **drawer mount** on the dashboard,
-   read-only first (render a chosen batch as a check; no writes).
+   read-only first (render a chosen batch as a check; no writes). **Done 2026-09-06.**
 3. **Dirty-gate** extension for a dirty `pay-outstanding` surface.
 4. **Write path** in the drawer (reusing OI-135's pattern) — own commit, own review.
 5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
@@ -762,6 +762,47 @@ turned out to hide a real bug, twice:**
   one `<link>`); `bill-dashboard.css` keeps its ~156 genuinely Bill-only rules
   (`.doc-status-badge` tones, due-date badges, etc.) and nothing else. `doc-form.html` regenerated
   via `scripts/assemble-doc-form-html.js` (no manual edits to the generated file).
+
+**Step 2 closeout (2026-09-06) — presentation over already-tested data, so the new logic is
+thinner than Step 1's, but one real design question surfaced during the build, not before it:**
+
+- **`src/check-doc-view.js`** (pure) maps a `PaymentBatchGroup` (Packet 2) + the `OutstandingBillRow[]`
+  it came from into `{ payTo, amount, payOn, memo, stubRows }` — installmentKeys resolved back to
+  invoice/dueDate/outstanding for the remittance stub. The header `amount` is always the group's own
+  `totalAmount`, never re-summed from the stub rows, so the two can't silently drift if rounding ever
+  differs between them. `src/check-doc-mount.js` is the DOM side (paint/close), null-safe like
+  `item-col-resize.js` — a repaint before the drawer exists must never throw.
+- **What the check does *not* show, on purpose:** `in_words`, check no., and the bank block are
+  fields ERPNext computes when a real Payment Entry is saved — this is a proposal, no PE exists yet,
+  so inventing them would show data that doesn't exist. The fragment renders "Assigned when saved"
+  instead of a blank, so the gap reads as intentional rather than as a bug. Taxes/deductions sections
+  are structurally present (`check-doc-taxes` / `check-doc-deductions`, `hidden` by default) but never
+  populated at this step, for the same reason — "sections render only when non-empty" is trivially
+  true for a proposal today and becomes real once Step 4 creates an actual document.
+- **Structural decision confirmed while building, not just planned:** the fragment (`check-doc.
+  fragment.html`) carries no inline styles or script — `check-doc.css` and `check-doc-mount.js` are
+  separate files a second host can link/import without copying markup, matching the "one fragment,
+  two mounts" intent named when the architecture was locked. `pay-outstanding.html` is now itself a
+  generated file (`scripts/assemble-pay-outstanding-html.js` from the new `pay-outstanding.src.html`
+  + the fragment) — the same pattern `assemble-doc-form-html.js` already established, not a new one.
+- **Drawer vs. rationale popup — a real interaction gap found by driving it, not by reading the
+  code:** the existing rationale popup does not close when a different group's popup opens, so
+  clicking "Preview as check" on a second group while the first's popup is still open is visually
+  busy (both a stale rationale card and the freshly-repainted drawer on screen at once). Confirmed via
+  a headless Playwright pass against the built file with a mocked `window.erpPayOutstanding` — not a
+  regression from this step (the popup-stacking behavior predates it), so left alone rather than
+  fixed under this step's scope; worth a look if 5zorro notices it while dogfooding.
+- Verification: `tests/check-doc-view.test.js` (9 tests — passthrough, stub ordering independent of
+  bills-array order, single-source-of-truth amount, missing-installmentKey fallback, empty-group,
+  junk input, no-mutation) and `tests/check-doc-mount.test.js` (null-safety in bare Node, no DOM).
+  Headless Playwright smoke (scratch harness, not committed): mocked two vendors (a 2-bill batch and
+  a 1-bill pay-alone group), opened the drawer from each, confirmed payee/amount/date/memo/stub rows/
+  stub total all match the source group and repaint correctly on a second open (no stale data from
+  the first), taxes/deductions stay hidden, close works, zero console errors. Screenshot confirmed
+  the drawer renders below the flow view rather than over it, matching the no-modal decision above.
+  `npm test`: 1041 pass (was 1030 immediately prior). `tests/html-reachability.test.js`'s OI-067 gate
+  required curating the two new HTML files (`pay-outstanding.src.html`, `check-doc.fragment.html`) —
+  working as intended, same as the interactable-inventory gate catching Packet T's new buttons.
 
 **Cascade-order correction (5zorro 2026-09-06) — a same-day reversal, recorded so it isn't
 rediscovered as a mystery later.** Immediately after Step 1 landed, a pass here swapped
