@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { autoSizeItemColumns, mountColResize } from "../src/item-col-resize.js";
+import {
+  autoSizeItemColumns,
+  mountColResize,
+  mountDensityControl,
+} from "../src/item-col-resize.js";
 
 const src = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const resizeSrc = src("../src/item-col-resize.js");
@@ -116,5 +120,54 @@ describe("Packet T C — resize handle CSS", () => {
 
   it("header cells are positioned so a handle can anchor to them", () => {
     assert.match(docFieldsCss, /#panel-items thead th,\s*\n\.bill-section-taxes thead th \{\s*position: relative;/);
+  });
+});
+
+describe("Packet T D — frozen leading columns", () => {
+  it("freezes through the item column, so you never lose your place", () => {
+    // Scrolling right to read Project is useless if you can no longer see which
+    // line you are on.
+    assert.match(resizeSrc, /const itemAt = heads\.findIndex\(\(h\) => h\.key === "item_code"\);/);
+    assert.match(resizeSrc, /Math\.min\(MAX_STICKY_COLS, itemAt >= 0 \? itemAt \+ 1 : 1\)/);
+  });
+
+  it("caps how much of the viewport can be frozen", () => {
+    assert.match(resizeSrc, /const MAX_STICKY_COLS = 3;/);
+  });
+
+  it("removes the offset rather than zeroing it for unfrozen columns", () => {
+    // left:0 would stick a column that should scroll; the CSS fallback is
+    // `auto`, which leaves it positioned but not actually stuck.
+    assert.match(resizeSrc, /table\.style\.removeProperty\(prop\);/);
+  });
+
+  it("offsets are a running sum of the widths step C computed", () => {
+    assert.match(resizeSrc, /left \+= widths\[heads\[i\]\?\.key\] \|\| 0;/);
+  });
+});
+
+describe("Packet T D — density control", () => {
+  it("cycles through every density and persists the choice", () => {
+    assert.match(resizeSrc, /DENSITIES\[\(DENSITIES\.indexOf\(now\) \+ 1\) % DENSITIES\.length\]/);
+    assert.match(resizeSrc, /paint\(writeDensity\(storage, next\)\)/);
+  });
+
+  it("re-applies the stored density on every mount, so a repaint keeps it", () => {
+    assert.match(resizeSrc, /const current = readDensity\(storage\);[\s\S]*?paint\(current\);/);
+  });
+
+  it("wires the click handler exactly once", () => {
+    assert.match(resizeSrc, /button\.dataset\.densityWired !== "1"/);
+    assert.match(resizeSrc, /button\.dataset\.densityWired = "1";/);
+  });
+
+  it("is mounted by both pages", () => {
+    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
+      assert.match(page, /mountDensityControl\(\{ table, button: document\.getElementById\("btn-density"\) \}\)/, label);
+    }
+  });
+
+  it("survives with no button and no table", () => {
+    assert.doesNotThrow(() => mountDensityControl({ table: null, button: null, storage: null }));
   });
 });
