@@ -62,8 +62,8 @@ export function lensTabsFor(state = {}) {
  * @returns {{ available: boolean, hint: string }}
  */
 export function docTabState(state = {}) {
-  if (state.onDoc) return { available: true, hint: "Doc skin" };
-  if (state.hasDocSkinnedRecord) return { available: true, hint: "Doc skin for this page" };
+  if (state.onDoc) return { available: true, hint: "Document-skin" };
+  if (state.hasDocSkinnedRecord) return { available: true, hint: "Document-skin for this page" };
   if (state.parkedIsDocSkinned || state.peekParentIsDocSkinned) {
     const label = state.returnLabel != null ? String(state.returnLabel).trim() : "";
     return { available: true, hint: label ? `Back to ${label}` : "Back to the form you came from" };
