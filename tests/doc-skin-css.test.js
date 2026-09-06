@@ -85,6 +85,32 @@ describe("doc-fields.css shared field/layout CSS (Packet 4b step 1, 2026-09-05)"
   });
 });
 
+describe("Packet T — line-grid readability CSS (2026-09-06)", () => {
+  it("A1: line + tax sections bleed to the viewport, scrollbar-safe", () => {
+    // The document column (.wrap, max-width 1100px) still governs header /
+    // addresses / totals / notes; only the two line grids break out.
+    assert.match(docFieldsCss, /\.bill-section-lines,\s*\n\.bill-section-taxes \{/);
+    assert.match(docFieldsCss, /width: calc\(100vw - var\(--doc-bleed-gutter\)\);/);
+    assert.match(
+      docFieldsCss,
+      /margin-inline: calc\(50% - 50vw \+ \(var\(--doc-bleed-gutter\) \/ 2\)\);/,
+    );
+  });
+
+  it("A1: the gutter variable has a 0px fallback so CSS alone stays correct", () => {
+    // If the JS wiring never runs (or throws), the bleed must still be sane --
+    // 0px just means it reaches the scrollbar edge instead of stopping short.
+    assert.match(docFieldsCss, /--doc-bleed-gutter:\s*0px;/);
+  });
+
+  it("A1: does not disturb the padding .line-tabs' negative pull depends on", () => {
+    // .bill-section .line-tabs uses margin: -12px -14px 0 to reach the section
+    // edges. Changing the sections' inline padding would silently unhook that.
+    assert.match(billDashboardCss, /\.bill-section \{[^}]*padding: 12px 14px 14px;/s);
+    assert.doesNotMatch(docFieldsCss, /\.bill-section-(lines|taxes)[^{]*\{[^}]*padding-inline:/s);
+  });
+});
+
 describe("doc-form CAPS control", () => {
   it("exposes CAPS toggle in Navigate toolbar", () => {
     assert.match(docFormHtml, /id="btn-caps" data-testid="doc-caps"/);
