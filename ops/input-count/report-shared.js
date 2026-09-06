@@ -7,7 +7,9 @@ import { scrapeInteractables } from "../../src/interactable-scrape.js";
 import {
   summarizeInputCounts,
   advertisingBarSegments,
+  simplifiedInteractables,
 } from "../../src/input-count.js";
+import { SEED_PROFILES } from "../../src/simplified-seed-profiles.js";
 
 /**
  * @typedef {{
@@ -35,6 +37,10 @@ export function printInputCountReport(cfg) {
   const van = scrapeInteractables(vanillaHtml);
   const vanSum = summarizeInputCounts(van.items);
 
+  const seed = SEED_PROFILES[cfg.meta.doctype] || null;
+  const simplifiedItems = simplifiedInteractables(van.items, seed);
+  const simplifiedSum = summarizeInputCounts(simplifiedItems);
+
   const docBar = advertisingBarSegments({
     blankItems: cfg.docCurated,
     sourcedItems: cfg.docCurated,
@@ -43,6 +49,9 @@ export function printInputCountReport(cfg) {
     blankItems: van.items,
     sourcedItems: van.items,
   });
+  const simplifiedBar = seed
+    ? advertisingBarSegments({ blankItems: simplifiedItems, sourcedItems: simplifiedItems })
+    : null;
 
   /** @param {string} label @param {string|number|boolean} v */
   function line(label, v) {
@@ -53,20 +62,24 @@ export function printInputCountReport(cfg) {
   console.log(`Anchor: ${cfg.meta.doctype} (${cfg.meta.anchor})`);
   if (cfg.meta.profileId) console.log(`Profile: ${cfg.meta.profileId}`);
   if (cfg.meta.surface) console.log(`Surface: ${cfg.meta.surface}`);
-  console.log("Lenses: Vanilla fixture · Doc curated (warm) · Doc static scrape");
+  console.log("Lenses: Vanilla fixture · Simplified (Vanilla − seed) · Doc curated (warm) · Doc static scrape");
   console.log("Competitors: omitted (legal risk). See docs/input-count-gotchas.md\n");
 
   console.log("--- Totals ---");
   line("Doc curated N_d", docWarm.interactableCount);
   line("Doc curated effort", docWarm.effort);
   line("Doc static scrape", docStaticSum.interactableCount);
+  line("Simplified N_s", seed ? simplifiedSum.interactableCount : "n/a (no seed)");
+  line("Simplified effort", seed ? simplifiedSum.effort : "n/a (no seed)");
   line("Vanilla fixture N_v", vanSum.interactableCount);
   line("Vanilla fixture effort", vanSum.effort);
   line("N_v > N_d?", vanSum.interactableCount > docWarm.interactableCount ? "yes" : "NO");
+  line("N_v > N_s?", seed ? (vanSum.interactableCount > simplifiedSum.interactableCount ? "yes" : "NO") : "n/a");
   console.log("");
 
   console.log("--- Advertising bar proxy (blank ≈ sourced until sourced fixtures) ---");
   console.log("Doc curated:", docBar);
+  if (simplifiedBar) console.log("Simplified: ", simplifiedBar);
   console.log("Vanilla:    ", vanBar);
   console.log("");
 
@@ -103,8 +116,10 @@ export function printInputCountReport(cfg) {
   return {
     N_d: docWarm.interactableCount,
     N_v: vanSum.interactableCount,
+    N_s: seed ? simplifiedSum.interactableCount : null,
     docEffort: docWarm.effort,
     vanillaEffort: vanSum.effort,
+    simplifiedEffort: seed ? simplifiedSum.effort : null,
     docStaticCount: docStaticSum.interactableCount,
   };
 }

@@ -18,6 +18,29 @@ This shell is not a second ERP. It exists to make daily books work safer and mor
 
 **Target display:** design primarily for a **1080p 16:9** monitor at full screen, or a **4K 16:9** monitor at half (longer on the vertical edge) or quarter screen. Prefer flexible layout (so other sizes still work) over hard-coded one-resolution UI.
 
+### Fewer things to click, measured, not asserted
+
+Every lens is scored the same way: count the actual interactable controls (fields, buttons,
+tabs) on a representative one-line Purchase transaction. **Doc** is a purpose-built form;
+**Simplified** is stock ERPNext with an assumptions bar that pre-fills or quiets the fields
+a given doctype's Doc skin already owns. Competitor products are deliberately left out of
+this table (elevated advertising-claim risk for an unaffiliated comparison).
+
+| Transaction | Vanilla ERPNext | Simplified skin | Doc skin |
+|---|---|---|---|
+| Bill (Purchase Invoice) | 65 | 54 (−17%) | 57 (−12%) |
+| Purchase Order | 58 | 48 (−17%) | 39 (−33%) |
+| Item Receipt (Purchase Receipt) | 66 | 56 (−15%) | 56 (−15%) |
+
+Both alternate lenses cut real interactables versus stock ERPNext on every transaction type
+that has one; **Doc vs Simplified is not a race** — read the two independently, not against
+each other (methodology and why: `docs/input-count-gotchas.md`, gotcha G11).
+
+Caveats, stated plainly: Vanilla's column is a representative-density fixture, not a live
+Desk HTML dump (gotcha G1); Simplified's seed profiles for Purchase Order and Item Receipt
+shipped 2026-09-05 and have not yet been dogfooded end-to-end. Reproduce with
+`npm run report:input-count`.
+
 ## Architecture (same as the prior decision log)
 
 | Layer | What it is |
