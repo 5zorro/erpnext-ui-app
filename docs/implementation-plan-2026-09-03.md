@@ -459,8 +459,8 @@ export const DEFAULT_PAYMENT_BATCH_PREFS = Object.freeze({
 | Piece | Job | Status |
 |---|---|---|
 | `src/payment-batch-prefs.js` | `DEFAULT_PAYMENT_BATCH_PREFS` + `validatePaymentBatchPrefs(prefs)` → `{ ok, errors }` (every invalid field reported, not just the first — a settings UI can highlight each one) + `mergePaymentBatchPrefs(raw)` → always a complete `PaymentBatchPrefs`, each field falling back to its own default independently (mirrors the existing `normalizeHealthRemediationPrefs` pattern in `health-remediation.js`, not a new convention). Pure. | **Done 2026-09-05.** |
-| Electron: `userData/payment-batch-prefs.json` read/write | Same pattern as `main.js`'s existing `loadPrefs()`/`savePrefs()` for `lens-prefs.json` — raw `fs` read, `JSON.parse` in a try/catch, `mergePaymentBatchPrefs()` to sanitize. | **Deferred to Packet 4** — electron wiring lands with the rest of the Doc Pay skin's IPC, same as Packet 1's `get-outstanding-bills` call. |
-| UI | Small settings affordance on the Doc Pay skin itself (not a separate settings page this tranche) — edit the three numbers inline, see suggestions re-flow live. | **Deferred to Packet 4.** |
+| Electron: `userData/payment-batch-prefs.json` read/write | Same pattern as `main.js`'s existing `loadPrefs()`/`savePrefs()` for `lens-prefs.json` — raw `fs` read, `JSON.parse` in a try/catch, `mergePaymentBatchPrefs()` to sanitize. | **Done** — `paymentBatchPrefsPath()` + load/save in `main.js`, `get-payment-batch-prefs` / `set-payment-batch-prefs` IPC (confirmed 2026-09-05; this table was stale, landed alongside Packet 4 as expected but never updated here). |
+| UI | Small settings affordance on the Doc Pay skin itself (not a separate settings page this tranche) — edit the three numbers inline, see suggestions re-flow live. | **Done** — `⚙ Assumptions` panel (`#prefs-panel`) on `pay-outstanding.html`. |
 
 ### Tests
 
@@ -617,21 +617,31 @@ inject the same fragment into two hosts:
 One document, two mounts, no duplicated markup. This is also what keeps AR cheap later: an AR mount
 is a third host over the same fragment, not a second implementation.
 
-### CSS: extract before building (own commit, first)
+### CSS: consolidate before building (own commit, first)
 
-The reusable pieces are **split across two files**, and only half is currently shared:
+**Correction (found 2026-09-05, pre-dev pass — the picture below is more tangled than the first
+architecture pass assumed):** there are not two files here, there are **four**, and one pair is
+already a live duplicate, not a clean single source:
 
 | File | Holds | Shared today? |
 |---|---|---|
 | `electron/doc-wash.css` (151 lines) | design tokens, wash/hatch/stamp layers, read-only `data-wash-source` styling. Already defines `--wash-payment: #e6f5f0` / `--accent-payment: #009E73`. | **Yes** — `doc-form.head.html`, `home.html`, `pay-outstanding.html` all link it |
-| `electron/doc-form.head.html` (241 lines) | `.card`, `.field`, `.cols`, `.taxes-table`, `.bill-section` — the component CSS the check document actually wants | **No** — inlined in `doc-form.html`'s head, reachable only by Bill/PO/IR |
+| `electron/doc-skin.css` (713 lines) | toolbar, dirty-pill, commit-gate, Link picker (`.link-wrap`/`.link-dd`), source modal, address modal | **Yes**, but doesn't hold what the check document wants — no `.card`/`.field`/`.cols` |
+| `electron/doc-form.head.html`'s inline `<style>` (241 lines) | `.card`, `.field`, `.cols`, `.taxes-table`, `.wrap`, `.banner`, money classes — the component CSS the check document actually wants | **No** — inlined, but see next row |
+| `electron/bill-dashboard.css` (645 lines) | **Byte-identical duplicates of ~32 selectors** from the row above (confirmed `.field` and `.card` diff clean) plus real Bill-dashboard-only rules (`.doc-status-badge` tones, due-date badges). Despite the name, it's linked unconditionally from `doc-form.head.html` — PO/IR load it too. | Linked, and because it loads **last** in `doc-form.head.html`'s `<link>` order, **it wins every duplicated selector** — the inline `<style>` block's copy is dead code wherever they overlap. Traced to `8a10b6e` ("unified doc-form shell") never being fully deduped after the fragment split. |
 
-**Step 1 of this packet** is therefore a mechanical extraction of those component rules from
-`doc-form.head.html` into a new shared **`electron/doc-fields.css`**, linked by `doc-form.head.html`
-and the new check hosts. No behavior change for Bill/PO/IR. **Its own commit, before any check
-work**, so a Bill/PO/IR regression is unambiguous. Note `doc-wash.css:76` already reaches into
-doc-form's `.bill-section` class names — the layering is mildly leaky already; the extraction should
-not worsen it.
+So "extract `.card`/`.field`/`.cols` out of `doc-form.head.html`" is not the mechanical, single-source
+move the first pass described — there are already two copies in the render path, and the one that
+actually renders (`bill-dashboard.css`) is named for the wrong doctype. **Step 1 is a three-way
+consolidation, not a lift-and-shift:** fold the inline `<style>` block's copy and `bill-dashboard.css`'s
+duplicate into one new shared **`electron/doc-fields.css`** (component classes only — leave
+`bill-dashboard.css`'s genuinely Bill-only rules where they are, or rename the file once the dup is
+gone), linked by `doc-form.head.html` and the new check hosts. **Verify computed styles unchanged**
+on Bill/PO/IR after the merge (the duplicate has been silently authoritative — deleting the "wrong"
+copy by instinct, i.e. the inline one, happens to be correct here, but check don't assume). **Its own
+commit, before any check work**, so a regression is unambiguous. Note `doc-wash.css:76` already
+reaches into doc-form's `.bill-section` class names — the layering is mildly leaky already; this
+consolidation should not add a fourth file to that leak.
 
 The read-only wash system (`doc-wash.css:102-141`, `data-wash-source`) already does the
 "auto-filled from elsewhere, style it differently" job the check's bank block needs, and the
@@ -648,7 +658,7 @@ filled.
 
 | Consideration | Handling |
 |---|---|
-| **Dirty-gate (the real work)** | The drawer holds an unsaved check, making `pay-outstanding` the **first non-`doc` surface that can be dirty**. Today `main.js:4022` short-circuits `gateDirtyThen` on `surfaceMode === "doc"`, and both `showHome()` and `showPayOutstanding()` assume this surface is never dirty. Extend the gate to cover it — otherwise clicking Home silently discards a half-written check. |
+| **Dirty-gate (the real work)** | The drawer holds an unsaved check, making `pay-outstanding` the **first non-`doc` surface that can be dirty**. Confirmed precisely (2026-09-05): `gateDirtyThen()` (`main.js:3256`) calls `isDocLensSurface()` (`main.js:497-499`, literally `return surfaceMode === "doc"`) first and takes the `"not on Doc lens"` fast path — no snapshot, no prompt — for any other surface. `showHome()` and `showPayOutstanding()` both call `gateDirtyThen()` assuming that's safe. Today it is; once the drawer can hold input it silently discards a half-written check on Home/Recent/anywhere. `isDocLensSurface()` needs to become aware of a dirty drawer too, not just `surfaceMode === "doc"`. |
 | **Height** | A check is ~2.4:1 (wide/short) and suits a bottom drawer; ACH is taller. Drawer must be expandable toward full height, not a fixed strip. Targets stay README's 1080p full / 4K half–quarter. |
 | **Existing PEs** | A drawer cannot serve "open this payment" — that is the full-page mount above, which is why the fragment split is not optional. |
 | **Writes** | Still the only genuinely new risk in this tranche. Reuse OI-135's existing JIT-Payment-Entry write pattern rather than inventing a second one; Clean Core means existing whitelisted methods only. |
