@@ -763,34 +763,41 @@ turned out to hide a real bug, twice:**
   (`.doc-status-badge` tones, due-date badges, etc.) and nothing else. `doc-form.html` regenerated
   via `scripts/assemble-doc-form-html.js` (no manual edits to the generated file).
 
-**Root-cause follow-up (5zorro 2026-09-06) — the symptom was fixed above; the mechanism that let
-it happen wasn't, until now.** Removing today's 96 duplicates left the actual hazard standing:
-`bill-dashboard.css` still loaded **after** `doc-fields.css`, so any rule it redefined there would
-still win the cascade tie silently — the exact mechanism that let 6 of the 96 drift unnoticed.
-5zorro's framing: *"make the bill dashboard no longer overwrite the shared tool."* Fixed two ways,
-belt and suspenders, not just one:
+**Cascade-order correction (5zorro 2026-09-06) — a same-day reversal, recorded so it isn't
+rediscovered as a mystery later.** Immediately after Step 1 landed, a pass here swapped
+`bill-dashboard.css` to load *before* `doc-fields.css`, reasoning that a future accidental
+redefinition should lose the cascade tie rather than win it — treating **any** override as a bug to
+prevent, backed by a comprehensive test that failed on any redefinition either direction. **This was
+the wrong rule.** 5zorro's actual framing: *"the bill dashboard is allowed to have different rules
+because it is more than just a doc-skin for a transaction entry, it is also the dashboard for
+individual voucher-packet controls (the bill receipt and entry is the final act showing approval).
+Therefore, the bill-dashboard.css is supposed to load last — that is the business logic."*
+`bill-dashboard.css` overriding a shared rule on purpose is a **feature** of its capstone role, not
+a hazard to engineer away. Reverted same day:
 
-- **Cascade order swapped** — `bill-dashboard.css` now loads *before* `doc-fields.css` in
-  `doc-form.head.html`, so a future accidental redefinition loses the tie instead of winning it.
-  Confirmed zero selector overlap between the two files before making the swap (a no-op for
-  today's rendering, purely a guard against tomorrow's).
-- **Comprehensive test guard** — `tests/doc-skin-css.test.js`'s old check was a hardcoded list of
-  4 selectors (`.field`/`.card`/`.cols`/`.taxes-table`), which would silently stop covering
-  anything as `doc-fields.css` grows. Replaced with a generic one that extracts every selector
-  `doc-fields.css` actually defines (114 today, self-maintaining) and fails if `bill-dashboard.css`
-  defines any of them — regardless of which side the cascade order would currently favor. Verified
-  the guard actually catches a regression (not just passes trivially): reintroduced `.field` into
-  `bill-dashboard.css`, confirmed the assertion failed and named the offending selector, reverted.
+- Link order restored: `doc-wash.css`, `doc-skin.css`, `doc-fields.css`, **`bill-dashboard.css`
+  last** — matching the pre-Step-1 order and the actual business rule.
+- The blanket "never redefine" test removed — it enforced the wrong invariant (would have blocked
+  every legitimate override decided below). `tests/doc-skin-css.test.js`'s link-order test now
+  documents *why* bill-dashboard.css loads last instead of asserting it can't override anything.
+- What's still true and still matters: **undocumented** drift (a rule diverging because nobody knew
+  there were two copies) is a review/authorship gap, not a cascade-order one — no automated guard
+  replaces it; the discipline is deciding and recording each divergence on purpose, which is what
+  the six decisions below are.
 
-Deliberately **not** done: migrating all four linked stylesheets (`doc-wash.css`, `doc-skin.css`,
-`bill-dashboard.css`, `doc-fields.css`) to CSS Cascade Layers (`@layer`), which would make
-precedence independent of `<link>` order entirely (immune to a future reordering silently
-reintroducing the hazard) — the more airtight fix, and worth it if this class of bug recurs, but a
-4-file migration is materially more surface than "make the bill dashboard no longer overwrite the
-shared tool" asked for today, and layering only two of the four files risks the "any unlayered rule
-always beats any layered rule" cascade-layers pitfall (`doc-wash.css` / `doc-skin.css` would need
-auditing too). Named here so it doesn't have to be rediscovered if 5zorro wants the fuller fix
-later.
+**The six drifted rules — decisions (5zorro 2026-09-06), against the `docs/mockups/
+doc-fields-dry-audit.html` review:**
+
+| Selector | Decision | Resulting state |
+|---|---|---|
+| `.addr-grid` | Bill's 3-column layout (`minmax(0,1fr) auto minmax(0,1fr)`, `align-items: center`) is nicer than PO/IR's — make it the shared default, drop bill-dashboard.css's copy. | **Already true, no change needed.** `doc-fields.css` has carried this exact value since Step 1 (bill-dashboard.css's version was already taken as authoritative there); `bill-dashboard.css` has had zero base `.addr-grid` rule since Step 1. Its `.bill-section .addr-grid textarea` / `.addr-grid textarea,` rules are separate, more-specific child-selector refinements, not duplicates of the base rule — untouched, unaffected. |
+| `.money-stack` | The 2px `#64748b` border is nicer — make it the shared default, drop bill-dashboard.css's copy. Believed Bill-only. | **Already true, no change needed** — same situation as `.addr-grid`. **Correction to the premise:** `.money-stack` is *not* Bill-only — `class="money-stack"` renders from both `bill-shell.fragment.html` (`data-testid="bill-money-stack"`) and the shared PO/IR `doc-form-body.fragment.html` (`data-testid="doc-money-stack"`). It already is the default for everything, which is what was asked for, just on a different premise than stated. |
+| `th, td` / `th` (bare, unscoped) | **Deferred — needs more context, then revisit.** | Govern the items-grid table (`#panel-items`) shared identically by Bill and PO/IR (not the taxes table, which has its own more-specific `.taxes-table th`/`.taxes-table td`, untouched, not part of this drift). The `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` bill-dashboard.css carries was added in `26d7b15` ("fixed-layout column sizing on items, taxes, payments") to keep resized columns from breaking on long cell text — a deliberate tradeoff at the time, not an accident, but 5zorro wants to revisit "what 'best' means" for the items-grid look before deciding. **No code change.** `doc-fields.css` keeps the current (truncating) value, matching what's rendered for Bill **and** PO/IR all along — this was never Bill-only, so there is no "Bill vs PO" difference live today to choose between; whatever "PO version" is being pictured predates `26d7b15`. |
+| `.line-actions` | **Deferred — no context yet.** | No code change; current shared value stands. |
+| `.line-tabs` | **Deferred — no context yet.** | No code change; current shared value stands. |
+
+Residual: revisit `th`/`td`/`.line-actions`/`.line-tabs` once 5zorro has decided what "best" means
+for the items-grid table — log under **Dogfood residuals** below when that happens, not before.
 
 ### Home tile decisions (5zorro 2026-09-05, third pass — resolved)
 
@@ -857,7 +864,7 @@ header block above; do not fold their status into this table.)*
 
 | Family | Status | Notes |
 |---|---|---|
-| — | — | Populate as Packets 1–4 land and 5zorro dogfoods. |
+| Items-grid table look (`th`/`td`/`.line-actions`/`.line-tabs`) | **Open — deferred, needs 5zorro's "best" decision first** | Shared by Bill/PO/IR via `doc-fields.css`; current (truncating) value stands until 5zorro decides what "best" means for the items grid (see Packet 4b step-1 closeout, cascade-order correction). Not blocking any other packet. |
 
 ---
 
