@@ -16,9 +16,13 @@ you hit; only then design mockups that sidestep the confirmed ones.
 
 | Symbol | Source | Use |
 |--------|--------|-----|
-| \(N_d\) | `BILL_DOC_CURATED` (warm inventory) | Doc advertising / Simplified thin ceiling |
-| Doc static | scrape of `electron/bill.html` | Completeness gate vs curated (no synthetic lines) |
-| \(N_v\) | scrape of `tests/fixtures/bill-vanilla-form.fixture.html` | Vanilla advertising proxy until live Desk dump |
+| \(N_d\) | `*_DOC_CURATED` (warm inventory, per doctype) | Doc advertising |
+| Doc static | scrape of the Doc skin HTML (Bill fragments / `doc-form.html`) | Completeness gate vs curated (no synthetic lines) |
+| \(N_v\) | scrape of `tests/fixtures/{bill,po,receipt}-vanilla-form.fixture.html` | Vanilla advertising proxy until live Desk dump |
+| \(N_s\) | `simplifiedInteractables(vanillaItems, SEED_PROFILES[doctype])` | Simplified advertising (G11) |
+
+Run `npm run report:input-count` for all three anchors, or `report:input-count:bill` /
+`:po` / `:receipt` for one.
 
 **Bar segments** (`advertisingBarSegments`):
 
@@ -33,15 +37,16 @@ Mode switch is **inferred** from markup (`date` / `tenkey` / `none`), not timed 
 
 ## Snapshot (update when inventories change)
 
-From `npm run report:input-count` (2026-08-02):
+From `npm run report:input-count` (2026-09-05, all three anchors, Simplified N_s added):
 
-| Lens | Interactables | Mode switches | Effort |
-|------|---------------|---------------|--------|
-| Doc curated | 31 | 6 | 37 |
-| Doc static HTML | 25 | 4 | 29 |
-| Vanilla fixture | 65 | 9 | 74 |
+| Doctype | Doc curated N_d | Simplified N_s | Vanilla fixture N_v | N_d vs N_v | N_s vs N_v |
+|---------|-----------------|-----------------|----------------------|-----------|-----------|
+| Bill (Purchase Invoice) | 57 | 54 | 65 | −12.3% | −16.9% |
+| Purchase Order | 39 | 48 | 58 | −32.8% | −17.2% |
+| Item Receipt (Purchase Receipt) | 56 | 56 | 66 | −15.2% | −15.2% |
 
-\(N_v > N_d\) holds on this snapshot.
+\(N_v > N_d\) and \(N_v > N_s\) both hold on every anchor. \(N_d\) vs \(N_s\) does **not**
+have a stable ordering — see G11.
 
 ---
 
@@ -106,6 +111,27 @@ count).
 Doc Amount column is display-only (not counted). Vanilla fixture may still count an
 amount control if marked editable. Align rules when refreshing the fixture.
 
+### G11 — Simplified N_s is Vanilla minus seed, not a separate fixture; N_d vs N_s is not ordered
+
+`simplifiedInteractables()` (`src/input-count.js`) takes the **same** Vanilla-fixture scrape
+used for \(N_v\) and drops any item whose field the doctype's seed profile assumes
+(`simplified-seed-profiles.js`) — this matches the runtime (Simplified is Vanilla + an
+assumptions bar, not a rebuilt form), so no new fixture was needed to add \(N_s\).
+
+\(N_v > N_s\) holds on all three anchors (2026-09-05), but \(N_d\) and \(N_s\) do **not**
+sit in a fixed order: Bill has \(N_s < N_d\) (54 vs 57), Purchase Order has \(N_d < N_s\)
+(39 vs 48) by a wide margin, Item Receipt ties (56 vs 56). This is not a bug in either
+number — Doc curated (\(N_d\)) is a warm inventory that includes commit-gate/retry buttons
+and a synthetic line template (G3) that only exist in certain states, while \(N_s\) is a
+literal one-state DOM count; they are measuring different things and were never meant to
+rank against each other. Do not read \(N_d\) vs \(N_s\) as "Doc beats Simplified" or vice
+versa — the only claim the numbers support is that both lenses cut real interactables
+versus stock Vanilla.
+
+Seed profiles for PO and Item Receipt (added 2026-09-05, same session as Bill's) have
+**not** been dogfooded — see gotchas G1–G10 for the same caveat already carried by \(N_v\).
+Treat this snapshot as a first-cut, honestly-labeled estimate, not a verified claim.
+
 ---
 
 ## Dogfood checklist (you)
@@ -126,4 +152,4 @@ amount control if marked editable. Align rules when refreshing the fixture.
 
 - Competitor product bars (legal / claim risk).
 - Keystroke logging (never).
-- PO / IR anchors (extend after Bill dogfood).
+- Simplified/PO/IR dogfood (G11) — numbers are a mechanical first cut, not yet walked in the app.
