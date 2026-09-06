@@ -83,7 +83,9 @@ flowchart LR
   end
   subgraph shell ["Electron"]
     Page["electron/pay-outstanding.html\nsurfaceMode: pay-outstanding (in-window)\nHome tile trigger — shipped"]
-    PEForm["Same content, anchored to\nPayment Entry doc skin instead\n(Packet 4b — refined, not built)"]
+    Frag["check-doc.fragment.html\n+ doc-fields.css (extracted)\n(Packet 4b — not built)"]
+    Drawer["Drawer mount\n(bottom of the dashboard)"]
+    FullPage["payment-doc.html\nfull-page mount, /app/payment-entry/&lt;name&gt;"]
   end
   ERP["ERPNext HTTP API\n(existing whitelisted methods only)"]
   ERP -->|"query_report.run\nAccounts Payable"| Fetch
@@ -91,8 +93,10 @@ flowchart LR
   Cal --> Econ
   Prefs --> Econ
   Econ --> Page
-  Page -.->|"Packet 4b: re-anchor + filter (have) + creation modal (new write, not built)"| PEForm
-  PEForm -.->|"modal creates"| Write["Payment Entry\n(Packet 4b's modal — real write, not built)"]
+  Frag -.->|"mount 1"| Drawer
+  Frag -.->|"mount 2"| FullPage
+  Page -.->|"Packet 4b: drawer hosts the check"| Drawer
+  Drawer -.->|"writes (Packet 4b step 4)"| Write["Payment Entry\n(real write — not built)"]
 ```
 
 ---
@@ -130,7 +134,7 @@ economics, suggestion — is new product surface, matching what 5zorro asked to 
 | Applied-payments table (OI-139) | **Shipping separately** — read-only PE list on a submitted Bill. Orthogonal (single-Bill view vs cross-vendor batch view). |
 | Cost-model prefs (APR / postage / per-check) | **Do not exist anywhere** — new SSoT, this tranche. |
 | Multi-installment sample data | **Does not exist** — `ops/sample-data/seed_corpus.py::_normalize_pi_dates` unconditionally clears `payment_schedule` and flattens every seeded Bill to a single 30-day due date. Zero bills in the sandbox today have more than one due date. **Packet G** fixes this for one dedicated fixture. |
-| Doc-skin Payment Entry | **Does not exist** — `DOC_SKIN_INDEX` (`src/lens-context.js`) only has `workflow-home` / `bill` / `po` / `receipt`. Payment Entry is Vanilla-only today (`/app/payment-entry/new`), and the doctype is shared by both AP (`payment_type: "Pay"`) and AR (`"Receive"`) flows. 5zorro decided (2026-09-04): **two entry points this tranche — Home tile AND a new Doc-skin Payment Entry form, AP only.** Rejected as anchors: the **Payments workspace** (bleeds AR ageing/reports into what should be an AP-only tool; AR gets its own doc skin later) and the **Payment Entry list/"Find" view** (it's an audit tool over already-created payments, not a bill-selection decision surface). See Packet 4 / new Packet 4b. |
+| Doc-skin Payment Entry | **Does not exist** — `DOC_SKIN_INDEX` (`src/lens-context.js`) only has `workflow-home` / `bill` / `po` / `receipt`. Payment Entry is Vanilla-only today (`/app/payment-entry/new`), and the doctype is shared by both AP (`payment_type: "Pay"`) and AR (`"Receive"`) flows. 5zorro decided (2026-09-04): **two entry points this tranche — Home tile AND a new Doc-skin Payment Entry form, AP only.** Rejected as anchors: the **Payments workspace** (bleeds AR ageing/reports into what should be an AP-only tool; AR gets its own doc skin later) and the **Payment Entry list/"Find" view** (it's an audit tool over already-created payments, not a bill-selection decision surface). **Refined 2026-09-05:** the PE anchor splits by route — `isNew` → dashboard, named record → check/ACH document — and "AP only" is now a *default*, not a shell scope limit; see Packet 4b. |
 
 ---
 
@@ -498,13 +502,14 @@ spread across list views, reports, or other Vanilla surfaces. Also now HANDOFF i
 
 **Where this leaves the Payment-Entry anchor (Packet 4b):** 5zorro's refined vision (2026-09-05) —
 Payment Entry becomes the *real* anchor, with an optional **filter by vendor or invoice** narrowing
-the same flow view down to one vendor, and a **modal** on a suggested group that creates the actual
-Payment Entry (folding Packet 5's write path in). The vendor/invoice filter already shipped on
-today's Home-triggered surface (`#filter-input`, vendor-scoped — matching by vendor name or one of
-its invoice names still shows that vendor's whole bill set, since slicing it would break
-`paymentBatchEconomics`' grouping math). **Not yet done:** actually anchoring to Payment Entry
-(today's trigger is still the Home tile only) and the creation modal. See **Packet 4b** below,
-updated with this refined shape.
+the same flow view down to one vendor, and a write surface on a suggested group that creates the
+actual Payment Entry (folding Packet 5's write path in). The vendor/invoice filter already shipped
+on today's Home-triggered surface (`#filter-input`, vendor-scoped — matching by vendor name or one
+of its invoice names still shows that vendor's whole bill set, since slicing it would break
+`paymentBatchEconomics`' grouping math). **Second pass, same day:** that write surface is a
+**check / ACH document in a bottom drawer**, not a modal — see Packet 4b, which supersedes the
+"anchor + modal" sketch. **Not yet done:** anchoring to Payment Entry (today's trigger is still the
+Home tile only), the check document, and the write path.
 
 | Piece | Job |
 |---|---|
@@ -518,13 +523,13 @@ updated with this refined shape.
 ### Explicitly NOT this packet
 
 - No checkbox multi-select → "Pay Now" action. No Payment Entry / Payment Order creation yet — that's
-  the modal described above, now folded into **Packet 4b** rather than Packet 5 standing alone.
+  Packet 4b's check-document drawer, folded in there rather than Packet 5 standing alone.
   Clicking a group today only deep-links to a blank Vanilla Payment Entry (`Open Payment Entry
   (Get Outstanding Invoices) →`) or the Bill itself — a link-out, not a shell-side write.
 - No list-scroll-position/return-to-list work (that's **OI-129**, explicitly parked until 5zorro
   dogfoods this and feels the same pain — do not pre-solve it here).
-- Anchoring to the actual Payment Entry form (today's only trigger is the Home tile) and the
-  creation modal — **Packet 4b**, still not built; see its updated shape below.
+- Anchoring to the actual Payment Entry form (today's only trigger is the Home tile), the check /
+  ACH document, and the write path — **Packet 4b**, still not built; see its updated shape below.
 
 ### Tests
 
@@ -536,67 +541,202 @@ persistent view (WebContentsView is not a reliable Playwright Page — e2e/GOTCH
 
 ---
 
-## Packet 4b — Doc-skin Payment Entry anchor (AP only) — refined 2026-09-05, still not built
+## Packet 4b — Payment Entry as a document (AP first, AR-ready) — architecture locked 2026-09-05
 
-### Business rule (refined 2026-09-05)
+> **Supersedes** the 2026-09-04 "anchor + modal" sketch. Same goal, better shape: the write surface
+> is a **check / ACH document**, not a modal over a form, and it is built as a **reusable fragment**
+> so AR can mount the same thing later without a second implementation.
 
-Payment Entry becomes the *real* anchor, replacing the Home tile as the primary entry point (Home
-tile likely stays too, as a fast path — not decided). Shape 5zorro described:
+### Business rule (refined 2026-09-05, second pass)
 
-- The same three-stage flow view (Packet 4, already shipped) renders **inside** the Payment Entry
-  doc skin — "the Bill doc skin morphed from just form entry to closer to a dashboard; I was hoping
-  this 'payment entry' would be kinda like a dashboard for the form entry." The dashboard *is* the
-  primary content; raw field entry is secondary.
-- **Filter by vendor or invoice** narrows the same view to one vendor — already shipped on today's
-  Home-triggered surface (`#filter-input`), reusable here as-is.
-- A **modal** on a suggested group's node collects whatever's needed and creates the actual Payment
-  Entry — folding Packet 5's write path into this packet rather than keeping it a separate stretch.
+5zorro's framing: *"I really don't like the database vanilla form entry view. When I look at a
+payment, I want to see a document — a check, or an ACH trace document."* The Doc skin for Payment
+Entry is therefore a **document rendering**, not a relabelled form:
 
-Scope stays **AP only** — this Doc skin activates for Pay-type Payment Entries; Receive-type (AR)
-stays Vanilla until AR gets its own doc skin (consistent with HANDOFF invariant 6's transaction-
-entry-forms-only scope, and avoids the same AR bleed 5zorro flagged when rejecting the Payments
-workspace as an anchor for Packet 4).
+- **Draft** → inputs laid out *on* a check / ACH advice.
+- **Submitted** → a printed check / completed trace document (read-only wash, no input chrome).
+- The dashboard (Packet 4's three-stage flow) stays the surface for *choosing* what to pay; the
+  check document is the surface for *paying* it.
 
-### What's already true, and what still isn't (honest status, 2026-09-05)
+### Why the document metaphor is the native shape (evidence, not preference)
 
-- **Already shipped, reusable as-is:** the three-stage flow view, the vendor/invoice filter, the
-  prefs panel, sort toggle — all pure presentation over already-tested Packets 1–3 data, currently
-  hosted on the Home-triggered `pay-outstanding` surface.
-- **Still not built:** actually anchoring this content to the Payment Entry *form* (today's only
-  trigger is the Home tile — `DOC_SKIN_INDEX` has no `payment-entry` entry), and the creation modal
-  (a real ERP write — nothing in this tranche has written to ERP yet; Clean Core still means calling
-  existing whitelisted methods only, e.g. `frappe.client.insert`/PE's own `frappe.call` methods, and
-  reusing whatever write pattern the existing JIT-Payment-Entry code (OI-135) already established
-  rather than inventing a second one).
-- **Sizing note stands:** Bill/PO/Receipt share `shell: "doc-form"` in `src/doc-skin-registry.js` —
-  one HTML shell (`electron/doc-form.html`) templated for "header + item grid + taxes" documents.
-  Payment Entry has no item grid; confirmed live (2026-09-05) that `doc-form.html` doesn't reload per
-  doctype at all — it's a persistent SPA reconfigured via `docFormUiPayload()`, so bolting a
-  dashboard-shaped mode onto it means either a real branch inside an already-large file, or (cleaner,
-  lower-risk to Bill/PO/Receipt) its own persistent `WebContentsView`, the same pattern Packet 4's
-  `payOutstanding` view now uses. Reusing `pay-outstanding.html`'s content directly is the likely
-  path — this packet is mostly *hosting* + *filter* + *modal*, not new dashboard content.
-- **Not resolved:** distinguishing AP from AR if this ever also needs to intercept a *raw* Vanilla
-  `/app/payment-entry/new` navigation (not just a Home-tile trigger) — `classifySurface`/
-  `lookupDocSkin` key off route + doctype only, never a field value like `payment_type`. Deferred
-  until/unless that interception is actually wanted; today's trigger (Home tile, soon Payment-Entry-
-  anchored) doesn't need it.
+Read of `erpnext/accounts/doctype/payment_entry/payment_entry.json` (2026-09-05). The AP field set
+maps ~1:1 onto a physical check using ERPNext's **own** fields — several of which are already
+computed and read-only, so the document gets them free:
 
-### Recommended sequencing
+| Check element | Existing PE field | Note |
+|---|---|---|
+| Pay to the order of | `party` / `party_name` | |
+| Amount box | `paid_amount` | |
+| Written-amount line | `in_words` / `base_in_words` | already computed, read-only — **free** |
+| Check no. / date | `reference_no` / `reference_date` | ERPNext labels these literally **"Cheque/Reference No"** |
+| Bank block | `bank`, `bank_account_no` | read-only, auto-filled from `bank_account` — **free** |
+| Drawing account | `paid_from` | |
+| Memo line | `remarks` | |
+| Remittance stub | `references` (child table) | the tear-off listing what is being paid |
 
-Two separable steps, not one big change: (1) anchor the already-built dashboard content to Payment
-Entry (hosting + filter wiring — no new writes), (2) the creation modal (a real write — deserves its
-own review, separate commit, and a check of OI-135's existing write pattern before inventing a new
-one). Do (1) first; do not block it on (2).
+ACH/wire reuses the same document with a different face: `party_bank_account` + `bank_account` +
+`mode_of_payment`, `reference_no` as trace number, `reference_date` as effective date.
+
+**AP-visible field count after dropping** sales-tax template, tax withholding, auto repeat,
+accounting dimensions, internal-transfer branches, and the target/source exchange-rate pairs
+(single currency): **~12–15 inputs.** Genuinely document-shaped, not form-shaped.
+
+**Sections rendered only when non-empty** (5zorro 2026-09-05 — "I have only seen taxes and charges
+on bank payments when there is a chargeback fee or wire fee"): `taxes` (`Advance Taxes and Charges`)
+and `deductions` (`Payment Deductions or Loss`). Confirmed rare for AP. Same *earned* principle the
+toolbar already applies to lens tabs — a check with a permanently empty tax table reads as a form
+again. Do not render an empty one.
+
+### Why not `doc-form.html`
+
+`doc-form.html` is a persistent SPA reconfigured by `docFormUiPayload()`, assembled by
+`scripts/assemble-doc-form-html.js` from three fragments, and templated for **header + item grid +
+taxes**. Payment Entry has no item grid.
+
+**Open question, deliberately not answered here** (5zorro 2026-09-05, and *not* an invariant): what
+`doc-form.html`'s real scope axis is — "documents that touch inventory," or something narrower like
+"AP line-item documents." Its three tenants (Bill/PO/IR) are *both* AP-side and item-bearing, so the
+current data cannot separate the two hypotheses. One counter-signal for the narrower reading:
+`doc-wash.css` already ships **`--stamp-buy` and `--stamp-sell`** tokens, so the wash layer was
+designed expecting a selling side. Evidence, not proof. Resolve it in the AR doc-skin discussion,
+not here — PE is out of `doc-form.html` under *both* readings, so this tranche is not blocked on it.
+
+### Structural decision: one fragment, two mounts
+
+The check/ACH document is built as **`electron/check-doc.fragment.html`**, never as markup inside
+`pay-outstanding.html`. `scripts/assemble-doc-form-html.js` is already exactly this pattern (three
+fragments → one HTML, plus a chrome-id-collision guard). Extend it (or add a sibling script) to
+inject the same fragment into two hosts:
+
+| Mount | Host | Purpose |
+|---|---|---|
+| **Drawer** | bottom of `electron/pay-outstanding.html` | pay a suggested batch without losing sight of it |
+| **Full page** | `electron/payment-doc.html` (new persistent view) | open an existing PE from Recent / Submitted / OI-139's applied-payments list |
+
+One document, two mounts, no duplicated markup. This is also what keeps AR cheap later: an AR mount
+is a third host over the same fragment, not a second implementation.
+
+### CSS: extract before building (own commit, first)
+
+The reusable pieces are **split across two files**, and only half is currently shared:
+
+| File | Holds | Shared today? |
+|---|---|---|
+| `electron/doc-wash.css` (151 lines) | design tokens, wash/hatch/stamp layers, read-only `data-wash-source` styling. Already defines `--wash-payment: #e6f5f0` / `--accent-payment: #009E73`. | **Yes** — `doc-form.head.html`, `home.html`, `pay-outstanding.html` all link it |
+| `electron/doc-form.head.html` (241 lines) | `.card`, `.field`, `.cols`, `.taxes-table`, `.bill-section` — the component CSS the check document actually wants | **No** — inlined in `doc-form.html`'s head, reachable only by Bill/PO/IR |
+
+**Step 1 of this packet** is therefore a mechanical extraction of those component rules from
+`doc-form.head.html` into a new shared **`electron/doc-fields.css`**, linked by `doc-form.head.html`
+and the new check hosts. No behavior change for Bill/PO/IR. **Its own commit, before any check
+work**, so a Bill/PO/IR regression is unambiguous. Note `doc-wash.css:76` already reaches into
+doc-form's `.bill-section` class names — the layering is mildly leaky already; the extraction should
+not worsen it.
+
+The read-only wash system (`doc-wash.css:102-141`, `data-wash-source`) already does the
+"auto-filled from elsewhere, style it differently" job the check's bank block needs, and the
+draft→submitted state change is the same mechanism.
+
+### The drawer: cheap, with one real cost
+
+In-page bottom drawer on `pay-outstanding.html`. Precedent already in the same file: `#prefs-panel`
+toggled by `⚙ Assumptions`. No new view, no new `surfaceMode`, no new preload.
+
+Chosen over the previously-planned **modal** deliberately: a modal occludes the batch being paid,
+which is the dashboard's entire point. The drawer keeps the flow view visible while the check is
+filled.
+
+| Consideration | Handling |
+|---|---|
+| **Dirty-gate (the real work)** | The drawer holds an unsaved check, making `pay-outstanding` the **first non-`doc` surface that can be dirty**. Today `main.js:4022` short-circuits `gateDirtyThen` on `surfaceMode === "doc"`, and both `showHome()` and `showPayOutstanding()` assume this surface is never dirty. Extend the gate to cover it — otherwise clicking Home silently discards a half-written check. |
+| **Height** | A check is ~2.4:1 (wide/short) and suits a bottom drawer; ACH is taller. Drawer must be expandable toward full height, not a fixed strip. Targets stay README's 1080p full / 4K half–quarter. |
+| **Existing PEs** | A drawer cannot serve "open this payment" — that is the full-page mount above, which is why the fragment split is not optional. |
+| **Writes** | Still the only genuinely new risk in this tranche. Reuse OI-135's existing JIT-Payment-Entry write pattern rather than inventing a second one; Clean Core means existing whitelisted methods only. |
+
+### Route anchoring: `isNew` is the discriminator
+
+The check document resolves the A-vs-B tension recorded on 2026-09-04 (one route could not resolve
+to two skins without reading a **field**, `payment_type`, which `lookupDocSkin` cannot see). With a
+document *and* a dashboard, each route has a natural target — and the split is **route-level**:
+
+| Route | Doc target | Why |
+|---|---|---|
+| `/app/payment-entry/new` (`isNew: true`) | **dashboard** | nothing chosen yet — this is the decision surface |
+| `/app/payment-entry/<name>` (`isNew: false`) | **check document** | you are looking at one payment |
+
+`routeInfo()` already returns **`isNew`** as a first-class field (`src/route-info.js:47`,
+`isNewDocRecord`, which also handles Frappe's `/new` → `new-payment-entry-…` promotion). No new
+parsing, no field read at hijack time, no load-then-swap, and therefore none of the G6
+`currentRoute`-lag race. `chrome-state.js` `docTabState()` stays one-Doc-per-page and needs **no
+change**.
+
+### AP vs AR at `/app/payment-entry/new` (5zorro 2026-09-05)
+
+**Problem:** `/new` carries no `payment_type`, so an AR clerk opening it would land on the AP
+dashboard. 5zorro's framing: *"separation of duties causes A/R to be separate from A/P, so 90% of
+the time a User will use the one according to their payment entry function."*
+
+**Decision — remember the direction, the same way lenses are remembered.** New pure module
+`src/payment-direction-prefs.js`, mirroring `src/lens-prefs.js` field-for-field (persisted
+`userData/payment-direction-prefs.json`, sanitized on read, immutable `remember…` returning a new
+object). Not a new convention — the same one.
+
+Resolution order at `/app/payment-entry/new`, strongest signal first:
+
+| # | Signal | Source | Beats |
+|---|---|---|---|
+| 1 | **Tile intent** | The Home tile already encodes it: `pay-bills` + `checks` mean Pay, `receive-pay` means Receive — all three route to `/app/payment-entry/new` today (`src/home-tiles.js`). The intent exists and is simply not carried; carry it. | everything |
+| 2 | **Remembered direction** | `payment-direction-prefs.json` — last direction this user actually completed | default |
+| 3 | **Default `"Pay"`** | this tranche builds AP; Receive falls through to Vanilla until AR ships | — |
+
+Plus an always-visible **direction toggle on the surface itself** (Paying / Receiving), which also
+*writes* the pref — so a mis-guess costs one click and never recurs. No settings page.
+
+For `/app/payment-entry/<name>` the pref is **irrelevant**: read the real `payment_type` off the
+document. The pref exists only to resolve `/new`'s genuine ambiguity.
+
+While AR is unbuilt, direction `"Receive"` means **stay in Vanilla** (no Doc tab offered) rather
+than showing an AP check — consistent with "lens tabs are earned per page."
+
+### Tests
+
+- `tests/payment-direction-prefs.test.js` — defaults to `"Pay"`; remembers per user; invalid/absent
+  file falls back to the default without discarding valid neighbours; tile intent beats a stored
+  pref; `remember…` is immutable (mirrors `tests/lens-prefs.test.js`).
+- `tests/lens-context.test.js` (extend) — `payment-entry` + `isNew: true` → dashboard target;
+  `isNew: false` → check-document target; direction `"Receive"` → no Doc tab while AR is unbuilt.
+- Layer 3 `scaffold-payment-doc.spec.js` — drawer opens from a suggested group and closes; leaving
+  the surface with a dirty drawer prompts (the gate above); full-page mount renders an existing PE.
+- No new Layer 1 tests for the document markup itself — presentation over already-tested data,
+  same rule as Packet 4.
+
+### Sequencing (each step independently reviewable)
+
+1. **Extract `doc-fields.css`** from `doc-form.head.html`. Reversible, no behavior change.
+2. **`check-doc.fragment.html`** + assemble-script wiring + **drawer mount** on the dashboard,
+   read-only first (render a chosen batch as a check; no writes).
+3. **Dirty-gate** extension for a dirty `pay-outstanding` surface.
+4. **Write path** in the drawer (reusing OI-135's pattern) — own commit, own review.
+5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
+
+Do 1–3 before 4. Do not block 1–2 on the write path.
+
+### Still open (5zorro's call, not agent's)
+
+- Does the **Home tile survive** once Payment Entry is a real anchor, or does `pay-outstanding`
+  become PE-only? (Tile currently the only trigger; carrying tile intent above assumes it stays.)
+- Whether `pay-bills` / `checks` / `receive-pay` collapse into fewer tiles once direction is
+  remembered.
 
 ---
 
 ## Packet 5 (stretch — not required to close this tranche) — the write path
 
 **Update 2026-09-05:** dogfood signal arrived faster than expected — 5zorro wants the write path
-folded into **Packet 4b's creation modal** rather than kept as an independent stretch. This section's
-three options are still the real menu for *how* that modal actually writes; keep evaluating them
-here, just under Packet 4b's umbrella now, not as a separate later packet.
+folded into **Packet 4b's check-document drawer** (step 4 of its sequencing) rather than kept as an
+independent stretch. This section's three options are still the real menu for *how* that drawer
+actually writes; keep evaluating them here, just under Packet 4b's umbrella now, not as a separate
+later packet.
 
 Only start after Packet 4 has been dogfooded and 5zorro has actually used the suggestions for a few
 real payment runs. Options to evaluate then, **not decided now**:
@@ -627,8 +767,15 @@ header block above; do not fold their status into this table.)*
 
 - Packet 5 (write path) — stretch, explicitly deferred pending dogfood.
 - The Doc-skin Payment Entry form's actual **build** (Packet 4b) — the **decision** to anchor there
-  (Home tile + PE form, AP only) is locked (2026-09-04); the build is deferred to its own follow-up
-  dated plan once Packet 4 is dogfooded.
+  (Home tile + PE form, AP first) is locked (2026-09-04) and its **architecture** is locked
+  (2026-09-05: check/ACH document, one fragment + two mounts, `isNew` route split, direction prefs);
+  the build is deferred to its own follow-up dated plan once Packet 4 is dogfooded.
+- The **AR** mount of the check document — Packet 4b's fragment split exists so AR is a third host
+  over the same document, not a second implementation, but no AR surface is built here. Direction
+  `"Receive"` stays in Vanilla for now.
+- Resolving what `doc-form.html`'s real scope axis is ("touches inventory" vs "AP line-item
+  documents") — an open question for the AR doc-skin discussion, deliberately **not** an invariant
+  and not load-bearing for this tranche (PE is out of `doc-form.html` under either reading).
 - Per-vendor payment-terms granularity (postage-buffer days, "next business day after net 30,"
   remittance-address-dependent buffers) — Vanilla has no field for any of this (Packet 0); Packet 1b
   defaults every vendor to the same conservative earlier-shift until real per-vendor detail is worth
