@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Pay Outstanding</title>
   <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="check-doc.css" />
   <style>
     :root {
       --flow-batch: var(--accent-payment, #009e73);
@@ -132,6 +133,24 @@
     .view-link { color: #0072b2; text-decoration: none; font-size: 11px; }
     .view-link:hover { text-decoration: underline; }
     svg.flow-svg { display: block; width: 100%; }
+    .check-drawer {
+      position: sticky; bottom: 0; left: 0; right: 0; z-index: 4;
+      background: #f8fafc; border-top: 1px solid #d6dee6;
+      box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+      max-height: 70vh; overflow-y: auto;
+      padding: 16px 20px 22px;
+    }
+    .check-drawer[hidden] { display: none; }
+    .check-drawer-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .check-drawer-title { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .4px; }
+    .check-drawer-close {
+      border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer;
+    }
+    .check-drawer-close:hover { background: #eef2f5; }
   </style>
 </head>
 <body>
@@ -196,6 +215,46 @@
     <div id="vendors" data-testid="pay-outstanding-vendors"></div>
   </main>
 
+  <div id="check-drawer" class="check-drawer" hidden data-testid="check-drawer">
+    <div class="check-drawer-head">
+      <span class="check-drawer-title">Payment preview</span>
+      <button type="button" class="check-drawer-close" id="check-drawer-close" data-testid="check-drawer-close">Close</button>
+    </div>
+    <div class="check-doc" id="check-doc" data-testid="check-doc" hidden>
+  <div class="check-doc-badge" data-testid="check-doc-badge">Preview — not yet saved</div>
+  <div class="check-doc-face">
+    <div class="check-doc-row check-doc-payee-row">
+      <span class="check-doc-label">Pay to the order of</span>
+      <span class="check-doc-payee" data-testid="check-doc-payee"></span>
+    </div>
+    <div class="check-doc-row check-doc-amount-row">
+      <span class="check-doc-amount-box" data-testid="check-doc-amount"></span>
+    </div>
+    <div class="check-doc-row check-doc-meta-row">
+      <div class="check-doc-field">
+        <span class="check-doc-label">Date</span>
+        <span class="check-doc-value" data-testid="check-doc-date"></span>
+      </div>
+      <div class="check-doc-field">
+        <span class="check-doc-label">Check no. / Bank</span>
+        <span class="check-doc-value check-doc-placeholder" data-testid="check-doc-bank">Assigned when saved</span>
+      </div>
+    </div>
+    <div class="check-doc-row check-doc-memo-row">
+      <span class="check-doc-label">Memo</span>
+      <span class="check-doc-value" data-testid="check-doc-memo"></span>
+    </div>
+  </div>
+  <div class="check-doc-stub">
+    <div class="check-doc-stub-head">Remittance</div>
+    <div class="check-doc-stub-rows" data-testid="check-doc-stub-rows"></div>
+    <div class="check-doc-stub-total" data-testid="check-doc-stub-total"></div>
+  </div>
+  <div class="check-doc-taxes" data-testid="check-doc-taxes" hidden></div>
+  <div class="check-doc-deductions" data-testid="check-doc-deductions" hidden></div>
+</div>
+  </div>
+
   <script type="module">
     import { paymentBatchEconomics } from "../src/payment-batch-economics.js";
     import {
@@ -203,6 +262,7 @@
       mergePaymentBatchPrefs,
       validatePaymentBatchPrefs,
     } from "../src/payment-batch-prefs.js";
+    import { paintCheckDoc, closeCheckDoc } from "../src/check-doc-mount.js";
 
     const api = window.erpPayOutstanding;
     const ROW_HEIGHT = 34;
@@ -237,6 +297,24 @@
     function money(n) {
       return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
+
+    // The check-doc drawer: a read-only preview of a chosen batch as a check/ACH document
+    // (Packet 4b step 2 -- no writes yet). One mount today; the same fragment + paintCheckDoc
+    // call is what a future full-page mount (an existing Payment Entry) will reuse.
+    const checkDrawer = document.getElementById("check-drawer");
+    const checkDrawerClose = document.getElementById("check-drawer-close");
+    const checkDocEl = document.getElementById("check-doc");
+
+    function openCheckDrawer(group, bills) {
+      paintCheckDoc(checkDocEl, group, bills);
+      checkDrawer.hidden = false;
+      checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    function closeCheckDrawer() {
+      checkDrawer.hidden = true;
+      closeCheckDoc(checkDocEl);
+    }
+    checkDrawerClose.onclick = closeCheckDrawer;
 
     function todayIso() {
       const d = new Date();
@@ -397,7 +475,7 @@
       return wrap;
     }
 
-    function groupNodeEl(group) {
+    function groupNodeEl(group, bills) {
       const wrap = document.createElement("div");
       wrap.className = "group-node";
       wrap.dataset.testid = "group-node";
@@ -455,6 +533,19 @@
       };
       rationale.appendChild(document.createElement("br"));
       rationale.appendChild(link);
+
+      const previewLink = document.createElement("a");
+      previewLink.className = "view-link";
+      previewLink.href = "#";
+      previewLink.dataset.testid = "group-preview-check";
+      previewLink.textContent = "Preview as check ↓";
+      previewLink.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        openCheckDrawer(group, bills);
+      };
+      rationale.appendChild(document.createElement("br"));
+      rationale.appendChild(previewLink);
 
       wrap.onclick = () => {
         rationale.hidden = !rationale.hidden;
@@ -623,7 +714,7 @@
       }
       const groupColHeight = groupSpans.reduce((m, s) => Math.max(m, s.y1), 0);
       for (const span of groupSpans) {
-        const built = groupNodeEl(span.group);
+        const built = groupNodeEl(span.group, bills);
         const wrap = document.createElement("div");
         wrap.className = "group-wrap";
         wrap.style.height = `${span.y1 - span.y0}px`;

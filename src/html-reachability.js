@@ -32,6 +32,8 @@ export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
   "doc-form-body.fragment.html": "PO/IR body partial — assembled into doc-form.html",
   "doc-form.head.html": "doc-form.html head/styles partial for assemble script",
   "doc-form.footer.html": "doc-form.html calc overlay + boot script partial",
+  "pay-outstanding.src.html": "pay-outstanding.html source shell for assemble-pay-outstanding-html.js",
+  "check-doc.fragment.html": "Check/ACH document partial — assembled into pay-outstanding.html's drawer (Packet 4b)",
 });
 
 /**

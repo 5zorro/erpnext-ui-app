@@ -1,0 +1,112 @@
+/**
+ * The check/ACH document (Packet 4b). One fragment, two mounts (drawer on pay-outstanding.html,
+ * later a full page for an existing Payment Entry) -- both link this file rather than duplicating
+ * rules, the same "shared component CSS" pattern doc-fields.css already establishes for Bill/PO/IR.
+ * Tokens (--wash-payment / --accent-payment) come from doc-wash.css, which every host already links.
+ */
+
+.check-doc[hidden] { display: none; }
+
+.check-doc {
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  color: #1f2d3d;
+  max-width: 560px;
+}
+
+.check-doc-badge {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--accent-payment, #009e73);
+  background: var(--wash-payment, #e6f5f0);
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-bottom: 10px;
+}
+
+.check-doc-face {
+  background: #fff;
+  border: 1px solid #d6dee6;
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+}
+
+.check-doc-row + .check-doc-row { margin-top: 12px; }
+
+.check-doc-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.check-doc-payee-row .check-doc-payee {
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid #cbd5e1;
+  display: block;
+  padding-bottom: 4px;
+  min-height: 1.2em;
+}
+
+.check-doc-amount-row { display: flex; justify-content: flex-end; }
+.check-doc-amount-box {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: #f8fafc;
+}
+
+.check-doc-meta-row { display: flex; gap: 24px; }
+.check-doc-field { flex: 1; min-width: 0; }
+.check-doc-value {
+  display: block;
+  font-size: 13px;
+  min-height: 1.2em;
+}
+.check-doc-placeholder { color: #94a3b8; font-style: italic; }
+
+.check-doc-memo-row .check-doc-value {
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 6px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.check-doc-stub {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px dashed #cbd5e1;
+}
+.check-doc-stub-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.check-doc-stub-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.check-doc-stub-invoice { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.check-doc-stub-due { color: #64748b; font-variant-numeric: tabular-nums; }
+.check-doc-stub-amount { font-variant-numeric: tabular-nums; text-align: right; min-width: 70px; }
+.check-doc-stub-total {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  padding-top: 6px;
+}
