@@ -36,7 +36,11 @@ import {
   nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
 } from "./link-picker-policy.js";
-import { autoSizeItemColumns, mountColResize } from "./item-col-resize.js";
+import {
+  autoSizeItemColumns,
+  mountColResize,
+  mountDensityControl,
+} from "./item-col-resize.js";
 import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
@@ -1134,6 +1138,7 @@ function sizeItemColumns() {
     if (!table) return;
     const tableKey = itemsTableKey();
     mountColResize(table, { tableKey, onChange: sizeItemColumns });
+    mountDensityControl({ table, button: document.getElementById("btn-density") });
     autoSizeItemColumns(table, { tableKey });
   } catch {
     /* column sizing is presentation; never let it break a repaint */

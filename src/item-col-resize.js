@@ -11,12 +11,15 @@
  */
 
 import {
+  DENSITIES,
   colRuleFor,
   defaultTableStorage,
   distributeColWidths,
   draggedColWidthPx,
   readColWidthPrefs,
+  readDensity,
   writeColWidthPref,
+  writeDensity,
 } from "./item-table-layout.js";
 
 /** Reused across calls; creating a canvas per repaint is pure waste. */
@@ -216,7 +219,42 @@ export function autoSizeItemColumns(table, opts) {
     const px = key ? widths[key] : null;
     if (px) c.style.width = `${px}px`;
   });
+  applyStickyOffsets(table, heads, widths);
   return widths;
+}
+
+/** Never freeze more than this much of the viewport away. */
+const MAX_STICKY_COLS = 3;
+
+/**
+ * Publish left offsets for the leading columns so they can freeze while the
+ * grid scrolls sideways. This has to live here because the offsets are a
+ * running sum of the widths step C just computed -- CSS cannot know them.
+ *
+ * The frozen group runs up to and including the item column: scrolling right to
+ * read Project is useless if you can no longer see which line you are on.
+ *
+ * @param {HTMLTableElement} table
+ * @param {{ th: HTMLElement, key: string }[]} heads
+ * @param {Record<string, number>} widths
+ */
+function applyStickyOffsets(table, heads, widths) {
+  const itemAt = heads.findIndex((h) => h.key === "item_code");
+  const count = Math.min(MAX_STICKY_COLS, itemAt >= 0 ? itemAt + 1 : 1);
+
+  let left = 0;
+  for (let i = 0; i < MAX_STICKY_COLS; i += 1) {
+    const prop = `--sticky-${i + 1}`;
+    if (i < count) {
+      table.style.setProperty(prop, `${Math.round(left)}px`);
+      left += widths[heads[i]?.key] || 0;
+    } else {
+      // Unset rather than 0: the CSS falls back to `left: auto`, which leaves
+      // the column positioned but not actually stuck.
+      table.style.removeProperty(prop);
+    }
+  }
+  table.setAttribute("data-sticky-count", String(count));
 }
 
 /**
@@ -311,4 +349,42 @@ export function mountColResize(table, opts) {
       ev.stopPropagation();
     });
   });
+}
+
+/**
+ * Row-height control. This is the one toggle Packet T allows itself, and the
+ * rule it lives under is that it must never be *needed*: every density wraps
+ * and grows, so reading your work never depends on finding this button.
+ *
+ * Idempotent — safe to call after every repaint.
+ *
+ * @param {{
+ *   table: HTMLTableElement|null,
+ *   button: HTMLElement|null,
+ *   storage?: object|null,
+ * }} opts
+ * @returns {string} the density in effect
+ */
+export function mountDensityControl(opts) {
+  const table = opts && opts.table;
+  const button = opts && opts.button;
+  const storage = opts && opts.storage !== undefined ? opts.storage : defaultTableStorage();
+
+  const current = readDensity(storage);
+  const paint = (density) => {
+    if (table) table.setAttribute("data-density", density);
+    if (button) button.textContent = `Rows: ${density}`;
+  };
+  paint(current);
+
+  if (button && button.dataset.densityWired !== "1") {
+    button.dataset.densityWired = "1";
+    button.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const now = readDensity(storage);
+      const next = DENSITIES[(DENSITIES.indexOf(now) + 1) % DENSITIES.length];
+      paint(writeDensity(storage, next));
+    });
+  }
+  return current;
 }

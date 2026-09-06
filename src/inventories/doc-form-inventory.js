@@ -157,6 +157,12 @@ const DOC_FORM_SHARED = Object.freeze([
     modeSwitch: "none",
     notes: "Paste/CSV import; mouse-only (OI-099)",
   },
+  {
+    id: "doc-density",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "Packet T D row height compact/standard/comfortable; mouse-only (OI-099)",
+  },
   { id: "doc-back-top", kind: "button", modeSwitch: "none" },
   // Commit gate (hidden in static HTML; shown at runtime)
   { id: "doc-gate-discard", kind: "button", modeSwitch: "none", synthetic: true },

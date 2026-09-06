@@ -104,6 +104,12 @@ const BILL_DOC_STATIC = Object.freeze([
     modeSwitch: "none",
     notes: "OI-132 paste/CSV import; mouse-only (OI-099)",
   },
+  {
+    id: "bill-density",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "Packet T D row height compact/standard/comfortable; mouse-only (OI-099)",
+  },
   { id: "bill-tax-account", kind: "text", modeSwitch: "none" },
   { id: "bill-tax-amount", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-add-tax", kind: "button", modeSwitch: "none" },

@@ -194,6 +194,54 @@ describe("Packet T step B — display layer (2026-09-06)", () => {
   });
 });
 
+describe("Packet T step D — frozen columns and density CSS (2026-09-06)", () => {
+  it("frozen cells get an opaque ground", () => {
+    // Without one the scrolled columns show straight through the frozen group.
+    assert.match(
+      docFieldsCss,
+      /#panel-items table\[data-sticky-count\] tbody td:nth-child\(-n \+ 3\) \{\s*background: #fff;/,
+    );
+    assert.match(
+      docFieldsCss,
+      /#panel-items table\[data-sticky-count\] thead th:nth-child\(-n \+ 3\) \{\s*background: #f8fafc;/,
+    );
+  });
+
+  it("each frozen column reads its offset from step C, falling back to auto", () => {
+    for (const n of [1, 2, 3]) {
+      assert.match(
+        docFieldsCss,
+        new RegExp(`left: var\\(--sticky-${n}, auto\\);`),
+        `column ${n} has no sticky offset`,
+      );
+    }
+  });
+
+  it("standard density is the unstyled default", () => {
+    // Only compact and comfortable override anything; "standard" existing as a
+    // rule would mean the default path could drift from the default look.
+    assert.doesNotMatch(docFieldsCss, /\[data-density="standard"\]/);
+    assert.match(docFieldsCss, /\[data-density="compact"\]/);
+    assert.match(docFieldsCss, /\[data-density="comfortable"\]/);
+  });
+
+  it("every density still wraps — the toggle is never needed to read", () => {
+    // The wrap rules live on td.cell-wrap > .cell-text unconditionally; density
+    // may only change padding/min-height/line-height.
+    const densityRules = docFieldsCss.match(/\[data-density="(compact|comfortable)"\][^{]*\{[^}]*\}/gs) || [];
+    assert.ok(densityRules.length > 0, "no density rules found");
+    for (const rule of densityRules) {
+      assert.doesNotMatch(rule, /white-space:/, `a density rule changes wrapping: ${rule}`);
+      assert.doesNotMatch(rule, /overflow-wrap:/, `a density rule changes wrapping: ${rule}`);
+    }
+  });
+
+  it("the density control ships in the generated shell for both bodies", () => {
+    assert.match(docFormHtml, /data-testid="bill-density"/);
+    assert.match(docFormHtml, /data-testid="doc-density"/);
+  });
+});
+
 describe("doc-form CAPS control", () => {
   it("exposes CAPS toggle in Navigate toolbar", () => {
     assert.match(docFormHtml, /id="btn-caps" data-testid="doc-caps"/);

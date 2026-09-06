@@ -488,3 +488,90 @@ td.cell-wrap:focus-within {
 .col-resize:active::after {
   background: #2563eb;
 }
+
+/* D — the leading columns freeze while the grid scrolls sideways. Offsets come
+   from step C (a running sum of the computed widths), published as custom
+   properties; `auto` means "positioned but not actually stuck", which is what a
+   column outside the frozen group gets. */
+
+#panel-items table thead th:nth-child(1),
+#panel-items table tbody td:nth-child(1) {
+  position: sticky;
+  left: var(--sticky-1, auto);
+  z-index: 2;
+}
+
+#panel-items table thead th:nth-child(2),
+#panel-items table tbody td:nth-child(2) {
+  position: sticky;
+  left: var(--sticky-2, auto);
+  z-index: 2;
+}
+
+#panel-items table thead th:nth-child(3),
+#panel-items table tbody td:nth-child(3) {
+  position: sticky;
+  left: var(--sticky-3, auto);
+  z-index: 2;
+}
+
+/* Frozen cells need an opaque ground or the scrolled columns show through. */
+#panel-items table[data-sticky-count] tbody td:nth-child(-n + 3) {
+  background: #fff;
+}
+
+#panel-items table[data-sticky-count] thead th:nth-child(-n + 3) {
+  background: #f8fafc;
+}
+
+/* A seam so the frozen group reads as frozen rather than as a rendering fault. */
+#panel-items table[data-sticky-count="1"] tbody td:nth-child(1),
+#panel-items table[data-sticky-count="1"] thead th:nth-child(1),
+#panel-items table[data-sticky-count="2"] tbody td:nth-child(2),
+#panel-items table[data-sticky-count="2"] thead th:nth-child(2),
+#panel-items table[data-sticky-count="3"] tbody td:nth-child(3),
+#panel-items table[data-sticky-count="3"] thead th:nth-child(3) {
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+/* D — row density. The one toggle this packet allows itself, under the rule
+   that it must never be *needed*: every density wraps and grows, so reading
+   your work never depends on finding it. "standard" is the unstyled default. */
+
+.density-btn {
+  margin-left: auto;
+}
+
+#panel-items table[data-density="compact"] td.cell-wrap > .cell-text {
+  min-height: 22px;
+  padding: 2px 6px;
+  line-height: 1.25;
+}
+
+#panel-items table[data-density="compact"] tbody td,
+#panel-items table[data-density="compact"] thead th {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+#panel-items table[data-density="compact"] td input {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+#panel-items table[data-density="comfortable"] td.cell-wrap > .cell-text {
+  min-height: 36px;
+  padding: 9px 6px;
+  line-height: 1.5;
+}
+
+#panel-items table[data-density="comfortable"] tbody td,
+#panel-items table[data-density="comfortable"] thead th {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+#panel-items table[data-density="comfortable"] td input {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}

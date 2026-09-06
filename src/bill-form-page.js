@@ -120,7 +120,11 @@ import {
 import {
   nextItemFocusAfterEdit,
 } from "../src/link-picker-policy.js";
-import { autoSizeItemColumns, mountColResize } from "./item-col-resize.js";
+import {
+  autoSizeItemColumns,
+  mountColResize,
+  mountDensityControl,
+} from "./item-col-resize.js";
 import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
@@ -1816,6 +1820,7 @@ export async function bootBillFormPage(api) {
         const table = el.items && el.items.closest ? el.items.closest("table") : null;
         if (!table) return;
         mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
+        mountDensityControl({ table, button: document.getElementById("btn-density") });
         autoSizeItemColumns(table, { tableKey: "bill-items" });
       } catch {
         /* column sizing is presentation; never let it break a repaint */
