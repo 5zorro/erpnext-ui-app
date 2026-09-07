@@ -231,7 +231,13 @@
       mergePaymentBatchPrefs,
       validatePaymentBatchPrefs,
     } from "../src/payment-batch-prefs.js";
-    import { paintCheckDoc, closeCheckDoc, mountCheckDocWrite } from "../src/check-doc-mount.js";
+    import {
+      paintCheckDoc,
+      closeCheckDoc,
+      mountCheckDocWrite,
+      setCheckDocBatchSource,
+    } from "../src/check-doc-mount.js";
+    import { buildCheckDocViewModel } from "../src/check-doc-view.js";
 
     const api = window.erpPayOutstanding;
     const ROW_HEIGHT = 34;
@@ -293,7 +299,8 @@
         );
         if (!proceed) return;
       }
-      paintCheckDoc(checkDocEl, group, bills);
+      setCheckDocBatchSource(group, bills);
+      paintCheckDoc(checkDocEl, buildCheckDocViewModel(group, bills));
       setDrawerDirty(false);
       checkDrawer.hidden = false;
       checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });

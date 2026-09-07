@@ -1,13 +1,18 @@
 /**
- * DOM side of the check/ACH document (Packet 4b). Populates the check-doc.fragment.html markup
- * from a chosen PaymentBatchGroup, and (step 4) wires the write-mode controls that turn that
- * preview into an actual Payment Entry. Pure view-model logic lives in check-doc-view.js and
- * payment-entry-batch.js; this file only touches the DOM.
+ * DOM side of the check/ACH document (Packet 4b). Paints the check-doc.fragment.html markup
+ * from an already-built CheckDocViewModel (check-doc-view.js), and (step 4) wires the write-
+ * mode controls that turn a *proposal* into an actual Payment Entry. Two mounts share this file
+ * unchanged: the pay-outstanding.html drawer (an editable proposal) and payment-doc.html (a
+ * read-only view of an existing document, step 5) -- only the caller differs in which view-model
+ * builder it uses and whether it calls mountCheckDocWrite at all.
  */
-import { buildCheckDocViewModel } from "./check-doc-view.js";
 import { mountLinkPicker } from "./link-picker-ui.js";
 
-/** The group/bills paintCheckDoc most recently painted -- what the submit button acts on. */
+/**
+ * What the write-mode submit button acts on -- set by setCheckDocBatchSource, read by
+ * mountCheckDocWrite's click handler. Irrelevant (stays null) on a read-only mount, which never
+ * calls mountCheckDocWrite.
+ */
 let currentGroup = null;
 let currentBills = [];
 
@@ -19,43 +24,42 @@ function field(root, testid) {
   return root.querySelector(`[data-testid="${testid}"]`);
 }
 
-function resetWriteInputs(root) {
-  const mop = field(root, "check-doc-mop");
-  if (mop) mop.value = "";
-  const acct = field(root, "check-doc-cash-account");
-  if (acct) acct.value = "";
-  const ref = field(root, "check-doc-reference-no");
-  if (ref) ref.value = "";
-  const status = field(root, "check-doc-write-status");
-  if (status) status.textContent = "";
-  const submit = field(root, "check-doc-submit");
-  if (submit) submit.disabled = false;
+/**
+ * Register what a later submit-click should act on. Call before/with paintCheckDoc when the
+ * mount is an editable proposal; never call it for a read-only existing-document mount.
+ * @param {import("./payment-batch-economics.js").PaymentBatchGroup|null} group
+ * @param {import("./outstanding-bills.js").OutstandingBillRow[]} [bills]
+ */
+export function setCheckDocBatchSource(group, bills) {
+  currentGroup = group || null;
+  currentBills = bills || [];
 }
 
 /**
  * @param {Element|null|undefined} root the check-doc fragment's own container
- * @param {import("./payment-batch-economics.js").PaymentBatchGroup} group
- * @param {import("./outstanding-bills.js").OutstandingBillRow[]} bills
+ * @param {import("./check-doc-view.js").CheckDocViewModel|null|undefined} viewModel
+ * @param {{ readOnly?: boolean, badgeText?: string }} [opts]
  */
-export function paintCheckDoc(root, group, bills) {
+export function paintCheckDoc(root, viewModel, opts = {}) {
   if (!root) return;
-  currentGroup = group || null;
-  currentBills = bills || [];
-  const vm = buildCheckDocViewModel(group, bills);
+  const vm = viewModel || {};
+
+  const badge = field(root, "check-doc-badge");
+  if (badge) badge.textContent = opts.badgeText || "Preview — not yet saved";
 
   const payee = field(root, "check-doc-payee");
-  if (payee) payee.textContent = vm.payTo;
+  if (payee) payee.textContent = vm.payTo || "";
   const amount = field(root, "check-doc-amount");
-  if (amount) amount.textContent = money(vm.amount);
+  if (amount) amount.textContent = money(vm.amount || 0);
   const date = field(root, "check-doc-date");
-  if (date) date.textContent = vm.payOn;
+  if (date) date.textContent = vm.payOn || "";
   const memo = field(root, "check-doc-memo");
-  if (memo) memo.textContent = vm.memo;
+  if (memo) memo.textContent = vm.memo || "";
 
   const rowsEl = field(root, "check-doc-stub-rows");
   if (rowsEl) {
     rowsEl.innerHTML = "";
-    for (const row of vm.stubRows) {
+    for (const row of vm.stubRows || []) {
       const el = document.createElement("div");
       el.className = "check-doc-stub-row";
       el.dataset.testid = "check-doc-stub-row";
@@ -75,12 +79,50 @@ export function paintCheckDoc(root, group, bills) {
     }
   }
   const total = field(root, "check-doc-stub-total");
-  if (total) total.textContent = `Total ${money(vm.amount)}`;
+  if (total) total.textContent = `Total ${money(vm.amount || 0)}`;
 
-  // taxes/deductions: a proposal carries neither (ERPNext only computes them once a real
-  // Payment Entry exists) -- sections stay hidden, "rendered only when non-empty" trivially
-  // satisfied here.
-  resetWriteInputs(root);
+  // taxes/deductions: a proposal carries neither, and this pass does not surface them for an
+  // existing document either (draft-only fields, rare for AP per the architecture note) --
+  // sections stay hidden either way, "rendered only when non-empty" trivially satisfied.
+
+  const mop = field(root, "check-doc-mop");
+  const acct = field(root, "check-doc-cash-account");
+  const ref = field(root, "check-doc-reference-no");
+  const status = field(root, "check-doc-write-status");
+  const submit = field(root, "check-doc-submit");
+  const actions = field(root, "check-doc-write-actions");
+
+  if (opts.readOnly) {
+    if (mop) {
+      mop.value = vm.modeOfPayment || "";
+      mop.disabled = true;
+    }
+    if (acct) {
+      acct.value = vm.bankAccount || "";
+      acct.disabled = true;
+    }
+    if (ref) {
+      ref.value = vm.referenceNo || "";
+      ref.disabled = true;
+    }
+    if (actions) actions.hidden = true;
+  } else {
+    if (mop) {
+      mop.value = "";
+      mop.disabled = false;
+    }
+    if (acct) {
+      acct.value = "";
+      acct.disabled = false;
+    }
+    if (ref) {
+      ref.value = "";
+      ref.disabled = false;
+    }
+    if (actions) actions.hidden = false;
+    if (status) status.textContent = "";
+    if (submit) submit.disabled = false;
+  }
   root.hidden = false;
 }
 
@@ -92,7 +134,8 @@ export function closeCheckDoc(root) {
 /**
  * Wire the write-mode controls once per fragment mount -- unlike paintCheckDoc, this does not
  * re-run on every group switch. mountLinkPicker refuses to double-mount the same input (its own
- * linkMounted WeakMap), so calling this once at page init is the correct lifetime.
+ * linkMounted WeakMap), so calling this once at page init is the correct lifetime. Never call
+ * this for a read-only mount (payment-doc.html) -- there is nothing to submit there.
  *
  * @param {Element|null|undefined} root
  * @param {{

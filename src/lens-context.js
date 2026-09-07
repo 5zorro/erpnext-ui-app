@@ -18,6 +18,7 @@
 
 import { normalizeDoctypeKey } from "./lens-prefs.js";
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
+import { isNewDocRecord } from "./route-info.js";
 
 /**
  * Doctypes the Simplified lens is actually ready for — derived from the shipped seed
@@ -45,7 +46,9 @@ export function hasSimplifiedLens(doctype, record) {
 /**
  * @typedef {{ kind: "workflow-home" }} DocSkinHomeTarget
  * @typedef {{ kind: "doc-form", doctype: string, record: string, route: string, layoutKey: string }} DocSkinFormTarget
- * @typedef {DocSkinHomeTarget | DocSkinFormTarget} DocSkinTarget
+ * @typedef {{ kind: "pay-outstanding" }} DocSkinPayOutstandingTarget
+ * @typedef {{ kind: "payment-doc", doctype: string, record: string, route: string }} DocSkinPaymentDocTarget
+ * @typedef {DocSkinHomeTarget | DocSkinFormTarget | DocSkinPayOutstandingTarget | DocSkinPaymentDocTarget} DocSkinTarget
  *
  * @typedef {{
  *   id: string,
@@ -88,6 +91,15 @@ export const DOC_SKIN_INDEX = [
     label: "Item Receipt entry",
     match: { doctypes: ["purchase-receipt"], needsRecord: true },
     layoutKey: "item-receipt",
+    ready: true,
+  },
+  {
+    id: "payment-entry",
+    label: "Payment entry",
+    // Not a doc-form.html layout -- resolveDocSkinTarget special-cases this id below, routing
+    // to pay-outstanding.html (isNew: nothing chosen yet, the decision surface) or
+    // payment-doc.html (an existing document: the check itself). See Packet 4b step 5.
+    match: { doctypes: ["payment-entry"], needsRecord: true },
     ready: true,
   },
 ];
@@ -152,17 +164,48 @@ export function lookupDocSkin(ctx = {}, index = DOC_SKIN_INDEX) {
 }
 
 /**
- * Show the Doc toolbar tab only when indexed AND ready.
+ * Payment Entry's `/new` route carries no `payment_type`, so which direction (AP "Pay" vs AR
+ * "Receive") is ambiguous from the route alone -- resolved by payment-direction-prefs.js and
+ * passed in as `ctx.paymentDirection`. AR has no Doc skin yet, so "Receive" stays in Vanilla
+ * (no tab) rather than showing an AP check. Existing records are unaffected: the real
+ * `payment_type` is truth there, not this pref (see payment-doc.html, which reads the actual
+ * document after opening).
+ * @param {DocSkinIndexEntry} entry
+ * @param {boolean} isNew
  * @param {Parameters<typeof classifySurface>[0]} ctx
+ */
+function isSuppressedPaymentEntryReceive(entry, isNew, ctx) {
+  return entry.id === "payment-entry" && isNew && ctx.paymentDirection === "Receive";
+}
+
+/**
+ * Show the Doc toolbar tab only when indexed AND ready.
+ * @param {Parameters<typeof classifySurface>[0] & { paymentDirection?: string }} ctx
  */
 export function hasDocSkin(ctx = {}) {
   const entry = lookupDocSkin(ctx);
-  return !!(entry && entry.ready);
+  if (!entry || !entry.ready) return false;
+  if (entry.id === "payment-entry") {
+    const rec = ctx.record != null && ctx.record !== "" ? String(ctx.record) : recordFromRoute(ctx.route);
+    if (isSuppressedPaymentEntryReceive(entry, isNewDocRecord(rec), ctx)) return false;
+  }
+  return true;
+}
+
+/**
+ * @param {string} dt
+ * @param {string} rec
+ * @param {Parameters<typeof classifySurface>[0]} ctx
+ */
+function deriveDocFormRoute(dt, rec, ctx) {
+  return typeof ctx.route === "string" && (ctx.route.includes(dt) || ctx.route.includes("/app/") || ctx.route.includes("/desk/"))
+    ? ctx.route.split(/[?#]/)[0]
+    : `/app/${dt}/${rec}`;
 }
 
 /**
  * Resolve Doc-skin navigation target, or null if tab should be hidden.
- * @param {Parameters<typeof classifySurface>[0]} ctx
+ * @param {Parameters<typeof classifySurface>[0] & { paymentDirection?: string }} ctx
  * @returns {DocSkinTarget|null}
  */
 export function resolveDocSkinTarget(ctx = {}) {
@@ -175,10 +218,15 @@ export function resolveDocSkinTarget(ctx = {}) {
 
   const dt = normalizeDoctypeKey(ctx.doctype) || doctypeFromRoute(ctx.route);
   const rec = ctx.record != null && ctx.record !== "" ? String(ctx.record) : recordFromRoute(ctx.route);
-  const route =
-    typeof ctx.route === "string" && (ctx.route.includes(dt) || ctx.route.includes("/app/") || ctx.route.includes("/desk/"))
-      ? ctx.route.split(/[?#]/)[0]
-      : `/app/${dt}/${rec}`;
+
+  if (entry.id === "payment-entry") {
+    const isNew = isNewDocRecord(rec);
+    if (isSuppressedPaymentEntryReceive(entry, isNew, ctx)) return null;
+    if (isNew) return { kind: "pay-outstanding" };
+    return { kind: "payment-doc", doctype: dt, record: rec, route: deriveDocFormRoute(dt, rec, ctx) };
+  }
+
+  const route = deriveDocFormRoute(dt, rec, ctx);
   return {
     kind: "doc-form",
     doctype: dt,

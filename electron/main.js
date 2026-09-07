@@ -61,6 +61,11 @@ import {
   validatePaymentBatchPrefs,
 } from "../src/payment-batch-prefs.js";
 import {
+  mergePaymentDirectionPrefs,
+  preferredPaymentDirection,
+  rememberPaymentDirection,
+} from "../src/payment-direction-prefs.js";
+import {
   routeInfo,
   routesReferToSameDoc,
   isNewDocRecord,
@@ -268,7 +273,7 @@ const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
   "utf8",
 );
 
-/** @typedef {"home"|"erp"|"bill"|"doc"} SurfaceMode */
+/** @typedef {"home"|"erp"|"bill"|"doc"|"pay-outstanding"|"payment-doc"} SurfaceMode */
 /** @typedef {"po"|"receipt"|"bill"} DocFormSkinId */
 
 let win = null;
@@ -281,6 +286,8 @@ let erp = null;
 let hist = null;
 /** OI-161 Packet 4 (v2): Home-triggered dashboard, hosted in-window like every other surface. */
 let payOutstanding = null;
+/** Packet 4b step 5: read-only full-page mount of an existing Payment Entry. */
+let paymentDoc = null;
 /** @type {SurfaceMode} */
 let surfaceMode = "home";
 /** @type {DocFormSkinId|null} */
@@ -298,6 +305,8 @@ let history = [];
 let lensPrefs = {};
 /** @type {import("../src/payment-batch-prefs.js").PaymentBatchPrefs} */
 let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+/** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
+let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
 let shelvedDrafts = [];
 /** @type {import("../src/calc/session-history.js").CalcHistoryEntry[]} */
@@ -552,6 +561,9 @@ function prefsPath() {
 function paymentBatchPrefsPath() {
   return path.join(app.getPath("userData"), "payment-batch-prefs.json");
 }
+function paymentDirectionPrefsPath() {
+  return path.join(app.getPath("userData"), "payment-direction-prefs.json");
+}
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
 }
@@ -594,10 +606,24 @@ function loadPrefs() {
   } catch {
     paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
   }
+  try {
+    paymentDirectionPrefs = mergePaymentDirectionPrefs(
+      JSON.parse(fs.readFileSync(paymentDirectionPrefsPath(), "utf8")),
+    );
+  } catch {
+    paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
+  }
 }
 function savePaymentBatchPrefs() {
   try {
     fs.writeFileSync(paymentBatchPrefsPath(), JSON.stringify(paymentBatchPrefs));
+  } catch {
+    /* ignore */
+  }
+}
+function savePaymentDirectionPrefs() {
+  try {
+    fs.writeFileSync(paymentDirectionPrefsPath(), JSON.stringify(paymentDirectionPrefs));
   } catch {
     /* ignore */
   }
@@ -800,7 +826,7 @@ function syncE2eApi() {
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
-      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding };
+      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding, paymentDoc };
       const view = map[name];
       if (!view || view.webContents.isDestroyed()) {
         return Promise.reject(new Error(`view not ready: ${name}`));
@@ -822,13 +848,22 @@ function sendHealth(status) {
 }
 
 function shellCtx() {
-  const info = routeInfo(currentRoute, ERP_BASE);
+  // On the ERP surface the live page is the truth, not currentRoute -- Frappe's own client
+  // router renames a fresh "/new" tab to "new-<doctype>-<random>" moments after it loads, and
+  // currentRoute (set when the navigation was *requested*) does not track that rename. Found via
+  // Packet 4b step 5's Doc-tab-right-after-tile-click flow: clicking Doc before this settled
+  // could resolve against a stale route and silently do nothing. sendUiState() already applies
+  // this same correction locally for its own tab-visibility read; this makes every shellCtx()
+  // consumer (including openDocSkinContinue's actual navigation, not just tab visibility) safe.
+  const liveRoute = surfaceMode === "erp" ? currentErpPathname() || currentRoute : currentRoute;
+  const info = routeInfo(liveRoute, ERP_BASE);
   return {
     showingHome: showingHome(),
     lens: isDocLensSurface() || showingHome() ? "doc" : "vanilla",
-    route: info.path || currentRoute,
+    route: info.path || liveRoute,
     doctype: info.doctype,
     record: info.record,
+    paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
   };
 }
 
@@ -877,7 +912,14 @@ function sendUiState() {
       hasDocSkinnedRecord: !!(
         contextInfo.doctype &&
         contextInfo.record &&
-        profileByDoctypeKey(contextInfo.doctype)
+        (profileByDoctypeKey(contextInfo.doctype) ||
+          (contextInfo.doctype === "payment-entry" &&
+            // Isolated from doc-form.html's profile registry on purpose (Packet 4b step 5) --
+            // routes to pay-outstanding.html/payment-doc.html instead. /new suppresses the tab
+            // for a Receive-direction visit (AR isn't built); an existing record always offers
+            // it -- payment-doc.html reads the real payment_type itself once open.
+            (!isNewDocRecord(contextInfo.record) ||
+              preferredPaymentDirection(paymentDirectionPrefs) !== "Receive")))
       ),
       hasSimplifiedLens: hasSimplifiedLens(contextInfo.doctype, contextInfo.record),
       parkedIsDocSkinned: !!(parkedInfo && parkedInfo.doctype && profileByDoctypeKey(parkedInfo.doctype)),
@@ -2788,7 +2830,7 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
 }
 
 function place() {
-  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding) return;
+  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc) return;
   const b = win.getContentBounds();
   const H = TAB_BAR_HEIGHT;
   const HW = historyRailWidth(histCollapsed);
@@ -2805,6 +2847,7 @@ function place() {
   docForm.setBounds(surfaceMode === "doc" ? main : OFF);
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
   payOutstanding.setBounds(surfaceMode === "pay-outstanding" ? main : OFF);
+  paymentDoc.setBounds(surfaceMode === "payment-doc" ? main : OFF);
 }
 
 /** @type {BrowserWindow|null} */
@@ -3468,6 +3511,43 @@ function showPayOutstanding() {
 }
 
 /**
+ * Packet 4b step 5: read-only full-page mount of an existing Payment Entry -- the "you are
+ * looking at one payment" side of the isNew route split (pay-outstanding.html is the other,
+ * "nothing chosen yet" side). Reloads fresh each time, same reasoning as showPayOutstanding.
+ * @param {string} record Payment Entry name
+ */
+function showPaymentDoc(record) {
+  gateDirtyThen(() => {
+    collapsePeekStackHard("home");
+    parkedDocSurface = null;
+    armSoftPeekEscHook(false).catch(() => {});
+    surfaceMode = "payment-doc";
+    place();
+    if (paymentDoc && !paymentDoc.webContents.isDestroyed()) {
+      paymentDoc.webContents.loadFile(path.join(__dirname, "payment-doc.html"), {
+        query: { name: record || "" },
+      });
+    }
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+  });
+}
+
+/**
+ * Home's "Pay Bills"/"Write Checks" (Vendors) vs "Receive Payments" (Customers) tiles all route
+ * to the same blank `/app/payment-entry/new` -- the tile clicked is the strongest direction
+ * signal payment-direction-prefs.js's resolution order names, so record it here before
+ * navigating (Packet 4b step 5, 5zorro 2026-09-05 resolution order).
+ * @param {string} direction "Pay" or "Receive"
+ */
+function openPaymentEntryTile(direction) {
+  paymentDirectionPrefs = rememberPaymentDirection(paymentDirectionPrefs, direction === "Receive" ? "Receive" : "Pay");
+  savePaymentDirectionPrefs();
+  showErp("/app/payment-entry/new", { forceLoad: true });
+}
+
+/**
  * Chromium often no-ops loadURL when the target equals the current URL.
  * Soft-set_route first; if that fails, bounce via /app then the target.
  * @param {string} appPath normalized /app/… path
@@ -4111,6 +4191,14 @@ function openDocSkinContinue() {
       openDocSkinProfile(profile, target.route);
       return;
     }
+    if (target.kind === "pay-outstanding") {
+      showPayOutstanding();
+      return;
+    }
+    if (target.kind === "payment-doc") {
+      showPaymentDoc(target.record);
+      return;
+    }
   }
   // OI-112: Tax Category / Purchase Taxes template / Company — Doc tab returns to last Bill/PO/IR.
   const dirtyDoc = dirtyState && dirtyState.doc;
@@ -4618,6 +4706,38 @@ async function createBatchPaymentEntryForBills(bills, intent = {}) {
   if (!pe.reference_date) pe.reference_date = intent.payOn || null;
 
   return insertAndSubmitPaymentEntry(pe);
+}
+
+/**
+ * Fetch one existing Payment Entry (Packet 4b step 5 -- payment-doc.html's full-page mount).
+ * Read-only: no fields are patched, unlike the drafts fetched for the batch write path above.
+ * @param {string} name
+ */
+async function fetchPaymentEntry(name) {
+  const n = name == null ? "" : String(name).trim();
+  if (!n || isNewDocRecord(n)) return { ok: false, reason: "No Payment Entry specified." };
+  const nameLit = JSON.stringify(n);
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var r = await frappe.call({
+        method: "frappe.client.get",
+        args: { doctype: "Payment Entry", name: ${nameLit} },
+      });
+      if (r && r.exc) {
+        return { ok: false, reason: String(r.exc).replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim() };
+      }
+      var doc = r && r.message;
+      if (!doc) return { ok: false, reason: "Payment Entry not found." };
+      try { doc = JSON.parse(JSON.stringify(doc)); } catch (eJson) {}
+      return { ok: true, doc: doc };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) return { ok: false, reason: "Could not load this Payment Entry." };
+  if (raw.ok) return raw;
+  return { ok: false, reason: formatClientErrorReason(raw.reason || raw, "Could not load this Payment Entry.") };
 }
 
 /**
@@ -5486,6 +5606,13 @@ function createWindow() {
       preload: path.join(__dirname, "pay-outstanding-preload.cjs"),
     },
   });
+  paymentDoc = new WebContentsView({
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "payment-doc-preload.cjs"),
+    },
+  });
 
   applyWebContentsListenerBudget(erp.webContents);
   applyWebContentsListenerBudget(docForm.webContents);
@@ -5497,6 +5624,7 @@ function createWindow() {
   win.contentView.addChildView(docForm);
   win.contentView.addChildView(erp);
   win.contentView.addChildView(payOutstanding);
+  win.contentView.addChildView(paymentDoc);
 
   chrome.webContents.loadFile(path.join(__dirname, "chrome.html"));
   home.webContents.loadFile(path.join(__dirname, "home.html"));
@@ -5505,6 +5633,7 @@ function createWindow() {
   hist.webContents.loadFile(path.join(__dirname, "history.html"));
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
   payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
+  paymentDoc.webContents.loadFile(path.join(__dirname, "payment-doc.html"));
 
   if (process.env.E2E === "1") {
     win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
@@ -8301,7 +8430,8 @@ ipcMain.on("open-mockup", (_e, name) => {
   });
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
-ipcMain.on("open-pay-outstanding", () => showPayOutstanding());
+ipcMain.on("open-payment-entry", (_e, direction) => openPaymentEntryTile(direction));
+ipcMain.handle("get-payment-entry", async (_e, name) => fetchPaymentEntry(name));
 ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
 ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
@@ -8319,7 +8449,7 @@ ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) =>
   createBatchPaymentEntryForBills(bills, intent),
 );
 ipcMain.on("open-devtools", (_e, target) => {
-  const map = { erp, chrome, home, hist, bill, docForm, payOutstanding };
+  const map = { erp, chrome, home, hist, bill, docForm, payOutstanding, paymentDoc };
   const key = typeof target === "string" && map[target] ? target : "erp";
   const view = map[key];
   if (view && !view.webContents.isDestroyed()) {

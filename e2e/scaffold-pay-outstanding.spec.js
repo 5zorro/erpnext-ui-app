@@ -8,6 +8,22 @@
 import { test, expect } from "@playwright/test";
 import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 
+/**
+ * Packet 4b step 5 retired the standalone "Pay Outstanding" Home tile -- Payment Entry is the
+ * real anchor now. Reach the same dashboard the way a clerk does today: "Pay Bills" tile → blank
+ * Vanilla Payment Entry → toolbar Doc tab (isNew: true routes to pay-outstanding.html per
+ * lens-context.js resolveDocSkinTarget).
+ * @param {import('@playwright/test').ElectronApplication} app
+ */
+async function openPayOutstandingViaPaymentEntry(app) {
+  await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+  await expect
+    .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+    .toMatch(/payment-entry\/new/);
+  await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+}
+
 test.describe("scaffold: pay outstanding", () => {
   /** @type {import('@playwright/test').ElectronApplication | undefined} */
   let app;
@@ -63,14 +79,7 @@ test.describe("scaffold: pay outstanding", () => {
       }
     }
 
-    await e2eCall(
-      app,
-      "execInView",
-      "home",
-      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
-    );
-
-    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await openPayOutstandingViaPaymentEntry(app);
 
     const title = await e2eCall(
       app,
@@ -181,13 +190,7 @@ test.describe("scaffold: pay outstanding", () => {
       };
     });
 
-    await e2eCall(
-      app,
-      "execInView",
-      "home",
-      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
-    );
-    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await openPayOutstandingViaPaymentEntry(app);
 
     // Not dirty yet — Home must proceed with no prompt at all (this is the pre-step-3 behavior,
     // still the correct one for a clean drawer).
@@ -199,13 +202,7 @@ test.describe("scaffold: pay outstanding", () => {
     // Back to Pay Outstanding, mark the drawer dirty (no real input exists yet — this is the
     // renderer-side call step 4's write path will make on an actual field change), then try to
     // leave via Home: must prompt, and "Stay" must keep the surface put.
-    await e2eCall(
-      app,
-      "execInView",
-      "home",
-      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
-    );
-    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await openPayOutstandingViaPaymentEntry(app);
     await e2eCall(app, "execInView", "payOutstanding", `window.erpPayOutstanding.setDirty(true); true`);
 
     await app.evaluate(() => { globalThis.__dialogResponse = 1; }); // "Stay"
@@ -224,16 +221,131 @@ test.describe("scaffold: pay outstanding", () => {
 
     // The discard must have cleared the flag — reopening Pay Outstanding and leaving again
     // proceeds with no further prompt (a stale dirty flag must not survive a resolved gate).
-    await e2eCall(
-      app,
-      "execInView",
-      "home",
-      `document.querySelector('[data-testid="tile-pay-outstanding"]').click(); true`,
-    );
-    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+    await openPayOutstandingViaPaymentEntry(app);
     await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
     dialogCalls = await app.evaluate(() => globalThis.__dialogCalls.length);
     expect(dialogCalls).toBe(2);
+  });
+
+  test("Packet 4b step 5: an existing Payment Entry opens as a read-only check document", async () => {
+    test.setTimeout(90_000);
+    try {
+      app = await launchShell();
+    } catch (err) {
+      test.skip(true, `launch skip-OK: ${err?.message || err}`);
+      return;
+    }
+    await waitForE2eApi(app);
+
+    const erpUrl = await e2eCall(app, "getErpUrl");
+    if (/\/login\b/.test(erpUrl)) {
+      const pwd = process.env.E2E_ERP_PASSWORD || "admin";
+      await e2eCall(
+        app,
+        "execInView",
+        "erp",
+        `fetch("/api/method/login", {
+           method: "POST",
+           headers: { "Content-Type": "application/x-www-form-urlencoded" },
+           body: "usr=Administrator&pwd=" + encodeURIComponent(${JSON.stringify(pwd)}),
+           credentials: "include",
+         }).then((r) => r.json())`,
+      );
+      await e2eCall(app, "openErp", "/desk");
+      const loggedIn = await expect
+        .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+        .toMatch(/\/desk\b/)
+        .then(() => true)
+        .catch(() => false);
+      if (!loggedIn) {
+        test.skip(true, "sandbox login skip-OK: E2E_ERP_PASSWORD doesn't match this environment");
+        return;
+      }
+    }
+
+    // Find a real submitted "Pay" Payment Entry and a real "Receive" one already in the sandbox
+    // (this test only reads -- no Payment Entry is created here).
+    const found = await e2eCall(
+      app,
+      "execInView",
+      "erp",
+      `frappe.call({
+         method: "frappe.client.get_list",
+         args: {
+           doctype: "Payment Entry",
+           filters: [["docstatus", "=", 1]],
+           fields: ["name", "party", "paid_amount", "payment_type"],
+           limit_page_length: 50,
+         },
+       }).then((r) => {
+         var rows = (r && r.message) || [];
+         var pay = rows.find((d) => d.payment_type === "Pay");
+         var receive = rows.find((d) => d.payment_type === "Receive");
+         return { pay: pay || null, receive: receive || null };
+       })`,
+    );
+    if (!found || !found.pay) {
+      test.skip(true, "no submitted Pay-type Payment Entry in this sandbox to view");
+      return;
+    }
+
+    await e2eCall(app, "openErp", `/app/payment-entry/${encodeURIComponent(found.pay.name)}`);
+    await expect
+      .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+      .toMatch(new RegExp(found.pay.name));
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("payment-doc");
+
+    // paintCheckDoc only runs once getPaymentEntry's IPC round-trip (a real ERP fetch) resolves --
+    // poll for the badge to leave the fragment's static default rather than reading once.
+    await expect
+      .poll(
+        async () =>
+          e2eCall(
+            app,
+            "execInView",
+            "paymentDoc",
+            `document.querySelector('[data-testid="check-doc-badge"]')?.textContent || ""`,
+          ),
+        { timeout: 15_000 },
+      )
+      .not.toBe("Preview — not yet saved");
+
+    const rendered = await e2eCall(
+      app,
+      "execInView",
+      "paymentDoc",
+      `({
+         badge: document.querySelector('[data-testid="check-doc-badge"]')?.textContent || "",
+         payee: document.querySelector('[data-testid="check-doc-payee"]')?.textContent || "",
+         amount: document.querySelector('[data-testid="check-doc-amount"]')?.textContent || "",
+         mopDisabled: document.getElementById("check-doc-mop")?.disabled,
+         writeActionsHidden: document.querySelector('[data-testid="check-doc-write-actions"]')?.hidden,
+       })`,
+    );
+    expect(rendered.badge).toMatch(/Submitted Payment Entry/);
+    expect(rendered.payee).toBe(found.pay.party);
+    expect(rendered.mopDisabled).toBe(true);
+    expect(rendered.writeActionsHidden).toBe(true);
+
+    if (found.receive) {
+      await e2eCall(app, "openErp", `/app/payment-entry/${encodeURIComponent(found.receive.name)}`);
+      await expect
+        .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+        .toMatch(new RegExp(found.receive.name));
+      await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("payment-doc");
+      const notPayVisible = await expect
+        .poll(
+          async () =>
+            e2eCall(app, "execInView", "paymentDoc", `document.getElementById("not-pay").hidden`),
+          { timeout: 10_000 },
+        )
+        .toBe(false)
+        .then(() => true)
+        .catch(() => false);
+      expect(notPayVisible).toBe(true);
+    }
   });
 });

@@ -126,9 +126,12 @@
           } else if (t.id === "receipt-new" && api.openEntry) {
             b.title = "Receive Inventory (last lens; default Doc)";
             b.onclick = () => api.openEntry("purchase-receipt");
-          } else if (t.id === "pay-outstanding" && api.openPayOutstanding) {
-            b.title = "Suggested payment batches across outstanding Bills (OI-161)";
-            b.onclick = () => api.openPayOutstanding();
+          } else if ((t.id === "pay-bills" || t.id === "checks") && api.openPaymentEntry) {
+            b.title = "Pay outstanding Bills (Doc tab: suggested batches, OI-161)";
+            b.onclick = () => api.openPaymentEntry("Pay");
+          } else if (t.id === "receive-pay" && api.openPaymentEntry) {
+            b.title = "Receive a customer payment";
+            b.onclick = () => api.openPaymentEntry("Receive");
           } else {
             b.title = t.route;
             b.onclick = () => api && api.openErp(t.route);

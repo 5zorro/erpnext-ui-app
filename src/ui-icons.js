@@ -59,7 +59,6 @@ const ICON_BODIES = {
 export const HOME_TILE_ICON = Object.freeze({
   "bill-new": "receipt",
   "pay-bills": "wallet-cash",
-  "pay-outstanding": "chart-line",
   "po-new": "package",
   "receipt-new": "inbox-down",
   vendors: "building",

@@ -729,7 +729,7 @@ than showing an AP check — consistent with "lens tabs are earned per page."
 3. **Dirty-gate** extension for a dirty `pay-outstanding` surface. **Done 2026-09-06.**
 4. **Write path** in the drawer (reusing OI-135's pattern) — own commit, own review.
    **Built 2026-09-06; live-sandbox verification blocked pending 5zorro's go-ahead (see closeout).**
-5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
+5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs. **Done 2026-09-06.**
 
 Do 1–3 before 4. Do not block 1–2 on the write path.
 
@@ -906,6 +906,80 @@ than by inspection alone:
   step (creating a real, submitted Payment Entry) was **blocked by the permission classifier** as a
   real financial write. Not overridden. **5zorro's call whether to run it** — see chat.
 - `npm test`: 1060 pass (was 1046).
+
+**Step 5 closeout (2026-09-06) — the route split landed exactly as designed, plus one real
+pre-existing race the flow was the first to expose:**
+
+- `lens-context.js`'s `DOC_SKIN_INDEX` gets a `payment-entry` row -- deliberately with no
+  `layoutKey`, since it is not a `doc-form.html` layout. `resolveDocSkinTarget`/`hasDocSkin` special-
+  case its id: `isNew` (`/new`) → `{ kind: "pay-outstanding" }` (nothing chosen yet, the existing
+  dashboard **is** the decision surface -- no new UI needed for that side); an existing record →
+  `{ kind: "payment-doc", ... }` (the new full-page mount). `isNew` + direction `"Receive"` → `null`
+  (no tab) -- AR isn't built. An existing record always offers the tab regardless of direction;
+  `payment-doc.html` reads the real `payment_type` itself once open and shows a plain fallback
+  message instead of misrendering an AR document as an AP check. 7 new `tests/lens-context.test.js`
+  cases cover the isNew/existing/Receive/list-view matrix, including Frappe's `new-*` tab promotion.
+- `src/payment-direction-prefs.js` (pure, mirrors `lens-prefs.js`): resolution order is tile intent
+  → remembered pref → default `"Pay"`, exactly as designed -- but simplified one layer from the
+  original note: a tile click **persists** the direction immediately rather than being a separate
+  transient "intent" channel consulted once and discarded. The two-signal design existed to recover
+  gracefully from a stale remembered pref on a non-tile `/new` visit; since a wrong resolution here
+  only ever costs "no tab, stay in Vanilla" (never wrong data shown), collapsing tile-click and
+  remembered-pref into one write meets the same UX bar with far less state-timing complexity. No
+  toggle UI on the dashboard itself this pass -- with `"Receive"` always bouncing to Vanilla today
+  (AR unbuilt), its only job would be correcting a wrong guess, and a second "Pay Bills"/"Write
+  Checks" click already does that for free. Revisit once AR exists and the toggle has real work to
+  do. 16 new tests.
+- **`electron/payment-doc.html`** (new persistent view + preload): read-only always, both Draft and
+  Submitted -- no editing an existing document this pass, only viewing one. Reuses the check-doc
+  fragment's write-mode fields as **display** fields: `paintCheckDoc`'s `readOnly` option fills
+  Mode of Payment / Pay-from-account / Reference No. from the real document and disables them
+  rather than needing a third markup variant. `check-doc-view.js` gained
+  `buildCheckDocViewModelFromPaymentEntry(peDoc)` (+ `paymentEntryStatusLabel`) as the second
+  producer of the same `CheckDocViewModel` shape `buildCheckDocViewModel` (the proposal case)
+  already produces -- `check-doc-mount.js`'s `paintCheckDoc` was refactored to take a pre-built
+  view-model instead of building one internally, so both mounts share the paint logic with the
+  view-model construction left to each caller. `setCheckDocBatchSource` split out to register what
+  a submit click acts on, separately from what gets painted -- `payment-doc.html` never calls it
+  (there is nothing to submit) or `mountCheckDocWrite` at all.
+- **Home tiles retired/rewired**: the standalone `pay-outstanding` tile is gone (per the plan's own
+  gating -- "not before step 5's full-page mount + isNew routing land," which just happened).
+  "Pay Bills"/"Write Checks" and "Receive Payments" now call a new `openPaymentEntry(direction)`
+  bridge method that records the direction pref before navigating, replacing the retired
+  `openPayOutstanding` (both the preload method and its `open-pay-outstanding` IPC channel deleted
+  as dead code, not left behind). `ui-icons.js`'s orphaned `pay-outstanding` icon mapping removed --
+  caught by the existing "every tile has an icon" completeness test, working as intended.
+- **A real pre-existing race, found by the new flow, not introduced by it**: `shellCtx()` built its
+  route from `currentRoute` alone. `sendUiState()`'s own local tab-visibility check already knew to
+  prefer the *live* ERP path when `surfaceMode === "erp"`, because Frappe's client router renames a
+  fresh `/new` tab to `new-<doctype>-<random>` moments after it loads, and `currentRoute` (set when
+  the navigation was *requested*, not when it settles) doesn't track that rename -- but `shellCtx()`
+  itself never got that correction, so `openDocSkinContinue()`'s actual navigation could resolve
+  against a stale route and silently no-op. Invisible until now because Bill/PO/Receipt are normally
+  entered already in Doc mode (`openEntry()`), never by landing in Vanilla and clicking Doc moments
+  after a fresh `/new` load -- this Payment-Entry flow is the first to routinely do exactly that.
+  Caught by a headless Playwright repro (3 repeated tile→Doc-tab round trips, one failed) before it
+  reached committed test code. Fixed once, generically, inside `shellCtx()` itself -- every consumer
+  benefits, not just payment-entry. `sendUiState()`'s own separate (now technically redundant)
+  correction was left alone rather than refactored out, to avoid touching more working code than
+  the fix needed.
+- **Verification**: unit tests as above (23 new: 7 lens-context, 16 payment-direction-prefs) plus
+  `tests/check-doc-view.test.js`/`check-doc-mount.test.js` extended for the new builder and the
+  `readOnly` paint path. `tests/shelved-drafts.test.js`'s doc-form/DOC_SKIN_INDEX completeness gate
+  correctly flagged that `payment-entry` isn't (and shouldn't be) shelvable -- fixed by scoping that
+  test's filter to `layoutKey`-bearing entries, not by adding payment-entry to the shelving registry.
+  All 9 e2e specs (not just the new one) pass under `xvfb-run` against the live sandbox, confirming
+  no regression from the tile retirement or the `shellCtx()` fix. The new
+  `e2e/scaffold-pay-outstanding.spec.js` case opens two **real** existing sandbox Payment Entries --
+  a submitted "Pay" one (renders correctly: real payee, disabled fields, hidden write actions,
+  "Submitted Payment Entry" badge) and a real "Receive" one (shows the AR-not-built fallback,
+  confirming the direction guard actually prevents the misrender it exists to prevent) -- read-only,
+  nothing written.
+- Not built, deliberately: an in-page direction toggle (see above); editing an existing Draft
+  Payment Entry from `payment-doc.html` (view-only this pass); Step 4's own live-sandbox write
+  verification, still pending 5zorro's go-ahead.
+- `npm test`: 1116 pass (was 1060; +33 mine, remainder from unrelated concurrent work landing in
+  the same window).
 
 **Cascade-order correction (5zorro 2026-09-06) — a same-day reversal, recorded so it isn't
 rediscovered as a mystery later.** Immediately after Step 1 landed, a pass here swapped
