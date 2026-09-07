@@ -60,6 +60,7 @@ export const HOME_TILE_ICON = Object.freeze({
   "bill-new": "receipt",
   "pay-bills": "wallet-cash",
   "po-new": "package",
+  "mr-new": "clipboard-list",
   "receipt-new": "inbox-down",
   vendors: "building",
   "estimate-new": "file-edit",

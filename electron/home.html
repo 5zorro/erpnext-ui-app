@@ -80,6 +80,62 @@
       padding: 5px 12px; font-size: 12px; color: #475569; cursor: pointer;
     }
     .dev-link:hover { background: #f1f5f9; border-color: #94a3b8; }
+
+    /* Vendors swimlane (dogfood feedback, 2026-09-06): daily request/receipt/bill
+       pipeline + a weekly/monthly lane. Tiles stay .item — same look as every other
+       Home group; only the arrangement differs. */
+    .flow-body { padding: 14px; }
+    .lanes { display: flex; flex-direction: column; gap: 0; }
+    .lane { display: flex; border: 1px solid #e1e8ee; border-radius: 8px; overflow: hidden; background: #fff; }
+    .lane + .lane { margin-top: 0; }
+    .rail {
+      flex: none; width: 26px; padding: 6px 0; display: flex;
+      align-items: center; justify-content: center;
+      border-right: 1px dashed #e1e8ee; cursor: help;
+    }
+    .lane[data-cadence="daily"] .rail { background: var(--wash-order); }
+    .lane[data-cadence="weekly"] .rail { background: var(--wash-payment); }
+    .rail-label {
+      display: inline-block; white-space: nowrap; transform: rotate(-90deg);
+      font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    }
+    .lane[data-cadence="daily"] .rail-label { color: color-mix(in srgb, var(--accent-order) 70%, #1f2d3d); }
+    .lane[data-cadence="weekly"] .rail-label { color: color-mix(in srgb, var(--accent-payment) 70%, #1f2d3d); }
+
+    .track { flex: 1; display: flex; align-items: center; gap: 8px; padding: 14px; overflow-x: auto; }
+    .lane .item { position: relative; flex: none; width: 98px; height: 76px; }
+
+    .step-badge {
+      position: absolute; top: -7px; left: -7px; min-width: 18px; height: 18px;
+      padding: 0 4px; border-radius: 999px; background: #2c3e50; color: #fff;
+      font-size: 9.5px; font-weight: 700; display: flex; align-items: center;
+      justify-content: center; box-shadow: 0 0 0 2px #fff;
+    }
+    .item[data-wash-role="request"] .step-badge { background: var(--accent-request); }
+    .item[data-wash-role="order"] .step-badge    { background: var(--accent-order); }
+    .item[data-wash-role="fulfill"] .step-badge  { background: var(--accent-fulfill); }
+    .item[data-wash-role="invoice"] .step-badge  { background: var(--accent-invoice); }
+    .item[data-wash-role="payment"] .step-badge  { background: var(--accent-payment); }
+
+    .source-stack { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .stack-caption {
+      margin: -2px 0 0; font-size: 9px; font-weight: 600; letter-spacing: .04em;
+      text-transform: uppercase; color: #94a3b8;
+    }
+
+    .arrow, .divider { flex: none; display: flex; align-items: center; color: #94a3b8; }
+    .arrow svg { width: 16px; height: 16px; display: block; }
+    .divider { width: 1px; height: 44px; background: #e1e8ee; }
+
+    .bridge { display: flex; justify-content: center; gap: 22px; margin: 8px 0; }
+    .bridge-item {
+      display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; max-width: 220px;
+    }
+    .bridge-item svg { flex: none; width: 14px; height: 14px; color: #94a3b8; }
+
+    @media (max-width: 900px) {
+      .bridge { flex-direction: column; align-items: center; gap: 4px; }
+    }
   </style>
 </head>
 <body>
@@ -92,15 +148,155 @@
     <span class="dev-label">Dev</span>
     <button class="dev-link" id="mockup-a" title="Option A: Thin inject over Vanilla">Simplified mockup A — thin inject</button>
     <button class="dev-link" id="mockup-b" title="Option B: Ground-up (Vanilla field parity)">Simplified mockup B — ground-up</button>
+    <button class="dev-link" id="mockup-vendor-swimlane" title="Vendors group as a two-lane process flow (Daily / Weekly-Monthly)">Vendor swimlane mockup</button>
   </div>
   <script type="module">
     import { HOME_GROUPS } from "../src/home-tiles.js";
     import { homeTileIconHtml, missingHomeTileIcons } from "../src/ui-icons.js";
+    import { VENDOR_FLOW_LANES, VENDOR_FLOW_BRIDGES } from "../src/vendor-process-flow.js";
 
     const api = window.erpHome;
 
+    function buildTileEl(t) {
+      const b = document.createElement("div");
+      b.className = "item" + (t.disabled ? " disabled" : "");
+      b.dataset.testid = `tile-${t.id}`;
+      if (t.washRole) b.dataset.washRole = t.washRole;
+      b.innerHTML = `<div class="ic">${homeTileIconHtml(t.id)}</div>${t.label}`;
+      if (t.disabled) {
+        b.title = "Requires an ERP module that may not be installed";
+      } else if (t.id === "bill-new" && api.openEntry) {
+        b.title = "Enter Bills (last lens; default Doc)";
+        b.onclick = () => api.openEntry("purchase-invoice");
+      } else if (t.id === "po-new" && api.openEntry) {
+        b.title = "Purchase Orders (last lens; default Doc)";
+        b.onclick = () => api.openEntry("purchase-order");
+      } else if (t.id === "receipt-new" && api.openEntry) {
+        b.title = "Receive Inventory (last lens; default Doc)";
+        b.onclick = () => api.openEntry("purchase-receipt");
+      } else if ((t.id === "pay-bills" || t.id === "checks") && api.openPaymentEntry) {
+        b.title = "Pay outstanding Bills (Doc tab: suggested batches, OI-161)";
+        b.onclick = () => api.openPaymentEntry("Pay");
+      } else if (t.id === "receive-pay" && api.openPaymentEntry) {
+        b.title = "Receive a customer payment";
+        b.onclick = () => api.openPaymentEntry("Receive");
+      } else {
+        b.title = t.route;
+        b.onclick = () => api && api.openErp(t.route);
+      }
+      return b;
+    }
+
+    function arrowEl() {
+      const s = document.createElement("span");
+      s.className = "arrow";
+      s.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h13M13 6l6 6-6 6"/></svg>';
+      return s;
+    }
+
+    function dividerEl() {
+      const s = document.createElement("span");
+      s.className = "divider";
+      s.setAttribute("aria-hidden", "true");
+      return s;
+    }
+
+    function bridgeIconSvg() {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6"/></svg>';
+    }
+
+    /** Vendors group as a two-lane process flow instead of a flat tile row (OI-161 dogfood). */
+    function renderVendorsFlow(group) {
+      const box = document.createElement("div");
+      box.className = "box";
+      box.dataset.testid = `group-${group.id}`;
+      const h = document.createElement("h3");
+      h.textContent = group.title;
+      box.appendChild(h);
+
+      const body = document.createElement("div");
+      body.className = "flow-body";
+      const lanesEl = document.createElement("div");
+      lanesEl.className = "lanes";
+
+      const tileById = (id) => group.tiles.find((t) => t.id === id);
+
+      for (const lane of VENDOR_FLOW_LANES) {
+        const laneEl = document.createElement("div");
+        laneEl.className = "lane";
+        laneEl.dataset.cadence = lane.id;
+
+        const rail = document.createElement("div");
+        rail.className = "rail";
+        rail.title = `${lane.label} — ${lane.subtitle}`;
+        rail.innerHTML = `<span class="rail-label">${lane.shortLabel}</span>`;
+        laneEl.appendChild(rail);
+
+        const track = document.createElement("div");
+        track.className = "track";
+        lane.steps.forEach((step, i) => {
+          const stepEl =
+            step.tileIds.length > 1
+              ? (() => {
+                  const stack = document.createElement("div");
+                  stack.className = "source-stack";
+                  step.tileIds.forEach((id, j) => {
+                    const t = tileById(id);
+                    if (!t) return;
+                    const el = buildTileEl(t);
+                    const badge = document.createElement("span");
+                    badge.className = "step-badge";
+                    badge.textContent = `${step.step}${String.fromCharCode(97 + j)}`;
+                    el.appendChild(badge);
+                    stack.appendChild(el);
+                  });
+                  const cap = document.createElement("span");
+                  cap.className = "stack-caption";
+                  cap.textContent = "either source";
+                  stack.appendChild(cap);
+                  return stack;
+                })()
+              : (() => {
+                  const t = tileById(step.tileIds[0]);
+                  if (!t) return null;
+                  const el = buildTileEl(t);
+                  const badge = document.createElement("span");
+                  badge.className = "step-badge";
+                  badge.textContent = step.step;
+                  el.appendChild(badge);
+                  return el;
+                })();
+          if (stepEl) track.appendChild(stepEl);
+          if (i < lane.steps.length - 1) track.appendChild(lane.sequential ? arrowEl() : dividerEl());
+        });
+        laneEl.appendChild(track);
+        lanesEl.appendChild(laneEl);
+
+        if (lane.id === "daily") {
+          const bridge = document.createElement("div");
+          bridge.className = "bridge";
+          for (const b of VENDOR_FLOW_BRIDGES) {
+            const item = document.createElement("div");
+            item.className = "bridge-item";
+            item.innerHTML = `${bridgeIconSvg()}<span>${b.label}</span>`;
+            bridge.appendChild(item);
+          }
+          lanesEl.appendChild(bridge);
+        }
+      }
+
+      body.appendChild(lanesEl);
+      box.appendChild(body);
+      return box;
+    }
+
     function render(groups, el) {
       for (const g of groups) {
+        if (g.id === "vendors") {
+          el.appendChild(renderVendorsFlow(g));
+          continue;
+        }
         const box = document.createElement("div");
         box.className = "box";
         box.dataset.testid = `group-${g.id}`;
@@ -109,35 +305,7 @@
         box.appendChild(h);
         const wrap = document.createElement("div");
         wrap.className = "items";
-        for (const t of g.tiles) {
-          const b = document.createElement("div");
-          b.className = "item" + (t.disabled ? " disabled" : "");
-          b.dataset.testid = `tile-${t.id}`;
-          if (t.washRole) b.dataset.washRole = t.washRole;
-          b.innerHTML = `<div class="ic">${homeTileIconHtml(t.id)}</div>${t.label}`;
-          if (t.disabled) {
-            b.title = "Requires an ERP module that may not be installed";
-          } else if (t.id === "bill-new" && api.openEntry) {
-            b.title = "Enter Bills (last lens; default Doc)";
-            b.onclick = () => api.openEntry("purchase-invoice");
-          } else if (t.id === "po-new" && api.openEntry) {
-            b.title = "Purchase Orders (last lens; default Doc)";
-            b.onclick = () => api.openEntry("purchase-order");
-          } else if (t.id === "receipt-new" && api.openEntry) {
-            b.title = "Receive Inventory (last lens; default Doc)";
-            b.onclick = () => api.openEntry("purchase-receipt");
-          } else if ((t.id === "pay-bills" || t.id === "checks") && api.openPaymentEntry) {
-            b.title = "Pay outstanding Bills (Doc tab: suggested batches, OI-161)";
-            b.onclick = () => api.openPaymentEntry("Pay");
-          } else if (t.id === "receive-pay" && api.openPaymentEntry) {
-            b.title = "Receive a customer payment";
-            b.onclick = () => api.openPaymentEntry("Receive");
-          } else {
-            b.title = t.route;
-            b.onclick = () => api && api.openErp(t.route);
-          }
-          wrap.appendChild(b);
-        }
+        for (const t of g.tiles) wrap.appendChild(buildTileEl(t));
         box.appendChild(wrap);
         el.appendChild(box);
       }
@@ -152,6 +320,7 @@
 
     document.getElementById("mockup-a").onclick = () => api.openMockup("simplified-option-a-thin-inject.html");
     document.getElementById("mockup-b").onclick = () => api.openMockup("simplified-option-b-ground-up.html");
+    document.getElementById("mockup-vendor-swimlane").onclick = () => api.openMockup("vendor-swimlane-flow.html");
   </script>
 </body>
 </html>
