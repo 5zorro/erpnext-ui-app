@@ -177,6 +177,7 @@ import {
   listAccountCompanyMismatchBlockers,
 } from "../src/account-company.js";
 import { formatClientErrorReason } from "../src/frappe-error.js";
+import { mergeSinglePaymentEntries } from "../src/payment-entry-batch.js";
 import { rankSupplierLinkOptions, utcYmd } from "../src/vendor-activity.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders, combineMappedBillSources } from "../src/source-modal.js";
 import {
@@ -4400,6 +4401,226 @@ async function createJitPaymentEntryForBill(billName, intent) {
 }
 
 /**
+ * Shared with fetchPaymentEntryDraftsForInvoices / insertAndSubmitPaymentEntry below (Packet 4b
+ * step 4) -- the same error-flattening helper createJitPaymentEntryForBill already defines
+ * inline above. Extracted once here rather than copy-pasted a third time; the two existing
+ * single-invoice functions above are left as they are (already-shipped, already-dogfooded --
+ * not touched by this batch-write work).
+ */
+const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
+  function flat(msg) {
+    if (msg == null) return "";
+    if (typeof msg === "string") {
+      var t = msg.trim();
+      if (!t) return "";
+      if (t.charAt(0) === "{" || t.charAt(0) === "[") {
+        try { return flat(JSON.parse(t)); } catch (e1) { return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
+      }
+      return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    }
+    if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
+    if (Array.isArray(msg)) return msg.map(flat).filter(Boolean).join(" · ");
+    if (typeof msg === "object") {
+      if (msg.message != null && msg.message !== msg) {
+        var inner = flat(msg.message);
+        if (inner) return inner;
+      }
+      if (msg.exception != null) {
+        var exn = flat(msg.exception);
+        if (exn) return exn.replace(/^frappe\.exceptions\.\w+:\s*/i, "");
+      }
+      if (msg.responseText != null) {
+        var body = flat(msg.responseText);
+        if (body) return body.replace(/^frappe\.exceptions\.\w+:\s*/i, "");
+      }
+      if (msg._server_messages != null) {
+        var sm = flat(msg._server_messages);
+        if (sm) return sm;
+      }
+      if (msg.exc != null) {
+        var ex = flat(msg.exc);
+        if (ex) return ex;
+      }
+      try {
+        var s = JSON.stringify(msg);
+        if (s && s !== "{}" && s !== "[]") return s.slice(0, 500);
+      } catch (e2) {}
+    }
+    var fb = String(msg);
+    return fb === "[object Object]" ? "" : fb;
+  }
+  return flat(err) || "Payment Entry request failed.";
+}`;
+
+/**
+ * Fetch one get_payment_entry draft per unique invoice (Packet 4b step 4). ERPNext's own
+ * controller only accepts one (dt, dn) at a time and has no "N unrelated invoices" call, so
+ * this loops client-side inside the ERP renderer -- one round trip covers the whole batch --
+ * and returns the raw drafts for mergeSinglePaymentEntries (src/payment-entry-batch.js) to
+ * combine in the main process, where that merge is unit-tested rather than duplicated as
+ * untested inline JS.
+ * @param {string[]} invoices Purchase Invoice names (already deduped by the caller)
+ * @param {{ bankAccount?: string, payOn?: string }} [opts]
+ */
+async function fetchPaymentEntryDraftsForInvoices(invoices, opts = {}) {
+  const list = Array.isArray(invoices)
+    ? [...new Set(invoices.map((s) => String(s || "").trim()).filter(Boolean))]
+    : [];
+  if (!list.length) return { ok: false, reason: "No bills in this batch." };
+  const bank = JSON.stringify(opts.bankAccount || "");
+  const payOn = JSON.stringify(opts.payOn || "");
+  const invoicesLit = JSON.stringify(list);
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var invoices = ${invoicesLit};
+      var bankAccount = ${bank};
+      var payOn = ${payOn};
+      var peDocs = [];
+      for (var i = 0; i < invoices.length; i++) {
+        var r;
+        try {
+          r = await frappe.call({
+            method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
+            args: {
+              dt: "Purchase Invoice",
+              dn: invoices[i],
+              bank_account: bankAccount || null,
+              reference_date: payOn || null,
+            },
+          });
+        } catch (eGet) {
+          return { ok: false, reason: reasonFrom(eGet), step: "get_payment_entry", invoice: invoices[i] };
+        }
+        if (r && r.exc) {
+          return { ok: false, reason: reasonFrom(r), step: "get_payment_entry", invoice: invoices[i] };
+        }
+        var pe = r && r.message;
+        if (!pe) {
+          return {
+            ok: false,
+            reason: "get_payment_entry returned empty for " + invoices[i] + ".",
+            step: "get_payment_entry",
+            invoice: invoices[i],
+          };
+        }
+        try { pe = JSON.parse(JSON.stringify(pe)); } catch (eJson) {}
+        peDocs.push(pe);
+      }
+      return { ok: true, peDocs: peDocs };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, reason: "Could not fetch Payment Entry drafts." };
+  }
+  if (raw.ok) return raw;
+  return {
+    ok: false,
+    reason: formatClientErrorReason(raw.reason || raw, "Could not fetch Payment Entry drafts."),
+    step: raw.step,
+    invoice: raw.invoice || null,
+  };
+}
+
+/**
+ * Insert + submit an already-fully-populated Payment Entry doc. Shared tail of the single-
+ * invoice JIT path (createJitPaymentEntryForBill above) and the batch path below -- identical
+ * insert/submit shape either way, only how the doc got built differs.
+ * @param {object} pe
+ */
+async function insertAndSubmitPaymentEntry(pe) {
+  const docLit = JSON.stringify(pe);
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var pe = ${docLit};
+      var inserted;
+      try {
+        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      } catch (eIns) {
+        return { ok: false, reason: reasonFrom(eIns), step: "insert" };
+      }
+      if (inserted && inserted.exc) {
+        return { ok: false, reason: reasonFrom(inserted), step: "insert" };
+      }
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
+      var submitted;
+      try {
+        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+      } catch (eSub) {
+        return {
+          ok: false,
+          reason: reasonFrom(eSub) || "Payment Entry saved as draft but Submit failed.",
+          step: "submit",
+          name: saved.name || null,
+        };
+      }
+      if (submitted && submitted.exc) {
+        return { ok: false, reason: reasonFrom(submitted), step: "submit", name: saved.name || null };
+      }
+      var finalDoc = submitted && submitted.message ? submitted.message : saved;
+      return {
+        ok: true,
+        name: finalDoc && finalDoc.name ? finalDoc.name : null,
+        docstatus: finalDoc ? finalDoc.docstatus : null,
+        paid_amount: finalDoc ? finalDoc.paid_amount : null,
+      };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, reason: "Payment Entry create failed." };
+  }
+  if (raw.ok) return raw;
+  return {
+    ok: false,
+    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
+    step: raw.step,
+    name: raw.name || null,
+  };
+}
+
+/**
+ * Create + submit one Payment Entry covering a whole PaymentBatchGroup (Packet 4b step 4).
+ * Dedupes to unique invoices first (an exploded-installment group can list the same invoice
+ * under two installmentKeys -- get_payment_entry already returns every unpaid installment for
+ * an invoice in one call when its Payment Terms Template allocates that way, so calling it
+ * twice for the same invoice would duplicate reference rows).
+ * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills
+ * @param {{ modeOfPayment?: string, cashBankAccount?: string, referenceNo?: string, payOn?: string }} intent
+ */
+async function createBatchPaymentEntryForBills(bills, intent = {}) {
+  const rows = Array.isArray(bills) ? bills : [];
+  const invoices = [...new Set(rows.map((b) => normalizeEditableText(b && b.invoice)).filter(Boolean))];
+  if (!invoices.length) return { ok: false, reason: "No bills in this batch." };
+  if (!normalizeEditableText(intent.cashBankAccount)) {
+    return { ok: false, reason: "Pick a Pay from account first." };
+  }
+
+  const fetched = await fetchPaymentEntryDraftsForInvoices(invoices, {
+    bankAccount: intent.cashBankAccount,
+    payOn: intent.payOn,
+  });
+  if (!fetched.ok) return fetched;
+
+  const merged = mergeSinglePaymentEntries(fetched.peDocs);
+  if (!merged.ok) return merged;
+
+  const pe = merged.doc;
+  if (normalizeEditableText(intent.modeOfPayment)) pe.mode_of_payment = intent.modeOfPayment;
+  if (!pe.reference_no) {
+    pe.reference_no = normalizeEditableText(intent.referenceNo) || `Batch of ${invoices.length}`;
+  }
+  if (!pe.reference_date) pe.reference_date = intent.payOn || null;
+
+  return insertAndSubmitPaymentEntry(pe);
+}
+
+/**
  * List Payment Entries allocated to this Purchase Invoice (OI-139).
  * Prefer parent PE filtered by child reference (child DocType get_list is often empty/denied).
  * @param {string} billName
@@ -8093,6 +8314,10 @@ ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;
 });
+ipcMain.handle("pay-outstanding-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) =>
+  createBatchPaymentEntryForBills(bills, intent),
+);
 ipcMain.on("open-devtools", (_e, target) => {
   const map = { erp, chrome, home, hist, bill, docForm, payOutstanding };
   const key = typeof target === "string" && map[target] ? target : "erp";

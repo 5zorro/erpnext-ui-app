@@ -13,10 +13,6 @@
         <span class="check-doc-label">Date</span>
         <span class="check-doc-value" data-testid="check-doc-date"></span>
       </div>
-      <div class="check-doc-field">
-        <span class="check-doc-label">Check no. / Bank</span>
-        <span class="check-doc-value check-doc-placeholder" data-testid="check-doc-bank">Assigned when saved</span>
-      </div>
     </div>
     <div class="check-doc-row check-doc-memo-row">
       <span class="check-doc-label">Memo</span>
@@ -30,4 +26,29 @@
   </div>
   <div class="check-doc-taxes" data-testid="check-doc-taxes" hidden></div>
   <div class="check-doc-deductions" data-testid="check-doc-deductions" hidden></div>
+  <div class="check-doc-write" data-testid="check-doc-write">
+    <div class="check-doc-row check-doc-write-row">
+      <div class="check-doc-field">
+        <label class="check-doc-label" for="check-doc-mop">Mode of Payment</label>
+        <input type="text" id="check-doc-mop" class="check-doc-input" data-testid="check-doc-mop"
+          placeholder="Search Mode of Payment…" autocomplete="off" />
+      </div>
+      <div class="check-doc-field">
+        <label class="check-doc-label" for="check-doc-cash-account">Pay from account</label>
+        <input type="text" id="check-doc-cash-account" class="check-doc-input" data-testid="check-doc-cash-account"
+          placeholder="Search Account…" autocomplete="off" />
+      </div>
+    </div>
+    <div class="check-doc-row check-doc-write-row">
+      <div class="check-doc-field">
+        <label class="check-doc-label" for="check-doc-reference-no">Check no. / Reference</label>
+        <input type="text" id="check-doc-reference-no" class="check-doc-input" data-testid="check-doc-reference-no"
+          placeholder="e.g. 10231" autocomplete="off" />
+      </div>
+    </div>
+    <div class="check-doc-write-actions">
+      <span class="check-doc-write-status" data-testid="check-doc-write-status"></span>
+      <button type="button" class="check-doc-submit" id="check-doc-submit" data-testid="check-doc-submit">Create &amp; submit Payment Entry</button>
+    </div>
+  </div>
 </div>

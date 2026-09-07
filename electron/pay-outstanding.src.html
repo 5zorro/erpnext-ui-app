@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Pay Outstanding</title>
   <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="doc-skin.css" />
   <link rel="stylesheet" href="check-doc.css" />
   <style>
     :root {
@@ -230,7 +231,7 @@
       mergePaymentBatchPrefs,
       validatePaymentBatchPrefs,
     } from "../src/payment-batch-prefs.js";
-    import { paintCheckDoc, closeCheckDoc } from "../src/check-doc-mount.js";
+    import { paintCheckDoc, closeCheckDoc, mountCheckDocWrite } from "../src/check-doc-mount.js";
 
     const api = window.erpPayOutstanding;
     const ROW_HEIGHT = 34;
@@ -266,23 +267,54 @@
       return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
-    // The check-doc drawer: a read-only preview of a chosen batch as a check/ACH document
-    // (Packet 4b step 2 -- no writes yet). One mount today; the same fragment + paintCheckDoc
-    // call is what a future full-page mount (an existing Payment Entry) will reuse.
+    // The check-doc drawer: a preview of a chosen batch as a check/ACH document, plus (Packet
+    // 4b step 4) the controls that turn it into an actual Payment Entry. One mount today; the
+    // same fragment + paint/mount calls are what a future full-page mount (an existing Payment
+    // Entry) will reuse.
     const checkDrawer = document.getElementById("check-drawer");
     const checkDrawerClose = document.getElementById("check-drawer-close");
     const checkDocEl = document.getElementById("check-doc");
+    const linkMounted = new WeakMap();
+
+    // Local mirror of what main.js's payOutstandingDirty holds (Packet 4b step 3) -- kept here
+    // too so this page can warn before silently discarding unsaved write-mode input when the
+    // user switches to a *different* group's preview without leaving the surface at all (the
+    // main-process gate only covers leaving Pay Outstanding, not switching batches within it).
+    let drawerDirty = false;
+    function setDrawerDirty(dirty) {
+      drawerDirty = !!dirty;
+      if (api && api.setDirty) api.setDirty(drawerDirty);
+    }
 
     function openCheckDrawer(group, bills) {
+      if (!checkDrawer.hidden && drawerDirty) {
+        const proceed = window.confirm(
+          "This will discard the unsaved check details you entered. Continue?",
+        );
+        if (!proceed) return;
+      }
       paintCheckDoc(checkDocEl, group, bills);
+      setDrawerDirty(false);
       checkDrawer.hidden = false;
       checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });
     }
     function closeCheckDrawer() {
+      if (drawerDirty && !window.confirm("Discard this unsaved check preview?")) return;
       checkDrawer.hidden = true;
       closeCheckDoc(checkDocEl);
+      setDrawerDirty(false);
     }
     checkDrawerClose.onclick = closeCheckDrawer;
+
+    mountCheckDocWrite(checkDocEl, {
+      api: api || {},
+      linkMounted,
+      onDirty: setDrawerDirty,
+      onSubmitted: () => {
+        closeCheckDrawer();
+        init(); // refresh: paid bills should drop off the list
+      },
+    });
 
     function todayIso() {
       const d = new Date();
