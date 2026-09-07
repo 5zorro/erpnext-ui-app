@@ -728,6 +728,7 @@ than showing an AP check — consistent with "lens tabs are earned per page."
    read-only first (render a chosen batch as a check; no writes). **Done 2026-09-06.**
 3. **Dirty-gate** extension for a dirty `pay-outstanding` surface. **Done 2026-09-06.**
 4. **Write path** in the drawer (reusing OI-135's pattern) — own commit, own review.
+   **Built 2026-09-06; live-sandbox verification blocked pending 5zorro's go-ahead (see closeout).**
 5. **Full-page mount** `payment-doc.html` + `isNew` route anchoring + direction prefs.
 
 Do 1–3 before 4. Do not block 1–2 on the write path.
@@ -842,6 +843,69 @@ thinner than Step 1's, but one real design question surfaced during the build, n
 - Not built, deliberately: no in-page prompt UI for this surface (would need its own design pass,
   and there's no Save action yet to make "Save and continue" meaningful) — a native dialog is the
   honest tool for what exists today. Revisit if Step 4's write path makes a plain dialog feel thin.
+
+**Step 4 closeout (2026-09-06) — 5zorro caught the plan's own assumption before code was written:**
+*"this is a group of unrelated invoices instead of 1 invoice, and the payment date is not the
+same... you may need to extract shared tools then use the tools in a more-complete doc-skin."*
+Reading `createJitPaymentEntryForBill` (`main.js`, OI-135) confirmed both points precisely rather
+than by inspection alone:
+
+- It calls ERPNext's own `get_payment_entry` with a single `(dt, dn)` — there is no server call
+  for "one payment covering N unrelated invoices." It then hardcodes `pe.references[0]`
+  (assumes exactly one reference row) and sets `reference_date` from the **Bill's own
+  `posting_date`** (`dirtyState.doc`, the currently-open Bill) — meaningless for a batch, which
+  has no single open Bill and whose payment date is `payOn`, a value `payment-batch-economics.js`
+  computed independently (often not any one bill's own due date). Neither assumption survives a
+  multi-invoice, economics-driven batch. Confirmed via `payment_entry.py:2885` (`get_payment_entry`
+  signature) that it **does** accept a `reference_date` parameter directly — cleaner than the
+  existing function's post-insert patch, and lets ERPNext's own `apply_early_payment_discount`
+  evaluate the discount window against the *actual* intended pay date instead of implicitly today.
+- **The shared tool extracted**: `src/payment-entry-batch.js` — `mergeSinglePaymentEntries(peDocs)`,
+  pure. The shell calls `get_payment_entry` once per **unique invoice** in the batch (not once per
+  installmentKey — an exploded multi-installment invoice already returns every unpaid installment
+  in one call via ERPNext's own Payment Terms Template logic, so calling it twice per invoice would
+  duplicate reference rows), letting ERPNext compute each invoice's own account / currency /
+  exchange rate / discount correctly, then merges the results here rather than reimplementing that
+  computation shell-side. Validates `company`/`party_type`/`party`/`payment_type`/`paid_from`/
+  `paid_to`/both currencies match before merging — a real mismatch fails loudly with a named field,
+  never silently. `tests/payment-entry-batch.test.js` — 13 tests: multi-doc merge, single-doc
+  passthrough, an already-multi-reference draft merged alongside another, six independent mismatch
+  rejections (one per matched field), empty/junk input, float-safe summing, no input mutation.
+- **Also extracted, scoped narrowly**: the ~50-line `reasonFrom` error-flattener duplicated inside
+  `createJitPaymentEntryForBill`'s injected script is now `PE_REASON_FROM_JS`, one `String.raw`
+  constant interpolated into the new batch functions. **Deliberately not** also retrofitted onto
+  the two already-shipped single-invoice functions (`createDraftPaymentEntryForBill` OI-139,
+  `createJitPaymentEntryForBill` OI-135) — same text, but touching two working, already-dogfooded
+  financial-write paths to dedupe error strings is a needless regression risk for this change to
+  take on. `insertAndSubmitPaymentEntry(pe)` (the identical insert+submit tail
+  `createJitPaymentEntryForBill` already had) is genuinely shared — the new batch path calls it;
+  the existing single-invoice path is untouched, still doing its own inline version.
+- **New write UI**: the check-doc drawer's static "Assigned when saved" bank placeholder (step 2)
+  is now real controls — Mode of Payment + Pay-from-account Link pickers (`mountLinkPicker`,
+  `searchLink`, reused verbatim from the Bill doc-skin, zero new search logic) and a Check no. /
+  Reference input. `doc-skin.css` linked into `pay-outstanding.html` for the `.link-wrap`/`.link-dd`
+  styles this needed — checked for bare-element selectors first (none; class-scoped throughout,
+  safe to add). New `main.js` IPC: `pay-outstanding-search-link` (thin — reuses the existing
+  `searchLink()` function verbatim, the same one Bill/PO/IR already call) and
+  `create-batch-payment-entry`.
+- **Intra-page dirty gap found while building, not in the original architecture note**: Step 3's
+  gate protects *leaving* Pay Outstanding, but switching the drawer to a *different* group while
+  mid-edit is a same-surface action the main-process gate never sees. Added a local `drawerDirty`
+  mirror in `pay-outstanding.src.html` (kept in sync with `setDirty` IPC) that confirms before an
+  in-drawer group switch or Close would silently discard typed input — the same failure mode Step 3
+  exists to prevent, one level down.
+- **Verification, two tiers**: (1) a headless Playwright pass with a fully mocked bridge covering
+  the whole UI contract — write fields render; submit blocked with no IPC call when no account is
+  picked; Mode of Payment / Account link pickers search and pick correctly; dirty tracking follows
+  every input; a successful submit's IPC payload was inspected directly and confirmed correct
+  (`bills` = exactly the batch's own rows, `intent.payOn` = the **group's** date, not any bill's own
+  due date); switching to a different group while dirty triggers the confirm, and the new group
+  paints with write inputs reset; zero console errors. (2) A **live** run against the real sandbox
+  ERP was attempted next — querying real data first found ALPINE SUPPLY carrying several
+  $424 invoices due 2026-08-20, a genuine multi-invoice batch candidate — but the actual submit
+  step (creating a real, submitted Payment Entry) was **blocked by the permission classifier** as a
+  real financial write. Not overridden. **5zorro's call whether to run it** — see chat.
+- `npm test`: 1060 pass (was 1046).
 
 **Cascade-order correction (5zorro 2026-09-06) — a same-day reversal, recorded so it isn't
 rediscovered as a mystery later.** Immediately after Step 1 landed, a pass here swapped
