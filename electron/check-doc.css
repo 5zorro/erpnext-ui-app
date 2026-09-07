@@ -127,6 +127,11 @@
   border-radius: 6px;
   font-size: 13px;
 }
+.check-doc-input:disabled {
+  background: #f1f5f9;
+  color: #475569;
+  cursor: default;
+}
 .check-doc-write-actions {
   display: flex;
   align-items: center;

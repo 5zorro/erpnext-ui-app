@@ -19,9 +19,14 @@ import {
 } from "../src/shelved-drafts.js";
 
 describe("draftableDoctypeKeys completeness", () => {
-  it("matches every ready Doc form in DOC_SKIN_INDEX", () => {
+  it("matches every ready doc-form.html entry in DOC_SKIN_INDEX", () => {
+    // Only entries with a layoutKey route to doc-form.html (Bill/PO/IR) and can accumulate a
+    // shelvable draft there. Packet 4b's "payment-entry" entry is ready but deliberately has no
+    // layoutKey -- it routes to pay-outstanding.html / payment-doc.html instead, neither of
+    // which has (or, this pass, needs) a shelving concept -- so it is excluded here on purpose,
+    // not missed.
     const fromIndex = DOC_SKIN_INDEX.filter(
-      (e) => e.ready && e.match && e.match.doctypes && e.match.doctypes.length,
+      (e) => e.ready && e.layoutKey && e.match && e.match.doctypes && e.match.doctypes.length,
     ).flatMap((e) => e.match.doctypes);
     const keys = draftableDoctypeKeys(DOC_SKIN_PROFILES);
     for (const dt of fromIndex) {

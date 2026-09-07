@@ -12,7 +12,7 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "submitted-dropdown.html": "Submitted-this-session popover (left-rail Submitted button)",
   "nav-incident-dialog.html": "Fail-loud nav issue note (toolbar Nav issue)",
   "focus-incident-dialog.html": "Fail-loud focus issue note (DB diagnose Focus issue)",
-  "pay-outstanding.html": "OI-161 Doc Pay skin — standalone window from Home's Pay Outstanding tile",
+  "pay-outstanding.html": "OI-161 Doc Pay skin — DOC_SKIN_INDEX payment-entry, isNew: true target",
 });
 
 /**
@@ -22,6 +22,7 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
 export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
   "home.html": "Doc Workflow Home (Home button / default Doc surface)",
   "doc-form.html": "DOC_SKIN_INDEX bill + po + receipt → shared Doc form shell",
+  "payment-doc.html": "DOC_SKIN_INDEX payment-entry, isNew: false target (Packet 4b step 5)",
 });
 
 /** Legacy shells retained for reference; not loaded at runtime (tranche 10). */
@@ -33,7 +34,8 @@ export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
   "doc-form.head.html": "doc-form.html head/styles partial for assemble script",
   "doc-form.footer.html": "doc-form.html calc overlay + boot script partial",
   "pay-outstanding.src.html": "pay-outstanding.html source shell for assemble-pay-outstanding-html.js",
-  "check-doc.fragment.html": "Check/ACH document partial — assembled into pay-outstanding.html's drawer (Packet 4b)",
+  "payment-doc.src.html": "payment-doc.html source shell for assemble-payment-doc-html.js",
+  "check-doc.fragment.html": "Check/ACH document partial — assembled into pay-outstanding.html's drawer and payment-doc.html (Packet 4b)",
 });
 
 /**

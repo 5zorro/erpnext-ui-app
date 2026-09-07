@@ -76,3 +76,60 @@ describe("docSkinRouteMatrix (anti-rot)", () => {
     });
   }
 });
+
+describe("Payment Entry routing (Packet 4b step 5)", () => {
+  it("payment-entry is indexed and ready", () => {
+    const entry = DOC_SKIN_INDEX.find((e) => e.id === "payment-entry");
+    assert.equal(entry?.ready, true);
+  });
+
+  it("isNew (/new, Pay direction) resolves to the pay-outstanding dashboard", () => {
+    const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry/new", paymentDirection: "Pay" };
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
+  });
+
+  it("isNew with no direction supplied defaults to available (Pay is the tranche default)", () => {
+    const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry/new" };
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
+  });
+
+  it("isNew + Receive direction: no tab, no target -- AR isn't built", () => {
+    const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry/new", paymentDirection: "Receive" };
+    assert.equal(hasDocSkin(ctx), false);
+    assert.equal(resolveDocSkinTarget(ctx), null);
+  });
+
+  it("an existing record resolves to the check document regardless of paymentDirection", () => {
+    const ctx = {
+      showingHome: false,
+      lens: "doc",
+      route: "/app/payment-entry/ACC-PAY-2026-00001",
+      paymentDirection: "Receive",
+    };
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), {
+      kind: "payment-doc",
+      doctype: "payment-entry",
+      record: "ACC-PAY-2026-00001",
+      route: "/app/payment-entry/ACC-PAY-2026-00001",
+    });
+  });
+
+  it("a payment-entry new-* tab name (Frappe's promoted /new route) still counts as new", () => {
+    const ctx = {
+      showingHome: false,
+      lens: "doc",
+      route: "/app/payment-entry/new-payment-entry-1",
+      paymentDirection: "Pay",
+    };
+    assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
+  });
+
+  it("a payment-entry list (no record) has no Doc tab", () => {
+    const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry" };
+    assert.equal(hasDocSkin(ctx), false);
+    assert.equal(resolveDocSkinTarget(ctx), null);
+  });
+});

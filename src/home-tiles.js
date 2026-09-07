@@ -23,11 +23,16 @@ export const AP_HOME_TILE_WASH = Object.freeze({
   "receipt-new": "fulfill",
   "bill-new": "invoice",
   "pay-bills": "payment",
-  "pay-outstanding": "payment",
 });
 
-/** Shell-only routes (not `/app/…` ERP forms) — OI-161 Doc Pay skin lives at our own route. */
-export const SHELL_ROUTE_TILE_IDS = Object.freeze(["pay-outstanding"]);
+/**
+ * Shell-only routes (not `/app/…` ERP forms). Empty since Packet 4b step 5: the standalone
+ * "Pay Outstanding" tile is retired now that Payment Entry is a real anchor -- "Pay Bills" /
+ * "Write Checks" land on the blank Vanilla form, whose Doc tab routes to the same dashboard
+ * (isNew: true → pay-outstanding.html, per lens-context.js resolveDocSkinTarget). A second door
+ * to the same surface would be redundant (5zorro 2026-09-05).
+ */
+export const SHELL_ROUTE_TILE_IDS = Object.freeze([]);
 
 /** @type {{ left: HomeGroup[], right: HomeGroup[] }} */
 export const HOME_GROUPS = {
@@ -38,7 +43,6 @@ export const HOME_GROUPS = {
       tiles: [
         { id: "bill-new", label: "Enter Bills", route: "/app/purchase-invoice/new", washRole: "invoice" },
         { id: "pay-bills", label: "Pay Bills", route: "/app/payment-entry/new", washRole: "payment" },
-        { id: "pay-outstanding", label: "Pay Outstanding", route: "/pay-outstanding", washRole: "payment" },
         { id: "po-new", label: "Purchase Orders", route: "/app/purchase-order/new", washRole: "order" },
         { id: "receipt-new", label: "Receive Inventory", route: "/app/purchase-receipt/new", washRole: "fulfill" },
         { id: "vendors", label: "Vendor Center", route: "/app/supplier" },

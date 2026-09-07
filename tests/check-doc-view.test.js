@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildCheckDocViewModel } from "../src/check-doc-view.js";
+import {
+  buildCheckDocViewModel,
+  buildCheckDocViewModelFromPaymentEntry,
+  paymentEntryStatusLabel,
+} from "../src/check-doc-view.js";
 
 const bills = [
   { installmentKey: "PINV-001", invoice: "PINV-001", dueDate: "2026-09-10", outstanding: 400 },
@@ -83,5 +87,83 @@ describe("buildCheckDocViewModel", () => {
     buildCheckDocViewModel(group, bills);
     assert.deepEqual(group, groupCopy);
     assert.deepEqual(bills, billsCopy);
+  });
+});
+
+describe("paymentEntryStatusLabel", () => {
+  it("maps docstatus to the ERP label", () => {
+    assert.equal(paymentEntryStatusLabel(0), "Draft");
+    assert.equal(paymentEntryStatusLabel(1), "Submitted");
+    assert.equal(paymentEntryStatusLabel(2), "Cancelled");
+  });
+  it("junk/absent docstatus falls back to Draft rather than throwing", () => {
+    assert.equal(paymentEntryStatusLabel(null), "Draft");
+    assert.equal(paymentEntryStatusLabel(undefined), "Draft");
+    assert.equal(paymentEntryStatusLabel("garbage"), "Draft");
+    assert.equal(paymentEntryStatusLabel(99), "Draft");
+  });
+});
+
+describe("buildCheckDocViewModelFromPaymentEntry", () => {
+  const pe = {
+    party: "ALPINE SUPPLY",
+    paid_amount: 848,
+    reference_date: "2026-08-20",
+    remarks: "Batch of 2",
+    mode_of_payment: "Check",
+    paid_from: "Demo Bank Account - HID",
+    reference_no: "10231",
+    docstatus: 1,
+    references: [
+      { reference_name: "ACC-PINV-2026-00011", due_date: "2026-08-20", allocated_amount: 424 },
+      { reference_name: "ACC-PINV-2026-00012", due_date: "2026-08-20", allocated_amount: 424 },
+    ],
+  };
+
+  it("maps a real submitted Payment Entry's fields directly", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry(pe);
+    assert.equal(vm.payTo, "ALPINE SUPPLY");
+    assert.equal(vm.amount, 848);
+    assert.equal(vm.payOn, "2026-08-20");
+    assert.equal(vm.memo, "Batch of 2");
+    assert.equal(vm.modeOfPayment, "Check");
+    assert.equal(vm.bankAccount, "Demo Bank Account - HID");
+    assert.equal(vm.referenceNo, "10231");
+    assert.equal(vm.status, "Submitted");
+    assert.equal(vm.stubRows.length, 2);
+    assert.deepEqual(vm.stubRows[0], {
+      invoice: "ACC-PINV-2026-00011",
+      dueDate: "2026-08-20",
+      amount: 424,
+    });
+  });
+
+  it("a draft doc (docstatus 0) reports status Draft", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry({ ...pe, docstatus: 0 });
+    assert.equal(vm.status, "Draft");
+  });
+
+  it("junk input never throws and yields empty-but-shaped output", () => {
+    assert.doesNotThrow(() => buildCheckDocViewModelFromPaymentEntry(null));
+    assert.doesNotThrow(() => buildCheckDocViewModelFromPaymentEntry(undefined));
+    const vm = buildCheckDocViewModelFromPaymentEntry(null);
+    assert.equal(vm.payTo, "");
+    assert.equal(vm.amount, 0);
+    assert.deepEqual(vm.stubRows, []);
+    assert.equal(vm.status, "Draft");
+  });
+
+  it("a reference row missing allocated_amount contributes 0, not NaN", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry({
+      ...pe,
+      references: [{ reference_name: "X", due_date: "2026-01-01" }],
+    });
+    assert.equal(vm.stubRows[0].amount, 0);
+  });
+
+  it("does not mutate its input", () => {
+    const copy = JSON.parse(JSON.stringify(pe));
+    buildCheckDocViewModelFromPaymentEntry(pe);
+    assert.deepEqual(pe, copy);
   });
 });

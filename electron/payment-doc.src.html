@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Payment Entry</title>
+  <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="doc-skin.css" />
+  <link rel="stylesheet" href="check-doc.css" />
+  <style>
+    html, body {
+      margin: 0; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px; box-sizing: border-box; padding: 0 20px; background: #fff;
+      border-bottom: 1px solid #d6dee6;
+    }
+    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 20px 40px; }
+    #load-error {
+      margin: 0 0 16px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5;
+      border-radius: 8px; color: #991b1b; font-size: 12px;
+    }
+    #load-error[hidden] { display: none; }
+    #not-pay {
+      margin: 0 0 16px; padding: 14px; background: #fffbeb; border: 1px solid #fcd34d;
+      border-radius: 8px; color: #92400e; font-size: 13px; line-height: 1.5;
+    }
+    #not-pay[hidden] { display: none; }
+    .view-link { color: #0072b2; text-decoration: none; font-size: 12px; }
+    .view-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 data-testid="payment-doc-title">Payment Entry</h1>
+    <a href="#" class="view-link" id="open-vanilla" data-testid="payment-doc-open-vanilla">Open in Vanilla →</a>
+  </header>
+  <main>
+    <div id="load-error" hidden data-testid="payment-doc-error"></div>
+    <div id="not-pay" hidden data-testid="payment-doc-not-pay">
+      This is a Receive-type Payment Entry. The Doc skin for receiving payments (AR) isn't built
+      yet — open it in Vanilla instead.
+    </div>
+    <!-- inject: check-doc.fragment.html -->
+  </main>
+
+  <script type="module">
+    import { paintCheckDoc } from "../src/check-doc-mount.js";
+    import { buildCheckDocViewModelFromPaymentEntry } from "../src/check-doc-view.js";
+
+    const api = window.erpPaymentDoc;
+    const checkDocEl = document.getElementById("check-doc");
+    const errorEl = document.getElementById("load-error");
+    const notPayEl = document.getElementById("not-pay");
+    const openVanillaLink = document.getElementById("open-vanilla");
+
+    function showError(message) {
+      errorEl.hidden = !message;
+      errorEl.textContent = message || "";
+    }
+
+    async function init() {
+      const params = new URLSearchParams(location.search);
+      const name = params.get("name") || "";
+
+      openVanillaLink.onclick = (ev) => {
+        ev.preventDefault();
+        if (api && api.openErp) {
+          api.openErp(name ? `/app/payment-entry/${encodeURIComponent(name)}` : "/app/payment-entry");
+        }
+      };
+
+      if (!name) {
+        showError("No Payment Entry specified.");
+        return;
+      }
+      if (!api || !api.getPaymentEntry) {
+        showError("Shell bridge unavailable — cannot load this Payment Entry.");
+        return;
+      }
+      const result = await api.getPaymentEntry(name).catch((e) => ({ ok: false, reason: String(e) }));
+      if (!result || !result.ok || !result.doc) {
+        showError((result && result.reason) || "Could not load this Payment Entry.");
+        return;
+      }
+      const doc = result.doc;
+      if (doc.payment_type !== "Pay") {
+        notPayEl.hidden = false;
+        return;
+      }
+      const vm = buildCheckDocViewModelFromPaymentEntry(doc);
+      paintCheckDoc(checkDocEl, vm, { readOnly: true, badgeText: `${vm.status} Payment Entry` });
+    }
+
+    init();
+  </script>
+</body>
+</html>
