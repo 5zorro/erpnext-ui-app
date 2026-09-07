@@ -20,6 +20,7 @@ export const HOME_TILE_WASH_ROLES = new Set(["request", "order", "fulfill", "inv
 /** AP vendor-column tiles → doc wash role (matches bill / po / receipt Doc skins). */
 export const AP_HOME_TILE_WASH = Object.freeze({
   "po-new": "order",
+  "mr-new": "request",
   "receipt-new": "fulfill",
   "bill-new": "invoice",
   "pay-bills": "payment",
@@ -44,6 +45,7 @@ export const HOME_GROUPS = {
         { id: "bill-new", label: "Enter Bills", route: "/app/purchase-invoice/new", washRole: "invoice" },
         { id: "pay-bills", label: "Pay Bills", route: "/app/payment-entry/new", washRole: "payment" },
         { id: "po-new", label: "Purchase Orders", route: "/app/purchase-order/new", washRole: "order" },
+        { id: "mr-new", label: "Material Request", route: "/app/material-request/new", washRole: "request" },
         { id: "receipt-new", label: "Receive Inventory", route: "/app/purchase-receipt/new", washRole: "fulfill" },
         { id: "vendors", label: "Vendor Center", route: "/app/supplier" },
       ],
