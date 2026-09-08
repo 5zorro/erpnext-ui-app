@@ -37,13 +37,21 @@ Mode switch is **inferred** from markup (`date` / `tenkey` / `none`), not timed 
 
 ## Snapshot (update when inventories change)
 
-From `npm run report:input-count` (2026-09-05, all three anchors, Simplified N_s added):
+From `npm run report:input-count` (2026-09-07, all three anchors; \(N_d\) up on all three
+after the credit-memo controls landed — see the note under the table):
 
 | Doctype | Doc curated N_d | Simplified N_s | Vanilla fixture N_v | N_d vs N_v | N_s vs N_v |
 |---------|-----------------|-----------------|----------------------|-----------|-----------|
-| Bill (Purchase Invoice) | 57 | 54 | 65 | −12.3% | −16.9% |
-| Purchase Order | 39 | 48 | 58 | −32.8% | −17.2% |
-| Item Receipt (Purchase Receipt) | 56 | 56 | 66 | −15.2% | −15.2% |
+| Bill (Purchase Invoice) | 59 | 54 | 65 | −9.2% | −16.9% |
+| Purchase Order | 40 | 48 | 58 | −31.0% | −17.2% |
+| Item Receipt (Purchase Receipt) | 57 | 56 | 66 | −13.6% | −15.2% |
+
+**Why \(N_d\) rose (2026-09-07):** the credit-memo tranche added a `Create Credit / Return`
+toolbar button, a draft-only `is_return` Yes/No switch, and two informal-link buttons to the
+Bill surface, plus shared chrome that PO/IR inherit. This is the expected cost of a feature,
+not a regression — but it is exactly the kind of drift that silently invalidates published
+marketing numbers, so the chart is now generated from these same sources by
+`npm run chart:input-count` rather than drawn once by hand.
 
 \(N_v > N_d\) and \(N_v > N_s\) both hold on every anchor. \(N_d\) vs \(N_s\) does **not**
 have a stable ordering — see G11.
@@ -125,9 +133,10 @@ used for \(N_v\) and drops any item whose field the doctype's seed profile assum
 (`simplified-seed-profiles.js`) — this matches the runtime (Simplified is Vanilla + an
 assumptions bar, not a rebuilt form), so no new fixture was needed to add \(N_s\).
 
-\(N_v > N_s\) holds on all three anchors (2026-09-05), but \(N_d\) and \(N_s\) do **not**
-sit in a fixed order: Bill has \(N_s < N_d\) (54 vs 57), Purchase Order has \(N_d < N_s\)
-(39 vs 48) by a wide margin, Item Receipt ties (56 vs 56). This is not a bug in either
+\(N_v > N_s\) holds on all three anchors (2026-09-07), but \(N_d\) and \(N_s\) do **not**
+sit in a fixed order: Bill has \(N_s < N_d\) (54 vs 59), Purchase Order has \(N_d < N_s\)
+(40 vs 48) by a wide margin, Item Receipt is near-tied the other way (57 vs 56 — it was an
+exact tie before the credit-memo controls landed). This is not a bug in either
 number — Doc curated (\(N_d\)) is a warm inventory that includes commit-gate/retry buttons
 and a synthetic line template (G3) that only exist in certain states, while \(N_s\) is a
 literal one-state DOM count; they are measuring different things and were never meant to

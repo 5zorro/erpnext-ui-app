@@ -36,9 +36,9 @@ a given doctype's Doc skin already owns.
 
 | Transaction | Vanilla ERPNext (labelled Default) | Default-Simplified skin | Doc skin |
 |---|---|---|---|
-| Bill (Purchase Invoice) | 65 | 54 (−17%) | 57 (−12%) |
-| Purchase Order | 58 | 48 (−17%) | 39 (−33%) |
-| Item Receipt (Purchase Receipt) | 66 | 56 (−15%) | 56 (−15%) |
+| Bill (Purchase Invoice) | 65 | 54 (−17%) | 59 (−9%) |
+| Purchase Order | 58 | 48 (−17%) | 40 (−31%) |
+| Item Receipt (Purchase Receipt) | 66 | 56 (−15%) | 57 (−14%) |
 
 Both alternate lenses cut real interactables versus stock ERPNext on every transaction type
 that has one; **Doc vs Simplified is not a race** — read the two independently, not against
@@ -50,7 +50,10 @@ file, so Vanilla's own count already includes fields a real one-tab-at-a-time De
 would not show at once (gotcha G1). Simplified's count is a direct subset of that same
 fixture (Vanilla's items minus the seed), so it inherits this, not a separate penalty of its
 own. Simplified's seed profiles for Purchase Order and Item Receipt shipped 2026-09-05 and
-have not yet been dogfooded end-to-end. Reproduce with `npm run report:input-count`.
+have not yet been dogfooded end-to-end. The Doc counts move whenever a Doc skin gains a
+control — the credit-memo work on 2026-09-07 added three, which is why Doc's Bill margin
+narrowed. Reproduce with `npm run report:input-count`; redraw the chart above with
+`npm run chart:input-count`.
 
 </details>
 
