@@ -39,6 +39,8 @@
         <button type="button" id="btn-new" data-testid="doc-new">New</button>
         <button type="button" id="btn-select-po" data-testid="bill-select-po" hidden>Select PO / source</button>
         <button type="button" id="btn-select-source" data-testid="doc-select-source" hidden>Select PO</button>
+        <button type="button" id="btn-credit-memo" data-testid="bill-credit-memo" hidden
+          title="Create a credit memo (Vendor Credit / Debit Note) against this submitted Bill — sets Return Against natively so it traces back correctly.">Create Credit / Return</button>
         <button type="button" id="btn-refresh" data-testid="doc-refresh"
           title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due on Bill). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
         <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Default-skin</button>
@@ -155,6 +157,21 @@
                 title="Click to pick Shipping Address (ship to / receiving)."></textarea>
             </div>
           </div>
+          </section>
+          <section class="credit-memo-toggle" id="credit-memo-toggle" data-testid="bill-credit-memo-toggle"
+            aria-label="Credit memo">
+            <div class="credit-memo-toggle-head">
+              <div class="credit-memo-toggle-question">
+                <span class="credit-memo-toggle-label">Credit memo (Vendor Credit)?</span>
+                <span class="credit-memo-toggle-hint">Set this before entering lines — quantities must be negative. Link it to the original Bill / Sales Order below once you know which one.</span>
+              </div>
+              <button type="button" id="f-is-return" class="credit-memo-switch" data-field="is_return"
+                data-testid="bill-is-return" role="switch" aria-checked="false" aria-label="Credit memo: No">
+                <span class="switch-word switch-word-no">No</span>
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                <span class="switch-word switch-word-yes">Yes</span>
+              </button>
+            </div>
           </section>
           <section class="bill-section bill-section-lines" data-testid="bill-lines-section">
             <div class="line-tabs" role="tablist" data-testid="bill-line-tabs">
@@ -354,6 +371,20 @@
                 </button>
               </div>
               <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
+            </div>
+            <div class="credit-links" id="credit-links-block" data-testid="bill-credit-links" hidden>
+              <div class="credit-link-row">
+                <span class="credit-link-label">Informal link to Bill:</span>
+                <span class="credit-link-value" id="credit-link-bill-value" data-testid="bill-informal-link-bill-value">(none)</span>
+                <button type="button" id="btn-informal-link-bill" data-testid="bill-informal-link-bill"
+                  title="Note (in Remarks) which Bill this credit memo is really about — not the ERP Return Against field, just a trace for humans.">Informal link to Bill…</button>
+              </div>
+              <div class="credit-link-row">
+                <span class="credit-link-label">Informal link to Sales Order:</span>
+                <span class="credit-link-value" id="credit-link-so-value" data-testid="bill-informal-link-so-value">(none)</span>
+                <button type="button" id="btn-informal-link-so" data-testid="bill-informal-link-so"
+                  title="Note (in Remarks) which Sales Order this credit relates to — e.g. a warranty return that already went out to a customer.">Informal link to Sales Order…</button>
+              </div>
             </div>
           </section>
             <div class="back-to-top-row">

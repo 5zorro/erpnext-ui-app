@@ -5285,35 +5285,48 @@ async function deleteBillItem(rowIndex) {
   return raw;
 }
 
-async function searchLink(doctype, txt) {
+async function searchLink(doctype, txt, filters) {
   if (typeof doctype !== "string" || !doctype.trim()) {
     return { ok: false, reason: "doctype required", results: [] };
   }
   const q = txt == null ? "" : String(txt);
+  const filterPairs =
+    filters && typeof filters === "object" && !Array.isArray(filters)
+      ? Object.entries(filters).filter(([, v]) => v != null && v !== "")
+      : [];
   const raw = await erpEval(`(async () => {
     try {
       if (!window.frappe) return { ok: false, reason: "ERP Desk not ready (no frappe)." };
       var doctype = ${JSON.stringify(doctype)};
       var txt = ${JSON.stringify(q)};
+      var filterPairs = ${JSON.stringify(filterPairs)};
       var rows = [];
       if (frappe.call) {
+        var args = {
+          txt: txt,
+          doctype: doctype,
+          reference_doctype: "Purchase Invoice",
+          page_length: 25
+        };
+        if (filterPairs.length) {
+          var filterObj = {};
+          filterPairs.forEach(function (p) { filterObj[p[0]] = p[1]; });
+          args.filters = filterObj;
+        }
         var r = await frappe.call({
           method: "frappe.desk.search.search_link",
-          args: {
-            txt: txt,
-            doctype: doctype,
-            reference_doctype: "Purchase Invoice",
-            page_length: 25
-          }
+          args: args
         });
         rows = (r && r.message) ? r.message : [];
       } else if (frappe.db && frappe.db.get_list) {
         var fields = ["name"];
         if (doctype === "Supplier") fields.push("supplier_name");
         if (doctype === "Item") fields.push("item_name");
+        var listFilters = txt ? [["name", "like", "%" + txt + "%"]] : [];
+        filterPairs.forEach(function (p) { listFilters.push([p[0], "=", p[1]]); });
         var list = await frappe.db.get_list(doctype, {
           fields: fields,
-          filters: txt ? [["name", "like", "%" + txt + "%"]] : [],
+          filters: listFilters,
           limit: 25,
           order_by: "modified desc"
         });
@@ -6038,8 +6051,8 @@ ipcMain.handle("bill-retry-load", async () => {
 function headerValueUnchanged(field, next) {
   const kind = dirtyCompareKindForField(field);
   const doc = dirtyState.doc;
-  if (field === "is_paid") {
-    const prev = doc ? doc.is_paid : 0;
+  if (field === "is_paid" || field === "is_return") {
+    const prev = doc ? doc[field] : 0;
     const a = prev === true || prev === 1 || prev === "1" ? 1 : 0;
     const b = next === true || next === 1 || next === "1" ? 1 : 0;
     return a === b;
@@ -6063,7 +6076,7 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
   }
   const kind = dirtyCompareKindForField(field);
   let next;
-  if (field === "is_paid") {
+  if (field === "is_paid" || field === "is_return") {
     next = value === true || value === 1 || value === "1" ? "1" : "0";
   } else if (kind === "number") {
     next = value == null ? "" : String(value);
@@ -6305,6 +6318,63 @@ async function mergeBillSources(items) {
 }
 
 ipcMain.handle("bill-merge-sources", async (_e, items) => mergeBillSources(items));
+
+/**
+ * Create a credit memo (AP return / debit note) against a submitted Bill — OI-082.
+ * Prefers ERPNext's own `make_debit_note` mapper over a freeform is_return flip: that native
+ * path sets `return_against` and carries the source items' po_detail/pr_detail links through,
+ * which is exactly what the 2026-09-06 dogfood showed a freeform return silently gets wrong
+ * (GL posts to an accrual placeholder account with no error — see museum OI-147).
+ * @param {string} sourceBillName
+ */
+async function createCreditMemoFrom(sourceBillName) {
+  const nm = typeof sourceBillName === "string" ? sourceBillName.trim() : "";
+  if (!nm) return { ok: false, reason: "Source Bill name required." };
+  await ensureErpFormBridge();
+  const mapped = await erpEval(`(async () => {
+    try {
+      var r = await frappe.call({
+        method: "erpnext.accounts.doctype.purchase_invoice.purchase_invoice.make_debit_note",
+        args: { source_name: ${JSON.stringify(nm)} },
+      });
+      return { ok: true, src: r && r.message };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  if (!mapped || !mapped.ok || !mapped.src) {
+    return {
+      ok: false,
+      reason: (mapped && mapped.reason) || `Could not create a credit memo against ${nm}.`,
+    };
+  }
+  const combined = combineMappedBillSources([mapped.src]);
+  if (!combined) {
+    return { ok: false, reason: "Credit memo had no item lines." };
+  }
+  cancelBillEnrichBackground("bill-create-credit-memo");
+  dirtyState = { isDirty: false, isNew: true, userEdited: false, baselineJson: null, doc: null };
+  amountDueScratch = "";
+  amountDueCommitted = "";
+  await showBill("/app/purchase-invoice/new", { skipDirtyGate: true });
+  const raw = await bridgeCall("mergeFromMapped", combined);
+  if (raw && raw.ok) {
+    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+    await waitForErpAjaxQuiet();
+    const extras = await enrichBillSnapshotExtras(raw.doc);
+    return {
+      ...raw,
+      ...extras,
+      amountDue: amountDueScratch,
+      userEdited: !!dirtyState.userEdited,
+    };
+  }
+  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Credit memo merge failed." };
+}
+
+ipcMain.handle("bill-create-credit-memo", async (_e, sourceBillName) =>
+  createCreditMemoFrom(sourceBillName),
+);
 
 ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
   const supplier = normalizeEditableText(payload && payload.supplier);
@@ -7513,7 +7583,7 @@ ipcMain.handle("bill-revert-unsaved", async () => {
   };
 });
 
-ipcMain.handle("bill-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+ipcMain.handle("bill-search-link", async (_e, doctype, txt, filters) => searchLink(doctype, txt, filters));
 ipcMain.handle("bill-account-company-check", async () => listBillAccountCompanyMismatches());
 ipcMain.on("bill-open-vanilla", () => {
   const route = currentRoute.includes("purchase-invoice")

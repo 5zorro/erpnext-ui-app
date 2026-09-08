@@ -50,6 +50,7 @@ describe("valuesMeaningfullyEqual", () => {
     assert.equal(dirtyCompareKindForField("posting_date"), "date");
     assert.equal(dirtyCompareKindForField("bill_date"), "date");
     assert.equal(dirtyCompareKindForField("supplier"), "text");
+    assert.equal(dirtyCompareKindForField("is_return"), "number");
   });
 
   it("normalizeEditableText trims", () => {

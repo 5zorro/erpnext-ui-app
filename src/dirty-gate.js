@@ -86,7 +86,7 @@ export function dirtyCompareKindForField(field) {
   if (field === "qty" || field === "rate" || field === "tax_amount" || field === "__amount_due" || field === "paid_amount") {
     return "number";
   }
-  if (field === "is_paid") {
+  if (field === "is_paid" || field === "is_return") {
     return "number";
   }
   if (field === "posting_date" || field === "bill_date" || field === "due_date" || field === "transaction_date" || field === "schedule_date") {

@@ -1419,12 +1419,14 @@
             if (skip.indexOf(k) < 0) row[k] = it[k];
           });
         });
-        ["bill_no", "payment_terms_template"].forEach(function (fld) {
+        // is_return / return_against (OI-082): only ever present on a make_debit_note mapped
+        // doc, so this is a no-op for the ordinary PO/PR merge path.
+        ["bill_no", "payment_terms_template", "is_return", "return_against"].forEach(function (fld) {
           if (src[fld]) f.doc[fld] = src[fld];
         });
         f.refresh_field("items");
         try {
-          f.refresh_fields(["bill_no", "payment_terms_template", "due_date"]);
+          f.refresh_fields(["bill_no", "payment_terms_template", "due_date", "is_return", "return_against"]);
         } catch (e1) {}
         await afterAjaxQuiet();
 

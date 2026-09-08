@@ -46,6 +46,12 @@ const BILL_DOC_STATIC = Object.freeze([
     notes: "OI-135 Already paid draft memory → Submit JIT PE; colocated with OI-139 applied PE table",
   },
   { id: "bill-is-paid", kind: "button", modeSwitch: "none", notes: "Already paid No/Yes switch" },
+  {
+    id: "bill-is-return",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "Credit memo (Vendor Credit) No/Yes switch — draft-only",
+  },
   { id: "bill-mode-of-payment", kind: "text", modeSwitch: "none" },
   { id: "bill-cash-bank", kind: "text", modeSwitch: "none" },
   { id: "bill-paid-amount", kind: "money", modeSwitch: "tenkey" },

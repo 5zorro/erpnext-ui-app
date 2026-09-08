@@ -34,8 +34,14 @@ export const ALPHA_BILL_TOOLBAR = Object.freeze([
   { id: "btn-submit", label: "Save draft & submit", museumEquivalent: "Save", group: "fileRetention" },
   { id: "btn-revert", label: "Revert unsaved changes", museumEquivalent: null, group: "fileRetention" },
   { id: "btn-select-po", label: "Select PO / source", museumEquivalent: "Select PO", group: "navigate" },
+  {
+    id: "btn-credit-memo",
+    label: "Create Credit / Return",
+    museumEquivalent: null,
+    group: "navigate",
+  },
   { id: "btn-refresh", label: "Refresh", museumEquivalent: null, group: "navigate" },
-  { id: "btn-vanilla", label: "Open in Vanilla", museumEquivalent: null, group: "navigate" },
+  { id: "btn-vanilla", label: "Open in Default-skin", museumEquivalent: null, group: "navigate" },
 ]);
 
 /** Actions that use the dirty commit popover (T3a). */
