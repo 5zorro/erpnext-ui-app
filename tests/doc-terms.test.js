@@ -12,11 +12,20 @@ describe("relabelTerm", () => {
     assert.equal(relabelTerm("Supplier"), "Vendor");
     assert.equal(relabelTerm("Supplier Name"), "Vendor Name");
   });
+
+  it("maps Debit Note to Vendor Credit (OI-082 AP return)", () => {
+    assert.equal(relabelTerm("Debit Note"), "Vendor Credit");
+    assert.equal(relabelTerm("Is Return (Debit Note)"), "Is Return (Vendor Credit)");
+  });
 });
 
 describe("erpTerm", () => {
   it("reverses Bill and Vendor", () => {
     assert.equal(erpTerm("Bill"), "Purchase Invoice");
     assert.equal(erpTerm("Vendor"), "Supplier");
+  });
+
+  it("reverses Vendor Credit to Debit Note", () => {
+    assert.equal(erpTerm("Vendor Credit"), "Debit Note");
   });
 });

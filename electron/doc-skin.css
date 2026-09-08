@@ -459,6 +459,12 @@
   padding: 8px 0;
   flex: 1;
 }
+.src-empty {
+  padding: 14px;
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
+}
 .src-group {
   padding: 6px 14px;
   font-size: 11px;

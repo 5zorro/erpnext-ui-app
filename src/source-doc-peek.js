@@ -3,7 +3,7 @@
  */
 
 /**
- * @param {"purchase-order"|"purchase-receipt"|string} kind
+ * @param {"purchase-order"|"purchase-receipt"|"purchase-invoice"|"sales-order"|string} kind
  * @param {string|null|undefined} name ERP document name
  * @returns {string|null}
  */
@@ -19,6 +19,12 @@ export function linkedSourcePeekRoute(kind, name) {
   if (k === "purchase-receipt" || k === "pr" || k === "item-receipt") {
     return `/app/purchase-receipt/${encodeURIComponent(n)}`;
   }
+  if (k === "purchase-invoice" || k === "bill") {
+    return `/app/purchase-invoice/${encodeURIComponent(n)}`;
+  }
+  if (k === "sales-order" || k === "so") {
+    return `/app/sales-order/${encodeURIComponent(n)}`;
+  }
   return null;
 }
 
@@ -28,12 +34,17 @@ export function linkedSourcePeekRoute(kind, name) {
  */
 export function canSoftPeekLinkedSourceRoute(route) {
   const r = route != null ? String(route).trim() : "";
-  return r.startsWith("/app/purchase-order/") || r.startsWith("/app/purchase-receipt/");
+  return (
+    r.startsWith("/app/purchase-order/") ||
+    r.startsWith("/app/purchase-receipt/") ||
+    r.startsWith("/app/purchase-invoice/") ||
+    r.startsWith("/app/sales-order/")
+  );
 }
 
 /**
  * Clerk-facing label for peek status / button title.
- * @param {"purchase-order"|"purchase-receipt"|string} kind
+ * @param {"purchase-order"|"purchase-receipt"|"purchase-invoice"|"sales-order"|string} kind
  * @returns {string}
  */
 export function linkedSourcePeekKindLabel(kind) {
@@ -42,5 +53,7 @@ export function linkedSourcePeekKindLabel(kind) {
     .replace(/_/g, "-");
   if (k === "purchase-order" || k === "po") return "Purchase Order";
   if (k === "purchase-receipt" || k === "pr" || k === "item-receipt") return "Item Receipt";
+  if (k === "purchase-invoice" || k === "bill") return "Bill";
+  if (k === "sales-order" || k === "so") return "Sales Order";
   return "source document";
 }

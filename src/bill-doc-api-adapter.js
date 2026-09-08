@@ -33,13 +33,14 @@ export function billApiFromErpDoc(api) {
     refocusListFilter: (fieldname) => api.refocusListFilter(fieldname || "bill_no"),
     newBill: () => api.newDoc(),
     printBill: () => api.printDoc(),
-    searchLink: (doctype, txt) => api.searchLink(doctype, txt || ""),
+    searchLink: (doctype, txt, filters) => api.searchLink(doctype, txt || "", filters || null),
     checkAccountCompanies: () => api.checkAccountCompanies(),
     listSources: (supplier) => api.listSources(supplier || ""),
     listSourceSlice: (supplier, sliceId) =>
       api.listSourceSlice ? api.listSourceSlice(supplier || "", sliceId || "") : Promise.resolve({ ok: false }),
     fetchSourceTerms: (refs) => api.fetchSourceTerms(refs || []),
     mergeSource: (kindOrItems, name) => api.mergeSource(kindOrItems, name),
+    createCreditMemo: (sourceBillName) => api.createCreditMemo(sourceBillName || ""),
     listSalesOrdersForPicker: (payload) => api.listSalesOrdersForPicker(payload || {}),
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>

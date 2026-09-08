@@ -45,6 +45,16 @@ import {
   linkedSourcePeekKindLabel,
 } from "../src/source-doc-peek.js";
 import {
+  isCreditMemoBill,
+  creditMemoReturnAgainst,
+  creditMemoOrphaned,
+  parseBillLinkToken,
+  withBillLinkToken,
+  parseSoLinkToken,
+  withSoLinkToken,
+  planCreditMemoSource,
+} from "../src/credit-memo.js";
+import {
   evaluateBillRef,
   billRefWaitingForVendorResult,
   resolveBillRefSupplier,
@@ -198,6 +208,7 @@ import {
 } from "../src/bill-tax-sync.js";
 import {
   applyDocWashToDocument,
+  setDocWashVariant,
   setWashSourceAttr,
   washRoleForSourceKind,
 } from "../src/doc-wash.js";
@@ -272,6 +283,8 @@ export async function bootBillFormPage(api) {
   /** @type {string} */
   let sourcePickerInflightSupplier = "";
   let allocationPickerOpen = false;
+  /** True while the credit-memo informal-link picker (Bill or Sales Order) is open. */
+  let informalLinkPickerOpen = false;
   /** True while OI-140 → Stock allocate dialog is open (freeze tax × deletes). */
   let allocateChargeModalOpen = false;
   /** @type {Record<number, object>} */
@@ -529,6 +542,14 @@ export async function bootBillFormPage(api) {
     revert: document.getElementById("btn-revert"),
     find: document.getElementById("btn-find"),
     newBill: document.getElementById("btn-new"),
+    creditMemo: document.getElementById("btn-credit-memo"),
+    creditMemoToggleSection: document.getElementById("credit-memo-toggle"),
+    isReturn: document.getElementById("f-is-return"),
+    creditLinksBlock: document.getElementById("credit-links-block"),
+    creditLinkBillValue: document.getElementById("credit-link-bill-value"),
+    creditLinkSoValue: document.getElementById("credit-link-so-value"),
+    informalLinkBill: document.getElementById("btn-informal-link-bill"),
+    informalLinkSo: document.getElementById("btn-informal-link-so"),
     print: document.getElementById("btn-print"),
     dirtyPill: document.getElementById("dirty-pill"),
     commitGate: document.getElementById("commit-gate"),
@@ -2571,6 +2592,22 @@ export async function bootBillFormPage(api) {
     }
   }
   
+  /** Draft-only toggle for is_return — flips on a form already loaded, so there's no
+   * navigate-then-mutate gap for a stale ERP nav to clobber (nav incident 2026-09-07). */
+  function paintCreditMemoToggle(doc, canEdit) {
+    const checked = isCreditMemoBill(doc);
+    // Vertical white ledger stripes over the invoice wash while this is a return — the
+    // one signal that survives on a *submitted* credit memo, where the toggle is hidden.
+    setDocWashVariant(document, checked ? "return" : null);
+    if (el.creditMemoToggleSection) el.creditMemoToggleSection.hidden = !canEdit;
+    if (el.isReturn) {
+      el.isReturn.classList.toggle("is-on", checked);
+      el.isReturn.setAttribute("aria-checked", checked ? "true" : "false");
+      el.isReturn.setAttribute("aria-label", checked ? "Credit memo: Yes" : "Credit memo: No");
+      el.isReturn.disabled = !canEdit;
+    }
+  }
+
   async function paintAppliedPayments(doc, opts = {}) {
     if (!el.appliedPayments) return;
     const submitted = doc && Number(doc.docstatus) === 1;
@@ -2955,7 +2992,12 @@ export async function bootBillFormPage(api) {
       setStatus("Source picker API missing — restart the shell.", "err");
       return { ok: false, reason: "api_missing" };
     }
-    if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
+    // Every modal on this page must respect every other one. The credit-memo link picker
+    // checked these two from day one; they did not check it back, so a toolbar Select PO
+    // could stack a second dialog on top of an open link picker.
+    if (sourceModalOpenRef.current || informalLinkPickerOpen) {
+      return { ok: false, reason: "already_open" };
+    }
     if (!editable()) {
       setStatus("Bill is not a draft — source picker locked.", "warn");
       return { ok: false, reason: "not_editable" };
@@ -3128,7 +3170,7 @@ export async function bootBillFormPage(api) {
       setStatus("Line allocation API missing — restart the shell.", "err");
       return;
     }
-    if (allocationPickerOpen || sourceModalOpenRef.current) return;
+    if (allocationPickerOpen || sourceModalOpenRef.current || informalLinkPickerOpen) return;
     if (!editable()) {
       setStatus("Bill is not a draft — allocation locked.", "warn");
       return;
@@ -3440,6 +3482,288 @@ export async function bootBillFormPage(api) {
     searchEl.focus();
   }
   
+  /**
+   * Informal link picker for credit memos (OI-147/164, OI-165 SO half) — writes a plain-text
+   * token into Remarks, never the real ERP `return_against` field. "Bill" defaults to the
+   * current vendor's submitted Bills; typing a name searches any vendor (2026-09-07 decision).
+   * "Sales Order" reuses the OI-134 line-allocation fetch as-is — rough first pass, not
+   * dogfooded yet (5zorro 2026-09-07: "won't verify it until later").
+   *
+   * `purpose: "source"` (Bill only) is the same list opened at a different moment: right
+   * after the clerk flips **Credit memo? → Yes** on a Bill they did *not* reach from a
+   * submitted Bill, so nothing has set `return_against` yet. Picking there routes through
+   * `planCreditMemoSource()` — an untouched draft is rebuilt via the native make_debit_note
+   * path (real `return_against`, correct expense account); a draft with lines already on it
+   * falls back to the informal token rather than silently destroying that work.
+   * @param {"bill"|"so"} kind
+   * @param {{ purpose?: "link"|"source" }} [opts]
+   */
+  async function openInformalLinkPicker(kind, opts = {}) {
+    if (!api || !api.setHeader) {
+      setStatus("Informal link API missing — restart the shell.", "err");
+      return;
+    }
+    if (informalLinkPickerOpen || sourceModalOpenRef.current || allocationPickerOpen) return;
+    const isBill = kind === "bill";
+    const isSourcePick = isBill && opts.purpose === "source";
+    const label = isBill ? "Bill" : "Sales Order";
+    const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
+    const supplier =
+      normalizeEditableText(lastDoc && lastDoc.supplier) || normalizeEditableText(el.vendor.value);
+
+    informalLinkPickerOpen = true;
+    let rows = [];
+    let query = "";
+
+    const back = document.createElement("div");
+    back.className = "src-back";
+    back.dataset.testid = isSourcePick
+      ? "bill-credit-source-picker"
+      : `bill-informal-link-picker-${kind}`;
+    const dialogLabel = isSourcePick
+      ? "Which Bill is this credit against?"
+      : `Informal link to ${label}`;
+    const box = document.createElement("div");
+    box.className = "src-box";
+    box.tabIndex = -1;
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", dialogLabel);
+    const subtitle = isSourcePick
+      ? " — same vendor by default; type/paste a name to search any vendor. Skip this and the credit posts with no Bill behind it."
+      : isBill
+        ? " — same vendor by default; type/paste a name to search any vendor"
+        : " (Sales Order picker — not restricted by vendor)";
+    box.innerHTML = `<div class="src-title">${dialogLabel}${subtitle}</div>
+      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
+        <input type="text" data-link-search placeholder="${
+          isBill ? "Search Bills…" : "Filter Sales Orders…"
+        }" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
+      </div>
+      <div class="src-body"></div>
+      <div class="src-foot">
+        <button type="button" data-act="clear">${
+          isSourcePick ? "Decide later" : "Clear link"
+        }</button>
+        <button type="button" data-act="cancel">Cancel</button>
+      </div>`;
+    back.appendChild(box);
+    document.body.appendChild(back);
+    const body = box.querySelector(".src-body");
+    const searchEl = box.querySelector("[data-link-search]");
+    const clearBtn = box.querySelector('[data-act="clear"]');
+    const cancelBtn = box.querySelector('[data-act="cancel"]');
+
+    function close() {
+      if (searchDebounce) clearTimeout(searchDebounce);
+      informalLinkPickerOpen = false;
+      document.removeEventListener("keydown", onKey, true);
+      if (back.parentNode) back.parentNode.removeChild(back);
+    }
+
+    async function applyLink(name) {
+      const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
+      const next = isBill
+        ? withBillLinkToken(currentRemarks, name)
+        : withSoLinkToken(currentRemarks, name);
+      setStatus(
+        name ? `Linking informally to ${label} ${name}…` : `Clearing informal ${label} link…`,
+      );
+      try {
+        const res = await api.setHeader("remarks", next);
+        if (res && res.ok) {
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+          setStatus(
+            name
+              ? `Noted in Remarks: informal link to ${label} ${name}.`
+              : `Informal ${label} link cleared.`,
+          );
+        } else {
+          setStatus((res && res.reason) || `Could not set the informal ${label} link.`, "err");
+        }
+      } catch (err) {
+        setStatus(
+          `Could not set the informal ${label} link: ${String(
+            err && err.message ? err.message : err,
+          )}`,
+          "err",
+        );
+      } finally {
+        close();
+      }
+    }
+
+    /**
+     * Source-pick route (toggle → Yes). An untouched draft is rebuilt through ERPNext's own
+     * make_debit_note so `return_against` is real; a draft with typed lines keeps its work
+     * and settles for the informal token, and is told which trade it just made.
+     */
+    async function chooseSourceBill(name) {
+      const plan = planCreditMemoSource(lastDoc);
+      if (plan !== "native") {
+        await applyLink(name);
+        if (plan === "informal") {
+          setStatus(
+            `Noted in Remarks: this credit is about Bill ${name}. Return Against was left ` +
+              "empty so the lines you already entered are not overwritten — to get the real " +
+              "ERP link (and the right expense account), start over from that Bill with " +
+              "Create Credit / Return.",
+            "warn",
+          );
+        }
+        return;
+      }
+      if (!api.createCreditMemo) {
+        setStatus("Credit memo API missing — restart the shell.", "err");
+        close();
+        return;
+      }
+      setStatus(`Building credit memo against ${name}…`);
+      close();
+      try {
+        const res = await api.createCreditMemo(name);
+        if (res && res.ok) {
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+          setStatus(`Credit memo drafted against ${name} — review qty/amounts, then save.`);
+        } else {
+          setStatus((res && res.reason) || `Could not create a credit memo against ${name}.`, "err");
+        }
+      } catch (err) {
+        setStatus(
+          `Credit memo against ${name} failed: ${String(err && err.message ? err.message : err)}`,
+          "err",
+        );
+      }
+    }
+
+    function drawRows() {
+      body.innerHTML = "";
+      const q = query.trim().toLowerCase();
+      const filtered = q
+        ? rows.filter((r) => `${r.value} ${r.description || ""}`.toLowerCase().includes(q))
+        : rows;
+      if (!filtered.length) {
+        const empty = document.createElement("div");
+        empty.className = "src-empty";
+        empty.textContent =
+          isBill && !q
+            ? `No submitted Bills found for ${supplier || "this vendor"}. Type to search any vendor.`
+            : "No matches.";
+        body.appendChild(empty);
+        return;
+      }
+      filtered.forEach((r) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "src-item";
+        btn.dataset.testid = isSourcePick
+          ? "bill-credit-source-row"
+          : `bill-informal-link-${kind}-row`;
+        btn.textContent =
+          r.description && r.description !== r.value ? `${r.value} — ${r.description}` : r.value;
+        btn.onclick = () => (isSourcePick ? chooseSourceBill(r.value) : applyLink(r.value));
+        body.appendChild(btn);
+      });
+    }
+
+    async function loadBillRows(q) {
+      if (!api.searchLink) return [];
+      // Typing widens the search past this vendor — but NOT past "submitted, not itself a
+      // return". A credit memo against a draft, a cancelled Bill, or another credit memo is
+      // never what the clerk meant, and make_debit_note would reject it anyway.
+      const res = await api.searchLink("Purchase Invoice", q || "", {
+        supplier: q ? undefined : supplier || undefined,
+        docstatus: 1,
+        is_return: 0,
+      });
+      const list = res && res.ok && Array.isArray(res.results) ? res.results : [];
+      return list.filter((r) => r && r.value && r.value !== currentName);
+    }
+
+    async function loadSoRows() {
+      if (!api.listSalesOrdersForPicker) return [];
+      const items =
+        lastDoc && Array.isArray(lastDoc.items)
+          ? lastDoc.items.map((r) => ({
+              item_code: r.item_code,
+              qty: r.qty,
+              rate: r.rate,
+              amount: r.amount,
+            }))
+          : [];
+      const res = await api.listSalesOrdersForPicker({
+        supplier: supplier || "",
+        customer: "",
+        billLines: items,
+      });
+      const list = res && res.ok && Array.isArray(res.orders) ? res.orders : [];
+      return list.map((so) => ({
+        value: so.name,
+        description: `${so.customer_name || so.customer || ""}${
+          so.grand_total ? ` — $${so.grand_total}` : ""
+        }`.trim(),
+      }));
+    }
+
+    // A throw anywhere in here used to leave informalLinkPickerOpen stuck true, locking the
+    // picker out for the rest of the session with no way back short of reopening the Bill.
+    async function reload() {
+      body.innerHTML = `<div class="src-empty">Loading…</div>`;
+      try {
+        rows = isBill ? await loadBillRows(query.trim()) : await loadSoRows();
+      } catch (err) {
+        rows = [];
+        body.innerHTML = "";
+        const failed = document.createElement("div");
+        failed.className = "src-empty";
+        failed.dataset.testid = "bill-link-picker-error";
+        failed.textContent = `Could not load ${label}s: ${String(
+          err && err.message ? err.message : err,
+        )}`;
+        body.appendChild(failed);
+        return;
+      }
+      drawRows();
+    }
+
+    let searchDebounce = null;
+    searchEl.addEventListener("input", () => {
+      query = searchEl.value || "";
+      if (isBill) {
+        if (searchDebounce) clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(reload, 220);
+      } else {
+        drawRows(); // SO rows are fetched once; filtered client-side while typing.
+      }
+    });
+
+    function onKey(ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        close();
+      }
+    }
+    document.addEventListener("keydown", onKey, true);
+    back.addEventListener("mousedown", (ev) => {
+      if (ev.target === back) close();
+    });
+    // "Decide later" must not strip an existing token — it only declines to add one now.
+    clearBtn.onclick = () => {
+      if (!isSourcePick) return applyLink("");
+      close();
+      setStatus(
+        "Credit memo left with no Bill behind it — the Return Against warning below stays up " +
+          "until you link one.",
+        "warn",
+      );
+      return undefined;
+    };
+    cancelBtn.onclick = () => close();
+
+    await reload();
+    searchEl.focus();
+  }
+
   function setFormBlocked(blocked, reason) {
     document.body.classList.toggle("blocked", !!blocked);
     const retry = document.getElementById("btn-retry");
@@ -3531,8 +3855,9 @@ export async function bootBillFormPage(api) {
     const pending = enrichPending || lastEnrichPending || {};
     const poRows = linkedPurchaseOrdersForBill(doc, linkedPos || []);
     const prRows = linkedPurchaseReceiptsForBill(doc, linkedReceipts || []);
+    const isReturn = isCreditMemoBill(doc);
     block.replaceChildren();
-    if (!poRows.length && !prRows.length) {
+    if (!poRows.length && !prRows.length && !isReturn) {
       block.hidden = true;
       return;
     }
@@ -3627,8 +3952,57 @@ export async function bootBillFormPage(api) {
       refField.append(refLabel, refInput);
       block.append(erpField, refField);
     });
+    if (isReturn) {
+      const returnAgainst = creditMemoReturnAgainst(doc);
+      const erpField = document.createElement("div");
+      erpField.className = "field";
+      const erpLabel = document.createElement("label");
+      erpLabel.textContent = "Return Against (Credit Memo For)";
+      const erpInput = document.createElement("input");
+      erpInput.type = "text";
+      erpInput.readOnly = true;
+      erpInput.tabIndex = -1;
+      erpInput.value = returnAgainst;
+      erpInput.dataset.testid = "bill-return-against-name";
+      erpInput.title = "Original Bill this credit memo returns against. Read-only — set at creation.";
+      setWashSourceAttr(erpInput, washRoleForSourceKind("bill"));
+      const erpRow = document.createElement("div");
+      erpRow.className = "row linked-source-row";
+      erpRow.append(erpInput);
+      const returnRoute = linkedSourcePeekRoute("purchase-invoice", returnAgainst);
+      appendLinkedSourcePeekButton(erpRow, returnRoute, "purchase-invoice", "bill-return-against-peek");
+      erpField.append(erpLabel, erpRow);
+      const warnField = document.createElement("div");
+      warnField.className = "field";
+      if (creditMemoOrphaned(doc)) {
+        const warn = document.createElement("div");
+        warn.className = "linked-source-warning";
+        warn.dataset.testid = "bill-return-orphan-warning";
+        warn.textContent =
+          "No Bill linked — ERPNext may silently post this to an accrual placeholder account " +
+          "instead of the real expense account (OI-147). Use Create Credit / Return from the " +
+          "original Bill instead of a freeform return.";
+        warnField.append(warn);
+      }
+      block.append(erpField, warnField);
+    }
   }
-  
+
+  /** Informal Bill/Sales Order link display (OI-147/164/165) — only on credit memos. */
+  function paintCreditLinks(doc) {
+    if (!el.creditLinksBlock) return;
+    if (!isCreditMemoBill(doc)) {
+      el.creditLinksBlock.hidden = true;
+      return;
+    }
+    el.creditLinksBlock.hidden = false;
+    const remarks = (doc && doc.remarks) || "";
+    const billLink = parseBillLinkToken(remarks);
+    const soLink = parseSoLinkToken(remarks);
+    if (el.creditLinkBillValue) el.creditLinkBillValue.textContent = billLink || "(none)";
+    if (el.creditLinkSoValue) el.creditLinkSoValue.textContent = soLink || "(none)";
+  }
+
   async function maybePrefillRemarksFromLinkedPos(doc, poRows, opts = {}) {
     if (!api || !editable() || !shouldPrefillBillRemarksFromPo(doc, poRows)) return;
     if (!opts.linkedPosChanged) return;
@@ -3720,6 +4094,10 @@ export async function bootBillFormPage(api) {
       if (el.clearQty) el.clearQty.disabled = true;
       if (el.attach) el.attach.disabled = true;
       if (el.addTax) el.addTax.disabled = true;
+      if (el.creditMemo) el.creditMemo.hidden = true;
+      if (el.creditMemoToggleSection) el.creditMemoToggleSection.hidden = true;
+      if (el.creditLinksBlock) el.creditLinksBlock.hidden = true;
+      setDocWashVariant(document, null);
       paintLinkedSources(null, [], []);
       paintChip();
       return;
@@ -3791,12 +4169,19 @@ export async function bootBillFormPage(api) {
       void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
     }
     paintHeaderInputIfAllowed(el.memo, "remarks", h.Memo ?? "", headerPaintOpts("remarks"));
+    paintCreditLinks(doc);
     void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
     syncAddressPickers(canEdit);
     syncDueDateField(doc, canEdit);
     paintAlreadyPaid(doc, canEdit);
+    paintCreditMemoToggle(doc, canEdit);
     paintDocStatusBadge(doc);
+    // Create Credit / Return (OI-082): only offer it on a submitted (docstatus 1), non-return
+    // Bill — not a draft, not already a credit memo, not a cancelled Bill.
+    if (el.creditMemo) {
+      el.creditMemo.hidden = Number(doc.docstatus) !== 1 || isCreditMemoBill(doc);
+    }
     void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
@@ -4262,6 +4647,33 @@ export async function bootBillFormPage(api) {
       }
     });
   }
+  if (el.isReturn) {
+    el.isReturn.addEventListener("click", async () => {
+      if (!api || !editable() || painting || el.isReturn.disabled) return;
+      const checked = !isCreditMemoBill(lastDoc);
+      setStatus(checked ? "Marking as credit memo…" : "Clearing credit memo…");
+      const res = await api.setHeader("is_return", checked ? 1 : 0);
+      if (!(res && res.ok)) {
+        setStatus((res && res.reason) || "Could not change credit memo flag.", "err");
+        paint(lastDoc, amountDue);
+        return;
+      }
+      if (!res.skipped) noteUserEdit();
+      paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+      setStatus(
+        checked
+          ? "Credit memo (Vendor Credit) — quantities must be negative. Use the informal " +
+              "links below once you know which Bill / Sales Order it relates to."
+          : "Credit memo cleared — back to a normal Bill.",
+      );
+      // Turning it ON with no source Bill behind it is exactly the OI-147 orphan the warning
+      // shouts about — so offer the picker at the one moment the clerk is thinking about it,
+      // rather than making them find "Informal link to Bill…" further down the page.
+      if (checked && !creditMemoReturnAgainst(lastDoc)) {
+        void openInformalLinkPicker("bill", { purpose: "source" });
+      }
+    });
+  }
   wireDateField(el.date);
   wireDateField(el.duedate);
   
@@ -4398,6 +4810,43 @@ export async function bootBillFormPage(api) {
   if (el.addSource) {
     el.addSource.tabIndex = -1;
     el.addSource.onclick = () => openSelectSourceFromToolbar();
+  }
+  if (el.creditMemo) {
+    el.creditMemo.onclick = async () => {
+      const sourceName = lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "";
+      if (!sourceName || !lastDoc || Number(lastDoc.docstatus) !== 1) {
+        setStatus("Save and submit this Bill before creating a credit memo against it.", "warn");
+        return;
+      }
+      if (!api || !api.createCreditMemo) {
+        setStatus("Credit memo API missing — restart the shell.", "err");
+        return;
+      }
+      setStatus(`Creating credit memo against ${sourceName}…`);
+      // createCreditMemoFrom resets dirtyState *before* it navigates, so a rejected IPC here
+      // must not leave the page sitting on "Creating…" forever with no way to tell.
+      try {
+        const res = await api.createCreditMemo(sourceName);
+        if (res && res.ok) {
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+          setStatus(`Credit memo drafted against ${sourceName} — review qty/amounts, then save.`);
+        } else {
+          setStatus((res && res.reason) || "Could not create credit memo.", "err");
+        }
+      } catch (err) {
+        setStatus(
+          `Could not create credit memo: ${String(err && err.message ? err.message : err)}. ` +
+            "Reopen the Bill before editing further.",
+          "err",
+        );
+      }
+    };
+  }
+  if (el.informalLinkBill) {
+    el.informalLinkBill.onclick = () => openInformalLinkPicker("bill");
+  }
+  if (el.informalLinkSo) {
+    el.informalLinkSo.onclick = () => openInformalLinkPicker("so");
   }
   document.getElementById("btn-retry").onclick = async () => {
     if (!api || !api.retryLoad) return;

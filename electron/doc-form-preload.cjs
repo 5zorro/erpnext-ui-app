@@ -52,7 +52,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => invokeSkin("bill-new", "doc-new"),
   printDoc: () => invokeSkin("bill-print", "doc-print"),
-  searchLink: (doctype, txt) => invokeSkin("bill-search-link", "doc-search-link", doctype, txt || ""),
+  searchLink: (doctype, txt, filters) =>
+    invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
   listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
   listSourceSlice: (supplier, sliceId) =>
@@ -64,6 +65,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
     return invokeSkin("bill-merge-source", "doc-merge-source", kindOrItems, name);
   },
   fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
+  createCreditMemo: (sourceBillName) =>
+    ipcRenderer.invoke("bill-create-credit-memo", sourceBillName || ""),
   retryLoad: () => invokeSkin("bill-retry-load", "doc-retry-load"),
   openVanilla: async () =>
     ipcRenderer.send((await billActive()) ? "bill-open-vanilla" : "doc-open-vanilla"),

@@ -21,8 +21,11 @@ function configureChromeForBill() {
 function configureChromeForDocForm() {
   const selectPo = document.getElementById("btn-select-po");
   const selectSource = document.getElementById("btn-select-source");
+  const creditMemo = document.getElementById("btn-credit-memo");
   if (selectPo) selectPo.hidden = true;
   if (selectSource) selectSource.hidden = true;
+  // Credit memo (is_return / return_against) is a Purchase Invoice concept — Bill-only.
+  if (creditMemo) creditMemo.hidden = true;
 }
 
 function activateBillShell() {

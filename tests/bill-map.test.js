@@ -38,6 +38,7 @@ import {
   uniqueLinkedPurchaseOrderNames,
   linkedPurchaseOrdersForBill,
   BILL_HEADER_FIELDS,
+  isWritableBillHeaderField,
 } from "../src/bill-map.js";
 import { splitHeaderColumns } from "../src/doc-action-flow.js";
 
@@ -432,5 +433,18 @@ describe("formatUsdAmount", () => {
   it("formats USD like museum fmtUsd", () => {
     assert.equal(formatUsdAmount(""), "");
     assert.match(formatUsdAmount(12.5), /\$12\.50/);
+  });
+});
+
+describe("isWritableBillHeaderField", () => {
+  it("allows is_return (credit memo from nothing, OI-147) alongside is_paid", () => {
+    assert.equal(isWritableBillHeaderField("is_return"), true);
+    assert.equal(isWritableBillHeaderField("is_paid"), true);
+  });
+
+  it("still rejects read-only / scratch / unknown fields", () => {
+    assert.equal(isWritableBillHeaderField("return_against"), false);
+    assert.equal(isWritableBillHeaderField("__amount_due"), false);
+    assert.equal(isWritableBillHeaderField("docstatus"), false);
   });
 });
