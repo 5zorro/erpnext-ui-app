@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DOC_WASH_BY_PROFILE,
   DOC_WASH_COLORS,
@@ -13,7 +14,12 @@ import {
   persistPatternPref,
   setWashSourceAttr,
   PATTERN_PREF_STORAGE_KEY,
+  DOC_WASH_VARIANTS,
+  normalizeDocWashVariant,
+  setDocWashVariant,
 } from "../src/doc-wash.js";
+
+const docWashCss = readFileSync(new URL("../electron/doc-wash.css", import.meta.url), "utf8");
 
 describe("doc-wash (OI-125)", () => {
   it("maps AP profiles to role + desk", () => {
@@ -91,6 +97,54 @@ describe("doc-wash (OI-125)", () => {
     const out = applyDocWashToDocument(fakeDoc, { profileId: "po", storage });
     assert.equal(out.patternPref, "ap");
     assert.equal(fakeDoc.documentElement.dataset.pattern, "ap");
+  });
+
+  it("normalizes the return variant, rejecting anything else", () => {
+    assert.deepEqual(DOC_WASH_VARIANTS, ["return"]);
+    assert.equal(normalizeDocWashVariant("return"), "return");
+    assert.equal(normalizeDocWashVariant("RETURN"), "return");
+    assert.equal(normalizeDocWashVariant(" return "), "return");
+    assert.equal(normalizeDocWashVariant("credit"), null);
+    assert.equal(normalizeDocWashVariant(null), null);
+  });
+
+  it("setDocWashVariant writes and clears data-doc-variant", () => {
+    const fakeDoc = { documentElement: { dataset: /** @type {Record<string, string>} */ ({}) } };
+    assert.equal(setDocWashVariant(fakeDoc, "return"), "return");
+    assert.equal(fakeDoc.documentElement.dataset.docVariant, "return");
+    assert.equal(setDocWashVariant(fakeDoc, null), null);
+    assert.equal(fakeDoc.documentElement.dataset.docVariant, undefined);
+  });
+
+  it("a return keeps its role wash — the variant is additive, not a replacement", () => {
+    const fakeDoc = { documentElement: { dataset: /** @type {Record<string, string>} */ ({}) } };
+    const out = applyDocWashToDocument(fakeDoc, {
+      profileId: "bill",
+      variant: "return",
+      storage: null,
+    });
+    assert.equal(out.role, "invoice");
+    assert.equal(out.variant, "return");
+    assert.equal(fakeDoc.documentElement.dataset.docRole, "invoice");
+    assert.equal(fakeDoc.documentElement.dataset.docVariant, "return");
+  });
+
+  it("CSS ships vertical white stripes for the return variant", () => {
+    assert.match(docWashCss, /--stripe-return:\s*repeating-linear-gradient\(\s*90deg/);
+    assert.match(
+      docWashCss,
+      /html\[data-doc-variant="return"\] \.card \{\s*background-image: var\(--stripe-return\);/,
+    );
+  });
+
+  it("stripes out-specify the pattern hatch so a patterned desk keeps both", () => {
+    // The hatch block is html + 3 attrs + class; a bare variant rule (html + 1 attr + class)
+    // would silently lose to it on a patterned desk. Guard the compound selectors instead.
+    assert.match(
+      docWashCss,
+      /html\[data-doc-variant="return"\]\[data-pattern="both"\]\[data-doc-desk="ap"\] \.card/,
+    );
+    assert.match(docWashCss, /background-image: var\(--stripe-return\), var\(--hatch-lighten\);/);
   });
 
   it("setWashSourceAttr writes or clears dataset", () => {
