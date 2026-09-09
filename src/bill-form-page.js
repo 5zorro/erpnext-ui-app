@@ -146,6 +146,12 @@ import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
 import { showSourceModal } from "../src/source-modal-ui.js";
 import {
+  buildCreditSourceGroups,
+  buildCreditSourceLoadingGroups,
+  buildCreditSourceErrorGroups,
+  classifyCreditSourceChoice,
+} from "../src/source-modal-credit-mode.js";
+import {
   runSourcePickerFlow,
   mayAutoOpenSourcePicker,
 } from "../src/source-picker-flow.js";
@@ -3050,13 +3056,69 @@ export async function bootBillFormPage(api) {
     document.querySelectorAll(".link-dd").forEach((dd) => {
       dd.hidden = true;
     });
-    setStatus("Loading open PO / Item Receipts…");
+
+    /**
+     * OI-166 — the modal asks one question, "where does this Bill come from?", and the foot
+     * switch changes which corpus answers it: open Purchase Orders / Item Receipts, or the
+     * submitted Bill this credit is against. 5zorro's flow is vendor → source in one breath,
+     * so the decision belongs here rather than behind a second dialog opened later.
+     *
+     * A Bill that is already a credit opens the modal already switched.
+     */
+    let creditOn = isCreditMemoBill(lastDoc);
+    /** Latest PO/IR corpus, kept warm so flipping back is instant and complete. */
+    let sourceGroups = null;
+    /** @type {import("./source-modal-ui.js").SourceModalController|null} */
+    let modalCtl = null;
+    let creditLoadToken = 0;
+    const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
+
+    async function switchCreditMode(next) {
+      if (!modalCtl) return;
+      creditOn = !!next;
+      if (!creditOn) {
+        // Slices that landed while the switch was on were accumulated, not painted.
+        modalCtl.setCreditMode(false, sourceGroups || undefined);
+        setStatus("Back to Purchase Orders and Item Receipts — Space to check · Enter to pull.");
+        return;
+      }
+      const token = ++creditLoadToken;
+      modalCtl.setCreditMode(true, buildCreditSourceLoadingGroups(sup));
+      setStatus(`Loading submitted Bills for ${sup}…`);
+      let rows = null;
+      let failure = "";
+      try {
+        rows = await searchSourceBillRows("", sup, currentName);
+      } catch (err) {
+        failure = String(err && err.message ? err.message : err);
+      }
+      // A stale fetch must never repaint a list the clerk has already switched away from.
+      if (token !== creditLoadToken || !creditOn || !sourceModalOpenRef.current) return;
+      if (failure) {
+        modalCtl.setCreditMode(true, buildCreditSourceErrorGroups(failure, sup));
+        setStatus(`Could not load Bills: ${failure}`, "err");
+        return;
+      }
+      modalCtl.setCreditMode(
+        true,
+        buildCreditSourceGroups(rows, { supplier: sup, exclude: currentName }),
+      );
+      setStatus("Pick the Bill this credit is against (or decide later).");
+    }
+
+    setStatus(
+      creditOn ? "Loading submitted Bills…" : "Loading open PO / Item Receipts…",
+    );
 
     return runSourcePickerFlow({
       supplier: sup,
       trigger,
       mode: "multi",
       listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
+      onGroups: (groups) => {
+        sourceGroups = groups;
+      },
+      applySlices: () => !creditOn,
       log: (event, detail) => logFocus(event, detail || ""),
       mayOpen: (vendor, trig) =>
         mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
@@ -3067,9 +3129,12 @@ export async function bootBillFormPage(api) {
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
       onStreamComplete: ({ errors }) => {
-        if (errors.length && sourceModalOpenRef.current) {
+        // Credit mode owns the status line while it is on — the PO/IR stream is still running
+        // underneath it and must not narrate over the question the clerk is actually answering.
+        if (creditOn || !sourceModalOpenRef.current) return;
+        if (errors.length) {
           setStatus(`Some sources failed to load (${errors.length}) — NIC still ok.`, "warn");
-        } else if (sourceModalOpenRef.current) {
+        } else {
           setStatus("Sources loaded — Space to check · Enter to pull (or NIC).");
         }
       },
@@ -3080,10 +3145,41 @@ export async function bootBillFormPage(api) {
           pickButtonTestId: "bill-source-pull",
           isOpenRef: sourceModalOpenRef,
           setStatus,
+          creditToggle: {
+            label: "Credit memo?",
+            checked: creditOn,
+            testId: "bill-source-credit-toggle",
+            onChange: (next) => {
+              void switchCreditMode(next);
+            },
+          },
+          onController: (c) => {
+            modalCtl = c;
+            if (flowOpts.onController) flowOpts.onController(c);
+            // Opened on a Bill that is already a credit: fetch its corpus straight away.
+            if (creditOn) void switchCreditMode(true);
+          },
           focusSurface: () => {
             if (api && api.focusBillSurface) api.focusBillSurface();
           },
           onChoose: async (choice) => {
+            if (creditOn) {
+              const verdict = classifyCreditSourceChoice(choice);
+              if (verdict.action === "decline") {
+                setStatus(
+                  "Credit memo left with no Bill behind it — the Return Against warning " +
+                    "stays up until you link one.",
+                  "warn",
+                );
+                return;
+              }
+              if (verdict.action !== "link") {
+                setStatus("Pick the Bill this credit is against, or decide later.", "warn");
+                return;
+              }
+              await commitCreditSource(verdict.name);
+              return;
+            }
             const mode = choice && choice.mode;
             const items = (choice && choice.items) || [];
             if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
@@ -3483,6 +3579,123 @@ export async function bootBillFormPage(api) {
   }
   
   /**
+   * Submitted, non-return Bills — the candidate list for "which Bill is this credit against?".
+   * The standalone picker and the source modal's **Credit memo?** switch (OI-166) ask exactly
+   * this question, so it is asked in exactly one place.
+   *
+   * Typing widens the search past this vendor; the filters that keep an answer *legitimate* —
+   * submitted, not itself a return, not this document — never widen.
+   *
+   * @param {string} query
+   * @param {string} supplier
+   * @param {string} excludeName
+   * @returns {Promise<Array<{ value: string, description?: string }>>}
+   */
+  async function searchSourceBillRows(query, supplier, excludeName) {
+    if (!api || !api.searchLink) return [];
+    const q = query != null ? String(query).trim() : "";
+    const res = await api.searchLink("Purchase Invoice", q, {
+      supplier: q ? undefined : supplier || undefined,
+      docstatus: 1,
+      is_return: 0,
+    });
+    const list = res && res.ok && Array.isArray(res.results) ? res.results : [];
+    const skip = excludeName != null ? String(excludeName).trim() : "";
+    return list.filter((r) => r && r.value && r.value !== skip);
+  }
+
+  /**
+   * Write one informal link token into Remarks and repaint. Returns the outcome instead of
+   * speaking: callers own their own dialog lifecycle and status voice.
+   * @param {"bill"|"so"} kind
+   * @param {string} name
+   * @returns {Promise<{ ok: boolean, label: string, reason?: string }>}
+   */
+  async function writeInformalLinkToken(kind, name) {
+    const label = kind === "bill" ? "Bill" : "Sales Order";
+    const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
+    const next =
+      kind === "bill"
+        ? withBillLinkToken(currentRemarks, name)
+        : withSoLinkToken(currentRemarks, name);
+    try {
+      const res = await api.setHeader("remarks", next);
+      if (res && res.ok) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        return { ok: true, label };
+      }
+      return {
+        ok: false,
+        label,
+        reason: (res && res.reason) || `Could not set the informal ${label} link.`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        label,
+        reason: `Could not set the informal ${label} link: ${String(
+          err && err.message ? err.message : err,
+        )}`,
+      };
+    }
+  }
+
+  /**
+   * Commit the sentence "this credit is against Bill &lt;name&gt;" — the single write path for it,
+   * shared by the standalone source picker and the source modal's Credit memo switch (OI-166).
+   * Never flips `is_return` freeform: that is the museum OI-147 failure where ERPNext silently
+   * books to an accrual placeholder instead of the item's real expense account.
+   *
+   * Caller closes its own dialog first; this only writes and narrates.
+   * @param {string} name
+   */
+  async function commitCreditSource(name) {
+    const plan = planCreditMemoSource(lastDoc);
+    if (plan !== "native") {
+      // "blocked" (not a draft) lands here too, exactly as the standalone picker has always
+      // behaved: ERPNext refuses the Remarks write rather than this shell inventing a second
+      // draft test. The modal route cannot reach it — openSourcePicker gates on editable().
+      setStatus(`Linking informally to Bill ${name}…`);
+      const res = await writeInformalLinkToken("bill", name);
+      if (!res.ok) {
+        setStatus(res.reason, "err");
+        return;
+      }
+      if (plan === "informal") {
+        setStatus(
+          `Noted in Remarks: this credit is about Bill ${name}. Return Against was left ` +
+            "empty so the lines you already entered are not overwritten — to get the real " +
+            "ERP link (and the right expense account), start over from that Bill with " +
+            "Create Credit / Return.",
+          "warn",
+        );
+      } else {
+        setStatus(`Noted in Remarks: informal link to Bill ${name}.`);
+      }
+      return;
+    }
+    if (!api.createCreditMemo) {
+      setStatus("Credit memo API missing — restart the shell.", "err");
+      return;
+    }
+    setStatus(`Building credit memo against ${name}…`);
+    try {
+      const res = await api.createCreditMemo(name);
+      if (res && res.ok) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        setStatus(`Credit memo drafted against ${name} — review qty/amounts, then save.`);
+      } else {
+        setStatus((res && res.reason) || `Could not create a credit memo against ${name}.`, "err");
+      }
+    } catch (err) {
+      setStatus(
+        `Credit memo against ${name} failed: ${String(err && err.message ? err.message : err)}`,
+        "err",
+      );
+    }
+  }
+
+  /**
    * Informal link picker for credit memos (OI-147/164, OI-165 SO half) — writes a plain-text
    * token into Remarks, never the real ERP `return_against` field. "Bill" defaults to the
    * current vendor's submitted Bills; typing a name searches any vendor (2026-09-07 decision).
@@ -3562,78 +3775,32 @@ export async function bootBillFormPage(api) {
     }
 
     async function applyLink(name) {
-      const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
-      const next = isBill
-        ? withBillLinkToken(currentRemarks, name)
-        : withSoLinkToken(currentRemarks, name);
       setStatus(
         name ? `Linking informally to ${label} ${name}…` : `Clearing informal ${label} link…`,
       );
       try {
-        const res = await api.setHeader("remarks", next);
-        if (res && res.ok) {
-          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        const res = await writeInformalLinkToken(kind, name);
+        if (res.ok) {
           setStatus(
             name
               ? `Noted in Remarks: informal link to ${label} ${name}.`
               : `Informal ${label} link cleared.`,
           );
         } else {
-          setStatus((res && res.reason) || `Could not set the informal ${label} link.`, "err");
+          setStatus(res.reason, "err");
         }
-      } catch (err) {
-        setStatus(
-          `Could not set the informal ${label} link: ${String(
-            err && err.message ? err.message : err,
-          )}`,
-          "err",
-        );
       } finally {
         close();
       }
     }
 
     /**
-     * Source-pick route (toggle → Yes). An untouched draft is rebuilt through ERPNext's own
-     * make_debit_note so `return_against` is real; a draft with typed lines keeps its work
-     * and settles for the informal token, and is told which trade it just made.
+     * Source-pick route (toggle → Yes) — routing lives in commitCreditSource(), which the
+     * source modal's Credit memo switch calls too, so the two doors cannot drift apart.
      */
     async function chooseSourceBill(name) {
-      const plan = planCreditMemoSource(lastDoc);
-      if (plan !== "native") {
-        await applyLink(name);
-        if (plan === "informal") {
-          setStatus(
-            `Noted in Remarks: this credit is about Bill ${name}. Return Against was left ` +
-              "empty so the lines you already entered are not overwritten — to get the real " +
-              "ERP link (and the right expense account), start over from that Bill with " +
-              "Create Credit / Return.",
-            "warn",
-          );
-        }
-        return;
-      }
-      if (!api.createCreditMemo) {
-        setStatus("Credit memo API missing — restart the shell.", "err");
-        close();
-        return;
-      }
-      setStatus(`Building credit memo against ${name}…`);
       close();
-      try {
-        const res = await api.createCreditMemo(name);
-        if (res && res.ok) {
-          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
-          setStatus(`Credit memo drafted against ${name} — review qty/amounts, then save.`);
-        } else {
-          setStatus((res && res.reason) || `Could not create a credit memo against ${name}.`, "err");
-        }
-      } catch (err) {
-        setStatus(
-          `Credit memo against ${name} failed: ${String(err && err.message ? err.message : err)}`,
-          "err",
-        );
-      }
+      await commitCreditSource(name);
     }
 
     function drawRows() {
@@ -3667,17 +3834,7 @@ export async function bootBillFormPage(api) {
     }
 
     async function loadBillRows(q) {
-      if (!api.searchLink) return [];
-      // Typing widens the search past this vendor — but NOT past "submitted, not itself a
-      // return". A credit memo against a draft, a cancelled Bill, or another credit memo is
-      // never what the clerk meant, and make_debit_note would reject it anyway.
-      const res = await api.searchLink("Purchase Invoice", q || "", {
-        supplier: q ? undefined : supplier || undefined,
-        docstatus: 1,
-        is_return: 0,
-      });
-      const list = res && res.ok && Array.isArray(res.results) ? res.results : [];
-      return list.filter((r) => r && r.value && r.value !== currentName);
+      return searchSourceBillRows(q, supplier, currentName);
     }
 
     async function loadSoRows() {

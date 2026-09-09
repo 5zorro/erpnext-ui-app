@@ -393,6 +393,26 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
       "trade it just made. Never silently destroys entered lines. Picker chrome is electron-only.",
   },
   {
+    id: "credit-memo-source-modal-switch",
+    name: "Credit memo? switch in the source modal's button row (OI-166)",
+    museum: false,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "source-modal-credit-mode.js",
+    notes:
+      "The source modal asks one question — where does this Bill come from? — and the foot " +
+      "switch changes which corpus answers it: open PO/IR, or the submitted Bill this credit " +
+      "is against. Matches how 5zorro actually works: vendor, then source, in one breath. " +
+      "Click-only and out of the tab order like every .src-foot control, because the modal " +
+      "captures Tab for group navigation. Arity flips with the mode (return_against is one " +
+      "Link, so credit mode is single-pick) and the commit routes through the same " +
+      "commitCreditSource/planCreditMemoSource path as the standalone picker — never a " +
+      "freeform is_return flip. Arity, group shapes, labels and choice classification are " +
+      "unit-tested; the DOM switch and the live fetch are electron-only. Vendor-scoped: " +
+      "cross-vendor search stays on the header switch's picker until this modal grows a " +
+      "search field.",
+  },
+  {
     id: "toolbar-print",
     name: "Print",
     museum: true,

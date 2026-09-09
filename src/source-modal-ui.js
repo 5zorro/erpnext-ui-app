@@ -14,6 +14,12 @@ import {
   firstSelectableItemIndex,
   nextSelectableGroupIndex,
 } from "./source-modal.js";
+import {
+  sourceModalArity,
+  sourceModalTitleHint,
+  sourceModalPickLabel,
+  creditSwitchView,
+} from "./source-modal-credit-mode.js";
 import { logFocus } from "./focus-debug-client.js";
 import { uiIconHtml } from "./ui-icons.js";
 
@@ -28,13 +34,22 @@ import { uiIconHtml } from "./ui-icons.js";
  *   applySlice: (sliceId: string, sliceGroup: SourceGroup, nextGroups?: SourceGroup[]) => void,
  *   setSliceError: (sliceId: string, message: string) => void,
  *   setLoadError: (message: string) => void,
+ *   setCreditMode: (credit: boolean, groups?: SourceGroup[]) => void,
  * }} SourceModalController
+ *
+ * @typedef {{
+ *   label: string,
+ *   checked?: boolean,
+ *   testId?: string,
+ *   onChange: (next: boolean) => void,
+ * }} SourceModalCreditToggle
  *
  * @typedef {{
  *   groups: SourceGroup[],
  *   mode?: "single" | "multi",
  *   testId?: string,
  *   pickButtonTestId?: string,
+ *   creditToggle?: SourceModalCreditToggle,
  *   onChoose: (choice: SourceItem | { mode: string, items: SourceItem[] }) => void|Promise<void>,
  *   setStatus?: (text: string, cls?: string) => void,
  *   focusSurface?: () => void,
@@ -75,7 +90,13 @@ export function showSourceModal(opts) {
       settle({ ok: true, kind });
     }
 
-  const mode = opts.mode === "single" ? "single" : "multi";
+  // Arity is not fixed for the life of the modal any more: credit mode is single-pick because
+  // `return_against` is one Link, while PO/IR stays multi-select merge (OI-166).
+  const baseMode = opts.mode === "single" ? "single" : "multi";
+  const creditToggle =
+    opts.creditToggle && typeof opts.creditToggle === "object" ? opts.creditToggle : null;
+  let creditOn = !!(creditToggle && creditToggle.checked);
+  let mode = sourceModalArity(creditOn, baseMode);
   let groups = opts.groups || [];
   const setStatus = opts.setStatus || (() => {});
   let gi = 0;
@@ -94,40 +115,95 @@ export function showSourceModal(opts) {
   box.setAttribute("aria-modal", "true");
   box.setAttribute("aria-label", "Source Selection");
 
-  const titleHint =
-    mode === "single"
-      ? "Source Selection — Tab: group · ↑/↓: item · Enter: select"
-      : "Source Selection — Tab: group · ↑/↓: move · Space: check · Enter: pull";
-  const pickLabel = mode === "single" ? "Select this source" : "Pull selected";
   const pickTestId = opts.pickButtonTestId
     ? ` data-testid="${opts.pickButtonTestId}"`
     : "";
 
-  box.innerHTML = `<div class="src-title">${titleHint}</div>
+  // Everything in `.src-foot` is **click-only and out of the tab order**. The modal owns Tab
+  // for group navigation (see onKey), so a focusable control down here would be one the clerk
+  // can see and never reach by keyboard — worse than an honest mouse-only affordance.
+  const creditToggleHtml = creditToggle
+    ? `<span class="src-credit-toggle">
+        <span class="src-credit-label">${creditToggle.label || "Credit memo?"}</span>
+        <button type="button" class="credit-memo-switch src-credit-switch" data-act="credit"
+          tabindex="-1" role="switch" aria-checked="false" aria-label="Credit memo: No"${
+            creditToggle.testId ? ` data-testid="${creditToggle.testId}"` : ""
+          }>
+          <span class="switch-word switch-word-no">No</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-word switch-word-yes">Yes</span>
+        </button>
+      </span>`
+    : "";
+
+  box.innerHTML = `<div class="src-title">${sourceModalTitleHint(mode, creditOn)}</div>
     <div class="src-load-error" hidden></div>
     <div class="src-body"></div>
     <div class="src-foot">
-      <button type="button" class="primary" data-act="pick"${pickTestId}>${pickLabel}</button>
-      <button type="button" data-act="cancel">Cancel</button>
+      <button type="button" class="primary" data-act="pick" tabindex="-1"${pickTestId}>${sourceModalPickLabel(
+        mode,
+        creditOn,
+      )}</button>
+      <button type="button" data-act="cancel" tabindex="-1">Cancel</button>
+      ${creditToggleHtml}
     </div>`;
   back.appendChild(box);
   document.body.appendChild(back);
   const body = box.querySelector(".src-body");
+  const titleEl = box.querySelector(".src-title");
   const loadErrorEl = box.querySelector(".src-load-error");
   const pickBtn = box.querySelector('[data-act="pick"]');
+  const creditBtn = box.querySelector('[data-act="credit"]');
 
   function activeItem() {
     return groups[gi] && groups[gi].items[ii];
   }
 
   function updatePickLabel() {
-    if (!pickBtn || mode === "single") return;
+    if (!pickBtn) return;
+    if (mode === "single") {
+      pickBtn.textContent = sourceModalPickLabel(mode, creditOn);
+      return;
+    }
     const n = selectedKeys.filter((k) => k && k !== "nic").length;
     const nic = selectedKeys.includes("nic");
     if (nic) pickBtn.textContent = "Continue without source (NIC)";
     else if (n > 1) pickBtn.textContent = `Pull selected (${n})`;
     else if (n === 1) pickBtn.textContent = "Pull selected (1)";
     else pickBtn.textContent = "Pull highlighted / selected";
+  }
+
+  /** Title, primary-button label and switch state — everything outside the list. */
+  function paintChrome() {
+    if (titleEl) titleEl.textContent = sourceModalTitleHint(mode, creditOn);
+    box.setAttribute("aria-label", creditOn ? "Credit memo source" : "Source Selection");
+    if (creditBtn) {
+      const view = creditSwitchView(creditOn);
+      creditBtn.classList.toggle("is-on", view.on);
+      creditBtn.setAttribute("aria-checked", view.ariaChecked);
+      creditBtn.setAttribute("aria-label", view.ariaLabel);
+      creditBtn.title = view.title;
+    }
+    updatePickLabel();
+  }
+
+  /**
+   * Swap the corpus the modal is asking about. The host owns *what* is in the new list (it does
+   * the fetching); the modal owns arity, labels and the fact that a swap clears the selection —
+   * a PO key must never survive into a credit commit.
+   * @param {boolean} credit
+   * @param {SourceGroup[]} [nextGroups]
+   */
+  function setCreditMode(credit, nextGroups) {
+    creditOn = !!credit;
+    mode = sourceModalArity(creditOn, baseMode);
+    selectedKeys = [];
+    gi = 0;
+    ii = 0;
+    loadError = "";
+    if (Array.isArray(nextGroups)) groups = nextGroups;
+    paintChrome();
+    draw();
   }
 
   function paintLoadError() {
@@ -353,6 +429,19 @@ export function showSourceModal(opts) {
   if (pickBtn) pickBtn.onclick = () => choose();
   const cancelBtn = box.querySelector('[data-act="cancel"]');
   if (cancelBtn) cancelBtn.onclick = () => close("cancel");
+  if (creditBtn && creditToggle) {
+    creditBtn.onclick = () => {
+      const next = !creditOn;
+      logFocus("source-modal-credit-mode", next ? "on" : "off");
+      // Report only. The host answers through controller.setCreditMode() once it knows what
+      // the new list holds, so a fetch failure cannot leave the switch lying about the corpus.
+      try {
+        creditToggle.onChange(next);
+      } catch (e) {
+        logFocus("source-modal-credit-mode-error", String(e && e.message ? e.message : e));
+      }
+    };
+  }
   back.addEventListener("click", (ev) => {
     if (ev.target === back) close("backdrop");
   });
@@ -426,14 +515,23 @@ export function showSourceModal(opts) {
         loadError = message != null ? String(message).trim() : "";
         draw();
       },
+      setCreditMode(credit, nextGroups) {
+        if (!openRef.current) return;
+        setCreditMode(credit, nextGroups);
+      },
     });
   }
+  paintChrome();
   draw();
-  logFocus("source-modal-open", mode);
+  logFocus("source-modal-open", creditOn ? `${mode}:credit` : mode);
   setTimeout(focusModalKeyboard, 0);
   setTimeout(focusModalKeyboard, 40);
   setStatus(
-    mode === "single" ? "Choose a source (or NIC)." : "Space to check sources · Enter to pull (or NIC).",
+    creditOn
+      ? "Pick the Bill this credit is against (or decide later)."
+      : mode === "single"
+        ? "Choose a source (or NIC)."
+        : "Space to check sources · Enter to pull (or NIC).",
   );
   });
 }

@@ -114,4 +114,117 @@ describe("runSourcePickerFlow", () => {
     await flowP;
     assert.ok(applied.includes("po_submitted"));
   });
+
+  it("holds slices off the modal while the host owns the corpus, then hands over the full set", async () => {
+    /** @type {string[]} */
+    const applied = [];
+    /** @type {import("../src/source-modal.js").SourceGroup[]} */
+    let latest = [];
+    // The host is showing another corpus (credit mode, OI-166) for the whole fetch.
+    let creditOn = true;
+
+    await runSourcePickerFlow({
+      supplier: "Alpine Supply",
+      trigger: "toolbar",
+      applySlices: () => !creditOn,
+      onGroups: (groups) => {
+        latest = groups;
+      },
+      listSourceSlice: async (_vendor, sliceId) => {
+        if (sliceId === "po_submitted") {
+          return {
+            ok: true,
+            rows: [{ name: "PO-1", transaction_date: "2019-01-01", grand_total: 10 }],
+          };
+        }
+        return { ok: true, rows: [] };
+      },
+      showModal: ({ onController, onClose }) =>
+        new Promise((resolve) => {
+          onController({
+            applySlice: (sliceId) => applied.push(sliceId),
+            setSliceError: (sliceId) => applied.push(`err:${sliceId}`),
+            updateGroups: () => {},
+            setLoadError: () => {},
+            setCreditMode: () => {},
+          });
+          setTimeout(() => {
+            onClose("cancel");
+            resolve({ ok: true, kind: "cancel" });
+          }, 30);
+        }),
+    });
+
+    // Nothing was painted over the credit list...
+    assert.deepEqual(applied, []);
+    // ...but the corpus was still assembled, so flipping back is complete, not frozen.
+    const po = latest.find((g) => g.id === "po_submitted");
+    assert.ok(po, "po_submitted group should still have been built");
+    assert.ok(
+      po.items.some((i) => i.name === "PO-1"),
+      "the row that arrived during credit mode should be in the held corpus",
+    );
+    creditOn = false;
+  });
+
+  it("holds slice errors too — a failed PO fetch must not shout over the credit question", async () => {
+    /** @type {string[]} */
+    const applied = [];
+
+    await runSourcePickerFlow({
+      supplier: "Alpine Supply",
+      trigger: "toolbar",
+      applySlices: () => false,
+      listSourceSlice: async (_vendor, sliceId) => {
+        if (sliceId === "po_submitted") return { ok: false, reason: "ERP unreachable" };
+        throw new Error("boom");
+      },
+      showModal: ({ onController, onClose }) =>
+        new Promise((resolve) => {
+          onController({
+            applySlice: (sliceId) => applied.push(sliceId),
+            setSliceError: (sliceId) => applied.push(`err:${sliceId}`),
+            updateGroups: () => {},
+            setLoadError: () => {},
+            setCreditMode: () => {},
+          });
+          setTimeout(() => {
+            onClose("cancel");
+            resolve({ ok: true, kind: "cancel" });
+          }, 30);
+        }),
+    });
+
+    assert.deepEqual(applied, []);
+  });
+
+  it("still paints by default — the gate is opt-in", async () => {
+    /** @type {string[]} */
+    const applied = [];
+
+    await runSourcePickerFlow({
+      supplier: "Alpine Supply",
+      trigger: "toolbar",
+      listSourceSlice: async (_vendor, sliceId) =>
+        sliceId === "po_submitted"
+          ? { ok: true, rows: [{ name: "PO-1", transaction_date: "2019-01-01", grand_total: 10 }] }
+          : { ok: true, rows: [] },
+      showModal: ({ onController, onClose }) =>
+        new Promise((resolve) => {
+          onController({
+            applySlice: (sliceId) => applied.push(sliceId),
+            setSliceError: () => {},
+            updateGroups: () => {},
+            setLoadError: () => {},
+            setCreditMode: () => {},
+          });
+          setTimeout(() => {
+            onClose("cancel");
+            resolve({ ok: true, kind: "cancel" });
+          }, 30);
+        }),
+    });
+
+    assert.ok(applied.includes("po_submitted"));
+  });
 });
