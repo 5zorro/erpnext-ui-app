@@ -46,6 +46,7 @@ import {
 } from "../src/source-doc-peek.js";
 import {
   isCreditMemoBill,
+  creditMemoTermsHint,
   creditMemoReturnAgainst,
   creditMemoOrphaned,
   parseBillLinkToken,
@@ -4348,6 +4349,9 @@ export async function bootBillFormPage(api) {
       String(h["Remittance & Billing Address"] ?? "").trim() ? "billing:painted" : "billing:blank",
     );
     paintHeaderLinkInputIfAllowed(el.terms, "payment_terms_template", h["Payment terms"] ?? "", headerPaintOpts("payment_terms_template"));
+    // An empty Payment Terms on a credit memo is ERPNext's own rule, not a dropped value —
+    // say which, because a blank field next to populated ones reads as a bug (5zorro 2026-09-09).
+    if (el.terms) el.terms.placeholder = creditMemoTermsHint(doc);
     paintHeaderInputIfAllowed(
       el.date,
       "bill_date",

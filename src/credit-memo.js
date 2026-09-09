@@ -199,6 +199,26 @@ export function withSoLinkToken(remarksText, soName) {
   return withLinkToken(remarksText, "so", soName);
 }
 
+/**
+ * Why a credit memo's Payment Terms are empty.
+ *
+ * Stock ERPNext clears them: `sales_and_purchase_return.py::make_return_doc` sets
+ * `payment_terms_template = ""` and `payment_schedule = []` for every Purchase Invoice return,
+ * unconditionally. A credit is not a thing you pay on terms, so there are none to carry.
+ *
+ * We say so rather than fix it, because there is nothing broken to fix — but an empty field
+ * beside a populated one reads as "dropped", and did (5zorro 2026-09-09, two incidents). This
+ * is a **placeholder**, never a lock: the field stays typeable, per the Doc-skin rule that
+ * read-only may only ever reflect the document's real state in ERPNext (HANDOFF invariant 7).
+ *
+ * @param {object|null|undefined} doc
+ * @returns {string} hint text, or "" when the field needs no explanation
+ */
+export function creditMemoTermsHint(doc) {
+  if (!isCreditMemoBill(doc)) return "";
+  return "Cleared by ERPNext on a credit memo — returns carry no terms";
+}
+
 // --- Returned Bill's Ref No (5zorro 2026-09-09) — a note, never the credit's own bill_no ---
 
 /** @param {string|null|undefined} refNo @returns {string} */

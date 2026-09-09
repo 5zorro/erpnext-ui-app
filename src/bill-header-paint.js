@@ -20,12 +20,21 @@ import {
  */
 export function shouldPreserveHeaderInputDuringPaint(opts) {
   const { field, paintedValue, currentValue, isFocused = false } = opts;
-  if (isFocused) return true;
   const kind = dirtyCompareKindForField(field);
   const painted = normalizeEditableText(paintedValue);
   const current = normalizeEditableText(currentValue);
   // Blank Doc field → accept ERP/header value (fixes Bill Due Date after Terms settle).
+  //
+  // This has to be tested **before** the focus guard, not after. An empty input has nothing to
+  // preserve — focus means "the user may be typing here", and until a character exists there is
+  // no typing to protect. Checking focus first made an empty focused field refuse ERP truth
+  // forever, which is exactly what happened to the vendor on a natively created credit memo
+  // (5zorro 2026-09-09): the first snapshot of the rebuilt form arrived blank, the shell
+  // auto-focused the empty vendor input, and every later paint — including the one carrying the
+  // supplier — was skipped as `supplier:focused`. The document was right the whole time; only
+  // the field the clerk was looking at was wrong.
   if (!current && painted) return false;
+  if (isFocused) return true;
   return !valuesMeaningfullyEqual(paintedValue, currentValue, { kind });
 }
 
