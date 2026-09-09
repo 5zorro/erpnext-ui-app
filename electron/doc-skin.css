@@ -552,6 +552,44 @@
   color: #fff;
   border-color: #2c3e50;
 }
+/* Credit-memo switch in the source modal's button row (OI-166).
+   Sits right of the actions and, like every control in .src-foot, is click-only:
+   the modal owns Tab for group navigation, so nothing down here is tabbable. */
+.src-credit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.src-credit-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  user-select: none;
+}
+.src-foot .src-credit-switch {
+  padding: 4px 8px;
+  gap: 7px;
+  min-width: 0;
+  border-radius: 999px;
+}
+.src-foot .src-credit-switch .switch-word {
+  font-size: 12px;
+  min-width: 1.5rem;
+}
+.src-foot .src-credit-switch .switch-track {
+  width: 2.25rem;
+  height: 1.125rem;
+}
+.src-foot .src-credit-switch .switch-thumb {
+  top: 2px;
+  left: 2px;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.src-foot .src-credit-switch.is-on .switch-thumb {
+  transform: translateX(1.125rem);
+}
 
 /* Address pickers (Bill + doc-form when features.addressPicker) */
 .addr-pick {

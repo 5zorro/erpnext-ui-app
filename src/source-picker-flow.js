@@ -27,6 +27,8 @@ import {
  *   mayOpen?: (supplier: string, trigger: SourcePickerTrigger) => { ok: boolean, reason?: string },
  *   onUserClose?: (kind: string) => void,
  *   onStreamComplete?: (summary: { errors: string[] }) => void,
+ *   applySlices?: () => boolean,
+ *   onGroups?: (groups: import("./source-modal.js").SourceGroup[]) => void,
  *   log?: (event: string, detail?: string) => void,
  * }} RunSourcePickerFlowOptions
  */
@@ -108,7 +110,12 @@ export async function runSourcePickerFlow(opts) {
     getGroups: () => groups,
     setGroups: (next) => {
       groups = next;
+      if (o.onGroups) o.onGroups(next);
     },
+    // A host that has swapped the modal to another corpus (credit mode, OI-166) keeps
+    // accumulating PO/IR slices here but stops painting them, so flipping back shows
+    // everything that arrived meanwhile instead of a list frozen at the moment of the flip.
+    applySlices: o.applySlices || (() => true),
     log,
     onComplete: o.onStreamComplete,
   });
@@ -128,6 +135,7 @@ export async function runSourcePickerFlow(opts) {
  *   getController: () => import("./source-modal-ui.js").SourceModalController | null,
  *   getGroups: () => import("./source-modal.js").SourceGroup[],
  *   setGroups: (g: import("./source-modal.js").SourceGroup[]) => void,
+ *   applySlices?: () => boolean,
  *   log: (event: string, detail?: string) => void,
  *   onComplete?: RunSourcePickerFlowOptions["onStreamComplete"],
  * }} ctx
@@ -142,23 +150,26 @@ async function streamSourceSlices(ctx) {
         if (!ctx.session.alive) return;
         const ctl = ctx.getController();
         if (!ctl) return;
+        const paint = ctx.applySlices ? ctx.applySlices() : true;
         if (!raw || raw.ok === false) {
           const msg = (raw && raw.reason) || `Could not load ${sliceId}`;
           errors.push(msg);
-          ctl.setSliceError(sliceId, msg);
+          if (paint) ctl.setSliceError(sliceId, msg);
           return;
         }
         const sliceGroup = buildSourceGroupFromSliceRows(sliceId, raw.rows || []);
         if (!sliceGroup) return;
         const next = applySourceSliceToGroups(ctx.getGroups(), sliceGroup);
         ctx.setGroups(next);
-        ctl.applySlice(sliceId, sliceGroup, next);
-        ctx.log("source-slice-ready", sliceId);
+        if (paint) ctl.applySlice(sliceId, sliceGroup, next);
+        ctx.log("source-slice-ready", paint ? sliceId : `${sliceId}:held`);
       } catch (e) {
         if (!ctx.session.alive) return;
         const msg = String(e && e.message ? e.message : e);
         errors.push(msg);
-        ctx.getController()?.setSliceError(sliceId, msg);
+        if (!ctx.applySlices || ctx.applySlices()) {
+          ctx.getController()?.setSliceError(sliceId, msg);
+        }
       }
     }),
   );
