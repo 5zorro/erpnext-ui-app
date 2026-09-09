@@ -224,6 +224,7 @@ import {
   profileByLayoutKey,
 } from "../src/doc-skin-registry.js";
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
+import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
 import { toolbarLensId, lensTabsFor, historyRailWidth } from "../src/chrome-state.js";
@@ -6299,7 +6300,9 @@ async function mergeBillSources(items) {
   if (!combined) {
     return { ok: false, reason: "Mapped sources had no item lines." };
   }
-  const raw = await bridgeCall("mergeFromMapped", combined);
+  // No party in the plan: this Bill already carries the vendor the clerk picked, and the
+  // source list is vendor-scoped, so re-setting it would only re-run the fetch chain.
+  const raw = await bridgeCall("mergeFromMapped", combined, planMappedHeaderApply(combined));
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     if (raw.paymentTermsSettle) {
@@ -6357,7 +6360,15 @@ async function createCreditMemoFrom(sourceBillName) {
   amountDueScratch = "";
   amountDueCommitted = "";
   await showBill("/app/purchase-invoice/new", { skipDirtyGate: true });
-  const raw = await bridgeCall("mergeFromMapped", combined);
+  // The form we just navigated to is a blank Purchase Invoice — it has no vendor, so the
+  // mapped doc's supplier has to be applied here or the credit memo comes out with the vendor
+  // the clerk picked a moment ago missing (5zorro dogfood 2026-09-09). Party fields go through
+  // set_value so credit_to / currency / taxes / addresses / payment terms come with it.
+  const raw = await bridgeCall(
+    "mergeFromMapped",
+    combined,
+    planMappedHeaderApply(combined, { applyParty: true, current: {} }),
+  );
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     await waitForErpAjaxQuiet();

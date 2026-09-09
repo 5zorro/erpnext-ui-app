@@ -75,7 +75,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 20);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 21);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -291,8 +291,17 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 20/);
+    assert.match(page, /var VERSION = 21/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
+    // A mapped doc's party fields must be applied through set_value, and before the item
+    // merge — see src/mapped-header-fields.js and the 2026-09-09 vendor-dropped dogfood.
+    assert.match(page, /function mergeFromMapped\(src, plan\)/);
+    assert.match(page, /await f\.set_value\(partyList\[pi\]\.field, partyList\[pi\]\.value\)/);
+    const merge = page.slice(page.indexOf("function mergeFromMapped"));
+    assert.ok(
+      merge.indexOf("set_value(partyList") < merge.indexOf('f.clear_table("items")'),
+      "party fields must be set before the item table is rebuilt",
+    );
     assert.match(page, /hasSupplierBillingDisplay/);
     assert.match(page, /isSupplierPartyMetaOnlyChange/);
     assert.match(page, /clearRow:\s*clearRow/);

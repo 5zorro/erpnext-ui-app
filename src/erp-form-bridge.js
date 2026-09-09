@@ -6,7 +6,7 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 20;
+export const DOC_FORM_BRIDGE_VERSION = 21;
 
 /** Max wait for address_display on supplier setHeader before snapshot (bridge deadline). */
 export const SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
