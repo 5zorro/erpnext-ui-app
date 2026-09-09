@@ -23,10 +23,17 @@
 /**
  * Plain copies. `is_return` / `return_against` only ever appear on a `make_debit_note` mapped
  * doc, so they are a no-op for the ordinary PO/PR merge.
+ *
+ * **`bill_no` is deliberately absent** (5zorro 2026-09-09). A credit memo has its own Ref No —
+ * the vendor's credit note number, which the clerk still has to type — so inheriting the
+ * returned Bill's supplier invoice number just puts a confusing wrong answer in the field. It
+ * cannot be quietly re-added "for the PO/IR path" either: `bill_no` exists **only** on Purchase
+ * Invoice (verified against the ERP source; Purchase Receipt has `supplier_delivery_note`
+ * instead), so it never arrived by any route but `make_debit_note`. The returned Bill's Ref No
+ * is recorded in the credit memo's notes instead — see `withBillRefToken` in credit-memo.js.
  * @type {string[]}
  */
 export const MAPPED_HEADER_COPY_FIELDS = [
-  "bill_no",
   "payment_terms_template",
   "is_return",
   "return_against",
@@ -48,6 +55,7 @@ export const MAPPED_HEADER_REFRESH_FIELDS = [
   "due_date",
   "is_return",
   "return_against",
+  "remarks",
 ];
 
 /**

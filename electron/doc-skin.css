@@ -290,6 +290,44 @@
   font-style: italic;
   color: var(--muted, #666);
 }
+/* "Still filling in" (5zorro 2026-09-09): an empty field and a field that has not answered
+   yet looked identical, so a slow vendor settle read as a bug. The sweep is deliberately
+   quiet — it says "waiting", not "error" — and it rides on top of whatever the field's own
+   state already is. */
+.field input.field-loading,
+.field textarea.field-loading,
+.field input.source-field-loading,
+.field textarea.source-field-loading {
+  background-image: linear-gradient(
+    100deg,
+    rgba(148, 163, 184, 0) 30%,
+    rgba(148, 163, 184, 0.22) 50%,
+    rgba(148, 163, 184, 0) 70%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: field-loading-sweep 1.15s ease-in-out infinite;
+  border-color: #cbd5e1;
+}
+@keyframes field-loading-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+/* Motion is the cue, not the message: without it the tint alone still reads as pending. */
+@media (prefers-reduced-motion: reduce) {
+  .field input.field-loading,
+  .field textarea.field-loading,
+  .field input.source-field-loading,
+  .field textarea.source-field-loading {
+    animation: none;
+    background-image: none;
+    background-color: rgba(148, 163, 184, 0.12);
+  }
+}
 
   width: 100%;
   min-height: 4rem;

@@ -144,6 +144,11 @@ import {
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
+import {
+  fieldsSettlingFor,
+  remainingHoldMs,
+  FIELD_LOADING_SHOW_AFTER_MS,
+} from "../src/field-loading.js";
 import { showSourceModal } from "../src/source-modal-ui.js";
 import {
   buildCreditSourceGroups,
@@ -2913,7 +2918,8 @@ export async function bootBillFormPage(api) {
       await runVendorPickWithSourceModal({
         supplier: v,
         decision,
-        setHeader: (field, value) => api.setHeader(field, value),
+        setHeader: (field, value) =>
+          withFieldSettleLoading(field, api.setHeader(field, value)),
         openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
           if (res && res.paymentTermsSettle) {
@@ -3578,6 +3584,49 @@ export async function bootBillFormPage(api) {
     searchEl.focus();
   }
   
+  /**
+   * Run an async header write with a visible "still filling in" state on the fields that write
+   * repopulates (5zorro 2026-09-09: a slow vendor settle under chaos read as a bug, because an
+   * empty field and a field that has not answered yet look the same).
+   *
+   * Timing rules are pure (`field-loading.js`): nothing appears for a fast reply, and once the
+   * sweep is up it stays up long enough to read rather than blinking out.
+   *
+   * @template T
+   * @param {string} field
+   * @param {Promise<T>} work
+   * @returns {Promise<T>}
+   */
+  async function withFieldSettleLoading(field, work) {
+    const keys = fieldsSettlingFor(field).filter((k) => el[k]);
+    if (!keys.length) return work;
+    let shownAt = 0;
+    const show = () => {
+      shownAt = Date.now();
+      keys.forEach((k) => el[k].classList.add("field-loading"));
+      logFocus("field-settle-loading", `${field}:show:${keys.join(",")}`);
+    };
+    const timer = setTimeout(show, FIELD_LOADING_SHOW_AFTER_MS);
+    const clear = () => {
+      keys.forEach((k) => el[k] && el[k].classList.remove("field-loading"));
+      logFocus("field-settle-loading", `${field}:clear`);
+    };
+    try {
+      return await work;
+    } finally {
+      clearTimeout(timer);
+      const hold = remainingHoldMs(shownAt, Date.now());
+      if (!shownAt) {
+        // Never shown — nothing to clear, and no reason to make the caller wait.
+        clear();
+      } else if (hold > 0) {
+        setTimeout(clear, hold);
+      } else {
+        clear();
+      }
+    }
+  }
+
   /**
    * Submitted, non-return Bills — the candidate list for "which Bill is this credit against?".
    * The standalone picker and the source modal's **Credit memo?** switch (OI-166) ask exactly

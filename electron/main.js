@@ -225,6 +225,7 @@ import {
 } from "../src/doc-skin-registry.js";
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
+import { withBillRefToken } from "../src/credit-memo.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
 import { toolbarLensId, lensTabsFor, historyRailWidth } from "../src/chrome-state.js";
@@ -6364,11 +6365,14 @@ async function createCreditMemoFrom(sourceBillName) {
   // mapped doc's supplier has to be applied here or the credit memo comes out with the vendor
   // the clerk picked a moment ago missing (5zorro dogfood 2026-09-09). Party fields go through
   // set_value so credit_to / currency / taxes / addresses / payment terms come with it.
-  const raw = await bridgeCall(
-    "mergeFromMapped",
-    combined,
-    planMappedHeaderApply(combined, { applyParty: true, current: {} }),
-  );
+  const creditPlan = planMappedHeaderApply(combined, { applyParty: true, current: {} });
+  // A credit memo carries its **own** Ref No — the vendor's credit note number, which the clerk
+  // has not typed yet. The returned Bill's supplier invoice number is a fact about a different
+  // document, so it goes in the notes rather than pre-filling that field with a wrong answer
+  // (5zorro 2026-09-09). bill_no is out of the copy list; this is where it lands instead.
+  const refNote = withBillRefToken("", combined.bill_no);
+  if (refNote) creditPlan.copy.push({ field: "remarks", value: refNote });
+  const raw = await bridgeCall("mergeFromMapped", combined, creditPlan);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     await waitForErpAjaxQuiet();

@@ -15,6 +15,10 @@ import {
   withBillLinkToken,
   draftHasEnteredLines,
   planCreditMemoSource,
+  buildBillRefToken,
+  parseBillRefToken,
+  stripBillRefToken,
+  withBillRefToken,
 } from "../src/credit-memo.js";
 
 describe("isCreditMemoBill", () => {
@@ -187,5 +191,58 @@ describe("Bill informal link token (OI-147/164 — 'create from nothing' then li
     remarks = withBillLinkToken(remarks, "ACC-PINV-2026-00999");
     assert.equal(parseBillLinkToken(remarks), "ACC-PINV-2026-00999");
     assert.equal(parseSoLinkToken(remarks), "SAL-ORD-2026-00123");
+  });
+});
+
+describe("returned Bill's Ref No token (5zorro 2026-09-09)", () => {
+  it("records the returned Bill's supplier invoice number as a note", () => {
+    assert.equal(buildBillRefToken("INV-9911"), "Ref No on returned Bill: INV-9911");
+    assert.equal(withBillRefToken("", "INV-9911"), "Ref No on returned Bill: INV-9911");
+  });
+
+  it("handles a vendor invoice number containing spaces", () => {
+    // Unlike Linked Bill / Linked Sales Order, which hold ERP document names, a supplier's
+    // own invoice number is free text and routinely has spaces in it.
+    const notes = withBillRefToken("", "INV 99 11/A");
+    assert.equal(parseBillRefToken(notes), "INV 99 11/A");
+  });
+
+  it("coexists with the informal Bill and Sales Order tokens", () => {
+    let notes = withBillRefToken("Short shipment, credit expected.", "INV-9911");
+    notes = withBillLinkToken(notes, "ACC-PINV-2026-00231");
+    notes = withSoLinkToken(notes, "SAL-ORD-2026-00007");
+    assert.equal(parseBillRefToken(notes), "INV-9911");
+    assert.equal(parseBillLinkToken(notes), "ACC-PINV-2026-00231");
+    assert.equal(parseSoLinkToken(notes), "SAL-ORD-2026-00007");
+    assert.match(notes, /^Short shipment, credit expected\./);
+  });
+
+  it("strips only its own line", () => {
+    let notes = withBillRefToken("", "INV-9911");
+    notes = withBillLinkToken(notes, "ACC-PINV-2026-00231");
+    assert.equal(stripBillRefToken(notes), "Linked Bill: ACC-PINV-2026-00231");
+    assert.equal(parseBillRefToken(stripBillRefToken(notes)), "");
+  });
+
+  it("is not confused by the label ending in the word Bill", () => {
+    // "Ref No on returned Bill" and "Linked Bill" both end in Bill; the line anchors must
+    // keep them apart in both directions.
+    const notes = withBillRefToken("", "INV-9911");
+    assert.equal(parseBillLinkToken(notes), "");
+    const linked = withBillLinkToken("", "ACC-PINV-2026-00231");
+    assert.equal(parseBillRefToken(linked), "");
+  });
+
+  it("replaces rather than repeats when set twice", () => {
+    let notes = withBillRefToken("", "INV-1");
+    notes = withBillRefToken(notes, "INV-2");
+    assert.equal(parseBillRefToken(notes), "INV-2");
+    assert.equal(notes.split("\n").filter((l) => l.startsWith("Ref No")).length, 1);
+  });
+
+  it("adds nothing when the returned Bill had no Ref No", () => {
+    assert.equal(buildBillRefToken(""), "");
+    assert.equal(buildBillRefToken(null), "");
+    assert.equal(withBillRefToken("Just a memo.", ""), "Just a memo.");
   });
 });

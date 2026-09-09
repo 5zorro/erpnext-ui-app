@@ -90,14 +90,37 @@ export function planCreditMemoSource(doc) {
   return draftHasEnteredLines(doc) ? "informal" : "native";
 }
 
-/** @typedef {"bill"|"so"} InformalLinkKind */
+/** @typedef {"bill"|"so"|"billRef"} InformalLinkKind */
 
 /** @type {Record<InformalLinkKind, string>} */
-const LINK_LABELS = { bill: "Linked Bill", so: "Linked Sales Order" };
+const LINK_LABELS = {
+  bill: "Linked Bill",
+  so: "Linked Sales Order",
+  // The returned Bill's own Supplier Invoice No. It lives here rather than in the credit
+  // memo's `bill_no` field because a credit memo has its **own** Ref No — the vendor's credit
+  // note number — and pre-filling that with the invoice being credited reads as an answer when
+  // it is really a different document's number (5zorro 2026-09-09).
+  billRef: "Ref No on returned Bill",
+};
 
-/** @param {string} label @returns {RegExp} */
-function linkLineRe(label) {
-  return new RegExp(`^${label}:\\s*(\\S+)\\s*$`, "m");
+/**
+ * Value shapes differ by kind: `bill` / `so` hold ERP document names, which never contain
+ * whitespace, so the strict pattern keeps a malformed line from parsing as a link. A vendor's
+ * invoice number is free text and routinely does contain spaces.
+ * @type {Record<InformalLinkKind, string>}
+ */
+const LINK_VALUE_PATTERNS = { bill: "\\S+", so: "\\S+", billRef: ".+?" };
+
+/** @param {string} s @returns {string} */
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** @param {InformalLinkKind} kind @returns {RegExp} */
+function linkLineRe(kind) {
+  const label = LINK_LABELS[kind];
+  const value = LINK_VALUE_PATTERNS[kind] || "\\S+";
+  return new RegExp(`^${escapeRe(label)}:\\s*(${value})\\s*$`, "m");
 }
 
 /**
@@ -120,7 +143,7 @@ export function parseLinkToken(remarksText, kind) {
   const label = LINK_LABELS[kind];
   if (!label) return "";
   const text = remarksText != null ? String(remarksText) : "";
-  const m = text.match(linkLineRe(label));
+  const m = text.match(linkLineRe(kind));
   return m ? m[1] : "";
 }
 
@@ -134,7 +157,7 @@ export function stripLinkToken(remarksText, kind) {
   const label = LINK_LABELS[kind];
   const text = remarksText != null ? String(remarksText) : "";
   if (!label) return text;
-  const re = linkLineRe(label);
+  const re = linkLineRe(kind);
   return text
     .split("\n")
     .filter((line) => !re.test(line))
@@ -174,6 +197,25 @@ export function stripSoLinkToken(remarksText) {
 /** @param {string|null|undefined} remarksText @param {string|null|undefined} soName @returns {string} */
 export function withSoLinkToken(remarksText, soName) {
   return withLinkToken(remarksText, "so", soName);
+}
+
+// --- Returned Bill's Ref No (5zorro 2026-09-09) — a note, never the credit's own bill_no ---
+
+/** @param {string|null|undefined} refNo @returns {string} */
+export function buildBillRefToken(refNo) {
+  return buildLinkToken("billRef", refNo);
+}
+/** @param {string|null|undefined} remarksText @returns {string} */
+export function parseBillRefToken(remarksText) {
+  return parseLinkToken(remarksText, "billRef");
+}
+/** @param {string|null|undefined} remarksText @returns {string} */
+export function stripBillRefToken(remarksText) {
+  return stripLinkToken(remarksText, "billRef");
+}
+/** @param {string|null|undefined} remarksText @param {string|null|undefined} refNo @returns {string} */
+export function withBillRefToken(remarksText, refNo) {
+  return withLinkToken(remarksText, "billRef", refNo);
 }
 
 // --- Bill (OI-147/164 informal trace — "create a credit from nothing" then link it later) ---
