@@ -16,6 +16,7 @@ import {
   draftHasEnteredLines,
   planCreditMemoSource,
   buildBillRefToken,
+  creditMemoTermsHint,
   parseBillRefToken,
   stripBillRefToken,
   withBillRefToken,
@@ -244,5 +245,27 @@ describe("returned Bill's Ref No token (5zorro 2026-09-09)", () => {
     assert.equal(buildBillRefToken(""), "");
     assert.equal(buildBillRefToken(null), "");
     assert.equal(withBillRefToken("Just a memo.", ""), "Just a memo.");
+  });
+});
+
+describe("creditMemoTermsHint", () => {
+  it("explains the empty Payment Terms on a credit memo", () => {
+    // ERPNext's own make_return_doc sets payment_terms_template = "" and payment_schedule = []
+    // for every Purchase Invoice return. Nothing was dropped; the field just has no answer.
+    const hint = creditMemoTermsHint({ is_return: 1 });
+    assert.match(hint, /credit memo/i);
+    assert.ok(hint.length > 0);
+  });
+
+  it("says nothing on an ordinary Bill", () => {
+    assert.equal(creditMemoTermsHint({ is_return: 0 }), "");
+    assert.equal(creditMemoTermsHint({}), "");
+    assert.equal(creditMemoTermsHint(null), "");
+  });
+
+  it("is a hint, not a lock — it says nothing about editability", () => {
+    // Doc skins stay typeable; read-only may only reflect docstatus (HANDOFF invariant 7).
+    const hint = creditMemoTermsHint({ is_return: 1 });
+    assert.doesNotMatch(hint, /read-?only|locked|cannot|can't/i);
   });
 });
