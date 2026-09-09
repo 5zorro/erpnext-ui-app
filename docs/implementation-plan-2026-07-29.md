@@ -91,7 +91,7 @@ flowchart TB
 | Bill / PO / IR Doc skins | **MVP done** (T1–T4); chrome polish mostly green 2026-07-28 |
 | Lens prefs | Per-doctype; default **doc**; persist; Find list does not flip pref |
 | Find Bill focus | **Passed** 2026-07-28 |
-| Vanilla Simplified | **Not started** — `simplified` lens id opens full Vanilla today |
+| Vanilla Simplified | **Option A shipped** 2026-09-02, hardened through 2026-09-05 — thin-inject chrome tab + `assume-applier-payload.js` engine live on Bill/PO/IR; Option B (ground-up) rejected for Simplified 2026-09-06 (kept only as a later Doc-skin idea, OI-163) |
 | In-field / sidebar calculator | **C0–C3 landed 2026-08-01** — Bill + PO/IR JIT; flyout session history + copy; OI-018 C4–C5 remain |
 | Sample / demo data for dogfood | **S−1 scripted** — `npm run seed:sample` (sandbox guard); live apply still needs `CONFIRM_SAMPLE_SEED=1` |
 | Input-count / scrape (Bill anchor) | **S0 landed** — `interactable-scrape.js` + `inventories/bill-doc-inventory.js` + Vanilla fixture; `npm test` |
@@ -183,7 +183,16 @@ Two mockups of Simplified on the **same** anchor (e.g. Purchase Invoice / Bill f
 2. Can either path **expand** to **Vanilla-like** count without a rewrite?
 3. Does the pick preserve **B0.2b** (pickers / focus / validations)?
 
-5zorro picks **one** for Packet S.
+**Decision (2026-09-06, 5zorro):** **Option A (thin-inject)** — chosen for maintainability, and
+because the injection core (`assume-applier-payload.js`) is reusable across **other Vanilla
+form-entry sites**, not just this anchor page. **Option B (ground-up) rejected for Simplified** —
+its field-parity control is real, but rebuilding the clerk path a second time (Doc already owns
+that job) duplicates maintenance surface for no Simplified-specific gain.
+
+One part of Option B's thinking survives as a **separate, later** idea — not a Simplified concern:
+expanding the **Doc skin's own** field coverage toward Vanilla parity. 5zorro does not want the Bill
+Doc-skin code touched right now (MVP-complete except returns / credit-debit memos — OI-082 /
+OI-147). Logged as museum **OI-163** — deferred, not this tranche, not blocking Packet S closeout.
 
 ### B0.6 Lists (Find)
 
@@ -239,7 +248,7 @@ Captured 2026-08-01 so they are not lost; **do not** pull into A/S unless 5zorro
 | Topic | Answer |
 |-------|--------|
 | Hide what? | Curated inventory; scraper **tests** completeness; warm load |
-| Thin inject vs ground-up? | **Per B0.5 pick** |
+| Thin inject vs ground-up? | **Decided 2026-09-06: Option A (thin-inject)** — see B0.5 decision |
 | Doc affordances | Pickers / focus / validations shared with Doc (**B0.2b**) |
 | Sample data | Seed script for dogfood + marketing (**B0.3b**) |
 | Tabs / sticky lens | Vanilla / Simplified / Doc; last wins |
@@ -329,10 +338,10 @@ flowchart LR
 |-------|--------|------|
 | **S−1** | Sample-data seed (dev/demo) | **Applied 2026-08-01** on HECSANDBOX — 25× Q/SO/SI/PO/PR/PI (`ui-app-sample-v1`). Re-run: `CONFIRM_SAMPLE_SEED=1 npm run seed:sample [-- --reset]`. Dogfood pickers + from-nothing vs from-source. |
 | **S0** | Input-count unit tests + fixtures | **Bill anchor landed** — scraper + curated Doc inventory + Vanilla fixture; CI \(N_v > N_d\). Bar helpers in `input-count.js`. **Next:** dogfood via `npm run report:input-count` + `docs/input-count-gotchas.md` before Simplified mockups. |
-| **S1** | Simplified tab + prefs | Pref lands Simplified |
-| **S2** | Chosen mockup path on PI/Bill + Doc affordances | Save = ERP truth; \(N_s \approx N_d\); pickers/focus/validations dogfood green |
-| **S3** | Expand config toward \(N_s' \approx N_v\) | No rewrite to grow |
-| **S4** | PO/IR only if shared engine | Same pattern (incl. SO picker with seed data) |
+| **S1** | Simplified tab + prefs | **Landed** — chrome lens tab + `lens-prefs.js` |
+| **S2** | Option A thin-inject on Bill/PO/IR + Doc affordances | **Landed 2026-09-02, hardened through 2026-09-05** — `assume-applier-payload.js` injection engine; chrome tab wired in `main.js` (`ensureSimplifiedSkin`/`removeSimplifiedSkin`) |
+| **S3** | Expand config toward \(N_s' \approx N_v\) | No rewrite to grow — **open**, optional, not blocking |
+| **S4** | PO/IR only if shared engine | **Landed** — Option A engine is shared; `simplified-seed-profiles.js` covers Bill/PO/IR (2026-09-05) |
 
 **Out of scope (this tranche):** bowtie, Pay Bill, Delete/Copy, Home, **keyboard shortcut engine**, full Assumptions editor, donation page, i18n, Bill Ref pattern (OI-087), currency research, save-emphasis (OI-093), DB health follow-ons — see Deferred / B0.9. **Calculator = Packet C** (in tranche, parallel).
 
@@ -370,6 +379,7 @@ flowchart LR
 | **D-SaveEmphasis** | OI-093 post–Save draft button emphasis |
 | **D-E2E** | Layer-2 |
 | **D-CreditNote** | OI-082 (open — discovery) + OI-147 (open — discovery, extends OI-082) — AP credit/debit note on Bill Doc skin (`is_return` / `return_against`); **must promote into the next dated plan at closeout, do not drop** |
+| **D-DocFieldParity** | **OI-163** (new 2026-09-06) — expand Doc skin (Bill/PO/IR) field coverage toward Vanilla parity; kept from Option B's rejected pitch. Explicitly **not this tranche** — current Bill Doc skin is MVP except returns (OI-082/OI-147); do not touch that code until 5zorro asks |
 
 > **D-Calc removed** — promoted to **Packet C** (OI-018).
 
