@@ -326,7 +326,151 @@ Returning early from an arming function leaves the *previous* guard live — whi
 
 ---
 
-## Template (append G7+)
+## G7 — `[hidden]` loses to any author `display:` rule (2026-09-08)
+
+**Observed:** `el.hidden = true` left the element on screen. Hit **four separate times** on the
+Packet 4b surfaces: `.check-doc-write-actions` (a submitted Payment Entry still offered "Create &
+submit"), `.col-header-row`, `.check-doc-payee`, and `.link-wrap` (a link picker's chevron floating
+on the check face with no input beside it).
+
+**Expected:** the UA stylesheet's `[hidden] { display: none }` hides it.
+
+**Architecture / fix:** that UA rule is the weakest possible declaration — **any** author
+`display:` on the same element beats it, and every one of these elements had one (`flex`, `grid`,
+`block`). A guard rule is required, and the guard must also **win the cascade**:
+`.check-doc-payee[hidden]` and `.check-doc-payee-row .check-doc-payee` have identical specificity,
+so a guard declared *first* silently loses and looks like it is doing nothing. Two further traps:
+a picker may **wrap** the element you hid (hide what the picker actually built, not just the input),
+and `.some-button span { display: none }` also hides an icon's own wrapper span — `uiIconHtml`
+emits `<span class="ui-ico"><svg…></span>`, so targeting bare `span` empties the button.
+
+`tests/doc-skin-css.test.js` now scans for this: it collects every element the JS toggles via
+`hidden`, checks for a bare `display:` rule, and requires a guard that is more specific — or equally
+specific and declared later. Verified by reintroducing each bug.
+
+**Dogfood:** the e2e that should have caught the first one asserted the `.hidden` *property*, which
+was `true` the whole time. Assert `getClientRects().length` — visibility, not intent.
+
+---
+
+## G8 — Headless measurement lies in four specific ways (2026-09-08)
+
+**Observed:** measurements said a layout was fine while the screenshot plainly showed it broken, and
+separately reported 1336px of ribbon drift where there was none.
+
+**Expected:** the numbers and the picture agree.
+
+**Architecture / fix:** four distinct blind spots, all worth checking before trusting a number:
+
+1. **`scrollWidth > clientWidth` cannot see wrapping.** Text that breaks to a second line reports
+   `scrollWidth === clientWidth`, so a squeezed flex row reads as "fits". Force `white-space:
+   nowrap` on anything claiming to be one line — then width pressure becomes clipping, which the
+   check *can* see. (Also makes "one line" an enforced property rather than a hope.)
+2. **`display: none` children have all-zero rects.** A collision check that includes them compares
+   against `top: 0` and reports a collision for every row — 48 false positives here. Filter by
+   computed `display` before measuring.
+3. **`scrollHeight` misses symmetric overflow.** With `justify-content: center`, content that
+   overflows a flex box spills equally top and bottom; `scrollHeight` counts only the bottom half.
+   Measure the union of children's rects against the parent's rect instead.
+4. **Pick the right end of the path.** A ribbon between a span and a row attaches at opposite ends
+   depending on which side the span is on, so reading `M` blindly measures the *bundle* end and
+   reports enormous drift. `querySelector` also silently takes the first of two SVG layers.
+
+**Dogfood:** the fix loop that works — measure, change, re-measure, **then screenshot**. Two of
+these were only caught because the picture disagreed with the numbers.
+
+---
+
+## G9 — A surface that never claims a route is invisible to the whole nav spine (2026-09-10)
+
+**Observed:** "I clicked on a few pages, and the recent portion of the nav flyout did not
+populate." (nav incident 2026-09-10). The snapshot's `history` was `[]` after a session of
+Home → Pay Outstanding → Home, and the trail showed the surface change
+(`openPaymentEntryTile lens=doc → pay-outstanding`) with `currentRoute` still on `/desk`
+throughout — including in the incident record itself, which therefore reported the wrong page.
+
+**Expected:** Recent shows the pages the clerk actually visited, and `currentRoute` names the
+document in front of them regardless of which surface is painting it.
+
+**Architecture / fix:** Recent is fed from *navigation*: `trackNav` (an ERP URL change) and
+`showDocForm` (which sets `currentRoute`, remembers the lens, and pushes a row). The two
+Payment Entry Doc surfaces — `pay-outstanding.html` and `payment-doc.html` — are
+`loadFile()` of a local page, so **neither event ever happens**. They were the first surfaces
+in the shell to be a place the clerk can *be* without being a place the shell knows about.
+`noteShellDocSurfaceRoute()` now does what `showDocForm` does: the route comes from
+`docSkinTargetRoute()` in `lens-context.js`, deliberately the *same* `/app/payment-entry/…`
+route the Vanilla visit uses, so both lenses share one history slot.
+
+The same root — **`doc-skin-registry.js` (doc-form layouts only) used as the oracle for "does
+this doctype have a Doc skin?", while `lens-context.js` is the declared SSoT** — had three
+more faces, all repaired here:
+
+- `classifyHistoryOpen` filed every Payment Entry under `kind: "setup"`, the muted decoration
+  meant for Tax Category and Company. Split into two questions: `doctypeHasDocSkin` still
+  answers the *navigation* one (and so leaves soft-peek policy untouched), `routeIsDocSkinned`
+  answers the *labelling* one from the skin index.
+- `openRoutePreferred` / `openHistoryRoute` required a doc-form profile before honouring a
+  remembered Doc lens, so every door into a payment except the toolbar Doc tab — Recent,
+  Drafts, Submitted — silently downgraded to Vanilla. `openShellDocSurface()` asks
+  `resolveDocSkinTarget` instead. (Deliberate consequence: an explicit Recent click on a
+  Payment Entry now opens its skin rather than soft-peeking it, matching the precedent
+  `docTabAction` already set — own skin beats return-peek for this doctype. In-page ERP links
+  still soft-peek.)
+- `open-vanilla-skin` fell through to `/desk` from Pay Outstanding, leaving the payment the
+  clerk was looking at, because `currentRoute` was `/desk` *and* the branch that would have
+  used it demanded a doc-form profile.
+
+**Dogfood:** Home → Pay Bills (Doc lens) → Pay Outstanding. Recent shows **New Payment Entry**
+immediately. Home, then click that row → back on Pay Outstanding, not Vanilla. From Pay
+Outstanding click Vanilla → the Vanilla Payment Entry, not Desk home.
+
+**Do not regress:** A surface that renders a document must claim its route the moment it is
+shown. Recent, the lens chip and incident snapshots are all downstream of `currentRoute`; a
+surface that skips it does not degrade gracefully, it becomes invisible — and it takes the
+incident report meant to debug it down with it. Equally: when a second registry starts
+answering "does this have a Doc skin?", the older one becomes a *subset* answer, not the
+answer.
+
+---
+
+## G10 — The toolbar re-derived an answer main had already computed (2026-09-10)
+
+**Observed:** *"While I'm on bill doc skin, the toolbar correctly has the label 'Document-Skin'
+emphasized (white). While I'm on the payment dashboard doc skin, the label 'document-skin' never
+is emphasized."* (nav incident 2026-09-10T05:29). Unreported second half: **Default-skin** was
+emphasized there instead, so the toolbar claimed the clerk was in Vanilla while they sat in the
+Doc skin.
+
+**Expected:** The lit tab names the lens you are actually in, on every surface that is the Doc
+lens — including the two that are not `doc-form.html`.
+
+**Architecture / fix:** `sendUiState()` computes the right answer twice over — `onDoc =
+showingHome() || isShellDocSurface()` feeds `toolbarLensId()`, which returned `"doc"` correctly
+on `pay-outstanding`. The toolbar then **ignored** it and recomputed selection from the payload's
+`showingBill || showingDocForm`, both of which are `surfaceMode === "doc"` — doc-form.html only:
+
+```js
+const onDocForm = !!(s.showingBill || s.showingDocForm);   // false on pay-outstanding
+const onErpForm = !showingHome && !onDocForm;              // ...so: true
+lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);        // never lit
+lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified"); // wrongly lit
+```
+
+Selection is now `lensTabEmphasis()` in `chrome-state.js`, sent as `lensActive`, and
+`chrome.html` only paints it. Note this is the *third* time `surfaceMode === "doc"` has been the
+wrong answer to "am I on the Doc lens?" — `isShellDocSurface()` exists precisely because it is,
+and every consumer has to use it rather than re-testing the narrow flags.
+
+**Dogfood:** Home → Pay Bills → Pay Outstanding: **Document-skin** is white, Default-skin is not.
+Same on a payment opened from Recent. Bill / PO / IR and Vanilla forms are unchanged.
+
+**Do not regress:** If main computes an answer and sends it, the renderer paints it — a renderer
+that recomputes the same question from a *narrower* input will silently disagree the moment a new
+surface appears, and it disagrees in the worst direction: confidently naming the wrong lens.
+
+---
+
+## Template (append G11+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)

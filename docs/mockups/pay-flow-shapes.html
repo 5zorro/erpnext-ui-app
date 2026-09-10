@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pay Outstanding — flow shape options</title>
+<style>
+  :root {
+    --flow-batch: #009e73;
+    --flow-invoice: #60a5fa;
+    --ink: #1f2d3d;
+    --muted: #64748b;
+    --line: #f1f5f9;
+    --edge: #d6dee6;
+  }
+  html, body { margin: 0; background: #eef2f5; color: var(--ink); font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 22px 28px 14px; background: #fff; border-bottom: 1px solid var(--edge); }
+  h1 { margin: 0 0 6px; font-size: 17px; }
+  header p { margin: 0 0 8px; font-size: 13px; color: var(--muted); max-width: 82ch; line-height: 1.6; }
+  header ul { margin: 0; padding-left: 20px; font-size: 12px; color: var(--muted); line-height: 1.7; max-width: 82ch; }
+  header b { color: var(--ink); font-weight: 600; }
+  main { padding: 24px 28px 60px; }
+  .opt { background: #fff; border: 1px solid var(--edge); border-radius: 10px; margin-bottom: 22px; overflow: hidden; }
+  .opt-head { padding: 12px 16px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; gap: 12px; }
+  .opt-name { font-size: 13px; font-weight: 700; }
+  .opt-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 2px 8px; border-radius: 999px; }
+  .tag-live { background: #e6f5f0; color: #00795c; }
+  .tag-rejected { background: #fee2e2; color: #991b1b; }
+  .tag-idea { background: #e0e7ff; color: #3730a3; }
+  .opt-why { font-size: 12px; color: var(--muted); line-height: 1.6; padding: 10px 16px 0; max-width: 92ch; }
+  .opt-why b { color: var(--ink); font-weight: 600; }
+  .demo { padding: 14px 16px 18px; }
+
+  .col-head {
+    display: grid; grid-template-columns: 150px 72px 1fr 104px 1fr;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .col-head span { padding: 0 12px; }
+  .col-head .c { text-align: center; padding: 0; }
+  .grid {
+    display: grid; grid-template-columns: 150px 72px 1fr 104px 1fr;
+    border: 1px solid var(--edge); border-radius: 8px; overflow: hidden;
+  }
+  .col { display: flex; flex-direction: column; }
+  /* Every element the SVG also measures is border-box — a 1px border on a content-box row makes
+     the DOM 35px while the ribbon is drawn at a 34px pitch (12px of drift by row 12, measured
+     2026-09-08). The SVG's coordinate space is the contract; the CSS has to keep it. */
+  .row, .node, .wrap { box-sizing: border-box; }
+  .row {
+    height: 34px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; font-size: 12px; border-bottom: 1px solid var(--line);
+  }
+  .row .due { color: #475569; font-variant-numeric: tabular-nums; }
+  .row .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row.group-edge { border-bottom: 2px solid var(--line); }
+  .wrap { position: relative; }
+  .node {
+    height: 100%; display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px;
+  }
+  /* The label sits where the bundle is — a label centred on an 8-row cell while the flow leaves
+     from the top 20% reads as unrelated to it (5zorro 2026-09-08). Per-option, because each
+     option puts the bundle somewhere different. */
+  .grid[data-align="top"] .node { justify-content: flex-start; }
+  .grid[data-align="centre"] .node,
+  .grid[data-align="spread"] .node { justify-content: center; }
+  .wrap:not(:last-child) .node.group { border-bottom: 2px solid #94a3b8; }
+  .wrap:not(:last-child) .node.invoice { border-bottom: 2px solid #dbeafe; }
+  .node.invoice { background: #f8fbff; }
+  /* Focus treatment (section 2's candidate): trace one suggested payment instead of untangling
+     every crossing. A class toggle and stroke opacity — no geometry change. */
+  .row.lit { background: #e6f5f0; }
+  .row.dimmed, .node.dimmed { opacity: .3; }
+  .node .t { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .node .s { font-size: 10px; color: var(--muted); }
+  .node .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--flow-batch); flex: 0 0 auto; }
+  svg.flow { display: block; width: 100%; }
+  .verdict { font-size: 12px; padding: 0 16px 14px; color: var(--muted); line-height: 1.6; max-width: 92ch; }
+  .verdict b { color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pay Outstanding — how the flow attaches to the table</h1>
+  <p>
+    <b>Section 1</b> compares flow shapes on one invoice with 8 installments batched into two
+    payments — the only variable is how the middle columns connect many schedule rows to one
+    aggregate row. <b>Section 2</b> takes the chosen shape (B) and puts it under both sorts on a
+    harder case: 3 invoices × 3 installments, batched one per invoice.
+  </p>
+  <ul>
+    <li><b>Aggregate rows are as tall as the rows they draw from</b> — 5 members = 5 row heights.
+      Sizing them by <i>amount</i> instead (what production does today) gave a 4-row-tall
+      suggested payment fed by 5 payments, and a 3-payment group taller than a 5-payment one.
+      5zorro, 2026-09-08: “if this mockup is to try to be production, it should look sane.”</li>
+    <li><b>The brace covers the bundle, not the row</b> — bracketing an 8-row cell when the flow
+      occupies its top fifth implies there is something to catch in the other four fifths.</li>
+    <li><b>The brace has its own gutter</b> — it used to sit on top of the strands it was
+      pointing at.</li>
+    <li><b>The label sits where the bundle is</b>, per option.</li>
+  </ul>
+</header>
+<main id="main"></main>
+
+<script>
+const ROW = 34;
+const MIN_STROKE = 2, MAX_STROKE = 16;
+/** Horizontal gutter reserved for the brace, so it never overlaps the strands. */
+const BRACE_ZONE = 20;
+/** A two-strand bundle is only ~8px tall; a brace that small reads as a smudge. */
+const MIN_BRACE_H = 18;
+
+/** One invoice, 8 installments, 2 groups — the shape-comparison dataset. */
+const DS_SINGLE = {
+  bills: Array.from({ length: 8 }, (_, i) => ({
+    key: "K" + i, inv: "ACC-PINV-2026-00900",
+    due: `2026-08-${String(10 + i).padStart(2, "0")}`,
+    amt: [50, 50, 120, 50, 50, 300, 50, 50][i],
+  })),
+  groups: [
+    { payOn: "2026-08-10", keys: ["K0", "K1", "K2", "K3", "K4"] },
+    { payOn: "2026-08-15", keys: ["K5", "K6", "K7"] },
+  ],
+};
+
+/**
+ * Three invoices, three installments each, batched one-per-invoice into three payments
+ * (5zorro 2026-09-08). This is the case that exposes the sort asymmetry — see section 2.
+ */
+const DS_CROSS = (() => {
+  const spec = [
+    { inv: "PI-OVERLAP-A", amt: 120, days: [10, 17, 24] },
+    { inv: "PI-OVERLAP-B", amt: 90, days: [12, 19, 26] },
+    { inv: "PI-OVERLAP-C", amt: 150, days: [14, 21, 28] },
+  ];
+  const bills = [];
+  spec.forEach((sp) => sp.days.forEach((d, i) => bills.push({
+    key: `${sp.inv}#${i}`, inv: sp.inv, due: `2026-08-${d}`, amt: sp.amt, slot: i,
+  })));
+  const groups = [0, 1, 2].map((i) => ({
+    payOn: bills.filter((b) => b.slot === i).map((b) => b.due).sort()[0],
+    keys: bills.filter((b) => b.slot === i).map((b) => b.key),
+  }));
+  return { bills, groups };
+})();
+
+/** @param {"date"|"invoice"} sort */
+function model(ds, sort) {
+  const byDue = (a, b) => a.due.localeCompare(b.due);
+  let bills;
+  if (sort === "date") {
+    bills = ds.bills.slice().sort(byDue);
+  } else {
+    // Each invoice's installments contiguous, invoices in first-due order — what the live
+    // page's "Invoice" sort does.
+    const firstDue = new Map();
+    for (const b of ds.bills.slice().sort(byDue)) if (!firstDue.has(b.inv)) firstDue.set(b.inv, b.due);
+    bills = ds.bills.slice().sort((a, b) =>
+      firstDue.get(a.inv).localeCompare(firstDue.get(b.inv)) || byDue(a, b));
+  }
+  const rowIndex = new Map(bills.map((b, i) => [b.key, i]));
+  const rowY = new Map(bills.map((b, i) => [b.key, i * ROW + ROW / 2]));
+  const amtOf = new Map(bills.map((b) => [b.key, b.amt]));
+  const total = bills.reduce((s, b) => s + b.amt, 0);
+
+  // Aggregates are ordered by where their first member actually sits, so the column follows
+  // the sort instead of fighting it.
+  const firstRow = (keys) => Math.min(...keys.map((k) => rowIndex.get(k)));
+  const invNames = [...new Set(bills.map((b) => b.inv))];
+  const invoices = invNames
+    .map((name) => ({ name, keys: bills.filter((b) => b.inv === name).map((b) => b.key) }))
+    .sort((a, b) => firstRow(a.keys) - firstRow(b.keys));
+  const groups = ds.groups.slice().sort((a, b) => firstRow(a.keys) - firstRow(b.keys));
+
+  return {
+    bills, rowIndex, rowY, amtOf,
+    H: bills.length * ROW,
+    strokeFor: (a) => Math.min(MAX_STROKE, Math.max(MIN_STROKE, (a / total) * MAX_STROKE * 4)),
+    invoices, groups,
+    /** Is every member of every aggregate contiguous under this sort? */
+    contiguous: (items) => items.every((it) => {
+      const idx = it.keys.map((k) => rowIndex.get(k)).sort((x, y) => x - y);
+      return idx.every((v, i) => i === 0 || v === idx[i - 1] + 1);
+    }),
+  };
+}
+
+/**
+ * An aggregate row is as tall as the schedule rows it draws from. That makes every column
+ * exactly as tall as the table (member counts sum to the row count), and — when members are
+ * contiguous under the current sort — the aggregate row lines up with its own block of rows
+ * instead of merely being near it.
+ */
+function spansFor(items, m) {
+  let cur = 0;
+  return items.map((it) => {
+    const h = it.keys.length * ROW;
+    const span = { y0: cur, y1: cur + h, item: it, value: it.keys.reduce((t, k) => t + m.amtOf.get(k), 0) };
+    cur += h;
+    return span;
+  });
+}
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, attrs) => {
+  const e = document.createElementNS(NS, n);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+};
+const bez = (x1, y1, x2, y2) => `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+
+/** `{` inside its own gutter, sized to the bundle it is gathering. */
+function bracePath(y0, y1, w, side) {
+  const onLeft = side === "left";
+  const tip = onLeft ? 2 : w - 2, spine = onLeft ? 9 : w - 9, curl = onLeft ? 15 : w - 15;
+  const mid = (y0 + y1) / 2, r = Math.min(5, Math.max(2, (y1 - y0) / 8));
+  return `M ${curl} ${y0} Q ${spine} ${y0} ${spine} ${y0 + r} L ${spine} ${mid - r}
+          Q ${spine} ${mid} ${tip} ${mid} Q ${spine} ${mid} ${spine} ${mid + r}
+          L ${spine} ${y1 - r} Q ${spine} ${y1} ${curl} ${y1}`;
+}
+
+/**
+ * @param {"top"|"centre"|"spread"} align where the bundle sits inside its span
+ * @param {"stroke"|"taper"} paint
+ * @param {string[]|null} focus keys to emphasise; everything else is dimmed
+ */
+function flowSvg(spans, side, w, color, opacity, align, paint, m, focus) {
+  const svg = el("svg", { class: "flow", viewBox: `0 0 ${w} ${m.H}`, preserveAspectRatio: "none" });
+  svg.style.height = m.H + "px";
+  const spanX = side === "left" ? BRACE_ZONE : w - BRACE_ZONE;
+  const pointX = side === "left" ? w : 0;
+  const dim = (keys) => focus && !keys.some((k) => focus.includes(k));
+
+  for (const span of spans) {
+    const keys = span.item.keys;
+    const spanH = span.y1 - span.y0;
+    const spanTotal = keys.reduce((t, k) => t + m.amtOf.get(k), 0);
+    const faded = dim(keys) ? 0.18 : 1;
+
+    const strands = [];
+    const bundleH = keys.reduce((t, k) => t + Math.max(m.strokeFor(m.amtOf.get(k)), 4), 0);
+    let used = align === "centre" ? (span.y0 + span.y1) / 2 - bundleH / 2 : span.y0;
+    for (const k of keys) {
+      const a = m.amtOf.get(k), stroke = m.strokeFor(a);
+      let sy;
+      if (align === "spread") {
+        const slice = (a / spanTotal) * spanH;
+        sy = used + slice / 2;
+        used += slice;
+      } else {
+        sy = used + stroke / 2;
+        used += Math.max(stroke, 4);
+      }
+      strands.push({ key: k, sy, stroke, py: m.rowY.get(k) });
+    }
+
+    if (keys.length > 1) {
+      let top = Math.min(...strands.map((s) => s.sy - s.stroke / 2));
+      let bot = Math.max(...strands.map((s) => s.sy + s.stroke / 2));
+      if (bot - top < MIN_BRACE_H) {
+        const mid = (top + bot) / 2;
+        top = mid - MIN_BRACE_H / 2; bot = mid + MIN_BRACE_H / 2;
+      }
+      svg.appendChild(el("path", {
+        class: "flow-brace", d: bracePath(top, bot, w, side), fill: "none", stroke: color,
+        "stroke-width": 1, "stroke-opacity": 0.6 * faded, "vector-effect": "non-scaling-stroke",
+      }));
+    }
+
+    for (const s of strands) {
+      const a = focus && !focus.includes(s.key) ? 0.15 : faded;
+      if (paint === "taper") {
+        const half = s.stroke / 2, rh = ROW / 2 - 2, mx = (spanX + pointX) / 2;
+        const d = side === "left"
+          ? `M ${spanX} ${s.sy - half} C ${mx} ${s.sy - half}, ${mx} ${s.py - rh}, ${pointX} ${s.py - rh}
+             L ${pointX} ${s.py + rh} C ${mx} ${s.py + rh}, ${mx} ${s.sy + half}, ${spanX} ${s.sy + half} Z`
+          : `M ${pointX} ${s.py - rh} C ${mx} ${s.py - rh}, ${mx} ${s.sy - half}, ${spanX} ${s.sy - half}
+             L ${spanX} ${s.sy + half} C ${mx} ${s.sy + half}, ${mx} ${s.py + rh}, ${pointX} ${s.py + rh} Z`;
+        svg.appendChild(el("path", { d, fill: color, "fill-opacity": opacity * 0.7 * a, stroke: "none" }));
+      } else {
+        svg.appendChild(el("path", {
+          d: side === "left" ? bez(spanX, s.sy, pointX, s.py) : bez(pointX, s.py, spanX, s.sy),
+          fill: "none", stroke: color, "stroke-width": s.stroke,
+          "stroke-opacity": opacity * a, "vector-effect": "non-scaling-stroke",
+        }));
+      }
+    }
+  }
+  return svg;
+}
+
+function buildGrid({ ds, sort = "date", align, paint = "stroke", focus = null }) {
+  const m = model(ds, sort);
+  const invoiceSpans = spansFor(m.invoices, m);
+  const groupSpans = spansFor(m.groups, m);
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  grid.dataset.align = align;
+
+  const colInv = document.createElement("div");
+  colInv.className = "col";
+  for (const span of invoiceSpans) {
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    wrap.style.height = span.y1 - span.y0 + "px";
+    const off = focus && !span.item.keys.some((k) => focus.includes(k)) ? " dimmed" : "";
+    wrap.innerHTML = `<div class="node invoice${off}"><span class="t">${span.item.name}</span>
+      <span class="s">${span.item.keys.length} installments · $${span.value.toFixed(2)}</span></div>`;
+    colInv.appendChild(wrap);
+  }
+  grid.appendChild(colInv);
+  grid.appendChild(flowSvg(invoiceSpans, "left", 72, "var(--flow-invoice)", 0.5, align, paint, m, focus));
+
+  const colBills = document.createElement("div");
+  colBills.className = "col";
+  const groupOf = new Map();
+  m.groups.forEach((g, i) => g.keys.forEach((k) => groupOf.set(k, i)));
+  m.bills.forEach((b, i) => {
+    const next = m.bills[i + 1];
+    const r = document.createElement("div");
+    r.className = "row"
+      + (next && groupOf.get(next.key) !== groupOf.get(b.key) ? " group-edge" : "")
+      + (focus ? (focus.includes(b.key) ? " lit" : " dimmed") : "");
+    r.innerHTML = `<span class="due">${b.due}</span><span class="amt">$${b.amt.toFixed(2)}</span>`;
+    colBills.appendChild(r);
+  });
+  grid.appendChild(colBills);
+  grid.appendChild(flowSvg(groupSpans, "right", 104, "var(--flow-batch)", 0.55, align, paint, m, focus));
+
+  const colG = document.createElement("div");
+  colG.className = "col";
+  for (const span of groupSpans) {
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    wrap.style.height = span.y1 - span.y0 + "px";
+    const off = focus && !span.item.keys.some((k) => focus.includes(k)) ? " dimmed" : "";
+    wrap.innerHTML = `<div class="node group${off}">
+      <span class="top"><span class="t"><span class="dot"></span> ${span.item.payOn}</span>
+      <span class="t">$${span.value.toFixed(2)}</span></span>
+      <span class="s">${span.item.keys.length} bills → one payment</span></div>`;
+    colG.appendChild(wrap);
+  }
+  grid.appendChild(colG);
+  return { grid, m };
+}
+
+const SECTIONS = [
+  {
+    h: "1 — Shape options (one invoice, 8 installments, 2 groups)",
+    options: [
+      {
+        name: "A — bundle at the row's top edge", tag: "was live", tagClass: "tag-live",
+        cfg: { ds: DS_SINGLE, align: "top" },
+        why: `Strands pack tight into a <b>bundle</b> whose total thickness reads as the group's
+          size; it starts at the row's top edge and the label is top-aligned to match.`,
+        verdict: `Cost: on a tall row the bundle and label both hug the top, the lower two-thirds
+          of the cell is empty, and strands from the last rows travel a long way up.`,
+      },
+      {
+        name: "B — bundle centred on the row", tag: "chosen", tagClass: "tag-live",
+        cfg: { ds: DS_SINGLE, align: "centre" },
+        why: `Identical strands, centred in the row with the label. <b>Chosen 2026-09-08:</b>
+          5zorro — “it keeps the ribbon height, and because they are not forced to move as far,
+          there is less overlap that could be confusing to a user.”`,
+        verdict: `Convergence points at the label, no dead half, and the shortest total strand
+          travel of any option — which is what keeps crossings readable.`,
+      },
+      {
+        name: "C — spread proportionally across the row (Sankey-true)", tag: "rejected", tagClass: "tag-rejected",
+        cfg: { ds: DS_SINGLE, align: "spread" },
+        why: `Each strand owns a slice of the row's height proportional to its amount.`,
+        verdict: `<b>Tried live 2026-09-08, reverted the same day.</b> When installments are
+          similar in size the slices land at the row pitch, every strand becomes a near-horizontal
+          line, and the convergence disappears: <i>“I now see no flow at all.”</i>`,
+      },
+      {
+        name: "D — B, with tapered filled ribbons", tag: "idea", tagClass: "tag-idea",
+        cfg: { ds: DS_SINGLE, align: "centre", paint: "taper" },
+        why: `B's geometry, filled ribbons: each starts at the table end as tall as its own row
+          and narrows to its share of the bundle.`,
+        verdict: `Strongest row-to-flow link. Cost: much more ink; at 90 installments the columns
+          may read as solid colour.`,
+      },
+    ],
+  },
+  {
+    h: "2 — B under both sorts (3 invoices × 3 installments, batched one per invoice)",
+    intro: `Nine payments, three suggested payments, each drawing one installment from each
+      invoice. Toggling the sort moves which side can line up — see the note under each.`,
+    options: [
+      {
+        name: "B · sorted by payment date", tag: "sort: date", tagClass: "tag-idea",
+        cfg: { ds: DS_CROSS, sort: "date", align: "centre" },
+        why: `Chronological, the page's default.`,
+        verdict: `<b>The suggested-payment side lines up perfectly</b> — each group's three
+          installments are consecutive rows, so its row is exactly its own block. <b>The invoice
+          side cannot</b>: each invoice's installments are rows 1/4/7, 2/5/8, 3/6/9, so its stacked
+          block sits next to rows that mostly are not its own and every strand crosses.`,
+      },
+      {
+        name: "B · sorted by invoice", tag: "sort: invoice", tagClass: "tag-idea",
+        cfg: { ds: DS_CROSS, sort: "invoice", align: "centre" },
+        why: `Each invoice's installments contiguous, invoices in first-due order.`,
+        verdict: `<b>Exactly the mirror image.</b> The invoice side now lines up and the
+          suggested-payment side crosses. <b>The asymmetry is structural:</b> the two aggregate
+          columns want opposite row orders, so a single sort can only ever satisfy one of them.
+          Sorting is therefore a real choice about which relationship you are reading, not a
+          cosmetic preference — worth saying so in the UI rather than leaving it to be discovered.`,
+      },
+      {
+        name: "B · sorted by invoice, one payment focused", tag: "candidate", tagClass: "tag-idea",
+        cfg: { ds: DS_CROSS, sort: "invoice", align: "centre", focus: DS_CROSS.groups[1].keys },
+        why: `The same crossing view with one suggested payment emphasised and everything else
+          dimmed — what hovering or clicking a suggested payment could do.`,
+        verdict: `<b>Candidate answer to the asymmetry.</b> If crossings are unavoidable on one
+          side, tracing one group at a time makes them irrelevant: the three lit rows and the one
+          lit bundle are readable regardless of sort. Cheap — a class toggle plus stroke opacity,
+          no geometry change. Not built.`,
+      },
+    ],
+  },
+];
+
+const main = document.getElementById("main");
+for (const sec of SECTIONS) {
+  const h = document.createElement("h2");
+  h.textContent = sec.h;
+  h.style.cssText = "font-size:14px;margin:8px 0 12px";
+  main.appendChild(h);
+  if (sec.intro) {
+    const pi = document.createElement("p");
+    pi.style.cssText = "font-size:12px;color:var(--muted);max-width:92ch;line-height:1.6;margin:0 0 14px";
+    pi.innerHTML = sec.intro;
+    main.appendChild(pi);
+  }
+  for (const o of sec.options) {
+    const box = document.createElement("section");
+    box.className = "opt";
+    box.innerHTML = `<div class="opt-head"><span class="opt-name">${o.name}</span>
+        <span class="opt-tag ${o.tagClass}">${o.tag}</span></div>
+      <div class="opt-why">${o.why}</div>
+      <div class="demo">
+        <div class="col-head"><span>Invoice</span><span class="c">Flow</span>
+          <span>Payment date / amount</span><span class="c">Flow</span><span>Suggested payment</span></div>
+      </div>
+      <div class="verdict">${o.verdict}</div>`;
+    const built = buildGrid(o.cfg);
+    box.querySelector(".demo").appendChild(built.grid);
+    // Say out loud which side is contiguous under this sort — the finding, not a guess.
+    const badge = document.createElement("div");
+    badge.style.cssText = "font-size:11px;color:var(--muted);padding:8px 16px 0";
+    badge.innerHTML = `Contiguous under this sort — invoices:
+      <b>${built.m.contiguous(built.m.invoices) ? "yes" : "no"}</b> ·
+      suggested payments: <b>${built.m.contiguous(built.m.groups) ? "yes" : "no"}</b>`;
+    box.querySelector(".demo").appendChild(badge);
+    main.appendChild(box);
+  }
+}
+</script>
+</body>
+</html>

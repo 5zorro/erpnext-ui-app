@@ -7,7 +7,10 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   setPrefs: (prefs) => ipcRenderer.invoke("set-payment-batch-prefs", prefs),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
   setDirty: (dirty) => ipcRenderer.send("set-pay-outstanding-dirty", !!dirty),
-  searchLink: (doctype, txt) => ipcRenderer.invoke("pay-outstanding-search-link", doctype, txt || ""),
+  searchLink: (doctype, txt, filters) =>
+    ipcRenderer.invoke("pay-outstanding-search-link", doctype, txt || "", filters || null),
   createBatchPaymentEntry: (bills, intent) =>
     ipcRenderer.invoke("create-batch-payment-entry", bills, intent),
+  createBlankPaymentEntry: (intent) => ipcRenderer.invoke("create-blank-payment-entry", intent),
+  openPaymentDoc: (name) => ipcRenderer.send("open-payment-doc", name),
 });

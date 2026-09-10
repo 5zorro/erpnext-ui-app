@@ -322,12 +322,22 @@ test.describe("scaffold: pay outstanding", () => {
          amount: document.querySelector('[data-testid="check-doc-amount"]')?.textContent || "",
          mopDisabled: document.getElementById("check-doc-mop")?.disabled,
          writeActionsHidden: document.querySelector('[data-testid="check-doc-write-actions"]')?.hidden,
+         // Ask what the clerk can SEE, not what the property says. These disagreed:
+         // .check-doc-write-actions carried an author "display: flex", which beats the UA
+         // sheet's [hidden] { display: none }, so hidden was true while a "Create & submit
+         // Payment Entry" button stayed on screen over a submitted document (found 2026-09-07).
+         writeActionsOnScreen: !!document
+           .querySelector('[data-testid="check-doc-write-actions"]')?.getClientRects().length,
+         submitOnScreen: !!document
+           .querySelector('[data-testid="check-doc-submit"]')?.getClientRects().length,
        })`,
     );
     expect(rendered.badge).toMatch(/Submitted Payment Entry/);
     expect(rendered.payee).toBe(found.pay.party);
     expect(rendered.mopDisabled).toBe(true);
     expect(rendered.writeActionsHidden).toBe(true);
+    expect(rendered.writeActionsOnScreen).toBe(false);
+    expect(rendered.submitOnScreen).toBe(false);
 
     if (found.receive) {
       await e2eCall(app, "openErp", `/app/payment-entry/${encodeURIComponent(found.receive.name)}`);

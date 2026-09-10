@@ -7,6 +7,9 @@ import {
   lookupDocSkin,
   DOC_SKIN_INDEX,
   docSkinRouteMatrix,
+  docSkinTargetRoute,
+  paymentEntryRoute,
+  PAYMENT_ENTRY_NEW_ROUTE,
 } from "../src/lens-context.js";
 
 describe("classifySurface", () => {
@@ -131,5 +134,51 @@ describe("Payment Entry routing (Packet 4b step 5)", () => {
     const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry" };
     assert.equal(hasDocSkin(ctx), false);
     assert.equal(resolveDocSkinTarget(ctx), null);
+  });
+});
+
+describe("docSkinTargetRoute", () => {
+  it("gives the two shell-local Payment Entry surfaces an ERP route to stand on", () => {
+    assert.equal(docSkinTargetRoute({ kind: "pay-outstanding" }), PAYMENT_ENTRY_NEW_ROUTE);
+    assert.equal(
+      docSkinTargetRoute({ kind: "payment-doc", record: "ACC-PAY-2026-00001" }),
+      "/app/payment-entry/ACC-PAY-2026-00001",
+    );
+  });
+
+  it("matches the route the same document has under Vanilla, so Recent keeps one slot", () => {
+    const ctx = {
+      showingHome: false,
+      lens: "doc",
+      route: "/app/payment-entry/ACC-PAY-2026-00001",
+      paymentDirection: "Pay",
+    };
+    assert.equal(docSkinTargetRoute(resolveDocSkinTarget(ctx)), ctx.route);
+  });
+
+  it("passes a doc-form target's own route straight through", () => {
+    assert.equal(
+      docSkinTargetRoute({ kind: "doc-form", route: "/app/purchase-invoice/new" }),
+      "/app/purchase-invoice/new",
+    );
+  });
+
+  it("Workflow Home is not an ERP page, so it has no route", () => {
+    assert.equal(docSkinTargetRoute({ kind: "workflow-home" }), "");
+    assert.equal(docSkinTargetRoute(null), "");
+    assert.equal(docSkinTargetRoute(undefined), "");
+  });
+});
+
+describe("paymentEntryRoute", () => {
+  it("an empty or new record is the blank decision surface", () => {
+    assert.equal(paymentEntryRoute(""), PAYMENT_ENTRY_NEW_ROUTE);
+    assert.equal(paymentEntryRoute(null), PAYMENT_ENTRY_NEW_ROUTE);
+    assert.equal(paymentEntryRoute("new"), PAYMENT_ENTRY_NEW_ROUTE);
+    assert.equal(paymentEntryRoute("new-payment-entry-kwzqoxkuwm"), PAYMENT_ENTRY_NEW_ROUTE);
+  });
+
+  it("a saved payment is its own route", () => {
+    assert.equal(paymentEntryRoute("ACC-PAY-2026-00001"), "/app/payment-entry/ACC-PAY-2026-00001");
   });
 });

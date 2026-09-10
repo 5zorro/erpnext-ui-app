@@ -4,22 +4,43 @@
     <div class="check-doc-row check-doc-payee-row">
       <span class="check-doc-label">Pay to the order of</span>
       <span class="check-doc-payee" data-testid="check-doc-payee"></span>
+      <!-- Blank mode only: the payee and amount become inputs, because on a new check the clerk
+           supplies them. Every other mount gets them from a batch or a saved document. -->
+      <input type="text" id="check-doc-payee-input" class="check-doc-input check-doc-payee-input"
+        data-testid="check-doc-payee-input" placeholder="Search Supplier…" autocomplete="off" hidden />
     </div>
     <div class="check-doc-row check-doc-amount-row">
       <span class="check-doc-amount-box" data-testid="check-doc-amount"></span>
+      <input type="number" step="0.01" min="0" id="check-doc-amount-input"
+        class="check-doc-input check-doc-amount-input" data-testid="check-doc-amount-input"
+        placeholder="0.00" autocomplete="off" hidden />
+    </div>
+    <!-- Written-amount line, check no. and bank block: ERPNext computes/fetches all of these on
+         save, so an existing document prints them. A proposal has none yet, so each row stays
+         `hidden` until paintCheckDoc is given a value — "rendered only when non-empty". -->
+    <div class="check-doc-row check-doc-words-row" data-testid="check-doc-words-row" hidden>
+      <span class="check-doc-words" data-testid="check-doc-words"></span>
     </div>
     <div class="check-doc-row check-doc-meta-row">
       <div class="check-doc-field">
         <span class="check-doc-label">Date</span>
         <span class="check-doc-value" data-testid="check-doc-date"></span>
       </div>
+      <div class="check-doc-field" data-testid="check-doc-no-field" hidden>
+        <span class="check-doc-label">Check no.</span>
+        <span class="check-doc-value" data-testid="check-doc-no"></span>
+      </div>
+    </div>
+    <div class="check-doc-row check-doc-bank-row" data-testid="check-doc-bank-row" hidden>
+      <span class="check-doc-label">Drawn on</span>
+      <span class="check-doc-value" data-testid="check-doc-bank"></span>
     </div>
     <div class="check-doc-row check-doc-memo-row">
       <span class="check-doc-label">Memo</span>
       <span class="check-doc-value" data-testid="check-doc-memo"></span>
     </div>
   </div>
-  <div class="check-doc-stub">
+  <div class="check-doc-stub" data-testid="check-doc-stub">
     <div class="check-doc-stub-head">Remittance</div>
     <div class="check-doc-stub-rows" data-testid="check-doc-stub-rows"></div>
     <div class="check-doc-stub-total" data-testid="check-doc-stub-total"></div>
@@ -45,10 +66,17 @@
         <input type="text" id="check-doc-reference-no" class="check-doc-input" data-testid="check-doc-reference-no"
           placeholder="e.g. 10231" autocomplete="off" />
       </div>
+      <div class="check-doc-field">
+        <label class="check-doc-label" for="check-doc-memo-input">Memo</label>
+        <input type="text" id="check-doc-memo-input" class="check-doc-input" data-testid="check-doc-memo-input"
+          placeholder="What this payment is for" autocomplete="off" />
+      </div>
     </div>
     <div class="check-doc-write-actions" data-testid="check-doc-write-actions">
       <span class="check-doc-write-status" data-testid="check-doc-write-status"></span>
       <button type="button" class="check-doc-submit" id="check-doc-submit" data-testid="check-doc-submit">Create &amp; submit Payment Entry</button>
+      <button type="button" class="check-doc-submit" id="check-doc-save" data-testid="check-doc-save" hidden>Save changes</button>
+      <button type="button" class="check-doc-submit" id="check-doc-create" data-testid="check-doc-create" hidden>Create draft payment</button>
     </div>
   </div>
 </div>

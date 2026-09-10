@@ -73,15 +73,28 @@ export function shouldAcceptErpTrackNav(intentPath, incomingUrl, erpBase) {
 
 /**
  * Clear intent once the browser reports a URL for the intended doctype.
- * Optimistic shell trackNav (fromBrowser=false) must not clear — stale events can still arrive.
+ * Optimistic shell trackNav must not clear — stale events can still arrive.
+ *
+ * **`fromBrowser` must be opted into, not defaulted into.** This used to clear unless
+ * `fromBrowser === false`, so any caller that simply omitted the flag disarmed the guard.
+ * `erpForceReopenRoute` did exactly that: it armed an intent, called `loadURL`, then
+ * optimistically `trackNav(target)` — clearing the intent ~3ms later, while the page we were
+ * leaving still had navigations in flight. Nav incident 2026-09-08T03:39: a Payment Entry
+ * the shell had already rejected as stale three times was accepted the fourth time (guard
+ * gone), rewrote `currentRoute`, and was then misread as a deliberate soft-peek hop — the
+ * clerk clicked Default-skin on a Bill and landed on New Payment Entry.
+ *
+ * A missing flag now means "the shell believes this, the browser has not confirmed it",
+ * which is the safe reading: the intent stays armed until a real browser event (or the
+ * 15s timeout, or the route poll reading the live URL) resolves it.
  *
  * @param {string|null|undefined} intentPath
  * @param {string} incomingUrl
- * @param {{ fromBrowser?: boolean }} [opts]
+ * @param {{ fromBrowser?: boolean }} [opts] `fromBrowser: true` = a real browser event
  * @param {string} [erpBase]
  * @returns {boolean} true if intent should clear
  */
 export function shouldClearErpNavIntent(intentPath, incomingUrl, opts = {}, erpBase) {
-  if (!intentPath || opts.fromBrowser === false) return false;
+  if (!intentPath || opts.fromBrowser !== true) return false;
   return shouldAcceptErpTrackNav(intentPath, incomingUrl, erpBase);
 }

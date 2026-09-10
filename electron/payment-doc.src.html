@@ -47,7 +47,11 @@
   </main>
 
   <script type="module">
-    import { paintCheckDoc } from "../src/check-doc-mount.js";
+    import {
+      paintCheckDoc,
+      mountCheckDocEdit,
+      setCheckDocDocument,
+    } from "../src/check-doc-mount.js";
     import { buildCheckDocViewModelFromPaymentEntry } from "../src/check-doc-view.js";
 
     const api = window.erpPaymentDoc;
@@ -61,7 +65,8 @@
       errorEl.textContent = message || "";
     }
 
-    async function init() {
+    /** @param {string} [statusText] shown after the repaint, which clears the status line */
+    async function init(statusText) {
       const params = new URLSearchParams(location.search);
       const name = params.get("name") || "";
 
@@ -91,8 +96,31 @@
         return;
       }
       const vm = buildCheckDocViewModelFromPaymentEntry(doc);
-      paintCheckDoc(checkDocEl, vm, { readOnly: true, badgeText: `${vm.status} Payment Entry` });
+      // A Draft is a form you can work in; a Submitted/Cancelled one is read-only because
+      // ERPNext says so, not because this skin prefers documents to feel read-only
+      // (5zorro 2026-09-08). The document's own docstatus is the only input to that choice.
+      setCheckDocDocument(doc.name || name);
+      paintCheckDoc(checkDocEl, vm, {
+        mode: vm.isDraft ? "edit" : "view",
+        badgeText: `${vm.status} Payment Entry`,
+      });
+      // paintCheckDoc clears the status line, so a post-save confirmation has to land after it.
+      if (statusText) {
+        const statusEl = checkDocEl.querySelector('[data-testid="check-doc-write-status"]');
+        if (statusEl) statusEl.textContent = statusText;
+      }
     }
+
+    mountCheckDocEdit(checkDocEl, {
+      api: api || {},
+      linkMounted: new WeakMap(),
+      onDirty: (dirty) => {
+        if (api && api.setDirty) api.setDirty(dirty);
+      },
+      // Repaint from ERP truth, not from what we just typed — a validation hook or a fetch-from
+      // may have changed more than the four fields we sent.
+      onSaved: () => init("Saved."),
+    });
 
     init();
   </script>

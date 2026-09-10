@@ -41,6 +41,22 @@ describe("rememberLens", () => {
     assert.deepEqual(next, { item: "vanilla", "purchase-invoice": "simplified" });
     assert.equal(prev["purchase-invoice"], undefined);
   });
+
+  // Nav incident 2026-09-08T04:33: payment-entry's Doc skin is not a doc-form.html layout,
+  // so it never reached showDocForm's rememberLens. "vanilla" was the only lens ever written
+  // for it, and the tile reopened on Vanilla no matter what the clerk had picked. The pure
+  // layer was always doctype-agnostic -- the gap was entirely in the callers.
+  it("round-trips payment-entry like any other doctype", () => {
+    const withDoc = rememberLens({}, "payment-entry", "doc");
+    assert.equal(withDoc["payment-entry"], "doc");
+    assert.equal(preferredLens("payment-entry", withDoc), "doc");
+    const backToVanilla = rememberLens(withDoc, "payment-entry", "vanilla");
+    assert.equal(preferredLens("payment-entry", backToVanilla), "vanilla");
+  });
+
+  it("an unwritten payment-entry pref still defaults to doc, not vanilla", () => {
+    assert.equal(preferredLens("payment-entry", {}), "doc");
+  });
 });
 
 describe("lens preference scenarios (5zorro)", () => {

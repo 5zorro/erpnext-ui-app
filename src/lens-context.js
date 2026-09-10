@@ -317,3 +317,39 @@ export function docSkinRouteMatrix() {
     },
   ];
 }
+
+/** @type {string} */
+export const PAYMENT_ENTRY_NEW_ROUTE = "/app/payment-entry/new";
+
+/**
+ * The `/app/…` route a Payment Entry Doc surface stands on.
+ * @param {string|null|undefined} record "" / "new" → the blank decision surface
+ * @returns {string}
+ */
+export function paymentEntryRoute(record) {
+  const rec = record == null ? "" : String(record).trim();
+  if (!rec || isNewDocRecord(rec)) return PAYMENT_ENTRY_NEW_ROUTE;
+  return `/app/payment-entry/${rec}`;
+}
+
+/**
+ * Where a resolved Doc-skin target *is*, as an ERP route ("" for Workflow Home, which is not
+ * an ERP page at all).
+ *
+ * doc-form.html skins get this for free: they are opened by a shell navigation that sets
+ * `currentRoute` and pushes a Recent row. The two shell-local Payment Entry surfaces
+ * (pay-outstanding.html / payment-doc.html) load a local file instead, so nothing told the
+ * shell where the clerk went — `currentRoute` stayed on the page *before* them, Recent never
+ * saw them, and an incident filed from Pay Outstanding reported `/desk`. That is nav incident
+ * 2026-09-10: a whole session of Home → Pay Outstanding → Home left Recent empty.
+ *
+ * @param {DocSkinTarget|null|undefined} target
+ * @returns {string}
+ */
+export function docSkinTargetRoute(target) {
+  if (!target || typeof target !== "object") return "";
+  if (target.kind === "pay-outstanding") return PAYMENT_ENTRY_NEW_ROUTE;
+  if (target.kind === "payment-doc") return paymentEntryRoute(target.record);
+  if (target.kind === "doc-form") return typeof target.route === "string" ? target.route : "";
+  return "";
+}
