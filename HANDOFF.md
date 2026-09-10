@@ -163,6 +163,19 @@ Simplified injection gate, Recent rows) must tolerate it lagging — see `docs/g
 Guarding those events is `erp-nav-intent.js`; the guard must always resolve to arm **or**
 clear, never "leave the last one armed".
 
+**Every surface claims a route.** A `surfaceMode` that renders a document must set
+`currentRoute` (and push its Recent row) the moment it is shown — an ERP navigation does this
+for free, a `loadFile()` surface must do it by hand via `noteShellDocSurfaceRoute()`, using the
+same `/app/…` route the Vanilla visit would use so both lenses share one history slot. The two
+Payment Entry Doc surfaces skipped it and went missing from Recent, the lens chip and their own
+incident snapshots — `docs/gotchas.md` G9.
+
+**Two registries, one question.** `lens-context.js` (`DOC_SKIN_INDEX`) is the SSoT for *what has
+a Doc skin*; `doc-skin-registry.js` (`DOC_SKIN_PROFILES`) only knows the doc-form.html layouts.
+Nav paths must ask the former (`resolveDocSkinTarget`) and use the latter only to dispatch a
+doc-form shell — asking the subset is how a remembered Doc lens gets silently downgraded to
+Vanilla (G9).
+
 **Persistence contract** (`userData/nav-state.json`): Drafts, Calculator history, Submitted
 docs and the rail's collapsed state survive restart (calc and submitted rows restored from
 disk are marked *previous session*, so the "this session" counter stays honest).
@@ -171,7 +184,8 @@ empty after a restart while Drafts still lists work in progress.
 
 **Lens tabs are earned per page.** Vanilla is always there — it is the ERP itself. Every
 other tab must be earned by the page in front of you (`chrome-state.js` `lensTabsFor()`;
-the toolbar renders the answer, it never guesses):
+the toolbar renders the answer, it never guesses — which tab is *lit* is `lensTabEmphasis()`
+under the same rule, after the toolbar re-derived it and lit the wrong one, G10):
 
 | Page | Tabs |
 |------|------|

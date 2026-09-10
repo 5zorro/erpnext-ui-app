@@ -18,6 +18,11 @@ from typing import Any
 import frappe
 from frappe.utils import add_days, cint, flt, getdate, nowdate
 
+# A5: ERPNext's OWN due-date arithmetic. `validate_due_date_with_template` throws unless the
+# document's due_date matches what this returns, so re-deriving it here (rather than
+# reimplementing "posting + credit_days") is what keeps a Net 15 or a "Net 10th" term valid.
+from erpnext.accounts.party import get_due_date_from_template
+
 
 TAG_FIELD_HINT = "ui-app-sample"  # substring used in title/remarks
 
@@ -73,8 +78,11 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
         frappe.db.commit()
         print(f"reset: deleted {deleted} tagged docs")
 
+    _ensure_modes_of_payment(plan)
+    terms_map = _ensure_payment_terms(plan)
+
     tax_ctx = _ensure_tax_masters(company, plan)
-    party_map = _ensure_masters(plan["parties"], company, warehouse, tag, tax_ctx)
+    party_map = _ensure_masters(plan["parties"], company, warehouse, tag, tax_ctx, terms_map)
     name_map: dict[str, str] = {}  # plan key -> ERP name
 
     # Apply in dependency order
@@ -321,15 +329,174 @@ def _ensure_tax_withholding_category(tds_name: str, company: str, tds_account: s
     return doc.name
 
 
+def _ensure_modes_of_payment(plan: dict) -> None:
+    """Create the rail-named Modes of Payment the cost model keys off.
+
+    ERPNext ships Bank Draft / Cash / Check / Credit Card / Wire Transfer, none of which
+    distinguish an ACH push from a domestic wire — a $0.40 vs $25 difference the whole batching
+    comparison turns on. Idempotent: existing records are left alone.
+    """
+    for m in plan.get("modesOfPayment") or []:
+        name = m["name"]
+        if frappe.db.exists("Mode of Payment", name):
+            continue
+        frappe.get_doc(
+            {
+                "doctype": "Mode of Payment",
+                "mode_of_payment": name,
+                "type": m.get("type") or "Bank",
+                "enabled": 1,
+            }
+        ).insert(ignore_permissions=True)
+        print(f"created Mode of Payment {name}")
+
+
+def _ensure_payment_terms(plan: dict) -> dict[str, str]:
+    """Create each Payment Term and the single-row Template that wraps it.
+
+    A Supplier can only link a Payment Terms Template, never a bare Payment Term, so every term
+    gets a same-named one-row template. Returns plan key -> template name.
+
+    The template row carries its own explicit copy of every field on purpose: ERPNext's
+    `get_payment_terms` reads the TEMPLATE DETAIL row (not the Payment Term master) when building a
+    bill's payment_schedule, and the detail's `fetch_from` only fires client-side. Setting both is
+    what makes these values actually reach a bill created server-side.
+    """
+    out: dict[str, str] = {}
+    for t in plan.get("paymentTerms") or []:
+        name = t["name"]
+        fields = {
+            "invoice_portion": 100,
+            "mode_of_payment": t.get("modeOfPayment"),
+            "due_date_based_on": t.get("dueDateBasedOn") or "Day(s) after invoice date",
+            "credit_days": int(t.get("creditDays") or 0),
+            "credit_months": int(t.get("creditMonths") or 0),
+            "description": t.get("description") or "",
+        }
+        if t.get("discount"):
+            fields.update(
+                {
+                    "discount_type": t.get("discountType") or "Percentage",
+                    "discount": float(t["discount"]),
+                    "discount_validity_based_on": t.get("discountValidityBasedOn")
+                    or "Day(s) after invoice date",
+                    "discount_validity": int(t.get("discountValidity") or 0),
+                }
+            )
+
+        # RECONCILE, don't just create. A create-only "ensure" silently keeps stale masters:
+        # on 2026-09-09 the grace fold changed every creditDays (Net 30 +16 became a 46-day term)
+        # and a re-seed rebuilt every bill against the OLD 30-day records, because the terms
+        # already existed by name. The plan is the SSoT; an existing record gets corrected.
+        if frappe.db.exists("Payment Term", name):
+            term = frappe.get_doc("Payment Term", name)
+            changed = [f for f, v in fields.items() if (term.get(f) or None) != (v or None)]
+            if changed:
+                term.update(fields)
+                term.save(ignore_permissions=True)
+                print(f"updated Payment Term {name} ({', '.join(changed)})")
+        else:
+            frappe.get_doc(
+                {"doctype": "Payment Term", "payment_term_name": name, **fields}
+            ).insert(ignore_permissions=True)
+            print(f"created Payment Term {name}")
+
+        # The template detail row is what `get_payment_terms` actually reads when building a
+        # bill's schedule, so it has to be reconciled too — correcting only the master would
+        # leave the number that matters untouched.
+        if frappe.db.exists("Payment Terms Template", name):
+            tmpl = frappe.get_doc("Payment Terms Template", name)
+            row = tmpl.terms[0] if tmpl.terms else None
+            if not row or any((row.get(f) or None) != (v or None) for f, v in fields.items()):
+                tmpl.set("terms", [{"payment_term": name, **fields}])
+                tmpl.save(ignore_permissions=True)
+                print(f"updated Payment Terms Template {name}")
+        else:
+            frappe.get_doc(
+                {
+                    "doctype": "Payment Terms Template",
+                    "template_name": name,
+                    "terms": [{"payment_term": name, **fields}],
+                }
+            ).insert(ignore_permissions=True)
+            print(f"created Payment Terms Template {name}")
+        out[t["key"]] = name
+    return out
+
+
+def _purge_ap(company: str) -> int:
+    """Cancel + delete EVERY AP document for `company`, tagged or not.
+
+    `_reset_tagged` only removes docs carrying the sample tag, which is useless against a sandbox
+    whose documents predate tagging (2026-09-09: 148 Purchase Invoices, 98 Purchase Receipts, zero
+    tagged). This is the blunt instrument — deliberately company-scoped, and guarded by the same
+    sandbox assertion as the seeder.
+
+    Order matters: a Payment Entry references an invoice, an invoice references a receipt, a
+    receipt references an order. Cancel dependents before parents or ERPNext refuses the delete.
+    """
+    doctypes = ["Payment Entry", "Purchase Invoice", "Purchase Receipt", "Purchase Order"]
+    deleted = 0
+    for dt in doctypes:
+        names = frappe.get_all(dt, filters={"company": company}, pluck="name")
+        for name in names:
+            try:
+                doc = frappe.get_doc(dt, name)
+                if doc.docstatus == 1:
+                    doc.cancel()
+                frappe.delete_doc(dt, name, force=1, ignore_permissions=True)
+                deleted += 1
+            except Exception as exc:
+                print(f"warn: could not delete {dt} {name}: {exc}")
+        frappe.db.commit()
+        print(f"purge: {dt} — {len(names)} seen")
+    return deleted
+
+
+def _sandbox_companies() -> list[str]:
+    """EVERY sandbox-named company, not just the one the seeder writes to.
+
+    `_resolve_company` deliberately skips "… (Demo)" so the seed never lands on it. That is right
+    for writing and wrong for purging: on 2026-09-09 a purge scoped to the resolved company left
+    56 Purchase Invoices, 28 Purchase Orders and 4 Purchase Receipts untouched on
+    "HECSANDBOX INCORPORATED (Demo)" — including every hand-made ALPINE SUPPLY document the purge
+    was asked to remove. Each name still has to pass `_assert_sandbox`.
+    """
+    override = os.environ.get("SAMPLE_COMPANY")
+    if override:
+        return [override]
+    names = [n for n in frappe.get_all("Company", pluck="name") if "sandbox" in n.lower()]
+    return names or [_resolve_company()]
+
+
+def purge_ap() -> dict[str, Any]:
+    """`bench execute` entry point for the AP purge alone (no reseed).
+
+    Covers every sandbox company — see `_sandbox_companies` for why scoping this to the seed's
+    own company silently leaves half the sandbox in place.
+    """
+    per_company: dict[str, int] = {}
+    for company in _sandbox_companies():
+        _assert_sandbox(company)
+        per_company[company] = _purge_ap(company)
+        frappe.db.commit()
+        print(f"purge: deleted {per_company[company]} AP docs for {company}")
+    total = sum(per_company.values())
+    print(f"purge: {total} AP docs deleted across {len(per_company)} company/companies")
+    return {"companies": per_company, "deleted": total}
+
+
 def _ensure_masters(
     parties: dict,
     company: str,
     warehouse: str,
     tag: str,
     tax_ctx: dict | None = None,
+    terms_map: dict[str, str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Return maps: suppliers/customers/items keyed by plan key → ERP name/code."""
     tax_ctx = tax_ctx or {}
+    terms_map = terms_map or {}
     out = {"suppliers": {}, "customers": {}, "items": {}, "projects": {}}
     sales_tmpl = tax_ctx.get("sales_tax_template") or ""
     tds_cat = tax_ctx.get("tds_category") or "SAMPLE-TDS"
@@ -348,6 +515,12 @@ def _ensure_masters(
             doc.insert(ignore_permissions=True)
         else:
             doc = frappe.get_doc("Supplier", name)
+        # A5: the Supplier's default terms. This only SEEDS a new bill — the bill's own
+        # payment_terms_template is what actually builds its payment_schedule.
+        s_tmpl = terms_map.get(s.get("paymentTermsKey") or "")
+        if s_tmpl and doc.payment_terms != s_tmpl:
+            doc.payment_terms = s_tmpl
+            doc.save(ignore_permissions=True)
         if s.get("taxWithholding") and frappe.db.exists("Tax Withholding Category", tds_cat):
             if doc.tax_withholding_category != tds_cat:
                 doc.tax_withholding_category = tds_cat
@@ -569,20 +742,46 @@ def _normalize_pi_dates(doc, posting: str, spec: dict) -> None:
     if hasattr(doc, "set_posting_time"):
         doc.set_posting_time = 1
     doc.bill_date = posting
+
+    # A5: once a bill carries a payment_terms_template, a hard-coded posting+30 is not just
+    # cosmetically wrong — `accounts_controller.validate_invoice_documents_schedule` calls
+    # `validate_due_date`, which THROWS when due_date is later than the template's own computed
+    # date. A Net 15 term died on exactly this ("Due Date cannot be after 08-14-2026").
+    tmpl = (getattr(doc, "payment_terms_template", None) or "").strip()
     schedule = spec.get("paymentSchedule")
+
     if schedule and hasattr(doc, "payment_schedule"):
+        # Packet G's multi-installment batching fixtures. Their explicit schedule IS the fixture,
+        # so it wins over the template — but the template link is kept (so the rows can still name
+        # a term and a method) and `ignore_default_payment_terms_template` switches off the
+        # due-date/amount validation that would otherwise reject a 90-day daily schedule against a
+        # Net 30 term.
+        term_mode = (
+            frappe.db.get_value("Payment Term", tmpl, "mode_of_payment") if tmpl else None
+        )
         doc.set("payment_schedule", [])
         for row in schedule:
-            doc.append(
-                "payment_schedule",
-                {
-                    "due_date": row["dueDate"],
-                    "invoice_portion": 0,
-                    "payment_amount": row["amount"],
-                    "outstanding": row["amount"],
-                },
-            )
+            line = {
+                "due_date": row["dueDate"],
+                "invoice_portion": 0,
+                "payment_amount": row["amount"],
+                "outstanding": row["amount"],
+            }
+            if tmpl:
+                # Template and Term are deliberately created under the SAME name by
+                # `_ensure_payment_terms`, so the template name is also a valid Payment Term link.
+                line["payment_term"] = tmpl
+                if term_mode:
+                    line["mode_of_payment"] = term_mode
+            doc.append("payment_schedule", line)
         doc.due_date = schedule[-1]["dueDate"]
+        if tmpl:
+            doc.ignore_default_payment_terms_template = 1
+    elif tmpl:
+        # Clear the mapped-in schedule so `set_payment_schedule` rebuilds it from the template,
+        # and take the due date from ERPNext's own helper — the same one the validator compares to.
+        doc.set("payment_schedule", [])
+        doc.due_date = get_due_date_from_template(tmpl, posting, posting)
     else:
         doc.due_date = add_days(getdate(posting), 30)
         if hasattr(doc, "payment_schedule"):
@@ -773,22 +972,26 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
             }
         )
     elif kind == "purchase_order":
-        doc = frappe.get_doc(
-            {
-                "doctype": "Purchase Order",
-                "supplier": party_map["suppliers"][spec["partyKey"]],
-                "company": company,
-                "transaction_date": posting,
-                "schedule_date": add_days(posting, 7),
-                "items": [
-                    {
-                        **row,
-                        "schedule_date": add_days(posting, 7),
-                    }
-                    for row in items
-                ],
-            }
-        )
+        supplier_name = party_map["suppliers"][spec["partyKey"]]
+        payload = {
+            "doctype": "Purchase Order",
+            "supplier": supplier_name,
+            "company": company,
+            "transaction_date": posting,
+            "schedule_date": add_days(posting, 7),
+            "items": [
+                {
+                    **row,
+                    "schedule_date": add_days(posting, 7),
+                }
+                for row in items
+            ],
+        }
+        # Terms on the order too, so a PO → Bill flow carries them the way a real one would.
+        po_tmpl = frappe.db.get_value("Supplier", supplier_name, "payment_terms")
+        if po_tmpl:
+            payload["payment_terms_template"] = po_tmpl
+        doc = frappe.get_doc(payload)
     elif kind == "purchase_receipt":
         doc = frappe.get_doc(
             {
@@ -801,20 +1004,34 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
             }
         )
     elif kind == "purchase_invoice":
-        doc = frappe.get_doc(
-            {
-                "doctype": "Purchase Invoice",
-                "supplier": party_map["suppliers"][spec["partyKey"]],
-                "company": company,
-                "posting_date": posting,
-                "set_posting_time": 1,
-                "bill_no": spec.get("billNo"),
-                "bill_date": posting,
-                "due_date": add_days(posting, 30),
-                "update_stock": 0,
-                "items": [{k: v for k, v in row.items() if k != "sales_order"} for row in items],
-            }
-        )
+        supplier_name = party_map["suppliers"][spec["partyKey"]]
+        # A5: `due_date` is DELIBERATELY not set when the supplier has terms. Creating a doc
+        # server-side never calls `get_party_details`, so the template does not auto-populate the
+        # way it does in the Desk UI — it has to be set explicitly. Once it is,
+        # `accounts_controller.set_payment_schedule` builds the payment_schedule from the template
+        # and derives the header due_date from it. Hard-coding posting+30 alongside that would
+        # fight ERPNext's own arithmetic and silently win for the non-Net-30 terms.
+        payload = {
+            "doctype": "Purchase Invoice",
+            "supplier": supplier_name,
+            "company": company,
+            "posting_date": posting,
+            "set_posting_time": 1,
+            "bill_no": spec.get("billNo"),
+            "bill_date": posting,
+            "update_stock": 0,
+            "items": [{k: v for k, v in row.items() if k != "sales_order"} for row in items],
+        }
+        pi_tmpl = frappe.db.get_value("Supplier", supplier_name, "payment_terms")
+        if pi_tmpl:
+            payload["payment_terms_template"] = pi_tmpl
+            # Set it explicitly rather than leaving it blank: `set_due_date` runs BEFORE
+            # `set_payment_schedule` in ERPNext's validate order, so an empty due_date is not
+            # backfilled from the schedule the template is about to build.
+            payload["due_date"] = get_due_date_from_template(pi_tmpl, posting, posting)
+        else:
+            payload["due_date"] = add_days(posting, 30)
+        doc = frappe.get_doc(payload)
     else:
         raise frappe.ValidationError(f"Unknown kind {kind}")
     _apply_tag_fields(doc, tag, spec["key"])
@@ -844,7 +1061,14 @@ def _stamp_dates(doc, kind: str, posting: str) -> None:
         doc.due_date = add_days(posting, 30)
     if kind == "purchase_invoice":
         doc.bill_date = posting
-        doc.due_date = add_days(posting, 30)
+        # Same trap as _normalize_pi_dates: posting+30 contradicts any non-Net-30 template and
+        # ERPNext throws rather than warns. Derive from the template when there is one.
+        pi_tmpl = (getattr(doc, "payment_terms_template", None) or "").strip()
+        doc.due_date = (
+            get_due_date_from_template(pi_tmpl, posting, posting)
+            if pi_tmpl
+            else add_days(posting, 30)
+        )
 
 
 def _resolve_bank_account(company: str) -> str:

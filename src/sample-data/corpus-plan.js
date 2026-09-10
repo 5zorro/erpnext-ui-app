@@ -13,7 +13,7 @@
  */
 
 /** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
-export const SAMPLE_TAG = "ui-app-sample-v3";
+export const SAMPLE_TAG = "ui-app-sample-v4";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
 export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
@@ -37,6 +37,105 @@ export const DEFAULT_PARTY_COUNTS = Object.freeze({
 });
 
 /** @param {number} n */
+/**
+ * Modes of Payment the fixtures need. ERPNext ships `Bank Draft / Cash / Check / Credit Card /
+ * Wire Transfer` — none of which name the *rail*, which is what the cost model turns on
+ * (payment-batch-prefs.js keys its fee table by exactly these names).
+ */
+export const SAMPLE_MODES_OF_PAYMENT = Object.freeze([
+  { name: "USPS_Check", type: "Bank" },
+  { name: "ACH", type: "Bank" },
+  { name: "DOM_WIRE", type: "Bank" },
+  // No term uses INT_WIRE — it exists so the $50 entry in the fee table has a real Mode of Payment
+  // behind it, and so a clerk can pick it on a Payment Entry without setup.
+  { name: "INT_WIRE", type: "Bank" },
+]);
+
+/**
+ * The Payment Terms fixtures, each wrapped by a single-row Payment Terms Template of the same name
+ * (a Supplier can only link a Template, never a bare Term).
+ *
+ * `dueDateBasedOn` uses ERPNext's own Select values verbatim. "Net 10th" — due on the 10th of the
+ * month following the invoice — is `Day(s) after the end of the invoice month` with `creditDays: 10`,
+ * NOT a day-of-month field: ERPNext has no such field, and end-of-month + 10 days is the 10th.
+ *
+ * Grace values are deliberately spread across the sign: a strict vendor that needs the cheque to
+ * land early (-3), an ordinary electronic tolerance (+2/+5), a long-standing postal tolerance (+16),
+ * and one explicit "no grace at all" (+0, which parses as 0 rather than as absent).
+ *
+ * 🔄 **`creditDays` is contract + grace** (5zorro 2026-09-09). "Net 30 with a +16 tolerance" is a
+ * Payment Term of **46** days, so ERPNext computes the real due date and the shell simply reads it.
+ * The shell must never shift a due date itself — that was the reversed design, and it double-counts.
+ * The name keeps the breakdown (`NET_30_DAYS (POSTAL) +16` says where 46 came from, which
+ * `NET_46_DAYS` could not), but it is documentation: nothing parses it to reach a payment date.
+ */
+export const SAMPLE_PAYMENT_TERMS = Object.freeze([
+  {
+    key: "PT-NET30-POST-STRICT",
+    name: "NET_30_DAYS (POSTAL) -3",
+    creditDays: 27, // contract 30, tolerance -3
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "USPS_Check",
+    description: "Net 30 from invoice date. Cheque by post; vendor wants it in hand before due.",
+  },
+  {
+    key: "PT-NET30-POST-LOOSE",
+    name: "NET_30_DAYS (POSTAL) +16",
+    creditDays: 46, // contract 30, tolerance +16
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "USPS_Check",
+    description: "Net 30 from invoice date. Cheque by post.",
+  },
+  {
+    key: "PT-NET30-ACH",
+    name: "NET_30_DAYS (ACH) +2",
+    creditDays: 32, // contract 30, tolerance +2
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "ACH",
+    description: "Net 30 from invoice date, paid by ACH.",
+  },
+  {
+    key: "PT-2-10-NET30-ACH",
+    name: "2%_10_NET_30 (ACH) +2",
+    creditDays: 32, // contract 30, tolerance +2
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "ACH",
+    discountType: "Percentage",
+    discount: 2,
+    discountValidity: 10,
+    discountValidityBasedOn: "Day(s) after invoice date",
+    description: "2% if paid within 10 days, otherwise net 30. ACH.",
+  },
+  {
+    key: "PT-2-10-NET30-POST",
+    name: "2%_10_NET_30 (POSTAL) -3",
+    creditDays: 27, // contract 30, tolerance -3
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "USPS_Check",
+    discountType: "Percentage",
+    discount: 2,
+    discountValidity: 10,
+    discountValidityBasedOn: "Day(s) after invoice date",
+    description: "2% if paid within 10 days, otherwise net 30. Cheque by post.",
+  },
+  {
+    key: "PT-NET10TH-ACH",
+    name: "NET_10TH (ACH) +5",
+    creditDays: 15, // contract month-end+10, tolerance +5
+    dueDateBasedOn: "Day(s) after the end of the invoice month",
+    modeOfPayment: "ACH",
+    description: "Due the 10th of the month following the invoice. ACH.",
+  },
+  {
+    key: "PT-NET15-WIRE",
+    name: "NET_15_DAYS (DOM_WIRE) +0",
+    creditDays: 15, // contract 15, tolerance +0
+    dueDateBasedOn: "Day(s) after invoice date",
+    modeOfPayment: "DOM_WIRE",
+    description: "Net 15, domestic wire. No grace — this vendor charges on day 16.",
+  },
+]);
+
 export function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -71,6 +170,9 @@ export function buildCorpusPlan(opts = {}) {
     taxWithholding: i < 2,
     // OI-087: your account # at the vendor (Customer Number At Supplier).
     accountNumber: i === 0 ? "CUST-44192" : i === 1 ? "ACCT-998877" : null,
+    // A5: round-robin the term catalogue so every term appears on real bills and the dashboard
+    // has a mix of methods and graces to reason about, rather than one term repeated eight times.
+    paymentTermsKey: SAMPLE_PAYMENT_TERMS[i % SAMPLE_PAYMENT_TERMS.length].key,
   }));
   // OI-131: picker rank fixtures — not used in the 60-day rotation.
   suppliers.push(
@@ -80,8 +182,27 @@ export function buildCorpusPlan(opts = {}) {
   // OI-161 / Packet G: dedicated vendors for the daily-payment-schedule batching fixture —
   // small and large dollar scale, so Packet 2's economics can be dogfooded at both.
   suppliers.push(
-    { key: "SUP-DAILY", name: "SAMPLE Vendor Daily Payrun", taxWithholding: false },
-    { key: "SUP-DAILY-LG", name: "SAMPLE Vendor Daily Payrun Large", taxWithholding: false },
+    // Deliberate method split across the batching fixtures: the cheque vendor should batch, the
+    // ACH vendor should mostly NOT (at $0.40 a push the float almost always wins), and the wire
+    // vendor should batch aggressively at $25. That contrast is the point of the fixture now.
+    {
+      key: "SUP-DAILY",
+      name: "SAMPLE Vendor Daily Payrun",
+      taxWithholding: false,
+      paymentTermsKey: "PT-NET30-POST-LOOSE",
+    },
+    {
+      key: "SUP-DAILY-LG",
+      name: "SAMPLE Vendor Daily Payrun Large",
+      taxWithholding: false,
+      paymentTermsKey: "PT-NET15-WIRE",
+    },
+    {
+      key: "SUP-OVERLAP",
+      name: "SAMPLE Vendor Overlapping Schedules",
+      taxWithholding: false,
+      paymentTermsKey: "PT-NET30-ACH",
+    },
   );
   const items = Array.from({ length: partyCounts.items }, (_, i) => ({
     key: `ITM-${pad2(i)}`,
@@ -226,6 +347,8 @@ export function buildCorpusPlan(opts = {}) {
     windowDays,
     counts,
     draftsPerKind,
+    modesOfPayment: SAMPLE_MODES_OF_PAYMENT,
+    paymentTerms: SAMPLE_PAYMENT_TERMS,
     parties: { suppliers, customers, items, projects },
     tax: {
       tdsCategory: SAMPLE_TDS_CATEGORY,
@@ -242,11 +365,18 @@ export function buildCorpusPlan(opts = {}) {
 export const AP_FIXTURE_EXTRA_COUNTS = Object.freeze({
   purchase_order: 3,
   purchase_receipt: 2,
-  purchase_invoice: 2,
+  // PI-DAILY + PI-DAILY-LG (Packet G) + PI-OVERLAP-A/B/C (overlapping schedules, 2026-09-08).
+  purchase_invoice: 5,
 });
 
-/** OI-161 Packet G: one daily-payment-schedule Bill per dollar scale. */
-export const PAYMENT_BATCH_FIXTURE_KEYS = Object.freeze(["PI-DAILY", "PI-DAILY-LG"]);
+/** OI-161: the payment-schedule fixtures — Packet G's two scales plus the overlapping trio. */
+export const PAYMENT_BATCH_FIXTURE_KEYS = Object.freeze([
+  "PI-DAILY",
+  "PI-DAILY-LG",
+  "PI-OVERLAP-A",
+  "PI-OVERLAP-B",
+  "PI-OVERLAP-C",
+]);
 
 /** Keys for T0 dogfood — ERP sandbox rows clerks pull in source modal / Find. */
 export const AP_DOGFOOD_FIXTURE_KEYS = Object.freeze([
@@ -379,6 +509,74 @@ function appendPaymentBatchFixture(docs, ctx) {
         dogfoodScenario: scale.scenario,
       }),
       key: scale.key,
+      dayOffset: postingDayOffset,
+    });
+  }
+
+  appendOverlappingScheduleFixture(docs, ctx);
+}
+
+/**
+ * OI-161 dogfood (5zorro 2026-09-08): *"1 vendor has 3 bills that each have 3 payments scheduled
+ * and that the payment schedules overlap/group."*
+ *
+ * The `SUP-DAILY` pair above is one invoice exploded into many installments — it proves the
+ * explode path and the economics at two scales, but every installment in a suggested group comes
+ * from the **same** bill, so the remittance stub is always one invoice repeated. This fixture is
+ * the case that was missing: three separate invoices whose schedules interleave, so each suggested
+ * group draws one installment from each bill and the stub finally shows three different invoice
+ * names on one check.
+ *
+ * Staggered by 2 days and spaced 7 apart, against the default `groupWindowDays: 7`:
+ *
+ *   bill A   day  0     7     14
+ *   bill B   day    2     9      16
+ *   bill C   day      4     11     18
+ *            \_____/ \_____/ \______/
+ *             group1  group2   group3
+ *
+ * Each group spans 4 days (inside the window) and the gap to the next is 3 days (outside a group
+ * once the earliest-due anchor moves), so this should read as three clean cross-bill batches
+ * rather than one run-on group -- which is exactly the thing worth looking at on the dashboard.
+ *
+ * $120 an installment keeps every group in the range where a flat fee beats float, so the
+ * suggestion is "batch" and not "pay alone" (the large-scale contrast is already SUP-DAILY-LG's job).
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number, items: object[] }} ctx
+ */
+function appendOverlappingScheduleFixture(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const item = items[0];
+  const rate = 120.0;
+  const rowsPerBill = 3;
+  const postingDayOffset = 20; // ~20 days before asOf, so the run spans overdue → future
+  const bills = [
+    { key: "PI-OVERLAP-A", index: 905, stagger: 0, billNo: "SMP-SUP-OVERLAP-INV-A" },
+    { key: "PI-OVERLAP-B", index: 906, stagger: 2, billNo: "SMP-SUP-OVERLAP-INV-B" },
+    { key: "PI-OVERLAP-C", index: 907, stagger: 4, billNo: "SMP-SUP-OVERLAP-INV-C" },
+  ];
+
+  for (const bill of bills) {
+    // Row i is due `posting + stagger + 7i` days -> dayOffset = postingDayOffset - that.
+    // Ascending array order = ascending due date (header due_date is "last row wins").
+    const paymentSchedule = Array.from({ length: rowsPerBill }, (_, i) => ({
+      // +1 so no installment falls on the posting date itself (SUP-DAILY uses the same offset).
+      dayOffset: postingDayOffset - (1 + bill.stagger + i * 7),
+      amount: rate,
+    }));
+    docs.push({
+      ...baseDoc("purchase_invoice", bill.index, windowDays, 2, {
+        partyKey: "SUP-OVERLAP",
+        items: [{ itemKey: item.key, qty: rowsPerBill, rate, salesOrderRef: null }],
+        source: null,
+        billNo: bill.billNo,
+        updateStock: false,
+        taxWithholding: false,
+        paymentSchedule,
+        dogfoodScenario: "oi161-overlapping-schedules",
+      }),
+      key: bill.key,
       dayOffset: postingDayOffset,
     });
   }

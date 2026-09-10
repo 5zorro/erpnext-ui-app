@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCheckDocViewModel,
   buildCheckDocViewModelFromPaymentEntry,
+  blankCheckViewModel,
   paymentEntryStatusLabel,
 } from "../src/check-doc-view.js";
 
@@ -143,6 +144,59 @@ describe("buildCheckDocViewModelFromPaymentEntry", () => {
     assert.equal(vm.status, "Draft");
   });
 
+  it("falls back to posting_date when the doc carries no reference_date", () => {
+    // reference_date is only mandatory alongside reference_no, so an ACH/wire or a
+    // Vanilla-created PE routinely has none -- without this the check face rendered a
+    // blank Date on a real, dated document.
+    const { reference_date, reference_no, ...noRefDate } = pe;
+    const vm = buildCheckDocViewModelFromPaymentEntry({ ...noRefDate, posting_date: "2026-08-18" });
+    assert.equal(vm.payOn, "2026-08-18");
+  });
+
+  it("reference_date still wins over posting_date when both are present", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry({ ...pe, posting_date: "2026-08-18" });
+    assert.equal(vm.payOn, "2026-08-20");
+  });
+
+  it("no date of either kind yields an empty payOn, not undefined", () => {
+    const { reference_date, ...noDates } = pe;
+    assert.equal(buildCheckDocViewModelFromPaymentEntry(noDates).payOn, "");
+  });
+
+  it("carries the fields ERPNext already computed — written amount and bank block", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry({
+      ...pe,
+      in_words: "Eight Hundred Forty Eight Dollars only",
+      bank: "Demo Bank",
+      bank_account_no: "000123456",
+    });
+    assert.equal(vm.inWords, "Eight Hundred Forty Eight Dollars only");
+    assert.equal(vm.bankName, "Demo Bank");
+    assert.equal(vm.bankAccountNo, "000123456");
+    assert.equal(vm.referenceDate, "2026-08-20");
+  });
+
+  it("falls back to base_in_words when in_words is absent", () => {
+    const vm = buildCheckDocViewModelFromPaymentEntry({ ...pe, base_in_words: "USD Eight Hundred" });
+    assert.equal(vm.inWords, "USD Eight Hundred");
+  });
+
+  it("a proposal carries none of them — nothing is invented before a PE exists", () => {
+    const vm = buildCheckDocViewModel(group, bills);
+    assert.equal(vm.inWords, undefined);
+    assert.equal(vm.bankName, undefined);
+    assert.equal(vm.bankAccountNo, undefined);
+    assert.equal(vm.isDraft, undefined);
+  });
+
+  it("isDraft follows the document's own docstatus, not a caller preference", () => {
+    assert.equal(buildCheckDocViewModelFromPaymentEntry({ ...pe, docstatus: 0 }).isDraft, true);
+    assert.equal(buildCheckDocViewModelFromPaymentEntry({ ...pe, docstatus: 1 }).isDraft, false);
+    assert.equal(buildCheckDocViewModelFromPaymentEntry({ ...pe, docstatus: 2 }).isDraft, false);
+    // No docstatus at all reads as a draft — matches paymentEntryStatusLabel's own default.
+    assert.equal(buildCheckDocViewModelFromPaymentEntry({ party: "X" }).isDraft, true);
+  });
+
   it("junk input never throws and yields empty-but-shaped output", () => {
     assert.doesNotThrow(() => buildCheckDocViewModelFromPaymentEntry(null));
     assert.doesNotThrow(() => buildCheckDocViewModelFromPaymentEntry(undefined));
@@ -165,5 +219,36 @@ describe("buildCheckDocViewModelFromPaymentEntry", () => {
     const copy = JSON.parse(JSON.stringify(pe));
     buildCheckDocViewModelFromPaymentEntry(pe);
     assert.deepEqual(pe, copy);
+  });
+});
+
+describe("blankCheckViewModel", () => {
+  it("is empty on purpose — the clerk supplies every field", () => {
+    const vm = blankCheckViewModel("2026-09-08");
+    assert.equal(vm.payTo, "");
+    assert.equal(vm.amount, 0);
+    assert.equal(vm.memo, "");
+    assert.deepEqual(vm.stubRows, []);
+  });
+
+  it("defaults the date to today so the date line is never blank on a fresh check", () => {
+    assert.equal(blankCheckViewModel("2026-09-08").payOn, "2026-09-08");
+  });
+
+  it("no date given yields an empty string, not undefined", () => {
+    assert.equal(blankCheckViewModel().payOn, "");
+  });
+
+  it("invents none of the saved-document fields", () => {
+    const vm = blankCheckViewModel("2026-09-08");
+    for (const k of ["inWords", "bankName", "bankAccountNo", "referenceNo", "status"]) {
+      assert.equal(vm[k], undefined, k);
+    }
+  });
+
+  it("returns a fresh object each call", () => {
+    const a = blankCheckViewModel("2026-09-08");
+    a.payTo = "mutated";
+    assert.equal(blankCheckViewModel("2026-09-08").payTo, "");
   });
 });

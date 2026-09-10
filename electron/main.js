@@ -53,7 +53,12 @@ import {
   serializeFocusIncidentLine,
 } from "../src/focus-incident.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
-import { resolveDocSkinTarget, DOC_FORM_DOCTYPES, hasSimplifiedLens } from "../src/lens-context.js";
+import {
+  resolveDocSkinTarget,
+  docSkinTargetRoute,
+  DOC_FORM_DOCTYPES,
+  hasSimplifiedLens,
+} from "../src/lens-context.js";
 import { buildOutstandingBillRows } from "../src/outstanding-bills.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
@@ -228,7 +233,13 @@ import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
 import { withBillRefToken } from "../src/credit-memo.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
-import { toolbarLensId, lensTabsFor, historyRailWidth } from "../src/chrome-state.js";
+import {
+  toolbarLensId,
+  lensTabsFor,
+  lensTabEmphasis,
+  docTabAction,
+  historyRailWidth,
+} from "../src/chrome-state.js";
 import {
   submittedEntryFromDoc,
   pushSubmittedDoc,
@@ -368,6 +379,12 @@ let dirtyState = {
  * path); the gate is wired ahead of that so the write path lands with protection already live.
  */
 let payOutstandingDirty = false;
+/**
+ * Packet 4b step 7: payment-doc.html edits a real Draft Payment Entry, so it is the second
+ * independently-dirtyable non-Doc surface. shouldGateSurfaceNavigation was written generic in
+ * step 3 for exactly this -- a second surface reuses the predicate rather than getting its own.
+ */
+let paymentDocDirty = false;
 /** Shell scratch: customer + multi-SO per Bill line (ERP PI item has no SO column). */
 /** @type {Record<string, Record<number, import("../src/bill-line-allocation.js").LineAllocation>>} */
 let billLineAllocationsByDoc = {};
@@ -518,9 +535,29 @@ function isDocLensSurface() {
   return surfaceMode === "doc";
 }
 
+/**
+ * Surfaces that *are* the Doc lens as far as the toolbar is concerned. Deliberately wider than
+ * isDocLensSurface(), which answers the narrower "is doc-form.html in front" — the question the
+ * dirty gate asks and must keep asking. Packet 4b's two Payment Entry surfaces are what
+ * lens-context resolves the Doc lens to for `payment-entry`, but they are not doc-form.html, so
+ * the toolbar highlighted Default-skin while the clerk was sitting in the Document-skin
+ * (found 2026-09-07). Third place `surfaceMode === "doc"` turned out to be an incomplete answer,
+ * after step 3's dirty gate and step 5's route split.
+ */
+function isShellDocSurface() {
+  return (
+    surfaceMode === "doc" || surfaceMode === "pay-outstanding" || surfaceMode === "payment-doc"
+  );
+}
+
 /** Packet 4b step 3 — the pay-outstanding drawer's own dirty-gate condition. */
 function isPayOutstandingDirtySurface() {
   return shouldGateSurfaceNavigation(surfaceMode, "pay-outstanding", payOutstandingDirty);
+}
+
+/** Packet 4b step 7 — the payment-doc Draft form's own dirty-gate condition. */
+function isPaymentDocDirtySurface() {
+  return shouldGateSurfaceNavigation(surfaceMode, "payment-doc", paymentDocDirty);
 }
 
 function activeDocProfile() {
@@ -782,7 +819,8 @@ function syncE2eApi() {
     appVersion: APP_VERSION,
     isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
     trackNav: (url) => {
-      trackNav(url);
+      // e2e stands in for a real browser navigation, so it resolves an intent like one.
+      trackNav(url, { fromBrowser: true });
       return history.map((h) => ({ ...h }));
     },
     showLauncher: () => {
@@ -872,7 +910,7 @@ function shellCtx() {
 function sendUiState() {
   if (chrome && !chrome.webContents.isDestroyed()) {
     const ctx = shellCtx();
-    const onDoc = showingHome() || isDocLensSurface();
+    const onDoc = showingHome() || isShellDocSurface();
     const livePath = currentErpPathname();
     const peekingAway =
       surfaceMode === "erp" &&
@@ -938,6 +976,8 @@ function sendUiState() {
       showingDocForm: surfaceMode === "doc",
       activeDocSkin,
       lens: lensId,
+      // Which tab is painted selected — computed here, not re-derived in the toolbar (G10).
+      lensActive: lensTabEmphasis({ lens: lensId, docAvailable: lensTabs.doc }),
       docSkinAvailable: lensTabs.doc,
       docTabHint: lensTabs.docHint,
       simplifiedAvailable: lensTabs.simplified,
@@ -1516,6 +1556,45 @@ function openDocSkinProfile(profile, route, opts = {}) {
 }
 
 /**
+ * Open the Doc skin for a route whose skin is *not* a doc-form.html profile.
+ *
+ * Every nav path (Recent, Drafts, Submitted, Home tiles, the Vanilla->Doc hijack) asks
+ * `doc-skin-registry.js` "does this doctype have a Doc skin?", and that registry only holds
+ * doc-form layouts. Payment Entry's skin lives in `lens-context.js` — the declared SSoT — so
+ * the answer was no everywhere except the toolbar Doc tab, and a remembered `doc` lens was
+ * silently downgraded to Vanilla on every other door into a payment. Ask the SSoT instead.
+ *
+ * @param {string} route
+ * @returns {boolean} true when a shell-local Doc surface took the navigation
+ */
+function openShellDocSurface(route) {
+  const info = routeInfo(typeof route === "string" ? route : "", ERP_BASE);
+  if (!info.doctype || !info.record) return false;
+  // doc-form.html doctypes keep their existing path (park/rebind, dirty gate, skin reload).
+  if (profileByDoctypeKey(info.doctype)) return false;
+  if (!shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })) return false;
+  const target = resolveDocSkinTarget({
+    route: info.path || route,
+    doctype: info.doctype,
+    record: info.record,
+    lens: "doc",
+    paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
+  });
+  if (!target) return false;
+  if (target.kind === "pay-outstanding") {
+    navDebug("openShellDocSurface", `pay-outstanding ← ${info.path || route}`);
+    showPayOutstanding();
+    return true;
+  }
+  if (target.kind === "payment-doc") {
+    navDebug("openShellDocSurface", `payment-doc ${target.record}`);
+    showPaymentDoc(target.record);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Open a form route on preferred lens (Home / Recent / Drafts / hijack).
  * @param {string} route
  * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean }} [opts]
@@ -1541,6 +1620,7 @@ function openRoutePreferred(route, opts = {}) {
     if (wantDoc && openDocSkinProfile(profile, info.path || r, opts)) {
       return;
     }
+    if (openShellDocSurface(r)) return;
     showErp(r, {
       forceLoad: opts.forceLoad !== false,
       skipDirtyGate: opts.skipDirtyGate,
@@ -1564,6 +1644,9 @@ function openHistoryRoute(route) {
     `${classified.mode} lens=${lens || "-"} same=${same} → ${path}`,
   );
   if (classified.mode === "vanilla-always") {
+    // A Payment Entry is `vanilla-always` because its skin is not a doc-form profile, but it
+    // still has one — soft-peeking it here is what made a Recent row reopen in Vanilla.
+    if (openShellDocSurface(path)) return;
     if (isSoftPeekRoute(path, ERP_BASE) && (erpIsWarm() || surfaceMode === "doc")) {
       // Same-route child clicks stay soft so we do not hard-load and collapse the tree.
       softPeekErp(path);
@@ -1643,7 +1726,7 @@ async function ensureErpMatchesShellRoute(appPath) {
   navDebug("erp-resync", `${currentErpPathname()} → ${path}`);
   const soft = await erpSoftSetRoute(path, { abandonUnsaved: true });
   if (soft && soft.ok) {
-    trackNav(erpUrl(ERP_BASE, path));
+    trackNav(erpUrl(ERP_BASE, path), { fromBrowser: false });
     return { ok: true, synced: true };
   }
   await erpForceReopenRoute(path);
@@ -1720,7 +1803,7 @@ function returnToPeekParent() {
   navDebug("peek-return", route);
   erpSoftSetRoute(route, { abandonUnsaved: true }).then((r) => {
     if (r && r.ok) {
-      trackNav(erpUrl(ERP_BASE, route));
+      trackNav(erpUrl(ERP_BASE, route), { fromBrowser: false });
       armSoftPeekEscHook(false).catch(() => {});
       sendUiState();
       sendHistory();
@@ -2031,7 +2114,9 @@ function pollErpRoute() {
     if (url && isAllowedErpUrl(ERP_BASE, url)) {
       if (url !== lastPolledErpUrl || erpLivePathDiffers(currentRoute, url, ERP_BASE)) {
         lastPolledErpUrl = url;
-        trackNav(url);
+        // Live webContents URL, so this is browser truth — and the backstop that resolves a
+        // nav intent whose set_route never fired a did-navigate-in-page.
+        trackNav(url, { fromBrowser: true });
       }
     }
   }
@@ -3318,6 +3403,17 @@ async function gateDirtyThen(doNav) {
       await gatePayOutstandingDirtyThen(doNav);
       return;
     }
+    if (isPaymentDocDirtySurface()) {
+      await gateUnsavedSurfaceThen(doNav, {
+        title: "Unsaved payment",
+        message: "This Payment Entry has unsaved changes.",
+        detail: "Discard your edits, or stay on this payment.",
+        onDiscard: () => {
+          paymentDocDirty = false;
+        },
+      });
+      return;
+    }
     navDebug("gate-skip", "not on Doc lens");
     doNav();
     return;
@@ -3446,8 +3542,8 @@ async function nativeGateFallback(doNav) {
  * Save action the drawer doesn't have until step 4's write path), so this is a plain native
  * prompt: discard the unsaved preview, or stay. Not a save option -- there is nothing to save.
  */
-async function gatePayOutstandingDirtyThen(doNav) {
-  navDebug("gate-open", "unsaved check preview — Discard/Stay in Pay Outstanding");
+async function gateUnsavedSurfaceThen(doNav, opts) {
+  navDebug("gate-open", `${opts.title} — Discard/Stay`);
   let response = 1;
   try {
     const r = await dialog.showMessageBox(win, {
@@ -3456,21 +3552,32 @@ async function gatePayOutstandingDirtyThen(doNav) {
       defaultId: 1,
       cancelId: 1,
       buttons: ["Discard and continue", "Stay"],
-      title: "Unsaved check",
-      message: "This payment preview has unsaved changes.",
-      detail: "Discard the check preview, or stay on Pay Outstanding.",
+      title: opts.title,
+      message: opts.message,
+      detail: opts.detail,
     });
     response = r.response;
   } catch {
     return;
   }
   if (response !== 0) {
-    navDebug("gate-cancel", "stayed on Pay Outstanding");
+    navDebug("gate-cancel", `stayed on ${opts.title}`);
     return;
   }
-  navDebug("gate-proceed", "discarded check preview, continuing nav");
-  payOutstandingDirty = false;
+  navDebug("gate-proceed", `discarded — ${opts.title}`);
+  if (opts.onDiscard) opts.onDiscard();
   doNav();
+}
+
+async function gatePayOutstandingDirtyThen(doNav) {
+  await gateUnsavedSurfaceThen(doNav, {
+    title: "Unsaved check",
+    message: "This payment preview has unsaved changes.",
+    detail: "Discard the check preview, or stay on Pay Outstanding.",
+    onDiscard: () => {
+      payOutstandingDirty = false;
+    },
+  });
 }
 
 function showHome() {
@@ -3487,9 +3594,31 @@ function showHome() {
 }
 
 /**
+ * Tell the rest of the shell where a shell-local Doc surface stands.
+ *
+ * doc-form.html skins get this from showDocForm; pay-outstanding.html and payment-doc.html
+ * load a local file instead, so nothing set `currentRoute` and nothing pushed a Recent row.
+ * The clerk read that as Recent being broken: a session of Home -> Pay Outstanding -> Home
+ * left the flyout empty because neither surface had ever claimed a route (nav incident
+ * 2026-09-10). Same route as the Vanilla visit on purpose -- one history slot per document,
+ * so the row reopens on whichever lens is remembered.
+ * @param {string} route `/app/payment-entry/...`
+ */
+function noteShellDocSurfaceRoute(route) {
+  if (typeof route !== "string" || !route) return;
+  currentRoute = route;
+  history = pushHistory(history, route, {
+    erpBase: ERP_BASE,
+    labels: DOCTYPE_LABELS,
+    companyAbbr: sessionCompanyAbbr,
+  });
+}
+
+/**
  * OI-161: Home's "Pay Outstanding" tile — in-window surface, not a popup (5zorro 2026-09-05:
  * "stay in window unless I spawn a second all-purpose window"). Triggered directly by the tile,
- * not by intercepting a Vanilla navigation — it doesn't need DOC_SKIN_INDEX/lens-context routing.
+ * so it does not need lens-context to *route* it — but it still borrows lens-context's answer
+ * for which ERP route it is standing on (noteShellDocSurfaceRoute).
  * Reloads the page fresh each time so it always reflects current ERP state.
  */
 function showPayOutstanding() {
@@ -3498,6 +3627,7 @@ function showPayOutstanding() {
     parkedDocSurface = null;
     armSoftPeekEscHook(false).catch(() => {});
     surfaceMode = "pay-outstanding";
+    noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "pay-outstanding" }));
     place();
     // A fresh load always starts clean -- reset here too, not just on the gate's own discard
     // path, so a future caller that reaches this without going through the gate can't leave
@@ -3524,7 +3654,10 @@ function showPaymentDoc(record) {
     parkedDocSurface = null;
     armSoftPeekEscHook(false).catch(() => {});
     surfaceMode = "payment-doc";
+    noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "payment-doc", record }));
     place();
+    // A fresh load always starts clean; same defensive reset as showPayOutstanding.
+    paymentDocDirty = false;
     if (paymentDoc && !paymentDoc.webContents.isDestroyed()) {
       paymentDoc.webContents.loadFile(path.join(__dirname, "payment-doc.html"), {
         query: { name: record || "" },
@@ -3544,8 +3677,19 @@ function showPaymentDoc(record) {
  * @param {string} direction "Pay" or "Receive"
  */
 function openPaymentEntryTile(direction) {
-  paymentDirectionPrefs = rememberPaymentDirection(paymentDirectionPrefs, direction === "Receive" ? "Receive" : "Pay");
+  const dir = direction === "Receive" ? "Receive" : "Pay";
+  paymentDirectionPrefs = rememberPaymentDirection(paymentDirectionPrefs, dir);
   savePaymentDirectionPrefs();
+  // Follow the remembered lens like every other Doc-skinned doctype (nav incident
+  // 2026-09-08T04:33 — this used to hardcode Vanilla). "Receive" is excluded on purpose:
+  // a new Receive has no Doc skin at all (lens-context isSuppressedPaymentEntryReceive),
+  // because pay-outstanding is the Pay decision surface.
+  if (dir === "Pay" && preferredLens("payment-entry", lensPrefs) === "doc") {
+    navDebug("openPaymentEntryTile", "lens=doc → pay-outstanding");
+    showPayOutstanding();
+    return;
+  }
+  navDebug("openPaymentEntryTile", `lens=vanilla dir=${dir} → /app/payment-entry/new`);
   showErp("/app/payment-entry/new", { forceLoad: true });
 }
 
@@ -3564,7 +3708,9 @@ async function erpForceReopenRoute(appPath, opts = {}) {
     const soft = await erpSoftSetRoute(path);
     if (soft && soft.ok) {
       navDebug("same-route-set_route", path);
-      trackNav(target);
+      // fromBrowser:false — we asked for this route, the page has not confirmed it yet.
+      // Clearing the intent here disarms the guard against the page we are leaving.
+      trackNav(target, { fromBrowser: false });
       return;
     }
     navDebug("same-route-bounce", `${(soft && soft.reason) || "no-set_route"} → ${path}`);
@@ -3573,7 +3719,7 @@ async function erpForceReopenRoute(appPath, opts = {}) {
   }
   await loadErpUrl(erpUrl(ERP_BASE, "/app"));
   await loadErpUrl(target);
-  trackNav(target);
+  trackNav(target, { fromBrowser: false });
 }
 
 function showErp(route = "/desk", opts = {}) {
@@ -4166,16 +4312,36 @@ async function showDocForm(skinId, route, opts = {}) {
 }
 
 function openDocSkin() {
-  // Soft-peek return: Doc tab rebinds parked Bill/PO/IR without wipe (OI-112).
+  // Precedence lives in chrome-state.js's docTabAction, next to the docTabState hint it has
+  // to agree with — the two disagreed, which is what broke the Doc tab on Payment Entry
+  // (nav incident 2026-09-08). Soft-peek return (OI-112) still wins for a parked copy of the
+  // *same* document, because that keeps unsaved edits.
+  const ctx = shellCtx();
   const parkRoute = parkedDocSurface && parkedDocSurface.route;
-  if (parkRoute) {
+  const peekParentRoute = isActivePeekStack(peekStack) ? peekStack.parent.route : "";
+  const peekParentIsCurrent = !!(
+    peekParentRoute && routesReferToSameDoc(peekParentRoute, ctx.route, ERP_BASE)
+  );
+  const action = docTabAction({
+    hasOwnDocSkin: !!resolveDocSkinTarget(ctx),
+    hasParked: !!parkRoute,
+    parkedIsSameDoc: !!(parkRoute && routesReferToSameDoc(parkRoute, ctx.route, ERP_BASE)),
+    hasPeekParent: !!peekParentRoute,
+    peekParentIsCurrent,
+  });
+  navDebug("doc-tab-action", `${action} ← ${ctx.route || ""}`);
+  // A parent-only peek stack that points at the page you are standing on can never be
+  // returned to; left armed it also keeps maybeHijackErpToDoc permanently disabled
+  // ("hijack-skip-peek" in the incident trail). Self-heal instead of stepping around it.
+  if (peekParentIsCurrent) collapsePeekStackHard("peek-parent-is-current");
+  if (action === "resume-parked") {
     resumeParkedDoc(parkRoute).then((ok) => {
       if (ok) return;
       openDocSkinContinue();
     });
     return;
   }
-  if (returnToPeekParent()) return;
+  if (action === "return-peek" && returnToPeekParent()) return;
   openDocSkinContinue();
 }
 
@@ -4193,11 +4359,19 @@ function openDocSkinContinue() {
       openDocSkinProfile(profile, target.route);
       return;
     }
+    // Payment Entry's Doc skin is not a doc-form.html layout, so it never went through
+    // showDocForm's rememberLens. That left "vanilla" as the only lens ever written for
+    // payment-entry (open-vanilla-skin and showErp both record it), so the tile reopened
+    // on Vanilla every time — nav incident 2026-09-08T04:33.
     if (target.kind === "pay-outstanding") {
+      lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
+      savePrefs();
       showPayOutstanding();
       return;
     }
     if (target.kind === "payment-doc") {
+      lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
+      savePrefs();
       showPaymentDoc(target.record);
       return;
     }
@@ -4708,6 +4882,206 @@ async function createBatchPaymentEntryForBills(bills, intent = {}) {
   if (!pe.reference_date) pe.reference_date = intent.payOn || null;
 
   return insertAndSubmitPaymentEntry(pe);
+}
+
+/**
+ * Create a **Draft** Payment Entry with no invoice references (Packet 4b step 8 -- the drawer's
+ * blank check). Draft, never submitted: nothing about this payment has been reviewed yet, and the
+ * document form is where a draft gets finished. Zero-reference Payment Entries are ordinary
+ * ERPNext usage (advances, deposits) -- confirmed in Packet 0 against payment_entry.py, where
+ * `references` is a plain Table field and validate() returns early when it is empty.
+ *
+ * The party's payable account comes from ERPNext's own `get_party_account` rather than being
+ * guessed here (Clean Core: existing whitelisted methods only).
+ *
+ * @param {{ party?: string, amount?: number, payOn?: string, modeOfPayment?: string,
+ *   cashBankAccount?: string, referenceNo?: string, memo?: string }} intent
+ */
+async function createBlankPaymentEntryDoc(intent = {}) {
+  const party = normalizeEditableText(intent.party);
+  const paidFrom = normalizeEditableText(intent.cashBankAccount);
+  const amount = Number(intent.amount);
+  if (!party) return { ok: false, reason: "Pick who this payment is to." };
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, reason: "Enter an amount greater than zero." };
+  }
+  if (!paidFrom) return { ok: false, reason: "Pick a Pay from account first." };
+  const company = await resolveErpCompany();
+  if (!company) return { ok: false, reason: "Could not resolve the company." };
+
+  const payload = JSON.stringify({
+    party,
+    paidFrom,
+    amount,
+    company,
+    payOn: normalizeEditableText(intent.payOn),
+    modeOfPayment: normalizeEditableText(intent.modeOfPayment),
+    referenceNo: normalizeEditableText(intent.referenceNo),
+    memo: normalizeEditableText(intent.memo),
+  });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var acct;
+      try {
+        acct = await frappe.call({
+          method: "erpnext.accounts.party.get_party_account",
+          args: { party_type: "Supplier", party: i.party, company: i.company },
+        });
+      } catch (eAcct) {
+        return { ok: false, reason: reasonFrom(eAcct), step: "get_party_account" };
+      }
+      var paidTo = acct && acct.message;
+      if (!paidTo) {
+        return { ok: false, reason: "No payable account is set for " + i.party + "." };
+      }
+      var doc = {
+        doctype: "Payment Entry",
+        payment_type: "Pay",
+        party_type: "Supplier",
+        party: i.party,
+        company: i.company,
+        paid_from: i.paidFrom,
+        paid_to: paidTo,
+        paid_amount: i.amount,
+        received_amount: i.amount,
+      };
+      if (i.payOn) { doc.posting_date = i.payOn; doc.reference_date = i.payOn; }
+      if (i.modeOfPayment) doc.mode_of_payment = i.modeOfPayment;
+      if (i.referenceNo) doc.reference_no = i.referenceNo;
+      if (i.memo) doc.remarks = i.memo;
+      var r;
+      try {
+        r = await frappe.call({ method: "frappe.client.insert", args: { doc: doc } });
+      } catch (eIns) {
+        return { ok: false, reason: reasonFrom(eIns), step: "insert" };
+      }
+      if (r && r.exc) return { ok: false, reason: reasonFrom(r), step: "insert" };
+      var made = r && r.message;
+      if (!made || !made.name) return { ok: false, reason: "Payment Entry insert returned nothing." };
+      return { ok: true, name: made.name };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (raw && raw.ok && raw.name) return raw;
+  return { ok: false, reason: (raw && raw.reason) || "Could not create the payment." };
+}
+
+/** Cached so a keystroke-per-search picker does not re-resolve the company every time. */
+let resolvedErpCompany = "";
+
+/**
+ * The company Packet 4b's surfaces operate in -- same preference order as
+ * fetchOutstandingBills' own resolution, and for the same reason: a sandbox can carry both
+ * "…SANDBOX…" and "…SANDBOX… (Demo)", and the demo one must never win by accident.
+ * @returns {Promise<string>} "" when it cannot be resolved (callers must treat that as "unscoped")
+ */
+async function resolveErpCompany() {
+  if (resolvedErpCompany) return resolvedErpCompany;
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false };
+      var r = await frappe.call({
+        method: "frappe.client.get_list",
+        args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
+      });
+      var names = ((r && r.message) || []).map(function (c) { return c.name; });
+      var company =
+        names.find(function (n) { return /sandbox/i.test(n) && n.indexOf("(Demo)") === -1; }) ||
+        (names.length === 1 ? names[0] : "") ||
+        (frappe.defaults && frappe.defaults.get_user_default && frappe.defaults.get_user_default("Company")) ||
+        "";
+      return { ok: true, company: company };
+    } catch (e) {
+      return { ok: false };
+    }
+  })()`);
+  if (raw && raw.ok && raw.company) resolvedErpCompany = String(raw.company);
+  return resolvedErpCompany;
+}
+
+/**
+ * Scope an Account link search to the current company, matching Vanilla's own paid_from query
+ * (see src/payment-entry-link-filters.js). Left unscoped when the company cannot be resolved --
+ * an empty picker would be worse than an unfiltered one.
+ * @param {string} doctype
+ * @param {Record<string, unknown>|null|undefined} filters
+ */
+async function withResolvedCompany(doctype, filters) {
+  if (doctype !== "Account" || !filters || typeof filters !== "object") return filters;
+  if (filters.company) return filters;
+  const company = await resolveErpCompany();
+  return company ? { ...filters, company } : filters;
+}
+
+/**
+ * Save the check-face fields of an existing **Draft** Payment Entry (Packet 4b step 7).
+ *
+ * A patch, never a whole-document write: only the four fields payment-doc.html's form owns are
+ * sent, so everything ERPNext computed (amount, allocations, exchange rates, in_words) is left
+ * exactly as it was. Uses `frappe.client.set_value`, which runs the doctype's own validation and
+ * refuses a submitted document on the server side -- the docstatus guard below is the honest
+ * client-side half, not the only one.
+ *
+ * @param {string} name Payment Entry name
+ * @param {{ mode_of_payment?: string, paid_from?: string, reference_no?: string, remarks?: string }} patch
+ */
+async function savePaymentEntryFields(name, patch) {
+  const n = name == null ? "" : String(name).trim();
+  if (!n || isNewDocRecord(n)) return { ok: false, reason: "No Payment Entry specified." };
+  const allowed = ["mode_of_payment", "paid_from", "reference_no", "remarks"];
+  /** @type {Record<string, string>} */
+  const fields = {};
+  for (const key of allowed) {
+    const v = patch && typeof patch === "object" ? patch[key] : undefined;
+    if (v != null) fields[key] = String(v);
+  }
+  if (!Object.keys(fields).length) return { ok: false, reason: "Nothing to save." };
+
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var name = ${JSON.stringify(n)};
+      var fields = ${JSON.stringify(fields)};
+      var cur;
+      try {
+        cur = await frappe.call({
+          method: "frappe.client.get_value",
+          args: { doctype: "Payment Entry", filters: { name: name }, fieldname: "docstatus" },
+        });
+      } catch (eGet) {
+        return { ok: false, reason: reasonFrom(eGet), step: "get_value" };
+      }
+      var docstatus = cur && cur.message ? Number(cur.message.docstatus) : NaN;
+      if (docstatus !== 0) {
+        return {
+          ok: false,
+          reason: docstatus === 1
+            ? "This Payment Entry is submitted — ERPNext does not allow editing it."
+            : "This Payment Entry is cancelled and cannot be edited.",
+        };
+      }
+      var r;
+      try {
+        r = await frappe.call({
+          method: "frappe.client.set_value",
+          args: { doctype: "Payment Entry", name: name, fieldname: fields },
+        });
+      } catch (eSet) {
+        return { ok: false, reason: reasonFrom(eSet), step: "set_value" };
+      }
+      if (r && r.exc) return { ok: false, reason: reasonFrom(r), step: "set_value" };
+      return { ok: true, doc: (r && r.message) || null };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (raw && raw.ok) return raw;
+  return { ok: false, reason: (raw && raw.reason) || "Could not save this Payment Entry." };
 }
 
 /**
@@ -5325,7 +5699,15 @@ async function searchLink(doctype, txt, filters) {
         if (doctype === "Supplier") fields.push("supplier_name");
         if (doctype === "Item") fields.push("item_name");
         var listFilters = txt ? [["name", "like", "%" + txt + "%"]] : [];
-        filterPairs.forEach(function (p) { listFilters.push([p[0], "=", p[1]]); });
+        filterPairs.forEach(function (p) {
+          // A Frappe filter dict value can be ["in", [...]] as well as a bare value -- the
+          // search_link path above passes it straight through, so this fallback must too.
+          if (Array.isArray(p[1]) && p[1].length === 2 && typeof p[1][0] === "string") {
+            listFilters.push([p[0], p[1][0], p[1][1]]);
+          } else {
+            listFilters.push([p[0], "=", p[1]]);
+          }
+        });
         var list = await frappe.db.get_list(doctype, {
           fields: fields,
           filters: listFilters,
@@ -5661,13 +6043,13 @@ function createWindow() {
     if (!isAllowedErpUrl(ERP_BASE, url)) e.preventDefault();
   });
   erp.webContents.on("did-navigate", (_e, url) => {
-    trackNav(url);
+    trackNav(url, { fromBrowser: true });
     ensureErpFormBridge().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
   });
   erp.webContents.on("did-navigate-in-page", (_e, url, isMainFrame) => {
     if (isMainFrame) {
-      trackNav(url);
+      trackNav(url, { fromBrowser: true });
       ensureErpFormBridge().catch(() => {});
       ensureSimplifiedSkin().catch(() => {});
     }
@@ -8438,8 +8820,11 @@ ipcMain.on("open-vanilla-skin", () => {
     savePrefs();
   }
   if (info.doctype && info.record) {
-    const profile = profileByDoctypeKey(info.doctype);
-    if (profile) {
+    // A shell Doc surface owns `currentRoute`, so it names the document in front of the clerk
+    // even when no doc-form profile does. Without the second half, Vanilla from Pay Outstanding
+    // fell through to `/desk` — leaving the payment you were looking at (nav incident
+    // 2026-09-10, same root as Recent: doc-form profiles are not the whole skin index).
+    if (profileByDoctypeKey(info.doctype) || isShellDocSurface()) {
       showErp(info.path || currentRoute, { forceLoad: true });
       return;
     }
@@ -8526,10 +8911,18 @@ ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
   savePaymentBatchPrefs();
   return { ok: true, prefs: { ...paymentBatchPrefs } };
 });
+ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
+  paymentDocDirty = !!dirty;
+});
+ipcMain.handle("save-payment-entry", async (_e, name, patch) => savePaymentEntryFields(name, patch));
+ipcMain.handle("create-blank-payment-entry", async (_e, intent) => createBlankPaymentEntryDoc(intent));
+ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;
 });
-ipcMain.handle("pay-outstanding-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+ipcMain.handle("pay-outstanding-search-link", async (_e, doctype, txt, filters) =>
+  searchLink(doctype, txt, await withResolvedCompany(doctype, filters)),
+);
 ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) =>
   createBatchPaymentEntryForBills(bills, intent),
 );

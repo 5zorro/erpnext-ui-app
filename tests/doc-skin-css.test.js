@@ -260,3 +260,271 @@ describe("bill-dashboard subsection chrome", () => {
     assert.match(docFormHtml, /data-testid="doc-notes-section"/);
   });
 });
+
+/**
+ * Regression guard for a real defect class, found 2026-09-07 on the Packet 4b surfaces.
+ *
+ * An author `display:` declaration beats the UA stylesheet's `[hidden] { display: none }`,
+ * so an element that carries a `display` rule does NOT hide when code sets `el.hidden = true`.
+ * It shipped twice: `.check-doc-write-actions` (a "Create & submit Payment Entry" button left
+ * on screen over an already-submitted Payment Entry) and `.col-header-row` (column labels over
+ * an empty list). Both passed their e2e checks because those asserted the `.hidden` *property*,
+ * which was correctly `true` the whole time.
+ */
+const checkDocCss = readFileSync(join(electronDir, "check-doc.css"), "utf8");
+const checkDocFragment = readFileSync(join(electronDir, "check-doc.fragment.html"), "utf8");
+const payOutstandingSrc = readFileSync(join(electronDir, "pay-outstanding.src.html"), "utf8");
+const paymentDocSrc = readFileSync(join(electronDir, "payment-doc.src.html"), "utf8");
+
+/** Every element carrying a literal `hidden` attribute, as the id/class tokens it can be styled by. */
+function hiddenAttrTokens(html) {
+  /** @type {string[]} */
+  const tokens = [];
+  for (const m of html.matchAll(/<[a-z][\w-]*\b([^>]*)>/gi)) {
+    const attrs = m[1];
+    // Blank out attribute *values* first so a `hidden` inside one (data-testid="x-hidden")
+    // can't be mistaken for the boolean attribute. `$` in the lookahead: the attribute is
+    // often last, and the `>` that follows it is outside this capture group.
+    const bare = attrs.replace(/="[^"]*"/g, (s) => " ".repeat(s.length));
+    if (!/\shidden(?=[\s/>]|$)/i.test(bare)) continue;
+    const id = /\bid="([^"]+)"/.exec(attrs);
+    if (id) tokens.push(`#${id[1]}`);
+    const cls = /\bclass="([^"]+)"/.exec(attrs);
+    if (cls) for (const c of cls[1].trim().split(/\s+/)) tokens.push(`.${c}`);
+  }
+  return [...new Set(tokens)];
+}
+
+/** Rules as [selectorList, declarations] pairs. Good enough for these hand-written sheets. */
+function cssRules(css) {
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => [m[1].trim(), m[2]]);
+}
+
+/** Does a bare (unqualified) rule for `token` set `display`? */
+function hasBareDisplayRule(css, token) {
+  return cssRules(css).some(
+    ([sel, decls]) =>
+      /(^|[\s;])display\s*:/.test(decls) &&
+      sel.split(",").some((part) => {
+        const last = part.trim().split(/[\s>+~]+/).pop() || "";
+        return last === token;
+      }),
+  );
+}
+
+/** Rough CSS specificity for one compound selector -- enough for these hand-written sheets. */
+function specificity(sel) {
+  const ids = (sel.match(/#[\w-]+/g) || []).length;
+  const cls =
+    (sel.match(/\.[\w-]+/g) || []).length +
+    (sel.match(/\[[^\]]*\]/g) || []).length +
+    (sel.match(/:(?!:)[\w-]+/g) || []).length;
+  const el = (sel.match(/(^|[\s>+~])[a-z][\w-]*/gi) || []).length;
+  return ids * 10000 + cls * 100 + el;
+}
+
+/**
+ * A guard only counts if it actually *wins*. `.x[hidden]` and `.parent .x` have identical
+ * specificity, so a guard declared before the display rule silently loses the cascade -- which
+ * is exactly what happened to .check-doc-payee (2026-09-08): the rule was present and the
+ * element still rendered. More specific wins outright; equally specific has to come later.
+ */
+function hasHiddenGuard(css, token) {
+  const rules = cssRules(css);
+  /** @returns {{spec: number, i: number}|null} strongest rule matching `pred` */
+  const strongest = (pred) =>
+    rules.reduce((best, [sel, decls], i) => {
+      const parts = sel.split(",").filter((part) => pred(part.trim(), decls));
+      if (!parts.length) return best;
+      const spec = Math.max(...parts.map((part) => specificity(part.trim())));
+      return !best || spec > best.spec || (spec === best.spec && i > best.i) ? { spec, i } : best;
+    }, null);
+
+  const guard = strongest(
+    (part, decls) => /display\s*:\s*none/.test(decls) && part.endsWith(`${token}[hidden]`),
+  );
+  if (!guard) return false;
+  const display = strongest(
+    (part, decls) =>
+      /(^|[\s;])display\s*:/.test(decls) && (part.split(/[\s>+~]+/).pop() || "") === token,
+  );
+  if (!display) return true; // nothing to beat
+  return guard.spec > display.spec || (guard.spec === display.spec && guard.i > display.i);
+}
+
+/** Inline <style> blocks plus every stylesheet the page links from electron/. */
+function stylesFor(html) {
+  const inline = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
+  const linked = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"/gi)]
+    .map((m) => {
+      try {
+        return readFileSync(join(electronDir, m[1]), "utf8");
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+  return `${linked}\n${inline}`;
+}
+
+describe("[hidden] survives author display rules (Packet 4b surfaces)", () => {
+  const pages = [
+    ["pay-outstanding.src.html", payOutstandingSrc, `${payOutstandingSrc}\n${checkDocFragment}`],
+    ["payment-doc.src.html", paymentDocSrc, `${paymentDocSrc}\n${checkDocFragment}`],
+  ];
+
+  for (const [name, page, markup] of pages) {
+    it(`${name}: every hidden-by-default element actually hides`, () => {
+      const css = stylesFor(page);
+      for (const token of hiddenAttrTokens(markup)) {
+        if (!hasBareDisplayRule(css, token)) continue;
+        assert.ok(
+          hasHiddenGuard(css, token),
+          `${name}: "${token}" sets display but has no "${token}[hidden]" guard — ` +
+            `setting .hidden = true will not hide it`,
+        );
+      }
+    });
+  }
+
+  // Toggled from JS only (check-doc-mount.js's read-only paint), so no `hidden` attribute in
+  // the fragment for the scan above to find. Listed explicitly rather than by parsing JS.
+  it("blank mode's swapped-out payee and amount actually disappear", () => {
+    // paintCheckDoc sets .hidden on these to swap in the blank-mode inputs. .check-doc-payee
+    // carries an author `display: block`, so it needs a guard (without it the span and the
+    // input rendered on top of each other, found 2026-09-08); .check-doc-amount-box has no
+    // display rule today and therefore does not — but it must stay that way, so assert the
+    // condition rather than the current spelling.
+    for (const token of [".check-doc-payee", ".check-doc-amount-box"]) {
+      assert.ok(
+        !hasBareDisplayRule(checkDocCss, token) || hasHiddenGuard(checkDocCss, token),
+        `${token} sets display but has no "${token}[hidden]" guard`,
+      );
+    }
+    assert.ok(hasBareDisplayRule(checkDocCss, ".check-doc-payee"), "premise moved: payee lost its display rule");
+    assert.ok(hasHiddenGuard(checkDocCss, ".check-doc-payee"));
+  });
+
+  it("the payee link-picker wrapper hides with its input", () => {
+    // mountLinkPicker wraps the payee input in a .link-wrap (display:flex, from doc-skin.css)
+    // and adds a chevron beside it, so paintCheckDoc hides the wrapper. Without a guard the
+    // orphan chevron rendered on the check face in every non-blank mode (found 2026-09-08).
+    const combined = `${docSkinCss}\n${checkDocCss}`;
+    assert.ok(hasBareDisplayRule(docSkinCss, ".link-wrap"), "premise moved: .link-wrap lost display");
+    assert.ok(
+      hasHiddenGuard(combined, ".link-wrap"),
+      "no winning [hidden] guard for .link-wrap inside the check document",
+    );
+  });
+
+  it("check-doc write actions hide on a read-only mount", () => {
+    assert.ok(hasBareDisplayRule(checkDocCss, ".check-doc-write-actions"));
+    assert.ok(
+      hasHiddenGuard(checkDocCss, ".check-doc-write-actions"),
+      "paintCheckDoc sets actions.hidden = true for an existing document; without a guard " +
+        "the submit button stays visible over an already-submitted Payment Entry",
+    );
+  });
+
+  it("the scan itself finds the elements it is meant to police", () => {
+    const tokens = hiddenAttrTokens(`${payOutstandingSrc}\n${checkDocFragment}`);
+    for (const expected of [".col-header-row", ".check-drawer", ".check-doc", "#prefs-panel"]) {
+      assert.ok(tokens.includes(expected), `scan missed ${expected}`);
+    }
+  });
+});
+
+describe("flow nodes fit their span (Packet 4b, 2026-09-08)", () => {
+  const css = stylesFor(payOutstandingSrc);
+
+  it("an aggregate node clips rather than printing over the payment below", () => {
+    // A node's height is member-count * ROW_HEIGHT because that is what lines the three columns
+    // up and lands the ribbons on their rows -- so the node cannot grow, and content that does
+    // not fit has to be dropped by density (src/flow-node-density.js) or clipped. Measured
+    // 2026-09-08 without this: a one-bill suggested payment wanted 67px in a 34px box and 88 of
+    // them overlapped their neighbour's text.
+    for (const sel of [".invoice-node", ".group-node"]) {
+      assert.ok(
+        cssRules(css).some(
+          ([selector, decls]) =>
+            /overflow:\s*hidden/.test(decls) &&
+            // Last token per comma part, like hasBareDisplayRule -- cssRules' selector capture
+            // also swallows any preceding comment.
+            selector.split(",").some((part) => (part.trim().split(/[\s>+~]+/).pop() || "") === sel),
+        ),
+        `${sel} needs overflow: hidden as the backstop for content that still does not fit`,
+      );
+    }
+  });
+
+  it("each density the pure module returns has a layout that fits it", () => {
+    // Every density needs its own rule here, because each has a different amount of height to
+    // spend: compact collapses to one line, medium puts the sub-line beside the button rather
+    // than under it, and full is the plain stacked node.
+    assert.ok(
+      /\.group-node\.compact\s*\{/.test(css) && /\.invoice-node\.compact\s*\{/.test(css),
+      "compact must collapse both node types",
+    );
+    assert.ok(
+      /\.group-node\.medium \{[\s\S]*?grid-template-areas: "top top" "sub act";/.test(css),
+      "medium must share its second line between the sub-line and the button",
+    );
+    assert.ok(
+      /\.group-node\.compact \.group-sub \{ display: none; \}/.test(css),
+      "only a one-row payment has to give up its sub-line",
+    );
+    assert.ok(
+      /\.invoice-node\.compact \.invoice-sub \{ display: none; \}/.test(css),
+      "a one-row invoice node has no room for its sub-line",
+    );
+  });
+
+  it("Create payment keeps a word on it at every density", () => {
+    // An unlabelled icon is the exact ambiguity the button was added to remove ("so it is clear
+    // what clicking does"), so a one-row node shortens the label rather than dropping it -- it has
+    // the width for a short one (measured: no clipping from 820px to 1440px, even with a
+    // seven-figure amount).
+    assert.match(
+      payOutstandingSrc,
+      /const actionLabel = plan\.density === "compact" \? "Pay" : "Create payment";/,
+      "compact shortens the label instead of hiding it",
+    );
+    assert.match(payOutstandingSrc, /act\.setAttribute\("aria-label",/, "always announced");
+  });
+
+  it("no rule hides the action's spans wholesale — that would take the icon with it", () => {
+    // uiIconHtml wraps its svg in a <span class="ui-ico">, so `.group-action span { display:
+    // none }` hides the glyph as well and leaves an empty pill. The label carries its own class
+    // precisely so it can be targeted alone.
+    assert.doesNotMatch(
+      css,
+      /\.group-action\s+span\s*\{[^}]*display:\s*none/,
+      "target .action-label, not every span inside the button",
+    );
+    assert.match(payOutstandingSrc, /<span class="action-label">/);
+  });
+
+  it("a one-line node forbids wrapping, so \"one line\" is enforced and not merely hoped for", () => {
+    // Flex will shrink a row below its content width and break the date into "2026-07-" / "27",
+    // which reads as a mangled two-line node. With nowrap the pressure becomes clipping, which
+    // the measurements can actually see.
+    assert.match(
+      css,
+      /\.group-node\.compact, \.group-node\.compact \* \{ white-space: nowrap; \}/,
+      "the compact node must not be allowed to wrap",
+    );
+  });
+
+  it("a suggested payment is identified by its own id, never by its date", () => {
+    // payOn is not unique: the bank calendar pulls a Saturday and a Sunday due date onto the same
+    // Friday, so one vendor can have several proposals on one date. Using the date as the identity
+    // lit every proposal sharing it (5zorro 2026-09-08).
+    assert.doesNotMatch(
+      payOutstandingSrc,
+      /dataset\.agg\s*=\s*group\.payOn/,
+      "the group node's data-agg must come from groupIdOf, not payOn",
+    );
+    assert.match(payOutstandingSrc, /function groupIdOf\(/);
+    assert.match(payOutstandingSrc, /aggId:\s*groupIdOf\(/);
+  });
+});

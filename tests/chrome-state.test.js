@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   toolbarLensId,
   docTabState,
+  docTabAction,
   lensTabsFor,
+  lensTabEmphasis,
   historyRailWidth,
   HISTORY_RAIL_WIDTH,
   HISTORY_RAIL_COLLAPSED_WIDTH,
@@ -161,5 +163,120 @@ describe("lensTabsFor", () => {
   it("a dashboard peeked from a Payments list offers Vanilla only", () => {
     const t = lensTabsFor({ peekParentIsDocSkinned: false, hasSimplifiedLens: false });
     assert.deepEqual(t, { vanilla: true, simplified: false, doc: false, docHint: "" });
+  });
+});
+
+describe("docTabAction — the Doc tab does what its own hint promises (nav incident 2026-09-08)", () => {
+  it("a page with its own Doc skin opens it, even with a peek parent armed", () => {
+    // The incident, exactly: standing on /app/payment-entry/new-payment-entry-… in Vanilla
+    // with a stale parent-only peek stack. Was "return-peek" (→ back to Vanilla).
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: true, hasPeekParent: true, peekParentIsCurrent: true }),
+      "open-own-skin",
+    );
+  });
+
+  it("a page with its own Doc skin beats a parked *different* document", () => {
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: true, hasParked: true, parkedIsSameDoc: false }),
+      "open-own-skin",
+    );
+  });
+
+  it("but a parked copy of the *same* document still wins — it keeps unsaved edits", () => {
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: true, hasParked: true, parkedIsSameDoc: true }),
+      "resume-parked",
+    );
+  });
+
+  it("OI-112 unchanged: no own skin → resume parked, else return to the peek parent", () => {
+    assert.equal(docTabAction({ hasOwnDocSkin: false, hasParked: true }), "resume-parked");
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: false, hasPeekParent: true }),
+      "return-peek",
+    );
+  });
+
+  it("never 'returns' to the page you are already standing on", () => {
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: false, hasPeekParent: true, peekParentIsCurrent: true }),
+      "fallback",
+    );
+  });
+
+  it("nothing to go back to and no skin here → fallback", () => {
+    assert.equal(docTabAction({}), "fallback");
+  });
+
+  it("agrees with docTabState's hint precedence for the same inputs", () => {
+    // The invariant this pair exists to keep: whenever the tab *says* "Document-skin for this
+    // page", clicking it must open that page's skin rather than navigating away.
+    const hint = docTabState({ hasDocSkinnedRecord: true, peekParentIsDocSkinned: true });
+    assert.equal(hint.hint, "Document-skin for this page");
+    assert.equal(
+      docTabAction({ hasOwnDocSkin: true, hasPeekParent: true }),
+      "open-own-skin",
+    );
+  });
+});
+
+describe("lensTabEmphasis — the toolbar renders the selected tab, it never re-derives it", () => {
+  /**
+   * The pay-outstanding / payment-doc surfaces are the Doc lens but are not doc-form.html.
+   * toolbarLensId already says so; this pins that the emphasis follows it, because the toolbar
+   * recomputing the same question from `showingBill || showingDocForm` is what left the
+   * Document-skin tab unlit on the payment dashboard (nav incident 2026-09-10).
+   */
+  const emphasisFor = (state) =>
+    lensTabEmphasis({
+      lens: toolbarLensId(state),
+      docAvailable: lensTabsFor({ onDoc: !!state.onDoc, hasDocSkinnedRecord: true }).doc,
+    });
+
+  it("a shell Doc surface that is not doc-form.html still lights Document-skin", () => {
+    assert.deepEqual(emphasisFor({ onDoc: true, surfaceMode: "pay-outstanding" }), {
+      doc: true,
+      vanilla: false,
+      simplified: false,
+    });
+    assert.deepEqual(emphasisFor({ onDoc: true, surfaceMode: "payment-doc" }), {
+      doc: true,
+      vanilla: false,
+      simplified: false,
+    });
+  });
+
+  it("and never lights Default-skin in its place", () => {
+    assert.equal(emphasisFor({ onDoc: true, surfaceMode: "pay-outstanding" }).vanilla, false);
+  });
+
+  it("Home and the doc-form skins are unchanged", () => {
+    assert.equal(emphasisFor({ onDoc: true, surfaceMode: "home" }).doc, true);
+    assert.equal(emphasisFor({ onDoc: true, surfaceMode: "doc" }).doc, true);
+  });
+
+  it("a Vanilla form lights Default-skin, a Simplified one lights Simplified", () => {
+    assert.deepEqual(lensTabEmphasis({ lens: "vanilla", docAvailable: true }), {
+      doc: false,
+      vanilla: true,
+      simplified: false,
+    });
+    assert.deepEqual(lensTabEmphasis({ lens: "simplified", docAvailable: true }), {
+      doc: false,
+      vanilla: false,
+      simplified: true,
+    });
+  });
+
+  it("exactly one tab is selected for every lens the toolbar can be in", () => {
+    for (const lens of ["vanilla", "simplified", "doc"]) {
+      const e = lensTabEmphasis({ lens, docAvailable: true });
+      assert.equal(Object.values(e).filter(Boolean).length, 1, `${lens} selected more than one tab`);
+    }
+  });
+
+  it("a hidden Doc tab is never the selected one", () => {
+    assert.equal(lensTabEmphasis({ lens: "doc", docAvailable: false }).doc, false);
   });
 });

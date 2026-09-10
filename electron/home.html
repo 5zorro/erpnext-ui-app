@@ -10,7 +10,11 @@
     .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 12px 20px 24px; max-width: 1120px; margin: 0 auto; }
     .col { display: flex; flex-direction: column; gap: 18px; }
     .box { background: #fff; border: 1px solid #d6dee6; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-    .box h3 { margin: 0; padding: 9px 14px; background: #2c3e50; color: #fff; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; }
+    .box h3 {
+      margin: 0; padding: 9px 14px; background: #2c3e50; color: #fff; font-size: 13px;
+      letter-spacing: .4px; text-transform: uppercase; display: flex; align-items: center; gap: 7px;
+    }
+    .box h3 .ui-ico--group svg { display: block; }
     .items { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; }
     .item {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -149,10 +153,11 @@
     <button class="dev-link" id="mockup-a" title="Option A: Thin inject over Vanilla">Simplified mockup A — thin inject</button>
     <button class="dev-link" id="mockup-b" title="Option B: Ground-up (Vanilla field parity)">Simplified mockup B — ground-up</button>
     <button class="dev-link" id="mockup-vendor-swimlane" title="Vendors group as a two-lane process flow (Daily / Weekly-Monthly)">Vendor swimlane mockup</button>
+    <button class="dev-link" id="mockup-pay-flow" title="Pay Outstanding: how the flow columns attach many schedule rows to one aggregate row">Pay flow shapes mockup</button>
   </div>
   <script type="module">
     import { HOME_GROUPS } from "../src/home-tiles.js";
-    import { homeTileIconHtml, missingHomeTileIcons } from "../src/ui-icons.js";
+    import { homeTileIconHtml, missingHomeTileIcons, homeGroupIconHtml } from "../src/ui-icons.js";
     import { VENDOR_FLOW_LANES, VENDOR_FLOW_BRIDGES } from "../src/vendor-process-flow.js";
 
     const api = window.erpHome;
@@ -212,7 +217,7 @@
       box.className = "box";
       box.dataset.testid = `group-${group.id}`;
       const h = document.createElement("h3");
-      h.textContent = group.title;
+      h.innerHTML = `${homeGroupIconHtml(group.id)}<span>${group.title}</span>`;
       box.appendChild(h);
 
       const body = document.createElement("div");
@@ -301,7 +306,7 @@
         box.className = "box";
         box.dataset.testid = `group-${g.id}`;
         const h = document.createElement("h3");
-        h.textContent = g.title;
+        h.innerHTML = `${homeGroupIconHtml(g.id)}<span>${g.title}</span>`;
         box.appendChild(h);
         const wrap = document.createElement("div");
         wrap.className = "items";
@@ -321,6 +326,7 @@
     document.getElementById("mockup-a").onclick = () => api.openMockup("simplified-option-a-thin-inject.html");
     document.getElementById("mockup-b").onclick = () => api.openMockup("simplified-option-b-ground-up.html");
     document.getElementById("mockup-vendor-swimlane").onclick = () => api.openMockup("vendor-swimlane-flow.html");
+    document.getElementById("mockup-pay-flow").onclick = () => api.openMockup("pay-flow-shapes.html");
   </script>
 </body>
 </html>

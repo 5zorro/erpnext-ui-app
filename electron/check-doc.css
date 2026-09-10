@@ -52,6 +52,13 @@
   padding-bottom: 4px;
   min-height: 1.2em;
 }
+/* Author display beats UA [hidden] -- blank mode swaps this span for an input. Declared *after*
+   the rule above on purpose: `.check-doc-payee[hidden]` and `.check-doc-payee-row
+   .check-doc-payee` have identical specificity, so an earlier guard silently loses the cascade
+   and both the span and the input render (found 2026-09-08 -- the guard was present and still
+   did nothing). */
+.check-doc-payee[hidden],
+.check-doc-amount-box[hidden] { display: none; }
 
 .check-doc-amount-row { display: flex; justify-content: flex-end; }
 .check-doc-amount-box {
@@ -64,7 +71,32 @@
   background: #f8fafc;
 }
 
+.check-doc-words-row[hidden],
+.check-doc-bank-row[hidden] { display: none; }
+.check-doc-payee-input[hidden],
+.check-doc-amount-input[hidden] { display: none; }
+/* doc-skin.css gives .link-wrap `display: flex`, which beats the UA `[hidden]` rule -- the same
+   class of bug as .check-doc-write-actions and .check-doc-payee. Scoped here rather than added
+   to the shared sheet. */
+.check-doc .link-wrap[hidden] { display: none; }
+.check-doc-payee-input { margin-top: 2px; font-size: 15px; font-weight: 600; }
+.check-doc-amount-input {
+  width: 160px; text-align: right; font-size: 18px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.check-doc-stub[hidden] { display: none; }
+.check-doc-words {
+  display: block;
+  font-size: 12px;
+  font-style: italic;
+  color: #334155;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 4px;
+}
+.check-doc-bank-row .check-doc-value { font-size: 12px; color: #475569; }
+
 .check-doc-meta-row { display: flex; gap: 24px; }
+.check-doc-meta-row .check-doc-field[hidden] { display: none; }
 .check-doc-field { flex: 1; min-width: 0; }
 .check-doc-value {
   display: block;
@@ -132,6 +164,14 @@
   color: #475569;
   cursor: default;
 }
+/**
+ * An author `display` beats the UA sheet's `[hidden] { display: none }`, so every class here
+ * that is toggled via the `hidden` property needs its own guard -- paintCheckDoc's read-only
+ * mount sets `actions.hidden = true` and, without this, the "Create & submit Payment Entry"
+ * button stayed on screen over an already-submitted document (found 2026-09-07).
+ */
+.check-doc-write-actions[hidden] { display: none; }
+
 .check-doc-write-actions {
   display: flex;
   align-items: center;
@@ -152,3 +192,6 @@
 }
 .check-doc-submit:hover { filter: brightness(0.95); }
 .check-doc-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Same reason as .check-doc-write-actions above: an author display beats UA `[hidden]`. These
+   two buttons are toggled per mount mode (proposal creates, draft saves, submitted neither). */
+.check-doc-submit[hidden] { display: none; }

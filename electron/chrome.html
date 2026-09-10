@@ -82,10 +82,7 @@
     }
 
     function applyUiState(s) {
-      const showingHome = !!s.showingHome;
-      const onDocForm = !!(s.showingBill || s.showingDocForm);
       const docOk = s.docSkinAvailable !== false;
-      const activeLens = s.lens || "vanilla";
       softPeekActive = !!s.softPeekActive;
       lensDoc.hidden = !docOk;
       // Says what the tab will actually do: skin this page, or hop back one step.
@@ -94,11 +91,15 @@
       // Main owns which lenses this page has (chrome-state.js lensTabsFor) — the toolbar must
       // not guess. "Not home, not doc" used to count as a form, so Simplified showed on Desk,
       // dashboards and list views alike (nav incident 2026-09-05).
-      const onErpForm = !showingHome && !onDocForm;
       lensSimplified.hidden = !s.simplifiedAvailable;
-      lensDoc.classList.toggle("active", (showingHome || onDocForm) && docOk);
-      lensVanilla.classList.toggle("active", onErpForm && activeLens !== "simplified");
-      lensSimplified.classList.toggle("active", onDocForm ? false : onErpForm && activeLens === "simplified");
+      // Main owns which tab is *selected* too (chrome-state.js lensTabEmphasis). Re-deriving it
+      // here from showingBill/showingDocForm saw only doc-form.html, so on the payment dashboard
+      // the Document-skin tab was never emphasized and Default-skin was emphasized in its place
+      // (nav incident 2026-09-10).
+      const emphasis = s.lensActive || {};
+      lensDoc.classList.toggle("active", !!emphasis.doc);
+      lensVanilla.classList.toggle("active", !!emphasis.vanilla);
+      lensSimplified.classList.toggle("active", !!emphasis.simplified);
       if (peekHint) {
         const hint = softPeekActive && s.softPeekHint ? String(s.softPeekHint) : "";
         peekHint.hidden = !hint;
