@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 20;
+  var VERSION = 21;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1385,13 +1385,38 @@
   /**
    * Apply mapped PO/PR → Bill items. Preserves source descriptions after item scripts run
    * (custom PO text must win); fills Item master only when source description was empty.
+   *
+   * `plan` comes from src/mapped-header-fields.js — the SSoT for which header fields ride
+   * along and whether each needs `set_value` (party) or a plain assignment (copy). Party
+   * fields go on **first**: ERPNext fetches credit_to / currency / taxes / addresses /
+   * payment terms off the supplier, and those fetches touch the very rows we are about to
+   * merge, so setting the vendor afterwards would undo the merge it was meant to precede.
+   * @param {object} src
+   * @param {{ party?: {field: string, value: any}[], copy?: {field: string, value: any}[], refresh?: string[] }} [plan]
    */
-  function mergeFromMapped(src) {
+  function mergeFromMapped(src, plan) {
     return (async function () {
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
         if (!src || !src.items) return { ok: false, reason: "No items mapped from source." };
+        var headerPlan = plan && typeof plan === "object" ? plan : null;
+        var partyList = headerPlan && headerPlan.party ? headerPlan.party : [];
+        for (var pi = 0; pi < partyList.length; pi++) {
+          try {
+            await f.set_value(partyList[pi].field, partyList[pi].value);
+          } catch (eParty) {
+            return {
+              ok: false,
+              reason:
+                "Could not set " +
+                partyList[pi].field +
+                ": " +
+                String(eParty && eParty.message ? eParty.message : eParty),
+            };
+          }
+        }
+        if (partyList.length) await afterAjaxQuiet();
         var skip = [
           "name",
           "idx",
@@ -1419,12 +1444,33 @@
             if (skip.indexOf(k) < 0) row[k] = it[k];
           });
         });
-        ["bill_no", "payment_terms_template"].forEach(function (fld) {
-          if (src[fld]) f.doc[fld] = src[fld];
+        // is_return / return_against (OI-082): only ever present on a make_debit_note mapped
+        // doc, so these are a no-op for the ordinary PO/PR merge path. The list is the caller's
+        // plan when it sent one, and the historical hard-coded set otherwise.
+        var copyList =
+          headerPlan && headerPlan.copy
+            ? headerPlan.copy
+            : ["bill_no", "payment_terms_template", "is_return", "return_against"]
+                .filter(function (fld) {
+                  return !!src[fld];
+                })
+                .map(function (fld) {
+                  return { field: fld, value: src[fld] };
+                });
+        copyList.forEach(function (c) {
+          if (c && c.field) f.doc[c.field] = c.value;
         });
         f.refresh_field("items");
         try {
-          f.refresh_fields(["bill_no", "payment_terms_template", "due_date"]);
+          f.refresh_fields(
+            (headerPlan && headerPlan.refresh) || [
+              "bill_no",
+              "payment_terms_template",
+              "due_date",
+              "is_return",
+              "return_against",
+            ],
+          );
         } catch (e1) {}
         await afterAjaxQuiet();
 

@@ -125,6 +125,17 @@ describe("bill-paid (OI-135 draft is_paid → JIT PE)", () => {
     assert.equal(billDocStatusBadge({ docstatus: 2 }).label, "Cancelled");
   });
 
+  it("billDocStatusBadge relabels a credit memo (is_return) as Vendor Credit — OI-082", () => {
+    const b = billDocStatusBadge({ docstatus: 1, is_return: 1, status: "Return" });
+    assert.equal(b.label, "Vendor Credit");
+    assert.equal(b.tone, "credit-memo");
+  });
+
+  it("credit memo relabel wins even without a status string", () => {
+    const b = billDocStatusBadge({ docstatus: 1, is_return: 1 });
+    assert.equal(b.label, "Vendor Credit");
+  });
+
   it("ignores stale status Draft when docstatus is submitted", () => {
     const b = billDocStatusBadge({
       docstatus: 1,

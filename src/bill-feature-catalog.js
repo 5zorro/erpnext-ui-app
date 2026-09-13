@@ -342,6 +342,77 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     pureModule: "bill-toolbar.js",
   },
   {
+    id: "credit-memo-create",
+    name: "Create Credit / Return (OI-082) — not museum's Create Copy, native make_debit_note",
+    museum: false,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "credit-memo.js",
+    notes:
+      "is_return/return_against classification + orphan-warning fully unit-tested; toolbar " +
+      "action + linked-Bill peek row are electron-only, no e2e yet.",
+  },
+  {
+    id: "credit-memo-new-from-nothing",
+    name: "Credit memo toggle on a new/draft Bill (no source Bill yet, OI-147)",
+    museum: false,
+    alpha: true,
+    coverage: "electron_only",
+    pureModule: "bill-map.js (isWritableBillHeaderField)",
+    notes:
+      "Draft-only Yes/No switch (mirrors Already paid?) sets is_return on the already-loaded " +
+      "form — no New-Bill-then-set_value round trip, so no nav-intent race window. Deliberately " +
+      "orphaned until informally linked. Reworked from a toolbar button after a real nav " +
+      "incident (2026-09-07): the old New Credit Memo button chained New Bill + setHeader, and " +
+      "under chaos-lag a stale prior ERP navigation could land in between and clobber cur_frm.",
+  },
+  {
+    id: "credit-memo-informal-links",
+    name: "Informal link to Bill / Sales Order (remarks token, OI-147/164/165)",
+    museum: false,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "credit-memo.js (buildLinkToken/parseLinkToken/stripLinkToken/withLinkToken)",
+    notes:
+      "Token engine fully unit-tested. Bill picker (same-vendor default, search-any-vendor on " +
+      "type) is electron-only. Sales Order picker reuses OI-134's fetch as a rough first pass — " +
+      "not dogfooded yet (5zorro 2026-09-07).",
+  },
+  {
+    id: "credit-memo-source-pick",
+    name: "Pick the source Bill at the moment Credit memo? flips to Yes (OI-147)",
+    museum: false,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "credit-memo.js (planCreditMemoSource/draftHasEnteredLines)",
+    notes:
+      "Answers 'which Bill is this against?' where the clerk did NOT arrive from a submitted " +
+      "Bill, so nothing has set return_against. Routing is unit-tested: an untouched draft is " +
+      "rebuilt via native make_debit_note (real return_against, right expense account); a draft " +
+      "with typed lines keeps its work and settles for the informal token, and is told which " +
+      "trade it just made. Never silently destroys entered lines. Picker chrome is electron-only.",
+  },
+  {
+    id: "credit-memo-source-modal-switch",
+    name: "Credit memo? switch in the source modal's button row (OI-166)",
+    museum: false,
+    alpha: true,
+    coverage: "partial",
+    pureModule: "source-modal-credit-mode.js",
+    notes:
+      "The source modal asks one question — where does this Bill come from? — and the foot " +
+      "switch changes which corpus answers it: open PO/IR, or the submitted Bill this credit " +
+      "is against. Matches how 5zorro actually works: vendor, then source, in one breath. " +
+      "Click-only and out of the tab order like every .src-foot control, because the modal " +
+      "captures Tab for group navigation. Arity flips with the mode (return_against is one " +
+      "Link, so credit mode is single-pick) and the commit routes through the same " +
+      "commitCreditSource/planCreditMemoSource path as the standalone picker — never a " +
+      "freeform is_return flip. Arity, group shapes, labels and choice classification are " +
+      "unit-tested; the DOM switch and the live fetch are electron-only. Vendor-scoped: " +
+      "cross-vendor search stays on the header switch's picker until this modal grows a " +
+      "search field.",
+  },
+  {
     id: "toolbar-print",
     name: "Print",
     museum: true,

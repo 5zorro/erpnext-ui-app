@@ -4,6 +4,12 @@ yarn-error.log*
 .DS_Store
 *.swp
 *~
+# Hand-made backups. `*~` and `*.swp` covered the editor's own, but not the ones people make by
+# renaming — electron/bill.html.old sat untracked-but-not-ignored because the rule below names
+# electron/bill.html exactly and gitignore does no suffix matching.
+*.old
+*.bak
+*.orig
 
 # Local secrets / sandbox credentials — never commit
 .env
@@ -44,5 +50,6 @@ ops/sample-data/dogfood-sources/generated/
 # Local agent orientation — not part of the public tree (HANDOFF.md is the tracked SSoT).
 CLAUDE.md
 
-# Legacy Bill shell (tranche 10) — SSoT: electron/bill-shell.fragment.html + doc-form.html
-electron/bill.html
+# Legacy Bill shell (tranche 10) — SSoT: electron/bill-shell.fragment.html + doc-form.html.
+# Globbed so a renamed copy cannot slip back in; the real history is in git (see 8a10b6e).
+electron/bill.html*

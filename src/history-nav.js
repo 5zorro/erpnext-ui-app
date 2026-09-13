@@ -4,6 +4,7 @@
  */
 import { routeInfo, normalizeAppRoute, routesReferToSameDoc } from "./route-info.js";
 import { profileByDoctypeKey } from "./doc-skin-registry.js";
+import { hasDocSkin } from "./lens-context.js";
 import { normalizeDoctypeKey } from "./lens-prefs.js";
 
 /** Default escape hatch when on a Vanilla master with no Doc skin. */
@@ -15,6 +16,28 @@ export const FALLBACK_DOC_ROUTE = "/app/purchase-invoice/new";
  */
 export function doctypeHasDocSkin(doctype) {
   return !!profileByDoctypeKey(doctype);
+}
+
+/**
+ * "Is this row a document, or a setup page?" — a *labelling* question, deliberately separate
+ * from `doctypeHasDocSkin` above, which answers the *navigation* question ("does a
+ * doc-form.html profile own this doctype", and so also "may we soft-peek it").
+ *
+ * Payment Entry is the first doctype where the two answers differ: its Doc skin is
+ * pay-outstanding.html / payment-doc.html, not a doc-form layout, so `doc-skin-registry.js`
+ * says no while `lens-context.js` — the declared SSoT for what has a skin — says yes. Recent
+ * filed every Payment Entry under "setup", the muted decoration meant for Tax Category and
+ * Company (nav incident 2026-09-10).
+ *
+ * @param {string} doctype slug from routeInfo
+ * @param {string} [record]
+ * @returns {boolean}
+ */
+export function routeIsDocSkinned(doctype, record) {
+  const dt = normalizeDoctypeKey(doctype);
+  const rec = record == null ? "" : String(record);
+  if (!dt || !rec) return false;
+  return hasDocSkin({ route: `/app/${dt}/${rec}`, doctype: dt, record: rec });
 }
 
 /**
@@ -148,7 +171,12 @@ export function classifyHistoryOpen(routeOrUrl, erpBase) {
     doctype,
     path: n.path || "/",
     record: n.record || "",
-    kind: mode === "doc-preferred" ? "doc" : "setup",
+    // Additive on purpose: a Bill/PO/IR *list* row has no record and stays "doc" through
+    // `mode`, while Payment Entry earns "doc" through the skin index (routeIsDocSkinned).
+    kind:
+      mode === "doc-preferred" || routeIsDocSkinned(doctype, n.record || "")
+        ? "doc"
+        : "setup",
   };
 }
 

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Vendors — swimlane mockup</title>
+  <style>
+    :root {
+      --bg: #eef2f5;
+      --surface: #ffffff;
+      --rail: #f4f7fa;
+      --line: #d7dfe6;
+      --ink: #1f2d3d;
+      --muted: #5b6b7c;
+      --muted-2: #8494a6;
+      --brand: #2c3e50;
+      --brand-ink: #ffffff;
+
+      --request-bg: #eef6fb;  --request-ink: #045a86; --request-accent: #0072B2;
+      --order-bg: #e8f4fc;    --order-ink: #2f7fab;   --order-accent: #56B4E9;
+      --fulfill-bg: #fff4e0;  --fulfill-ink: #9a6a00; --fulfill-accent: #E69F00;
+      --invoice-bg: #f6eaf2;  --invoice-ink: #a24f83; --invoice-accent: #CC79A7;
+      --payment-bg: #e6f5f0;  --payment-ink: #00805e; --payment-accent: #009E73;
+      --neutral-bg: #eef1f4;  --neutral-ink: #52616f; --neutral-accent: #8494a6;
+
+      --tile-shadow: rgba(15, 23, 32, .12);
+      --toast-bg: #1f2d3d;
+      --toast-ink: #ffffff;
+      --focus: #2f7fab;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    .page { max-width: 1040px; margin: 0 auto; padding: 30px 22px 60px; }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    h1 { margin: 0 0 10px; font-size: 24px; font-weight: 700; letter-spacing: -.01em; }
+    .dek { margin: 0 0 26px; max-width: 62ch; font-size: 14px; line-height: 1.6; color: var(--muted); }
+
+    .tabs {
+      display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 20px;
+      background: var(--rail); border: 1px solid var(--line); border-radius: 9px;
+    }
+    .tab {
+      font: inherit; font-size: 13px; font-weight: 600; color: var(--muted);
+      background: transparent; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+    }
+    .tab:hover { color: var(--ink); }
+    .tab.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--tile-shadow); }
+    .tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .view[hidden] { display: none; }
+
+    .lanes { display: flex; flex-direction: column; gap: 0; }
+    .lane {
+      display: flex; background: var(--surface); border: 1px solid var(--line);
+      border-radius: 12px; overflow: hidden;
+    }
+    .rail {
+      flex: none; width: 28px; padding: 8px 0; display: flex;
+      align-items: center; justify-content: center;
+      border-right: 1px dashed var(--line); cursor: help;
+    }
+    .lane[data-cadence="daily"] .rail { background: var(--order-bg); }
+    .lane[data-cadence="weekly"] .rail { background: var(--payment-bg); }
+    .rail-label {
+      display: inline-block; white-space: nowrap; transform: rotate(-90deg);
+      font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    }
+    .lane[data-cadence="daily"] .rail-label { color: var(--order-ink); }
+    .lane[data-cadence="weekly"] .rail-label { color: var(--payment-ink); }
+
+    .track { flex: 1; display: flex; align-items: center; gap: 10px; padding: 18px 20px; overflow-x: auto; }
+
+    .tile {
+      position: relative; flex: none; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 5px; width: 128px; height: 100px; padding: 8px 6px;
+      border-radius: 10px; border: 1px solid; font: inherit; cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .tile:hover { transform: translateY(-2px); box-shadow: 0 6px 14px var(--tile-shadow); }
+    .tile:active { transform: translateY(0); }
+    .tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .tile[data-role="request"]  { background: var(--request-bg);  border-color: color-mix(in srgb, var(--request-accent) 38%, var(--line)); }
+    .tile[data-role="order"]    { background: var(--order-bg);    border-color: color-mix(in srgb, var(--order-accent) 38%, var(--line)); }
+    .tile[data-role="fulfill"]  { background: var(--fulfill-bg);  border-color: color-mix(in srgb, var(--fulfill-accent) 38%, var(--line)); }
+    .tile[data-role="invoice"]  { background: var(--invoice-bg);  border-color: color-mix(in srgb, var(--invoice-accent) 38%, var(--line)); }
+    .tile[data-role="payment"]  { background: var(--payment-bg);  border-color: color-mix(in srgb, var(--payment-accent) 38%, var(--line)); }
+    .tile[data-role="neutral"]  { background: var(--neutral-bg);  border-color: var(--line); }
+
+    .step {
+      position: absolute; top: -8px; left: -8px; width: 21px; height: 21px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 11px; font-weight: 600; color: #fff; box-shadow: 0 0 0 2px var(--surface);
+    }
+    .tile[data-role="request"] .step  { background: var(--request-accent); }
+    .tile[data-role="order"] .step    { background: var(--order-accent); }
+    .tile[data-role="fulfill"] .step  { background: var(--fulfill-accent); }
+    .tile[data-role="invoice"] .step  { background: var(--invoice-accent); }
+    .tile[data-role="payment"] .step  { background: var(--payment-accent); }
+    .tile[data-role="neutral"] .step  { background: var(--neutral-accent); }
+
+    .tile .ic { width: 24px; height: 24px; }
+    .tile[data-role="request"] .ic  { color: var(--request-ink); }
+    .tile[data-role="order"] .ic    { color: var(--order-ink); }
+    .tile[data-role="fulfill"] .ic  { color: var(--fulfill-ink); }
+    .tile[data-role="invoice"] .ic  { color: var(--invoice-ink); }
+    .tile[data-role="payment"] .ic  { color: var(--payment-ink); }
+    .tile[data-role="neutral"] .ic  { color: var(--neutral-ink); }
+    .tile .ic svg { width: 100%; height: 100%; display: block; }
+
+    .tile .label { font-size: 12.5px; font-weight: 600; color: var(--ink); text-align: center; line-height: 1.2; }
+    .tile .route {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 9px; color: var(--muted-2); text-align: center; line-height: 1.2;
+    }
+
+    .arrow, .divider { flex: none; color: var(--muted-2); display: flex; align-items: center; }
+    .arrow svg { width: 20px; height: 20px; display: block; }
+    .divider { width: 1px; height: 56px; background: var(--line); }
+
+    .source-stack { flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .stack-caption {
+      margin: -2px 0 0; font-size: 9.5px; font-weight: 600; letter-spacing: .05em;
+      text-transform: uppercase; color: var(--muted-2);
+    }
+    .step--wide { width: auto; min-width: 21px; padding: 0 5px; border-radius: 10px; font-size: 10px; }
+
+    .bridge { display: flex; justify-content: center; gap: 28px; margin: 10px 0; }
+    .bridge-item {
+      display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); max-width: 240px;
+    }
+    .bridge-item svg { width: 16px; height: 16px; flex: none; color: var(--muted-2); }
+
+    @media (max-width: 700px) {
+      .bridge { flex-direction: column; align-items: center; gap: 6px; }
+    }
+
+    .box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .box > h3 {
+      margin: 0; padding: 10px 16px; background: var(--brand); color: var(--brand-ink);
+      font-size: 12.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 600;
+    }
+    .box-body { padding: 18px; background: var(--bg); }
+
+    .grid-items { display: flex; flex-wrap: wrap; gap: 10px; }
+    .grid-item {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 96px; height: 76px; gap: 5px; border-radius: 8px; border: 1px solid;
+      font-size: 11.5px; font-weight: 600; text-align: center; padding: 6px; color: var(--ink);
+    }
+    .grid-item .ic { width: 20px; height: 20px; }
+    .grid-item .ic svg { width: 100%; height: 100%; display: block; }
+    .grid-item[data-role="invoice"] { background: var(--invoice-bg); border-color: color-mix(in srgb, var(--invoice-accent) 38%, var(--line)); }
+    .grid-item[data-role="invoice"] .ic { color: var(--invoice-ink); }
+    .grid-item[data-role="payment"] { background: var(--payment-bg); border-color: color-mix(in srgb, var(--payment-accent) 38%, var(--line)); }
+    .grid-item[data-role="payment"] .ic { color: var(--payment-ink); }
+    .grid-item[data-role="order"] { background: var(--order-bg); border-color: color-mix(in srgb, var(--order-accent) 38%, var(--line)); }
+    .grid-item[data-role="order"] .ic { color: var(--order-ink); }
+    .grid-item[data-role="fulfill"] { background: var(--fulfill-bg); border-color: color-mix(in srgb, var(--fulfill-accent) 38%, var(--line)); }
+    .grid-item[data-role="fulfill"] .ic { color: var(--fulfill-ink); }
+    .grid-item[data-role="neutral"] { background: var(--neutral-bg); border-color: var(--line); }
+    .grid-item[data-role="neutral"] .ic { color: var(--neutral-ink); }
+    .grid-caption { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); max-width: 46ch; }
+
+    footer.note {
+      margin-top: 30px; padding-top: 16px; border-top: 1px solid var(--line);
+      font-size: 12px; line-height: 1.6; color: var(--muted-2);
+    }
+    footer.note code {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      background: var(--rail); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+    }
+
+    .toast {
+      position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 8px);
+      background: var(--toast-bg); color: var(--toast-ink);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 12px; padding: 8px 14px; border-radius: 8px;
+      opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease;
+    }
+    .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <p class="eyebrow">Doc Workflow Home &middot; Vendors group</p>
+    <h1>One pipeline, two speeds</h1>
+    <p class="dek">
+      Purchase Orders and Material Requests are the two sources that start a purchase; either
+      one leads to Receive Inventory, then Enter Bills &mdash; that's the daily loop. Pay Bills
+      and Vendor Center research happen weekly or monthly. The swimlane below keeps every tile
+      exactly as clickable as it is today &mdash; it just draws the order and the cadence
+      instead of one flat row of boxes.
+    </p>
+
+    <div class="box">
+      <h3>Vendors</h3>
+      <div class="box-body">
+
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" data-view="flow" role="tab" aria-selected="true">Process flow</button>
+      <button class="tab" data-view="grid" role="tab" aria-selected="false">Today&rsquo;s grid</button>
+    </div>
+
+    <section class="view" id="view-flow" role="tabpanel">
+      <div class="lanes">
+        <div class="lane" data-cadence="daily">
+          <div class="rail" title="Daily — Request &rarr; Receipt &rarr; Finalized Transaction">
+            <span class="rail-label">Daily</span>
+          </div>
+          <div class="track">
+            <div class="source-stack">
+              <button class="tile" data-role="order" data-route="/app/purchase-order/new" title="/app/purchase-order/new">
+                <span class="step step--wide">1a</span>
+                <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22 2 7l10-5 10 5-10 15z"/><path d="M2 7h20M12 2v20"/></svg></span>
+                <span class="label">Purchase Orders</span>
+                <span class="route">/purchase-order/new</span>
+              </button>
+              <button class="tile" data-role="request" data-route="/app/material-request/new" title="/app/material-request/new">
+                <span class="step step--wide">1b</span>
+                <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/></svg></span>
+                <span class="label">Material Request</span>
+                <span class="route">/material-request/new</span>
+              </button>
+              <span class="stack-caption">either source</span>
+            </div>
+
+            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h13M13 6l6 6-6 6"/></svg></span>
+
+            <button class="tile" data-role="fulfill" data-route="/app/purchase-receipt/new" title="/app/purchase-receipt/new">
+              <span class="step">2</span>
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3H10l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
+              <span class="label">Receive Inventory</span>
+              <span class="route">/purchase-receipt/new</span>
+            </button>
+
+            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h13M13 6l6 6-6 6"/></svg></span>
+
+            <button class="tile" data-role="invoice" data-route="/app/purchase-invoice/new" title="/app/purchase-invoice/new">
+              <span class="step">3</span>
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16l3-2 3 2 3-2 3 2 3-2V8z"/><path d="M14 2v6h6"/></svg></span>
+              <span class="label">Enter Bills</span>
+              <span class="route">/purchase-invoice/new</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="bridge">
+          <div class="bridge-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6"/></svg>
+            <span>Posted bills queue up for the weekly pay run</span>
+          </div>
+          <div class="bridge-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6"/></svg>
+            <span>Entered bills get checked against vendor statements</span>
+          </div>
+        </div>
+
+        <div class="lane" data-cadence="weekly">
+          <div class="rail" title="Weekly / monthly — Settle &amp; research">
+            <span class="rail-label">As needed</span>
+          </div>
+          <div class="track">
+            <button class="tile" data-role="payment" data-route="/app/payment-entry/new" title="/app/payment-entry/new">
+              <span class="step">4</span>
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M16 14h.01"/></svg></span>
+              <span class="label">Pay Bills</span>
+              <span class="route">/payment-entry/new</span>
+            </button>
+
+            <span class="divider" aria-hidden="true"></span>
+
+            <button class="tile" data-role="neutral" data-route="/app/supplier" title="/app/supplier">
+              <span class="step">5</span>
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18"/><path d="M6 12H4M10 12H8M14 12h-2M18 12h-2M6 16H4M10 16H8M14 16h-2M18 16h-2M6 20H4M10 20H8M14 20h-2M18 20h-2M10 6h4"/></svg></span>
+              <span class="label">Vendor Center</span>
+              <span class="route">/supplier</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-grid" role="tabpanel" hidden>
+      <p class="grid-caption">For comparison: the same five tiles as they render today &mdash; one flat row, no sequence, no cadence, and no Material Request.</p>
+      <div class="grid-items">
+        <div class="grid-item" data-role="invoice"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16l3-2 3 2 3-2 3 2 3-2V8z"/><path d="M14 2v6h6"/></svg></span>Enter Bills</div>
+        <div class="grid-item" data-role="payment"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M16 14h.01"/></svg></span>Pay Bills</div>
+        <div class="grid-item" data-role="order"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22 2 7l10-5 10 5-10 15z"/><path d="M2 7h20M12 2v20"/></svg></span>Purchase Orders</div>
+        <div class="grid-item" data-role="fulfill"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3H10l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>Receive Inventory</div>
+        <div class="grid-item" data-role="neutral"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18"/><path d="M6 12H4M10 12H8M14 12h-2M18 12h-2M6 16H4M10 16H8M14 16h-2M18 16h-2M6 20H4M10 20H8M14 20h-2M18 20h-2M10 6h4"/></svg></span>Vendor Center</div>
+      </div>
+    </section>
+
+      </div>
+    </div>
+
+    <footer class="note">
+      <p>
+        Mockup only &mdash; tile order and copy for review, not wired to navigation.
+        Colors reuse the existing <code>doc-wash</code> role tokens (request / order / fulfill /
+        invoice / payment) from <code>src/doc-wash.js</code>, and the icon set matches
+        <code>src/ui-icons.js</code> &mdash; no new palette introduced. Material Request
+        (<code>/app/material-request/new</code>) is not a Home tile today; it's proposed here
+        as the second Request-stage source, alongside Purchase Orders. Tiles here still
+        &ldquo;click&rdquo; (toast only) so you can feel the sequence before anything is wired up.
+      </p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    (function () {
+      var tabs = document.querySelectorAll(".tab");
+      var views = { flow: document.getElementById("view-flow"), grid: document.getElementById("view-grid") };
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          tabs.forEach(function (t) { t.classList.remove("is-active"); t.setAttribute("aria-selected", "false"); });
+          tab.classList.add("is-active");
+          tab.setAttribute("aria-selected", "true");
+          Object.keys(views).forEach(function (key) { views[key].hidden = key !== tab.dataset.view; });
+        });
+      });
+
+      var toast = document.getElementById("toast");
+      var toastTimer = null;
+      document.querySelectorAll(".tile").forEach(function (tile) {
+        tile.addEventListener("click", function () {
+          toast.textContent = "Would open " + tile.dataset.route;
+          toast.classList.add("is-visible");
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () { toast.classList.remove("is-visible"); }, 1600);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

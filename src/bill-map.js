@@ -743,6 +743,7 @@ export function isWritableBillHeaderField(field) {
   }
   return (
     field === "is_paid" ||
+    field === "is_return" ||
     field === "mode_of_payment" ||
     field === "cash_bank_account" ||
     field === "paid_amount" ||

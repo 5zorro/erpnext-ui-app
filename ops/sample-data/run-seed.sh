@@ -3,7 +3,16 @@
 #
 # Usage:
 #   CONFIRM_SAMPLE_SEED=1 npm run seed:sample
-#   CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset   # cancel+delete prior tagged docs first
+#   CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset      # cancel+delete prior TAGGED docs first
+#   CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --purge-ap   # cancel+delete ALL AP docs, then seed
+#
+# --reset vs --purge-ap:
+#   --reset    removes only docs carrying the [ui-app-sample] tag. Useless against documents that
+#              predate tagging — on 2026-09-09 the sandbox held 148 Purchase Invoices and 98
+#              Purchase Receipts with zero tagged, so --reset deleted nothing.
+#   --purge-ap 🔴 DESTRUCTIVE. Cancels and deletes EVERY Payment Entry, Purchase Invoice, Purchase
+#              Receipt and Purchase Order for the sandbox company — hand-made dogfood documents
+#              included, not just seeded ones. Same sandbox-company guard as the seed.
 #
 # Env:
 #   FRAPPE_SITE                default: frontend
@@ -19,8 +28,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SITE="${FRAPPE_SITE:-frontend}"
 CONTAINER="${FRAPPE_BACKEND_CONTAINER:-frappe_docker-backend-1}"
 RESET=0
+PURGE_AP=0
 for arg in "$@"; do
   if [[ "$arg" == "--reset" ]]; then RESET=1; fi
+  if [[ "$arg" == "--purge-ap" ]]; then PURGE_AP=1; fi
 done
 
 if [[ "${CONFIRM_SAMPLE_SEED:-}" != "1" && "${CONFIRM_SAMPLE_SEED:-}" != "true" && "${CONFIRM_SAMPLE_SEED:-}" != "yes" ]]; then
@@ -63,6 +74,19 @@ fi
 echo "Copying plan + seed into container…"
 docker cp "$PLAN_HOST" "$CONTAINER:/tmp/corpus-plan.json"
 docker cp "$ROOT/ops/sample-data/seed_corpus.py" "$CONTAINER:/tmp/seed_corpus.py"
+
+if [[ "$PURGE_AP" == "1" ]]; then
+  echo "🔴 PURGING ALL AP DOCS for company '$COMPANY' (Payment Entry, Purchase Invoice,"
+  echo "   Purchase Receipt, Purchase Order) — hand-made dogfood documents included."
+  docker exec \
+    -e SAMPLE_COMPANY="${SAMPLE_COMPANY:-}" \
+    -e SAMPLE_DATA_FORCE="${SAMPLE_DATA_FORCE:-}" \
+    "$CONTAINER" bash -lc "
+set -e
+cd /home/frappe/frappe-bench
+bench --site '$SITE' execute \"[exec(open('/tmp/seed_corpus.py').read(), g:={}), g['purge_ap']()][1]\"
+"
+fi
 
 echo "Running seed (reset=$RESET)…"
 # bench execute accepts a dotted method OR one Python expression (eval).

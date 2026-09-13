@@ -9,6 +9,7 @@
  */
 
 import { isAmountDueEntered } from "./bill-map.js";
+import { isCreditMemoBill, CREDIT_MEMO_LABEL } from "./credit-memo.js";
 
 /** ERP header fields for on-Bill pay-at-entry memory (draft). */
 export const BILL_PAID_ERP_FIELDS = Object.freeze([
@@ -207,7 +208,7 @@ export function billCanAddPayment(doc) {
 /**
  * Banner badge beside “Bill” (Vanilla-style status pill).
  * @param {object|null|undefined} doc
- * @returns {{ label: string, tone: "draft"|"submitted"|"paid"|"partial"|"unpaid"|"cancelled"|"neutral" }|null}
+ * @returns {{ label: string, tone: "draft"|"submitted"|"paid"|"partial"|"unpaid"|"cancelled"|"neutral"|"credit-memo" }|null}
  */
 export function billDocStatusBadge(doc) {
   if (!doc || typeof doc !== "object") return null;
@@ -218,6 +219,8 @@ export function billDocStatusBadge(doc) {
     if (!name || /^new-/i.test(name)) return { label: "Draft", tone: "draft" };
     return { label: "Draft", tone: "draft" };
   }
+  // Credit memo relabel wins over the raw ERP status string (e.g. "Return") — OI-082.
+  if (isCreditMemoBill(doc)) return { label: CREDIT_MEMO_LABEL, tone: "credit-memo" };
   let status = String(doc.status || "").trim();
   let lower = status.toLowerCase();
   // docstatus is authoritative — savedocs can return status "Draft" before ERP refreshes it.

@@ -96,6 +96,21 @@ describe("shouldAcceptErpTrackNav", () => {
 });
 
 describe("shouldClearErpNavIntent", () => {
+  // Nav incident 2026-09-08T03:39 (see the module doc): erpForceReopenRoute armed an intent,
+  // called loadURL, then optimistically trackNav(target) with no opts. Under the old
+  // `!== false` reading that cleared the guard ~3ms later, and the Payment Entry navigation
+  // the shell had already rejected as stale three times was accepted on the fourth.
+  it("does NOT clear when fromBrowser is omitted — the flag must be opted into", () => {
+    assert.equal(
+      shouldClearErpNavIntent("/app/purchase-invoice/new", "/app/purchase-invoice/new"),
+      false,
+    );
+    assert.equal(
+      shouldClearErpNavIntent("/app/purchase-invoice/new", "/app/purchase-invoice/new", {}),
+      false,
+    );
+  });
+
   it("does not clear on optimistic shell trackNav", () => {
     assert.equal(
       shouldClearErpNavIntent("/app/purchase-order/new", "/app/purchase-order/new", {

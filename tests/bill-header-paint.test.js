@@ -67,6 +67,58 @@ describe("shouldPreserveHeaderInputDuringPaint", () => {
     );
   });
 
+  it("fills an EMPTY focused field — focus with nothing typed protects nothing", () => {
+    // The credit-memo vendor bug (5zorro 2026-09-09): the shell auto-focuses the vendor input
+    // when a rebuilt form first paints blank, so every later paint carrying the real supplier
+    // was skipped as "focused" and the field stayed empty for good.
+    assert.equal(
+      shouldPreserveHeaderInputDuringPaint({
+        field: "supplier",
+        paintedValue: "Alpine Supply",
+        currentValue: "",
+        isFocused: true,
+      }),
+      false,
+    );
+  });
+
+  it("still refuses to blank a focused field that holds a value", () => {
+    assert.equal(
+      shouldPreserveHeaderInputDuringPaint({
+        field: "supplier",
+        paintedValue: "",
+        currentValue: "Alpine Supply",
+        isFocused: true,
+      }),
+      true,
+    );
+  });
+
+  it("protects the first character typed into a focused empty field", () => {
+    // The window this opens is exactly one keystroke wide, and it closes on that keystroke.
+    assert.equal(
+      shouldPreserveHeaderInputDuringPaint({
+        field: "supplier",
+        paintedValue: "Alpine Supply",
+        currentValue: "A",
+        isFocused: true,
+      }),
+      true,
+    );
+  });
+
+  it("treats whitespace-only as empty, not as typing", () => {
+    assert.equal(
+      shouldPreserveHeaderInputDuringPaint({
+        field: "supplier",
+        paintedValue: "Alpine Supply",
+        currentValue: "   ",
+        isFocused: true,
+      }),
+      false,
+    );
+  });
+
   it("preserves partial date entry while typing", () => {
     assert.equal(
       shouldPreserveHeaderInputDuringPaint({
@@ -88,6 +140,16 @@ describe("paintHeaderInputIfAllowed", () => {
     });
     assert.equal(ok, false);
     assert.equal(input.value, "typed");
+  });
+
+  it("assigns into a focused empty input, and marks a link committed", () => {
+    const input = { value: "", dataset: {} };
+    const ok = paintHeaderLinkInputIfAllowed(input, "supplier", "Alpine Supply", {
+      activeElement: input,
+    });
+    assert.equal(ok, true);
+    assert.equal(input.value, "Alpine Supply");
+    assert.equal(input.dataset.linkCommitted, "Alpine Supply");
   });
 
   it("assigns when not focused and not dirty", () => {

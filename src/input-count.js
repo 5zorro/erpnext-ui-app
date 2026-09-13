@@ -149,6 +149,21 @@ export function evaluateSimplifiedMvpCeiling(p) {
 }
 
 /**
+ * Simplified lens proxy: Vanilla interactables minus whatever the doctype's seed profile
+ * assumes (any placement — L1 pre-fills it, L2/L3 quiet or hide it; either way the clerk
+ * no longer interacts with it). Same DOM as Vanilla, not a separate fixture — Simplified
+ * is Vanilla + an assumptions bar, not a rebuilt form, so this is what the runtime
+ * actually does to the interactable count.
+ * @param {Iterable<Pick<Interactable, 'field'>>} items
+ * @param {Readonly<Record<string, string>>|null|undefined} seed
+ * @returns {Interactable[]}
+ */
+export function simplifiedInteractables(items, seed) {
+  const assumed = seed && typeof seed === "object" ? new Set(Object.keys(seed)) : new Set();
+  return [...items].filter((it) => !(it.field && assumed.has(it.field)));
+}
+
+/**
  * Compare scrape vs curated completeness.
  * @param {string[]} missingIds
  * @returns {{ ok: boolean, missing: string[] }}

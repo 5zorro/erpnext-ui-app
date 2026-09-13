@@ -16,9 +16,13 @@ you hit; only then design mockups that sidestep the confirmed ones.
 
 | Symbol | Source | Use |
 |--------|--------|-----|
-| \(N_d\) | `BILL_DOC_CURATED` (warm inventory) | Doc advertising / Simplified thin ceiling |
-| Doc static | scrape of `electron/bill.html` | Completeness gate vs curated (no synthetic lines) |
-| \(N_v\) | scrape of `tests/fixtures/bill-vanilla-form.fixture.html` | Vanilla advertising proxy until live Desk dump |
+| \(N_d\) | `*_DOC_CURATED` (warm inventory, per doctype) | Doc advertising |
+| Doc static | scrape of the Doc skin HTML (Bill fragments / `doc-form.html`) | Completeness gate vs curated (no synthetic lines) |
+| \(N_v\) | scrape of `tests/fixtures/{bill,po,receipt}-vanilla-form.fixture.html` | Vanilla advertising proxy until live Desk dump |
+| \(N_s\) | `simplifiedInteractables(vanillaItems, SEED_PROFILES[doctype])` | Simplified advertising (G11) |
+
+Run `npm run report:input-count` for all three anchors, or `report:input-count:bill` /
+`:po` / `:receipt` for one.
 
 **Bar segments** (`advertisingBarSegments`):
 
@@ -33,15 +37,24 @@ Mode switch is **inferred** from markup (`date` / `tenkey` / `none`), not timed 
 
 ## Snapshot (update when inventories change)
 
-From `npm run report:input-count` (2026-08-02):
+From `npm run report:input-count` (2026-09-07, all three anchors; \(N_d\) up on all three
+after the credit-memo controls landed — see the note under the table):
 
-| Lens | Interactables | Mode switches | Effort |
-|------|---------------|---------------|--------|
-| Doc curated | 31 | 6 | 37 |
-| Doc static HTML | 25 | 4 | 29 |
-| Vanilla fixture | 65 | 9 | 74 |
+| Doctype | Doc curated N_d | Simplified N_s | Vanilla fixture N_v | N_d vs N_v | N_s vs N_v |
+|---------|-----------------|-----------------|----------------------|-----------|-----------|
+| Bill (Purchase Invoice) | 59 | 54 | 65 | −9.2% | −16.9% |
+| Purchase Order | 40 | 48 | 58 | −31.0% | −17.2% |
+| Item Receipt (Purchase Receipt) | 57 | 56 | 66 | −13.6% | −15.2% |
 
-\(N_v > N_d\) holds on this snapshot.
+**Why \(N_d\) rose (2026-09-07):** the credit-memo tranche added a `Create Credit / Return`
+toolbar button, a draft-only `is_return` Yes/No switch, and two informal-link buttons to the
+Bill surface, plus shared chrome that PO/IR inherit. This is the expected cost of a feature,
+not a regression — but it is exactly the kind of drift that silently invalidates published
+marketing numbers, so the chart is now generated from these same sources by
+`npm run chart:input-count` rather than drawn once by hand.
+
+\(N_v > N_d\) and \(N_v > N_s\) both hold on every anchor. \(N_d\) vs \(N_s\) does **not**
+have a stable ordering — see G11.
 
 ---
 
@@ -53,6 +66,13 @@ The Vanilla file is a **representative density** snippet (Clean Core — no vend
 Live Purchase Invoice may add section collapses, child-table chrome, custom fields, or
 workspace buttons. **Dogfood:** Tab a blank PI in Vanilla on sandbox; if your mental
 count is far from ~65, capture a Desk HTML dump and replace/extend the fixture.
+
+The fixture also has no per-tab `hidden`/panel markup (checked 2026-09-06): fields from
+every tab (Details, Payments, Terms, More Info, Connections) sit flat and unhidden in one
+file, so \(N_v\) already counts every tab flattened, not what a real one-tab-at-a-time
+Desk session shows at once. \(N_s\) (G11) is a direct subset of this same list, so it
+inherits the flattening rather than suffering a separate penalty from it — but the
+absolute numbers for **both** still overstate what a clerk sees on any one tab.
 
 ### G2 — Blank vs sourced not split yet
 
@@ -106,6 +126,28 @@ count).
 Doc Amount column is display-only (not counted). Vanilla fixture may still count an
 amount control if marked editable. Align rules when refreshing the fixture.
 
+### G11 — Simplified N_s is Vanilla minus seed, not a separate fixture; N_d vs N_s is not ordered
+
+`simplifiedInteractables()` (`src/input-count.js`) takes the **same** Vanilla-fixture scrape
+used for \(N_v\) and drops any item whose field the doctype's seed profile assumes
+(`simplified-seed-profiles.js`) — this matches the runtime (Simplified is Vanilla + an
+assumptions bar, not a rebuilt form), so no new fixture was needed to add \(N_s\).
+
+\(N_v > N_s\) holds on all three anchors (2026-09-07), but \(N_d\) and \(N_s\) do **not**
+sit in a fixed order: Bill has \(N_s < N_d\) (54 vs 59), Purchase Order has \(N_d < N_s\)
+(40 vs 48) by a wide margin, Item Receipt is near-tied the other way (57 vs 56 — it was an
+exact tie before the credit-memo controls landed). This is not a bug in either
+number — Doc curated (\(N_d\)) is a warm inventory that includes commit-gate/retry buttons
+and a synthetic line template (G3) that only exist in certain states, while \(N_s\) is a
+literal one-state DOM count; they are measuring different things and were never meant to
+rank against each other. Do not read \(N_d\) vs \(N_s\) as "Doc beats Simplified" or vice
+versa — the only claim the numbers support is that both lenses cut real interactables
+versus stock Vanilla.
+
+Seed profiles for PO and Item Receipt (added 2026-09-05, same session as Bill's) have
+**not** been dogfooded — see gotchas G1–G10 for the same caveat already carried by \(N_v\).
+Treat this snapshot as a first-cut, honestly-labeled estimate, not a verified claim.
+
 ---
 
 ## Dogfood checklist (you)
@@ -126,4 +168,4 @@ amount control if marked editable. Align rules when refreshing the fixture.
 
 - Competitor product bars (legal / claim risk).
 - Keystroke logging (never).
-- PO / IR anchors (extend after Bill dogfood).
+- Simplified/PO/IR dogfood (G11) — numbers are a mechanical first cut, not yet walked in the app.

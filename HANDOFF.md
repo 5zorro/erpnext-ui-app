@@ -10,10 +10,18 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
-   `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086).
-   `implementation-plan-2026-09-03.md` (Doc Pay skin economic batching / OI-138 · OI-161) —
-   planned, no code yet.
-   **Closed:** `implementation-plan-2026-08-19.md` (nav instrumentation OI-126/127/128 A,
+   `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
+   assumptions) — the only open plan; successor to the Doc Pay skin tranche.
+   **Closed:** `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086 + Calculator
+   OI-018, closed 2026-09-08) — lens architecture folded into **Simplified lens** below; the
+   calculator's shipped/remaining split (C0–C3 landed, C4–C5 open) lives on museum **OI-018**;
+   the AP credit-memo thread (OI-082 / OI-147 / OI-164 / OI-166 / OI-167) was promoted into the
+   2026-09-08 plan as required, **not** dropped.
+   `implementation-plan-2026-09-03.md` (Doc Pay skin economic batching / OI-138 ·
+   OI-161, MVP 2026-09-08) — flow-geometry contract folded into **Pay Outstanding flow** below;
+   `[hidden]`/display and headless-measurement lessons in [docs/gotchas.md](docs/gotchas.md) G7-G8;
+   three financial write paths still unverified against a live sandbox (carried into the successor).
+   `implementation-plan-2026-08-19.md` (nav instrumentation OI-126/127/128 A,
    2026-09-05) — map folded into **Navigation spine** below; residuals live on as museum
    OI-128 (peek granularity) and OI-040 (concurrent instances, parked).
    `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
@@ -91,6 +99,16 @@ flowchart LR
    Receipt, Bill, Payment Entry, Sales Order, Sales Invoice, Quotation, Journal Entry — not spread
    across list views, reports, or other Vanilla surfaces.
 
+7. **A Doc skin is still a form** (5zorro 2026-09-08) — *"it is supposed to still be a form, but
+   it is supposed to be easier for humans who handle documents… I don't want to force the lens of
+   the form to be read-only to make it more 'document-like'."* What makes a Doc skin
+   document-shaped is layout, naming, and what it chooses to show — never the removal of the
+   ability to type. The **only** legitimate source of read-only is the document's own state in
+   ERPNext (`docstatus`: submitted and cancelled cannot be edited, drafts can), plus fields the ERP
+   itself computes. Read-only is a fact the skin reflects, not a lever it pulls for feel. Recorded
+   because the opposite instinct is easy to have twice — it was specced into the Doc Pay skin
+   tranche's Payment Entry step and had to be reversed before build (plan since closed).
+
 ### Extension points (where new work plugs in)
 
 | Capability | Pure module(s) | Electron surface |
@@ -103,6 +121,7 @@ flowchart LR
 | Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
 | Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
+| Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
 | Doc terms | `doc-terms.js` | Bill / Home labels (QB-style) |
@@ -111,6 +130,8 @@ flowchart LR
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
 | Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
+| Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |
+| In-field calculator | `src/calc/` (`calc-engine.js`, `attach-field-calc.js`, `field-calc.js`, `back-in-amount.js`, `session-history.js`) | Doc form numeric fields (Bill / PO / IR) + left-rail Calculator history; 24h prune in `nav-state.json` |
 | Link search (T1) | `link-search.js`, `vendor-activity.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131) |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`ce79ba6`) |
@@ -142,6 +163,19 @@ Simplified injection gate, Recent rows) must tolerate it lagging — see `docs/g
 Guarding those events is `erp-nav-intent.js`; the guard must always resolve to arm **or**
 clear, never "leave the last one armed".
 
+**Every surface claims a route.** A `surfaceMode` that renders a document must set
+`currentRoute` (and push its Recent row) the moment it is shown — an ERP navigation does this
+for free, a `loadFile()` surface must do it by hand via `noteShellDocSurfaceRoute()`, using the
+same `/app/…` route the Vanilla visit would use so both lenses share one history slot. The two
+Payment Entry Doc surfaces skipped it and went missing from Recent, the lens chip and their own
+incident snapshots — `docs/gotchas.md` G9.
+
+**Two registries, one question.** `lens-context.js` (`DOC_SKIN_INDEX`) is the SSoT for *what has
+a Doc skin*; `doc-skin-registry.js` (`DOC_SKIN_PROFILES`) only knows the doc-form.html layouts.
+Nav paths must ask the former (`resolveDocSkinTarget`) and use the latter only to dispatch a
+doc-form shell — asking the subset is how a remembered Doc lens gets silently downgraded to
+Vanilla (G9).
+
 **Persistence contract** (`userData/nav-state.json`): Drafts, Calculator history, Submitted
 docs and the rail's collapsed state survive restart (calc and submitted rows restored from
 disk are marked *previous session*, so the "this session" counter stays honest).
@@ -150,13 +184,19 @@ empty after a restart while Drafts still lists work in progress.
 
 **Lens tabs are earned per page.** Vanilla is always there — it is the ERP itself. Every
 other tab must be earned by the page in front of you (`chrome-state.js` `lensTabsFor()`;
-the toolbar renders the answer, it never guesses):
+the toolbar renders the answer, it never guesses — which tab is *lit* is `lensTabEmphasis()`
+under the same rule, after the toolbar re-derived it and lit the wrong one, G10):
 
 | Page | Tabs |
 |------|------|
 | Bill record | Vanilla · Simplified · Doc |
-| PO / IR record | Vanilla · Doc |
+| PO record | Vanilla · Simplified · Doc |
+| IR (Purchase Receipt) record | Vanilla · Simplified · Doc |
 | Desk, dashboards, lists, masters | Vanilla only |
+
+(2026-09-05: Simplified's seed now covers all three anchored doc-skin doctypes, not just
+Bill — see `simplified-seed-profiles.js`. Any future doctype with a Doc skin but no seed
+yet stays Vanilla + Doc only, same rule as before.)
 
 - **Simplified** needs a seeded doctype *and* an open record — availability derives from
   `SEED_PROFILES` via `lens-context.js` `hasSimplifiedLens()`, so shipping a seed lights up
@@ -171,6 +211,67 @@ the toolbar renders the answer, it never guesses):
   does not bounce to Desk.
 
 OI-112 — always-on Doc tab narrowed 2026-09-05; rule extended to the whole toolbar.
+
+### Simplified lens (folded from the 2026-07-29 plan, closed 2026-09-08)
+
+Simplified is **thin-inject**, decided 2026-09-06 after building both mockups: the shell injects
+`assume-applier-payload.js` into the **live Vanilla form** and hides / dims / skip-tabs its way to
+the clerk path. Ground-up rebuild was rejected — Doc already owns the rebuilt clerk path, and the
+injection core is reusable against **other Vanilla form-entry sites**, which a second bespoke form
+would not be. The rejected mockup's one good idea — growing a skin's field coverage toward Vanilla
+parity — survives as museum **OI-163**, aimed at the **Doc** skin, and is explicitly parked.
+
+Three rules keep the lens cheap:
+
+- **A doctype joins Simplified by shipping a seed profile, not shell code.**
+  `simplified-seed-profiles.js` is the SSoT; `lens-context.js` `hasSimplifiedLens()` derives tab
+  availability from it, so there is no second list to forget (see **Lens tabs are earned per page**
+  above). Bill / PO / IR are seeded today.
+- **The skin owns an explicit `destroy()`.** Leaving the lens must not depend on a page reload
+  happening — it injects into a page it does not control.
+- **Anything Doc affords, Simplified re-hosts rather than drops.** Link pickers, focus policy and
+  validations come from the shared policy modules; "hide until broken" is not a simplification.
+  The one place this is still unpaid: the in-field **calculator** is not attached to Simplified
+  fields (museum OI-018 C5).
+
+The ceiling is measured, not asserted — `npm run report:input-count` compares the Vanilla
+interactable count against the skin's, and CI holds \(N_v > N_d\). Growing Simplified toward
+\(N_v\) is config, not a rewrite (museum OI-086, Packet S3 — optional).
+
+### Pay Outstanding flow (folded from the 2026-09-03 plan, MVP 2026-09-08)
+
+Vendor card = five columns: **invoices → (ribbon) → payment schedule → (ribbon) → suggested
+payments**. Four rules were each paid for with a bug; break one and the picture silently stops
+matching the table.
+
+- **The SVG owns the geometry, and the DOM is told to match.** Row *i*'s centre is
+  `i * ROW_HEIGHT + ROW_HEIGHT/2`; an aggregate's span is `memberCount * ROW_HEIGHT` (member count,
+  **never** dollar share — that produced a 4-row-tall payment fed by 5 rows). This is what makes all
+  three columns exactly `scheduleHeight` tall.
+- **Everything the SVG also measures must be `box-sizing: border-box`.** A content-box row with a
+  1px border renders 35px against a 34px pitch: 12px of drift by row 12.
+- **A node fits its content to its span; the span never grows to fit the content.**
+  `flow-node-density.js` returns a capacity in lines (1 row → one line, 2 → two, 3+ → all), and
+  `overflow: hidden` is the backstop so anything left over clips instead of printing over the
+  payment below. Adjustable row heights were considered and rejected 2026-09-08: Y would have to
+  come from measurement rather than arithmetic, and under the invoice sort a group's members are
+  not contiguous, so there is no coherent set of rows to stretch. If a *schedule row* ever needs two
+  lines, replace the constant with a cumulative `rowTop[i]` array — the SVG already computes from a
+  row index, so that is the contained change.
+- **A suggested payment is identified by its own `id`, never by `payOn`.** The bank calendar walks
+  *backwards* to the last banking day, so a Saturday and a Sunday due date land on the same Friday
+  and one vendor can legitimately hold several proposals for one date. Using the date as identity
+  lit them all at once.
+
+**The sort is a real choice, not a preference.** With groups drawing from several invoices, the two
+aggregate columns want opposite row orders, so only one can be contiguous under any one sort (date
+sort → payments line up, invoices cross; invoice sort → the mirror image). Measured, not tunable —
+`pay-flow-sort.js` computes it and the card says so out loud. Hover-focus exists to make the
+crossings legible rather than to remove them.
+
+**Actions are buttons; clicks only explore.** Committing work is a labelled button on the node
+(`Create payment`, shortened to `Pay` in a one-row node — never reduced to a bare icon); cell clicks
+navigate nothing and write nothing.
 
 ### Dogfood debugging (5zorro → agent)
 

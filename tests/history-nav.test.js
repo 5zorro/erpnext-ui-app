@@ -4,6 +4,7 @@ import {
   classifyHistoryOpen,
   pickFallbackDocRoute,
   doctypeHasDocSkin,
+  routeIsDocSkinned,
   FALLBACK_DOC_ROUTE,
   isSoftPeekRoute,
   appRouteParts,
@@ -174,6 +175,58 @@ describe("doctypeHasDocSkin", () => {
   it("is true only for Doc skin registry keys", () => {
     assert.equal(doctypeHasDocSkin("purchase-invoice"), true);
     assert.equal(doctypeHasDocSkin("tax-category"), false);
+  });
+
+  it("stays a doc-form question — Payment Entry's skin is not one, so soft-peek is unchanged", () => {
+    assert.equal(doctypeHasDocSkin("payment-entry"), false);
+    assert.equal(isSoftPeekRoute("/app/payment-entry/ACC-PAY-2026-00001"), true);
+  });
+});
+
+describe("routeIsDocSkinned", () => {
+  it("answers the labelling question from the skin index, not the doc-form registry", () => {
+    assert.equal(routeIsDocSkinned("payment-entry", "ACC-PAY-2026-00001"), true);
+    assert.equal(routeIsDocSkinned("purchase-invoice", "new"), true);
+    assert.equal(routeIsDocSkinned("tax-category", "Capital"), false);
+  });
+
+  it("needs a record — a list is not a document", () => {
+    assert.equal(routeIsDocSkinned("payment-entry", ""), false);
+    assert.equal(routeIsDocSkinned("", "ACC-PAY-2026-00001"), false);
+  });
+});
+
+describe("classifyHistoryOpen kind", () => {
+  it("a Payment Entry is a document row, not a muted setup row", () => {
+    const c = classifyHistoryOpen("/app/payment-entry/ACC-PAY-2026-00001");
+    assert.equal(c.kind, "doc");
+    // How to *open* it is still the doc-form question, so soft-peek policy is untouched.
+    assert.equal(c.mode, "vanilla-always");
+  });
+
+  it("real setup pages keep the setup decoration", () => {
+    assert.equal(classifyHistoryOpen("/app/tax-category/Capital").kind, "setup");
+    assert.equal(classifyHistoryOpen("/app/company/HI").kind, "setup");
+  });
+
+  it("a Bill list still counts as doc even with no record", () => {
+    const c = classifyHistoryOpen("/app/purchase-invoice");
+    assert.equal(c.kind, "doc");
+    assert.equal(c.mode, "doc-preferred");
+  });
+});
+
+describe("decorateHistoryEntry on a Payment Entry", () => {
+  it("keeps the payment name instead of overwriting it with \"setup\"", () => {
+    const row = decorateHistoryEntry({
+      route: "/app/payment-entry/ACC-PAY-2026-00001",
+      dt: "payment-entry",
+      label: "Payment Entry",
+      detail: "ACC-PAY-2026-00001",
+    });
+    assert.equal(row.kind, "doc");
+    assert.equal(row.detail, "ACC-PAY-2026-00001");
+    assert.equal(row.detailMuted, false);
   });
 });
 

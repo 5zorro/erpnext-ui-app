@@ -7,6 +7,7 @@
 export const DOC_TERM_PAIRS = [
   ["Purchase Invoices", "Bills"],
   ["Purchase Invoice", "Bill"],
+  ["Debit Note", "Vendor Credit"],
   ["Purchase Orders", "Purchase Orders"],
   ["Purchase Receipts", "Item Receipts"],
   ["Purchase Receipt", "Item Receipt"],

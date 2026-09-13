@@ -10,7 +10,9 @@ import {
   advertisingBarSegments,
   evaluateSimplifiedMvpCeiling,
   completenessGate,
+  simplifiedInteractables,
 } from "../src/input-count.js";
+import { SEED_PROFILES } from "../src/simplified-seed-profiles.js";
 import {
   BILL_DOC_CURATED,
   BILL_DOC_INVENTORY_META,
@@ -168,5 +170,40 @@ describe("Item Receipt anchor N_d / N_v", () => {
     const docStatic = scrapeInteractables(docFormHtml);
     const vanilla = scrapeInteractables(vanillaReceiptHtml);
     assert.ok(vanilla.count > docStatic.count);
+  });
+});
+
+describe("simplifiedInteractables (Vanilla minus seed) all three anchors", () => {
+  it("drops only fields the seed assumes; keeps null-field items", () => {
+    const items = [
+      { field: "cost_center" },
+      { field: "supplier" },
+      { field: null },
+    ];
+    const kept = simplifiedInteractables(items, { cost_center: "L2" });
+    assert.deepEqual(kept, [{ field: "supplier" }, { field: null }]);
+  });
+
+  it("returns all items unchanged when no seed is given", () => {
+    const items = [{ field: "supplier" }];
+    assert.deepEqual(simplifiedInteractables(items, null), items);
+  });
+
+  it("Bill: Simplified lens is strictly thinner than Vanilla", () => {
+    const vanilla = scrapeInteractables(vanillaBillHtml).items;
+    const simplified = simplifiedInteractables(vanilla, SEED_PROFILES["Purchase Invoice"]);
+    assert.ok(simplified.length < vanilla.length);
+  });
+
+  it("PO: Simplified lens drops at least one seeded field present in the fixture", () => {
+    const vanilla = scrapeInteractables(vanillaPoHtml).items;
+    const simplified = simplifiedInteractables(vanilla, SEED_PROFILES["Purchase Order"]);
+    assert.ok(simplified.length < vanilla.length);
+  });
+
+  it("Item Receipt: Simplified lens drops at least one seeded field present in the fixture", () => {
+    const vanilla = scrapeInteractables(vanillaReceiptHtml).items;
+    const simplified = simplifiedInteractables(vanilla, SEED_PROFILES["Purchase Receipt"]);
+    assert.ok(simplified.length < vanilla.length);
   });
 });

@@ -45,6 +45,17 @@ import {
   linkedSourcePeekKindLabel,
 } from "../src/source-doc-peek.js";
 import {
+  isCreditMemoBill,
+  creditMemoTermsHint,
+  creditMemoReturnAgainst,
+  creditMemoOrphaned,
+  parseBillLinkToken,
+  withBillLinkToken,
+  parseSoLinkToken,
+  withSoLinkToken,
+  planCreditMemoSource,
+} from "../src/credit-memo.js";
+import {
   evaluateBillRef,
   billRefWaitingForVendorResult,
   resolveBillRefSupplier,
@@ -121,6 +132,11 @@ import {
   nextItemFocusAfterEdit,
 } from "../src/link-picker-policy.js";
 import {
+  autoSizeItemColumns,
+  mountColResize,
+  mountDensityControl,
+} from "./item-col-resize.js";
+import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
   itemTableKeyDecision,
@@ -129,7 +145,18 @@ import {
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
+import {
+  fieldsSettlingFor,
+  remainingHoldMs,
+  FIELD_LOADING_SHOW_AFTER_MS,
+} from "../src/field-loading.js";
 import { showSourceModal } from "../src/source-modal-ui.js";
+import {
+  buildCreditSourceGroups,
+  buildCreditSourceLoadingGroups,
+  buildCreditSourceErrorGroups,
+  classifyCreditSourceChoice,
+} from "../src/source-modal-credit-mode.js";
 import {
   runSourcePickerFlow,
   mayAutoOpenSourcePicker,
@@ -193,6 +220,7 @@ import {
 } from "../src/bill-tax-sync.js";
 import {
   applyDocWashToDocument,
+  setDocWashVariant,
   setWashSourceAttr,
   washRoleForSourceKind,
 } from "../src/doc-wash.js";
@@ -229,6 +257,23 @@ export async function bootBillFormPage(api) {
   let taxTabGuard = false;
   /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
   let itemCellMode = CELL_MODE_EDIT;
+
+  /**
+   * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
+   * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
+   * (it is a one-shot handoff to the focus handler), so nothing survives for a
+   * stylesheet to match on.
+   * @param {"edit"|"nav"} mode
+   */
+  function setItemCellMode(mode) {
+    itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+    try {
+      if (el && el.items) el.items.dataset.cellMode = itemCellMode;
+    } catch {
+      /* mode mirroring is cosmetic; never let it break navigation */
+    }
+  }
+
   let userEdited = false;
   /** @type {"find"|"new"|"print"|null} */
   let pendingGate = null; // GateTrigger | null — SSoT for the one commit-gate
@@ -250,6 +295,8 @@ export async function bootBillFormPage(api) {
   /** @type {string} */
   let sourcePickerInflightSupplier = "";
   let allocationPickerOpen = false;
+  /** True while the credit-memo informal-link picker (Bill or Sales Order) is open. */
+  let informalLinkPickerOpen = false;
   /** True while OI-140 → Stock allocate dialog is open (freeze tax × deletes). */
   let allocateChargeModalOpen = false;
   /** @type {Record<number, object>} */
@@ -507,6 +554,14 @@ export async function bootBillFormPage(api) {
     revert: document.getElementById("btn-revert"),
     find: document.getElementById("btn-find"),
     newBill: document.getElementById("btn-new"),
+    creditMemo: document.getElementById("btn-credit-memo"),
+    creditMemoToggleSection: document.getElementById("credit-memo-toggle"),
+    isReturn: document.getElementById("f-is-return"),
+    creditLinksBlock: document.getElementById("credit-links-block"),
+    creditLinkBillValue: document.getElementById("credit-link-bill-value"),
+    creditLinkSoValue: document.getElementById("credit-link-so-value"),
+    informalLinkBill: document.getElementById("btn-informal-link-bill"),
+    informalLinkSo: document.getElementById("btn-informal-link-so"),
     print: document.getElementById("btn-print"),
     dirtyPill: document.getElementById("dirty-pill"),
     commitGate: document.getElementById("commit-gate"),
@@ -1371,7 +1426,7 @@ export async function bootBillFormPage(api) {
   
   function focusItemCell(rowIndex, field, opts = {}) {
     const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-    itemCellMode = mode;
+    setItemCellMode(mode);
     const wantSelect =
       opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
     const tryFocus = () => {
@@ -1541,8 +1596,8 @@ export async function bootBillFormPage(api) {
             : formatGroupedNumber(r.tax_amount);
         return `<tr data-taxidx="${r.idx}">
           <td><span class="ro">${escapeHtml(String(r.lineNo))}</span></td>
-          <td><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
-          <td><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
           <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
@@ -1559,8 +1614,18 @@ export async function bootBillFormPage(api) {
         </tr>`;
       })
       .join("");
+    sizeTaxColumns();
   
     el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
+      // Same resting-text sync as the items grid (Packet T step B).
+      const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+      if (taxCellText) {
+        const syncTaxCellText = () => {
+          taxCellText.textContent = inp.value;
+        };
+        inp.addEventListener("input", syncTaxCellText);
+        inp.addEventListener("change", syncTaxCellText);
+      }
       const field = inp.getAttribute("data-tax-field");
       const ri = Number(inp.getAttribute("data-tax-row"));
       inp.tabIndex = -1;
@@ -1786,6 +1851,36 @@ export async function bootBillFormPage(api) {
     paintMoneyStack(doc);
   }
   
+
+    /**
+     * Packet T C — size the line grid from its content, then arm the drag
+     * handles. Runs after every repaint because the header row is rebuilt each
+     * time; both calls are idempotent.
+     */
+    function sizeItemColumns() {
+      try {
+        const table = el.items && el.items.closest ? el.items.closest("table") : null;
+        if (!table) return;
+        mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
+        mountDensityControl({ table, button: document.getElementById("btn-density") });
+        autoSizeItemColumns(table, { tableKey: "bill-items" });
+      } catch {
+        /* column sizing is presentation; never let it break a repaint */
+      }
+    }
+
+    function sizeTaxColumns() {
+      try {
+        const table =
+          el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
+        if (!table) return;
+        mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
+        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false });
+      } catch {
+        /* ignore */
+      }
+    }
+
   function paintItemsHead() {
     const thead = document.getElementById("items-head-row");
     if (!thead) return;
@@ -1858,13 +1953,13 @@ export async function bootBillFormPage(api) {
             return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="bill-cell-${ri}-rate" /></td>`;
           }
           if (!canEdit) {
-            return `<td><span class="ro">${escapeHtml(val)}</span></td>`;
+            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
           }
           // Qty: text + decimal keypad — no spinner; ↑/↓ navigate rows only.
           if (col.field === "qty") {
             return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-qty" /></td>`;
           }
-          return `<td><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
+          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
         }).join("");
         const del = canEdit
           ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
@@ -1874,8 +1969,21 @@ export async function bootBillFormPage(api) {
       .join("");
   
     paintLineTotals(doc);
+    sizeItemColumns();
   
     el.items.querySelectorAll("input[data-row]").forEach((inp) => {
+      // Keep the resting text layer in step with the editor. The text is hidden
+      // while the input has focus, so this is not load-bearing for correctness
+      // mid-edit -- it is here so a cell reads right the instant you leave it,
+      // without waiting for a repaint that may never come.
+      const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+      if (cellText) {
+        const syncCellText = () => {
+          cellText.textContent = inp.value;
+        };
+        inp.addEventListener("input", syncCellText);
+        inp.addEventListener("change", syncCellText);
+      }
       const field = inp.getAttribute("data-field");
       const ri = Number(inp.getAttribute("data-row"));
       const linkDt = linkDoctypeForBillField(field);
@@ -1982,10 +2090,10 @@ export async function bootBillFormPage(api) {
       }
       inp.addEventListener("focus", () => {
         if (inp.dataset.navFocus === "1") {
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           delete inp.dataset.navFocus;
         } else {
-          itemCellMode = CELL_MODE_EDIT;
+          setItemCellMode(CELL_MODE_EDIT);
         }
       });
       if (field === "item_code") {
@@ -2052,7 +2160,7 @@ export async function bootBillFormPage(api) {
   
         if (decision.action === "leave_edit") {
           if (decision.preventDefault) ev.preventDefault();
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           try {
             if (typeof inp.select === "function") inp.select();
           } catch {
@@ -2062,7 +2170,7 @@ export async function bootBillFormPage(api) {
         }
   
         if (decision.action === "enter_edit") {
-          itemCellMode = CELL_MODE_EDIT;
+          setItemCellMode(CELL_MODE_EDIT);
           if (ev.key === "F2") {
             ev.preventDefault();
             try {
@@ -2086,7 +2194,7 @@ export async function bootBillFormPage(api) {
           decision.action === "leave_edit_move" ||
           (decision.action === "tab" && decision.direction === "left")
         ) {
-          itemCellMode = CELL_MODE_NAV;
+          setItemCellMode(CELL_MODE_NAV);
           itemTabGuard = true;
           void (async () => {
             try {
@@ -2135,7 +2243,7 @@ export async function bootBillFormPage(api) {
   
         if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
         ev.preventDefault();
-        itemCellMode = CELL_MODE_NAV;
+        setItemCellMode(CELL_MODE_NAV);
         itemTabGuard = true;
         void (async () => {
           try {
@@ -2496,6 +2604,22 @@ export async function bootBillFormPage(api) {
     }
   }
   
+  /** Draft-only toggle for is_return — flips on a form already loaded, so there's no
+   * navigate-then-mutate gap for a stale ERP nav to clobber (nav incident 2026-09-07). */
+  function paintCreditMemoToggle(doc, canEdit) {
+    const checked = isCreditMemoBill(doc);
+    // Vertical white ledger stripes over the invoice wash while this is a return — the
+    // one signal that survives on a *submitted* credit memo, where the toggle is hidden.
+    setDocWashVariant(document, checked ? "return" : null);
+    if (el.creditMemoToggleSection) el.creditMemoToggleSection.hidden = !canEdit;
+    if (el.isReturn) {
+      el.isReturn.classList.toggle("is-on", checked);
+      el.isReturn.setAttribute("aria-checked", checked ? "true" : "false");
+      el.isReturn.setAttribute("aria-label", checked ? "Credit memo: Yes" : "Credit memo: No");
+      el.isReturn.disabled = !canEdit;
+    }
+  }
+
   async function paintAppliedPayments(doc, opts = {}) {
     if (!el.appliedPayments) return;
     const submitted = doc && Number(doc.docstatus) === 1;
@@ -2795,7 +2919,8 @@ export async function bootBillFormPage(api) {
       await runVendorPickWithSourceModal({
         supplier: v,
         decision,
-        setHeader: (field, value) => api.setHeader(field, value),
+        setHeader: (field, value) =>
+          withFieldSettleLoading(field, api.setHeader(field, value)),
         openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
           if (res && res.paymentTermsSettle) {
@@ -2880,7 +3005,12 @@ export async function bootBillFormPage(api) {
       setStatus("Source picker API missing — restart the shell.", "err");
       return { ok: false, reason: "api_missing" };
     }
-    if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
+    // Every modal on this page must respect every other one. The credit-memo link picker
+    // checked these two from day one; they did not check it back, so a toolbar Select PO
+    // could stack a second dialog on top of an open link picker.
+    if (sourceModalOpenRef.current || informalLinkPickerOpen) {
+      return { ok: false, reason: "already_open" };
+    }
     if (!editable()) {
       setStatus("Bill is not a draft — source picker locked.", "warn");
       return { ok: false, reason: "not_editable" };
@@ -2933,13 +3063,69 @@ export async function bootBillFormPage(api) {
     document.querySelectorAll(".link-dd").forEach((dd) => {
       dd.hidden = true;
     });
-    setStatus("Loading open PO / Item Receipts…");
+
+    /**
+     * OI-166 — the modal asks one question, "where does this Bill come from?", and the foot
+     * switch changes which corpus answers it: open Purchase Orders / Item Receipts, or the
+     * submitted Bill this credit is against. 5zorro's flow is vendor → source in one breath,
+     * so the decision belongs here rather than behind a second dialog opened later.
+     *
+     * A Bill that is already a credit opens the modal already switched.
+     */
+    let creditOn = isCreditMemoBill(lastDoc);
+    /** Latest PO/IR corpus, kept warm so flipping back is instant and complete. */
+    let sourceGroups = null;
+    /** @type {import("./source-modal-ui.js").SourceModalController|null} */
+    let modalCtl = null;
+    let creditLoadToken = 0;
+    const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
+
+    async function switchCreditMode(next) {
+      if (!modalCtl) return;
+      creditOn = !!next;
+      if (!creditOn) {
+        // Slices that landed while the switch was on were accumulated, not painted.
+        modalCtl.setCreditMode(false, sourceGroups || undefined);
+        setStatus("Back to Purchase Orders and Item Receipts — Space to check · Enter to pull.");
+        return;
+      }
+      const token = ++creditLoadToken;
+      modalCtl.setCreditMode(true, buildCreditSourceLoadingGroups(sup));
+      setStatus(`Loading submitted Bills for ${sup}…`);
+      let rows = null;
+      let failure = "";
+      try {
+        rows = await searchSourceBillRows("", sup, currentName);
+      } catch (err) {
+        failure = String(err && err.message ? err.message : err);
+      }
+      // A stale fetch must never repaint a list the clerk has already switched away from.
+      if (token !== creditLoadToken || !creditOn || !sourceModalOpenRef.current) return;
+      if (failure) {
+        modalCtl.setCreditMode(true, buildCreditSourceErrorGroups(failure, sup));
+        setStatus(`Could not load Bills: ${failure}`, "err");
+        return;
+      }
+      modalCtl.setCreditMode(
+        true,
+        buildCreditSourceGroups(rows, { supplier: sup, exclude: currentName }),
+      );
+      setStatus("Pick the Bill this credit is against (or decide later).");
+    }
+
+    setStatus(
+      creditOn ? "Loading submitted Bills…" : "Loading open PO / Item Receipts…",
+    );
 
     return runSourcePickerFlow({
       supplier: sup,
       trigger,
       mode: "multi",
       listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
+      onGroups: (groups) => {
+        sourceGroups = groups;
+      },
+      applySlices: () => !creditOn,
       log: (event, detail) => logFocus(event, detail || ""),
       mayOpen: (vendor, trig) =>
         mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
@@ -2950,9 +3136,12 @@ export async function bootBillFormPage(api) {
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
       onStreamComplete: ({ errors }) => {
-        if (errors.length && sourceModalOpenRef.current) {
+        // Credit mode owns the status line while it is on — the PO/IR stream is still running
+        // underneath it and must not narrate over the question the clerk is actually answering.
+        if (creditOn || !sourceModalOpenRef.current) return;
+        if (errors.length) {
           setStatus(`Some sources failed to load (${errors.length}) — NIC still ok.`, "warn");
-        } else if (sourceModalOpenRef.current) {
+        } else {
           setStatus("Sources loaded — Space to check · Enter to pull (or NIC).");
         }
       },
@@ -2963,10 +3152,41 @@ export async function bootBillFormPage(api) {
           pickButtonTestId: "bill-source-pull",
           isOpenRef: sourceModalOpenRef,
           setStatus,
+          creditToggle: {
+            label: "Credit memo?",
+            checked: creditOn,
+            testId: "bill-source-credit-toggle",
+            onChange: (next) => {
+              void switchCreditMode(next);
+            },
+          },
+          onController: (c) => {
+            modalCtl = c;
+            if (flowOpts.onController) flowOpts.onController(c);
+            // Opened on a Bill that is already a credit: fetch its corpus straight away.
+            if (creditOn) void switchCreditMode(true);
+          },
           focusSurface: () => {
             if (api && api.focusBillSurface) api.focusBillSurface();
           },
           onChoose: async (choice) => {
+            if (creditOn) {
+              const verdict = classifyCreditSourceChoice(choice);
+              if (verdict.action === "decline") {
+                setStatus(
+                  "Credit memo left with no Bill behind it — the Return Against warning " +
+                    "stays up until you link one.",
+                  "warn",
+                );
+                return;
+              }
+              if (verdict.action !== "link") {
+                setStatus("Pick the Bill this credit is against, or decide later.", "warn");
+                return;
+              }
+              await commitCreditSource(verdict.name);
+              return;
+            }
             const mode = choice && choice.mode;
             const items = (choice && choice.items) || [];
             if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
@@ -3053,7 +3273,7 @@ export async function bootBillFormPage(api) {
       setStatus("Line allocation API missing — restart the shell.", "err");
       return;
     }
-    if (allocationPickerOpen || sourceModalOpenRef.current) return;
+    if (allocationPickerOpen || sourceModalOpenRef.current || informalLinkPickerOpen) return;
     if (!editable()) {
       setStatus("Bill is not a draft — allocation locked.", "warn");
       return;
@@ -3365,6 +3585,392 @@ export async function bootBillFormPage(api) {
     searchEl.focus();
   }
   
+  /**
+   * Run an async header write with a visible "still filling in" state on the fields that write
+   * repopulates (5zorro 2026-09-09: a slow vendor settle under chaos read as a bug, because an
+   * empty field and a field that has not answered yet look the same).
+   *
+   * Timing rules are pure (`field-loading.js`): nothing appears for a fast reply, and once the
+   * sweep is up it stays up long enough to read rather than blinking out.
+   *
+   * @template T
+   * @param {string} field
+   * @param {Promise<T>} work
+   * @returns {Promise<T>}
+   */
+  async function withFieldSettleLoading(field, work) {
+    const keys = fieldsSettlingFor(field).filter((k) => el[k]);
+    if (!keys.length) return work;
+    let shownAt = 0;
+    const show = () => {
+      shownAt = Date.now();
+      keys.forEach((k) => el[k].classList.add("field-loading"));
+      logFocus("field-settle-loading", `${field}:show:${keys.join(",")}`);
+    };
+    const timer = setTimeout(show, FIELD_LOADING_SHOW_AFTER_MS);
+    const clear = () => {
+      keys.forEach((k) => el[k] && el[k].classList.remove("field-loading"));
+      logFocus("field-settle-loading", `${field}:clear`);
+    };
+    try {
+      return await work;
+    } finally {
+      clearTimeout(timer);
+      const hold = remainingHoldMs(shownAt, Date.now());
+      if (!shownAt) {
+        // Never shown — nothing to clear, and no reason to make the caller wait.
+        clear();
+      } else if (hold > 0) {
+        setTimeout(clear, hold);
+      } else {
+        clear();
+      }
+    }
+  }
+
+  /**
+   * Submitted, non-return Bills — the candidate list for "which Bill is this credit against?".
+   * The standalone picker and the source modal's **Credit memo?** switch (OI-166) ask exactly
+   * this question, so it is asked in exactly one place.
+   *
+   * Typing widens the search past this vendor; the filters that keep an answer *legitimate* —
+   * submitted, not itself a return, not this document — never widen.
+   *
+   * @param {string} query
+   * @param {string} supplier
+   * @param {string} excludeName
+   * @returns {Promise<Array<{ value: string, description?: string }>>}
+   */
+  async function searchSourceBillRows(query, supplier, excludeName) {
+    if (!api || !api.searchLink) return [];
+    const q = query != null ? String(query).trim() : "";
+    const res = await api.searchLink("Purchase Invoice", q, {
+      supplier: q ? undefined : supplier || undefined,
+      docstatus: 1,
+      is_return: 0,
+    });
+    const list = res && res.ok && Array.isArray(res.results) ? res.results : [];
+    const skip = excludeName != null ? String(excludeName).trim() : "";
+    return list.filter((r) => r && r.value && r.value !== skip);
+  }
+
+  /**
+   * Write one informal link token into Remarks and repaint. Returns the outcome instead of
+   * speaking: callers own their own dialog lifecycle and status voice.
+   * @param {"bill"|"so"} kind
+   * @param {string} name
+   * @returns {Promise<{ ok: boolean, label: string, reason?: string }>}
+   */
+  async function writeInformalLinkToken(kind, name) {
+    const label = kind === "bill" ? "Bill" : "Sales Order";
+    const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
+    const next =
+      kind === "bill"
+        ? withBillLinkToken(currentRemarks, name)
+        : withSoLinkToken(currentRemarks, name);
+    try {
+      const res = await api.setHeader("remarks", next);
+      if (res && res.ok) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        return { ok: true, label };
+      }
+      return {
+        ok: false,
+        label,
+        reason: (res && res.reason) || `Could not set the informal ${label} link.`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        label,
+        reason: `Could not set the informal ${label} link: ${String(
+          err && err.message ? err.message : err,
+        )}`,
+      };
+    }
+  }
+
+  /**
+   * Commit the sentence "this credit is against Bill &lt;name&gt;" — the single write path for it,
+   * shared by the standalone source picker and the source modal's Credit memo switch (OI-166).
+   * Never flips `is_return` freeform: that is the museum OI-147 failure where ERPNext silently
+   * books to an accrual placeholder instead of the item's real expense account.
+   *
+   * Caller closes its own dialog first; this only writes and narrates.
+   * @param {string} name
+   */
+  async function commitCreditSource(name) {
+    const plan = planCreditMemoSource(lastDoc);
+    if (plan !== "native") {
+      // "blocked" (not a draft) lands here too, exactly as the standalone picker has always
+      // behaved: ERPNext refuses the Remarks write rather than this shell inventing a second
+      // draft test. The modal route cannot reach it — openSourcePicker gates on editable().
+      setStatus(`Linking informally to Bill ${name}…`);
+      const res = await writeInformalLinkToken("bill", name);
+      if (!res.ok) {
+        setStatus(res.reason, "err");
+        return;
+      }
+      if (plan === "informal") {
+        setStatus(
+          `Noted in Remarks: this credit is about Bill ${name}. Return Against was left ` +
+            "empty so the lines you already entered are not overwritten — to get the real " +
+            "ERP link (and the right expense account), start over from that Bill with " +
+            "Create Credit / Return.",
+          "warn",
+        );
+      } else {
+        setStatus(`Noted in Remarks: informal link to Bill ${name}.`);
+      }
+      return;
+    }
+    if (!api.createCreditMemo) {
+      setStatus("Credit memo API missing — restart the shell.", "err");
+      return;
+    }
+    setStatus(`Building credit memo against ${name}…`);
+    try {
+      const res = await api.createCreditMemo(name);
+      if (res && res.ok) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        setStatus(`Credit memo drafted against ${name} — review qty/amounts, then save.`);
+      } else {
+        setStatus((res && res.reason) || `Could not create a credit memo against ${name}.`, "err");
+      }
+    } catch (err) {
+      setStatus(
+        `Credit memo against ${name} failed: ${String(err && err.message ? err.message : err)}`,
+        "err",
+      );
+    }
+  }
+
+  /**
+   * Informal link picker for credit memos (OI-147/164, OI-165 SO half) — writes a plain-text
+   * token into Remarks, never the real ERP `return_against` field. "Bill" defaults to the
+   * current vendor's submitted Bills; typing a name searches any vendor (2026-09-07 decision).
+   * "Sales Order" reuses the OI-134 line-allocation fetch as-is — rough first pass, not
+   * dogfooded yet (5zorro 2026-09-07: "won't verify it until later").
+   *
+   * `purpose: "source"` (Bill only) is the same list opened at a different moment: right
+   * after the clerk flips **Credit memo? → Yes** on a Bill they did *not* reach from a
+   * submitted Bill, so nothing has set `return_against` yet. Picking there routes through
+   * `planCreditMemoSource()` — an untouched draft is rebuilt via the native make_debit_note
+   * path (real `return_against`, correct expense account); a draft with lines already on it
+   * falls back to the informal token rather than silently destroying that work.
+   * @param {"bill"|"so"} kind
+   * @param {{ purpose?: "link"|"source" }} [opts]
+   */
+  async function openInformalLinkPicker(kind, opts = {}) {
+    if (!api || !api.setHeader) {
+      setStatus("Informal link API missing — restart the shell.", "err");
+      return;
+    }
+    if (informalLinkPickerOpen || sourceModalOpenRef.current || allocationPickerOpen) return;
+    const isBill = kind === "bill";
+    const isSourcePick = isBill && opts.purpose === "source";
+    const label = isBill ? "Bill" : "Sales Order";
+    const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
+    const supplier =
+      normalizeEditableText(lastDoc && lastDoc.supplier) || normalizeEditableText(el.vendor.value);
+
+    informalLinkPickerOpen = true;
+    let rows = [];
+    let query = "";
+
+    const back = document.createElement("div");
+    back.className = "src-back";
+    back.dataset.testid = isSourcePick
+      ? "bill-credit-source-picker"
+      : `bill-informal-link-picker-${kind}`;
+    const dialogLabel = isSourcePick
+      ? "Which Bill is this credit against?"
+      : `Informal link to ${label}`;
+    const box = document.createElement("div");
+    box.className = "src-box";
+    box.tabIndex = -1;
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", dialogLabel);
+    const subtitle = isSourcePick
+      ? " — same vendor by default; type/paste a name to search any vendor. Skip this and the credit posts with no Bill behind it."
+      : isBill
+        ? " — same vendor by default; type/paste a name to search any vendor"
+        : " (Sales Order picker — not restricted by vendor)";
+    box.innerHTML = `<div class="src-title">${dialogLabel}${subtitle}</div>
+      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
+        <input type="text" data-link-search placeholder="${
+          isBill ? "Search Bills…" : "Filter Sales Orders…"
+        }" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
+      </div>
+      <div class="src-body"></div>
+      <div class="src-foot">
+        <button type="button" data-act="clear">${
+          isSourcePick ? "Decide later" : "Clear link"
+        }</button>
+        <button type="button" data-act="cancel">Cancel</button>
+      </div>`;
+    back.appendChild(box);
+    document.body.appendChild(back);
+    const body = box.querySelector(".src-body");
+    const searchEl = box.querySelector("[data-link-search]");
+    const clearBtn = box.querySelector('[data-act="clear"]');
+    const cancelBtn = box.querySelector('[data-act="cancel"]');
+
+    function close() {
+      if (searchDebounce) clearTimeout(searchDebounce);
+      informalLinkPickerOpen = false;
+      document.removeEventListener("keydown", onKey, true);
+      if (back.parentNode) back.parentNode.removeChild(back);
+    }
+
+    async function applyLink(name) {
+      setStatus(
+        name ? `Linking informally to ${label} ${name}…` : `Clearing informal ${label} link…`,
+      );
+      try {
+        const res = await writeInformalLinkToken(kind, name);
+        if (res.ok) {
+          setStatus(
+            name
+              ? `Noted in Remarks: informal link to ${label} ${name}.`
+              : `Informal ${label} link cleared.`,
+          );
+        } else {
+          setStatus(res.reason, "err");
+        }
+      } finally {
+        close();
+      }
+    }
+
+    /**
+     * Source-pick route (toggle → Yes) — routing lives in commitCreditSource(), which the
+     * source modal's Credit memo switch calls too, so the two doors cannot drift apart.
+     */
+    async function chooseSourceBill(name) {
+      close();
+      await commitCreditSource(name);
+    }
+
+    function drawRows() {
+      body.innerHTML = "";
+      const q = query.trim().toLowerCase();
+      const filtered = q
+        ? rows.filter((r) => `${r.value} ${r.description || ""}`.toLowerCase().includes(q))
+        : rows;
+      if (!filtered.length) {
+        const empty = document.createElement("div");
+        empty.className = "src-empty";
+        empty.textContent =
+          isBill && !q
+            ? `No submitted Bills found for ${supplier || "this vendor"}. Type to search any vendor.`
+            : "No matches.";
+        body.appendChild(empty);
+        return;
+      }
+      filtered.forEach((r) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "src-item";
+        btn.dataset.testid = isSourcePick
+          ? "bill-credit-source-row"
+          : `bill-informal-link-${kind}-row`;
+        btn.textContent =
+          r.description && r.description !== r.value ? `${r.value} — ${r.description}` : r.value;
+        btn.onclick = () => (isSourcePick ? chooseSourceBill(r.value) : applyLink(r.value));
+        body.appendChild(btn);
+      });
+    }
+
+    async function loadBillRows(q) {
+      return searchSourceBillRows(q, supplier, currentName);
+    }
+
+    async function loadSoRows() {
+      if (!api.listSalesOrdersForPicker) return [];
+      const items =
+        lastDoc && Array.isArray(lastDoc.items)
+          ? lastDoc.items.map((r) => ({
+              item_code: r.item_code,
+              qty: r.qty,
+              rate: r.rate,
+              amount: r.amount,
+            }))
+          : [];
+      const res = await api.listSalesOrdersForPicker({
+        supplier: supplier || "",
+        customer: "",
+        billLines: items,
+      });
+      const list = res && res.ok && Array.isArray(res.orders) ? res.orders : [];
+      return list.map((so) => ({
+        value: so.name,
+        description: `${so.customer_name || so.customer || ""}${
+          so.grand_total ? ` — $${so.grand_total}` : ""
+        }`.trim(),
+      }));
+    }
+
+    // A throw anywhere in here used to leave informalLinkPickerOpen stuck true, locking the
+    // picker out for the rest of the session with no way back short of reopening the Bill.
+    async function reload() {
+      body.innerHTML = `<div class="src-empty">Loading…</div>`;
+      try {
+        rows = isBill ? await loadBillRows(query.trim()) : await loadSoRows();
+      } catch (err) {
+        rows = [];
+        body.innerHTML = "";
+        const failed = document.createElement("div");
+        failed.className = "src-empty";
+        failed.dataset.testid = "bill-link-picker-error";
+        failed.textContent = `Could not load ${label}s: ${String(
+          err && err.message ? err.message : err,
+        )}`;
+        body.appendChild(failed);
+        return;
+      }
+      drawRows();
+    }
+
+    let searchDebounce = null;
+    searchEl.addEventListener("input", () => {
+      query = searchEl.value || "";
+      if (isBill) {
+        if (searchDebounce) clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(reload, 220);
+      } else {
+        drawRows(); // SO rows are fetched once; filtered client-side while typing.
+      }
+    });
+
+    function onKey(ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        close();
+      }
+    }
+    document.addEventListener("keydown", onKey, true);
+    back.addEventListener("mousedown", (ev) => {
+      if (ev.target === back) close();
+    });
+    // "Decide later" must not strip an existing token — it only declines to add one now.
+    clearBtn.onclick = () => {
+      if (!isSourcePick) return applyLink("");
+      close();
+      setStatus(
+        "Credit memo left with no Bill behind it — the Return Against warning below stays up " +
+          "until you link one.",
+        "warn",
+      );
+      return undefined;
+    };
+    cancelBtn.onclick = () => close();
+
+    await reload();
+    searchEl.focus();
+  }
+
   function setFormBlocked(blocked, reason) {
     document.body.classList.toggle("blocked", !!blocked);
     const retry = document.getElementById("btn-retry");
@@ -3456,8 +4062,9 @@ export async function bootBillFormPage(api) {
     const pending = enrichPending || lastEnrichPending || {};
     const poRows = linkedPurchaseOrdersForBill(doc, linkedPos || []);
     const prRows = linkedPurchaseReceiptsForBill(doc, linkedReceipts || []);
+    const isReturn = isCreditMemoBill(doc);
     block.replaceChildren();
-    if (!poRows.length && !prRows.length) {
+    if (!poRows.length && !prRows.length && !isReturn) {
       block.hidden = true;
       return;
     }
@@ -3552,8 +4159,57 @@ export async function bootBillFormPage(api) {
       refField.append(refLabel, refInput);
       block.append(erpField, refField);
     });
+    if (isReturn) {
+      const returnAgainst = creditMemoReturnAgainst(doc);
+      const erpField = document.createElement("div");
+      erpField.className = "field";
+      const erpLabel = document.createElement("label");
+      erpLabel.textContent = "Return Against (Credit Memo For)";
+      const erpInput = document.createElement("input");
+      erpInput.type = "text";
+      erpInput.readOnly = true;
+      erpInput.tabIndex = -1;
+      erpInput.value = returnAgainst;
+      erpInput.dataset.testid = "bill-return-against-name";
+      erpInput.title = "Original Bill this credit memo returns against. Read-only — set at creation.";
+      setWashSourceAttr(erpInput, washRoleForSourceKind("bill"));
+      const erpRow = document.createElement("div");
+      erpRow.className = "row linked-source-row";
+      erpRow.append(erpInput);
+      const returnRoute = linkedSourcePeekRoute("purchase-invoice", returnAgainst);
+      appendLinkedSourcePeekButton(erpRow, returnRoute, "purchase-invoice", "bill-return-against-peek");
+      erpField.append(erpLabel, erpRow);
+      const warnField = document.createElement("div");
+      warnField.className = "field";
+      if (creditMemoOrphaned(doc)) {
+        const warn = document.createElement("div");
+        warn.className = "linked-source-warning";
+        warn.dataset.testid = "bill-return-orphan-warning";
+        warn.textContent =
+          "No Bill linked — ERPNext may silently post this to an accrual placeholder account " +
+          "instead of the real expense account (OI-147). Use Create Credit / Return from the " +
+          "original Bill instead of a freeform return.";
+        warnField.append(warn);
+      }
+      block.append(erpField, warnField);
+    }
   }
-  
+
+  /** Informal Bill/Sales Order link display (OI-147/164/165) — only on credit memos. */
+  function paintCreditLinks(doc) {
+    if (!el.creditLinksBlock) return;
+    if (!isCreditMemoBill(doc)) {
+      el.creditLinksBlock.hidden = true;
+      return;
+    }
+    el.creditLinksBlock.hidden = false;
+    const remarks = (doc && doc.remarks) || "";
+    const billLink = parseBillLinkToken(remarks);
+    const soLink = parseSoLinkToken(remarks);
+    if (el.creditLinkBillValue) el.creditLinkBillValue.textContent = billLink || "(none)";
+    if (el.creditLinkSoValue) el.creditLinkSoValue.textContent = soLink || "(none)";
+  }
+
   async function maybePrefillRemarksFromLinkedPos(doc, poRows, opts = {}) {
     if (!api || !editable() || !shouldPrefillBillRemarksFromPo(doc, poRows)) return;
     if (!opts.linkedPosChanged) return;
@@ -3645,6 +4301,10 @@ export async function bootBillFormPage(api) {
       if (el.clearQty) el.clearQty.disabled = true;
       if (el.attach) el.attach.disabled = true;
       if (el.addTax) el.addTax.disabled = true;
+      if (el.creditMemo) el.creditMemo.hidden = true;
+      if (el.creditMemoToggleSection) el.creditMemoToggleSection.hidden = true;
+      if (el.creditLinksBlock) el.creditLinksBlock.hidden = true;
+      setDocWashVariant(document, null);
       paintLinkedSources(null, [], []);
       paintChip();
       return;
@@ -3689,6 +4349,9 @@ export async function bootBillFormPage(api) {
       String(h["Remittance & Billing Address"] ?? "").trim() ? "billing:painted" : "billing:blank",
     );
     paintHeaderLinkInputIfAllowed(el.terms, "payment_terms_template", h["Payment terms"] ?? "", headerPaintOpts("payment_terms_template"));
+    // An empty Payment Terms on a credit memo is ERPNext's own rule, not a dropped value —
+    // say which, because a blank field next to populated ones reads as a bug (5zorro 2026-09-09).
+    if (el.terms) el.terms.placeholder = creditMemoTermsHint(doc);
     paintHeaderInputIfAllowed(
       el.date,
       "bill_date",
@@ -3716,12 +4379,19 @@ export async function bootBillFormPage(api) {
       void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
     }
     paintHeaderInputIfAllowed(el.memo, "remarks", h.Memo ?? "", headerPaintOpts("remarks"));
+    paintCreditLinks(doc);
     void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
     syncAddressPickers(canEdit);
     syncDueDateField(doc, canEdit);
     paintAlreadyPaid(doc, canEdit);
+    paintCreditMemoToggle(doc, canEdit);
     paintDocStatusBadge(doc);
+    // Create Credit / Return (OI-082): only offer it on a submitted (docstatus 1), non-return
+    // Bill — not a draft, not already a credit memo, not a cancelled Bill.
+    if (el.creditMemo) {
+      el.creditMemo.hidden = Number(doc.docstatus) !== 1 || isCreditMemoBill(doc);
+    }
     void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
@@ -4187,6 +4857,33 @@ export async function bootBillFormPage(api) {
       }
     });
   }
+  if (el.isReturn) {
+    el.isReturn.addEventListener("click", async () => {
+      if (!api || !editable() || painting || el.isReturn.disabled) return;
+      const checked = !isCreditMemoBill(lastDoc);
+      setStatus(checked ? "Marking as credit memo…" : "Clearing credit memo…");
+      const res = await api.setHeader("is_return", checked ? 1 : 0);
+      if (!(res && res.ok)) {
+        setStatus((res && res.reason) || "Could not change credit memo flag.", "err");
+        paint(lastDoc, amountDue);
+        return;
+      }
+      if (!res.skipped) noteUserEdit();
+      paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+      setStatus(
+        checked
+          ? "Credit memo (Vendor Credit) — quantities must be negative. Use the informal " +
+              "links below once you know which Bill / Sales Order it relates to."
+          : "Credit memo cleared — back to a normal Bill.",
+      );
+      // Turning it ON with no source Bill behind it is exactly the OI-147 orphan the warning
+      // shouts about — so offer the picker at the one moment the clerk is thinking about it,
+      // rather than making them find "Informal link to Bill…" further down the page.
+      if (checked && !creditMemoReturnAgainst(lastDoc)) {
+        void openInformalLinkPicker("bill", { purpose: "source" });
+      }
+    });
+  }
   wireDateField(el.date);
   wireDateField(el.duedate);
   
@@ -4323,6 +5020,43 @@ export async function bootBillFormPage(api) {
   if (el.addSource) {
     el.addSource.tabIndex = -1;
     el.addSource.onclick = () => openSelectSourceFromToolbar();
+  }
+  if (el.creditMemo) {
+    el.creditMemo.onclick = async () => {
+      const sourceName = lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "";
+      if (!sourceName || !lastDoc || Number(lastDoc.docstatus) !== 1) {
+        setStatus("Save and submit this Bill before creating a credit memo against it.", "warn");
+        return;
+      }
+      if (!api || !api.createCreditMemo) {
+        setStatus("Credit memo API missing — restart the shell.", "err");
+        return;
+      }
+      setStatus(`Creating credit memo against ${sourceName}…`);
+      // createCreditMemoFrom resets dirtyState *before* it navigates, so a rejected IPC here
+      // must not leave the page sitting on "Creating…" forever with no way to tell.
+      try {
+        const res = await api.createCreditMemo(sourceName);
+        if (res && res.ok) {
+          paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+          setStatus(`Credit memo drafted against ${sourceName} — review qty/amounts, then save.`);
+        } else {
+          setStatus((res && res.reason) || "Could not create credit memo.", "err");
+        }
+      } catch (err) {
+        setStatus(
+          `Could not create credit memo: ${String(err && err.message ? err.message : err)}. ` +
+            "Reopen the Bill before editing further.",
+          "err",
+        );
+      }
+    };
+  }
+  if (el.informalLinkBill) {
+    el.informalLinkBill.onclick = () => openInformalLinkPicker("bill");
+  }
+  if (el.informalLinkSo) {
+    el.informalLinkSo.onclick = () => openInformalLinkPicker("so");
   }
   document.getElementById("btn-retry").onclick = async () => {
     if (!api || !api.retryLoad) return;
