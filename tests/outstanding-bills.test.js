@@ -5,6 +5,8 @@ import {
   attachDiscountWindow,
   explodeInstallments,
   buildOutstandingBillRows,
+  pickTermFields,
+  attachTermFields,
 } from "../src/outstanding-bills.js";
 
 // Captured live from the sandbox (bench execute frappe.desk.query_report.run, report_name=
@@ -281,3 +283,175 @@ function dateForOffsetFromJuly23(n) {
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+
+// --- Packet A1: payment-term structure carried onto the bill row -------------------------------
+// Field names below are the real `Payment Schedule` child-doctype fieldnames, read from
+// erpnext/accounts/doctype/payment_schedule/payment_schedule.json (2026-09-08), not guessed.
+
+describe("pickTermFields (A1)", () => {
+  it("copies every term field a schedule row states", () => {
+    const got = pickTermFields({
+      payment_term: "NET_30_DAYS (POSTAL) -3",
+      description: "Net 30 from invoice date, cheque by post",
+      mode_of_payment: "USPS_Check",
+      invoice_portion: 100,
+      payment_amount: 4500,
+      paid_amount: 0,
+      discounted_amount: 0,
+      credit_days: 30,
+      credit_months: 0,
+      due_date_based_on: "Day(s) after invoice date",
+      discount_validity: 10,
+      discount_validity_based_on: "Day(s) after invoice date",
+    });
+    assert.deepEqual(got, {
+      paymentTerm: "NET_30_DAYS (POSTAL) -3",
+      termDescription: "Net 30 from invoice date, cheque by post",
+      modeOfPayment: "USPS_Check",
+      invoicePortion: 100,
+      paymentAmount: 4500,
+      paidAmount: 0,
+      discountedAmount: 0,
+      creditDays: 30,
+      creditMonths: 0,
+      dueDateBasedOn: "Day(s) after invoice date",
+      discountValidity: 10,
+      discountValidityBasedOn: "Day(s) after invoice date",
+    });
+  });
+
+  it("omits keys the row does not state — absent must stay absent, never '' or 0", () => {
+    // This is the whole A1 rule: the sandbox's real rows are full of NULLs, and a NULL
+    // payment_term must not become "" (which would read as "a term with an empty name").
+    const got = pickTermFields({
+      payment_term: null,
+      description: null,
+      mode_of_payment: null,
+      credit_days: null,
+      invoice_portion: 100,
+    });
+    assert.deepEqual(got, { invoicePortion: 100 });
+    assert.equal("paymentTerm" in got, false);
+    assert.equal("creditDays" in got, false);
+  });
+
+  it("keeps a genuine zero — credit_days 0 is 'due on receipt', not 'unrecorded'", () => {
+    const got = pickTermFields({ credit_days: 0, payment_term: "DUE_ON_RECEIPT (ACH) +0" });
+    assert.equal(got.creditDays, 0);
+    assert.equal(got.paymentTerm, "DUE_ON_RECEIPT (ACH) +0");
+  });
+
+  it("drops whitespace-only strings and non-finite numbers", () => {
+    const got = pickTermFields({ payment_term: "   ", credit_days: "not a number", paid_amount: "" });
+    assert.deepEqual(got, {});
+  });
+
+  it("trims stray whitespace off a Link value", () => {
+    assert.equal(pickTermFields({ payment_term: " NET_45 (ACH) +2 " }).paymentTerm, "NET_45 (ACH) +2");
+  });
+
+  it("is safe on junk input", () => {
+    assert.deepEqual(pickTermFields(null), {});
+    assert.deepEqual(pickTermFields(undefined), {});
+    assert.deepEqual(pickTermFields("nope"), {});
+  });
+});
+
+describe("buildOutstandingBillRows carries term structure (A1)", () => {
+  const REPORT_ROW = Object.freeze({
+    voucher_no: "ACC-PINV-2026-00301",
+    party: "ALPINE SUPPLY",
+    posting_date: "2026-08-01",
+    due_date: "2026-08-31",
+    invoiced: 4500,
+    outstanding: 4500,
+    currency: "USD",
+  });
+
+  it("attaches the term on a single-installment bill", () => {
+    const [row] = buildOutstandingBillRows(REPORT_ROW, [
+      {
+        due_date: "2026-08-31",
+        outstanding: 4500,
+        payment_term: "NET_30_DAYS (POSTAL) -3",
+        mode_of_payment: "USPS_Check",
+        credit_days: 30,
+      },
+    ]);
+    assert.equal(row.paymentTerm, "NET_30_DAYS (POSTAL) -3");
+    assert.equal(row.modeOfPayment, "USPS_Check");
+    assert.equal(row.creditDays, 30);
+  });
+
+  it("leaves term keys absent when the schedule states none (today's sandbox shape)", () => {
+    // Every payment_schedule row in the sandbox is NULL payment_term / mode_of_payment as of
+    // 2026-09-08 — this is the shape A5's seed exists to fix, and it must not crash or fabricate.
+    const [row] = buildOutstandingBillRows(REPORT_ROW, [{ due_date: "2026-08-31", outstanding: 4500 }]);
+    assert.equal("paymentTerm" in row, false);
+    assert.equal("modeOfPayment" in row, false);
+    assert.equal(row.outstanding, 4500);
+  });
+
+  it("gives each installment its OWN term, not the header's", () => {
+    // A bill split 50% wire on order / 50% ACH net 30 must not report one method for both — this
+    // is why explodeInstallments picks term fields per row rather than spreading the base row.
+    const rows = buildOutstandingBillRows({ ...REPORT_ROW, invoiced: 10000, outstanding: 10000 }, [
+      {
+        due_date: "2026-08-01",
+        outstanding: 5000,
+        payment_term: "DUE_ON_RECEIPT (DOM_WIRE) +0",
+        mode_of_payment: "DOM_WIRE",
+        invoice_portion: 50,
+      },
+      {
+        due_date: "2026-08-31",
+        outstanding: 5000,
+        payment_term: "NET_30_DAYS (ACH) +2",
+        mode_of_payment: "ACH",
+        invoice_portion: 50,
+      },
+    ]);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].modeOfPayment, "DOM_WIRE");
+    assert.equal(rows[0].paymentTerm, "DUE_ON_RECEIPT (DOM_WIRE) +0");
+    assert.equal(rows[1].modeOfPayment, "ACH");
+    assert.equal(rows[1].paymentTerm, "NET_30_DAYS (ACH) +2");
+    assert.notEqual(rows[0].installmentKey, rows[1].installmentKey);
+  });
+
+  it("does not let an installment inherit a sibling's term when its own row is bare", () => {
+    const rows = buildOutstandingBillRows({ ...REPORT_ROW, invoiced: 10000, outstanding: 10000 }, [
+      { due_date: "2026-08-01", outstanding: 5000, payment_term: "NET_0 (DOM_WIRE) +0" },
+      { due_date: "2026-08-31", outstanding: 5000 },
+    ]);
+    assert.equal(rows[0].paymentTerm, "NET_0 (DOM_WIRE) +0");
+    assert.equal("paymentTerm" in rows[1], false);
+  });
+});
+
+describe("attachTermFields (A1)", () => {
+  const BASE = Object.freeze({
+    invoice: "ACC-PINV-2026-00301",
+    installmentKey: "ACC-PINV-2026-00301",
+    supplier: "ALPINE SUPPLY",
+    postingDate: "2026-08-01",
+    dueDate: "2026-08-31",
+    invoiced: 4500,
+    outstanding: 4500,
+    currency: "USD",
+  });
+
+  it("takes the term from the first schedule row and never mutates the input", () => {
+    const rows = [{ payment_term: "NET_30_DAYS (ACH) +2", mode_of_payment: "ACH" }];
+    const out = attachTermFields(BASE, rows);
+    assert.equal(out.paymentTerm, "NET_30_DAYS (ACH) +2");
+    assert.equal(out.modeOfPayment, "ACH");
+    assert.equal("paymentTerm" in BASE, false);
+    assert.notEqual(out, BASE);
+  });
+
+  it("returns a plain copy when there is no schedule at all", () => {
+    assert.deepEqual(attachTermFields(BASE, []), { ...BASE });
+    assert.deepEqual(attachTermFields(BASE, null), { ...BASE });
+  });
+});

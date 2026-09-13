@@ -6,6 +6,7 @@
 import { bootDocFormPage } from "./doc-form-page.js";
 import { bootBillFormPage } from "./bill-form-page.js";
 import { billApiFromErpDoc } from "./bill-doc-api-adapter.js";
+import { scrollbarGutterPx } from "./item-table-layout.js";
 
 /** @type {"bill"|"doc-form"|null} */
 let activeShellKind = null;
@@ -20,8 +21,11 @@ function configureChromeForBill() {
 function configureChromeForDocForm() {
   const selectPo = document.getElementById("btn-select-po");
   const selectSource = document.getElementById("btn-select-source");
+  const creditMemo = document.getElementById("btn-credit-memo");
   if (selectPo) selectPo.hidden = true;
   if (selectSource) selectSource.hidden = true;
+  // Credit memo (is_return / return_against) is a Purchase Invoice concept — Bill-only.
+  if (creditMemo) creditMemo.hidden = true;
 }
 
 function activateBillShell() {
@@ -94,6 +98,32 @@ async function boot() {
   });
   await finish();
 }
+
+/**
+ * Packet T A1 — publish the scrollbar gutter so full-bleed line sections can
+ * subtract it. `100vw` includes the scrollbar on platforms that reserve a
+ * gutter, so without this the bleed overflows by exactly that much and summons
+ * a horizontal scrollbar on the whole page.
+ */
+function syncBleedGutter() {
+  try {
+    const px = scrollbarGutterPx(window.innerWidth, document.documentElement.clientWidth);
+    document.documentElement.style.setProperty("--doc-bleed-gutter", `${px}px`);
+  } catch {
+    /* leave the 0px stylesheet default in place */
+  }
+}
+
+function watchBleedGutter() {
+  syncBleedGutter();
+  try {
+    window.addEventListener("resize", syncBleedGutter, { passive: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+watchBleedGutter();
 
 boot().catch((err) => {
   console.error("doc-form boot failed", err);

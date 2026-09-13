@@ -34,6 +34,55 @@ const NEVER_SEEDED_PI = [
   "bill_date",
 ];
 
+const NEVER_SEEDED_PO = [
+  // required fields
+  "naming_series",
+  "supplier",
+  "company",
+  "transaction_date",
+  "currency",
+  "conversion_rate",
+  "items",
+  "status",
+  // doc skin's own write paths (OI-136 address picker, tax rows)
+  "supplier_address",
+  "shipping_address",
+  "dispatch_address",
+  "billing_address",
+  "taxes_and_charges",
+  // fields Doc PO already surfaces directly
+  "title",
+  "payment_terms_template",
+  "terms",
+  // rounding-math toggle — not the kind of field to silently lock
+  "disable_rounded_total",
+];
+
+const NEVER_SEEDED_RECEIPT = [
+  // required fields
+  "naming_series",
+  "supplier",
+  "company",
+  "posting_date",
+  "posting_time",
+  "currency",
+  "conversion_rate",
+  "items",
+  "status",
+  // doc skin's own write paths (OI-136 address picker, tax rows)
+  "supplier_address",
+  "shipping_address",
+  "dispatch_address",
+  "billing_address",
+  "taxes_and_charges",
+  // fields Doc IR already surfaces directly
+  "lr_no",
+  "remarks",
+  "terms",
+  // rounding-math toggle — not the kind of field to silently lock
+  "disable_rounded_total",
+];
+
 test("every seeded placement is a valid non-vanilla PLACEMENTS value", () => {
   for (const doctype of Object.keys(SEED_PROFILES)) {
     const seed = SEED_PROFILES[doctype];
@@ -47,6 +96,20 @@ test("every seeded placement is a valid non-vanilla PLACEMENTS value", () => {
 test("Purchase Invoice seed excludes credit-note, required, and doc-skin-owned fields", () => {
   const seed = SEED_PROFILES["Purchase Invoice"];
   for (const fn of NEVER_SEEDED_PI) {
+    assert.equal(seed[fn], undefined, `${fn} must not be seeded`);
+  }
+});
+
+test("Purchase Order seed excludes required, address/tax write-path, and doc-skin-owned fields", () => {
+  const seed = SEED_PROFILES["Purchase Order"];
+  for (const fn of NEVER_SEEDED_PO) {
+    assert.equal(seed[fn], undefined, `${fn} must not be seeded`);
+  }
+});
+
+test("Purchase Receipt seed excludes required, address/tax write-path, and doc-skin-owned fields", () => {
+  const seed = SEED_PROFILES["Purchase Receipt"];
+  for (const fn of NEVER_SEEDED_RECEIPT) {
     assert.equal(seed[fn], undefined, `${fn} must not be seeded`);
   }
 });

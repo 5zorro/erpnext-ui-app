@@ -1,4 +1,5 @@
 import { describe, it } from "node:test";
+import { parsePaymentTermGrace } from "../src/payment-term-grace.js";
 import assert from "node:assert/strict";
 import {
   SAMPLE_TAG,
@@ -48,8 +49,10 @@ describe("sample-data corpus plan", () => {
       assert.equal(submitted.length, n + extra, `submitted docs ${kind}`);
       assert.equal(drafts.length, DEFAULT_DRAFTS_PER_KIND, `draft docs ${kind}`);
     }
-    assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 10);
-    assert.equal(plan.parties.suppliers.length, 12);
+    // 11 activity-less suppliers: the 8 generic ones plus SUP-DAILY / SUP-DAILY-LG (Packet G)
+    // and SUP-OVERLAP (overlapping schedules, 2026-09-08).
+    assert.equal(plan.parties.suppliers.filter((s) => !s.activity).length, 11);
+    assert.equal(plan.parties.suppliers.length, 13);
     assert.equal(plan.parties.customers.length, 8);
     assert.equal(plan.parties.items.length, 12);
     assert.equal(plan.parties.projects.length, 4);
@@ -84,8 +87,9 @@ describe("sample-data corpus plan", () => {
     assert.equal(bySource["purchase_receipt←none"], 13);
     assert.equal(bySource["purchase_invoice←purchase_receipt"], 8);
     assert.equal(bySource["purchase_invoice←purchase_order"], 8);
-    // +2 over the base 9: OI-161 Packet G's PI-DAILY / PI-DAILY-LG (create-from-nothing).
-    assert.equal(bySource["purchase_invoice←none"], 11);
+    // +5 over the base 9, all create-from-nothing: OI-161 Packet G's PI-DAILY / PI-DAILY-LG
+    // plus the three overlapping-schedule bills (PI-OVERLAP-A/B/C, 2026-09-08).
+    assert.equal(bySource["purchase_invoice←none"], 14);
   });
 
   it("leaves open POs for source-picker dogfood (20..24)", () => {
@@ -199,9 +203,49 @@ describe("sample-data corpus plan", () => {
     assert.equal(piFromMn.length, 0);
   });
 
+  it("OI-161: three bills whose schedules interleave into cross-bill groups (2026-09-08)", () => {
+    const plan = buildCorpusPlan();
+    const keys = ["PI-OVERLAP-A", "PI-OVERLAP-B", "PI-OVERLAP-C"];
+    const rows = keys.map((k) => plan.docs.find((d) => d.key === k));
+    for (const [i, row] of rows.entries()) {
+      assert.ok(row, keys[i]);
+      assert.equal(row.partyKey, "SUP-OVERLAP");
+      assert.equal(row.dogfoodScenario, "oi161-overlapping-schedules");
+      assert.equal(row.paymentSchedule.length, 3);
+      // Same rule ERPNext enforces: schedule amounts must sum to grand_total exactly.
+      const grand = row.items.reduce((a, it) => a + it.qty * it.rate, 0);
+      const sched = row.paymentSchedule.reduce((a, r) => a + r.amount, 0);
+      assert.equal(sched, grand, `${keys[i]} schedule sums to grand total`);
+      // ERPNext throws on duplicate due dates within one document.
+      const offsets = row.paymentSchedule.map((r) => r.dayOffset);
+      assert.equal(new Set(offsets).size, offsets.length, `${keys[i]} distinct due dates`);
+      // Ascending due date == descending dayOffset, so "last row wins" gives the header date.
+      assert.deepEqual([...offsets].sort((a, b) => b - a), offsets, `${keys[i]} ascending due dates`);
+      // No installment on the posting date itself.
+      assert.ok(Math.max(...offsets) < row.dayOffset, `${keys[i]} first due date is after posting`);
+    }
+
+    // The whole point of the fixture: due dates interleave A,B,C / A,B,C / A,B,C rather than
+    // running bill-by-bill, so each suggested group draws one installment from each bill.
+    const due = rows.flatMap((r) =>
+      r.paymentSchedule.map((sr) => ({ bill: r.key.slice(-1), day: r.dayOffset - sr.dayOffset })),
+    );
+    due.sort((a, b) => a.day - b.day);
+    assert.deepEqual(due.map((d) => d.bill).join(""), "ABCABCABC");
+
+    // Three clusters of three, each cluster inside the default 7-day group window and separated
+    // from the next by more than the stagger -- otherwise this collapses into one run-on group.
+    const days = due.map((d) => d.day);
+    for (let i = 0; i < 3; i += 1) {
+      const cluster = days.slice(i * 3, i * 3 + 3);
+      assert.ok(cluster[2] - cluster[0] < 7, `cluster ${i} spans under the group window`);
+    }
+    assert.ok(days[3] - days[2] > 0 && days[6] - days[5] > 0, "clusters are separated");
+  });
+
   it("OI-161 Packet G: daily payment-schedule fixture at two dollar scales", () => {
     const plan = buildCorpusPlan();
-    assert.equal(PAYMENT_BATCH_FIXTURE_KEYS.length, 2);
+    assert.equal(PAYMENT_BATCH_FIXTURE_KEYS.length, 5);
 
     const cases = [
       { key: "PI-DAILY", partyKey: "SUP-DAILY", rate: 50.0, grandTotal: 4500.0 },
@@ -292,5 +336,152 @@ describe("sample-data sandbox guard", () => {
   it("requires CONFIRM_SAMPLE_SEED", () => {
     assert.equal(assertSeedConfirmed({}).ok, false);
     assert.equal(assertSeedConfirmed({ CONFIRM_SAMPLE_SEED: "1" }).ok, true);
+  });
+});
+
+// --- Packet A5: payment terms fixtures ----------------------------------------------------------
+
+describe("payment terms fixtures (A5)", () => {
+  const plan = buildCorpusPlan({});
+
+  it("names modes of payment by RAIL, not by ERPNext's stock labels", () => {
+    // payment-batch-prefs.js keys its fee table by exactly these names; ERPNext's stock
+    // "Check / Wire Transfer" do not distinguish ACH from a domestic wire, which is the whole
+    // difference the cost model turns on ($0.40 vs $25).
+    assert.deepEqual(
+      plan.modesOfPayment.map((m) => m.name),
+      ["USPS_Check", "ACH", "DOM_WIRE", "INT_WIRE"],
+    );
+  });
+
+  it("every term name parses under the grace grammar", () => {
+    for (const t of plan.paymentTerms) {
+      const grace = parsePaymentTermGrace(t.name);
+      assert.notEqual(grace, undefined, `${t.name} must encode a grace`);
+      assert.ok(Number.isSafeInteger(grace));
+    }
+  });
+
+  it("spreads grace across the sign, including an explicit zero", () => {
+    const graces = plan.paymentTerms.map((t) => parsePaymentTermGrace(t.name));
+    assert.ok(graces.some((g) => g < 0), "a strict vendor");
+    assert.ok(graces.some((g) => g > 0), "a tolerant vendor");
+    assert.ok(graces.includes(0), "an explicit +0 — parses as 0, not as absent");
+  });
+
+  it("covers the requested shapes: Net 30 variants, 2/10 Net 30, Net 10th", () => {
+    const names = plan.paymentTerms.map((t) => t.name);
+    assert.ok(names.filter((n) => n.startsWith("NET_30_DAYS")).length >= 2, "a couple of Net 30");
+    assert.ok(names.filter((n) => n.startsWith("2%_10_NET_30")).length >= 1, "2/10 Net 30");
+    assert.ok(names.some((n) => n.startsWith("NET_10TH")), "Net 10th");
+  });
+
+  it("models Net 10th off the end of the invoice month, not a day-of-month field", () => {
+    // ERPNext has no day-of-month due field; "the 10th of next month" is
+    // due_date_based_on = "Day(s) after the end of the invoice month". creditDays is 15 rather
+    // than 10 because grace folds in (contract month-end+10, tolerance +5) — see below.
+    const net10th = plan.paymentTerms.find((t) => t.name.startsWith("NET_10TH"));
+    assert.equal(net10th.dueDateBasedOn, "Day(s) after the end of the invoice month");
+    assert.equal(net10th.creditDays, 15);
+  });
+
+  it("folds grace INTO creditDays — the shell must never shift a due date itself", () => {
+    // Reversed 2026-09-09. "Net 30 with +16 tolerance" is a 46-day Payment Term, so ERPNext
+    // computes the real due date. Parsing the name to shift it afterwards would double-count,
+    // and a name the parser refused would silently produce a wrong date and a wrong batch group.
+    const byName = Object.fromEntries(plan.paymentTerms.map((t) => [t.name, t]));
+    const CONTRACT = {
+      "NET_30_DAYS (POSTAL) -3": 30,
+      "NET_30_DAYS (POSTAL) +16": 30,
+      "NET_30_DAYS (ACH) +2": 30,
+      "2%_10_NET_30 (ACH) +2": 30,
+      "2%_10_NET_30 (POSTAL) -3": 30,
+      "NET_10TH (ACH) +5": 10,
+      "NET_15_DAYS (DOM_WIRE) +0": 15,
+    };
+    for (const [name, contract] of Object.entries(CONTRACT)) {
+      const grace = parsePaymentTermGrace(name);
+      assert.equal(
+        byName[name].creditDays,
+        contract + grace,
+        `${name}: creditDays must be contract ${contract} + grace ${grace}`,
+      );
+    }
+  });
+
+  it("keeps the discount window on the contract clock, not the graced one", () => {
+    // 2/10 net 30 with +2 tolerance is still "2% if paid within 10 days" — the tolerance moves
+    // the net deadline, never the discount window. discountValidity stays 10 while creditDays is 32.
+    for (const t of plan.paymentTerms.filter((x) => x.discount)) {
+      assert.equal(t.discountValidity, 10);
+      assert.ok(t.creditDays > t.discountValidity);
+    }
+  });
+
+  it("uses only ERPNext's own Select values for due_date_based_on", () => {
+    const ALLOWED = new Set([
+      "Day(s) after invoice date",
+      "Day(s) after the end of the invoice month",
+      "Month(s) after the end of the invoice month",
+    ]);
+    for (const t of plan.paymentTerms) assert.ok(ALLOWED.has(t.dueDateBasedOn), t.dueDateBasedOn);
+  });
+
+  it("gives several ACH terms and one wire", () => {
+    const modes = plan.paymentTerms.map((t) => t.modeOfPayment);
+    assert.ok(modes.filter((m) => m === "ACH").length >= 2, "a few ACH");
+    assert.equal(modes.filter((m) => m === "DOM_WIRE").length, 1, "a wire");
+    assert.ok(modes.includes("USPS_Check"));
+  });
+
+  it("declares every mode its terms reference", () => {
+    const declared = new Set(plan.modesOfPayment.map((m) => m.name));
+    for (const t of plan.paymentTerms) assert.ok(declared.has(t.modeOfPayment), t.modeOfPayment);
+  });
+
+  it("keeps the (METHOD) parenthetical consistent with modeOfPayment", () => {
+    // The name is decoration and the field is the SSoT — but a fixture whose decoration lies
+    // would make dogfood unreadable, so the seed data at least keeps them in step.
+    const LABEL = { USPS_Check: "POSTAL", ACH: "ACH", DOM_WIRE: "DOM_WIRE", INT_WIRE: "INT_WIRE" };
+    for (const t of plan.paymentTerms) {
+      assert.ok(t.name.includes(`(${LABEL[t.modeOfPayment]})`), `${t.name} vs ${t.modeOfPayment}`);
+    }
+  });
+
+  it("gives every discount term a validity window and a type", () => {
+    for (const t of plan.paymentTerms.filter((x) => x.discount)) {
+      assert.equal(t.discountType, "Percentage");
+      assert.ok(t.discountValidity > 0);
+      assert.equal(t.discountValidityBasedOn, "Day(s) after invoice date");
+    }
+  });
+
+  it("uses unique names and keys — Payment Term.payment_term_name is unique:1 in ERPNext", () => {
+    const names = plan.paymentTerms.map((t) => t.name);
+    const keys = plan.paymentTerms.map((t) => t.key);
+    assert.equal(new Set(names).size, names.length);
+    assert.equal(new Set(keys).size, keys.length);
+  });
+
+  it("assigns a real term to every rotating and batching supplier", () => {
+    const known = new Set(plan.paymentTerms.map((t) => t.key));
+    const assigned = plan.parties.suppliers.filter((s) => s.paymentTermsKey);
+    assert.ok(assigned.length >= 11);
+    for (const s of assigned) assert.ok(known.has(s.paymentTermsKey), `${s.key} -> ${s.paymentTermsKey}`);
+  });
+
+  it("splits the batching fixtures across methods so the contrast is visible", () => {
+    // SUP-DAILY on cheque should batch; SUP-OVERLAP on ACH mostly should not ($0.40 loses to
+    // float); SUP-DAILY-LG on wire should batch hard ($25). That contrast is the fixture's job.
+    const byKey = Object.fromEntries(plan.parties.suppliers.map((s) => [s.key, s]));
+    const termByKey = Object.fromEntries(plan.paymentTerms.map((t) => [t.key, t]));
+    assert.equal(termByKey[byKey["SUP-DAILY"].paymentTermsKey].modeOfPayment, "USPS_Check");
+    assert.equal(termByKey[byKey["SUP-DAILY-LG"].paymentTermsKey].modeOfPayment, "DOM_WIRE");
+    assert.equal(termByKey[byKey["SUP-OVERLAP"].paymentTermsKey].modeOfPayment, "ACH");
+  });
+
+  it("exercises every term in the catalogue on at least one supplier", () => {
+    const used = new Set(plan.parties.suppliers.map((s) => s.paymentTermsKey).filter(Boolean));
+    for (const t of plan.paymentTerms) assert.ok(used.has(t.key), `${t.name} is never assigned`);
   });
 });

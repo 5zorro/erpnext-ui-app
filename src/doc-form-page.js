@@ -37,6 +37,11 @@ import {
   itemNavFieldsFromCols,
 } from "./link-picker-policy.js";
 import {
+  autoSizeItemColumns,
+  mountColResize,
+  mountDensityControl,
+} from "./item-col-resize.js";
+import {
   CELL_MODE_EDIT,
   CELL_MODE_NAV,
   itemTableKeyDecision,
@@ -175,6 +180,23 @@ const addressPickerOpenRef = { current: false };
 let itemTabGuard = false;
 /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
 let itemCellMode = CELL_MODE_EDIT;
+
+/**
+ * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
+ * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
+ * (it is a one-shot handoff to the focus handler), so nothing survives for a
+ * stylesheet to match on.
+ * @param {"edit"|"nav"} mode
+ */
+function setItemCellMode(mode) {
+  itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+  try {
+    if (el && el.items) el.items.dataset.cellMode = itemCellMode;
+  } catch {
+    /* mode mirroring is cosmetic; never let it break navigation */
+  }
+}
+
 /** @type {{ key: string, asc: boolean }} */
 /** @type {import("./item-sort-specs.js").SortSpec[]} */
 let itemSortSpecs = [{ key: "lineNo", asc: true }];
@@ -889,7 +911,7 @@ async function resolveCommitGate(choiceRaw) {
 
 function focusItemCell(rowIndex, field, opts = {}) {
   const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-  itemCellMode = mode;
+  setItemCellMode(mode);
   const wantSelect =
     opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
   const tryFocus = () => {
@@ -1096,12 +1118,57 @@ function rowItemCodeAt(doc, rowIndex) {
   return row && row.item_code != null ? String(row.item_code).trim() : "";
 }
 
+/**
+ * Packet T C — size the line grid from its content, then arm the drag handles.
+ * Runs after every repaint because the header row is rebuilt each time; both
+ * calls are idempotent. Keyed by profile so PO and Item Receipt keep their own
+ * column widths.
+ */
+function itemsTableKey() {
+  return `${(ui && ui.profileId) || "doc"}-items`;
+}
+
+function taxesTableKey() {
+  return `${(ui && ui.profileId) || "doc"}-taxes`;
+}
+
+function sizeItemColumns() {
+  try {
+    const table = el && el.items && el.items.closest ? el.items.closest("table") : null;
+    if (!table) return;
+    const tableKey = itemsTableKey();
+    mountColResize(table, { tableKey, onChange: sizeItemColumns });
+    mountDensityControl({ table, button: document.getElementById("btn-density") });
+    autoSizeItemColumns(table, { tableKey });
+  } catch {
+    /* column sizing is presentation; never let it break a repaint */
+  }
+}
+
+function sizeTaxColumns() {
+  try {
+    const table =
+      el && el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
+    if (!table) return;
+    const tableKey = taxesTableKey();
+    mountColResize(table, { tableKey, onChange: sizeTaxColumns });
+    autoSizeItemColumns(table, { tableKey, sticky: false });
+  } catch {
+    /* ignore */
+  }
+}
+
 function paintItemsHead() {
   if (!el.itemsHead || !ui) return;
   const headers = sortableHeadersFromCols(ui.itemCols);
   if (!headers.length) {
     el.itemsHead.innerHTML =
-      ui.itemCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
+      ui.itemCols
+        .map(
+          (c) =>
+            `<th data-col-key="${escapeHtml(c.field || c.label || "")}">${escapeHtml(c.label)}</th>`,
+        )
+        .join("") + "<th></th>";
     return;
   }
   el.itemsHead.innerHTML =
@@ -1275,8 +1342,8 @@ function paintTaxes(doc) {
       const amtShown =
         r.tax_amount === "" || r.tax_amount == null ? "" : formatGroupedNumber(r.tax_amount);
       return `<tr data-taxidx="${r.idx}">
-        <td><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
-        <td><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
+        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
+        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
         <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="doc-tax-${r.idx}-rate" /></td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="doc-tax-${r.idx}-amount" /></td>
@@ -1290,8 +1357,18 @@ function paintTaxes(doc) {
       </tr>`;
     })
     .join("");
+  sizeTaxColumns();
 
   el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
+    // Same resting-text sync as the items grid (Packet T step B).
+    const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+    if (taxCellText) {
+      const syncTaxCellText = () => {
+        taxCellText.textContent = inp.value;
+      };
+      inp.addEventListener("input", syncTaxCellText);
+      inp.addEventListener("change", syncTaxCellText);
+    }
     const field = inp.getAttribute("data-tax-field");
     const ri = Number(inp.getAttribute("data-tax-row"));
     const apply = async (value) => {
@@ -1405,12 +1482,12 @@ function paintItems(doc) {
             return `<td><input type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-row="${ri}" data-field="${col.field}" data-date="1" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-${col.field}" autocomplete="off" /></td>`;
           }
           if (!canEdit) {
-            return `<td><span class="ro">${escapeHtml(val)}</span></td>`;
+            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
           }
           if (col.field === "qty") {
             return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-qty" /></td>`;
           }
-          return `<td><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
+          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
         })
         .join("");
       const del = canEdit
@@ -1421,8 +1498,21 @@ function paintItems(doc) {
     .join("");
 
   paintLineTotals(doc);
+  sizeItemColumns();
 
   el.items.querySelectorAll("input[data-row]").forEach((inp) => {
+    // Keep the resting text layer in step with the editor. The text is hidden
+    // while the input has focus, so this is not load-bearing for correctness
+    // mid-edit -- it is here so a cell reads right the instant you leave it,
+    // without waiting for a repaint that may never come.
+    const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
+    if (cellText) {
+      const syncCellText = () => {
+        cellText.textContent = inp.value;
+      };
+      inp.addEventListener("input", syncCellText);
+      inp.addEventListener("change", syncCellText);
+    }
     const field = inp.getAttribute("data-field");
     const ri = Number(inp.getAttribute("data-row"));
     const linkDt = linkDoctypeForDocField(field, ui.headerFields, ui.itemCols);
@@ -1534,10 +1624,10 @@ function paintItems(doc) {
     }
     inp.addEventListener("focus", () => {
       if (inp.dataset.navFocus === "1") {
-        itemCellMode = CELL_MODE_NAV;
+        setItemCellMode(CELL_MODE_NAV);
         delete inp.dataset.navFocus;
       } else {
-        itemCellMode = CELL_MODE_EDIT;
+        setItemCellMode(CELL_MODE_EDIT);
       }
     });
     if (field === "item_code") {
@@ -1602,7 +1692,7 @@ function paintItems(doc) {
 
       if (decision.action === "leave_edit") {
         if (decision.preventDefault) ev.preventDefault();
-        itemCellMode = CELL_MODE_NAV;
+        setItemCellMode(CELL_MODE_NAV);
         try {
           if (typeof inp.select === "function") inp.select();
         } catch {
@@ -1612,7 +1702,7 @@ function paintItems(doc) {
       }
 
       if (decision.action === "enter_edit") {
-        itemCellMode = CELL_MODE_EDIT;
+        setItemCellMode(CELL_MODE_EDIT);
         if (ev.key === "F2") {
           ev.preventDefault();
           try {
@@ -1636,7 +1726,7 @@ function paintItems(doc) {
         decision.action === "leave_edit_move" ||
         (decision.action === "tab" && decision.direction === "left")
       ) {
-        itemCellMode = CELL_MODE_NAV;
+        setItemCellMode(CELL_MODE_NAV);
         itemTabGuard = true;
         void (async () => {
           try {
@@ -1682,7 +1772,7 @@ function paintItems(doc) {
 
       if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
       ev.preventDefault();
-      itemCellMode = CELL_MODE_NAV;
+      setItemCellMode(CELL_MODE_NAV);
       itemTabGuard = true;
       void (async () => {
         try {

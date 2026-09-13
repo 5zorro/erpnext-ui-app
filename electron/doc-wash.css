@@ -21,6 +21,13 @@
     rgba(255, 255, 255, 0.48) 6px,
     rgba(255, 255, 255, 0.48) 8px
   );
+  --stripe-return: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 13px,
+    rgba(255, 255, 255, 0.9) 13px,
+    rgba(255, 255, 255, 0.9) 16px
+  );
   --stamp-buy: url("assets/buying-stamp.svg");
   --stamp-sell: url("assets/selling-stamp.svg");
 }
@@ -88,6 +95,28 @@ html[data-pattern="both"][data-doc-desk="ap"] .card,
 html[data-pattern="both"][data-doc-desk="ar"] .tb-group,
 html[data-pattern="both"][data-doc-desk="ar"] .card {
   background-image: var(--hatch-lighten);
+}
+
+/*
+  Variant: return / credit memo (OI-147, 2026-09-07). Vertical white ledger stripes over the
+  role wash, so a Vendor Credit is never mistaken for an ordinary Bill at a glance. A return
+  keeps its role wash (it is still an invoice-role AP document) — the stripes are additive.
+  Second block exists only to out-specify the pattern-pref hatch above (4 attrs vs 3) so a
+  patterned desk keeps its hatch *and* gets the stripes, rather than one silently winning.
+*/
+html[data-doc-variant="return"] .tb-group,
+html[data-doc-variant="return"] .card {
+  background-image: var(--stripe-return);
+}
+html[data-doc-variant="return"][data-pattern="ap"][data-doc-desk="ap"] .tb-group,
+html[data-doc-variant="return"][data-pattern="ap"][data-doc-desk="ap"] .card,
+html[data-doc-variant="return"][data-pattern="ar"][data-doc-desk="ar"] .tb-group,
+html[data-doc-variant="return"][data-pattern="ar"][data-doc-desk="ar"] .card,
+html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ap"] .tb-group,
+html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ap"] .card,
+html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ar"] .tb-group,
+html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ar"] .card {
+  background-image: var(--stripe-return), var(--hatch-lighten);
 }
 
 body > .wrap,

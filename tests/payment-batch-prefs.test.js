@@ -4,6 +4,8 @@ import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   validatePaymentBatchPrefs,
   mergePaymentBatchPrefs,
+  paymentMethodFee,
+  paymentMethodFeeResolver,
 } from "../src/payment-batch-prefs.js";
 
 describe("payment-batch-prefs: defaults", () => {
@@ -105,5 +107,74 @@ describe("payment-batch-prefs: mergePaymentBatchPrefs", () => {
     const before = { ...DEFAULT_PAYMENT_BATCH_PREFS };
     mergePaymentBatchPrefs({ apr: 0.5 }).apr = 999; // mutate the returned object, not the default
     assert.deepEqual(DEFAULT_PAYMENT_BATCH_PREFS, before);
+  });
+});
+
+// --- Packet B2a: per-method payment fees --------------------------------------------------------
+
+describe("paymentMethodFee (B2a)", () => {
+  const PREFS = { apr: 0.09, postage: 0.78, perCheck: 0.05, groupWindowDays: 7 };
+
+  it("composes the cheque fee from postage + perCheck", () => {
+    // The composition that used to live in pay-outstanding.src.html:1417.
+    assert.equal(paymentMethodFee(PREFS, "USPS_Check"), 0.83);
+  });
+
+  it("uses 5zorro's real per-push costs (2026-09-08)", () => {
+    assert.equal(paymentMethodFee(PREFS, "ACH"), 0.4);
+    assert.equal(paymentMethodFee(PREFS, "DOM_WIRE"), 25);
+    assert.equal(paymentMethodFee(PREFS, "INT_WIRE"), 50);
+  });
+
+  it("keeps INT_WIRE flat — intermediary count is deliberately not modelled", () => {
+    assert.equal(paymentMethodFee(PREFS, "INT_WIRE"), 25 + 25);
+  });
+
+  it("follows the postage/perCheck prefs when the clerk changes them", () => {
+    assert.equal(paymentMethodFee({ ...PREFS, postage: 1.0, perCheck: 0.1 }, "USPS_Check"), 1.1);
+    // ...but an electronic method must not move when postage does.
+    assert.equal(paymentMethodFee({ ...PREFS, postage: 1.0 }, "ACH"), 0.4);
+  });
+
+  it("falls back to the cheque fee for an unknown or missing method, never to zero", () => {
+    // Every payment_schedule row in the sandbox has a NULL mode_of_payment today. A $0 fee would
+    // make the engine claim fee savings that do not exist.
+    assert.equal(paymentMethodFee(PREFS, null), 0.83);
+    assert.equal(paymentMethodFee(PREFS, undefined), 0.83);
+    assert.equal(paymentMethodFee(PREFS, ""), 0.83);
+    assert.equal(paymentMethodFee(PREFS, "Bank Draft"), 0.83);
+  });
+
+  it("trims a padded method name", () => {
+    assert.equal(paymentMethodFee(PREFS, "  ACH  "), 0.4);
+  });
+
+  it("lets a methodFees override win over the default", () => {
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: { ACH: 0.25 } }, "ACH"), 0.25);
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: { ACH: 0.25 } }, "DOM_WIRE"), 25);
+  });
+
+  it("accepts a zero override — some banks really do bundle ACH", () => {
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: { ACH: 0 } }, "ACH"), 0);
+  });
+
+  it("ignores a junk override rather than discarding the whole prefs object", () => {
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: { ACH: -5 } }, "ACH"), 0.4);
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: { ACH: "free" } }, "ACH"), 0.4);
+    assert.equal(paymentMethodFee({ ...PREFS, methodFees: "nope" }, "ACH"), 0.4);
+  });
+
+  it("survives a wholly invalid prefs object by falling back to defaults", () => {
+    assert.equal(paymentMethodFee(null, "USPS_Check"), 0.83);
+    assert.equal(paymentMethodFee(undefined, "ACH"), 0.4);
+  });
+});
+
+describe("paymentMethodFeeResolver (B2a)", () => {
+  it("binds prefs into a (method) => fee function", () => {
+    const fee = paymentMethodFeeResolver({ apr: 0.09, postage: 0.78, perCheck: 0.05, groupWindowDays: 7 });
+    assert.equal(fee("ACH"), 0.4);
+    assert.equal(fee("USPS_Check"), 0.83);
+    assert.equal(fee(null), 0.83);
   });
 });

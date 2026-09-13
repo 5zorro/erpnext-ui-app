@@ -21,14 +21,28 @@ describe("source-doc-peek", () => {
     assert.equal(linkedSourcePeekRoute("purchase-order", ""), null);
   });
 
-  it("allows peek routes for PO/PR only", () => {
-    assert.equal(canSoftPeekLinkedSourceRoute("/app/purchase-order/PO-1"), true);
-    assert.equal(canSoftPeekLinkedSourceRoute("/app/purchase-invoice/PI-1"), false);
+  it("builds Bill (return_against) and Sales Order routes (OI-082 / OI-165)", () => {
+    assert.equal(
+      linkedSourcePeekRoute("purchase-invoice", "ACC-PINV-2026-00231"),
+      "/app/purchase-invoice/ACC-PINV-2026-00231",
+    );
+    assert.equal(linkedSourcePeekRoute("bill", "ACC-PINV-2026-00231"), "/app/purchase-invoice/ACC-PINV-2026-00231");
+    assert.equal(linkedSourcePeekRoute("sales-order", "SAL-ORD-2026-00123"), "/app/sales-order/SAL-ORD-2026-00123");
+    assert.equal(linkedSourcePeekRoute("so", "SAL-ORD-2026-00123"), "/app/sales-order/SAL-ORD-2026-00123");
   });
 
-  it("linkedSourcePeekKindLabel names PO and IR", () => {
+  it("allows peek routes for PO/PR/Bill/Sales Order", () => {
+    assert.equal(canSoftPeekLinkedSourceRoute("/app/purchase-order/PO-1"), true);
+    assert.equal(canSoftPeekLinkedSourceRoute("/app/purchase-invoice/PI-1"), true);
+    assert.equal(canSoftPeekLinkedSourceRoute("/app/sales-order/SO-1"), true);
+    assert.equal(canSoftPeekLinkedSourceRoute("/app/sales-invoice/SI-1"), false);
+  });
+
+  it("linkedSourcePeekKindLabel names PO, IR, Bill, Sales Order", () => {
     assert.equal(linkedSourcePeekKindLabel("purchase-order"), "Purchase Order");
     assert.equal(linkedSourcePeekKindLabel("purchase-receipt"), "Item Receipt");
+    assert.equal(linkedSourcePeekKindLabel("purchase-invoice"), "Bill");
+    assert.equal(linkedSourcePeekKindLabel("sales-order"), "Sales Order");
   });
 });
 

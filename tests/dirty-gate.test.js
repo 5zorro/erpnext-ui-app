@@ -11,6 +11,7 @@ import {
   normalizeEditableText,
   valuesMeaningfullyEqual,
   dirtyCompareKindForField,
+  shouldGateSurfaceNavigation,
 } from "../src/dirty-gate.js";
 
 describe("sanitizeDoc", () => {
@@ -49,6 +50,7 @@ describe("valuesMeaningfullyEqual", () => {
     assert.equal(dirtyCompareKindForField("posting_date"), "date");
     assert.equal(dirtyCompareKindForField("bill_date"), "date");
     assert.equal(dirtyCompareKindForField("supplier"), "text");
+    assert.equal(dirtyCompareKindForField("is_return"), "number");
   });
 
   it("normalizeEditableText trims", () => {
@@ -128,5 +130,31 @@ describe("finishLensApply", () => {
     const next = finishLensApply({ doc, userEdited: true }, true);
     assert.equal(next.userEdited, false);
     assert.ok(docMatchesBaseline({ name: "PINV-1" }, next.baselineJson));
+  });
+});
+
+describe("shouldGateSurfaceNavigation (Packet 4b step 3)", () => {
+  it("gates only when on the target surface AND dirty", () => {
+    assert.equal(shouldGateSurfaceNavigation("pay-outstanding", "pay-outstanding", true), true);
+  });
+
+  it("does not gate when dirty but on a different surface", () => {
+    assert.equal(shouldGateSurfaceNavigation("home", "pay-outstanding", true), false);
+    assert.equal(shouldGateSurfaceNavigation("doc", "pay-outstanding", true), false);
+  });
+
+  it("does not gate when on the target surface but clean", () => {
+    assert.equal(shouldGateSurfaceNavigation("pay-outstanding", "pay-outstanding", false), false);
+  });
+
+  it("a stale dirty flag never blocks navigation once the surface changed", () => {
+    // Simulates: drawer left dirty, user already navigated to Home some other way.
+    assert.equal(shouldGateSurfaceNavigation("home", "pay-outstanding", true), false);
+  });
+
+  it("junk dirty values coerce rather than throw", () => {
+    assert.equal(shouldGateSurfaceNavigation("pay-outstanding", "pay-outstanding", "yes"), true);
+    assert.equal(shouldGateSurfaceNavigation("pay-outstanding", "pay-outstanding", 0), false);
+    assert.equal(shouldGateSurfaceNavigation("pay-outstanding", "pay-outstanding", undefined), false);
   });
 });

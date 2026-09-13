@@ -62,13 +62,76 @@ export function lensTabsFor(state = {}) {
  * @returns {{ available: boolean, hint: string }}
  */
 export function docTabState(state = {}) {
-  if (state.onDoc) return { available: true, hint: "Doc skin" };
-  if (state.hasDocSkinnedRecord) return { available: true, hint: "Doc skin for this page" };
+  if (state.onDoc) return { available: true, hint: "Document-skin" };
+  if (state.hasDocSkinnedRecord) return { available: true, hint: "Document-skin for this page" };
   if (state.parkedIsDocSkinned || state.peekParentIsDocSkinned) {
     const label = state.returnLabel != null ? String(state.returnLabel).trim() : "";
     return { available: true, hint: label ? `Back to ${label}` : "Back to the form you came from" };
   }
   return { available: false, hint: "" };
+}
+
+/**
+ * What clicking the Doc tab should *do*, in the same precedence {@link docTabState} uses for
+ * what the tab *says*. These two disagreed until 2026-09-08: the hint put "this page's own
+ * Doc skin" ahead of "back to where you came from" (docTabState above), while main.js's
+ * openDocSkin() tried the two return paths first. Invisible for two years of Bill/PO/IR
+ * because every peek parent and every parked return was a page with no Doc skin of its own —
+ * Payment Entry is the first doctype that is *both* soft-peekable (`vanilla-always`, no
+ * doc-form profile, so `isSoftPeekRoute` is true) and Doc-skinned (lens-context routes it to
+ * pay-outstanding / payment-doc). Clicking Doc on it returned to Vanilla instead of opening
+ * its skin — 5zorro's nav incident, 2026-09-08.
+ *
+ * `parkedIsSameDoc` is the one case a return still wins: same destination either way, but
+ * resuming keeps unsaved edits instead of re-opening the form clean (OI-112 soft-peek return).
+ *
+ * `peekParentIsCurrent` exists because a peek stack can outlive its child — leave the child
+ * and the parent-only stack stays armed while you are standing *on* the parent. "Returning"
+ * there navigates to the page you are already on, which reads as the Doc tab doing nothing.
+ * Never return in that case; the caller should collapse the stale stack instead.
+ *
+ * @param {{
+ *   hasOwnDocSkin?: boolean,
+ *   hasParked?: boolean,
+ *   parkedIsSameDoc?: boolean,
+ *   hasPeekParent?: boolean,
+ *   peekParentIsCurrent?: boolean,
+ * }} [state]
+ * @returns {"resume-parked"|"open-own-skin"|"return-peek"|"fallback"}
+ */
+export function docTabAction(state = {}) {
+  if (state.hasParked && state.parkedIsSameDoc) return "resume-parked";
+  if (state.hasOwnDocSkin) return "open-own-skin";
+  if (state.hasParked) return "resume-parked";
+  if (state.hasPeekParent && !state.peekParentIsCurrent) return "return-peek";
+  return "fallback";
+}
+
+/**
+ * Which lens tab the toolbar paints as **selected**.
+ *
+ * Main already knows this — {@link toolbarLensId} answers it, and its `onDoc` input is the
+ * wide `isShellDocSurface()`, not just "doc-form.html is in front". The toolbar used to throw
+ * that answer away and re-derive selection from `showingBill || showingDocForm`, two flags
+ * that only ever describe doc-form.html. On the two Payment Entry Doc surfaces both are false,
+ * so the Document-skin tab was never emphasized *and* "not home, not doc-form" made the page
+ * look like an ERP form, which lit Default-skin instead — the toolbar claiming the clerk was
+ * in Vanilla while they sat in the Doc skin (nav incident 2026-09-10).
+ *
+ * Same rule as {@link lensTabsFor}: the toolbar renders the answer, it never guesses.
+ *
+ * @param {{ lens?: LensId|string, docAvailable?: boolean }} [state]
+ * @returns {{ doc: boolean, vanilla: boolean, simplified: boolean }}
+ */
+export function lensTabEmphasis(state = {}) {
+  const lens = state.lens === "doc" || state.lens === "simplified" ? state.lens : "vanilla";
+  const onDoc = lens === "doc";
+  return {
+    // A tab that is hidden must not also be the selected one.
+    doc: onDoc && state.docAvailable !== false,
+    vanilla: !onDoc && lens !== "simplified",
+    simplified: !onDoc && lens === "simplified",
+  };
 }
 
 /**

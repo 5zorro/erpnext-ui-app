@@ -86,7 +86,7 @@ export function dirtyCompareKindForField(field) {
   if (field === "qty" || field === "rate" || field === "tax_amount" || field === "__amount_due" || field === "paid_amount") {
     return "number";
   }
-  if (field === "is_paid") {
+  if (field === "is_paid" || field === "is_return") {
     return "number";
   }
   if (field === "posting_date" || field === "bill_date" || field === "due_date" || field === "transaction_date" || field === "schedule_date") {
@@ -138,4 +138,19 @@ export function finishLensApply(state = {}, wasCleanFlag) {
  */
 export function markUserEdited(state = {}) {
   return { ...state, userEdited: true };
+}
+
+/**
+ * Packet 4b step 3: a non-Doc surface (the pay-outstanding check-preview drawer is the first)
+ * can independently hold unsaved input. Generalizes "only userEdited gates navigation" to a
+ * surface keyed by its own surfaceMode string, so a second such surface can reuse this instead
+ * of a new predicate. Only gates while the surface is the one actually showing -- a drawer left
+ * dirty on a surface the user already navigated away from must not block unrelated navigation.
+ * @param {string} currentSurfaceMode
+ * @param {string} targetSurfaceMode surface the dirty flag belongs to
+ * @param {boolean} dirty
+ * @returns {boolean} true = prompt before navigate
+ */
+export function shouldGateSurfaceNavigation(currentSurfaceMode, targetSurfaceMode, dirty) {
+  return currentSurfaceMode === targetSurfaceMode && !!dirty;
 }

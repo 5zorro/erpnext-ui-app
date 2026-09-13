@@ -30,6 +30,16 @@ export const DOC_WASH_ACCENTS = Object.freeze({
 
 export const DEFAULT_PATTERN_PREF = /** @type {DocWashPatternPref} */ ("ar");
 
+/**
+ * Document *variants* sit on top of a role wash without replacing it: a Vendor Credit is
+ * still an invoice-role AP document, it just must never be mistaken for an ordinary Bill at
+ * a glance. Rendered as vertical white ledger stripes over the role wash (2026-09-07).
+ * @typedef {"return"} DocWashVariant
+ */
+
+/** @type {DocWashVariant[]} */
+export const DOC_WASH_VARIANTS = ["return"];
+
 /** @type {DocWashPatternPref[]} */
 export const PATTERN_PREF_IDS = ["ar", "ap", "both", "none"];
 
@@ -94,6 +104,34 @@ export function patternAppliesToDesk(pref, desk) {
 }
 
 /**
+ * @param {DocWashVariant|string|null|undefined} value
+ * @returns {DocWashVariant|null}
+ */
+export function normalizeDocWashVariant(value) {
+  const v = value != null ? String(value).trim().toLowerCase() : "";
+  return DOC_WASH_VARIANTS.includes(/** @type {DocWashVariant} */ (v))
+    ? /** @type {DocWashVariant} */ (v)
+    : null;
+}
+
+/**
+ * Set (or clear) the variant attribute on documentElement. Split out from
+ * `applyDocWashToDocument` because the variant is only known *after* the doc loads and can
+ * flip live (credit-memo toggle), while role/desk/pattern are settled once at boot.
+ * @param {Document} doc
+ * @param {DocWashVariant|string|null|undefined} variant
+ * @returns {DocWashVariant|null}
+ */
+export function setDocWashVariant(doc, variant) {
+  const root = doc && doc.documentElement;
+  const v = normalizeDocWashVariant(variant);
+  if (!root || !root.dataset) return v;
+  if (v) root.dataset.docVariant = v;
+  else delete root.dataset.docVariant;
+  return v;
+}
+
+/**
  * @param {string|null|undefined} profileId
  * @returns {{ role: DocWashRole, desk: DocWashDesk }|null}
  */
@@ -120,9 +158,10 @@ export function washRoleForSourceKind(sourceKind) {
  *   role?: DocWashRole|null,
  *   desk?: DocWashDesk|null,
  *   patternPref?: DocWashPatternPref|string|null,
+ *   variant?: DocWashVariant|string|null,
  *   storage?: { getItem?: (k: string) => string|null, setItem?: (k: string, v: string) => void }|null,
  * }} [opts]
- * @returns {{ role: DocWashRole|null, desk: DocWashDesk|null, patternPref: DocWashPatternPref }}
+ * @returns {{ role: DocWashRole|null, desk: DocWashDesk|null, patternPref: DocWashPatternPref, variant: DocWashVariant|null }}
  */
 export function applyDocWashToDocument(doc, opts = {}) {
   const fromProfile = washForProfile(opts.profileId);
@@ -147,8 +186,9 @@ export function applyDocWashToDocument(doc, opts = {}) {
     else delete root.dataset.docDesk;
     root.dataset.pattern = patternPref;
   }
+  const variant = setDocWashVariant(doc, opts.variant);
 
-  return { role, desk, patternPref };
+  return { role, desk, patternPref, variant };
 }
 
 export const PATTERN_PREF_STORAGE_KEY = "doc-wash-pattern";

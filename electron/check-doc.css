@@ -1,0 +1,197 @@
+/**
+ * The check/ACH document (Packet 4b). One fragment, two mounts (drawer on pay-outstanding.html,
+ * later a full page for an existing Payment Entry) -- both link this file rather than duplicating
+ * rules, the same "shared component CSS" pattern doc-fields.css already establishes for Bill/PO/IR.
+ * Tokens (--wash-payment / --accent-payment) come from doc-wash.css, which every host already links.
+ */
+
+.check-doc[hidden] { display: none; }
+
+.check-doc {
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  color: #1f2d3d;
+  max-width: 560px;
+}
+
+.check-doc-badge {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--accent-payment, #009e73);
+  background: var(--wash-payment, #e6f5f0);
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-bottom: 10px;
+}
+
+.check-doc-face {
+  background: #fff;
+  border: 1px solid #d6dee6;
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+}
+
+.check-doc-row + .check-doc-row { margin-top: 12px; }
+
+.check-doc-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.check-doc-payee-row .check-doc-payee {
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid #cbd5e1;
+  display: block;
+  padding-bottom: 4px;
+  min-height: 1.2em;
+}
+/* Author display beats UA [hidden] -- blank mode swaps this span for an input. Declared *after*
+   the rule above on purpose: `.check-doc-payee[hidden]` and `.check-doc-payee-row
+   .check-doc-payee` have identical specificity, so an earlier guard silently loses the cascade
+   and both the span and the input render (found 2026-09-08 -- the guard was present and still
+   did nothing). */
+.check-doc-payee[hidden],
+.check-doc-amount-box[hidden] { display: none; }
+
+.check-doc-amount-row { display: flex; justify-content: flex-end; }
+.check-doc-amount-box {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: #f8fafc;
+}
+
+.check-doc-words-row[hidden],
+.check-doc-bank-row[hidden] { display: none; }
+.check-doc-payee-input[hidden],
+.check-doc-amount-input[hidden] { display: none; }
+/* doc-skin.css gives .link-wrap `display: flex`, which beats the UA `[hidden]` rule -- the same
+   class of bug as .check-doc-write-actions and .check-doc-payee. Scoped here rather than added
+   to the shared sheet. */
+.check-doc .link-wrap[hidden] { display: none; }
+.check-doc-payee-input { margin-top: 2px; font-size: 15px; font-weight: 600; }
+.check-doc-amount-input {
+  width: 160px; text-align: right; font-size: 18px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.check-doc-stub[hidden] { display: none; }
+.check-doc-words {
+  display: block;
+  font-size: 12px;
+  font-style: italic;
+  color: #334155;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 4px;
+}
+.check-doc-bank-row .check-doc-value { font-size: 12px; color: #475569; }
+
+.check-doc-meta-row { display: flex; gap: 24px; }
+.check-doc-meta-row .check-doc-field[hidden] { display: none; }
+.check-doc-field { flex: 1; min-width: 0; }
+.check-doc-value {
+  display: block;
+  font-size: 13px;
+  min-height: 1.2em;
+}
+.check-doc-memo-row .check-doc-value {
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 6px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.check-doc-stub {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px dashed #cbd5e1;
+}
+.check-doc-stub-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.check-doc-stub-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.check-doc-stub-invoice { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.check-doc-stub-due { color: #64748b; font-variant-numeric: tabular-nums; }
+.check-doc-stub-amount { font-variant-numeric: tabular-nums; text-align: right; min-width: 70px; }
+.check-doc-stub-total {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  padding-top: 6px;
+}
+
+.check-doc-write {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #d6dee6;
+  border-radius: 10px;
+}
+.check-doc-write-row { display: flex; gap: 16px; }
+.check-doc-write-row + .check-doc-write-row { margin-top: 10px; }
+.check-doc-write .check-doc-field { flex: 1; min-width: 0; }
+.check-doc-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.check-doc-input:disabled {
+  background: #f1f5f9;
+  color: #475569;
+  cursor: default;
+}
+/**
+ * An author `display` beats the UA sheet's `[hidden] { display: none }`, so every class here
+ * that is toggled via the `hidden` property needs its own guard -- paintCheckDoc's read-only
+ * mount sets `actions.hidden = true` and, without this, the "Create & submit Payment Entry"
+ * button stayed on screen over an already-submitted document (found 2026-09-07).
+ */
+.check-doc-write-actions[hidden] { display: none; }
+
+.check-doc-write-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+.check-doc-write-status { font-size: 12px; color: #64748b; flex: 1; min-width: 0; }
+.check-doc-submit {
+  border: none;
+  background: var(--accent-payment, #009e73);
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.check-doc-submit:hover { filter: brightness(0.95); }
+.check-doc-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Same reason as .check-doc-write-actions above: an author display beats UA `[hidden]`. These
+   two buttons are toggled per mount mode (proposal creates, draft saves, submitted neither). */
+.check-doc-submit[hidden] { display: none; }

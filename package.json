@@ -21,6 +21,7 @@
     "report:input-count:bill": "node ops/input-count/report-bill.js",
     "report:input-count:po": "node ops/input-count/report-doc-form.js po",
     "report:input-count:receipt": "node ops/input-count/report-doc-form.js receipt",
+    "chart:input-count": "node ops/input-count/render-chart.mjs",
     "erp:up": "bash ops/erp-host/ensure-erp-up.sh",
     "erp:check": "bash ops/erp-host/upgrade-sandbox.sh --check",
     "erp:upgrade-sandbox": "bash ops/erp-host/upgrade-sandbox.sh --upgrade",

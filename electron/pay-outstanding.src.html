@@ -1,0 +1,1451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pay Outstanding</title>
+  <link rel="stylesheet" href="doc-wash.css" />
+  <link rel="stylesheet" href="doc-skin.css" />
+  <link rel="stylesheet" href="check-doc.css" />
+  <style>
+    :root {
+      --flow-batch: var(--accent-payment, #009e73);
+      --flow-discount: #e69f00;
+      --flow-alone: #94a3b8;
+      --flow-invoice: #60a5fa;
+    }
+    html, body {
+      margin: 0; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px; box-sizing: border-box; padding: 0 20px; background: #fff;
+      border-bottom: 1px solid #d6dee6; position: sticky; top: 0; z-index: 3;
+    }
+    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; flex: 0 0 auto; }
+    .filter-input {
+      flex: 0 1 260px; margin: 0 16px; padding: 6px 10px; border: 1px solid #d6dee6;
+      border-radius: 6px; font-size: 12px; background: #f8fafc;
+    }
+    .filter-input:focus { outline: none; border-color: #60a5fa; background: #fff; }
+    #empty.no-match { color: #94a3b8; }
+    .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #64748b; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-swatch { width: 14px; height: 4px; border-radius: 2px; }
+    .hdr-actions { display: flex; align-items: center; gap: 10px; }
+    #prefs-toggle {
+      border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
+    #prefs-toggle:hover { background: #eef2f5; }
+    .sort-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; }
+    .sort-btn {
+      border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 6px;
+      padding: 5px 10px; font-size: 11px; cursor: pointer;
+    }
+    .sort-btn:hover { background: #eef2f5; }
+    .sort-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    #prefs-panel {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+      padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #d6dee6;
+    }
+    #prefs-panel[hidden] { display: none; }
+    .pref-field { display: flex; flex-direction: column; gap: 3px; }
+    .pref-field label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .pref-field input {
+      width: 90px; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px;
+    }
+    .pref-field input.invalid { border-color: #dc2626; background: #fef2f2; }
+    #prefs-error { font-size: 11px; color: #dc2626; }
+    main { max-width: 1040px; margin: 0 auto; padding: 0 20px 40px; }
+    .col-header-row {
+      display: grid; grid-template-columns: 150px 64px 1fr 96px 1fr; align-items: center;
+      height: 28px; box-sizing: border-box; margin: 0 0 10px;
+      background: var(--doc-page-canvas, #eef2f5); position: sticky; top: 52px; z-index: 2;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+    }
+    /* Author `display` beats the UA sheet's `[hidden] { display: none }` — this row is
+       toggled by the `hidden` property (empty state, load error), so it needs its own
+       guard or it renders column labels over an empty list (found 2026-09-07). */
+    .col-header-row[hidden] { display: none; }
+    .col-header-invoice { padding: 0 12px; }
+    .col-header-left, .col-header-right { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+    .col-header-flow { text-align: center; }
+    .c-due, .c-sdate { flex: 1; }
+    .c-amt, .c-samt { flex: 0 0 84px; text-align: right; }
+    #empty { padding: 40px 0; text-align: center; color: #64748b; font-size: 13px; }
+    #load-error {
+      margin: 12px 0; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5;
+      border-radius: 8px; color: #991b1b; font-size: 12px;
+    }
+    #load-error[hidden] { display: none; }
+    .vendor-card {
+      background: #fff; border: 1px solid #d6dee6; border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 18px;
+    }
+    .vendor-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding: 10px 14px; background: #2c3e50; color: #fff; border-radius: 10px 10px 0 0;
+      position: sticky; top: 80px; z-index: 1;
+    }
+    .vendor-head .name { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+    .vendor-head .total { font-size: 12px; color: #cbd5e1; }
+    .flow-grid {
+      /* The invoice column is sized to hold a whole ERPNext naming-series name (ACC-PINV-2026-
+         00904) *plus* its peek button. At 150px it had 94px for a 137px name, so every invoice
+         ID on the surface was ellipsized -- 5zorro: "I can't tell the entire invoice ID from
+         that." A column that cannot show a normal invoice number is simply too narrow. */
+      display: grid; grid-template-columns: 208px 64px 1fr 96px 1fr; align-items: stretch;
+    }
+    .col-bills, .col-groups, .col-invoices { display: flex; flex-direction: column; }
+    .col-groups, .col-invoices { align-items: stretch; }
+    /* Every element whose height the flow SVG also computes must be border-box, or a 1px
+       border makes the DOM row 35px while the ribbon is drawn at a 34px pitch. Measured
+       2026-09-08: 12px of accumulated drift by row 12, and group nodes standing 14px taller
+       than their own wrapper -- "the images shift slightly up if there are multiple grouped
+       payments". The SVG's coordinate space is the contract here; the CSS has to keep it. */
+    .group-wrap, .invoice-wrap { position: relative; box-sizing: border-box; }
+    .row, .invoice-node, .group-node { box-sizing: border-box; }
+    /* The label sits where the bundle is -- centred, matching option B's centred bundle
+       (chosen 2026-09-08). If the bundle placement ever changes, this moves with it. */
+    .invoice-node {
+      display: flex; flex-direction: column; justify-content: center; padding: 6px 10px;
+      cursor: pointer; border-bottom: 1px solid #f1f5f9; gap: 2px; background: #f8fbff;
+    }
+    .invoice-node:hover { background: #eef6ff; }
+    /* An aggregate node fits its content to the height the SVG gave it, never the other way round
+       (src/flow-node-density.js): its span height is member-count * ROW_HEIGHT, and that is what
+       keeps the three columns the same height and lands the ribbons on their rows. `overflow:
+       hidden` is the backstop -- if a future line still does not fit it clips, rather than printing
+       over the payment below, which is the failure 5zorro hit (measured 2026-09-08: a suggested
+       payment wanted 67px in a 34px box, and 88 of them collided with their neighbour). */
+    .invoice-node, .group-node { overflow: hidden; }
+    .invoice-node.compact { padding: 3px 10px; }
+    /* At one row the invoice has exactly one installment, so its sub-line only repeats the amount
+       already shown in the schedule row at the same y, 64px to the right. */
+    .invoice-node.compact .invoice-sub { display: none; }
+    .invoice-name {
+      font-size: 11px; font-weight: 600; color: #1f2d3d; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .invoice-sub { font-size: 10px; color: #64748b; }
+    .row {
+      display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 12px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .bill-row { cursor: pointer; }
+    .bill-row:hover { background: #f8fafc; }
+    .bill-row .due { color: #475569; font-variant-numeric: tabular-nums; }
+    .bill-row .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .discount-badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e;
+      white-space: nowrap;
+    }
+    .group-node {
+      display: flex; flex-direction: column; justify-content: center; padding: 6px 12px;
+      cursor: pointer; border-bottom: 1px solid #f1f5f9; gap: 2px;
+    }
+    .group-node:hover { background: #f8fafc; }
+    /* One-bill payment: everything on a single line. Create payment KEEPS its label here -- what
+       is scarce at one row is height, and a 19px button sits inside a 32px content box with room
+       to spare, so hiding the label would cost discoverability for nothing (measured: 303px of
+       content in the narrowest 335px column this grid produces). The sub-line is what actually
+       goes, at anything under three rows -- at one bill it reads "Proposed payment", which the
+       column heading already said. */
+    .group-node.compact {
+      flex-direction: row; align-items: center; gap: 8px; padding: 0 12px;
+    }
+    /* A one-line node has to *forbid* wrapping, or "one line" is only a hope: flex will happily
+       shrink a row below its content width and let the date break into "2026-07-" / "27", which
+       reads as a mangled two-line node rather than an honest overflow. With nowrap the pressure
+       shows up as clipping instead, which the measurements can see and the media query below can
+       act on. */
+    .group-node.compact, .group-node.compact * { white-space: nowrap; }
+    .group-node.compact .group-top { flex: 1 1 auto; min-width: 0; }
+    .group-node.compact .group-action { align-self: center; margin-top: 0; padding: 2px 7px; }
+    .group-node.compact .group-sub { display: none; }
+    /* Two rows: the sub-line and the button share the second line. Stacking all three wants 64px
+       in a 66px box, which is not slack worth trusting -- side by side it wants 50. Worth the
+       extra rule, because "2 bills -> one payment" is the line that explains why this row says
+       $5,000 when every schedule row beside it says $2,500. */
+    .group-node.medium {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "top top" "sub act";
+      align-content: center; align-items: center; column-gap: 8px; row-gap: 2px;
+    }
+    .group-node.medium .group-top { grid-area: top; }
+    .group-node.medium .group-sub { grid-area: sub; }
+    .group-node.medium .group-action { grid-area: act; margin-top: 0; align-self: center; }
+    /* Suggested-group boundaries (5zorro 2026-09-08). The right side is the decision surface,
+       so its divisions are thicker *and* darker; the left side only mirrors where a group
+       starts and ends, so it is thicker but stays the same light tone — visible when you look
+       for it, never competing with the group nodes for attention. */
+    .group-wrap:not(:last-child) .group-node { border-bottom: 2px solid #94a3b8; }
+    .row.group-edge { border-bottom: 2px solid #f1f5f9; }
+    .invoice-wrap:not(:last-child) .invoice-node { border-bottom: 2px solid #dbeafe; }
+    .group-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .group-payon { font-size: 12px; font-weight: 600; color: #1f2d3d; font-variant-numeric: tabular-nums; }
+    .group-amt { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .reason-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .group-sub { font-size: 10px; color: #64748b; }
+    .rationale {
+      font-size: 11px; color: #334155; background: #fff; border: 1px solid #d6dee6;
+      padding: 8px 12px; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.12);
+      position: absolute; top: 100%; left: 8px; right: 8px; z-index: 5; border-radius: 0 0 8px 8px;
+    }
+    .rationale[hidden] { display: none; }
+    .rationale .member-bills { margin-top: 4px; color: #64748b; }
+    .view-link { color: #0072b2; text-decoration: none; font-size: 11px; }
+    .view-link:hover { text-decoration: underline; }
+    svg.flow-svg { display: block; width: 100%; }
+    /* Focus one payment at a time (5zorro 2026-09-08). The two aggregate columns want opposite
+       row orders, so on either sort one side's strands necessarily cross; rather than trying to
+       out-clever the sort, light one relationship and dim the rest. CSS beats the presentation
+       attributes the SVG sets, so no repaint is needed -- just a class on the grid. */
+    .flow-grid.focusing .row:not(.lit),
+    .flow-grid.focusing .invoice-node:not(.lit),
+    .flow-grid.focusing .group-node:not(.lit) { opacity: .3; }
+    .flow-grid.focusing svg.flow-svg path:not(.lit) { stroke-opacity: .08; }
+    .flow-grid.focusing .row.lit { background: var(--wash-payment, #e6f5f0); }
+    .flow-grid.focusing .invoice-node.lit { background: #e6f0ff; }
+    .flow-grid.focusing .group-node.lit { background: var(--wash-payment, #e6f5f0); }
+    .flow-grid.focusing svg.flow-svg path.lit { stroke-opacity: .95; }
+    .flow-grid.pinned .group-node.lit { box-shadow: inset 2px 0 0 var(--accent-payment, #009e73); }
+    /* Actions are buttons; everything else is exploration (5zorro 2026-09-08: "having a button
+       of 'create payment' so it is clear what clicking does. Otherwise, all clicks are just
+       exploring information"). Clicking a cell used to navigate away or bury the real action in
+       a popup -- neither is discoverable. */
+    .flow-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+      border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
+      padding: 2px 5px; cursor: pointer; line-height: 1; flex: 0 0 auto;
+    }
+    .flow-btn:hover { background: #eef6ff; border-color: #93c5fd; color: #1d4ed8; }
+    .flow-btn svg { display: block; }
+    .invoice-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    /* On a schedule row the peek button would be 90 rows of visual noise at rest, so it earns
+       its place on hover. pointer-events too, or an invisible button still swallows clicks. */
+    .bill-row .flow-btn { opacity: 0; pointer-events: none; transition: opacity .1s; }
+    .bill-row:hover .flow-btn, .bill-row .flow-btn:focus-visible { opacity: 1; pointer-events: auto; }
+    .group-action {
+      display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+      margin-top: 4px; border: 1px solid var(--accent-payment, #009e73);
+      background: #fff; color: #00795c; border-radius: 6px;
+      padding: 3px 9px; font-size: 11px; font-weight: 600; cursor: pointer;
+    }
+    .group-action:hover { background: var(--wash-payment, #e6f5f0); }
+    .group-action svg { display: block; }
+    .focus-hint {
+      font-size: 11px; color: #64748b; padding: 7px 14px; border-top: 1px solid var(--line, #f1f5f9);
+      background: #fbfdff;
+    }
+    .focus-hint b { color: #1f2d3d; font-weight: 600; }
+    .check-drawer {
+      position: sticky; bottom: 0; left: 0; right: 0; z-index: 4;
+      background: #f8fafc; border-top: 1px solid #d6dee6;
+      box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+      /* border-box so a stop means what it says: check-drawer-height.js hands us a viewport
+         fraction, and on a content-box element the 38px of padding + border landed on top of
+         it (peek asked for 324px and rendered 363px). max-height here is a pre-JS fallback
+         only — applyDrawerStop() overwrites it on load and on resize. */
+      box-sizing: border-box;
+      max-height: 55vh; overflow-y: auto;
+      padding: 16px 20px 22px;
+    }
+    .check-drawer[hidden] { display: none; }
+    /* The drawer bleeds full-width so its surface reads as a tray under the page, but its
+       *contents* belong to the same column `main` centres — without this the check sat hard
+       against the window's left edge while every vendor card was 420px to the right at
+       1920px (found 2026-09-07). Same max-width as `main`, deliberately: the check's left
+       edge lines up with the vendor cards' left edge, so the drawer reads as being about
+       the row above it. */
+    .check-drawer-inner { max-width: 1040px; margin: 0 auto; }
+    .check-drawer-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px; cursor: pointer; user-select: none;
+    }
+    .check-drawer-head:hover .check-drawer-title { color: #1f2d3d; }
+    .check-drawer-caret { font-size: 9px; color: #94a3b8; margin-right: 6px; }
+    /* Closed state: the drawer collapses to a strip that still says what it is and pulls back
+       up on click -- a reverse dropdown (5zorro 2026-09-08). Without it the drawer was only
+       reachable through a group's rationale popup, and nothing on the page said so. */
+    .drawer-tab {
+      position: sticky; bottom: 0; left: 0; right: 0; z-index: 4;
+      display: block; width: 100%; box-sizing: border-box;
+      border: none; border-top: 1px solid #d6dee6; background: #fff;
+      box-shadow: 0 -2px 10px rgba(0,0,0,.05);
+      padding: 11px 20px; font: inherit; font-size: 12px; color: #475569;
+      cursor: pointer; text-align: center;
+    }
+    .drawer-tab[hidden] { display: none; }
+    .drawer-tab:hover { background: #f8fafc; color: #1f2d3d; }
+    .drawer-tab-caret { color: #94a3b8; margin-right: 8px; font-size: 9px; }
+    .check-drawer-title { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .4px; }
+    .check-drawer-head-actions { display: flex; align-items: center; gap: 8px; }
+    .check-drawer-stop {
+      border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer;
+    }
+    .check-drawer-stop:hover { background: #eef2f5; }
+    /* A real check is ~2.4:1 wide/short — this packet's own Height row says so, and says that
+       shape is *why* a bottom drawer suits it. Step 2 shipped a 560px-wide vertical column
+       instead, so the drawer stood 631px tall at 1080p (58% of the window) with ~480px of the
+       content column unused beside it. Lay the remittance stub next to the check face rather
+       than under it, and the same content is roughly half as tall. Scoped to the drawer on
+       purpose: payment-doc.html is a full page with room to spare, and shares the fragment. */
+    .check-drawer .check-doc { max-width: none; }
+    @media (min-width: 900px) {
+      .check-drawer .check-doc {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        grid-template-areas: "badge badge" "face stub" "write stub";
+        align-content: start;
+        column-gap: 22px;
+      }
+      .check-drawer .check-doc-badge { grid-area: badge; justify-self: start; }
+      .check-drawer .check-doc-face { grid-area: face; }
+      .check-drawer .check-doc-write { grid-area: write; }
+      .check-drawer .check-doc-stub {
+        grid-area: stub; margin-top: 0; padding-top: 0;
+        border-top: none; border-left: 2px dashed #cbd5e1; padding-left: 22px;
+      }
+    }
+    .check-drawer-close {
+      border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer;
+    }
+    .check-drawer-close:hover { background: #eef2f5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 data-testid="pay-outstanding-title">Pay Outstanding</h1>
+    <input
+      type="search"
+      id="filter-input"
+      class="filter-input"
+      placeholder="Filter by vendor or invoice…"
+      data-testid="filter-input"
+    />
+    <div class="hdr-actions">
+      <div class="legend" aria-hidden="true">
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-batch)"></span>Batch</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-discount)"></span>Discount capture</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--flow-alone)"></span>Pay alone</span>
+      </div>
+      <div class="sort-toggle" role="group" aria-label="Sort schedule by">
+        Sort:
+        <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
+        <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
+      </div>
+      <button type="button" id="prefs-toggle" aria-expanded="false">⚙ Assumptions</button>
+    </div>
+  </header>
+  <div id="prefs-panel" hidden>
+    <div class="pref-field">
+      <label for="pref-apr">APR %</label>
+      <input type="number" id="pref-apr" step="0.1" min="0" data-testid="pref-apr" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-postage">Postage $</label>
+      <input type="number" id="pref-postage" step="0.01" min="0" data-testid="pref-postage" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-percheck">Per-check $</label>
+      <input type="number" id="pref-percheck" step="0.01" min="0" data-testid="pref-percheck" />
+    </div>
+    <div class="pref-field">
+      <label for="pref-window">Batch window (days)</label>
+      <input type="number" id="pref-window" step="1" min="0" data-testid="pref-window" />
+    </div>
+    <span id="prefs-error"></span>
+  </div>
+  <main>
+    <div id="load-error" hidden></div>
+    <div id="empty" hidden data-testid="pay-outstanding-empty">Nothing outstanding.</div>
+    <div class="col-header-row" id="col-header-row" hidden data-testid="flow-col-header">
+      <div class="col-header-invoice">Invoice</div>
+      <div class="col-header-flow">Flow</div>
+      <div class="col-header-left">
+        <span class="c-due">Payment date</span>
+        <span class="c-amt">Amount</span>
+      </div>
+      <div class="col-header-flow">Flow</div>
+      <div class="col-header-right">
+        <span class="c-sdate">Suggested date</span>
+        <span class="c-samt">Suggested amount</span>
+      </div>
+    </div>
+    <div id="vendors" data-testid="pay-outstanding-vendors"></div>
+  </main>
+
+  <button type="button" id="drawer-tab" class="drawer-tab" data-testid="drawer-tab">
+    <span class="drawer-tab-caret" aria-hidden="true">▲</span>New payment — blank check
+  </button>
+
+  <div id="check-drawer" class="check-drawer" hidden data-testid="check-drawer">
+    <div class="check-drawer-inner">
+      <div class="check-drawer-head">
+        <span class="check-drawer-title"><span class="check-drawer-caret" aria-hidden="true">▼</span>Payment preview</span>
+        <div class="check-drawer-head-actions">
+          <button type="button" class="check-drawer-stop" id="check-drawer-stop"
+            data-testid="check-drawer-stop" title="Drawer height">Half</button>
+          <button type="button" class="check-drawer-close" id="check-drawer-close" data-testid="check-drawer-close">Close</button>
+        </div>
+      </div>
+      <!-- inject: check-doc.fragment.html -->
+    </div>
+  </div>
+
+  <script type="module">
+    import { paymentBatchEconomics } from "../src/payment-batch-economics.js";
+    import {
+      DEFAULT_PAYMENT_BATCH_PREFS,
+      mergePaymentBatchPrefs,
+      validatePaymentBatchPrefs,
+      paymentMethodFeeResolver,
+    } from "../src/payment-batch-prefs.js";
+    import {
+      paintCheckDoc,
+      closeCheckDoc,
+      mountCheckDocWrite,
+      mountCheckDocBlank,
+      setCheckDocBatchSource,
+    } from "../src/check-doc-mount.js";
+    import { buildCheckDocViewModel, blankCheckViewModel } from "../src/check-doc-view.js";
+    import {
+      sortBillsForSchedule,
+      rowIndexOf,
+      orderAggregatesByFirstRow,
+      aggregatesAreContiguous,
+    } from "../src/pay-flow-sort.js";
+    import { resolveFlowFocus, noFlowFocus, togglePinnedFocus } from "../src/pay-flow-focus.js";
+    import { flowNodePlan } from "../src/flow-node-density.js";
+    import { uiIconHtml } from "../src/ui-icons.js";
+    import {
+      CHECK_DRAWER_STOP_LABEL,
+      nextDrawerStop,
+      drawerMaxHeightPx,
+      readDrawerStop,
+      writeDrawerStop,
+    } from "../src/check-drawer-height.js";
+
+    const api = window.erpPayOutstanding;
+    const ROW_HEIGHT = 34;
+    const MIN_STROKE = 2;
+    const MAX_STROKE = 16;
+    /** Horizontal gutter reserved for the brace, so it never overlaps the strands. */
+    const BRACE_ZONE = 20;
+    /** A two-strand bundle is only ~8px tall; a brace that small reads as a smudge. */
+    const MIN_BRACE_H = 18;
+    const REASON_COLOR = {
+      batch: "var(--flow-batch)",
+      "discount-capture": "var(--flow-discount)",
+      "pay-alone": "var(--flow-alone)",
+    };
+
+    let allBills = [];
+    let prefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+    /** @type {"date"|"invoice"} */
+    let scheduleSortMode = "date";
+    let filterText = "";
+
+    const vendorsEl = document.getElementById("vendors");
+    const emptyEl = document.getElementById("empty");
+    const colHeaderEl = document.getElementById("col-header-row");
+    const loadErrorEl = document.getElementById("load-error");
+    const prefsToggle = document.getElementById("prefs-toggle");
+    const prefsPanel = document.getElementById("prefs-panel");
+    const prefsError = document.getElementById("prefs-error");
+    const prefInputs = {
+      apr: document.getElementById("pref-apr"),
+      postage: document.getElementById("pref-postage"),
+      perCheck: document.getElementById("pref-percheck"),
+      groupWindowDays: document.getElementById("pref-window"),
+    };
+
+    function money(n) {
+      return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
+    // The check-doc drawer: a preview of a chosen batch as a check/ACH document, plus (Packet
+    // 4b step 4) the controls that turn it into an actual Payment Entry. One mount today; the
+    // same fragment + paint/mount calls are what a future full-page mount (an existing Payment
+    // Entry) will reuse.
+    const checkDrawer = document.getElementById("check-drawer");
+    const checkDrawerClose = document.getElementById("check-drawer-close");
+    const checkDocEl = document.getElementById("check-doc");
+    const linkMounted = new WeakMap();
+
+    // Local mirror of what main.js's payOutstandingDirty holds (Packet 4b step 3) -- kept here
+    // too so this page can warn before silently discarding unsaved write-mode input when the
+    // user switches to a *different* group's preview without leaving the surface at all (the
+    // main-process gate only covers leaving Pay Outstanding, not switching batches within it).
+    let drawerDirty = false;
+    function setDrawerDirty(dirty) {
+      drawerDirty = !!dirty;
+      if (api && api.setDirty) api.setDirty(drawerDirty);
+    }
+
+    /**
+     * One rationale popup on screen at a time. Two separate defects, one rule: a second
+     * group's popup used to open without closing the first, and — because the only route
+     * into the drawer was a link *inside* a popup — opening the drawer always left its own
+     * launcher floating on top of it (.rationale z-index 5 vs the drawer's 4). Named during
+     * Packet 4b step 2 and deferred; fixed 2026-09-07. That launcher has since become the
+     * "Create payment" button on the node itself (2026-09-08), so the popup is now purely the
+     * maths — but one-popup-at-a-time and click-away still apply.
+     * @param {Element|null} [except] leave this one alone (the popup being toggled open)
+     */
+    function closeOtherRationales(except) {
+      for (const el of document.querySelectorAll('[data-testid="group-rationale"]')) {
+        if (el !== except) el.hidden = true;
+      }
+    }
+
+    /**
+     * Click-away. A popup is absolutely positioned over whatever sits below it, so with one
+     * open the *next* vendor's group node is physically unreachable — the popup swallows the
+     * click (found 2026-09-07 while verifying the one-at-a-time rule above; the toggle alone
+     * could never fire on a covered node). Capture phase, so a dismiss lands before the group
+     * node's own toggle handler: click a covered node once to dismiss, again to open it.
+     */
+    document.addEventListener(
+      "click",
+      (ev) => {
+        const t = ev.target;
+        if (!t || typeof t.closest !== "function") return;
+        if (t.closest(".group-node")) return; // its own handler owns the toggle
+        if (t.closest('[data-testid="group-rationale"] a')) return; // let the popup's links work
+        closeOtherRationales(null);
+      },
+      true,
+    );
+
+    /** Esc releases a pinned trace -- the same key that already closes things on this surface. */
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      let released = false;
+      for (const grid of document.querySelectorAll(".flow-grid")) {
+        if (grid.classList.contains("pinned") && typeof grid.__releaseFocus === "function") {
+          grid.__releaseFocus();
+          released = true;
+        }
+      }
+      if (released) ev.stopPropagation();
+    });
+
+    function openCheckDrawer(group, bills) {
+      if (!checkDrawer.hidden && drawerDirty) {
+        const proceed = window.confirm(
+          "This will discard the unsaved check details you entered. Continue?",
+        );
+        if (!proceed) return;
+      }
+      // After the gate, not before: a cancelled switch leaves the screen exactly as it was.
+      closeOtherRationales(null);
+      setCheckDocBatchSource(group, bills);
+      paintCheckDoc(checkDocEl, buildCheckDocViewModel(group, bills));
+      setDrawerDirty(false);
+      checkDrawer.hidden = false;
+      syncDrawerTab();
+      checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    /**
+     * Drawer height (Packet 4b step 6). The wide check layout above does most of the work; this
+     * is the "expandable toward full height" control the Height row asked for, for the cases it
+     * cannot shrink — an ACH advice, or a long remittance stub. Cycles peek → half → full.
+     */
+    function safeLocalStorage() {
+      // A blocked/absent store throws on *access*, not just on use — check-drawer-height.js
+      // handles a throwing store, but it still has to be handed one without throwing first.
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    }
+    const checkDrawerStopBtn = document.getElementById("check-drawer-stop");
+    let drawerStop = readDrawerStop(safeLocalStorage());
+    function applyDrawerStop() {
+      checkDrawer.style.maxHeight = `${drawerMaxHeightPx(drawerStop, window.innerHeight)}px`;
+      if (checkDrawerStopBtn) checkDrawerStopBtn.textContent = CHECK_DRAWER_STOP_LABEL[drawerStop];
+    }
+    if (checkDrawerStopBtn) {
+      checkDrawerStopBtn.onclick = () => {
+        drawerStop = writeDrawerStop(safeLocalStorage(), nextDrawerStop(drawerStop));
+        applyDrawerStop();
+      };
+    }
+    // Stops are viewport-relative, so a resize has to re-clamp or "full" stops being full.
+    window.addEventListener("resize", applyDrawerStop);
+    applyDrawerStop();
+
+    function closeCheckDrawer() {
+      if (drawerDirty && !window.confirm("Discard this unsaved check preview?")) return;
+      checkDrawer.hidden = true;
+      closeCheckDoc(checkDocEl);
+      setDrawerDirty(false);
+      syncDrawerTab();
+    }
+    checkDrawerClose.onclick = (ev) => {
+      ev.stopPropagation();
+      closeCheckDrawer();
+    };
+    // Clicking the drawer's own head collapses it -- 5zorro tried exactly that and nothing
+    // happened (2026-09-08). Buttons inside the head keep their own handlers.
+    const checkDrawerHead = checkDrawer.querySelector(".check-drawer-head");
+    if (checkDrawerHead) {
+      checkDrawerHead.onclick = (ev) => {
+        if (ev.target && ev.target.closest && ev.target.closest("button")) return;
+        closeCheckDrawer();
+      };
+    }
+
+    /**
+     * The closed state is a strip, not nothing: a reverse dropdown that pulls the drawer back up
+     * with a *blank* check ready to fill in. Before this the drawer was reachable only through a
+     * group's rationale popup, and nothing on the page said so (5zorro 2026-09-08).
+     */
+    const drawerTab = document.getElementById("drawer-tab");
+    function syncDrawerTab() {
+      if (drawerTab) drawerTab.hidden = !checkDrawer.hidden;
+    }
+    function openBlankCheckDrawer() {
+      if (!checkDrawer.hidden && drawerDirty) {
+        const proceed = window.confirm(
+          "This will discard the unsaved check details you entered. Continue?",
+        );
+        if (!proceed) return;
+      }
+      closeOtherRationales(null);
+      setCheckDocBatchSource(null, []);
+      paintCheckDoc(checkDocEl, blankCheckViewModel(todayIso()), {
+        mode: "blank",
+        badgeText: "New payment — not yet saved",
+      });
+      setDrawerDirty(false);
+      checkDrawer.hidden = false;
+      syncDrawerTab();
+      applyDrawerStop();
+      checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    if (drawerTab) drawerTab.onclick = openBlankCheckDrawer;
+
+    mountCheckDocWrite(checkDocEl, {
+      api: api || {},
+      linkMounted,
+      onDirty: setDrawerDirty,
+      onSubmitted: () => {
+        closeCheckDrawer();
+        init(); // refresh: paid bills should drop off the list
+      },
+    });
+    mountCheckDocBlank(checkDocEl, {
+      api: api || {},
+      linkMounted,
+      onDirty: setDrawerDirty,
+      // A blank payment is created as a **Draft**, never auto-submitted -- nothing has been
+      // reviewed yet. Hand it to the document form, which is where a draft gets worked on.
+      onCreated: (result) => {
+        setDrawerDirty(false);
+        closeCheckDrawer();
+        if (api && api.openPaymentDoc && result && result.name) api.openPaymentDoc(result.name);
+      },
+    });
+    syncDrawerTab();
+
+    function todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+
+    function groupBySupplier(bills) {
+      const map = new Map();
+      for (const b of bills) {
+        if (!map.has(b.supplier)) map.set(b.supplier, []);
+        map.get(b.supplier).push(b);
+      }
+      return map;
+    }
+
+    function paintPrefsInputs() {
+      prefInputs.apr.value = Math.round(prefs.apr * 1000) / 10; // decimal -> %
+      prefInputs.postage.value = prefs.postage;
+      prefInputs.perCheck.value = prefs.perCheck;
+      prefInputs.groupWindowDays.value = prefs.groupWindowDays;
+    }
+
+    function readPrefsFromInputs() {
+      return {
+        apr: Number(prefInputs.apr.value) / 100,
+        postage: Number(prefInputs.postage.value),
+        perCheck: Number(prefInputs.perCheck.value),
+        groupWindowDays: Number(prefInputs.groupWindowDays.value),
+      };
+    }
+
+    async function onPrefsChanged() {
+      const candidate = readPrefsFromInputs();
+      const check = validatePaymentBatchPrefs(candidate);
+      for (const key of Object.keys(prefInputs)) prefInputs[key].classList.remove("invalid");
+      if (!check.ok) {
+        prefsError.textContent = check.errors.join("; ");
+        for (const err of check.errors) {
+          const field = err.split(" ")[0];
+          if (prefInputs[field]) prefInputs[field].classList.add("invalid");
+        }
+        return;
+      }
+      prefsError.textContent = "";
+      prefs = candidate;
+      render(); // client-side re-compute only — bills already fetched, no re-fetch (Packet 3)
+      if (api && api.setPrefs) {
+        const saved = await api.setPrefs(prefs).catch(() => null);
+        if (saved && saved.ok) prefs = saved.prefs;
+      }
+    }
+
+    prefsToggle.onclick = () => {
+      const open = prefsPanel.hidden;
+      prefsPanel.hidden = !open;
+      prefsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+
+    const sortDateBtn = document.getElementById("sort-date");
+    const sortInvoiceBtn = document.getElementById("sort-invoice");
+    function setSortMode(mode) {
+      if (mode === scheduleSortMode) return;
+      scheduleSortMode = mode;
+      sortDateBtn.classList.toggle("active", mode === "date");
+      sortInvoiceBtn.classList.toggle("active", mode === "invoice");
+      render(); // re-derives billY from the new order — both ribbon layers re-align automatically
+    }
+    sortDateBtn.onclick = () => setSortMode("date");
+    sortInvoiceBtn.onclick = () => setSortMode("invoice");
+
+    /** Filter by vendor (substring, case-insensitive) or invoice name — optional, empty = all. */
+    function matchesFilter(bill, filter) {
+      if (!filter) return true;
+      const f = filter.toLowerCase();
+      return bill.supplier.toLowerCase().includes(f) || bill.invoice.toLowerCase().includes(f);
+    }
+    const filterInput = document.getElementById("filter-input");
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value.trim();
+      render();
+    });
+    for (const input of Object.values(prefInputs)) {
+      input.addEventListener("change", onPrefsChanged);
+    }
+
+    function billRowEl(bill) {
+      const row = document.createElement("div");
+      row.className = "row bill-row";
+      row.dataset.testid = "bill-row";
+      row.dataset.key = bill.installmentKey;
+
+      const due = document.createElement("span");
+      due.className = "due c-due";
+      due.textContent = bill.dueDate;
+      if (bill.discountDate && bill.discountDate >= todayIso()) {
+        const badge = document.createElement("span");
+        badge.className = "discount-badge";
+        badge.textContent = `−${money(bill.discountAmount)} by ${bill.discountDate}`;
+        due.appendChild(document.createTextNode(" "));
+        due.appendChild(badge);
+      }
+
+      const amt = document.createElement("span");
+      amt.className = "amt c-amt";
+      amt.textContent = money(bill.outstanding);
+
+      row.appendChild(due);
+      row.appendChild(amt);
+      const peek = document.createElement("button");
+      peek.type = "button";
+      peek.className = "flow-btn";
+      peek.dataset.testid = "bill-row-peek";
+      peek.title = `Peek at ${bill.invoice}`;
+      peek.setAttribute("aria-label", `Peek at ${bill.invoice}`);
+      peek.innerHTML = uiIconHtml("eye", { size: 13 });
+      peek.onclick = (ev) => {
+        ev.stopPropagation();
+        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(bill.invoice)}`);
+      };
+      row.appendChild(peek);
+      return row;
+    }
+
+    /**
+     * A suggested payment's identity. `payOn` is NOT unique and cannot be used for this: the bank
+     * calendar pulls a Saturday and a Sunday due date back onto the same Friday, so one vendor can
+     * legitimately have several proposals on one date. Using the date as the id meant hovering one
+     * lit every other proposal sharing it — 5zorro 2026-09-08: *"separate payments visible, but on
+     * hover, a group of more than 1 lights up."* `payment-batch-economics.js` now stamps a unique
+     * `id`; the fallback keeps this honest for any caller that has not (the first member's
+     * installmentKey is itself unique, since every bill belongs to exactly one group).
+     * @param {{ id?: string, payOn?: string, bills?: string[] }} group
+     * @param {number} index position within the card, last-resort tiebreak only
+     */
+    function groupIdOf(group, index) {
+      const g = group || {};
+      return g.id || `${g.payOn || "?"}#${(g.bills && g.bills[0]) || `g${index}`}`;
+    }
+
+    /**
+     * One node per unique invoice, ordered by first appearance in `orderedBills` — this keeps
+     * the invoice column consistent with whichever schedule sort is active (date or invoice)
+     * without the two ever needing separate ordering logic.
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} orderedBills
+     */
+    function groupByInvoiceInOrder(orderedBills) {
+      const order = [];
+      const rowsByInvoice = new Map();
+      for (const b of orderedBills) {
+        if (!rowsByInvoice.has(b.invoice)) {
+          rowsByInvoice.set(b.invoice, []);
+          order.push(b.invoice);
+        }
+        rowsByInvoice.get(b.invoice).push(b);
+      }
+      return order.map((invoice) => ({
+        invoice,
+        rows: rowsByInvoice.get(invoice),
+        total: rowsByInvoice.get(invoice).reduce((s, r) => s + r.outstanding, 0),
+      }));
+    }
+
+    /**
+     * @param {{ invoice: string, rows: object[], total: number }} inv
+     * @param {import("../src/flow-node-density.js").FlowNodePlan} plan how much height it has
+     */
+    function invoiceNodeEl(inv, plan) {
+      const wrap = document.createElement("div");
+      wrap.className = `invoice-node ${plan.density}`;
+      wrap.dataset.testid = "invoice-node";
+      wrap.dataset.agg = inv.invoice;
+
+      const head = document.createElement("div");
+      head.className = "invoice-head";
+      const name = document.createElement("div");
+      name.className = "invoice-name";
+      name.textContent = inv.invoice;
+      head.appendChild(name);
+      const peek = document.createElement("button");
+      peek.type = "button";
+      peek.className = "flow-btn";
+      peek.dataset.testid = "invoice-peek";
+      peek.title = `Peek at ${inv.invoice}`;
+      peek.setAttribute("aria-label", `Peek at ${inv.invoice}`);
+      peek.innerHTML = uiIconHtml("eye", { size: 13 });
+      peek.onclick = (ev) => {
+        ev.stopPropagation();
+        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(inv.invoice)}`);
+      };
+      head.appendChild(peek);
+      wrap.appendChild(head);
+
+      const sub = document.createElement("div");
+      sub.className = "invoice-sub";
+      sub.textContent =
+        inv.rows.length > 1 ? `${inv.rows.length} installments · ${money(inv.total)}` : money(inv.total);
+      wrap.appendChild(sub);
+
+      return wrap;
+    }
+
+    /**
+     * @param {object} group
+     * @param {object[]} bills
+     * @param {string} aggId the group's identity — NOT `payOn`, which repeats (see groupIdOf)
+     * @param {import("../src/flow-node-density.js").FlowNodePlan} plan how much height it has
+     */
+    function groupNodeEl(group, bills, aggId, plan) {
+      const wrap = document.createElement("div");
+      wrap.className = `group-node ${plan.density}`;
+      wrap.dataset.testid = "group-node";
+      wrap.dataset.reason = group.reason;
+      wrap.dataset.agg = aggId;
+      wrap.dataset.payon = group.payOn;
+
+      const top = document.createElement("div");
+      top.className = "group-top";
+      const label = document.createElement("span");
+      label.className = "c-sdate";
+      label.style.display = "flex";
+      label.style.alignItems = "center";
+      label.style.gap = "6px";
+      const dot = document.createElement("span");
+      dot.className = "reason-dot";
+      dot.style.background = REASON_COLOR[group.reason] || REASON_COLOR["pay-alone"];
+      label.appendChild(dot);
+      const payOn = document.createElement("span");
+      payOn.className = "group-payon";
+      payOn.textContent = group.payOn;
+      label.appendChild(payOn);
+      top.appendChild(label);
+      const amt = document.createElement("span");
+      amt.className = "group-amt c-samt";
+      amt.textContent = money(group.totalAmount);
+      top.appendChild(amt);
+      wrap.appendChild(top);
+
+      const sub = document.createElement("div");
+      sub.className = "group-sub";
+      sub.textContent =
+        group.bills.length > 1 ? `${group.bills.length} bills → one payment` : "Proposed payment";
+      wrap.appendChild(sub);
+
+      const rationale = document.createElement("div");
+      rationale.className = "rationale";
+      rationale.hidden = true;
+      rationale.dataset.testid = "group-rationale";
+      const text = document.createElement("div");
+      text.textContent = group.rationale;
+      rationale.appendChild(text);
+      if (group.bills.length > 1) {
+        const members = document.createElement("div");
+        members.className = "member-bills";
+        members.textContent = `Bills: ${group.bills.join(", ")}`;
+        rationale.appendChild(members);
+      }
+      const link = document.createElement("a");
+      link.className = "view-link";
+      link.href = "#";
+      link.textContent = "Open Payment Entry (Get Outstanding Invoices) →";
+      link.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (api && api.openErp) api.openErp("/app/payment-entry/new");
+      };
+      rationale.appendChild(document.createElement("br"));
+      rationale.appendChild(link);
+
+      // The one committing action on this surface, stated as a button rather than hidden behind
+      // a cell click or buried in the rationale popup (5zorro 2026-09-08). Everything else the
+      // clerk can click here only explores.
+      const act = document.createElement("button");
+      act.type = "button";
+      act.className = "group-action";
+      act.dataset.testid = "group-create-payment";
+      act.title = `Fill in a check for ${(group.bills || []).length} bill${
+        (group.bills || []).length === 1 ? "" : "s"
+      } (${money(group.totalAmount)}) — nothing is written until you submit it`;
+      act.setAttribute("aria-label", `Create payment — ${group.payOn}, ${money(group.totalAmount)}`);
+      // A one-row node shares its width three ways (date, amount, action), and "Create payment"
+      // needs every pixel of it: measured 346px of content in a 348px column, which clips the
+      // moment an amount runs to seven figures. Shortening the label is much better than dropping
+      // it -- an unlabelled icon is exactly the ambiguity the button was added to remove -- and the
+      // title and aria-label still say the whole thing.
+      const actionLabel = plan.density === "compact" ? "Pay" : "Create payment";
+      act.innerHTML = `${uiIconHtml("wallet-cash", { size: 13 })}<span class="action-label">${actionLabel}</span>`;
+      act.onclick = (ev) => {
+        ev.stopPropagation();
+        openCheckDrawer(group, bills);
+      };
+      wrap.appendChild(act);
+
+      wrap.onclick = () => {
+        const opening = rationale.hidden;
+        if (opening) closeOtherRationales(rationale);
+        rationale.hidden = !opening;
+      };
+      return { node: wrap, rationale };
+    }
+
+    /**
+     * Focus one relationship at a time (5zorro 2026-09-08). Hover previews, click pins, Esc or a
+     * click on empty space releases. Applied purely by class -- resolveFlowFocus is pure and the
+     * CSS beats the SVG's presentation attributes, so nothing repaints on a mouse move.
+     * @param {HTMLElement} grid
+     * @param {{ invoices: {id: string, keys: string[]}[], groups: {id: string, keys: string[]}[] }} index
+     */
+    function wireFlowFocus(grid, index) {
+      /** @type {import("../src/pay-flow-focus.js").FlowFocusTarget|null} */
+      let pinned = null;
+      let hovered = null;
+
+      const targetFrom = (ev) => {
+        const t = ev.target;
+        if (!t || typeof t.closest !== "function") return null;
+        const group = t.closest(".group-node");
+        if (group) return { kind: "group", id: group.dataset.agg || "" };
+        const inv = t.closest(".invoice-node");
+        if (inv) return { kind: "invoice", id: inv.dataset.agg || "" };
+        const row = t.closest(".row[data-key]");
+        if (row) return { kind: "row", id: row.dataset.key || "" };
+        return null;
+      };
+
+      function paint() {
+        const focus = resolveFlowFocus(pinned || hovered, index);
+        for (const el of grid.querySelectorAll(".lit")) el.classList.remove("lit");
+        grid.classList.toggle("focusing", focus.active);
+        grid.classList.toggle("pinned", focus.active && !!pinned);
+        if (!focus.active) return;
+        const keys = new Set(focus.keys);
+        const aggs = new Set([...focus.invoiceIds, ...focus.groupIds]);
+        for (const el of grid.querySelectorAll("[data-key]")) {
+          if (keys.has(el.dataset.key)) el.classList.add("lit");
+        }
+        for (const el of grid.querySelectorAll(".invoice-node[data-agg], .group-node[data-agg]")) {
+          if (aggs.has(el.dataset.agg)) el.classList.add("lit");
+        }
+        // A brace belongs to its aggregate, and only reads right when that aggregate is lit.
+        for (const el of grid.querySelectorAll("path.flow-brace[data-agg]")) {
+          if (aggs.has(el.dataset.agg)) el.classList.add("lit");
+        }
+      }
+
+      grid.addEventListener("mouseover", (ev) => {
+        const next = targetFrom(ev);
+        const same = next && hovered && next.kind === hovered.kind && next.id === hovered.id;
+        if (same) return;
+        hovered = next;
+        if (!pinned) paint();
+      });
+      grid.addEventListener("mouseleave", () => {
+        hovered = null;
+        if (!pinned) paint();
+      });
+      // Pin on click. The group node's own handler still toggles its rationale popup, so a click
+      // there does both -- pin the trace and show the maths.
+      grid.addEventListener("click", (ev) => {
+        const next = targetFrom(ev);
+        if (!next) return;
+        pinned = togglePinnedFocus(pinned, next);
+        paint();
+      });
+      grid.__releaseFocus = () => {
+        pinned = null;
+        hovered = null;
+        paint();
+      };
+    }
+
+    /**
+     * A `{` gathering a span's whole height back to the single node beside it (5zorro 2026-09-08:
+     * "there should be a bracket like { that directs it to the single row in the invoice column").
+     * The spine runs the span's height on the aggregate's side, curls toward the many rows at top
+     * and bottom, and sends one stem to the node — so "these ten installments are that one
+     * invoice" is legible even before you trace a ribbon.
+     * @param {number} y0 @param {number} y1 @param {number} width flow-column width
+     * @param {"left"|"right"} spanSide which side the aggregate node is on
+     */
+    function bracePath(y0, y1, width, spanSide) {
+      const onLeft = spanSide === "left";
+      const tipX = onLeft ? 2 : width - 2;      // stem tip, pointing at the node
+      const spineX = onLeft ? 9 : width - 9;
+      const curlX = onLeft ? 15 : width - 15;   // curls lean toward the many rows
+      const mid = (y0 + y1) / 2;
+      const r = Math.min(5, Math.max(2, (y1 - y0) / 8));
+      return [
+        `M ${curlX} ${y0}`,
+        `Q ${spineX} ${y0} ${spineX} ${y0 + r}`,
+        `L ${spineX} ${mid - r}`,
+        `Q ${spineX} ${mid} ${tipX} ${mid}`,
+        `Q ${spineX} ${mid} ${spineX} ${mid + r}`,
+        `L ${spineX} ${y1 - r}`,
+        `Q ${spineX} ${y1} ${curlX} ${y1}`,
+      ].join(" ");
+    }
+
+    /** Ribbon path: horizontal-ish cubic bezier from (x1,y1) to (x2,y2). */
+    function ribbonPath(x1, y1, x2, y2) {
+      const midX = (x1 + x2) / 2;
+      return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+    }
+
+    /**
+     * A ribbon layer between a set of aggregate "spans" (each fanning its members out/in across
+     * its own y0..y1) and a set of discrete row points keyed by installmentKey. Used for both
+     * ribbon layers (invoice -> schedule, spans on the left; schedule -> groups, spans on the
+     * right) so the fan-out/fan-in math lives in exactly one place.
+     * @param {{
+     *   spans: Array<{ y0: number, y1: number, keys: string[], reason?: string }>,
+     *   pointY: Map<string, number>,
+     *   amountByKey: Map<string, number>,
+     *   height: number,
+     *   width: number,
+     *   spanSide: "left"|"right",
+     *   strokeFor: (amount: number) => number,
+     *   colorFor: (span: object) => string,
+     *   opacity: number,
+     * }} args
+     */
+    function buildRibbonSvg({ spans, pointY, amountByKey, height, width, spanSide, strokeFor, colorFor, opacity, aggIdOf }) {
+      const svgNs = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNs, "svg");
+      svg.setAttribute("class", "flow-svg");
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.style.height = `${height}px`;
+
+      for (const span of spans) {
+        // The links converge into a **bundle** centred in the aggregate row, each strand as thick as
+        // its own amount -- so the bundle's total thickness reads as the group's size and each
+        // strand's share stays legible. It is deliberately NOT spread to fill the span's height:
+        // a first pass distributed attachment points proportionally, which made every strand a
+        // near-horizontal straight line and erased the convergence entirely ("I now see no flow
+        // at all for the stress test of 90 small payments" -- 5zorro 2026-09-08, reverted).
+        // The bundle being shorter than, or not centred on, the node it feeds is expected; the
+        // brace below is what ties it back to the single row.
+        // Pass 1: where each strand meets the aggregate. Computed before anything is drawn so
+        // the brace can be sized to the bundle's real extent rather than the row's -- bracing an
+        // 8-row cell when the flow occupies its top fifth implies there is something to catch in
+        // the other four fifths (5zorro 2026-09-08).
+        const strands = [];
+        // Option B, chosen 2026-09-08: the bundle is centred in its row rather than pinned to the
+        // top edge. 5zorro's reasoning -- "it keeps the ribbon height, and because they are not
+        // forced to move as far, there is less overlap that could be confusing to a user." Total
+        // strand travel is the lowest of the shapes considered, which is what keeps the crossings
+        // legible on the sort where one side cannot line up (see docs/mockups/pay-flow-shapes.html).
+        const bundleH = span.keys.reduce(
+          (t, k) => t + Math.max(strokeFor(amountByKey.get(k) || 0), 4),
+          0,
+        );
+        let used = (span.y0 + span.y1) / 2 - bundleH / 2;
+        for (const key of span.keys) {
+          const py = pointY.has(key) ? pointY.get(key) : (span.y0 + span.y1) / 2;
+          const stroke = strokeFor(amountByKey.get(key) || 0);
+          const sy = Math.min(span.y1, used + stroke / 2);
+          used += Math.max(stroke, 4);
+          strands.push({ sy, stroke, py, key });
+        }
+
+        if (strands.length > 1) {
+          let top = Math.min(...strands.map((st) => st.sy - st.stroke / 2));
+          let bot = Math.max(...strands.map((st) => st.sy + st.stroke / 2));
+          if (bot - top < MIN_BRACE_H) {
+            const mid = (top + bot) / 2;
+            top = mid - MIN_BRACE_H / 2;
+            bot = mid + MIN_BRACE_H / 2;
+          }
+          const brace = document.createElementNS(svgNs, "path");
+          brace.setAttribute("class", "flow-brace");
+          if (aggIdOf) brace.dataset.agg = aggIdOf(span);
+          brace.setAttribute("d", bracePath(top, bot, width, spanSide));
+          brace.setAttribute("fill", "none");
+          brace.setAttribute("stroke", colorFor(span));
+          brace.setAttribute("stroke-width", "1");
+          brace.setAttribute("stroke-opacity", "0.6");
+          brace.setAttribute("vector-effect", "non-scaling-stroke");
+          svg.appendChild(brace);
+        }
+
+        for (const { sy, stroke, py, key } of strands) {
+          // Strands start clear of BRACE_ZONE so the brace never sits on top of what it points
+          // at -- it used to overlap on the node side of both flow columns.
+          const spanX = spanSide === "left" ? BRACE_ZONE : width - BRACE_ZONE;
+          const pointX = spanSide === "left" ? width : 0;
+          const path = document.createElementNS(svgNs, "path");
+          path.setAttribute(
+            "d",
+            spanSide === "left" ? ribbonPath(spanX, sy, pointX, py) : ribbonPath(pointX, py, spanX, sy),
+          );
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", colorFor(span));
+          path.setAttribute("stroke-width", String(stroke));
+          path.setAttribute("stroke-opacity", String(opacity));
+          path.setAttribute("vector-effect", "non-scaling-stroke");
+          // Focus is applied by class, so a hover must not force a re-render.
+          path.dataset.key = key;
+          if (aggIdOf) path.dataset.agg = aggIdOf(span);
+          svg.appendChild(path);
+        }
+      }
+      return svg;
+    }
+
+    /**
+     * "date": globally chronological (today's default). "invoice": each invoice's installments
+     * grouped contiguously (still date-ordered within the invoice) -- ribbons still render
+     * correctly either way since they're computed from installmentKey -> Y, not from an assumed
+     * order.
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills
+     * @param {"date"|"invoice"} mode
+     */
+    function renderVendorCard(supplier, bills, groups) {
+      const card = document.createElement("div");
+      card.className = "vendor-card";
+      card.dataset.testid = "vendor-card";
+
+      const head = document.createElement("div");
+      head.className = "vendor-head";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = supplier;
+      const total = document.createElement("span");
+      total.className = "total";
+      total.textContent = `${bills.length} bill${bills.length === 1 ? "" : "s"} · ${money(
+        bills.reduce((s, b) => s + b.outstanding, 0),
+      )} outstanding`;
+      head.appendChild(name);
+      head.appendChild(total);
+      card.appendChild(head);
+
+      const grid = document.createElement("div");
+      grid.className = "flow-grid";
+
+      const sortedBills = sortBillsForSchedule(bills, scheduleSortMode);
+      const rowIndex = rowIndexOf(sortedBills);
+      // Ordered by where their first member actually sits, not by payOn unconditionally -- under
+      // the invoice sort those disagree, and every mismatch is a crossing the picture did not
+      // need (src/pay-flow-sort.js).
+      const sortedGroups = orderAggregatesByFirstRow(
+        groups.slice().sort((a, b) => a.payOn.localeCompare(b.payOn)),
+        (g) => g.bills || [],
+        rowIndex,
+      );
+
+      const colBills = document.createElement("div");
+      colBills.className = "col-bills";
+      // installmentKey -> which suggested group claims it, so a schedule row can show where its
+      // group ends. Rows are sorted by date (or invoice), not by group, so a boundary is simply
+      // "the next row belongs to a different group" -- which is also the honest rendering when a
+      // group's members are not contiguous under the current sort.
+      const groupOfKey = new Map();
+      groups.forEach((g, gi) => {
+        for (const key of g.bills || []) groupOfKey.set(key, gi);
+      });
+      const billY = new Map(); // installmentKey -> center Y (within the flow-grid's own coordinate space)
+      sortedBills.forEach((bill, i) => {
+        const row = billRowEl(bill);
+        row.style.height = `${ROW_HEIGHT}px`;
+        const next = sortedBills[i + 1];
+        const mine = groupOfKey.get(bill.installmentKey);
+        if (next && groupOfKey.get(next.installmentKey) !== mine) row.classList.add("group-edge");
+        colBills.appendChild(row);
+        billY.set(bill.installmentKey, i * ROW_HEIGHT + ROW_HEIGHT / 2);
+      });
+
+      const scheduleHeight = sortedBills.length * ROW_HEIGHT;
+      const vendorTotal = bills.reduce((s, b) => s + b.outstanding, 0) || 1;
+      // installmentKey -> outstanding, for ribbon stroke width on both ribbon layers below.
+      const billAmountByKey = new Map(bills.map((b) => [b.installmentKey, b.outstanding]));
+      function strokeFor(amount) {
+        const share = vendorTotal > 0 ? amount / vendorTotal : 0;
+        const scaled = share * MAX_STROKE * 4; // heuristic scale; clamped below regardless
+        return Math.min(MAX_STROKE, Math.max(MIN_STROKE, scaled));
+      }
+
+      // Invoice column — one node per unique invoice, ordered to match the active schedule sort
+      // (groupByInvoiceInOrder derives order from `sortedBills`, so date vs invoice sort both
+      // "just work" without separate ordering logic here).
+      const invoiceList = orderAggregatesByFirstRow(
+        groupByInvoiceInOrder(sortedBills),
+        (e) => e.rows.map((r) => r.installmentKey),
+        rowIndex,
+      );
+      const colInvoices = document.createElement("div");
+      colInvoices.className = "col-invoices";
+      // An aggregate row is as tall as the schedule rows it draws from -- NOT proportional to
+      // its dollar amount, which is what this did until 2026-09-08. Amount-sizing produced a
+      // 4-row-tall suggested payment fed by 5 payments, and a 3-payment group taller than a
+      // 5-payment one: "if this mockup is to try to be production, it should look sane."
+      // Row-count sizing also makes all three columns exactly `scheduleHeight` tall, and lines
+      // an aggregate row up with its own block of rows whenever its members are contiguous
+      // under the current sort (date-windowed groups always are).
+      const invoiceSpans = []; // { y0, y1, invoice: invoiceListEntry }
+      {
+        let cur = 0;
+        for (const entry of invoiceList) {
+          const h = Math.max(ROW_HEIGHT, entry.rows.length * ROW_HEIGHT);
+          invoiceSpans.push({ y0: cur, y1: cur + h, invoice: entry });
+          cur += h;
+        }
+      }
+      const invoiceColHeight = invoiceSpans.reduce((m, s) => Math.max(m, s.y1), 0);
+      for (const span of invoiceSpans) {
+        const wrap = document.createElement("div");
+        wrap.className = "invoice-wrap";
+        const h = span.y1 - span.y0;
+        wrap.style.height = `${h}px`;
+        const node = invoiceNodeEl(span.invoice, flowNodePlan(h, ROW_HEIGHT));
+        node.style.height = "100%";
+        wrap.appendChild(node);
+        colInvoices.appendChild(wrap);
+      }
+
+      // Groups column (right) — unchanged shape, still keyed off installmentKey.
+      const colGroups = document.createElement("div");
+      colGroups.className = "col-groups";
+      const groupSpans = []; // { y0, y1, group, aggId }
+      {
+        let cur = 0;
+        sortedGroups.forEach((g, i) => {
+          // Same rule as invoiceSpans above: member count, not dollar share.
+          const h = Math.max(ROW_HEIGHT, (g.bills || []).length * ROW_HEIGHT);
+          groupSpans.push({ y0: cur, y1: cur + h, group: g, aggId: groupIdOf(g, i) });
+          cur += h;
+        });
+      }
+      const groupColHeight = groupSpans.reduce((m, s) => Math.max(m, s.y1), 0);
+      for (const span of groupSpans) {
+        const h = span.y1 - span.y0;
+        const built = groupNodeEl(span.group, bills, span.aggId, flowNodePlan(h, ROW_HEIGHT));
+        const wrap = document.createElement("div");
+        wrap.className = "group-wrap";
+        wrap.style.height = `${h}px`;
+        built.node.style.height = "100%";
+        wrap.appendChild(built.node);
+        wrap.appendChild(built.rationale); // absolutely positioned — expanding it never shifts layout
+        colGroups.appendChild(wrap);
+      }
+
+      // One shared height for both ribbon layers so everything in this vendor's row lines up.
+      const flowHeight = Math.max(scheduleHeight, invoiceColHeight, groupColHeight, ROW_HEIGHT);
+      // What focus resolves against: the two aggregate sides of *this* card. Group identity comes
+      // from `groupSpans`, so the node's data-agg, this index and the ribbon below cannot drift
+      // apart — the whole point of resolving each id exactly once.
+      const focusIndex = {
+        invoices: invoiceList.map((e) => ({
+          id: e.invoice,
+          keys: e.rows.map((r) => r.installmentKey),
+        })),
+        groups: groupSpans.map((s) => ({ id: s.aggId, keys: s.group.bills || [] })),
+      };
+
+      // Ribbon 1: invoice (span, fans out) -> schedule row (point). Neutral "structural" color —
+      // this layer shows grouping, not the economics decision (that's ribbon 2's job).
+      const invoiceRibbonSvg = buildRibbonSvg({
+        spans: invoiceSpans.map((s) => ({
+          y0: s.y0, y1: s.y1, invoiceName: s.invoice.invoice,
+          keys: s.invoice.rows.map((r) => r.installmentKey),
+        })),
+        aggIdOf: (span) => span.invoiceName,
+        pointY: billY,
+        amountByKey: billAmountByKey,
+        height: flowHeight,
+        width: 64,
+        spanSide: "left",
+        strokeFor,
+        colorFor: () => "var(--flow-invoice)",
+        opacity: 0.4,
+      });
+
+      // Ribbon 2: schedule row (point) -> group (span, fans in). Colored by suggestion reason —
+      // this is the actual economics decision the tool exists to show.
+      const groupRibbonSvg = buildRibbonSvg({
+        spans: groupSpans.map((s) => ({
+          y0: s.y0, y1: s.y1, keys: s.group.bills, reason: s.group.reason, groupId: s.aggId,
+        })),
+        aggIdOf: (span) => span.groupId,
+        pointY: billY,
+        amountByKey: billAmountByKey,
+        height: flowHeight,
+        width: 96,
+        spanSide: "right",
+        strokeFor,
+        colorFor: (span) => REASON_COLOR[span.reason] || REASON_COLOR["pay-alone"],
+        opacity: 0.55,
+      });
+
+      grid.appendChild(colInvoices);
+      grid.appendChild(invoiceRibbonSvg);
+      grid.appendChild(colBills);
+      grid.appendChild(groupRibbonSvg);
+      grid.appendChild(colGroups);
+      wireFlowFocus(grid, focusIndex);
+      card.appendChild(grid);
+      // Say the sort tradeoff out loud instead of leaving it to be discovered: with groups drawing
+      // from several invoices, only one of the two aggregate columns can be contiguous under any
+      // one sort (src/pay-flow-sort.js).
+      const invContig = aggregatesAreContiguous(focusIndex.invoices, rowIndex);
+      const grpContig = aggregatesAreContiguous(focusIndex.groups, rowIndex);
+      if (!invContig || !grpContig) {
+        const hint = document.createElement("div");
+        hint.className = "focus-hint";
+        hint.dataset.testid = "flow-focus-hint";
+        const crossing = !invContig ? "Invoice" : "Suggested payment";
+        const clean = !invContig ? "suggested payment" : "invoice";
+        hint.innerHTML =
+          `<b>${crossing}</b> ribbons cross under this sort — its rows are spread through the ` +
+          `schedule, while the ${clean} side lines up. Sorting the other way swaps which side ` +
+          `crosses. <b>Hover</b> any row, invoice or payment to trace just that one — clicking ` +
+          `only explores; the buttons are the only things that act.`;
+        card.appendChild(hint);
+      }
+
+      return card;
+    }
+
+    function showError(message) {
+      loadErrorEl.hidden = !message;
+      loadErrorEl.textContent = message || "";
+    }
+
+    function render() {
+      vendorsEl.innerHTML = "";
+      if (!allBills.length) {
+        emptyEl.hidden = false;
+        emptyEl.classList.remove("no-match");
+        emptyEl.textContent = "Nothing outstanding.";
+        vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
+        return;
+      }
+
+      // Filter is vendor-scoped, not bill-scoped: matching by vendor name OR one of its invoice
+      // names still shows that vendor's *whole* bill set, unfiltered internally -- slicing a
+      // vendor's own bills would break paymentBatchEconomics' grouping math.
+      const bySupplier = groupBySupplier(allBills);
+      const suppliers = [...bySupplier.keys()].filter(
+        (supplier) => !filterText || bySupplier.get(supplier).some((b) => matchesFilter(b, filterText)),
+      );
+
+      if (!suppliers.length) {
+        emptyEl.hidden = false;
+        emptyEl.classList.add("no-match");
+        emptyEl.textContent = `No vendor or invoice matches "${filterText}".`;
+        vendorsEl.hidden = true;
+        colHeaderEl.hidden = true;
+        return;
+      }
+      emptyEl.hidden = true;
+      emptyEl.classList.remove("no-match");
+      vendorsEl.hidden = false;
+      colHeaderEl.hidden = false;
+
+      const earliest = (rows) => rows.reduce((min, b) => (min === null || b.dueDate < min ? b.dueDate : min), null);
+      suppliers.sort((a, b) => (earliest(bySupplier.get(a)) || "").localeCompare(earliest(bySupplier.get(b)) || ""));
+
+      // C0: fee composition is business logic and belongs in payment-batch-prefs.js, not here.
+      // `feeForMethod` also switches the engine into per-method mode, which does two things the
+      // old flat `postage + perCheck` could not: it prices each rail correctly (ACH $0.40 vs a
+      // $25 domestic wire), and it stops proposing batches that cannot exist — a Payment Entry
+      // carries one `mode_of_payment`, so bills paid different ways never merge.
+      const feeForMethod = paymentMethodFeeResolver(prefs);
+
+      for (const supplier of suppliers) {
+        const bills = bySupplier.get(supplier);
+        const { groups } = paymentBatchEconomics({
+          bills,
+          perPaymentFee: feeForMethod(null), // fallback for bills with no mode_of_payment recorded
+          apr: prefs.apr,
+          groupWindowDays: prefs.groupWindowDays,
+          feeForMethod,
+        });
+        vendorsEl.appendChild(renderVendorCard(supplier, bills, groups));
+      }
+    }
+
+    async function init() {
+      prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);
+      paintPrefsInputs();
+      if (!api || !api.getOutstandingBills) {
+        showError("Shell bridge unavailable — cannot load outstanding bills.");
+        render();
+        return;
+      }
+      const result = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
+      allBills = (result && result.ok && result.bills) || [];
+      if (!result || !result.ok) showError((result && result.reason) || "Could not load outstanding bills.");
+      render();
+    }
+
+    init();
+  </script>
+</body>
+</html>
