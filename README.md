@@ -89,7 +89,7 @@ npm start
 In the app: **Home** is the **Document Workflow Home** (grouped tiles by process). Click a tile to open
 that ERP route. **Default skin** → Vanilla ErpNext Desk; **ERP console** → DevTools to aid in dogfood. Left **Recent** updates as you browse.
 
-**Plan (working, dated):** [docs/implementation-plan-2026-07-18.md](docs/implementation-plan-2026-07-18.md) · **Handoff / doc lifecycle:** [HANDOFF.md](HANDOFF.md) · **Beta:** [docs/beta-slice.md](docs/beta-slice.md) · **Commits:** [docs/commit-conventions.md](docs/commit-conventions.md)
+**Plan (working, dated):** **Handoff / doc lifecycle:** [HANDOFF.md](HANDOFF.md) · **Beta:** [docs/beta-slice.md](docs/beta-slice.md) · **Commits:** [docs/commit-conventions.md](docs/commit-conventions.md)
 
 ## Related
 
