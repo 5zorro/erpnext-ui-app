@@ -1,7 +1,6 @@
 # Beta slice (locked until the maintainer revises)
 
-Public / `main` only advances when a **milestone** is green (see the current dated
-[implementation-plan-2026-07-15.md](implementation-plan-2026-07-15.md); plans are temporary — see
+Public / `main` only advances when a **milestone** is green (see the current dated implementation plan); plans are temporary — see
 [../HANDOFF.md](../HANDOFF.md)).
 
 ## Current public tip (local `alpha`)
@@ -19,7 +18,7 @@ Earlier: **M0** chrome + live ERP · **M1/M1.5** Recent · **M2** Home tiles · 
 | **1** | AP daily-entry MVP (`0.2.0-alpha.1`) → `main` when you choose | Bill + PO + IR Doc read/edit/save/submit; units green; dogfood OK |
 | **next** | Doc chrome from D-DocChrome (OI backlog in museum `open_items.md`) | Copy / Closed / ribbons / Recalc / Pay Bill / etc. as picked |
 
-How: [implementation-plan-2026-07-18.md](implementation-plan-2026-07-18.md) (T1–T4 done at MVP; deferred packets). Discovery IDs live only in museum `open_items.md` (private issues list — not copied here).
+How: Implementation plan memorializes a focused slice of the Open Item IDs. These Discovery IDs live only in museum `open_items.md` (private issues list — not copied here).
 
 ## Then (tests may reorder)
 
