@@ -70,6 +70,7 @@ import {
   mergePaymentBatchPrefs,
   validatePaymentBatchPrefs,
 } from "../src/payment-batch-prefs.js";
+import { planPaymentTermCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
   preferredPaymentDirection,
@@ -2921,7 +2922,6 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
   sendHistory();
 }
 
-function place() {
 /** Content bounds the views were last placed against (see scheduleRelayout). */
 let placedAgainst = null;
 /** @type {ReturnType<typeof setTimeout>[]} */
@@ -2949,10 +2949,11 @@ function scheduleRelayout() {
   );
 }
 
+function place() {
   if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc) return;
   const b = win.getContentBounds();
-  const H = TAB_BAR_HEIGHT;
   placedAgainst = { width: b.width, height: b.height };
+  const H = TAB_BAR_HEIGHT;
   const HW = historyRailWidth(histCollapsed);
   const main = {
     x: HW,
@@ -4909,6 +4910,13 @@ async function createBatchPaymentEntryForBills(bills, intent = {}) {
 
   const pe = merged.doc;
   if (normalizeEditableText(intent.modeOfPayment)) pe.mode_of_payment = intent.modeOfPayment;
+  const memo = normalizeEditableText(intent.memo);
+  if (memo) {
+    // payment_entry.py::set_remarks replaces `remarks` on every save unless `custom_remarks` is
+    // ticked, so without the flag the memo is silently swapped for "Amount USD … to …" (C9).
+    pe.remarks = memo;
+    pe.custom_remarks = 1;
+  }
   if (!pe.reference_no) {
     pe.reference_no = normalizeEditableText(intent.referenceNo) || `Batch of ${invoices.length}`;
   }
@@ -4984,7 +4992,8 @@ async function createBlankPaymentEntryDoc(intent = {}) {
       if (i.payOn) { doc.posting_date = i.payOn; doc.reference_date = i.payOn; }
       if (i.modeOfPayment) doc.mode_of_payment = i.modeOfPayment;
       if (i.referenceNo) doc.reference_no = i.referenceNo;
-      if (i.memo) doc.remarks = i.memo;
+      // custom_remarks, or ERPNext's set_remarks overwrites the memo on insert (C9).
+      if (i.memo) { doc.remarks = i.memo; doc.custom_remarks = 1; }
       var r;
       try {
         r = await frappe.call({ method: "frappe.client.insert", args: { doc: doc } });
@@ -5001,6 +5010,79 @@ async function createBlankPaymentEntryDoc(intent = {}) {
   })()`);
   if (raw && raw.ok && raw.name) return raw;
   return { ok: false, reason: (raw && raw.reason) || "Could not create the payment." };
+}
+
+/**
+ * Create a Payment Term master and the single-row Payment Terms Template that wraps it (Packet C6).
+ *
+ * 🔴 This writes **masters, not bill data.** It creates a term for bills entered from now on and
+ * cannot touch the bills on the dashboard behind it — terms freeze at submit. `planPaymentTermCreate`
+ * returns the sentence that says so (`affects`), and the modal renders it; this function refuses to
+ * do anything that would make that sentence untrue. There is deliberately no rename and no
+ * re-point-an-existing-bill path here: renaming a Payment Term rewrites
+ * `payment_schedule.payment_term` on every historical bill that used it.
+ *
+ * Two inserts, not one transaction: Frappe has no client-side multi-doc atomic insert over
+ * `frappe.client`, so a template failure can leave an orphan term behind. That is recoverable and
+ * visible (the term exists, unusable by a Supplier until a template names it), which is better than
+ * the alternative of writing the template first and leaving it pointing at a term that is not there.
+ * The reason string says which half landed.
+ *
+ * @param {object} input the shape `planPaymentTermCreate` takes
+ * @returns {Promise<{ ok: boolean, name?: string, plan?: object, reason?: string, errors?: string[] }>}
+ */
+async function createPaymentTermDocs(input = {}) {
+  const existing = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var r = await frappe.call({
+        method: "frappe.client.get_list",
+        args: { doctype: "Payment Term", fields: ["name"], limit_page_length: 0 },
+      });
+      return { ok: true, names: ((r && r.message) || []).map(function (x) { return x.name; }) };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e) };
+    }
+  })()`);
+  if (!existing || !existing.ok) {
+    return { ok: false, reason: (existing && existing.reason) || "Could not read the existing Payment Terms." };
+  }
+
+  const plan = planPaymentTermCreate(input, { existingNames: existing.names || [] });
+  if (!plan.ok) return { ok: false, reason: plan.errors[0], errors: plan.errors, plan };
+
+  const payload = JSON.stringify({ term: plan.term, template: plan.template });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var t;
+      try {
+        t = await frappe.call({ method: "frappe.client.insert", args: { doc: i.term } });
+      } catch (eTerm) {
+        return { ok: false, reason: reasonFrom(eTerm), step: "insert-term" };
+      }
+      if (t && t.exc) return { ok: false, reason: reasonFrom(t), step: "insert-term" };
+      try {
+        var tp = await frappe.call({ method: "frappe.client.insert", args: { doc: i.template } });
+        if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template" };
+      } catch (eTpl) {
+        return { ok: false, reason: reasonFrom(eTpl), step: "insert-template" };
+      }
+      var made = t && t.message;
+      if (!made || !made.name) return { ok: false, reason: "Payment Term insert returned nothing." };
+      return { ok: true, name: made.name };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+
+  if (raw && raw.ok && raw.name) return { ok: true, name: raw.name, plan };
+  const step = raw && raw.step === "insert-template"
+    ? ` The Payment Term "${plan.name}" was created, but its Template was not — a Supplier cannot link the term until one exists.`
+    : "";
+  return { ok: false, reason: `${(raw && raw.reason) || "Could not create the payment term."}${step}`, plan };
 }
 
 /** Cached so a keystroke-per-search picker does not re-resolve the company every time. */
@@ -5034,6 +5116,84 @@ async function resolveErpCompany() {
   })()`);
   if (raw && raw.ok && raw.company) resolvedErpCompany = String(raw.company);
   return resolvedErpCompany;
+}
+
+/**
+ * The facts the check drawer's autofill decides from (Packet C9) — read-only, and all over existing
+ * whitelisted methods. The choosing happens in src/payment-entry-defaults.js; this only gathers:
+ * the company's name and abbreviation (memo), every Mode of Payment with its per-company default
+ * accounts (what Vanilla fills Account Paid From from), this company's Pay entries of **any**
+ * docstatus (a cancelled cheque still used its number), and the Supplier's Customer Numbers table.
+ *
+ * Mode of Payment is read as the parent document rather than via the whitelisted
+ * `get_bank_cash_account`, which throws — and pops a dialog in the ERP view — for every method with
+ * no default account, which is most of them in the sandbox. Each part fails on its own: a missing
+ * piece leaves that field unproposed rather than losing the rest.
+ *
+ * @param {string} supplier
+ */
+async function fetchPaymentDefaultsFacts(supplier) {
+  const company = await resolveErpCompany();
+  if (!company) return { ok: false, reason: "Could not resolve the company." };
+  const payload = JSON.stringify({ company, supplier: normalizeEditableText(supplier) });
+  const raw = await erpEval(`(async () => {
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var out = { ok: true, company: i.company, companyName: "", abbr: "", history: [], customerNumbers: [] };
+      try {
+        var c = await frappe.call({
+          method: "frappe.client.get_value",
+          args: { doctype: "Company", filters: { name: i.company }, fieldname: ["company_name", "abbr"] },
+        });
+        if (c && c.message) { out.companyName = c.message.company_name || ""; out.abbr = c.message.abbr || ""; }
+      } catch (eCompany) {}
+      try {
+        var list = await frappe.call({
+          method: "frappe.client.get_list",
+          args: { doctype: "Mode of Payment", fields: ["name", "type", "enabled"], limit_page_length: 0 },
+        });
+        var modes = [];
+        var rows = (list && list.message) || [];
+        for (var k = 0; k < rows.length; k++) {
+          var rec = { name: rows[k].name, type: rows[k].type, enabled: rows[k].enabled, accounts: [] };
+          try {
+            var full = await frappe.call({ method: "frappe.client.get", args: { doctype: "Mode of Payment", name: rows[k].name } });
+            rec.accounts = ((full && full.message && full.message.accounts) || []).map(function (a) {
+              return { company: a.company, default_account: a.default_account };
+            });
+          } catch (eMode) {}
+          modes.push(rec);
+        }
+        out.modes = modes;
+      } catch (eModes) {}
+      try {
+        var h = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Payment Entry",
+            filters: { payment_type: "Pay", company: i.company },
+            fields: ["name", "party", "mode_of_payment", "paid_from", "reference_no", "docstatus", "creation"],
+            order_by: "creation desc",
+            limit_page_length: 500,
+          },
+        });
+        out.history = (h && h.message) || [];
+      } catch (eHistory) {}
+      if (i.supplier) {
+        try {
+          var s = await frappe.call({ method: "frappe.client.get", args: { doctype: "Supplier", name: i.supplier } });
+          out.customerNumbers = ((s && s.message && s.message.customer_numbers) || []).map(function (r) {
+            return { company: r.company, customer_number: r.customer_number };
+          });
+        } catch (eSupplier) {}
+      }
+      return out;
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e) };
+    }
+  })()`);
+  return raw && raw.ok ? raw : { ok: false, reason: (raw && raw.reason) || "Could not read payment defaults." };
 }
 
 /**
@@ -5073,6 +5233,9 @@ async function savePaymentEntryFields(name, patch) {
     if (v != null) fields[key] = String(v);
   }
   if (!Object.keys(fields).length) return { ok: false, reason: "Nothing to save." };
+  // A typed memo only survives the save with custom_remarks ticked (payment_entry.py::set_remarks);
+  // an emptied one hands remarks back to ERPNext's own wording.
+  if ("remarks" in fields) fields.custom_remarks = fields.remarks.trim() ? "1" : "0";
 
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
@@ -6096,6 +6259,8 @@ function createWindow() {
   scheduleRelayout();
   for (const ev of SHELL_RELAYOUT_EVENTS) win.on(ev, scheduleRelayout);
   win.on("closed", () => {
+    for (const t of relayoutTimers) clearTimeout(t);
+    relayoutTimers = [];
     closeDiagnoseDropdown();
     closeNavIncidentDialog();
     closeSubmittedDropdown();
@@ -6259,8 +6424,6 @@ ipcMain.handle("health-remediation-autofix", async () => {
     type: "warning",
     buttons: ["Run script", "Cancel"],
     defaultId: 1,
-    for (const t of relayoutTimers) clearTimeout(t);
-    relayoutTimers = [];
     cancelId: 1,
     title: "Start ERPNext?",
     message: "Run the IT-configured recovery script?",
@@ -8951,6 +9114,8 @@ ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
 });
 ipcMain.handle("save-payment-entry", async (_e, name, patch) => savePaymentEntryFields(name, patch));
 ipcMain.handle("create-blank-payment-entry", async (_e, intent) => createBlankPaymentEntryDoc(intent));
+ipcMain.handle("create-payment-term", async (_e, input) => createPaymentTermDocs(input));
+ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefaultsFacts(supplier));
 ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;
