@@ -40,6 +40,13 @@ describe("ui-icons", () => {
   it("unknown icon falls back to idle dot", () => {
     assert.match(uiIconSvg("not-a-real-icon"), /circle/);
   });
+
+  // A missing body silently renders the idle dot, which would pass an eyeball check at 13px.
+  it("the check drawer's header glyphs are real icons, not the idle fallback", () => {
+    for (const name of ["maximize", "window", "x", "arrow-down"]) {
+      assert.notEqual(uiIconSvg(name), uiIconSvg("idle"), name);
+    }
+  });
 });
 
 describe("home group header glyphs (vanilla Desk module icon reuse)", () => {

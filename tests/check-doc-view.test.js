@@ -31,7 +31,10 @@ describe("buildCheckDocViewModel", () => {
     assert.equal(vm.payTo, "Acme Supply");
     assert.equal(vm.amount, 550);
     assert.equal(vm.payOn, "2026-09-09");
-    assert.equal(vm.memo, "Batched to save one postage/check fee.");
+    // Not the batching rationale: the memo is printed on the check and sent as ACH discretionary
+    // data, so "3 bills batched: $0.80 fee saved…" would reach the vendor. C9 fills it instead
+    // ("ABC Co Cust#1234", 5zorro 2026-09-14).
+    assert.equal(vm.memo, "");
   });
 
   it("maps stub rows in group.bills order, not bills-array order", () => {

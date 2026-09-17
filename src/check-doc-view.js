@@ -45,7 +45,10 @@ export function buildCheckDocViewModel(group, bills) {
     payTo: g.supplier || "",
     amount: g.totalAmount || 0,
     payOn: g.payOn || "",
-    memo: g.rationale || "",
+    // Not the batching rationale. The memo is printed on the cheque and sent as ACH discretionary
+    // data, so it reaches the vendor — "3 bills batched: $0.80 fee saved…" was never a memo. The
+    // drawer fills it from payment-entry-defaults.js instead ("ABC Co Cust#1234", 5zorro 2026-09-14).
+    memo: "",
     stubRows,
   };
 }
