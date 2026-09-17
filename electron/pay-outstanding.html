@@ -34,8 +34,12 @@
     .legend-swatch { width: 14px; height: 4px; border-radius: 2px; }
     .hdr-actions { display: flex; align-items: center; gap: 10px; }
     #prefs-toggle {
+      display: inline-flex; align-items: center; gap: 5px;
       border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 6px;
       padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
+    #prefs-toggle .ui-ico, .drawer-tab-caret .ui-ico, .check-drawer-caret .ui-ico {
+      display: inline-flex;
     }
     #prefs-toggle:hover { background: #eef2f5; }
     .sort-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; }
@@ -45,18 +49,241 @@
     }
     .sort-btn:hover { background: #eef2f5; }
     .sort-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    /* Packet C1. The old panel was four ungrouped inputs -- APR, Postage, Per-check, Batch window
+       -- which encoded the pre-B2a world where one flat fee covered every payment. Three things
+       were wrong with that shape and all three are 5zorro's words: ACH's real cost was
+       unreachable, nothing said Postage and Per-check are two halves of ONE number ("at least a
+       border around the two inputs that contribute"), and APR stated a rate rather than its
+       effect. Groups here are semantic, not decorative: each fieldset is one question. */
     #prefs-panel {
-      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+      display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;
       padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #d6dee6;
     }
     #prefs-panel[hidden] { display: none; }
+    .pref-group {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+      margin: 0; padding: 8px 12px 10px; border: 1px solid #cbd5e1; border-radius: 8px;
+      background: #fff;
+    }
+    .pref-group > legend {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #475569;
+      padding: 0 5px; font-weight: 600;
+    }
+    /* The composed one. Its own border is what says "these two make one number" -- the total
+       beside the legend is what says which number. */
+    .pref-subgroup {
+      display: flex; align-items: flex-end; gap: 8px;
+      margin: 0; padding: 6px 10px 8px; border: 1px dashed #94a3b8; border-radius: 6px;
+      background: #f8fafc;
+    }
+    .pref-subgroup > legend { font-size: 10px; color: #475569; padding: 0 4px; font-weight: 600; }
+    .pref-compose-total { color: #0f766e; font-variant-numeric: tabular-nums; }
+    .pref-plus { font-size: 12px; color: #64748b; padding-bottom: 6px; }
     .pref-field { display: flex; flex-direction: column; gap: 3px; }
     .pref-field label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
     .pref-field input {
       width: 90px; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px;
     }
+    .pref-field.narrow input { width: 66px; }
+    .pref-field input[type="date"] { width: 132px; }
     .pref-field input.invalid { border-color: #dc2626; background: #fef2f2; }
-    #prefs-error { font-size: 11px; color: #dc2626; }
+    .pref-note { margin: 0; flex-basis: 100%; font-size: 10px; color: #64748b; line-height: 1.4; }
+    #prefs-error { font-size: 11px; color: #dc2626; align-self: center; }
+
+    /* C6 -- the terms creation modal, launched from this panel. Terms ARE assumptions in the
+       economic model, and this is where a missing grace or a wrong method becomes visible.
+       In-page overlay, not a window: HANDOFF invariant 6 keeps the whole app in one window. */
+    /* P3b -- the delay calendar table. Deliberately plain: it is a spreadsheet's worth of data,
+       and the spreadsheet is where it gets edited. */
+    .pref-group.wide { flex-basis: 100%; }
+    .delay-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+    .delay-status { font-size: 11px; color: #5b6b7b; }
+    .delay-status .unratified { color: #b45309; font-weight: 600; }
+    .delay-table-wrap { max-height: 190px; overflow-y: auto; border: 1px solid #d6dee6; border-radius: 6px; background: #fff; }
+    .delay-table { border-collapse: collapse; width: 100%; font-size: 11px; }
+    .delay-table th { text-align: left; font-weight: 600; color: #5b6b7b; padding: 4px 6px; border-bottom: 1px solid #e6ecf2; position: sticky; top: 0; background: #f7f9fb; }
+    .delay-table td { padding: 3px 6px; border-bottom: 1px solid #f0f4f8; vertical-align: middle; }
+    .delay-table tr.unratified td { background: #fffbeb; }
+    .delay-table tr.unratified .why::after { content: " — not signed off, so it moves nothing"; color: #b45309; }
+    .delay-table .drop { border: 0; background: none; cursor: pointer; color: #94a3b8; font-size: 13px; line-height: 1; }
+    .delay-table .drop:hover { color: #b91c1c; }
+    .delay-empty { padding: 8px; color: #7b8a99; font-size: 11px; }
+    .delay-add { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+    .delay-add input[type="text"] { flex: 1 1 220px; min-width: 0; }
+    .delay-msgs { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: #b45309; }
+    .delay-msgs li.err { color: #b91c1c; }
+
+    /* P4b/P4c -- the modal shaped like the name it produces. */
+    .term-part { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px 10px; margin: 0 0 10px; flex-basis: 48%; }
+    .term-part.wide { flex-basis: 100%; }
+    .term-part > legend { font-size: 11px; font-weight: 600; color: #334155; padding: 0 4px; }
+    .term-part-n { display: inline-flex; width: 15px; height: 15px; border-radius: 50%; background: #0f766e; color: #fff; align-items: center; justify-content: center; font-size: 9px; margin-right: 4px; }
+    .term-eg { font-size: 10.5px; color: #64748b; margin: 4px 0 0; }
+    .term-custom { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+    /* G7: an author display rule beats [hidden]'s user-agent one, so every hideable element that
+       sets display needs its own guard or `.hidden = true` does nothing. */
+    .term-custom[hidden], .term-split-wrap[hidden] { display: none; }
+    .term-split { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    .term-split th { text-align: left; color: #64748b; font-weight: 600; padding: 2px 8px 2px 0; }
+    .term-split td { padding: 2px 8px 2px 0; }
+    .term-split input { width: 74px; }
+    .term-split tfoot td { font-weight: 600; padding-top: 4px; }
+    .term-split tfoot td.bad { color: #b91c1c; }
+    .term-internals { margin: 6px 0; font-size: 11px; color: #475569; }
+    .term-internals summary { cursor: pointer; color: #0f766e; }
+    .term-internals-table { border-collapse: collapse; margin-top: 4px; width: 100%; }
+    .term-internals-table td { padding: 2px 8px 2px 0; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .term-internals-table td:first-child { color: #64748b; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    #term-modal-open {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: 1px solid #0d9488; background: #f0fdfa; color: #0f766e; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer; align-self: center;
+    }
+    #term-modal-open .ui-ico { display: inline-flex; }
+    #term-modal-open:hover { background: #ccfbf1; }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 20;
+      display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px;
+      overflow: auto;
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .modal-card {
+      background: #fff; border-radius: 10px; width: 560px; max-width: 100%;
+      box-shadow: 0 12px 40px rgba(0,0,0,.28); overflow: hidden;
+    }
+    .modal-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding: 12px 16px; background: #2c3e50; color: #fff;
+    }
+    .modal-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+    .modal-close {
+      border: 0; background: transparent; color: #cbd5e1; font-size: 12px; cursor: pointer;
+    }
+    .modal-close:hover { color: #fff; }
+    .modal-body { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 12px; }
+    .modal-body .pref-field { flex: 0 0 auto; }
+    .modal-body .pref-field.wide { flex: 1 1 100%; }
+    .modal-body .pref-field.wide input, .modal-body .pref-field select { width: 100%; }
+    .modal-body select {
+      padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px;
+      background: #fff; min-width: 150px;
+    }
+    /* The generated name, shown live. The whole point of the modal is that the convention is
+       enforced by code rather than by typing, so the clerk has to be able to see what it produced. */
+    .term-preview {
+      flex: 1 1 100%; padding: 8px 10px; border-radius: 6px; background: #f8fafc;
+      border: 1px solid #cbd5e1; font-size: 12px;
+    }
+    .term-preview-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+      font-weight: 600; color: #0f766e;
+    }
+    .term-preview-sub { font-size: 10px; color: #64748b; margin-top: 3px; }
+    /* 🔴 The sentence that must not be dropped: this creates a term for FUTURE bills and cannot
+       repair the ones on screen behind it. A "create term" button on a dashboard full of bills
+       reads exactly like a fix for them. */
+    .term-affects {
+      flex: 1 1 100%; font-size: 11px; line-height: 1.45; color: #7c2d12;
+      background: #fff7ed; border: 1px solid #fdba74; border-radius: 6px; padding: 8px 10px;
+    }
+    .term-warnings { flex: 1 1 100%; margin: 0; padding-left: 18px; font-size: 10px; color: #92400e; }
+    .term-errors { flex: 1 1 100%; margin: 0; padding-left: 18px; font-size: 11px; color: #b91c1c; }
+    .term-warnings li, .term-errors li { margin: 2px 0; line-height: 1.4; }
+    .modal-foot {
+      display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+      padding: 10px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc;
+    }
+    .modal-foot .msg { margin-right: auto; font-size: 11px; color: #475569; }
+    .modal-foot .msg.bad { color: #b91c1c; }
+    .modal-foot .msg.good { color: #0f766e; }
+    .btn-secondary {
+      border: 1px solid #cbd5e1; background: #fff; color: #475569; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
+    .btn-primary {
+      border: 1px solid #0f766e; background: #0d9488; color: #fff; border-radius: 6px;
+      padding: 6px 14px; font-size: 12px; cursor: pointer;
+    }
+    .btn-primary[disabled] { background: #94a3b8; border-color: #94a3b8; cursor: not-allowed; }
+
+    /* C3 -- the mode of payment, made legible. 5zorro: "the mode of payment is unclear from the
+       invoice as it currently renders." It is real data on every seeded bill
+       (payment_schedule.mode_of_payment) and the dashboard showed none of it. Tinted per rail so
+       a mixed-method vendor reads as mixed at a glance -- which is exactly the case C4 has to
+       explain, since those bills can never batch together. */
+    /* `flex: 0 0 auto` -- the chip is 3-10 characters and is the NEW information on the row, so it
+       must never be the thing that shrinks. Measured 2026-09-11: with `0 1 auto` a discount row
+       squeezed "ACH" down to a single letter "A" next to its -$1,200.00 by 2026-09-15 badge, which
+       reads as a glyph rather than a method. The badge yields instead (see .discount-badge). */
+    .method-chip {
+      font-size: 9px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 4px; white-space: nowrap; flex: 0 0 auto;
+      background: #e2e8f0; color: #475569;
+    }
+    .method-chip[data-method="ACH"] { background: #dbeafe; color: #1e40af; }
+    .method-chip[data-method="USPS_Check"] { background: #dcfce7; color: #166534; }
+    .method-chip[data-method="DOM_WIRE"], .method-chip[data-method="INT_WIRE"] {
+      background: #fae8ff; color: #86198f;
+    }
+    /* An unrecorded method is NOT a cheque, however the engine prices it. Struck through so it
+       never reads as a claim the bill actually makes. */
+    .method-chip.method-none { background: #f1f5f9; color: #94a3b8; font-style: italic; }
+    .bill-row .due { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+    /* C4 -- non-blocking validation. 5zorro: "a non-blocking warning emoji that makes a balloon on
+       click explaining that non-blocking validation." Nothing here gates anything: HANDOFF
+       invariant 7 says the skin reflects a state, it never gates on it. The chip is a button so it
+       is reachable by keyboard; the balloon opens on click, not hover, because these are sentences
+       rather than tooltips. */
+    .advisory-chip {
+      display: inline-flex; align-items: center; border: 0; background: transparent;
+      padding: 1px 2px; cursor: pointer; line-height: 1; flex: 0 0 auto; border-radius: 3px;
+    }
+    .advisory-chip[data-level="warn"] { color: #b45309; }
+    .advisory-chip[data-level="info"] { color: #2563eb; }
+    .advisory-chip:hover, .advisory-chip:focus-visible { background: #fef3c7; outline: none; }
+    .vendor-head .advisory-chip[data-level="info"] { color: #93c5fd; }
+    .advisory-balloon {
+      position: absolute; z-index: 8; width: 340px; max-width: 80vw;
+      background: #fff; border: 1px solid #d6dee6; border-radius: 8px; padding: 8px 10px;
+      box-shadow: 0 6px 20px rgba(0,0,0,.16); font-size: 11px; line-height: 1.45; color: #334155;
+      text-align: left; white-space: normal;
+    }
+    .advisory-balloon[hidden] { display: none; }
+    /* Wider than an advisory balloon: the derivation is a four-column table and the detail column
+       carries a whole sentence. */
+    .deriv-balloon { width: 520px; }
+    .advisory-item + .advisory-item { margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 8px; }
+    .advisory-title { font-weight: 600; display: block; margin-bottom: 2px; }
+    .advisory-item.warn .advisory-title { color: #b45309; }
+    .advisory-item.info .advisory-title { color: #1e40af; }
+    /* The vendor-level chip sits in the dark card header, so it needs its own hover tone. */
+    .vendor-head .advisory-chip:hover, .vendor-head .advisory-chip:focus-visible { background: #475569; }
+
+    /* C5 -- the derivation, itemised. 5zorro: "was it 2 weekend days, 1 blur day, 1 holiday, and
+       1 user entry OR was it exactly on time". One row per rule that actually fired. */
+    .deriv { margin-top: 6px; border-top: 1px solid #eef2f5; padding-top: 6px; }
+    .deriv-hint { color: #94a3b8; font-style: italic; }
+    .deriv-head { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .deriv-table { display: table; width: 100%; font-size: 10px; margin-top: 3px; }
+    .deriv-row { display: table-row; }
+    .deriv-row > span { display: table-cell; padding: 1px 0; vertical-align: top; }
+    .deriv-rule { color: #475569; padding-right: 10px !important; white-space: nowrap; width: 1%; }
+    /* nowrap on both: an ISO date broken across two lines ("2026-11-" / "29") reads as a mangled
+       value rather than a wrapped one, and the detail column is the one with room to give. */
+    .deriv-date {
+      color: #1f2d3d; font-variant-numeric: tabular-nums; padding-right: 8px !important;
+      white-space: nowrap; width: 1%;
+    }
+    .deriv-delta {
+      color: #94a3b8; font-variant-numeric: tabular-nums; padding-right: 10px !important;
+      text-align: right; white-space: nowrap; width: 1%;
+    }
+    .deriv-detail { color: #94a3b8; }
+    .deriv-row.warn .deriv-rule, .deriv-row.warn .deriv-detail { color: #b45309; font-weight: 600; }
+    .deriv-total { color: #475569; font-weight: 600; }
+    .deriv-note { color: #64748b; margin-top: 4px; font-size: 10px; }
     main { max-width: 1040px; margin: 0 auto; padding: 0 20px 40px; }
     .col-header-row {
       display: grid; grid-template-columns: 150px 64px 1fr 96px 1fr; align-items: center;
@@ -140,6 +367,10 @@
     .discount-badge {
       font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e;
       white-space: nowrap;
+      /* Yields before the method chip does: this badge is the longest thing in the cell and its
+         own content is repeated in the suggested-payment column, so an ellipsis here costs less
+         than an unreadable method. */
+      flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     }
     .group-node {
       display: flex; flex-direction: column; justify-content: center; padding: 6px 12px;
@@ -195,6 +426,40 @@
     }
     .rationale[hidden] { display: none; }
     .rationale .member-bills { margin-top: 4px; color: #64748b; }
+    /* One bill per line, left-aligned (5zorro 2026-09-12). A name never breaks inside itself; when
+       a line is too long for the balloon only the note after it wraps, onto its own line. */
+    .member-list { margin: 2px 0 0; padding-left: 22px; color: #334155; text-align: left; }
+    .member-key { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .member-note { color: #64748b; white-space: nowrap; }
+    /* The Doc skins' amount format: underlined cents (electron/doc-fields.css). */
+    .money-cents { text-decoration: underline; text-underline-offset: 2px; }
+    /* C8 -- the check-run cutoff. A later-run payment is a preview, not a decision: darker fill plus
+       a chip (5zorro 2026-09-14), and still fully clickable, because invariant 7 says the skin
+       reflects a state and never gates on it. Off-cycle is the fire drill -- the one thing on this
+       surface that cannot wait -- so it gets the loudest mark. */
+    .run-chip {
+      font-size: 9px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 4px; white-space: nowrap; flex: 0 0 auto;
+    }
+    .run-chip.off-cycle { background: #fee2e2; color: #991b1b; }
+    .run-chip.later { background: #475569; color: #f1f5f9; }
+    .group-node[data-run="later"] { background: #e2e8f0; }
+    .group-node[data-run="later"]:hover { background: #d5dde6; }
+    .group-node[data-run="off-cycle"] { box-shadow: inset 3px 0 0 #dc2626; }
+    .vendor-head .run-chip { margin-right: 8px; vertical-align: 1px; }
+    .rationale .run-line { margin-bottom: 4px; font-weight: 600; }
+    .rationale .run-line.off-cycle { color: #991b1b; }
+    .rationale .run-line.later { color: #475569; }
+    .rationale .run-line.this-run { color: #0f766e; }
+    #run-strip {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 12px 0 10px;
+      padding: 8px 12px; background: #fff; border: 1px solid #d6dee6; border-radius: 8px;
+      font-size: 12px; color: #334155;
+    }
+    #run-strip[hidden] { display: none; }
+    #run-strip .run-counts { color: #64748b; font-variant-numeric: tabular-nums; }
+    #run-strip .run-count-off { color: #991b1b; font-weight: 600; }
+    #run-strip .btn-secondary { margin-left: auto; }
     .view-link { color: #0072b2; text-decoration: none; font-size: 11px; }
     .view-link:hover { text-decoration: underline; }
     svg.flow-svg { display: block; width: 100%; }
@@ -283,9 +548,12 @@
     .check-drawer-title { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .4px; }
     .check-drawer-head-actions { display: flex; align-items: center; gap: 8px; }
     .check-drawer-stop {
+      display: inline-flex; align-items: center; gap: 3px;
       border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
       padding: 5px 12px; font-size: 12px; cursor: pointer;
     }
+    /* Two glyphs sit tight together; the word keeps a little more air from them. */
+    .check-drawer-stop > span:last-child, .check-drawer-close > span:last-child { margin-left: 3px; }
     .check-drawer-stop:hover { background: #eef2f5; }
     /* A real check is ~2.4:1 wide/short — this packet's own Height row says so, and says that
        shape is *why* a bottom drawer suits it. Step 2 shipped a 560px-wide vertical column
@@ -311,6 +579,7 @@
       }
     }
     .check-drawer-close {
+      display: inline-flex; align-items: center; gap: 3px;
       border: 1px solid #d6dee6; background: #fff; color: #475569; border-radius: 6px;
       padding: 5px 12px; font-size: 12px; cursor: pointer;
     }
@@ -338,31 +607,215 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
-      <button type="button" id="prefs-toggle" aria-expanded="false">⚙ Assumptions</button>
+      <button type="button" id="prefs-toggle" aria-expanded="false"></button>
     </div>
   </header>
   <div id="prefs-panel" hidden>
-    <div class="pref-field">
-      <label for="pref-apr">APR %</label>
-      <input type="number" id="pref-apr" step="0.1" min="0" data-testid="pref-apr" />
-    </div>
-    <div class="pref-field">
-      <label for="pref-postage">Postage $</label>
-      <input type="number" id="pref-postage" step="0.01" min="0" data-testid="pref-postage" />
-    </div>
-    <div class="pref-field">
-      <label for="pref-percheck">Per-check $</label>
-      <input type="number" id="pref-percheck" step="0.01" min="0" data-testid="pref-percheck" />
-    </div>
-    <div class="pref-field">
-      <label for="pref-window">Batch window (days)</label>
-      <input type="number" id="pref-window" step="1" min="0" data-testid="pref-window" />
-    </div>
+    <fieldset class="pref-group" data-testid="pref-group-carry">
+      <legend>Cost / relief of paying early or late</legend>
+      <div class="pref-field narrow">
+        <label for="pref-apr">APR %</label>
+        <input type="number" id="pref-apr" step="0.1" min="0" data-testid="pref-apr" />
+      </div>
+      <p class="pref-note">
+        Paying a bill early costs this much a year on the money; paying it late relieves the same
+        amount. Post-grace it genuinely runs both ways.
+      </p>
+    </fieldset>
+
+    <fieldset class="pref-group" data-testid="pref-group-fees">
+      <legend>What one payment costs to send</legend>
+      <fieldset class="pref-subgroup" data-testid="pref-cheque-compose">
+        <legend>
+          Check = <span class="pref-compose-total" id="pref-cheque-total" data-testid="pref-cheque-total"></span>
+        </legend>
+        <div class="pref-field narrow">
+          <label for="pref-postage">Postage $</label>
+          <input type="number" id="pref-postage" step="0.01" min="0" data-testid="pref-postage" />
+        </div>
+        <span class="pref-plus" aria-hidden="true">+</span>
+        <div class="pref-field narrow">
+          <label for="pref-percheck">Per-check $</label>
+          <input type="number" id="pref-percheck" step="0.01" min="0" data-testid="pref-percheck" />
+        </div>
+      </fieldset>
+      <!-- One input per Mode of Payment, built from KNOWN_PAYMENT_METHODS so a new rail ships as a
+           table entry rather than as new markup. -->
+      <div id="pref-method-fees" style="display:flex; gap:12px; align-items:flex-end;"></div>
+      <p class="pref-note">
+        A bill joins an earlier payment only when the fee it saves is worth more than the float of
+        paying it early. That is worked out per bill, for every way of grouping a vendor's bills, so
+        there is no batching window to set.
+      </p>
+    </fieldset>
+    <fieldset class="pref-group" data-testid="pref-group-runs">
+      <legend>Check runs</legend>
+      <div class="pref-field">
+        <label for="pref-next-run">Next check run</label>
+        <input type="date" id="pref-next-run" data-testid="pref-next-run" />
+      </div>
+      <div class="pref-field narrow">
+        <label for="pref-run-interval">Every (days)</label>
+        <input type="number" id="pref-run-interval" step="1" min="0" data-testid="pref-run-interval" />
+      </div>
+      <p class="pref-note">
+        <span id="pref-run-status" data-testid="pref-run-status"></span>
+        A payment that has to go out before the run is flagged <b>Off-cycle</b>; one payable on or
+        after the run that follows is shaded as a <b>later run</b>. Leave the date empty to turn this
+        off. Once the date passes it rolls forward by the interval, assuming that run happened.
+      </p>
+    </fieldset>
+    <!-- P3b. The delay calendar: the algorithm proposes, the user ratifies, and the ratified list
+         is what moves a payment date. CSV is the stored format *and* the interchange format
+         (5zorro: Excel is "the defacto software of choice of finance professionals"), so the file
+         under userData is the same artefact he edits. -->
+    <fieldset class="pref-group wide" data-testid="pref-group-delay">
+      <legend>Delay days (postal &amp; bank)</legend>
+      <div class="delay-actions">
+        <button type="button" class="btn-secondary" id="delay-propose" data-testid="delay-propose">
+          Suggest for <span id="delay-year"></span>
+        </button>
+        <button type="button" class="btn-secondary" id="delay-import" data-testid="delay-import">Import CSV…</button>
+        <button type="button" class="btn-secondary" id="delay-export" data-testid="delay-export">Export for Excel…</button>
+        <span class="delay-status" id="delay-status" data-testid="delay-status"></span>
+      </div>
+      <div class="delay-table-wrap">
+        <table class="delay-table" id="delay-table" data-testid="delay-table">
+          <thead>
+            <tr><th>Sign off</th><th>Date</th><th>Applies to</th><th>Why</th><th></th></tr>
+          </thead>
+          <tbody id="delay-rows"></tbody>
+        </table>
+      </div>
+      <div class="delay-add">
+        <input type="date" id="delay-new-date" data-testid="delay-new-date" aria-label="Delay date" />
+        <select id="delay-new-scope" data-testid="delay-new-scope" aria-label="Applies to">
+          <option value="postal">Postal (checks only)</option>
+          <option value="bank">Bank (every method)</option>
+        </select>
+        <input type="text" id="delay-new-reason" data-testid="delay-new-reason" placeholder="Why — e.g. Nor'easter, carrier stopped" />
+        <button type="button" class="btn-secondary" id="delay-add" data-testid="delay-add">Add day</button>
+      </div>
+      <ul class="delay-msgs" id="delay-msgs" data-testid="delay-msgs"></ul>
+      <p class="pref-note" id="delay-note" data-testid="delay-note"></p>
+    </fieldset>
+    <button type="button" id="term-modal-open" data-testid="term-modal-open"></button>
     <span id="prefs-error"></span>
+  </div>
+
+  <!-- C6. Two launch points share this one modal and one pure planner (src/payment-term-plan.js);
+       the other is the Bill Doc skin's payment_terms_template picker. Not a Doc skin on Payment
+       Term -- invariant 6 is unchanged. -->
+  <div class="modal-backdrop" id="term-modal" hidden data-testid="term-modal">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="term-modal-title">
+      <div class="modal-head">
+        <h2 id="term-modal-title">New payment term</h2>
+        <button type="button" class="modal-close" id="term-modal-close" data-testid="term-modal-close">Close</button>
+      </div>
+      <!-- P4b. The form is shaped like the name it produces: the three parts of
+           `CREDIT_PERIOD (METHOD) ±GRACE`, in that order, each with a worked example. A clerk
+           reading this should be able to see why the name comes out the way it does. -->
+      <div class="modal-body">
+        <fieldset class="term-part" data-testid="term-part-contract">
+          <legend><span class="term-part-n">1</span> Contracted terms</legend>
+          <div class="pref-field wide">
+            <label for="term-shape">What the vendor's contract says</label>
+            <select id="term-shape" data-testid="term-shape"></select>
+            <p class="term-eg">e.g. <b>2% 10 days, net 30 days</b> — the discount, its window, and the credit period</p>
+          </div>
+          <div id="term-custom" class="term-custom" hidden>
+            <div class="pref-field narrow">
+              <label for="term-days">Credit period (days)</label>
+              <input type="number" id="term-days" step="1" min="0" value="30" data-testid="term-days" />
+            </div>
+            <div class="pref-field narrow">
+              <label for="term-discount">Discount %</label>
+              <input type="number" id="term-discount" step="0.1" min="0" value="" data-testid="term-discount" />
+            </div>
+            <div class="pref-field narrow">
+              <label for="term-discount-days">…if paid within</label>
+              <input type="number" id="term-discount-days" step="1" min="0" value="" data-testid="term-discount-days" />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="term-part" data-testid="term-part-method">
+          <legend><span class="term-part-n">2</span> Method of payment</legend>
+          <div class="pref-field">
+            <label for="term-method">How this vendor is paid</label>
+            <select id="term-method" data-testid="term-method"></select>
+            <p class="term-eg">e.g. <b>ACH</b> — it prices the payment and picks which delay calendar applies</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="term-part" data-testid="term-part-grace">
+          <legend><span class="term-part-n">3</span> Grace adjustment to the contracted terms</legend>
+          <div class="pref-field narrow">
+            <label for="term-grace">Grace (± days)</label>
+            <input type="number" id="term-grace" step="1" value="0" data-testid="term-grace" />
+          </div>
+          <p class="term-eg">
+            e.g. <b>+0</b> — no adjustment. <b>Negative</b> pays earlier than the contract (mail and
+            clearing time); <b>positive</b> pays after the contractual due date, on purpose.
+          </p>
+        </fieldset>
+
+        <fieldset class="term-part wide" data-testid="term-part-installments">
+          <legend>Installments</legend>
+          <div class="pref-field narrow">
+            <label for="term-installments">Payments</label>
+            <select id="term-installments" data-testid="term-installments"></select>
+          </div>
+          <span class="term-eg" id="term-installments-note">One payment for the whole invoice.</span>
+          <div class="term-split-wrap" id="term-split-wrap" hidden>
+            <table class="term-split" id="term-split" data-testid="term-split">
+              <thead><tr><th>#</th><th>Days</th><th>Share of the invoice</th></tr></thead>
+              <tbody id="term-split-rows"></tbody>
+              <tfoot><tr><td></td><td>Total</td><td id="term-split-total" data-testid="term-split-total"></td></tr></tfoot>
+            </table>
+          </div>
+        </fieldset>
+
+        <div class="pref-field wide">
+          <label for="term-basis">Counted from</label>
+          <select id="term-basis" data-testid="term-basis"></select>
+        </div>
+        <div class="pref-field wide">
+          <label for="term-description">Description (optional)</label>
+          <input type="text" id="term-description" data-testid="term-description" />
+        </div>
+        <div class="term-preview">
+          <div class="term-preview-name" id="term-preview-name" data-testid="term-preview-name"></div>
+          <div class="term-preview-sub" id="term-preview-sub" data-testid="term-preview-sub"></div>
+        </div>
+        <!-- P4c. "have a intuitive internals working too" — what each part of the name writes,
+             so the term reads as ordinary ERPNext data rather than a shell invention. -->
+        <details class="term-internals" data-testid="term-internals">
+          <summary>What this writes in ERPNext</summary>
+          <table class="term-internals-table">
+            <tbody id="term-internals-rows"></tbody>
+          </table>
+        </details>
+        <p class="term-affects" id="term-affects" data-testid="term-affects"></p>
+        <ul class="term-errors" id="term-errors" data-testid="term-errors"></ul>
+        <ul class="term-warnings" id="term-warnings" data-testid="term-warnings"></ul>
+      </div>
+      <div class="modal-foot">
+        <span class="msg" id="term-msg" data-testid="term-msg"></span>
+        <button type="button" class="btn-secondary" id="term-cancel">Cancel</button>
+        <button type="button" class="btn-primary" id="term-create" data-testid="term-create">Create term</button>
+      </div>
+    </div>
   </div>
   <main>
     <div id="load-error" hidden></div>
     <div id="empty" hidden data-testid="pay-outstanding-empty">Nothing outstanding.</div>
+    <!-- C8. Hidden while no check run is set, so the dashboard reads exactly as before the cutoff. -->
+    <div id="run-strip" hidden data-testid="run-strip">
+      <span id="run-strip-status" data-testid="run-strip-status"></span>
+      <span class="run-counts" id="run-strip-counts" data-testid="run-strip-counts"></span>
+      <button type="button" class="btn-secondary" id="run-strip-early" data-testid="run-strip-early"></button>
+    </div>
     <div class="col-header-row" id="col-header-row" hidden data-testid="flow-col-header">
       <div class="col-header-invoice">Invoice</div>
       <div class="col-header-flow">Flow</div>
@@ -380,13 +833,13 @@
   </main>
 
   <button type="button" id="drawer-tab" class="drawer-tab" data-testid="drawer-tab">
-    <span class="drawer-tab-caret" aria-hidden="true">▲</span>New payment — blank check
+    <span class="drawer-tab-caret" aria-hidden="true"></span>New payment — blank check
   </button>
 
   <div id="check-drawer" class="check-drawer" hidden data-testid="check-drawer">
     <div class="check-drawer-inner">
       <div class="check-drawer-head">
-        <span class="check-drawer-title"><span class="check-drawer-caret" aria-hidden="true">▼</span>Payment preview</span>
+        <span class="check-drawer-title"><span class="check-drawer-caret" aria-hidden="true"></span>Payment preview</span>
         <div class="check-drawer-head-actions">
           <button type="button" class="check-drawer-stop" id="check-drawer-stop"
             data-testid="check-drawer-stop" title="Drawer height">Half</button>
@@ -467,6 +920,9 @@
           placeholder="What this payment is for" autocomplete="off" />
       </div>
     </div>
+    <!-- C9: where each autofilled value came from (src/payment-entry-defaults.js). Hidden until
+         something was filled, so a document opened for editing shows nothing extra. -->
+    <ul class="check-doc-autofill" data-testid="check-doc-autofill" hidden></ul>
     <div class="check-doc-write-actions" data-testid="check-doc-write-actions">
       <span class="check-doc-write-status" data-testid="check-doc-write-status"></span>
       <button type="button" class="check-doc-submit" id="check-doc-submit" data-testid="check-doc-submit">Create &amp; submit Payment Entry</button>
@@ -479,21 +935,45 @@
   </div>
 
   <script type="module">
-    import { paymentBatchEconomics } from "../src/payment-batch-economics.js";
+    import {
+      paymentBatchEconomics,
+      explainGroupMembership,
+      describeGroupMembership,
+    } from "../src/payment-batch-economics.js";
     import {
       DEFAULT_PAYMENT_BATCH_PREFS,
       mergePaymentBatchPrefs,
       validatePaymentBatchPrefs,
       paymentMethodFeeResolver,
+      KNOWN_PAYMENT_METHODS,
+      CHEQUE_METHOD,
+      composedChequeFee,
+      paymentMethodLabel,
+      describePaymentMethod,
     } from "../src/payment-batch-prefs.js";
+    import { derivePaymentDate, summarizePaymentDate } from "../src/payment-date-derivation.js";
+    import {
+      parseDelayCalendarCsv,
+      serializeDelayCalendarCsv,
+      mergeDelayCalendar,
+      proposeDelayCalendar,
+      delayCalendarIndex,
+      delayDayProbe,
+      unratifiedCount,
+      normalizeDelayDate,
+    } from "../src/delay-calendar.js";
+    import { planPaymentTermsCreate, DAY_BASED_DUE_DATE_BASES } from "../src/payment-term-plan.js";
+    import { billAdvisories, vendorAdvisories, advisoryLevel } from "../src/payment-bill-advisories.js";
     import {
       paintCheckDoc,
       closeCheckDoc,
       mountCheckDocWrite,
       mountCheckDocBlank,
       setCheckDocBatchSource,
+      applyCheckDocDefaults,
     } from "../src/check-doc-mount.js";
     import { buildCheckDocViewModel, blankCheckViewModel } from "../src/check-doc-view.js";
+    import { proposePaymentEntryDefaults, referenceNoInUse } from "../src/payment-entry-defaults.js";
     import {
       sortBillsForSchedule,
       rowIndexOf,
@@ -503,6 +983,15 @@
     import { resolveFlowFocus, noFlowFocus, togglePinnedFocus } from "../src/pay-flow-focus.js";
     import { flowNodePlan } from "../src/flow-node-density.js";
     import { uiIconHtml } from "../src/ui-icons.js";
+    import { formatUsdAmount, formatUsdAmountHtml, moneyTextHtml } from "../src/money.js";
+    import {
+      resolveCheckRun,
+      checkRunSplits,
+      classifyForRun,
+      describeRunPlacement,
+      describeCheckRun,
+      summarizeCheckRun,
+    } from "../src/check-run-schedule.js";
     import {
       CHECK_DRAWER_STOP_LABEL,
       nextDrawerStop,
@@ -527,6 +1016,31 @@
 
     let allBills = [];
     let prefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+    /** @type {import("../src/delay-calendar.js").DelayDay[]} P3b -- the ratified delay calendar. */
+    let delayCalendar = [];
+    /**
+     * Whether a calendar file exists at all — **not** whether it has entries.
+     *
+     * 🔴 This is the switch, and it is deliberately file-existence rather than length. Passing a
+     * probe built from an empty calendar would turn every bridge day off at once (the probe
+     * *replaces* the bridge rule, see explainPayByDate), which is the one outcome C2 must not
+     * produce: dates would move with nothing on screen explaining why and no way to put them back.
+     * A file means the user has been through this panel. No file means leave the old rule alone.
+     */
+    let delayCalendarExists = false;
+
+    /** The `delayDay` argument for the engine and the audit, or null while there is no calendar. */
+    function delayProbe() {
+      if (!delayCalendarExists) return null;
+      const index = delayCalendarIndex(delayCalendar);
+      return (iso, method) => delayDayProbe(index, method)(iso);
+    }
+
+    /** Spread into an options object: `{ ...delayOpt() }` adds `delayDay` only when there is one. */
+    function delayOpt() {
+      const probe = delayProbe();
+      return probe ? { delayDay: probe } : {};
+    }
     /** @type {"date"|"invoice"} */
     let scheduleSortMode = "date";
     let filterText = "";
@@ -542,11 +1056,31 @@
       apr: document.getElementById("pref-apr"),
       postage: document.getElementById("pref-postage"),
       perCheck: document.getElementById("pref-percheck"),
-      groupWindowDays: document.getElementById("pref-window"),
+      runIntervalDays: document.getElementById("pref-run-interval"),
     };
+    const methodFeesEl = document.getElementById("pref-method-fees");
+    const nextRunInput = document.getElementById("pref-next-run");
+    const runStatusEl = document.getElementById("pref-run-status");
+    const runStripEl = document.getElementById("run-strip");
+    const runStripStatusEl = document.getElementById("run-strip-status");
+    const runStripCountsEl = document.getElementById("run-strip-counts");
+    const runStripEarlyBtn = document.getElementById("run-strip-early");
+    const chequeTotalEl = document.getElementById("pref-cheque-total");
+    /** @type {Map<string, HTMLInputElement>} Mode of Payment -> its cost input (C1) */
+    const methodFeeInputs = new Map();
 
+    /** Plain `$1,225.00` — for titles and aria labels, which cannot carry markup. */
     function money(n) {
-      return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return formatUsdAmount(Number(n) || 0);
+    }
+
+    /**
+     * `$1,225.00` with the cents underlined — the Doc skins' amount format (5zorro 2026-09-12: *"I
+     * like the $ format to match that of the bill doc skin entry page"*). Assign with innerHTML;
+     * `formatUsdAmountHtml` escapes. Sentences that carry amounts inline go through `moneyTextHtml`.
+     */
+    function moneyHtml(n) {
+      return formatUsdAmountHtml(Number(n) || 0);
     }
 
     // The check-doc drawer: a preview of a chosen batch as a check/ACH document, plus (Packet
@@ -598,6 +1132,14 @@
         if (!t || typeof t.closest !== "function") return;
         if (t.closest(".group-node")) return; // its own handler owns the toggle
         if (t.closest('[data-testid="group-rationale"] a')) return; // let the popup's links work
+        // A payment row and the chips own their own balloon toggles. This capture pass runs BEFORE
+        // their handlers, so closing here would make a second click close-then-reopen and nothing
+        // would ever shut. Rationales still dismiss, which is the point of clicking away.
+        if (t.closest(".bill-row") || t.closest('[data-testid="advisory-chip"]')) {
+          closeOtherRationales(null);
+          return;
+        }
+        closeAllBalloons();
         closeOtherRationales(null);
       },
       true,
@@ -630,7 +1172,52 @@
       setDrawerDirty(false);
       checkDrawer.hidden = false;
       syncDrawerTab();
+      applyDrawerStop();
       checkDrawer.scrollIntoView({ behavior: "smooth", block: "end" });
+      loadDrawerDefaults(group.supplier, group.method || "");
+    }
+
+    /* ---------------------------------------------------------------------------------------
+     * C9 -- autofill the drawer from what ERPNext already knows (5zorro 2026-09-14). All the
+     * choosing is in src/payment-entry-defaults.js; this reads the facts once per opened drawer and
+     * re-proposes whenever the clerk changes one of the four fields.
+     * ------------------------------------------------------------------------------------- */
+    const drawerDefaults = { facts: null, supplier: "", termsMethod: "", token: 0 };
+    async function loadDrawerDefaults(supplier, termsMethod) {
+      const token = ++drawerDefaults.token;
+      drawerDefaults.facts = null;
+      drawerDefaults.supplier = supplier || "";
+      drawerDefaults.termsMethod = termsMethod || "";
+      if (!api || !api.getPaymentDefaults || !supplier) return;
+      const facts = await api.getPaymentDefaults(supplier).catch(() => null);
+      // A drawer switched to another payment (or closed) while this was loading must not be filled.
+      if (token !== drawerDefaults.token || checkDrawer.hidden || !facts || !facts.ok) return;
+      drawerDefaults.facts = facts;
+      refreshDrawerDefaults();
+    }
+    function refreshDrawerDefaults() {
+      const { facts, supplier, termsMethod } = drawerDefaults;
+      if (!facts) return;
+      const input = (testid) => checkDocEl.querySelector(`[data-testid="${testid}"]`);
+      const typed = (testid) => {
+        const el = input(testid);
+        return el && el.dataset.autofilled !== "1" ? el.value.trim() : "";
+      };
+      const proposal = proposePaymentEntryDefaults(facts, {
+        supplier,
+        termsMethod,
+        mode: typed("check-doc-mop"),
+        paidFrom: typed("check-doc-cash-account"),
+      });
+      const mode = typed("check-doc-mop") || proposal.modeOfPayment.value;
+      const paidFrom = typed("check-doc-cash-account") || proposal.paidFrom.value;
+      const reference = typed("check-doc-reference-no") || proposal.referenceNo.value;
+      // ERPNext accepts a duplicate reference without complaint, so this is the only check.
+      const clash = referenceNoInUse(facts, reference, { mode, paidFrom });
+      const warning = clash
+        ? `${reference} is already used on ${clash.name}${Number(clash.docstatus) === 2 ? " (cancelled — a voided check still used its number)" : ""}`
+        : "";
+      applyCheckDocDefaults(checkDocEl, proposal, { warning });
     }
     /**
      * Drawer height (Packet 4b step 6). The wide check layout above does most of the work; this
@@ -650,7 +1237,10 @@
     let drawerStop = readDrawerStop(safeLocalStorage());
     function applyDrawerStop() {
       checkDrawer.style.maxHeight = `${drawerMaxHeightPx(drawerStop, window.innerHeight)}px`;
-      if (checkDrawerStopBtn) checkDrawerStopBtn.textContent = CHECK_DRAWER_STOP_LABEL[drawerStop];
+      if (checkDrawerStopBtn) {
+        checkDrawerStopBtn.innerHTML = `${uiIconHtml("maximize", { size: 13 })}${uiIconHtml("window", { size: 13 })}` +
+          `<span>${CHECK_DRAWER_STOP_LABEL[drawerStop]}</span>`;
+      }
     }
     if (checkDrawerStopBtn) {
       checkDrawerStopBtn.onclick = () => {
@@ -701,6 +1291,8 @@
       }
       closeOtherRationales(null);
       setCheckDocBatchSource(null, []);
+      drawerDefaults.token += 1; // a blank check waits for its payee before proposing anything
+      drawerDefaults.facts = null;
       paintCheckDoc(checkDocEl, blankCheckViewModel(todayIso()), {
         mode: "blank",
         badgeText: "New payment — not yet saved",
@@ -717,6 +1309,7 @@
       api: api || {},
       linkMounted,
       onDirty: setDrawerDirty,
+      onFieldEdited: () => refreshDrawerDefaults(),
       onSubmitted: () => {
         closeCheckDrawer();
         init(); // refresh: paid bills should drop off the list
@@ -726,6 +1319,7 @@
       api: api || {},
       linkMounted,
       onDirty: setDrawerDirty,
+      onPayeePicked: (supplier) => loadDrawerDefaults(supplier, ""),
       // A blank payment is created as a **Draft**, never auto-submitted -- nothing has been
       // reviewed yet. Hand it to the document form, which is where a draft gets worked on.
       onCreated: (result) => {
@@ -750,19 +1344,68 @@
       return map;
     }
 
+    /**
+     * C1: one cost input per Mode of Payment, built from `KNOWN_PAYMENT_METHODS` rather than typed
+     * into the markup, so adding a rail is a table entry (same rule as Simplified's seed profiles).
+     * The cheque is skipped -- its fee is the composed one, and it has its own bordered subgroup.
+     */
+    function buildMethodFeeInputs() {
+      for (const method of KNOWN_PAYMENT_METHODS) {
+        if (method === CHEQUE_METHOD) continue;
+        const field = document.createElement("div");
+        field.className = "pref-field narrow";
+        const label = document.createElement("label");
+        label.htmlFor = `pref-fee-${method}`;
+        label.textContent = `${paymentMethodLabel(method)} $`;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.id = `pref-fee-${method}`;
+        input.step = "0.01";
+        input.min = "0";
+        input.dataset.testid = `pref-fee-${method.toLowerCase()}`;
+        input.dataset.method = method;
+        input.title = paymentMethodLabel(method, { long: true });
+        field.appendChild(label);
+        field.appendChild(input);
+        methodFeesEl.appendChild(field);
+        methodFeeInputs.set(method, input);
+        input.addEventListener("change", onPrefsChanged);
+      }
+    }
+
     function paintPrefsInputs() {
       prefInputs.apr.value = Math.round(prefs.apr * 1000) / 10; // decimal -> %
       prefInputs.postage.value = prefs.postage;
       prefInputs.perCheck.value = prefs.perCheck;
-      prefInputs.groupWindowDays.value = prefs.groupWindowDays;
+      prefInputs.runIntervalDays.value = prefs.runIntervalDays;
+      nextRunInput.value = prefs.nextRunDate || "";
+      for (const [method, input] of methodFeeInputs) {
+        input.value = describePaymentMethod(prefs, method).fee;
+      }
+      paintChequeTotal();
+    }
+
+    /** The half of "a border around the two inputs that contribute" that says which number. */
+    function paintChequeTotal() {
+      const composed = composedChequeFee(readPrefsFromInputs());
+      chequeTotalEl.innerHTML = moneyHtml(composed.total);
     }
 
     function readPrefsFromInputs() {
+      /** @type {Record<string, number>} */
+      const methodFees = {};
+      for (const [method, input] of methodFeeInputs) {
+        const n = Number(input.value);
+        if (input.value !== "" && Number.isFinite(n) && n >= 0) methodFees[method] = n;
+      }
       return {
         apr: Number(prefInputs.apr.value) / 100,
         postage: Number(prefInputs.postage.value),
         perCheck: Number(prefInputs.perCheck.value),
-        groupWindowDays: Number(prefInputs.groupWindowDays.value),
+        runIntervalDays: Number(prefInputs.runIntervalDays.value),
+        nextRunDate: nextRunInput.value || "",
+        runEarlyOn: prefs.runEarlyOn || "", // set only by the run strip's button, never typed
+        methodFees,
       };
     }
 
@@ -770,6 +1413,13 @@
       const candidate = readPrefsFromInputs();
       const check = validatePaymentBatchPrefs(candidate);
       for (const key of Object.keys(prefInputs)) prefInputs[key].classList.remove("invalid");
+      // A method fee is validated per entry, not as part of the object: one mistyped wire cost
+      // marks its own box and falls back to the table default, rather than voiding the panel and
+      // taking the ACH cost next to it down with it (payment-batch-prefs.js's read-time rule).
+      for (const [method, input] of methodFeeInputs) {
+        const n = Number(input.value);
+        input.classList.toggle("invalid", input.value !== "" && !(Number.isFinite(n) && n >= 0));
+      }
       if (!check.ok) {
         prefsError.textContent = check.errors.join("; ");
         for (const err of check.errors) {
@@ -778,7 +1428,11 @@
         }
         return;
       }
-      prefsError.textContent = "";
+      const badMethods = [...methodFeeInputs].filter(([, i]) => i.classList.contains("invalid"));
+      prefsError.textContent = badMethods.length
+        ? `Ignoring ${badMethods.map(([m]) => paymentMethodLabel(m)).join(", ")} — using the default cost.`
+        : "";
+      paintChequeTotal();
       prefs = candidate;
       render(); // client-side re-compute only — bills already fetched, no re-fetch (Packet 3)
       if (api && api.setPrefs) {
@@ -791,6 +1445,20 @@
       const open = prefsPanel.hidden;
       prefsPanel.hidden = !open;
       prefsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+
+    nextRunInput.addEventListener("change", onPrefsChanged);
+
+    // C8 -- "What happens if the date hasn't happened yet, but i want to do a full check run
+    // anyway" (5zorro 2026-09-14). Stored as today's date, so it lapses by itself tomorrow.
+    runStripEarlyBtn.onclick = async () => {
+      const run = resolveCheckRun(prefs, todayIso());
+      prefs = { ...prefs, runEarlyOn: run.early ? "" : todayIso() };
+      render();
+      if (api && api.setPrefs) {
+        const saved = await api.setPrefs(prefs).catch(() => null);
+        if (saved && saved.ok) prefs = saved.prefs;
+      }
     };
 
     const sortDateBtn = document.getElementById("sort-date");
@@ -820,7 +1488,103 @@
       input.addEventListener("change", onPrefsChanged);
     }
 
-    function billRowEl(bill) {
+    /**
+     * C3's chip. One element, used on the schedule row and on the suggested-payment node, so the
+     * two can never disagree about what a bill is paid by.
+     * @param {string|null|undefined} method a `Mode of Payment` name
+     */
+    function methodChipEl(method) {
+      const chip = document.createElement("span");
+      const key = method == null ? "" : String(method).trim();
+      chip.className = key ? "method-chip" : "method-chip method-none";
+      chip.dataset.testid = "method-chip";
+      if (key) chip.dataset.method = key;
+      chip.textContent = paymentMethodLabel(key);
+      const priced = describePaymentMethod(prefs, key);
+      chip.title = key
+        ? `${priced.longLabel} — ${money(priced.fee)} per payment`
+        : `This bill records no mode of payment. It is priced at the cheque cost (${money(priced.fee)}) ` +
+          `because that is the conservative guess, but the bill does not say so.`;
+      return chip;
+    }
+
+    /**
+     * C4's chip. `null` when there is nothing to say -- silence is the default, and a chip on every
+     * row is a chip on no rows.
+     * @param {import("../src/payment-bill-advisories.js").Advisory[]} advisories
+     * @param {HTMLElement} anchorEl the positioned ancestor the balloon hangs off
+     */
+    function advisoryChipEl(advisories, anchorEl) {
+      if (!advisories.length) return null;
+      const level = advisoryLevel(advisories);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "advisory-chip";
+      chip.dataset.testid = "advisory-chip";
+      chip.dataset.level = level;
+      chip.dataset.count = String(advisories.length);
+      chip.innerHTML = uiIconHtml(level === "warn" ? "alert" : "info", { size: 13 });
+      chip.title = advisories.map((a) => a.title).join(" · ");
+      chip.setAttribute(
+        "aria-label",
+        `${advisories.length} note${advisories.length === 1 ? "" : "s"}: ${chip.title}`,
+      );
+
+      const balloon = document.createElement("div");
+      balloon.className = "advisory-balloon";
+      balloon.dataset.testid = "advisory-balloon";
+      balloon.hidden = true;
+      for (const a of advisories) {
+        const item = document.createElement("div");
+        item.className = `advisory-item ${a.level}`;
+        item.dataset.advisory = a.id;
+        const title = document.createElement("strong");
+        title.className = "advisory-title";
+        title.textContent = a.title;
+        const body = document.createElement("span");
+        body.innerHTML = moneyTextHtml(a.body);
+        item.appendChild(title);
+        item.appendChild(body);
+        balloon.appendChild(item);
+      }
+      anchorEl.appendChild(balloon);
+
+      chip.onclick = (ev) => {
+        ev.stopPropagation(); // a chip must not also toggle the row's own derivation
+        const opening = balloon.hidden;
+        closeAllBalloons();
+        if (!opening) return;
+        balloon.hidden = false;
+        positionBalloon(balloon, chip, anchorEl);
+      };
+      return chip;
+    }
+
+    /**
+     * Place a balloon under whatever opened it, clamped inside the card. Called after unhiding so
+     * the measurements are real.
+     * @param {HTMLElement} balloon @param {HTMLElement} opener @param {HTMLElement} hostEl
+     */
+    function positionBalloon(balloon, opener, hostEl) {
+      const rect = opener.getBoundingClientRect();
+      const host = hostEl.getBoundingClientRect();
+      const width = balloon.offsetWidth || 340;
+      balloon.style.top = `${rect.bottom - host.top + 4}px`;
+      balloon.style.left = `${Math.max(8, Math.min(rect.left - host.left, host.width - width - 8))}px`;
+    }
+
+    function closeAllBalloons() {
+      for (const b of document.querySelectorAll(".advisory-balloon")) b.hidden = true;
+    }
+
+    /**
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow} bill
+     * @param {HTMLElement} balloonHost the positioned ancestor a balloon hangs off -- the vendor
+     *   card, not the row: `.row` is static and a balloon inside one would be clipped by the flow
+     *   grid's own overflow rules.
+     * @param {object|null|undefined} group the suggested payment this bill belongs to
+     */
+    function billRowEl(bill, balloonHost, group) {
       const row = document.createElement("div");
       row.className = "row bill-row";
       row.dataset.testid = "bill-row";
@@ -828,18 +1592,27 @@
 
       const due = document.createElement("span");
       due.className = "due c-due";
-      due.textContent = bill.dueDate;
+      const dueText = document.createElement("span");
+      dueText.textContent = bill.dueDate;
+      dueText.style.flex = "0 0 auto";
+      due.appendChild(dueText);
+      // C3. The method rides on the schedule row because that is the row 5zorro reads an
+      // obligation off, and because a vendor's rows can legitimately differ -- mode_of_payment
+      // lives on payment_schedule, not on the Supplier, so one vendor can have a cheque bill and
+      // an ACH bill, and a single bill can carry two installments on different rails.
+      due.appendChild(methodChipEl(bill.modeOfPayment));
       if (bill.discountDate && bill.discountDate >= todayIso()) {
         const badge = document.createElement("span");
         badge.className = "discount-badge";
-        badge.textContent = `−${money(bill.discountAmount)} by ${bill.discountDate}`;
+        badge.innerHTML = `−${moneyHtml(bill.discountAmount)}`;
+        badge.append(` by ${bill.discountDate}`);
         due.appendChild(document.createTextNode(" "));
         due.appendChild(badge);
       }
 
       const amt = document.createElement("span");
       amt.className = "amt c-amt";
-      amt.textContent = money(bill.outstanding);
+      amt.innerHTML = moneyHtml(bill.outstanding);
 
       row.appendChild(due);
       row.appendChild(amt);
@@ -855,6 +1628,29 @@
         if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(bill.invoice)}`);
       };
       row.appendChild(peek);
+      const advisories = billAdvisories(bill, { today: todayIso(), prefs });
+      const chip = advisoryChipEl(advisories, balloonHost);
+      // Inserted before the peek button so the row reads date - method - amount - note - peek.
+      if (chip) row.insertBefore(chip, peek);
+
+      // C5 lives here now. `.bill-row` has said `cursor: pointer` since the flow view shipped
+      // while clicking did nothing -- an affordance with no action. This is the action.
+      //
+      // Built on first click, not up front: SUP-DAILY carries 90 rows, and 90 hidden four-column
+      // tables per vendor card is weight nobody asked for to show one of them.
+      let deriv = null;
+      row.title = "Click for how this payment date was arrived at";
+      row.onclick = () => {
+        const opening = !deriv || deriv.hidden;
+        closeAllBalloons();
+        if (!opening) return;
+        if (!deriv) {
+          deriv = billDerivationEl(bill, group);
+          balloonHost.appendChild(deriv);
+        }
+        deriv.hidden = false;
+        positionBalloon(deriv, row, balloonHost);
+      };
       return row;
     }
 
@@ -929,11 +1725,179 @@
 
       const sub = document.createElement("div");
       sub.className = "invoice-sub";
-      sub.textContent =
-        inv.rows.length > 1 ? `${inv.rows.length} installments · ${money(inv.total)}` : money(inv.total);
+      sub.innerHTML =
+        inv.rows.length > 1 ? `${inv.rows.length} installments · ${moneyHtml(inv.total)}` : moneyHtml(inv.total);
       wrap.appendChild(sub);
 
       return wrap;
+    }
+
+    /**
+     * The derivation for one bill, with the right obligation.
+     *
+     * A discount capture is meeting the discount deadline, not the due date — deriving it from
+     * `due_date` would print a date that is not the one on the node, and would report every
+     * 2/10-net-30 bill as overriding its own terms.
+     *
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow} bill
+     * @param {object|null|undefined} group the suggested payment this bill belongs to, if known
+     */
+    function derivationForBill(bill, group) {
+      const isDiscount = group && group.reason === "discount-capture";
+      // The calendar is scoped by rail, and derivePaymentDate walks one bill, so the probe is
+      // bound to this bill's own method here rather than passed through method-blind.
+      const probe = delayProbe();
+      const delay = probe ? { delayDay: (iso) => probe(iso, bill.modeOfPayment || "") } : {};
+      return derivePaymentDate(
+        isDiscount ? { ...bill, dueDate: bill.discountDate || bill.dueDate } : bill,
+        isDiscount ? { obligation: "discount-window", ...delay } : delay,
+      );
+    }
+
+    /**
+     * C5 — "the bumps, itemised", as a table. One row per rule that actually fired, so the answer
+     * to *"was it 2 weekend days, 1 blur day, 1 holiday… OR was it exactly on time"* is readable
+     * rather than inferred. All arithmetic comes from `payment-date-derivation.js`; this only turns
+     * steps into cells.
+     *
+     * @param {import("../src/payment-date-derivation.js").PaymentDateDerivation} d
+     */
+    function derivationTableEl(d) {
+      const table = document.createElement("div");
+      table.className = "deriv-table";
+      for (const step of d.steps) {
+        const row = document.createElement("div");
+        row.className = `deriv-row${step.severity === "warn" ? " warn" : ""}`;
+        row.dataset.testid = "derivation-step";
+        row.dataset.rule = step.rule;
+        row.appendChild(cell("deriv-rule", step.label));
+        row.appendChild(cell("deriv-date", step.date));
+        row.appendChild(cell("deriv-delta", step.deltaDays ? `${step.deltaDays}` : "—"));
+        const detail = cell("deriv-detail", "");
+        detail.innerHTML = moneyTextHtml(step.detail || "");
+        row.appendChild(detail);
+        table.appendChild(row);
+      }
+      return table;
+    }
+
+    /**
+     * 🔴 The audit lives on the **individual payment row**, not on the grouped suggestion
+     * (5zorro 2026-09-12: *"I think i would want the audit to be on each of the payments. there is
+     * a lot of noise on the balloon on the grouped payment suggestion."*).
+     *
+     * That split is also the one the plan already drew: **B1 is the short form, C5 is the full
+     * disclosure.** A grouped payment answers *"why are these bills one payment"* — fees against
+     * float — and stacking one member's day-by-day calendar walk inside it buried that. Each row
+     * answers *"why is this obligation on this date"*, which is a per-bill question and now has a
+     * per-bill home.
+     *
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow} bill
+     * @param {object|null|undefined} group
+     */
+    function billDerivationEl(bill, group) {
+      const d = derivationForBill(bill, group);
+      // The batching move, as the last row of the same walk (5zorro 2026-09-12: the calendar steps
+      // ended on 7/31 while the suggested payment said 7/28, and nothing said why). Priced with the
+      // same APR and fallback fee the engine was just called with -- see renderDashboard.
+      const membership = describeGroupMembership(
+        explainGroupMembership(group, bill, {
+          apr: prefs.apr,
+          perPaymentFee: paymentMethodFeeResolver(prefs)(null),
+          ...delayOpt(),
+        }),
+        { methodLabel: group && group.method ? paymentMethodLabel(group.method) : "" },
+      );
+      const wrap = document.createElement("div");
+      wrap.className = "advisory-balloon deriv-balloon";
+      wrap.dataset.testid = "bill-derivation";
+      wrap.hidden = true;
+
+      const head = document.createElement("div");
+      head.className = "deriv-head";
+      head.textContent = `${bill.installmentKey} — how ${membership ? membership.step.date : d.payOn} was arrived at`;
+      wrap.appendChild(head);
+
+      const short = document.createElement("div");
+      short.className = "deriv-note";
+      short.dataset.testid = "derivation-summary";
+      short.textContent = summarizePaymentDate(d);
+      wrap.appendChild(short);
+
+      wrap.appendChild(derivationTableEl(membership ? { ...d, steps: [...d.steps, membership.step] } : d));
+      if (membership && membership.note) {
+        const note = document.createElement("div");
+        note.className = "deriv-note deriv-total";
+        note.dataset.testid = "membership-note";
+        note.innerHTML = moneyTextHtml(membership.note);
+        wrap.appendChild(note);
+      }
+      return wrap;
+    }
+
+    /**
+     * What stays on the grouped suggestion: B1's **one line**, naming which date rule moved this
+     * payment and by how many days. The full table moved to the rows — see `billDerivationEl`.
+     *
+     * @param {object} group
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} vendorBills
+     * @returns {HTMLElement|null}
+     */
+    function derivationEl(group, vendorBills) {
+      const members = (group.bills || [])
+        .map((key) => vendorBills.find((b) => b.installmentKey === key))
+        .filter(Boolean);
+      if (!members.length) return null;
+
+      const derivations = members.map((bill) => ({ bill, d: derivationForBill(bill, group) }));
+      const anchor = derivations.find((x) => x.d.payOn === group.payOn) || derivations[0];
+
+      const wrap = document.createElement("div");
+      wrap.className = "deriv";
+      wrap.dataset.testid = "group-derivation";
+
+      const short = document.createElement("div");
+      short.className = "deriv-note";
+      short.dataset.testid = "derivation-summary";
+      short.textContent = `${group.payOn}: ${summarizePaymentDate(anchor.d)}`;
+      wrap.appendChild(short);
+
+      const hint = document.createElement("div");
+      hint.className = "deriv-note deriv-hint";
+      hint.textContent =
+        "Click a payment row on the left for its own day-by-day derivation, ending in what joining this payment saved it.";
+      wrap.appendChild(hint);
+
+      return wrap;
+    }
+
+    /** @param {string} cls @param {string} textContent */
+    function cell(cls, textContent) {
+      const el = document.createElement("span");
+      el.className = cls;
+      el.textContent = textContent;
+      return el;
+    }
+
+    /**
+     * One bill's part in its group, for the numbered member list: which one sets the date, which
+     * were already payable that day, and how far early (and at what float) the rest were pulled.
+     * The float is attributed per bill rather than left as one total — that IS grouping information.
+     * @param {ReturnType<typeof explainGroupMembership>} m
+     * @returns {string} safe HTML, or "" when there is nothing to add
+     */
+    function memberNoteHtml(m) {
+      if (!m) return "";
+      if (m.kind === "sets-date") return "sets the date";
+      if (m.kind === "same-day") return "already payable that day";
+      if (m.kind !== "joined-early") return "";
+      const days = `${m.daysEarly} day${m.daysEarly === 1 ? "" : "s"} early`;
+      return m.floatCost == null ? days : `${days}, ${moneyHtml(m.floatCost)} float`;
+    }
+
+    /** Whole days between two ISO dates, unsigned — the popup states the direction in words. */
+    function daysApart(a, b) {
+      return Math.abs(Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000));
     }
 
     /**
@@ -942,13 +1906,17 @@
      * @param {string} aggId the group's identity — NOT `payOn`, which repeats (see groupIdOf)
      * @param {import("../src/flow-node-density.js").FlowNodePlan} plan how much height it has
      */
-    function groupNodeEl(group, bills, aggId, plan) {
+    function groupNodeEl(group, bills, aggId, plan, run) {
       const wrap = document.createElement("div");
       wrap.className = `group-node ${plan.density}`;
       wrap.dataset.testid = "group-node";
       wrap.dataset.reason = group.reason;
       wrap.dataset.agg = aggId;
       wrap.dataset.payon = group.payOn;
+      // C8: where this payment sits against the check run. Null while no run is set, which leaves
+      // the node exactly as it was.
+      const placement = describeRunPlacement(classifyForRun(group.payOn, run), run, group);
+      if (placement) wrap.dataset.run = placement.kind;
 
       const top = document.createElement("div");
       top.className = "group-top";
@@ -965,10 +1933,26 @@
       payOn.className = "group-payon";
       payOn.textContent = group.payOn;
       label.appendChild(payOn);
+      // C3, second half: the node is where the method explains the fee, so the chip belongs on the
+      // top line rather than the sub-line -- a compact (one-row) node hides its sub-line entirely,
+      // and one-row nodes are the common case for ACH, which is exactly the rail whose $0.40 fee
+      // the clerk is most likely to be puzzled by.
+      //
+      // `group.method` is absent, not "", when the bills record no mode of payment: the engine
+      // tags a partition only when it has a real method (payment-batch-economics.js::tagMethod).
+      label.appendChild(methodChipEl(group.method));
+      if (placement && placement.chip) {
+        const chip = document.createElement("span");
+        chip.className = `run-chip ${placement.kind}`;
+        chip.dataset.testid = "run-chip";
+        chip.textContent = placement.chip;
+        chip.title = placement.line;
+        label.appendChild(chip);
+      }
       top.appendChild(label);
       const amt = document.createElement("span");
       amt.className = "group-amt c-samt";
-      amt.textContent = money(group.totalAmount);
+      amt.innerHTML = moneyHtml(group.totalAmount);
       top.appendChild(amt);
       wrap.appendChild(top);
 
@@ -982,15 +1966,53 @@
       rationale.className = "rationale";
       rationale.hidden = true;
       rationale.dataset.testid = "group-rationale";
+      if (placement) {
+        const line = document.createElement("div");
+        line.className = `run-line ${placement.kind}`;
+        line.dataset.testid = "run-line";
+        line.textContent = placement.line;
+        rationale.appendChild(line);
+      }
       const text = document.createElement("div");
-      text.textContent = group.rationale;
+      text.innerHTML = moneyTextHtml(group.rationale);
       rationale.appendChild(text);
       if (group.bills.length > 1) {
-        const members = document.createElement("div");
-        members.className = "member-bills";
-        members.textContent = `Bills: ${group.bills.join(", ")}`;
-        rationale.appendChild(members);
+        // One bill per line, numbered in payment-date order (5zorro 2026-09-12: ERPNext's long
+        // names wrapped mid-run in a comma-joined list and read badly). Each line carries that
+        // bill's own part in the grouping, which is why the separate "pulled forward" sentence
+        // folded in here rather than repeating the names a second time.
+        const label = document.createElement("div");
+        label.className = "member-bills";
+        label.textContent = "Bills in this payment:";
+        rationale.appendChild(label);
+        const list = document.createElement("ol");
+        list.className = "member-list";
+        list.dataset.testid = "group-member-list";
+        for (const key of group.bills) {
+          const li = document.createElement("li");
+          const name = document.createElement("span");
+          name.className = "member-key";
+          name.textContent = key;
+          li.appendChild(name);
+          const bill = bills.find((b) => b.installmentKey === key);
+          const note = memberNoteHtml(
+            bill ? explainGroupMembership(group, bill, { apr: prefs.apr, ...delayOpt() }) : null,
+          );
+          if (note) {
+            const span = document.createElement("span");
+            span.className = "member-note";
+            span.innerHTML = ` — ${note}`;
+            li.appendChild(span);
+          }
+          list.appendChild(li);
+        }
+        rationale.appendChild(list);
       }
+      // B1 + C5: name the inputs, not only the arithmetic. What the popup said until now
+      // ("3 bills batched: $1.66 fee saved vs $0.22 float cost") explains the comparison but not
+      // where 2026-09-03 came from -- which was 5zorro's actual question.
+      const deriv = derivationEl(group, bills);
+      if (deriv) rationale.appendChild(deriv);
       const link = document.createElement("a");
       link.className = "view-link";
       link.href = "#";
@@ -1247,10 +2269,11 @@
      * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills
      * @param {"date"|"invoice"} mode
      */
-    function renderVendorCard(supplier, bills, groups) {
+    function renderVendorCard(supplier, bills, groups, run) {
       const card = document.createElement("div");
       card.className = "vendor-card";
       card.dataset.testid = "vendor-card";
+      card.style.position = "relative"; // the positioning context for every C4 balloon inside it
 
       const head = document.createElement("div");
       head.className = "vendor-head";
@@ -1259,10 +2282,23 @@
       name.textContent = supplier;
       const total = document.createElement("span");
       total.className = "total";
-      total.textContent = `${bills.length} bill${bills.length === 1 ? "" : "s"} · ${money(
+      total.innerHTML = `${bills.length} bill${bills.length === 1 ? "" : "s"} · ${moneyHtml(
         bills.reduce((s, b) => s + b.outstanding, 0),
       )} outstanding`;
       head.appendChild(name);
+      // Between the name and the total: `total` is not in the DOM yet, so this is an append.
+      const vendorChip = advisoryChipEl(vendorAdvisories(bills), card);
+      if (vendorChip) head.appendChild(vendorChip);
+      // C8: a vendor with fire drills says so in its header, so it can be found while scrolling.
+      const offCycle = groups.filter((g) => classifyForRun(g.payOn, run) === "off-cycle").length;
+      if (offCycle) {
+        const chip = document.createElement("span");
+        chip.className = "run-chip off-cycle";
+        chip.dataset.testid = "vendor-off-cycle";
+        chip.textContent = `${offCycle} off-cycle`;
+        chip.title = `${offCycle} payment${offCycle === 1 ? "" : "s"} for ${supplier} cannot wait for the ${run.runDate} check run`;
+        total.prepend(chip);
+      }
       head.appendChild(total);
       card.appendChild(head);
 
@@ -1292,10 +2328,10 @@
       });
       const billY = new Map(); // installmentKey -> center Y (within the flow-grid's own coordinate space)
       sortedBills.forEach((bill, i) => {
-        const row = billRowEl(bill);
+        const mine = groupOfKey.get(bill.installmentKey);
+        const row = billRowEl(bill, card, groups[mine]);
         row.style.height = `${ROW_HEIGHT}px`;
         const next = sortedBills[i + 1];
-        const mine = groupOfKey.get(bill.installmentKey);
         if (next && groupOfKey.get(next.installmentKey) !== mine) row.classList.add("group-edge");
         colBills.appendChild(row);
         billY.set(bill.installmentKey, i * ROW_HEIGHT + ROW_HEIGHT / 2);
@@ -1365,7 +2401,7 @@
       const groupColHeight = groupSpans.reduce((m, s) => Math.max(m, s.y1), 0);
       for (const span of groupSpans) {
         const h = span.y1 - span.y0;
-        const built = groupNodeEl(span.group, bills, span.aggId, flowNodePlan(h, ROW_HEIGHT));
+        const built = groupNodeEl(span.group, bills, span.aggId, flowNodePlan(h, ROW_HEIGHT), run);
         const wrap = document.createElement("div");
         wrap.className = "group-wrap";
         wrap.style.height = `${h}px`;
@@ -1452,6 +2488,43 @@
       return card;
     }
 
+    /**
+     * C8 -- the strip above the vendor cards: where the cutoff stands, how many payments cannot wait
+     * for it, and the "Do this run today" override. Hidden while no run is set.
+     * @param {import("../src/check-run-schedule.js").CheckRun} run
+     * @param {ReturnType<typeof summarizeCheckRun>} summary
+     */
+    function paintRunStrip(run, summary) {
+      runStatusEl.textContent = describeCheckRun(run);
+      if (run.state === "off") {
+        runStripEl.hidden = true;
+        return;
+      }
+      runStripEl.hidden = false;
+      runStripStatusEl.textContent = describeCheckRun(run);
+      const parts = [];
+      if (summary.offCycle.count) {
+        parts.push(
+          `<span class="run-count-off" data-testid="run-count-off">${summary.offCycle.count} off-cycle (${moneyHtml(summary.offCycle.amount)})</span>`,
+        );
+      }
+      parts.push(`${summary.thisRun.count} in this run (${moneyHtml(summary.thisRun.amount)})`);
+      if (summary.later.count) parts.push(`${summary.later.count} in later runs`);
+      runStripCountsEl.innerHTML = parts.join(" · ");
+
+      if (run.state === "upcoming") {
+        runStripEarlyBtn.hidden = false;
+        runStripEarlyBtn.textContent = "Do this run today";
+        runStripEarlyBtn.title = `Treat today as the ${run.runDate} check run: everything due before ${run.cutoff} goes in it, and nothing is off-cycle. Lapses by itself tomorrow.`;
+      } else if (run.early) {
+        runStripEarlyBtn.hidden = false;
+        runStripEarlyBtn.textContent = "Back to the schedule";
+        runStripEarlyBtn.title = `Stop treating today as the ${run.runDate} check run.`;
+      } else {
+        runStripEarlyBtn.hidden = true;
+      }
+    }
+
     function showError(message) {
       loadErrorEl.hidden = !message;
       loadErrorEl.textContent = message || "";
@@ -1459,6 +2532,11 @@
 
     function render() {
       vendorsEl.innerHTML = "";
+      // C8: resolved once per render against the clerk's own date, so a dashboard left open past
+      // midnight re-reads the schedule (and drops an early run) on its next render.
+      const run = resolveCheckRun(prefs, todayIso());
+      paintRunStrip(run, summarizeCheckRun([], run));
+      runStripEl.hidden = true; // shown again below once there are payments to count
       if (!allBills.length) {
         emptyEl.hidden = false;
         emptyEl.classList.remove("no-match");
@@ -1499,22 +2577,560 @@
       // carries one `mode_of_payment`, so bills paid different ways never merge.
       const feeForMethod = paymentMethodFeeResolver(prefs);
 
+      const runBreaks = checkRunSplits(run);
+      const shownGroups = [];
       for (const supplier of suppliers) {
         const bills = bySupplier.get(supplier);
         const { groups } = paymentBatchEconomics({
           bills,
           perPaymentFee: feeForMethod(null), // fallback for bills with no mode_of_payment recorded
           apr: prefs.apr,
-          groupWindowDays: prefs.groupWindowDays,
           feeForMethod,
+          runBreaks, // C8: no batch crosses the check run
+          ...delayOpt(), // P3d: the ratified calendar, once there is one
         });
-        vendorsEl.appendChild(renderVendorCard(supplier, bills, groups));
+        shownGroups.push(...groups);
+        vendorsEl.appendChild(renderVendorCard(supplier, bills, groups, run));
+      }
+      paintRunStrip(run, summarizeCheckRun(shownGroups, run));
+    }
+
+    /* ---------------------------------------------------------------------------------------
+     * C6 -- terms creation modal.
+     *
+     * All the rules live in `planPaymentTermsCreate`: the CREDIT_PERIOD (METHOD) ±GRACE name with
+     * grace last, the fold of grace into credit_days, the matching mode_of_payment, the wrapping
+     * single-row Template, the readable collision message, and the 🔴 rename warning. This block
+     * only moves strings into it and renders what comes back -- which is why the same planner can
+     * back the Bill Doc skin's picker without either surface re-deriving a convention.
+     * ------------------------------------------------------------------------------------- */
+    /**
+     * P4b — the contracted terms in the words a vendor's invoice uses. `days` is the credit period;
+     * `discount` / `discountDays` fill the early-payment quartet. Adding a shape is a row here.
+     */
+    const TERM_SHAPES = Object.freeze([
+      { id: "due", label: "Due on receipt", days: 0 },
+      { id: "net_10", label: "Net 10 days", days: 10 },
+      { id: "net_15", label: "Net 15 days", days: 15 },
+      { id: "net_30", label: "Net 30 days", days: 30 },
+      { id: "net_45", label: "Net 45 days", days: 45 },
+      { id: "net_60", label: "Net 60 days", days: 60 },
+      { id: "1_10_net_30", label: "1% 10 days, net 30 days", days: 30, discount: 1, discountDays: 10 },
+      { id: "2_10_net_30", label: "2% 10 days, net 30 days", days: 30, discount: 2, discountDays: 10 },
+      { id: "2_10_net_45", label: "2% 10 days, net 45 days", days: 45, discount: 2, discountDays: 10 },
+      { id: "custom", label: "Custom…", days: null },
+    ]);
+
+    const termModal = {
+      root: document.getElementById("term-modal"),
+      days: document.getElementById("term-days"),
+      grace: document.getElementById("term-grace"),
+      method: document.getElementById("term-method"),
+      basis: document.getElementById("term-basis"),
+      discount: document.getElementById("term-discount"),
+      discountDays: document.getElementById("term-discount-days"),
+      description: document.getElementById("term-description"),
+      shape: document.getElementById("term-shape"),
+      custom: document.getElementById("term-custom"),
+      installments: document.getElementById("term-installments"),
+      installmentsNote: document.getElementById("term-installments-note"),
+      splitWrap: document.getElementById("term-split-wrap"),
+      splitRows: document.getElementById("term-split-rows"),
+      splitTotal: document.getElementById("term-split-total"),
+      internals: document.getElementById("term-internals-rows"),
+      previewName: document.getElementById("term-preview-name"),
+      previewSub: document.getElementById("term-preview-sub"),
+      affects: document.getElementById("term-affects"),
+      errors: document.getElementById("term-errors"),
+      warnings: document.getElementById("term-warnings"),
+      msg: document.getElementById("term-msg"),
+      create: document.getElementById("term-create"),
+    };
+
+    function buildTermModalOptions() {
+      // Inline SVG, not a Unicode glyph: ui-icons.js is the SSoT precisely so the shell does not
+      // depend on Noto Color Emoji / Segoe UI Emoji being installed (it is not, on WSL).
+      // Every glyph on this surface comes from ui-icons.js, for the reason its own docstring gives:
+      // no Noto Color Emoji / Segoe UI Emoji dependency, on any of Windows, WSL or macOS.
+      document.getElementById("prefs-toggle").innerHTML =
+        `${uiIconHtml("gear", { size: 13 })}<span>Assumptions</span>`;
+      document.querySelector(".drawer-tab-caret").innerHTML = uiIconHtml("chevron-up", { size: 12 });
+      document.querySelector(".check-drawer-caret").innerHTML = uiIconHtml("chevron-down", { size: 12 });
+      document.getElementById("check-drawer-close").innerHTML =
+        `${uiIconHtml("x", { size: 13 })}${uiIconHtml("arrow-down", { size: 13 })}<span>Close</span>`;
+      document.getElementById("term-modal-open").innerHTML =
+        `${uiIconHtml("plus", { size: 13 })}<span>New payment term…</span>`;
+
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "— none —";
+      termModal.method.appendChild(none);
+      for (const m of KNOWN_PAYMENT_METHODS) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = paymentMethodLabel(m, { long: true });
+        termModal.method.appendChild(opt);
+      }
+      termModal.method.value = "ACH";
+      // P4b -- the contracted terms a vendor actually writes on an invoice, in their own words.
+      // "Custom…" reveals the raw numbers; everything else fills them in, so the clerk types a
+      // shape they recognise rather than translating it into three boxes first.
+      for (const s of TERM_SHAPES) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = s.label;
+        termModal.shape.appendChild(opt);
+      }
+      termModal.shape.value = "net_30";
+      for (let n = 1; n <= 6; n++) {
+        const opt = document.createElement("option");
+        opt.value = String(n);
+        opt.textContent = n === 1 ? "1 — pay it all at once" : `${n} installments`;
+        termModal.installments.appendChild(opt);
+      }
+      termModal.installments.value = "1";
+      for (const b of DAY_BASED_DUE_DATE_BASES) {
+        const opt = document.createElement("option");
+        opt.value = b;
+        opt.textContent = b;
+        termModal.basis.appendChild(opt);
       }
     }
 
+    /** How many payments the plan is split into. */
+    function termInstallmentCount() {
+      const n = Number(termModal.installments.value);
+      return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : 1;
+    }
+
+    /**
+     * Apply the picked contracted-terms shape to the raw numbers, and show them only for "Custom…".
+     * The inputs stay the SSoT — the picker fills them — so the planner keeps one input shape and
+     * the custom path is not a second code path.
+     */
+    function applyTermShape() {
+      const shape = TERM_SHAPES.find((s) => s.id === termModal.shape.value);
+      const custom = !shape || shape.days == null;
+      termModal.custom.hidden = !custom;
+      if (custom) return;
+      termModal.days.value = String(shape.days);
+      termModal.discount.value = shape.discount == null ? "" : String(shape.discount);
+      termModal.discountDays.value = shape.discountDays == null ? "" : String(shape.discountDays);
+    }
+
+    /**
+     * P4e — the installment table. Shares are pre-split evenly with the remainder on the last row,
+     * because 100/3 is 33.33 three times over and ERPNext refuses anything but exactly 100. Days
+     * default to multiples of the contracted period, which is what makes 30/60/90 one choice
+     * rather than three.
+     */
+    function buildTermSplitRows(force) {
+      const n = termInstallmentCount();
+      termModal.splitWrap.hidden = n < 2;
+      termModal.installmentsNote.textContent =
+        n < 2
+          ? "One payment for the whole invoice."
+          : "Each payment becomes its own row on the bill's schedule, payable separately.";
+      if (n < 2) {
+        termModal.splitRows.innerHTML = "";
+        return;
+      }
+      const existing = [...termModal.splitRows.querySelectorAll("tr")];
+      if (!force && existing.length === n) return;
+
+      const base = Number(termModal.days.value) || 30;
+      const even = Math.floor((100 / n) * 100) / 100;
+      const last = Math.round((100 - even * (n - 1)) * 100) / 100;
+      termModal.splitRows.innerHTML = "";
+      for (let k = 0; k < n; k++) {
+        const tr = document.createElement("tr");
+        const idx = document.createElement("td");
+        idx.textContent = String(k + 1);
+        tr.appendChild(idx);
+
+        const daysTd = document.createElement("td");
+        const days = document.createElement("input");
+        days.type = "number";
+        days.step = "1";
+        days.min = "0";
+        days.className = "split-days";
+        days.value = String(base * (k + 1));
+        days.setAttribute("aria-label", `Payment ${k + 1} days`);
+        days.addEventListener("input", paintTermModal);
+        daysTd.appendChild(days);
+        tr.appendChild(daysTd);
+
+        const portionTd = document.createElement("td");
+        const portion = document.createElement("input");
+        portion.type = "number";
+        portion.step = "0.01";
+        portion.min = "0";
+        portion.className = "split-portion";
+        portion.value = String(k === n - 1 ? last : even);
+        portion.setAttribute("aria-label", `Payment ${k + 1} share`);
+        portion.addEventListener("input", paintTermModal);
+        portionTd.appendChild(portion);
+        portionTd.appendChild(document.createTextNode(" %"));
+        tr.appendChild(portionTd);
+
+        termModal.splitRows.appendChild(tr);
+      }
+    }
+
+    function readTermModal() {
+      const discount = Number(termModal.discount.value);
+      const base = {
+        method: termModal.method.value || undefined,
+        dueDateBasedOn: termModal.basis.value,
+        description: termModal.description.value.trim() || undefined,
+        graceDays: Number(termModal.grace.value) || 0,
+      };
+      const rows = [...termModal.splitRows.querySelectorAll("tr")];
+      if (termInstallmentCount() > 1 && rows.length) {
+        // A split plan carries no discount quartet: a per-row early-payment discount is a real
+        // Vanilla capability nobody has asked for, and guessing at it would put numbers on a term
+        // master that no one chose.
+        return {
+          ...base,
+          installments: rows.map((tr) => ({
+            contractDays: Number(tr.querySelector(".split-days").value),
+            portion: Number(tr.querySelector(".split-portion").value),
+            graceDays: base.graceDays,
+          })),
+        };
+      }
+      return {
+        ...base,
+        contractDays: Number(termModal.days.value),
+        discount: termModal.discount.value !== "" && discount > 0 ? discount : undefined,
+        discountValidity: Number(termModal.discountDays.value) || 0,
+      };
+    }
+
+    /** P4c — what each part of the name actually writes, as ERPNext's own field names. */
+    function paintTermInternals(plan) {
+      const first = plan.plans[0] || null;
+      const rows = [
+        ["Payment Term", plan.plans.map((p) => p.name).join(" · ")],
+        ["Payment Terms Template", plan.templateName],
+        ["credit_days", plan.plans.map((p) => p.creditDays).join(" · ") + "  (contract + grace, folded)"],
+        ["mode_of_payment", (first && first.fields.mode_of_payment) || "— none —"],
+        ["due_date_based_on", (first && first.fields.due_date_based_on) || ""],
+        ["invoice_portion", plan.portions.map((x) => `${x}%`).join(" · ")],
+      ];
+      if (first && first.fields.discount) {
+        rows.push(["discount", `${first.fields.discount} ${first.fields.discount_type}`]);
+        rows.push(["discount_validity", `${first.fields.discount_validity} days`]);
+      }
+      termModal.internals.innerHTML = "";
+      for (const [field, value] of rows) {
+        const tr = document.createElement("tr");
+        const a = document.createElement("td");
+        a.textContent = field;
+        const b = document.createElement("td");
+        b.textContent = String(value);
+        tr.appendChild(a);
+        tr.appendChild(b);
+        termModal.internals.appendChild(tr);
+      }
+    }
+
+    /** Re-plan on every keystroke: the generated name IS the feedback this modal exists to give. */
+    function paintTermModal() {
+      const plan = planPaymentTermsCreate(readTermModal());
+      const single = plan.plans.length === 1;
+      const one = plan.plans[0];
+      termModal.previewName.textContent = single ? one.name : plan.templateName;
+      termModal.previewSub.textContent = !plan.ok
+        ? "Not creatable yet — see below."
+        : single
+          ? `ERPNext will store this as a ${one.creditDays}-day term ` +
+            `(${one.contractDays} contract ${one.graceDays < 0 ? "−" : "+"} ${Math.abs(one.graceDays)} grace), ` +
+            `plus a same-named single-row template so a Supplier can link it.`
+          : `${plan.plans.length} payments — ` +
+            plan.plans.map((pl, k) => `${plan.portions[k]}% at ${pl.creditDays} days`).join(", ") +
+            ` — created as ${plan.plans.length} Payment Terms inside one template, ${plan.templateName}.`;
+      // The running total, live: ERPNext refuses anything but exactly 100, and finding that out
+      // from a server traceback after filling in six rows is the experience this replaces.
+      const total = Math.round(plan.portions.reduce((a, b) => a + b, 0) * 100) / 100;
+      termModal.splitTotal.textContent = `${total}%`;
+      termModal.splitTotal.className = total === 100 ? "" : "bad";
+      termModal.affects.textContent = plan.affects;
+      paintTermInternals(plan);
+      fillList(termModal.errors, plan.errors);
+      fillList(termModal.warnings, plan.warnings);
+      termModal.create.disabled = !plan.ok;
+      return plan;
+    }
+
+    function fillList(ul, items) {
+      ul.textContent = "";
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        ul.appendChild(li);
+      }
+      ul.hidden = items.length === 0;
+    }
+
+    function openTermModal() {
+      termModal.msg.textContent = "";
+      termModal.msg.className = "msg";
+      applyTermShape();
+      buildTermSplitRows(true);
+      paintTermModal();
+      termModal.root.hidden = false;
+      // The contracted terms are the first decision and the one the name is built from, so focus
+      // starts there rather than on a number the picker is about to fill in.
+      termModal.shape.focus();
+    }
+
+    function closeTermModal() {
+      termModal.root.hidden = true;
+    }
+
+    async function submitTermModal() {
+      const plan = paintTermModal();
+      if (!plan.ok) return;
+      if (!api || !api.createPaymentTerm) {
+        termModal.msg.textContent = "Shell bridge unavailable — cannot create the term.";
+        termModal.msg.className = "msg bad";
+        return;
+      }
+      termModal.create.disabled = true;
+      termModal.msg.textContent = `Creating ${plan.plans.length === 1 ? plan.plans[0].name : plan.templateName}…`;
+      termModal.msg.className = "msg";
+      const r = await api
+        .createPaymentTerm(readTermModal())
+        .catch((e) => ({ ok: false, reason: String((e && e.message) || e) }));
+      if (r && r.ok) {
+        // Deliberately does NOT re-render the dashboard. Nothing behind this modal changed --
+        // saying otherwise by repainting would imply the new term touched the bills on screen.
+        const made = (r.names && r.names.length > 1 ? `${r.names.length} terms and the template ${r.template}` : r.name) || r.name;
+        termModal.msg.textContent = `Created ${made}. It applies to bills entered from now on.`;
+        termModal.msg.className = "msg good";
+      } else {
+        termModal.msg.textContent = (r && r.reason) || "Could not create the payment term.";
+        termModal.msg.className = "msg bad";
+      }
+      termModal.create.disabled = false;
+    }
+
+    document.getElementById("term-modal-open").onclick = openTermModal;
+    document.getElementById("term-modal-close").onclick = closeTermModal;
+    document.getElementById("term-cancel").onclick = closeTermModal;
+    termModal.create.onclick = submitTermModal;
+    termModal.root.addEventListener("click", (ev) => {
+      if (ev.target === termModal.root) closeTermModal(); // backdrop only, never the card
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && !termModal.root.hidden) closeTermModal();
+    });
+    // The shape picker fills the raw numbers, so it must run before the repaint reads them; the
+    // installment count rebuilds the table, which is where the repaint gets its rows from.
+    termModal.shape.addEventListener("change", () => {
+      applyTermShape();
+      buildTermSplitRows(true);
+      paintTermModal();
+    });
+    termModal.installments.addEventListener("change", () => {
+      buildTermSplitRows(true);
+      paintTermModal();
+    });
+    for (const el of [
+      termModal.days, termModal.grace, termModal.method, termModal.basis,
+      termModal.discount, termModal.discountDays, termModal.description,
+    ]) {
+      el.addEventListener("input", paintTermModal);
+      el.addEventListener("change", paintTermModal);
+    }
+
+    /* ---------------------------------------------------------------------------------------
+     * P3b -- the delay calendar panel.
+     *
+     * The pure module owns parse, serialise, merge and the ratification rule; everything below
+     * moves strings and paints rows. The stored file *is* CSV, so "export" is a copy for Excel
+     * (BOM + CRLF) rather than a conversion, and an import is a merge that protects decisions
+     * already made: a hand-typed row always beats a re-proposal, and a signature survives one.
+     * ------------------------------------------------------------------------------------- */
+    const delayEls = {
+      rows: document.getElementById("delay-rows"),
+      status: document.getElementById("delay-status"),
+      msgs: document.getElementById("delay-msgs"),
+      note: document.getElementById("delay-note"),
+      year: document.getElementById("delay-year"),
+      newDate: document.getElementById("delay-new-date"),
+      newScope: document.getElementById("delay-new-scope"),
+      newReason: document.getElementById("delay-new-reason"),
+    };
+
+    function showDelayMsgs(list, kind) {
+      delayEls.msgs.innerHTML = "";
+      for (const m of list || []) {
+        const li = document.createElement("li");
+        if (kind === "err") li.className = "err";
+        li.textContent = m;
+        delayEls.msgs.appendChild(li);
+      }
+    }
+
+    function paintDelayPanel() {
+      const unratified = unratifiedCount(delayCalendar);
+      const ratified = delayCalendar.length - unratified;
+      delayEls.year.textContent = String(new Date().getFullYear());
+      delayEls.status.innerHTML = delayCalendarExists
+        ? `${ratified} signed off` +
+          (unratified ? ` · <span class="unratified">${unratified} awaiting sign-off</span>` : "")
+        : "No calendar yet — the built-in bridge-day rule is still in force.";
+      delayEls.note.textContent = delayCalendarExists
+        ? "Only signed-off days move a payment date. Postal days apply to checks; bank days apply to every method. Export, edit in Excel, and import back — the file is plain CSV."
+        : "Suggest a year or add a day to start one. Once a calendar exists it replaces the built-in rule, so a suggested day only counts after you sign it off.";
+
+      delayEls.rows.innerHTML = "";
+      if (!delayCalendar.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 5;
+        td.className = "delay-empty";
+        td.textContent = "No delay days.";
+        tr.appendChild(td);
+        delayEls.rows.appendChild(tr);
+        return;
+      }
+      for (const entry of delayCalendar) {
+        const tr = document.createElement("tr");
+        if (!entry.ratified) tr.className = "unratified";
+
+        const sign = document.createElement("td");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = !!entry.ratified;
+        box.setAttribute("aria-label", `Sign off ${entry.date}`);
+        box.onchange = () => {
+          entry.ratified = box.checked;
+          void saveDelayCalendar();
+        };
+        sign.appendChild(box);
+        tr.appendChild(sign);
+
+        const date = document.createElement("td");
+        date.textContent = entry.date;
+        tr.appendChild(date);
+
+        const scope = document.createElement("td");
+        scope.textContent = entry.scope === "postal" ? "Checks" : "All methods";
+        tr.appendChild(scope);
+
+        const why = document.createElement("td");
+        why.className = "why";
+        why.textContent = entry.reason || (entry.source === "suggested" ? "Suggested" : "");
+        tr.appendChild(why);
+
+        const drop = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "drop";
+        btn.textContent = "×";
+        btn.title = `Remove ${entry.date}`;
+        btn.onclick = () => {
+          delayCalendar = delayCalendar.filter((e) => e !== entry);
+          void saveDelayCalendar();
+        };
+        drop.appendChild(btn);
+        tr.appendChild(drop);
+
+        delayEls.rows.appendChild(tr);
+      }
+    }
+
+    /** Persist, then re-render the dashboard: a signature changes real payment dates. */
+    async function saveDelayCalendar() {
+      delayCalendarExists = true;
+      paintDelayPanel();
+      render();
+      if (api && api.setDelayCalendar) {
+        await api.setDelayCalendar(serializeDelayCalendarCsv(delayCalendar)).catch(() => null);
+      }
+    }
+
+    document.getElementById("delay-add").onclick = () => {
+      const parsed = normalizeDelayDate(delayEls.newDate.value);
+      if (!parsed.date) {
+        showDelayMsgs([`"${delayEls.newDate.value || "(blank)"}" is not a date this can read.`], "err");
+        return;
+      }
+      showDelayMsgs([]);
+      // source "user": a day typed here is the user's own statement, so it arrives signed off.
+      delayCalendar = mergeDelayCalendar(delayCalendar, [
+        {
+          date: parsed.date,
+          scope: delayEls.newScope.value === "bank" ? "bank" : "postal",
+          reason: delayEls.newReason.value.trim(),
+          source: "user",
+          ratified: true,
+        },
+      ]);
+      delayEls.newReason.value = "";
+      void saveDelayCalendar();
+    };
+
+    document.getElementById("delay-propose").onclick = () => {
+      const year = new Date().getFullYear();
+      const before = delayCalendar.length;
+      delayCalendar = mergeDelayCalendar(delayCalendar, proposeDelayCalendar(year));
+      const added = delayCalendar.length - before;
+      showDelayMsgs(
+        added
+          ? [`${added} suggested day${added === 1 ? "" : "s"} added for ${year}. They move nothing until you sign them off.`]
+          : [`Nothing new to suggest for ${year}.`],
+      );
+      void saveDelayCalendar();
+    };
+
+    document.getElementById("delay-export").onclick = async () => {
+      if (!api || !api.exportDelayCalendar) return;
+      // Excel flavour: BOM so a reason with an apostrophe or an accent survives, CRLF so the file
+      // does not open as one long line.
+      const r = await api
+        .exportDelayCalendar(serializeDelayCalendarCsv(delayCalendar, { excel: true }))
+        .catch(() => null);
+      if (r && r.ok) showDelayMsgs([`Exported to ${r.path}`]);
+      else if (r && !r.canceled) showDelayMsgs([(r && r.error) || "Could not export."], "err");
+    };
+
+    document.getElementById("delay-import").onclick = async () => {
+      if (!api || !api.importDelayCalendar) return;
+      const r = await api.importDelayCalendar().catch(() => null);
+      if (!r || !r.ok) {
+        if (r && !r.canceled) showDelayMsgs([(r && r.error) || "Could not read that file."], "err");
+        return;
+      }
+      const { entries, errors, warnings } = parseDelayCalendarCsv(r.text);
+      delayCalendar = mergeDelayCalendar(delayCalendar, entries);
+      // Errors first: a dropped row is a delay day that silently stops applying, which is the one
+      // failure this whole layer exists to prevent.
+      showDelayMsgs([...errors, ...warnings, `Imported ${entries.length} day${entries.length === 1 ? "" : "s"}.`],
+        errors.length ? "err" : "");
+      void saveDelayCalendar();
+    };
+
+    async function loadDelayCalendar() {
+      if (!api || !api.getDelayCalendar) return;
+      const r = await api.getDelayCalendar().catch(() => null);
+      if (!r) return;
+      delayCalendarExists = !!r.exists;
+      const parsed = parseDelayCalendarCsv(r.csv || "");
+      delayCalendar = parsed.entries;
+      if (parsed.errors.length) showDelayMsgs(parsed.errors, "err");
+    }
+
     async function init() {
+      buildMethodFeeInputs();
+      buildTermModalOptions();
       prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);
       paintPrefsInputs();
+      await loadDelayCalendar();
+      paintDelayPanel();
       if (!api || !api.getOutstandingBills) {
         showError("Shell bridge unavailable — cannot load outstanding bills.");
         render();

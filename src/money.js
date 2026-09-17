@@ -112,7 +112,23 @@ export function formatSignedUsdHtml(value) {
 }
 
 /**
- * @param {string} s
+ * Plain text with every `$#,###.##` amount inside it given the same underlined-cents treatment as
+ * `formatUsdAmountHtml` — for sentences that carry amounts inline (a batching rationale, an audit
+ * step, an advisory). Everything else in the text is escaped, so the result is safe for innerHTML.
+ * A number that is not a two-decimal dollar amount (`9%`, `3/365`, a date) is left alone.
+ * @param {unknown} text
+ * @returns {string} safe HTML
+ */
+export function moneyTextHtml(text) {
+  if (text == null) return "";
+  return escapeMoneyHtml(text).replace(
+    /(-?\$)(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!\d)/g,
+    (_, prefix, intPart, cents) => `${prefix}${intPart}.<span class="money-cents">${cents}</span>`,
+  );
+}
+
+/**
+ * @param {unknown} s
  */
 function escapeMoneyHtml(s) {
   return String(s)
