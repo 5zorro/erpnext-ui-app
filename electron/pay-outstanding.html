@@ -113,6 +113,28 @@
     .delay-msgs { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: #b45309; }
     .delay-msgs li.err { color: #b91c1c; }
 
+    /* P4b/P4c -- the modal shaped like the name it produces. */
+    .term-part { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px 10px; margin: 0 0 10px; flex-basis: 48%; }
+    .term-part.wide { flex-basis: 100%; }
+    .term-part > legend { font-size: 11px; font-weight: 600; color: #334155; padding: 0 4px; }
+    .term-part-n { display: inline-flex; width: 15px; height: 15px; border-radius: 50%; background: #0f766e; color: #fff; align-items: center; justify-content: center; font-size: 9px; margin-right: 4px; }
+    .term-eg { font-size: 10.5px; color: #64748b; margin: 4px 0 0; }
+    .term-custom { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+    /* G7: an author display rule beats [hidden]'s user-agent one, so every hideable element that
+       sets display needs its own guard or `.hidden = true` does nothing. */
+    .term-custom[hidden], .term-split-wrap[hidden] { display: none; }
+    .term-split { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    .term-split th { text-align: left; color: #64748b; font-weight: 600; padding: 2px 8px 2px 0; }
+    .term-split td { padding: 2px 8px 2px 0; }
+    .term-split input { width: 74px; }
+    .term-split tfoot td { font-weight: 600; padding-top: 4px; }
+    .term-split tfoot td.bad { color: #b91c1c; }
+    .term-internals { margin: 6px 0; font-size: 11px; color: #475569; }
+    .term-internals summary { cursor: pointer; color: #0f766e; }
+    .term-internals-table { border-collapse: collapse; margin-top: 4px; width: 100%; }
+    .term-internals-table td { padding: 2px 8px 2px 0; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .term-internals-table td:first-child { color: #64748b; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
     #term-modal-open {
       display: inline-flex; align-items: center; gap: 5px;
       border: 1px solid #0d9488; background: #f0fdfa; color: #0f766e; border-radius: 6px;
@@ -690,30 +712,73 @@
         <h2 id="term-modal-title">New payment term</h2>
         <button type="button" class="modal-close" id="term-modal-close" data-testid="term-modal-close">Close</button>
       </div>
+      <!-- P4b. The form is shaped like the name it produces: the three parts of
+           `CREDIT_PERIOD (METHOD) ±GRACE`, in that order, each with a worked example. A clerk
+           reading this should be able to see why the name comes out the way it does. -->
       <div class="modal-body">
-        <div class="pref-field narrow">
-          <label for="term-days">Credit period (days)</label>
-          <input type="number" id="term-days" step="1" min="0" value="30" data-testid="term-days" />
-        </div>
-        <div class="pref-field narrow">
-          <label for="term-grace">Grace (± days)</label>
-          <input type="number" id="term-grace" step="1" value="0" data-testid="term-grace" />
-        </div>
-        <div class="pref-field">
-          <label for="term-method">Method of payment</label>
-          <select id="term-method" data-testid="term-method"></select>
-        </div>
-        <div class="pref-field">
+        <fieldset class="term-part" data-testid="term-part-contract">
+          <legend><span class="term-part-n">1</span> Contracted terms</legend>
+          <div class="pref-field wide">
+            <label for="term-shape">What the vendor's contract says</label>
+            <select id="term-shape" data-testid="term-shape"></select>
+            <p class="term-eg">e.g. <b>2% 10 days, net 30 days</b> — the discount, its window, and the credit period</p>
+          </div>
+          <div id="term-custom" class="term-custom" hidden>
+            <div class="pref-field narrow">
+              <label for="term-days">Credit period (days)</label>
+              <input type="number" id="term-days" step="1" min="0" value="30" data-testid="term-days" />
+            </div>
+            <div class="pref-field narrow">
+              <label for="term-discount">Discount %</label>
+              <input type="number" id="term-discount" step="0.1" min="0" value="" data-testid="term-discount" />
+            </div>
+            <div class="pref-field narrow">
+              <label for="term-discount-days">…if paid within</label>
+              <input type="number" id="term-discount-days" step="1" min="0" value="" data-testid="term-discount-days" />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="term-part" data-testid="term-part-method">
+          <legend><span class="term-part-n">2</span> Method of payment</legend>
+          <div class="pref-field">
+            <label for="term-method">How this vendor is paid</label>
+            <select id="term-method" data-testid="term-method"></select>
+            <p class="term-eg">e.g. <b>ACH</b> — it prices the payment and picks which delay calendar applies</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="term-part" data-testid="term-part-grace">
+          <legend><span class="term-part-n">3</span> Grace adjustment to the contracted terms</legend>
+          <div class="pref-field narrow">
+            <label for="term-grace">Grace (± days)</label>
+            <input type="number" id="term-grace" step="1" value="0" data-testid="term-grace" />
+          </div>
+          <p class="term-eg">
+            e.g. <b>+0</b> — no adjustment. <b>Negative</b> pays earlier than the contract (mail and
+            clearing time); <b>positive</b> pays after the contractual due date, on purpose.
+          </p>
+        </fieldset>
+
+        <fieldset class="term-part wide" data-testid="term-part-installments">
+          <legend>Installments</legend>
+          <div class="pref-field narrow">
+            <label for="term-installments">Payments</label>
+            <select id="term-installments" data-testid="term-installments"></select>
+          </div>
+          <span class="term-eg" id="term-installments-note">One payment for the whole invoice.</span>
+          <div class="term-split-wrap" id="term-split-wrap" hidden>
+            <table class="term-split" id="term-split" data-testid="term-split">
+              <thead><tr><th>#</th><th>Days</th><th>Share of the invoice</th></tr></thead>
+              <tbody id="term-split-rows"></tbody>
+              <tfoot><tr><td></td><td>Total</td><td id="term-split-total" data-testid="term-split-total"></td></tr></tfoot>
+            </table>
+          </div>
+        </fieldset>
+
+        <div class="pref-field wide">
           <label for="term-basis">Counted from</label>
           <select id="term-basis" data-testid="term-basis"></select>
-        </div>
-        <div class="pref-field narrow">
-          <label for="term-discount">Discount %</label>
-          <input type="number" id="term-discount" step="0.1" min="0" value="" data-testid="term-discount" />
-        </div>
-        <div class="pref-field narrow">
-          <label for="term-discount-days">…if paid within</label>
-          <input type="number" id="term-discount-days" step="1" min="0" value="" data-testid="term-discount-days" />
         </div>
         <div class="pref-field wide">
           <label for="term-description">Description (optional)</label>
@@ -723,6 +788,14 @@
           <div class="term-preview-name" id="term-preview-name" data-testid="term-preview-name"></div>
           <div class="term-preview-sub" id="term-preview-sub" data-testid="term-preview-sub"></div>
         </div>
+        <!-- P4c. "have a intuitive internals working too" — what each part of the name writes,
+             so the term reads as ordinary ERPNext data rather than a shell invention. -->
+        <details class="term-internals" data-testid="term-internals">
+          <summary>What this writes in ERPNext</summary>
+          <table class="term-internals-table">
+            <tbody id="term-internals-rows"></tbody>
+          </table>
+        </details>
         <p class="term-affects" id="term-affects" data-testid="term-affects"></p>
         <ul class="term-errors" id="term-errors" data-testid="term-errors"></ul>
         <ul class="term-warnings" id="term-warnings" data-testid="term-warnings"></ul>
@@ -889,7 +962,7 @@
       unratifiedCount,
       normalizeDelayDate,
     } from "../src/delay-calendar.js";
-    import { planPaymentTermCreate, DAY_BASED_DUE_DATE_BASES } from "../src/payment-term-plan.js";
+    import { planPaymentTermsCreate, DAY_BASED_DUE_DATE_BASES } from "../src/payment-term-plan.js";
     import { billAdvisories, vendorAdvisories, advisoryLevel } from "../src/payment-bill-advisories.js";
     import {
       paintCheckDoc,
@@ -2525,12 +2598,29 @@
     /* ---------------------------------------------------------------------------------------
      * C6 -- terms creation modal.
      *
-     * All the rules live in `planPaymentTermCreate`: the CREDIT_PERIOD (METHOD) ±GRACE name with
+     * All the rules live in `planPaymentTermsCreate`: the CREDIT_PERIOD (METHOD) ±GRACE name with
      * grace last, the fold of grace into credit_days, the matching mode_of_payment, the wrapping
      * single-row Template, the readable collision message, and the 🔴 rename warning. This block
      * only moves strings into it and renders what comes back -- which is why the same planner can
      * back the Bill Doc skin's picker without either surface re-deriving a convention.
      * ------------------------------------------------------------------------------------- */
+    /**
+     * P4b — the contracted terms in the words a vendor's invoice uses. `days` is the credit period;
+     * `discount` / `discountDays` fill the early-payment quartet. Adding a shape is a row here.
+     */
+    const TERM_SHAPES = Object.freeze([
+      { id: "due", label: "Due on receipt", days: 0 },
+      { id: "net_10", label: "Net 10 days", days: 10 },
+      { id: "net_15", label: "Net 15 days", days: 15 },
+      { id: "net_30", label: "Net 30 days", days: 30 },
+      { id: "net_45", label: "Net 45 days", days: 45 },
+      { id: "net_60", label: "Net 60 days", days: 60 },
+      { id: "1_10_net_30", label: "1% 10 days, net 30 days", days: 30, discount: 1, discountDays: 10 },
+      { id: "2_10_net_30", label: "2% 10 days, net 30 days", days: 30, discount: 2, discountDays: 10 },
+      { id: "2_10_net_45", label: "2% 10 days, net 45 days", days: 45, discount: 2, discountDays: 10 },
+      { id: "custom", label: "Custom…", days: null },
+    ]);
+
     const termModal = {
       root: document.getElementById("term-modal"),
       days: document.getElementById("term-days"),
@@ -2540,6 +2630,14 @@
       discount: document.getElementById("term-discount"),
       discountDays: document.getElementById("term-discount-days"),
       description: document.getElementById("term-description"),
+      shape: document.getElementById("term-shape"),
+      custom: document.getElementById("term-custom"),
+      installments: document.getElementById("term-installments"),
+      installmentsNote: document.getElementById("term-installments-note"),
+      splitWrap: document.getElementById("term-split-wrap"),
+      splitRows: document.getElementById("term-split-rows"),
+      splitTotal: document.getElementById("term-split-total"),
+      internals: document.getElementById("term-internals-rows"),
       previewName: document.getElementById("term-preview-name"),
       previewSub: document.getElementById("term-preview-sub"),
       affects: document.getElementById("term-affects"),
@@ -2574,6 +2672,23 @@
         termModal.method.appendChild(opt);
       }
       termModal.method.value = "ACH";
+      // P4b -- the contracted terms a vendor actually writes on an invoice, in their own words.
+      // "Custom…" reveals the raw numbers; everything else fills them in, so the clerk types a
+      // shape they recognise rather than translating it into three boxes first.
+      for (const s of TERM_SHAPES) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = s.label;
+        termModal.shape.appendChild(opt);
+      }
+      termModal.shape.value = "net_30";
+      for (let n = 1; n <= 6; n++) {
+        const opt = document.createElement("option");
+        opt.value = String(n);
+        opt.textContent = n === 1 ? "1 — pay it all at once" : `${n} installments`;
+        termModal.installments.appendChild(opt);
+      }
+      termModal.installments.value = "1";
       for (const b of DAY_BASED_DUE_DATE_BASES) {
         const opt = document.createElement("option");
         opt.value = b;
@@ -2582,29 +2697,166 @@
       }
     }
 
+    /** How many payments the plan is split into. */
+    function termInstallmentCount() {
+      const n = Number(termModal.installments.value);
+      return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : 1;
+    }
+
+    /**
+     * Apply the picked contracted-terms shape to the raw numbers, and show them only for "Custom…".
+     * The inputs stay the SSoT — the picker fills them — so the planner keeps one input shape and
+     * the custom path is not a second code path.
+     */
+    function applyTermShape() {
+      const shape = TERM_SHAPES.find((s) => s.id === termModal.shape.value);
+      const custom = !shape || shape.days == null;
+      termModal.custom.hidden = !custom;
+      if (custom) return;
+      termModal.days.value = String(shape.days);
+      termModal.discount.value = shape.discount == null ? "" : String(shape.discount);
+      termModal.discountDays.value = shape.discountDays == null ? "" : String(shape.discountDays);
+    }
+
+    /**
+     * P4e — the installment table. Shares are pre-split evenly with the remainder on the last row,
+     * because 100/3 is 33.33 three times over and ERPNext refuses anything but exactly 100. Days
+     * default to multiples of the contracted period, which is what makes 30/60/90 one choice
+     * rather than three.
+     */
+    function buildTermSplitRows(force) {
+      const n = termInstallmentCount();
+      termModal.splitWrap.hidden = n < 2;
+      termModal.installmentsNote.textContent =
+        n < 2
+          ? "One payment for the whole invoice."
+          : "Each payment becomes its own row on the bill's schedule, payable separately.";
+      if (n < 2) {
+        termModal.splitRows.innerHTML = "";
+        return;
+      }
+      const existing = [...termModal.splitRows.querySelectorAll("tr")];
+      if (!force && existing.length === n) return;
+
+      const base = Number(termModal.days.value) || 30;
+      const even = Math.floor((100 / n) * 100) / 100;
+      const last = Math.round((100 - even * (n - 1)) * 100) / 100;
+      termModal.splitRows.innerHTML = "";
+      for (let k = 0; k < n; k++) {
+        const tr = document.createElement("tr");
+        const idx = document.createElement("td");
+        idx.textContent = String(k + 1);
+        tr.appendChild(idx);
+
+        const daysTd = document.createElement("td");
+        const days = document.createElement("input");
+        days.type = "number";
+        days.step = "1";
+        days.min = "0";
+        days.className = "split-days";
+        days.value = String(base * (k + 1));
+        days.setAttribute("aria-label", `Payment ${k + 1} days`);
+        days.addEventListener("input", paintTermModal);
+        daysTd.appendChild(days);
+        tr.appendChild(daysTd);
+
+        const portionTd = document.createElement("td");
+        const portion = document.createElement("input");
+        portion.type = "number";
+        portion.step = "0.01";
+        portion.min = "0";
+        portion.className = "split-portion";
+        portion.value = String(k === n - 1 ? last : even);
+        portion.setAttribute("aria-label", `Payment ${k + 1} share`);
+        portion.addEventListener("input", paintTermModal);
+        portionTd.appendChild(portion);
+        portionTd.appendChild(document.createTextNode(" %"));
+        tr.appendChild(portionTd);
+
+        termModal.splitRows.appendChild(tr);
+      }
+    }
+
     function readTermModal() {
       const discount = Number(termModal.discount.value);
-      return {
-        contractDays: Number(termModal.days.value),
-        graceDays: Number(termModal.grace.value) || 0,
+      const base = {
         method: termModal.method.value || undefined,
         dueDateBasedOn: termModal.basis.value,
         description: termModal.description.value.trim() || undefined,
+        graceDays: Number(termModal.grace.value) || 0,
+      };
+      const rows = [...termModal.splitRows.querySelectorAll("tr")];
+      if (termInstallmentCount() > 1 && rows.length) {
+        // A split plan carries no discount quartet: a per-row early-payment discount is a real
+        // Vanilla capability nobody has asked for, and guessing at it would put numbers on a term
+        // master that no one chose.
+        return {
+          ...base,
+          installments: rows.map((tr) => ({
+            contractDays: Number(tr.querySelector(".split-days").value),
+            portion: Number(tr.querySelector(".split-portion").value),
+            graceDays: base.graceDays,
+          })),
+        };
+      }
+      return {
+        ...base,
+        contractDays: Number(termModal.days.value),
         discount: termModal.discount.value !== "" && discount > 0 ? discount : undefined,
         discountValidity: Number(termModal.discountDays.value) || 0,
       };
     }
 
+    /** P4c — what each part of the name actually writes, as ERPNext's own field names. */
+    function paintTermInternals(plan) {
+      const first = plan.plans[0] || null;
+      const rows = [
+        ["Payment Term", plan.plans.map((p) => p.name).join(" · ")],
+        ["Payment Terms Template", plan.templateName],
+        ["credit_days", plan.plans.map((p) => p.creditDays).join(" · ") + "  (contract + grace, folded)"],
+        ["mode_of_payment", (first && first.fields.mode_of_payment) || "— none —"],
+        ["due_date_based_on", (first && first.fields.due_date_based_on) || ""],
+        ["invoice_portion", plan.portions.map((x) => `${x}%`).join(" · ")],
+      ];
+      if (first && first.fields.discount) {
+        rows.push(["discount", `${first.fields.discount} ${first.fields.discount_type}`]);
+        rows.push(["discount_validity", `${first.fields.discount_validity} days`]);
+      }
+      termModal.internals.innerHTML = "";
+      for (const [field, value] of rows) {
+        const tr = document.createElement("tr");
+        const a = document.createElement("td");
+        a.textContent = field;
+        const b = document.createElement("td");
+        b.textContent = String(value);
+        tr.appendChild(a);
+        tr.appendChild(b);
+        termModal.internals.appendChild(tr);
+      }
+    }
+
     /** Re-plan on every keystroke: the generated name IS the feedback this modal exists to give. */
     function paintTermModal() {
-      const plan = planPaymentTermCreate(readTermModal());
-      termModal.previewName.textContent = plan.name;
-      termModal.previewSub.textContent = plan.ok
-        ? `ERPNext will store this as a ${plan.creditDays}-day term ` +
-          `(${plan.contractDays} contract ${plan.graceDays < 0 ? "−" : "+"} ${Math.abs(plan.graceDays)} grace), ` +
-          `plus a same-named single-row template so a Supplier can link it.`
-        : "Not creatable yet — see below.";
+      const plan = planPaymentTermsCreate(readTermModal());
+      const single = plan.plans.length === 1;
+      const one = plan.plans[0];
+      termModal.previewName.textContent = single ? one.name : plan.templateName;
+      termModal.previewSub.textContent = !plan.ok
+        ? "Not creatable yet — see below."
+        : single
+          ? `ERPNext will store this as a ${one.creditDays}-day term ` +
+            `(${one.contractDays} contract ${one.graceDays < 0 ? "−" : "+"} ${Math.abs(one.graceDays)} grace), ` +
+            `plus a same-named single-row template so a Supplier can link it.`
+          : `${plan.plans.length} payments — ` +
+            plan.plans.map((pl, k) => `${plan.portions[k]}% at ${pl.creditDays} days`).join(", ") +
+            ` — created as ${plan.plans.length} Payment Terms inside one template, ${plan.templateName}.`;
+      // The running total, live: ERPNext refuses anything but exactly 100, and finding that out
+      // from a server traceback after filling in six rows is the experience this replaces.
+      const total = Math.round(plan.portions.reduce((a, b) => a + b, 0) * 100) / 100;
+      termModal.splitTotal.textContent = `${total}%`;
+      termModal.splitTotal.className = total === 100 ? "" : "bad";
       termModal.affects.textContent = plan.affects;
+      paintTermInternals(plan);
       fillList(termModal.errors, plan.errors);
       fillList(termModal.warnings, plan.warnings);
       termModal.create.disabled = !plan.ok;
@@ -2624,9 +2876,13 @@
     function openTermModal() {
       termModal.msg.textContent = "";
       termModal.msg.className = "msg";
+      applyTermShape();
+      buildTermSplitRows(true);
       paintTermModal();
       termModal.root.hidden = false;
-      termModal.days.focus();
+      // The contracted terms are the first decision and the one the name is built from, so focus
+      // starts there rather than on a number the picker is about to fill in.
+      termModal.shape.focus();
     }
 
     function closeTermModal() {
@@ -2642,7 +2898,7 @@
         return;
       }
       termModal.create.disabled = true;
-      termModal.msg.textContent = `Creating ${plan.name}…`;
+      termModal.msg.textContent = `Creating ${plan.plans.length === 1 ? plan.plans[0].name : plan.templateName}…`;
       termModal.msg.className = "msg";
       const r = await api
         .createPaymentTerm(readTermModal())
@@ -2650,7 +2906,8 @@
       if (r && r.ok) {
         // Deliberately does NOT re-render the dashboard. Nothing behind this modal changed --
         // saying otherwise by repainting would imply the new term touched the bills on screen.
-        termModal.msg.textContent = `Created ${r.name}. It applies to bills entered from now on.`;
+        const made = (r.names && r.names.length > 1 ? `${r.names.length} terms and the template ${r.template}` : r.name) || r.name;
+        termModal.msg.textContent = `Created ${made}. It applies to bills entered from now on.`;
         termModal.msg.className = "msg good";
       } else {
         termModal.msg.textContent = (r && r.reason) || "Could not create the payment term.";
@@ -2668,6 +2925,17 @@
     });
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape" && !termModal.root.hidden) closeTermModal();
+    });
+    // The shape picker fills the raw numbers, so it must run before the repaint reads them; the
+    // installment count rebuilds the table, which is where the repaint gets its rows from.
+    termModal.shape.addEventListener("change", () => {
+      applyTermShape();
+      buildTermSplitRows(true);
+      paintTermModal();
+    });
+    termModal.installments.addEventListener("change", () => {
+      buildTermSplitRows(true);
+      paintTermModal();
     });
     for (const el of [
       termModal.days, termModal.grace, termModal.method, termModal.basis,

@@ -202,6 +202,151 @@ export function planPaymentTermCreate(input, opts = {}) {
   };
 }
 
+
+/**
+ * @typedef {{
+ *   ok: boolean,
+ *   templateName: string,
+ *   plans: PaymentTermPlan[],          // one per installment, in order
+ *   terms: Record<string, unknown>[],  // ready for frappe.client.insert, in order
+ *   template: Record<string, unknown>, // one template, N detail rows
+ *   portions: number[],
+ *   errors: string[],
+ *   warnings: string[],
+ *   affects: string,
+ * }} PaymentTermsPlan
+ */
+
+/**
+ * Plan an **installment** template: N Payment Terms and the one Template whose rows split the
+ * invoice between them (P4e, 5zorro 2026-09-16: *"the ability to have installment payments.
+ * vanilla supports this"*).
+ *
+ * One installment is the ordinary case and stays byte-identical to `planPaymentTermCreate` — same
+ * name for the term and the template, same documents. Only N > 1 changes shape.
+ *
+ * 🔴 **Three server rules are enforced here rather than met as a traceback.** Verified against
+ * `payment_terms_template.py` 2026-09-16:
+ * 1. `validate_invoice_portion` — the portions must total exactly 100.00 to two decimals. It is a
+ *    `msgprint(raise_exception=1)`, so the clerk would otherwise lose the modal's contents to a
+ *    dialog that does not say which row is wrong.
+ * 2. `validate_terms` — the tuple `(payment_term, credit_days, credit_months, due_date_based_on)`
+ *    must be unique per row. Because a term's name is derived from its own numbers, two rows with
+ *    the same period, method and grace collapse to the same name and trip this. Three equal
+ *    installments 30 days apart are fine; three at the same offset are not a payment plan.
+ * 3. `payment_term` is mandatory per row when the template allocates by terms, which is why every
+ *    row here creates a real master rather than inline numbers.
+ *
+ * @param {{ installments?: PaymentTermInput[] } & PaymentTermInput & { templateName?: string }} input
+ * @param {{ existingNames?: string[], existingTemplateNames?: string[] }} [opts]
+ * @returns {PaymentTermsPlan}
+ */
+export function planPaymentTermsCreate(input, opts = {}) {
+  const i = input || {};
+  const rows = Array.isArray(i.installments) && i.installments.length ? i.installments : [i];
+  const single = rows.length === 1;
+  const errors = [];
+  const warnings = [];
+
+  // Shared header values live on the input, not on every row, so the modal cannot produce a
+  // template whose rows disagree about how the vendor is paid.
+  const shared = { method: i.method, dueDateBasedOn: i.dueDateBasedOn };
+  const plans = rows.map((row, n) => {
+    const plan = planPaymentTermCreate({ ...shared, ...row }, { existingNames: opts.existingNames || [] });
+    for (const e of plan.errors) errors.push(single ? e : `Payment ${n + 1}: ${e}`);
+    for (const w of plan.warnings) if (!warnings.includes(w)) warnings.push(w);
+    return plan;
+  });
+
+  const portions = rows.map((row, n) => {
+    const raw = single && row.portion == null ? 100 : Number(row.portion);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      errors.push(`Payment ${n + 1}: the share of the invoice must be a number above zero.`);
+      return 0;
+    }
+    return round2(raw);
+  });
+
+  const total = round2(portions.reduce((a, b) => a + b, 0));
+  if (total !== 100) {
+    errors.push(
+      `The payments add up to ${total}% of the invoice, not 100%. ERPNext refuses a template whose ` +
+        `rows do not total exactly 100.`,
+    );
+  }
+
+  const seen = new Map();
+  plans.forEach((plan, n) => {
+    if (seen.has(plan.name)) {
+      errors.push(
+        `Payments ${seen.get(plan.name) + 1} and ${n + 1} are the same term — ${plan.name}. Two ` +
+          `installments on the same day are one payment; change a credit period so they fall apart.`,
+      );
+    } else seen.set(plan.name, n);
+  });
+
+  const templateName = String(i.templateName || "").trim() || defaultTemplateName(plans, i.method, single);
+  const existingTemplates = (opts.existingTemplateNames || []).map((n) => String(n));
+  if (existingTemplates.includes(templateName)) {
+    errors.push(`A Payment Terms Template called "${templateName}" already exists. Give this one a different name.`);
+  }
+
+  if (!single) {
+    warnings.push(
+      `The invoice is split ${portions.map((x) => `${x}%`).join(" / ")} across ${plans.length} payments. ` +
+        `Each one gets its own row on the bill's payment schedule, and the dashboard treats them as ` +
+        `separate obligations — which is what makes them payable separately.`,
+    );
+  }
+
+  // Unique term documents only: a repeated name is already an error above, and inserting it twice
+  // would turn one readable message into a database traceback.
+  const terms = [];
+  const emitted = new Set();
+  for (const plan of plans) {
+    if (emitted.has(plan.name)) continue;
+    emitted.add(plan.name);
+    terms.push(plan.term);
+  }
+
+  return {
+    ok: errors.length === 0,
+    templateName,
+    plans,
+    terms,
+    template: {
+      doctype: "Payment Terms Template",
+      template_name: templateName,
+      // Same rule as the single-row case: the detail row carries its own explicit copy of every
+      // field, because `get_payment_terms` reads the detail and its `fetch_from` is client-side.
+      terms: plans.map((plan, n) => ({ payment_term: plan.name, ...plan.fields, invoice_portion: portions[n] })),
+    },
+    portions,
+    errors,
+    warnings,
+    affects: AFFECTS_COPY,
+  };
+}
+
+/**
+ * A template's own name. One installment keeps the term's name, exactly as before. Several get a
+ * name that reads as a plan — `3_PAYMENTS_30_60_90 (ACH)` — because a clerk picks this from a link
+ * field and the periods are what tells the plans apart.
+ *
+ * @param {PaymentTermPlan[]} plans @param {string|undefined} method @param {boolean} single
+ */
+function defaultTemplateName(plans, method, single) {
+  if (single) return plans[0] ? plans[0].name : "";
+  const days = plans.map((p) => p.creditDays).join("_");
+  const suffix = method ? ` (${method})` : "";
+  return `${plans.length}_PAYMENTS_${days}${suffix}`;
+}
+
+/** @param {number} n */
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
 /**
  * 🔴 The sentence the modal must not drop. Terms freeze at submit, so this button changes nothing
  * about the bills on screen behind it — and a "create term" button on a dashboard full of bills

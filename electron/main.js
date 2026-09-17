@@ -70,7 +70,7 @@ import {
   mergePaymentBatchPrefs,
   validatePaymentBatchPrefs,
 } from "../src/payment-batch-prefs.js";
-import { planPaymentTermCreate } from "../src/payment-term-plan.js";
+import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
   preferredPaymentDirection,
@@ -5025,7 +5025,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
  * Create a Payment Term master and the single-row Payment Terms Template that wraps it (Packet C6).
  *
  * 🔴 This writes **masters, not bill data.** It creates a term for bills entered from now on and
- * cannot touch the bills on the dashboard behind it — terms freeze at submit. `planPaymentTermCreate`
+ * cannot touch the bills on the dashboard behind it — terms freeze at submit. `planPaymentTermsCreate`
  * returns the sentence that says so (`affects`), and the modal renders it; this function refuses to
  * do anything that would make that sentence untrue. There is deliberately no rename and no
  * re-point-an-existing-bill path here: renaming a Payment Term rewrites
@@ -5037,7 +5037,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
  * the alternative of writing the template first and leaving it pointing at a term that is not there.
  * The reason string says which half landed.
  *
- * @param {object} input the shape `planPaymentTermCreate` takes
+ * @param {object} input the shape `planPaymentTermsCreate` takes (one term, or `installments` for a plan)
  * @returns {Promise<{ ok: boolean, name?: string, plan?: object, reason?: string, errors?: string[] }>}
  */
 async function createPaymentTermDocs(input = {}) {
@@ -5048,7 +5048,17 @@ async function createPaymentTermDocs(input = {}) {
         method: "frappe.client.get_list",
         args: { doctype: "Payment Term", fields: ["name"], limit_page_length: 0 },
       });
-      return { ok: true, names: ((r && r.message) || []).map(function (x) { return x.name; }) };
+      // Template names too (P4e): an installment plan gets a name of its own, and a collision on
+      // it is worth a sentence rather than a unique:1 traceback.
+      var rt = await frappe.call({
+        method: "frappe.client.get_list",
+        args: { doctype: "Payment Terms Template", fields: ["name"], limit_page_length: 0 },
+      });
+      return {
+        ok: true,
+        names: ((r && r.message) || []).map(function (x) { return x.name; }),
+        templateNames: ((rt && rt.message) || []).map(function (x) { return x.name; }),
+      };
     } catch (e) {
       return { ok: false, reason: String((e && e.message) || e) };
     }
@@ -5057,40 +5067,55 @@ async function createPaymentTermDocs(input = {}) {
     return { ok: false, reason: (existing && existing.reason) || "Could not read the existing Payment Terms." };
   }
 
-  const plan = planPaymentTermCreate(input, { existingNames: existing.names || [] });
+  const plan = planPaymentTermsCreate(input, {
+    existingNames: existing.names || [],
+    existingTemplateNames: existing.templateNames || [],
+  });
   if (!plan.ok) return { ok: false, reason: plan.errors[0], errors: plan.errors, plan };
 
-  const payload = JSON.stringify({ term: plan.term, template: plan.template });
+  // N terms then one template (P4e). One installment is the old path with a one-element array.
+  const payload = JSON.stringify({ terms: plan.terms, template: plan.template });
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       var i = ${payload};
-      var t;
-      try {
-        t = await frappe.call({ method: "frappe.client.insert", args: { doc: i.term } });
-      } catch (eTerm) {
-        return { ok: false, reason: reasonFrom(eTerm), step: "insert-term" };
+      var t = null;
+      var made = [];
+      for (var n = 0; n < i.terms.length; n++) {
+        var one;
+        try {
+          one = await frappe.call({ method: "frappe.client.insert", args: { doc: i.terms[n] } });
+        } catch (eTerm) {
+          return { ok: false, reason: reasonFrom(eTerm), step: "insert-term", made: made };
+        }
+        if (one && one.exc) return { ok: false, reason: reasonFrom(one), step: "insert-term", made: made };
+        if (one && one.message && one.message.name) made.push(one.message.name);
+        if (n === 0) t = one;
       }
-      if (t && t.exc) return { ok: false, reason: reasonFrom(t), step: "insert-term" };
       try {
         var tp = await frappe.call({ method: "frappe.client.insert", args: { doc: i.template } });
         if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template" };
       } catch (eTpl) {
         return { ok: false, reason: reasonFrom(eTpl), step: "insert-template" };
       }
-      var made = t && t.message;
-      if (!made || !made.name) return { ok: false, reason: "Payment Term insert returned nothing." };
-      return { ok: true, name: made.name };
+      if (!made.length) return { ok: false, reason: "Payment Term insert returned nothing." };
+      return { ok: true, name: made[0], names: made, template: i.template.template_name };
     } catch (e) {
       return { ok: false, reason: reasonFrom(e), step: "unknown" };
     }
   })()`);
 
-  if (raw && raw.ok && raw.name) return { ok: true, name: raw.name, plan };
+  if (raw && raw.ok && raw.name) {
+    return { ok: true, name: raw.name, names: raw.names || [raw.name], template: raw.template, plan };
+  }
+  // A partial insert is worth naming precisely: the terms that did land are real masters, and the
+  // clerk needs to know they exist before retrying into a name collision with their own work.
+  const landed = (raw && raw.made) || [];
+  const partial = landed.length ? ` Created so far: ${landed.join(", ")}.` : "";
   const step = raw && raw.step === "insert-template"
-    ? ` The Payment Term "${plan.name}" was created, but its Template was not — a Supplier cannot link the term until one exists.`
-    : "";
+    ? ` The Payment Term${plan.terms.length > 1 ? "s were" : ` "${plan.templateName}" was`} created, but the Template was not — a Supplier cannot link a term until one exists.`
+    : partial;
   return { ok: false, reason: `${(raw && raw.reason) || "Could not create the payment term."}${step}`, plan };
 }
 
