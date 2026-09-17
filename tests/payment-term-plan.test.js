@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   paymentTermName,
   planPaymentTermCreate,
+  planPaymentTermsCreate,
   AFFECTS_COPY,
   DAY_BASED_DUE_DATE_BASES,
 } from "../src/payment-term-plan.js";
@@ -211,5 +212,112 @@ describe("planPaymentTermCreate: what it says out loud", () => {
       "Day(s) after invoice date",
       "Day(s) after the end of the invoice month",
     ]);
+  });
+});
+
+describe("payment-term-plan: installments (P4e)", () => {
+  const thirds = {
+    method: "ACH",
+    installments: [
+      { contractDays: 30, portion: 33.33 },
+      { contractDays: 60, portion: 33.33 },
+      { contractDays: 90, portion: 33.34 },
+    ],
+  };
+
+  it("builds one template with a row per payment, each pointing at its own term", () => {
+    const plan = planPaymentTermsCreate(thirds);
+    assert.equal(plan.ok, true);
+    assert.equal(plan.templateName, "3_PAYMENTS_30_60_90 (ACH)");
+    assert.equal(plan.terms.length, 3);
+    assert.deepEqual(
+      plan.template.terms.map((r) => [r.payment_term, r.invoice_portion, r.credit_days]),
+      [
+        ["NET_30_DAYS (ACH) +0", 33.33, 30],
+        ["NET_60_DAYS (ACH) +0", 33.33, 60],
+        ["NET_90_DAYS (ACH) +0", 33.34, 90],
+      ],
+    );
+    // Every row carries its own explicit copy of the fields, because get_payment_terms reads the
+    // detail row and its fetch_from is client-side only.
+    for (const row of plan.template.terms) assert.equal(row.mode_of_payment, "ACH");
+  });
+
+  // validate_invoice_portion: "Combined invoice portion must equal 100%", raise_exception=1.
+  it("refuses portions that do not total exactly 100, and says what they total", () => {
+    const plan = planPaymentTermsCreate({
+      method: "ACH",
+      installments: [
+        { contractDays: 30, portion: 50 },
+        { contractDays: 60, portion: 49 },
+      ],
+    });
+    assert.equal(plan.ok, false);
+    assert.match(plan.errors.join(" "), /99% of the invoice, not 100%/);
+  });
+
+  it("accepts thirds that only total 100 because the last one absorbs the cent", () => {
+    assert.equal(planPaymentTermsCreate(thirds).ok, true);
+    assert.equal(
+      planPaymentTermsCreate({
+        method: "ACH",
+        installments: [
+          { contractDays: 30, portion: 33.33 },
+          { contractDays: 60, portion: 33.33 },
+          { contractDays: 90, portion: 33.33 },
+        ],
+      }).ok,
+      false,
+      "99.99 is not 100 — ERPNext rounds to 2dp and refuses",
+    );
+  });
+
+  // validate_terms: the (payment_term, credit_days, credit_months, due_date_based_on) tuple.
+  it("refuses two installments that are the same term", () => {
+    const plan = planPaymentTermsCreate({
+      method: "ACH",
+      installments: [
+        { contractDays: 30, portion: 50 },
+        { contractDays: 30, portion: 50 },
+      ],
+    });
+    assert.equal(plan.ok, false);
+    assert.match(plan.errors.join(" "), /Payments 1 and 2 are the same term/);
+  });
+
+  it("numbers a row's own error so the clerk knows which payment is wrong", () => {
+    const plan = planPaymentTermsCreate({
+      method: "ACH",
+      installments: [
+        { contractDays: 30, portion: 50 },
+        { contractDays: -5, portion: 50 },
+      ],
+    });
+    assert.equal(plan.ok, false);
+    assert.match(plan.errors.join(" "), /Payment 2: A credit period cannot be negative/);
+  });
+
+  it("one installment is the old single-term plan, unchanged", () => {
+    const single = planPaymentTermsCreate({ contractDays: 30, method: "ACH" });
+    const legacy = planPaymentTermCreate({ contractDays: 30, method: "ACH" });
+    assert.equal(single.ok, true);
+    assert.equal(single.templateName, legacy.name, "the template still takes the term's own name");
+    assert.equal(single.terms.length, 1);
+    assert.deepEqual(single.terms[0], legacy.term);
+    assert.deepEqual(single.template.terms, legacy.template.terms);
+    // No error for a portion nobody typed: one payment is the whole invoice.
+    assert.equal(single.template.terms[0].invoice_portion, 100);
+  });
+
+  it("does not let a collision be discovered by the database", () => {
+    const plan = planPaymentTermsCreate(thirds, { existingTemplateNames: ["3_PAYMENTS_30_60_90 (ACH)"] });
+    assert.equal(plan.ok, false);
+    assert.match(plan.errors.join(" "), /already exists/);
+  });
+
+  it("keeps the never-rename warning once, not once per row", () => {
+    const plan = planPaymentTermsCreate(thirds);
+    const renames = plan.warnings.filter((w) => /Renaming a Payment Term/.test(w));
+    assert.equal(renames.length, 1);
   });
 });

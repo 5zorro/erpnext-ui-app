@@ -250,7 +250,46 @@ day stop applying at once, with no way for anyone to turn them back on.
 
 ---
 
-## P4 — C6: the second launch point, and a modal that teaches the name
+## P4 — 🟡 BUILT except the gated half (2026-09-16)
+
+**Landed: P4b, P4c, P4e.** The modal is now shaped like the name it produces — three numbered
+parts in the name's own order, each with a worked example:
+
+1. **Contracted terms**, as a picker of the shapes a vendor actually writes (`Net 30 days`,
+   `2% 10 days, net 30 days`, `Due on receipt`, … , `Custom…`). It fills the raw numbers rather
+   than replacing them, so the planner keeps one input shape and Custom is not a second code path.
+2. **Method of payment**, unchanged, with a line saying what it decides (price, and which delay
+   calendar applies).
+3. **Grace adjustment**, `+0` by default, with the both-directions sentence — negative pays early
+   for transit, positive pays after the contractual due date on purpose.
+
+**P4c** is a *What this writes in ERPNext* disclosure under the preview: the term and template
+names, `credit_days` (contract + grace, folded), `mode_of_payment`, `due_date_based_on`,
+`invoice_portion`, and the discount pair when there is one.
+
+**P4e — installments.** A payments picker (1–6); above 1 it reveals a table of days and shares,
+pre-split evenly with the remainder on the last row (100/3 is 33.33 three times, and ERPNext
+refuses 99.99), with a live total that turns red off 100. `planPaymentTermsCreate` is the new pure
+entry point: N terms inside one template, named `3_PAYMENTS_30_60_90 (ACH)`. One installment is
+byte-identical to the old single-term plan — a test pins the documents against
+`planPaymentTermCreate`'s. The three server rules are enforced before the insert rather than met as
+a traceback (portions total exactly 100; no two rows the same term; every row gets a real master).
+`main.js` now inserts N terms then the template, and names what landed if the run breaks midway.
+
+**Deliberately not built:** a per-row discount quartet. Vanilla allows it; nobody asked for it, and
+inventing discount numbers on a term master is worse than leaving the feature to Custom.
+
+### Still gated: P4a and P4d
+
+**P4a — the live write-path proof — is the blocker, and it is 5zorro's click.** `createPaymentTermDocs`
+has never inserted a real Payment Term. The one existing door is Home → **Pay Bills** →
+**⚙ Assumptions** → **＋ New payment term…** → **Create term**, and it writes for real. Until that
+has been done once, **P4d (the Bill Doc skin's picker launching this modal) stays unwired** — a
+second launch point onto an unproven write just doubles the blast radius.
+
+### (Original statement)
+
+### C6: the second launch point, and a modal that teaches the name
 
 **5zorro:** *"I want the modal for this to prompt good form of a terms name, therefore, it would
 have examples of the 3 fields that make up a name e.g. 'contracted terms e.g. 2% 10 days net 30
