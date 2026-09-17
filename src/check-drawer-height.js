@@ -34,8 +34,14 @@ export const CHECK_DRAWER_STOP_LABEL = Object.freeze({
   full: "Full",
 });
 
-/** @type {CheckDrawerStop} */
-export const DEFAULT_CHECK_DRAWER_STOP = "half";
+/**
+ * Full, not half (5zorro 2026-09-14): *"I think the drawer should come up further on the screen, I
+ * really am not going to be looking too closely at the dashboard while the payment entry drawer is
+ * up."* Writing a payment is a task of its own; the dashboard behind it is context, not work. The
+ * Peek/Half control still shrinks it, and a stop the clerk chose is remembered over this default.
+ * @type {CheckDrawerStop}
+ */
+export const DEFAULT_CHECK_DRAWER_STOP = "full";
 
 /** Below this the drawer head stops being usable, so no viewport is small enough to go under it. */
 export const CHECK_DRAWER_MIN_PX = 180;

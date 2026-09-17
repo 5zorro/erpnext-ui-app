@@ -13,4 +13,10 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
     ipcRenderer.invoke("create-batch-payment-entry", bills, intent),
   createBlankPaymentEntry: (intent) => ipcRenderer.invoke("create-blank-payment-entry", intent),
   openPaymentDoc: (name) => ipcRenderer.send("open-payment-doc", name),
+  createPaymentTerm: (input) => ipcRenderer.invoke("create-payment-term", input),
+  getDelayCalendar: () => ipcRenderer.invoke("get-delay-calendar"),
+  setDelayCalendar: (csv) => ipcRenderer.invoke("set-delay-calendar", csv || ""),
+  exportDelayCalendar: (csv) => ipcRenderer.invoke("export-delay-calendar", csv || ""),
+  importDelayCalendar: () => ipcRenderer.invoke("import-delay-calendar"),
+  getPaymentDefaults: (supplier) => ipcRenderer.invoke("get-payment-defaults", supplier || ""),
 });

@@ -117,6 +117,9 @@
           placeholder="What this payment is for" autocomplete="off" />
       </div>
     </div>
+    <!-- C9: where each autofilled value came from (src/payment-entry-defaults.js). Hidden until
+         something was filled, so a document opened for editing shows nothing extra. -->
+    <ul class="check-doc-autofill" data-testid="check-doc-autofill" hidden></ul>
     <div class="check-doc-write-actions" data-testid="check-doc-write-actions">
       <span class="check-doc-write-status" data-testid="check-doc-write-status"></span>
       <button type="button" class="check-doc-submit" id="check-doc-submit" data-testid="check-doc-submit">Create &amp; submit Payment Entry</button>

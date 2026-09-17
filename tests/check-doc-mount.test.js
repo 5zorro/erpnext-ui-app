@@ -6,6 +6,7 @@ import {
   closeCheckDoc,
   mountCheckDocWrite,
   setCheckDocBatchSource,
+  applyCheckDocDefaults,
 } from "../src/check-doc-mount.js";
 
 describe("check-doc-mount — null/junk safety (bare Node, no DOM)", () => {
@@ -30,5 +31,12 @@ describe("check-doc-mount — null/junk safety (bare Node, no DOM)", () => {
     assert.doesNotThrow(() => setCheckDocBatchSource(null, null));
     assert.doesNotThrow(() => setCheckDocBatchSource(undefined, undefined));
     assert.doesNotThrow(() => setCheckDocBatchSource({}, "junk"));
+  });
+
+  // C9: the defaults arrive asynchronously, after the drawer may already have been closed.
+  it("applyCheckDocDefaults no-ops when the root or the proposal is missing", () => {
+    assert.doesNotThrow(() => applyCheckDocDefaults(null, {}));
+    assert.doesNotThrow(() => applyCheckDocDefaults(undefined, undefined));
+    assert.doesNotThrow(() => applyCheckDocDefaults({ querySelector: () => null }, null));
   });
 });

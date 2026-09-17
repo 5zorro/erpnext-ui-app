@@ -233,12 +233,13 @@ describe("sample-data corpus plan", () => {
     due.sort((a, b) => a.day - b.day);
     assert.deepEqual(due.map((d) => d.bill).join(""), "ABCABCABC");
 
-    // Three clusters of three, each cluster inside the default 7-day group window and separated
-    // from the next by more than the stagger -- otherwise this collapses into one run-on group.
+    // Three clusters of three, each spanning under a week and separated from the next by more than
+    // the stagger. This pins the fixture's SHAPE only; which groups the engine then proposes is the
+    // economics suite's job (there has been no group window since 2026-09-12).
     const days = due.map((d) => d.day);
     for (let i = 0; i < 3; i += 1) {
       const cluster = days.slice(i * 3, i * 3 + 3);
-      assert.ok(cluster[2] - cluster[0] < 7, `cluster ${i} spans under the group window`);
+      assert.ok(cluster[2] - cluster[0] < 7, `cluster ${i} spans under a week`);
     }
     assert.ok(days[3] - days[2] > 0 && days[6] - days[5] > 0, "clusters are separated");
   });
