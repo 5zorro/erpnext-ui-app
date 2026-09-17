@@ -609,6 +609,15 @@ function paymentBatchPrefsPath() {
 function paymentDirectionPrefsPath() {
   return path.join(app.getPath("userData"), "payment-direction-prefs.json");
 }
+/**
+ * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
+ * spreadsheets but only store as a csv?"*). The stored file is therefore the same artefact the
+ * user edits in Excel — they can open this path directly, and an export is a copy rather than a
+ * conversion. Parsing and serialising stay in `src/delay-calendar.js`; this layer moves strings.
+ */
+function delayCalendarPath() {
+  return path.join(app.getPath("userData"), "delay-calendar.csv");
+}
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
 }
@@ -9114,6 +9123,54 @@ ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
 });
 ipcMain.handle("save-payment-entry", async (_e, name, patch) => savePaymentEntryFields(name, patch));
 ipcMain.handle("create-blank-payment-entry", async (_e, intent) => createBlankPaymentEntryDoc(intent));
+/**
+ * Delay calendar (P3b/P3c). `exists` is load-bearing, not informational: the renderer only passes
+ * the ratified-calendar probe into the date walk when a calendar file exists, because with no file
+ * every bridge day would stop applying at once and there would be no UI to turn them back on.
+ */
+ipcMain.handle("get-delay-calendar", () => {
+  try {
+    return { csv: fs.readFileSync(delayCalendarPath(), "utf8"), exists: true };
+  } catch {
+    return { csv: "", exists: false };
+  }
+});
+ipcMain.handle("set-delay-calendar", (_e, csv) => {
+  try {
+    fs.writeFileSync(delayCalendarPath(), String(csv == null ? "" : csv));
+    return { ok: true, exists: true, path: delayCalendarPath() };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+/** Save-as, for the copy that goes into Excel. The renderer sends the Excel-flavoured text. */
+ipcMain.handle("export-delay-calendar", async (_e, csv) => {
+  const r = await dialog.showSaveDialog(win, {
+    title: "Export delay calendar",
+    defaultPath: path.join(app.getPath("documents"), "delay-calendar.csv"),
+    filters: [{ name: "CSV (Excel)", extensions: ["csv"] }],
+  });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(r.filePath, String(csv == null ? "" : csv));
+    return { ok: true, path: r.filePath };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+ipcMain.handle("import-delay-calendar", async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: "Import delay calendar",
+    properties: ["openFile"],
+    filters: [{ name: "CSV (Excel)", extensions: ["csv", "txt"] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+  try {
+    return { ok: true, text: fs.readFileSync(r.filePaths[0], "utf8"), path: r.filePaths[0] };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
 ipcMain.handle("create-payment-term", async (_e, input) => createPaymentTermDocs(input));
 ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefaultsFacts(supplier));
 ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));

@@ -179,7 +179,44 @@ pointing at an input the math never had.
 
 ---
 
-## P3 — C2: the delay calendar panel, in the format finance actually uses
+## P3 — ✅ BUILT 2026-09-16. The delay calendar panel, in the format finance actually uses
+
+**What landed.** The stored file **is** the CSV (`userData/delay-calendar.csv`), so the artefact the
+app reads is the artefact Excel edits — an export is a copy, not a conversion. The panel sits in the
+assumptions drawer: *Suggest for \<year\>*, *Import CSV…*, *Export for Excel…*, a sign-off checkbox
+per row, a remove button, and an add-a-day row with a reason. Unratified rows render tinted and say
+*"not signed off, so it moves nothing"* in place of a silent no-op.
+
+- **P3a** — `normalizeDelayDate` reads the locale dates Excel writes back over an ISO column
+  (`1/16/2026`, `01-16-26`, `12.25.2026`), month-first because every other calendar here is US,
+  day-first when month-first is impossible (`16/1/2026`), and **flagged as a warning** when it
+  genuinely reads both ways (`3/4/2026`) — kept, not dropped, with the row named. A day that does
+  not exist (`2026-02-30`, which `new Date` would happily turn into March 2nd) is an error with its
+  line number. Export takes `{ excel: true }` for BOM + CRLF; the stored file stays byte-identical
+  to what the module always wrote, and the parser strips its own BOM on the way back in.
+- **P3d** — `explainPayByDate` takes `opts.delayDay`, a `(iso) => reason | ""` probe built by
+  `delayDayProbe`. It **replaces** the bridge rule rather than stacking on it, which is the point:
+  a day the user declined to sign off has to actually stop applying. The probe is a function, not
+  the calendar, so `bank-business-days.js` keeps knowing nothing about rails or ratification and
+  `delay-calendar.js` can keep importing it without a cycle.
+- 🔴 **The engine gets the same calendar as the audit.** `paymentBatchEconomics` takes
+  `delayDay(iso, method)` and routes every pay-by walk through it — including the discount-capture
+  date and `explainGroupMembership` — because the grouping and the explanation walk the same dates.
+  A test asserts the membership audit's `ownPayOn` matches the group's `payOn` under a calendar,
+  and diverges without one.
+- 🔴 **The switch is file existence, not entry count.** With no calendar file the built-in bridge
+  rule still fires; the probe is only passed once a file exists. An empty calendar would otherwise
+  switch every bridge day off at once with nothing on screen to turn them back on — the exact
+  failure C2 exists to prevent.
+- The audit step carries the user's own words: *"2026-04-03 is not a payable day. Good Friday —
+  mail delayed."* — which is the whole reason a ratified list beats a heuristic.
+
+**Not done:** a `.xlsx` parser (see below — decide after dogfood), and **no dogfood pass yet**. The
+panel has unit coverage behind it (16 new tests, 1741 green) but nobody has clicked it.
+
+### (Original statement)
+
+### C2: the delay calendar panel, in the format finance actually uses
 
 **5zorro:** *"something that is easy to edit in microsoft excel as that is the defacto software of
 choice of finance professionals. perhaps accept spreadsheets but only store as a csv?"*

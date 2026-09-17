@@ -7,6 +7,7 @@ import {
 } from "../src/payment-batch-economics.js";
 import { paymentMethodFeeResolver } from "../src/payment-batch-prefs.js";
 import { effectivePayByDate } from "../src/bank-business-days.js";
+import { delayCalendarIndex, delayDayProbe } from "../src/delay-calendar.js";
 
 const round2 = (x) => Math.round(x * 100) / 100;
 
@@ -833,5 +834,71 @@ describe("paymentBatchEconomics — never combines across a check run", () => {
     const { groups } = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, runBreaks: ["2026-03-09"] });
     assert.deepEqual(groups.map((g) => g.bills), [["A"], ["B", "C"]]);
     assert.equal(groups[1].reason, "batch");
+  });
+});
+
+describe("payment-batch-economics: the ratified delay calendar (P3d)", () => {
+  // 2026-04-03 is Good Friday: an ordinary payable day to every built-in rule, and exactly the
+  // case 5zorro raised — "Good Friday is not a federal holiday, but postage got really delayed".
+  const goodFriday = [
+    { date: "2026-04-03", scope: "postal", reason: "Good Friday", source: "user", ratified: true },
+  ];
+  // The real composition, not a stand-in: the view builds its probe exactly this way, so a change
+  // to the scope rules shows up here rather than passing against a hand-written predicate.
+  const probe = (iso, method) => delayDayProbe(delayCalendarIndex(goodFriday), method)(iso);
+
+  const bill = (over = {}) => ({
+    name: "ACC-PINV-0001",
+    installmentKey: "ACC-PINV-0001",
+    supplier: "Alpine Supply",
+    dueDate: "2026-04-03",
+    outstanding: 5000,
+    ...over,
+  });
+
+  it("moves the group's payment date onto the calendar's answer", () => {
+    const plain = paymentBatchEconomics({ bills: [bill()], perPaymentFee: 0.83, apr: 0.09 });
+    assert.equal(plain.groups[0].payOn, "2026-04-03");
+
+    // No recorded method, so both calendars apply — the same conservative default the fee side
+    // takes, for the same reason: being early is recoverable, being late is not.
+    const withCalendar = paymentBatchEconomics({
+      bills: [bill()],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+      delayDay: probe,
+    });
+    assert.equal(withCalendar.groups[0].payOn, "2026-04-02");
+  });
+
+  it("scopes the delay by the bill's own rail, not by the calendar alone", () => {
+    const bills = [
+      bill({ name: "CHQ", installmentKey: "CHQ", modeOfPayment: "USPS_Check" }),
+      bill({ name: "ACH", installmentKey: "ACH", modeOfPayment: "ACH" }),
+    ];
+    const { groups } = paymentBatchEconomics({
+      bills,
+      perPaymentFee: 0.83,
+      apr: 0.09,
+      feeForMethod: paymentMethodFeeResolver({}),
+      delayDay: probe,
+    });
+    const byMethod = Object.fromEntries(groups.map((g) => [g.method, g.payOn]));
+    assert.equal(byMethod.USPS_Check, "2026-04-02", "the cheque observes the postal delay day");
+    assert.equal(byMethod.ACH, "2026-04-03", "ACH does not");
+  });
+
+  // 🔴 The engine and the audit walk the same dates. If only one of them is given the calendar,
+  // the balloon explains a date the dashboard is not showing.
+  it("the membership audit agrees with the grouping it explains", () => {
+    const one = bill({ modeOfPayment: "USPS_Check" });
+    const { groups } = paymentBatchEconomics({ bills: [one], perPaymentFee: 0.83, apr: 0.09, delayDay: probe });
+    const membership = explainGroupMembership(groups[0], one, { apr: 0.09, delayDay: probe });
+    assert.equal(membership.ownPayOn, groups[0].payOn);
+
+    // Without the calendar the audit would quote 04-03 against a 04-02 payment — the disagreement
+    // this test exists to prevent.
+    const blind = explainGroupMembership(groups[0], one, { apr: 0.09 });
+    assert.notEqual(blind.ownPayOn, groups[0].payOn);
   });
 });

@@ -275,3 +275,26 @@ describe("payment-date-derivation: naming the right deadline", () => {
     assert.match(summarizePaymentDate(d), /discount deadline\.$/);
   });
 });
+
+describe("payment-date-derivation: the ratified calendar in the audit (P3d)", () => {
+  it("names the user's own reason in the step, not a rule name", () => {
+    const bill = {
+      name: "ACC-PINV-0001",
+      dueDate: "2026-04-03", // a Friday, and an ordinary working day to every built-in rule
+      supplier: "Alpine Supply",
+      outstanding: 100,
+    };
+    const probe = (iso) => (iso === "2026-04-03" ? "Good Friday — mail delayed" : "");
+
+    const plain = derivePaymentDate(bill);
+    assert.equal(plain.payOn, "2026-04-03", "nothing moves it without a calendar");
+
+    const withCalendar = derivePaymentDate(bill, { delayDay: probe });
+    assert.equal(withCalendar.payOn, "2026-04-02");
+    const step = withCalendar.steps.find((s) => s.rule === "delay");
+    assert.ok(step, "the walk records a delay step");
+    assert.equal(step.label, "Delay day");
+    assert.match(step.detail, /Good Friday — mail delayed/);
+    assert.match(summarizePaymentDate(withCalendar), /delay day/);
+  });
+});
