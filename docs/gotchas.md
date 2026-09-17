@@ -470,6 +470,39 @@ surface appears, and it disagrees in the worst direction: confidently naming the
 
 ---
 
+## G11 — One `resize` listener is not a layout (2026-09-17)
+
+**Observed:** Fullscreen on a 1080p monitor left the desktop showing under the history rail and
+under the page — 5zorro's focus incident: "it does not use all vertical space. something didn't
+update." Measured through a real window manager, entering fullscreen left **1347px of dead space
+below the views and 2560px beside them**: the views kept their windowed size. Leaving fullscreen
+left them oversized, clipping their own bottoms. A milder form was there at startup — views 27px
+taller than the content box.
+
+**Expected:** Views cover the window's content box in every window state.
+
+**Architecture / fix:** The shell wired `win.on("resize", place)` and nothing else. A fullscreen
+transition does not reliably deliver a `resize` whose `getContentBounds()` is the *final* size —
+under WSLg the programmatic fullscreen delivered no usable resize at all. Two parts, both needed
+(`src/shell-relayout.js`, pure + tested):
+1. Listen to the state changes themselves — `enter-full-screen`, `leave-full-screen`, `maximize`,
+   `unmaximize`, `restore`, `resized`, `show` — not only `resize`.
+2. Re-place again **after** the event (0 / 80 / 250 / 600ms), because the final bounds can land
+   after the event announcing them. The late passes compare content size first, so a settled
+   window costs one comparison.
+
+**Snap-to-half (Win+Right), measured separately:** the `resize` it fires reports the **pre-snap**
+size — the real one arrives only in the `move` events that follow, and a left-half snap fired no
+`resize` at all. So `move`/`moved` are in the event list too, and the immediate pass is guarded by
+`contentSizeChanged` so an ordinary window drag re-places nothing.
+
+**Do not regress:** `e2e/scaffold-window-fit.spec.js` measures dead space windowed → fullscreen →
+windowed. It is a Layer 3 smoke on purpose: these numbers do not exist until a real window manager
+has resized a real window, so no unit test can see this bug class. Verified by reverting the fix —
+the smoke fails on the fullscreen assertion.
+
+---
+
 ## Template (append G11+)
 
 ```markdown

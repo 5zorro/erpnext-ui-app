@@ -52,6 +52,11 @@ import {
   appendFocusIncident,
   serializeFocusIncidentLine,
 } from "../src/focus-incident.js";
+import {
+  SHELL_RELAYOUT_EVENTS,
+  RELAYOUT_SETTLE_MS,
+  contentSizeChanged,
+} from "../src/shell-relayout.js";
 import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
 import {
   resolveDocSkinTarget,
@@ -2917,9 +2922,37 @@ function bumpFormHistoryFromDoc(routePath, doctypeKey, doc) {
 }
 
 function place() {
+/** Content bounds the views were last placed against (see scheduleRelayout). */
+let placedAgainst = null;
+/** @type {ReturnType<typeof setTimeout>[]} */
+let relayoutTimers = [];
+
+/**
+ * Re-place now and again shortly after. A fullscreen or maximize transition reports its final
+ * content bounds *after* the event that announced it on some window managers (WSLg among them),
+ * and the shell used to place once against the stale size and never ask again — the incident of
+ * 2026-09-17: fullscreen on 1080p left the desktop showing under the rail and the page.
+ */
+function scheduleRelayout() {
+  // Guarded, because `move` is in the event list: dragging a window changes no view's size, and
+  // a snap's own `resize` arrives carrying the pre-snap bounds. The settle passes below are what
+  // actually catch that one, so they are scheduled whether or not this pass did anything.
+  if (!win || win.isDestroyed()) return;
+  if (contentSizeChanged(placedAgainst, win.getContentBounds())) place();
+  for (const t of relayoutTimers) clearTimeout(t);
+  relayoutTimers = RELAYOUT_SETTLE_MS.filter((ms) => ms > 0).map((ms) =>
+    setTimeout(() => {
+      if (!win || win.isDestroyed()) return;
+      // Only a size change can invalidate the placement, so a settled window costs one compare.
+      if (contentSizeChanged(placedAgainst, win.getContentBounds())) place();
+    }, ms),
+  );
+}
+
   if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc) return;
   const b = win.getContentBounds();
   const H = TAB_BAR_HEIGHT;
+  placedAgainst = { width: b.width, height: b.height };
   const HW = historyRailWidth(histCollapsed);
   const main = {
     x: HW,
@@ -6060,8 +6093,8 @@ function createWindow() {
     if (surfaceMode === "erp") scheduleErpKeyboardFocus();
   });
 
-  place();
-  win.on("resize", place);
+  scheduleRelayout();
+  for (const ev of SHELL_RELAYOUT_EVENTS) win.on(ev, scheduleRelayout);
   win.on("closed", () => {
     closeDiagnoseDropdown();
     closeNavIncidentDialog();
@@ -6226,6 +6259,8 @@ ipcMain.handle("health-remediation-autofix", async () => {
     type: "warning",
     buttons: ["Run script", "Cancel"],
     defaultId: 1,
+    for (const t of relayoutTimers) clearTimeout(t);
+    relayoutTimers = [];
     cancelId: 1,
     title: "Start ERPNext?",
     message: "Run the IT-configured recovery script?",
