@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
     ipcRenderer.invoke("create-batch-payment-entry", bills, intent),
   createBlankPaymentEntry: (intent) => ipcRenderer.invoke("create-blank-payment-entry", intent),
   openPaymentDoc: (name) => ipcRenderer.send("open-payment-doc", name),
+  createPaymentTerm: (input) => ipcRenderer.invoke("create-payment-term", input),
+  getPaymentDefaults: (supplier) => ipcRenderer.invoke("get-payment-defaults", supplier || ""),
 });

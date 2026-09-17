@@ -133,6 +133,12 @@
 .check-doc-stub-invoice { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .check-doc-stub-due { color: #64748b; font-variant-numeric: tabular-nums; }
 .check-doc-stub-amount { font-variant-numeric: tabular-nums; text-align: right; min-width: 70px; }
+/* The Doc skins' amount format: underlined cents (electron/doc-fields.css), 5zorro 2026-09-12. */
+.money-cents { text-decoration: underline; text-underline-offset: 2px; }
+/* C9 -- where each autofilled value came from, one line per field. The drawer shows its working
+   rather than guessing silently: a wrong default the clerk can see is a default the clerk fixes. */
+.check-doc-autofill { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: #64748b; line-height: 1.45; }
+.check-doc-autofill li.warn { color: #b45309; font-weight: 600; }
 .check-doc-stub-total {
   display: flex;
   justify-content: flex-end;
