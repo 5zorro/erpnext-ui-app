@@ -12,6 +12,7 @@
  */
 import { mountLinkPicker } from "./link-picker-ui.js";
 import { checkDocLinkFilters } from "./payment-entry-link-filters.js";
+import { formatUsdAmountHtml } from "./money.js";
 
 /**
  * What the write-mode submit button acts on -- set by setCheckDocBatchSource, read by
@@ -23,8 +24,12 @@ let currentBills = [];
 /** Which existing Payment Entry an edit-mode save acts on. Null on the proposal mount. */
 let currentDocName = null;
 
-function money(n) {
-  return `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/**
+ * The Doc skins' amount format — `$1,234.56` with the cents underlined (5zorro 2026-09-12). Safe
+ * HTML: assign with innerHTML.
+ */
+function moneyHtml(n) {
+  return formatUsdAmountHtml(Number(n) || 0);
 }
 
 function field(root, testid) {
@@ -108,7 +113,7 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
   const payee = field(root, "check-doc-payee");
   if (payee) payee.textContent = vm.payTo || "";
   const amount = field(root, "check-doc-amount");
-  if (amount) amount.textContent = money(vm.amount || 0);
+  if (amount) amount.innerHTML = moneyHtml(vm.amount || 0);
   const date = field(root, "check-doc-date");
   if (date) date.textContent = vm.payOn || "";
   const memo = field(root, "check-doc-memo");
@@ -136,7 +141,7 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
       due.textContent = row.dueDate;
       const amt = document.createElement("span");
       amt.className = "check-doc-stub-amount";
-      amt.textContent = money(row.amount);
+      amt.innerHTML = moneyHtml(row.amount);
       el.appendChild(inv);
       el.appendChild(due);
       el.appendChild(amt);
@@ -144,7 +149,9 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
     }
   }
   const total = field(root, "check-doc-stub-total");
-  if (total) total.textContent = `Total ${money(vm.amount || 0)}`;
+  // One span, not loose text + the cents span: `.check-doc-stub-total` is a flex box, and each loose
+  // child would become its own flex item — rendering "Total $5,750." and "50" as separate pieces.
+  if (total) total.innerHTML = `<span>Total ${moneyHtml(vm.amount || 0)}</span>`;
 
   // taxes/deductions: a proposal carries neither, and this pass does not surface them for an
   // existing document either (draft-only fields, rare for AP per the architecture note) --
@@ -196,6 +203,13 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
     if (!el) continue;
     el.value = prefill ? value || "" : "";
     el.disabled = disabled;
+    // A repaint starts from nothing the app filled in: the next applyCheckDocDefaults decides again.
+    if (el.dataset) delete el.dataset.autofilled;
+  }
+  const autofill = field(root, "check-doc-autofill");
+  if (autofill) {
+    autofill.innerHTML = "";
+    autofill.hidden = true;
   }
   // A submitted document has nothing to act on; a draft is saved; a proposal is created.
   if (actions) actions.hidden = disabled;
@@ -216,6 +230,61 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
   root.hidden = false;
 }
 
+/**
+ * Fill the check's Mode of Payment, Pay from account, reference and memo from
+ * `proposePaymentEntryDefaults` (Packet C9), and list where each value came from beneath them.
+ *
+ * Only fields the clerk has not typed into are touched. What the app fills is marked
+ * `data-autofilled`; typing into a field or picking a value removes the mark. So a later call — a
+ * different method picked, which changes the account and the number sequence — refreshes what the
+ * app wrote and never what the clerk wrote. Filling a field does not mark the drawer dirty: nothing
+ * the clerk entered would be lost by closing it.
+ *
+ * @param {Element|null|undefined} root
+ * @param {ReturnType<typeof import("./payment-entry-defaults.js").proposePaymentEntryDefaults>|null|undefined} proposal
+ * @param {{ warning?: string }} [opts] a line to show first, e.g. a duplicate check number
+ */
+export function applyCheckDocDefaults(root, proposal, opts = {}) {
+  if (!root || !proposal) return;
+  const slots = [
+    ["check-doc-mop", proposal.modeOfPayment],
+    ["check-doc-cash-account", proposal.paidFrom],
+    ["check-doc-reference-no", proposal.referenceNo],
+    ["check-doc-memo-input", proposal.memo],
+  ];
+  const notes = [];
+  for (const [testid, proposed] of slots) {
+    const el = field(root, testid);
+    if (!el || !proposed || el.disabled) continue;
+    const ours = el.value.trim() === "" || el.dataset.autofilled === "1";
+    if (!ours) continue;
+    el.value = proposed.value || "";
+    if (proposed.value) el.dataset.autofilled = "1";
+    else delete el.dataset.autofilled;
+    // A note with no value still matters: "type the first check number" is an instruction.
+    if (proposed.note) notes.push(proposed.note);
+  }
+
+  // Mirror onto the check face, so the document shows what will be written.
+  const memoInput = field(root, "check-doc-memo-input");
+  const memoFace = field(root, "check-doc-memo");
+  if (memoInput && memoFace) memoFace.textContent = memoInput.value;
+  const refInput = field(root, "check-doc-reference-no");
+  if (refInput) setOptionalRow(root, "check-doc-no-field", "check-doc-no", refInput.value.trim());
+
+  const list = field(root, "check-doc-autofill");
+  if (!list) return;
+  list.innerHTML = "";
+  const lines = opts.warning ? [[opts.warning, "warn"], ...notes.map((n) => [n, ""])] : notes.map((n) => [n, ""]);
+  for (const [line, cls] of lines) {
+    const li = document.createElement("li");
+    if (cls) li.className = cls;
+    li.textContent = line;
+    list.appendChild(li);
+  }
+  list.hidden = lines.length === 0;
+}
+
 /** @param {Element|null|undefined} root */
 export function closeCheckDoc(root) {
   if (root) root.hidden = true;
@@ -233,11 +302,14 @@ export function closeCheckDoc(root) {
  *   linkMounted?: WeakMap<Element, true>,
  *   onDirty?: (dirty: boolean) => void,
  *   onSubmitted?: (result: { ok: true, name: string|null }) => void,
- * }} [deps]
+ *   onFieldEdited?: (testid: string) => void,
+ * }} [deps] `onFieldEdited` (C9) fires after the clerk types into or picks one of the four
+ *   write fields — the page re-proposes the others from it (a new method changes the account and
+ *   the number sequence).
  */
 export function mountCheckDocWrite(root, deps = {}) {
   if (!root) return;
-  const { api, linkMounted, onDirty, onSubmitted } = deps;
+  const { api, linkMounted, onDirty, onSubmitted, onFieldEdited } = deps;
   const mopInput = field(root, "check-doc-mop");
   const acctInput = field(root, "check-doc-cash-account");
   const refInput = field(root, "check-doc-reference-no");
@@ -247,6 +319,12 @@ export function mountCheckDocWrite(root, deps = {}) {
   const markDirty = () => {
     if (onDirty) onDirty(true);
   };
+  /** The clerk owns this field now: stop treating it as autofilled, and let the page re-propose. */
+  const edited = (el) => {
+    if (el && el.dataset) delete el.dataset.autofilled;
+    markDirty();
+    if (onFieldEdited && el) onFieldEdited(el.dataset.testid || "");
+  };
   const linkDeps = {
     api: withLinkFilters(api, deps.linkFilterContext),
     linkMounted: linkMounted || new WeakMap(),
@@ -254,11 +332,24 @@ export function mountCheckDocWrite(root, deps = {}) {
       if (statusEl) statusEl.textContent = text || "";
     },
   };
-  if (mopInput) mountLinkPicker(mopInput, "Mode of Payment", async () => markDirty(), linkDeps);
-  if (acctInput) mountLinkPicker(acctInput, "Account", async () => markDirty(), linkDeps);
-  if (refInput) refInput.addEventListener("input", markDirty);
+  if (mopInput) mountLinkPicker(mopInput, "Mode of Payment", async () => edited(mopInput), linkDeps);
+  if (acctInput) mountLinkPicker(acctInput, "Account", async () => edited(acctInput), linkDeps);
+  if (mopInput) mopInput.addEventListener("input", () => edited(mopInput));
+  if (acctInput) acctInput.addEventListener("input", () => edited(acctInput));
   const memoInput = field(root, "check-doc-memo-input");
-  if (memoInput) memoInput.addEventListener("input", markDirty);
+  const memoFace = field(root, "check-doc-memo");
+  if (refInput) {
+    refInput.addEventListener("input", () => {
+      setOptionalRow(root, "check-doc-no-field", "check-doc-no", refInput.value.trim());
+      edited(refInput);
+    });
+  }
+  if (memoInput) {
+    memoInput.addEventListener("input", () => {
+      if (memoFace) memoFace.textContent = memoInput.value;
+      edited(memoInput);
+    });
+  }
 
   if (!submitBtn) return;
   submitBtn.addEventListener("click", async () => {
@@ -276,6 +367,8 @@ export function mountCheckDocWrite(root, deps = {}) {
       modeOfPayment: mopInput ? mopInput.value.trim() : "",
       cashBankAccount,
       referenceNo: refInput ? refInput.value.trim() : "",
+      // C9: the memo box used to be ignored on this path — typed, shown, and never sent.
+      memo: memoInput ? memoInput.value.trim() : "",
       payOn: currentGroup.payOn,
     };
     const groupBillKeys = new Set(currentGroup.bills || []);
@@ -392,11 +485,12 @@ export function mountCheckDocEdit(root, deps = {}) {
  *   linkFilterContext?: { paymentType?: string, partyType?: string, company?: string },
  *   onDirty?: (dirty: boolean) => void,
  *   onCreated?: (result: { ok: true, name?: string }) => void,
- * }} [deps]
+ *   onPayeePicked?: (supplier: string) => void,
+ * }} [deps] `onPayeePicked` (C9): once the payee is known the page can propose the rest.
  */
 export function mountCheckDocBlank(root, deps = {}) {
   if (!root) return;
-  const { api, linkMounted, onDirty, onCreated } = deps;
+  const { api, linkMounted, onDirty, onCreated, onPayeePicked } = deps;
   const payeeInput = field(root, "check-doc-payee-input");
   const amountInput = field(root, "check-doc-amount-input");
   const mopInput = field(root, "check-doc-mop");
@@ -419,10 +513,19 @@ export function mountCheckDocBlank(root, deps = {}) {
   };
   // Supplier is this mount's own picker; Mode of Payment / Account are already mounted by
   // mountCheckDocWrite on the same fragment, and mountLinkPicker refuses to double-mount.
-  if (payeeInput) mountLinkPicker(payeeInput, "Supplier", async () => markDirty(), linkDeps);
-  for (const el of [amountInput, refInput, memoInput]) {
-    if (el) el.addEventListener("input", markDirty);
+  if (payeeInput) {
+    mountLinkPicker(
+      payeeInput,
+      "Supplier",
+      async (value) => {
+        markDirty();
+        if (onPayeePicked) onPayeePicked(String(value || "").trim());
+      },
+      linkDeps,
+    );
   }
+  // Reference and memo already mark dirty through mountCheckDocWrite's listeners on the same inputs.
+  if (amountInput) amountInput.addEventListener("input", markDirty);
 
   if (!createBtn) return;
   createBtn.addEventListener("click", async () => {

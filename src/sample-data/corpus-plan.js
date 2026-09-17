@@ -527,17 +527,18 @@ function appendPaymentBatchFixture(docs, ctx) {
  * group draws one installment from each bill and the stub finally shows three different invoice
  * names on one check.
  *
- * Staggered by 2 days and spaced 7 apart, against the default `groupWindowDays: 7`:
+ * Staggered by 2 days and spaced 7 apart:
  *
  *   bill A   day  0     7     14
  *   bill B   day    2     9      16
  *   bill C   day      4     11     18
- *            \_____/ \_____/ \______/
- *             group1  group2   group3
  *
- * Each group spans 4 days (inside the window) and the gap to the next is 3 days (outside a group
- * once the earliest-due anchor moves), so this should read as three clean cross-bill batches
- * rather than one run-on group -- which is exactly the thing worth looking at on the dashboard.
+ * Designed 2026-09-08 against a 7-day group window, which cut this into three clean A-B-C groups.
+ * That window was retired 2026-09-12 for an exact cheapest grouping, so the cut now falls wherever
+ * fees against float say: at ACH's $0.40 it is still usually three groups of three, but the bank
+ * calendar can move it (a Columbus Day installment walks back onto the previous Friday and changes
+ * which group it joins), and at the cheque fee two larger groups win. What survives either way is the
+ * fixture's point — every group draws installments from more than one invoice.
  *
  * $120 an installment keeps every group in the range where a flat fee beats float, so the
  * suggestion is "batch" and not "pay alone" (the large-scale contrast is already SUP-DAILY-LG's job).

@@ -40,6 +40,11 @@ describe("check drawer stops", () => {
     assert.equal(Object.keys(CHECK_DRAWER_STOP_LABEL).length, CHECK_DRAWER_STOPS.length);
   });
 
+  // 5zorro 2026-09-14: the dashboard is not what anyone reads while writing a payment.
+  it("opens at full height unless the clerk chose otherwise", () => {
+    assert.equal(DEFAULT_CHECK_DRAWER_STOP, "full");
+  });
+
   it("stops are ordered smallest to largest", () => {
     const heights = CHECK_DRAWER_STOPS.map((s) => drawerMaxHeightPx(s, 1080));
     for (let i = 1; i < heights.length; i += 1) {
