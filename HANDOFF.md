@@ -10,8 +10,11 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
+   `implementation-plan-2026-09-16.md` (Pay Outstanding corrections, the delay calendar panel,
+   the terms-name builder) — **the active plan**.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
-   assumptions) — the only open plan; successor to the Doc Pay skin tranche.
+   assumptions) — **superseded 2026-09-16**, closing; its two unfinished build items are carried
+   into the active plan.
    **Closed:** `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086 + Calculator
    OI-018, closed 2026-09-08) — lens architecture folded into **Simplified lens** below; the
    calculator's shipped/remaining split (C0–C3 landed, C4–C5 open) lives on museum **OI-018**;
@@ -20,7 +23,9 @@
    `implementation-plan-2026-09-03.md` (Doc Pay skin economic batching / OI-138 ·
    OI-161, MVP 2026-09-08) — flow-geometry contract folded into **Pay Outstanding flow** below;
    `[hidden]`/display and headless-measurement lessons in [docs/gotchas.md](docs/gotchas.md) G7-G8;
-   three financial write paths still unverified against a live sandbox (carried into the successor).
+   its three financial write paths ran against the live sandbox 2026-09-11 (GL verified); what
+   stays unverified is the `erpEval` + IPC hop, plus a fourth path (`createPaymentTermDocs`) that
+   has never run live.
    `implementation-plan-2026-08-19.md` (nav instrumentation OI-126/127/128 A,
    2026-09-05) — map folded into **Navigation spine** below; residuals live on as museum
    OI-128 (peek granularity) and OI-040 (concurrent instances, parked).
@@ -121,7 +126,7 @@ flowchart LR
 | Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
 | Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
-| Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
+| Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
 | Doc terms | `doc-terms.js` | Bill / Home labels (QB-style) |
