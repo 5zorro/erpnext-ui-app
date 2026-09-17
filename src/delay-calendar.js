@@ -46,6 +46,59 @@ export const DELAY_SCOPES = Object.freeze(["bank", "postal"]);
 export const DELAY_CSV_COLUMNS = Object.freeze(["date", "scope", "reason", "ratified", "source"]);
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** `1/16/2026`, `01-16-26`, `3.4.2026` — what a spreadsheet hands back after it has "helped". */
+const LOCALE_DATE_RE = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/;
+/** A BOM survives Excel's round trip and would otherwise become part of the header's first cell. */
+const BOM = "\ufeff";
+
+/**
+ * A date cell, as it comes back from a spreadsheet.
+ *
+ * 🔴 **Excel is the editor 5zorro asked for** (*"the defacto software of choice of finance
+ * professionals"*), and it reformats an ISO date column into the machine's locale on open — so a
+ * file exported as `2026-01-16` comes back as `1/16/2026` whether or not anyone edited that row.
+ * Refusing it would mean the round trip only works for files nobody opened.
+ *
+ * The reading is **US month-first**, because every other calendar in this app is US (federal
+ * holidays, USPS, NACHA). Two guards keep that from silently inventing a date:
+ * - a first component over 12 can only be a day, so `16/1/2026` is read day-first and is not
+ *   ambiguous;
+ * - a row where **both** components are 12 or under and differ (`3/4/2026`) is genuinely ambiguous.
+ *   It is accepted month-first and **reported** as ambiguous, so the panel can list those rows for
+ *   an eyeball rather than either rejecting a whole year's file or quietly picking March.
+ *
+ * A two-digit year maps to 2000+ — a delay calendar is a forward-looking document, and 1926 is not
+ * a plausible reading.
+ *
+ * @param {string} raw
+ * @returns {{ date: string, ambiguous: boolean, error: string }}
+ */
+export function normalizeDelayDate(raw) {
+  const s = String(raw == null ? "" : raw).replace(BOM, "").trim();
+  if (!s) return { date: "", ambiguous: false, error: "(blank)" };
+  if (ISO_RE.test(s)) {
+    return isRealDate(s) ? { date: s, ambiguous: false, error: "" } : { date: "", ambiguous: false, error: s };
+  }
+  const m = LOCALE_DATE_RE.exec(s);
+  if (!m) return { date: "", ambiguous: false, error: s };
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  // Day-first only when month-first is impossible; otherwise US order, flagged when it could go
+  // either way. "Could go either way" excludes 3/3, which reads the same under both.
+  const dayFirst = a > 12;
+  const month = dayFirst ? b : a;
+  const day = dayFirst ? a : b;
+  const iso = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!isRealDate(iso)) return { date: "", ambiguous: false, error: s };
+  return { date: iso, ambiguous: !dayFirst && b <= 12 && a !== b, error: "" };
+}
+
+/** Does this ISO string name a day that exists? `2026-02-30` parses as a string but is not a date. */
+function isRealDate(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
 
 /**
  * Which delay calendars a payment method observes.
@@ -102,15 +155,21 @@ export function proposeDelayCalendar(year) {
  * an error rather than dropped silently. A row the user typed and this module discarded without
  * saying so is a delay day that quietly stops applying.
  *
+ * `warnings` is separate from `errors` on purpose: an error means a row was **dropped**, a warning
+ * means a row was **kept** under a reading the user should glance at (see `normalizeDelayDate`).
+ *
  * @param {string} text
- * @returns {{ entries: DelayDay[], errors: string[] }}
+ * @returns {{ entries: DelayDay[], errors: string[], warnings: string[] }}
  */
 export function parseDelayCalendarCsv(text) {
-  const rows = splitCsv(String(text == null ? "" : text));
+  // Strip the BOM our own Excel-friendly export writes, or it becomes part of the first header
+  // cell, the header stops being recognised, and row 1 is parsed as data.
+  const rows = splitCsv(String(text == null ? "" : text).replace(/^\ufeff/, ""));
   /** @type {DelayDay[]} */
   const entries = [];
   const errors = [];
-  if (!rows.length) return { entries, errors };
+  const warnings = [];
+  if (!rows.length) return { entries, errors, warnings };
 
   const header = rows[0].map((h) => h.trim().toLowerCase());
   const hasHeader = header.includes("date");
@@ -123,10 +182,17 @@ export function parseDelayCalendarCsv(text) {
     if (!row.length || row.every((c) => !c.trim())) continue;
     const lineNo = r + 1;
 
-    const date = pick(row, idx.date).trim();
-    if (!ISO_RE.test(date)) {
-      errors.push(`Line ${lineNo}: "${date || "(blank)"}" is not a YYYY-MM-DD date.`);
+    const parsed = normalizeDelayDate(pick(row, idx.date));
+    if (!parsed.date) {
+      errors.push(`Line ${lineNo}: "${parsed.error}" is not a date this can read.`);
       continue;
+    }
+    const date = parsed.date;
+    if (parsed.ambiguous) {
+      warnings.push(
+        `Line ${lineNo}: "${pick(row, idx.date).trim()}" read as ${date} (month first). ` +
+          `Check it if your spreadsheet writes day first.`,
+      );
     }
     const scopeRaw = pick(row, idx.scope).trim().toLowerCase();
     const scope = DELAY_SCOPES.includes(scopeRaw) ? scopeRaw : "";
@@ -144,17 +210,23 @@ export function parseDelayCalendarCsv(text) {
       source: pick(row, idx.source).trim() === "suggested" ? "suggested" : "user",
     });
   }
-  return { entries: dedupe(entries), errors };
+  return { entries: dedupe(entries), errors, warnings };
 }
 
 /**
  * Entries back to CSV, header included, sorted by date then scope so a re-export of an unchanged
  * calendar is byte-identical — a diffable file is the point of choosing CSV.
  *
+ * `opts.excel` writes the file Excel opens cleanly on a double click: a BOM so UTF-8 in a reason
+ * ("Nor'easter") survives, and CRLF line endings. It is **off by default** so the stored file and
+ * the tests stay byte-identical to what this module has always written — the export button opts in,
+ * nothing else does.
+ *
  * @param {DelayDay[]} entries
+ * @param {{ excel?: boolean }} [opts]
  * @returns {string}
  */
-export function serializeDelayCalendarCsv(entries) {
+export function serializeDelayCalendarCsv(entries, opts = {}) {
   const list = (Array.isArray(entries) ? entries : [])
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || a.scope.localeCompare(b.scope));
@@ -164,7 +236,8 @@ export function serializeDelayCalendarCsv(entries) {
       [e.date, e.scope, csvCell(e.reason || ""), e.ratified ? "yes" : "no", e.source || "user"].join(","),
     );
   }
-  return `${lines.join("\n")}\n`;
+  const eol = opts.excel ? "\r\n" : "\n";
+  return `${opts.excel ? BOM : ""}${lines.join(eol)}${eol}`;
 }
 
 /**
@@ -240,6 +313,27 @@ export function delayDayReason(index, isoDate, method) {
     if (r != null && index[scope] && index[scope].has(isoDate)) return r;
   }
   return "";
+}
+
+/**
+ * The probe `bank-business-days.js::explainPayByDate` takes as `opts.delayDay` — the switch that
+ * makes the ratified calendar, rather than the bridge-day rule, decide which judgement days move a
+ * payment (P3d).
+ *
+ * Returns the entry's own reason when it has one, so the audit trail can say *"Nor'easter, carrier
+ * stopped"* instead of *"delay day"*. A ratified entry with a blank reason still has to move the
+ * date, so it falls back to a label rather than to `""` — an empty string means "not a delay day",
+ * and a silent no would be the calendar failing to apply what the user signed off.
+ *
+ * @param {ReturnType<typeof delayCalendarIndex>} index
+ * @param {string|null|undefined} method
+ * @returns {(iso: string) => string}
+ */
+export function delayDayProbe(index, method) {
+  return (iso) => {
+    if (!isDelayDay(index, iso, method)) return "";
+    return delayDayReason(index, iso, method) || "Ratified delay day";
+  };
 }
 
 /**

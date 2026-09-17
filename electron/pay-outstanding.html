@@ -93,6 +93,26 @@
     /* C6 -- the terms creation modal, launched from this panel. Terms ARE assumptions in the
        economic model, and this is where a missing grace or a wrong method becomes visible.
        In-page overlay, not a window: HANDOFF invariant 6 keeps the whole app in one window. */
+    /* P3b -- the delay calendar table. Deliberately plain: it is a spreadsheet's worth of data,
+       and the spreadsheet is where it gets edited. */
+    .pref-group.wide { flex-basis: 100%; }
+    .delay-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+    .delay-status { font-size: 11px; color: #5b6b7b; }
+    .delay-status .unratified { color: #b45309; font-weight: 600; }
+    .delay-table-wrap { max-height: 190px; overflow-y: auto; border: 1px solid #d6dee6; border-radius: 6px; background: #fff; }
+    .delay-table { border-collapse: collapse; width: 100%; font-size: 11px; }
+    .delay-table th { text-align: left; font-weight: 600; color: #5b6b7b; padding: 4px 6px; border-bottom: 1px solid #e6ecf2; position: sticky; top: 0; background: #f7f9fb; }
+    .delay-table td { padding: 3px 6px; border-bottom: 1px solid #f0f4f8; vertical-align: middle; }
+    .delay-table tr.unratified td { background: #fffbeb; }
+    .delay-table tr.unratified .why::after { content: " — not signed off, so it moves nothing"; color: #b45309; }
+    .delay-table .drop { border: 0; background: none; cursor: pointer; color: #94a3b8; font-size: 13px; line-height: 1; }
+    .delay-table .drop:hover { color: #b91c1c; }
+    .delay-empty { padding: 8px; color: #7b8a99; font-size: 11px; }
+    .delay-add { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+    .delay-add input[type="text"] { flex: 1 1 220px; min-width: 0; }
+    .delay-msgs { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: #b45309; }
+    .delay-msgs li.err { color: #b91c1c; }
+
     #term-modal-open {
       display: inline-flex; align-items: center; gap: 5px;
       border: 1px solid #0d9488; background: #f0fdfa; color: #0f766e; border-radius: 6px;
@@ -623,6 +643,40 @@
         off. Once the date passes it rolls forward by the interval, assuming that run happened.
       </p>
     </fieldset>
+    <!-- P3b. The delay calendar: the algorithm proposes, the user ratifies, and the ratified list
+         is what moves a payment date. CSV is the stored format *and* the interchange format
+         (5zorro: Excel is "the defacto software of choice of finance professionals"), so the file
+         under userData is the same artefact he edits. -->
+    <fieldset class="pref-group wide" data-testid="pref-group-delay">
+      <legend>Delay days (postal &amp; bank)</legend>
+      <div class="delay-actions">
+        <button type="button" class="btn-secondary" id="delay-propose" data-testid="delay-propose">
+          Suggest for <span id="delay-year"></span>
+        </button>
+        <button type="button" class="btn-secondary" id="delay-import" data-testid="delay-import">Import CSV…</button>
+        <button type="button" class="btn-secondary" id="delay-export" data-testid="delay-export">Export for Excel…</button>
+        <span class="delay-status" id="delay-status" data-testid="delay-status"></span>
+      </div>
+      <div class="delay-table-wrap">
+        <table class="delay-table" id="delay-table" data-testid="delay-table">
+          <thead>
+            <tr><th>Sign off</th><th>Date</th><th>Applies to</th><th>Why</th><th></th></tr>
+          </thead>
+          <tbody id="delay-rows"></tbody>
+        </table>
+      </div>
+      <div class="delay-add">
+        <input type="date" id="delay-new-date" data-testid="delay-new-date" aria-label="Delay date" />
+        <select id="delay-new-scope" data-testid="delay-new-scope" aria-label="Applies to">
+          <option value="postal">Postal (checks only)</option>
+          <option value="bank">Bank (every method)</option>
+        </select>
+        <input type="text" id="delay-new-reason" data-testid="delay-new-reason" placeholder="Why — e.g. Nor'easter, carrier stopped" />
+        <button type="button" class="btn-secondary" id="delay-add" data-testid="delay-add">Add day</button>
+      </div>
+      <ul class="delay-msgs" id="delay-msgs" data-testid="delay-msgs"></ul>
+      <p class="pref-note" id="delay-note" data-testid="delay-note"></p>
+    </fieldset>
     <button type="button" id="term-modal-open" data-testid="term-modal-open"></button>
     <span id="prefs-error"></span>
   </div>
@@ -825,6 +879,16 @@
       describePaymentMethod,
     } from "../src/payment-batch-prefs.js";
     import { derivePaymentDate, summarizePaymentDate } from "../src/payment-date-derivation.js";
+    import {
+      parseDelayCalendarCsv,
+      serializeDelayCalendarCsv,
+      mergeDelayCalendar,
+      proposeDelayCalendar,
+      delayCalendarIndex,
+      delayDayProbe,
+      unratifiedCount,
+      normalizeDelayDate,
+    } from "../src/delay-calendar.js";
     import { planPaymentTermCreate, DAY_BASED_DUE_DATE_BASES } from "../src/payment-term-plan.js";
     import { billAdvisories, vendorAdvisories, advisoryLevel } from "../src/payment-bill-advisories.js";
     import {
@@ -879,6 +943,31 @@
 
     let allBills = [];
     let prefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
+    /** @type {import("../src/delay-calendar.js").DelayDay[]} P3b -- the ratified delay calendar. */
+    let delayCalendar = [];
+    /**
+     * Whether a calendar file exists at all — **not** whether it has entries.
+     *
+     * 🔴 This is the switch, and it is deliberately file-existence rather than length. Passing a
+     * probe built from an empty calendar would turn every bridge day off at once (the probe
+     * *replaces* the bridge rule, see explainPayByDate), which is the one outcome C2 must not
+     * produce: dates would move with nothing on screen explaining why and no way to put them back.
+     * A file means the user has been through this panel. No file means leave the old rule alone.
+     */
+    let delayCalendarExists = false;
+
+    /** The `delayDay` argument for the engine and the audit, or null while there is no calendar. */
+    function delayProbe() {
+      if (!delayCalendarExists) return null;
+      const index = delayCalendarIndex(delayCalendar);
+      return (iso, method) => delayDayProbe(index, method)(iso);
+    }
+
+    /** Spread into an options object: `{ ...delayOpt() }` adds `delayDay` only when there is one. */
+    function delayOpt() {
+      const probe = delayProbe();
+      return probe ? { delayDay: probe } : {};
+    }
     /** @type {"date"|"invoice"} */
     let scheduleSortMode = "date";
     let filterText = "";
@@ -1582,9 +1671,13 @@
      */
     function derivationForBill(bill, group) {
       const isDiscount = group && group.reason === "discount-capture";
+      // The calendar is scoped by rail, and derivePaymentDate walks one bill, so the probe is
+      // bound to this bill's own method here rather than passed through method-blind.
+      const probe = delayProbe();
+      const delay = probe ? { delayDay: (iso) => probe(iso, bill.modeOfPayment || "") } : {};
       return derivePaymentDate(
         isDiscount ? { ...bill, dueDate: bill.discountDate || bill.dueDate } : bill,
-        isDiscount ? { obligation: "discount-window" } : {},
+        isDiscount ? { obligation: "discount-window", ...delay } : delay,
       );
     }
 
@@ -1638,6 +1731,7 @@
         explainGroupMembership(group, bill, {
           apr: prefs.apr,
           perPaymentFee: paymentMethodFeeResolver(prefs)(null),
+          ...delayOpt(),
         }),
         { methodLabel: group && group.method ? paymentMethodLabel(group.method) : "" },
       );
@@ -1828,7 +1922,9 @@
           name.textContent = key;
           li.appendChild(name);
           const bill = bills.find((b) => b.installmentKey === key);
-          const note = memberNoteHtml(bill ? explainGroupMembership(group, bill, { apr: prefs.apr }) : null);
+          const note = memberNoteHtml(
+            bill ? explainGroupMembership(group, bill, { apr: prefs.apr, ...delayOpt() }) : null,
+          );
           if (note) {
             const span = document.createElement("span");
             span.className = "member-note";
@@ -2418,6 +2514,7 @@
           apr: prefs.apr,
           feeForMethod,
           runBreaks, // C8: no batch crosses the check run
+          ...delayOpt(), // P3d: the ratified calendar, once there is one
         });
         shownGroups.push(...groups);
         vendorsEl.appendChild(renderVendorCard(supplier, bills, groups, run));
@@ -2580,11 +2677,192 @@
       el.addEventListener("change", paintTermModal);
     }
 
+    /* ---------------------------------------------------------------------------------------
+     * P3b -- the delay calendar panel.
+     *
+     * The pure module owns parse, serialise, merge and the ratification rule; everything below
+     * moves strings and paints rows. The stored file *is* CSV, so "export" is a copy for Excel
+     * (BOM + CRLF) rather than a conversion, and an import is a merge that protects decisions
+     * already made: a hand-typed row always beats a re-proposal, and a signature survives one.
+     * ------------------------------------------------------------------------------------- */
+    const delayEls = {
+      rows: document.getElementById("delay-rows"),
+      status: document.getElementById("delay-status"),
+      msgs: document.getElementById("delay-msgs"),
+      note: document.getElementById("delay-note"),
+      year: document.getElementById("delay-year"),
+      newDate: document.getElementById("delay-new-date"),
+      newScope: document.getElementById("delay-new-scope"),
+      newReason: document.getElementById("delay-new-reason"),
+    };
+
+    function showDelayMsgs(list, kind) {
+      delayEls.msgs.innerHTML = "";
+      for (const m of list || []) {
+        const li = document.createElement("li");
+        if (kind === "err") li.className = "err";
+        li.textContent = m;
+        delayEls.msgs.appendChild(li);
+      }
+    }
+
+    function paintDelayPanel() {
+      const unratified = unratifiedCount(delayCalendar);
+      const ratified = delayCalendar.length - unratified;
+      delayEls.year.textContent = String(new Date().getFullYear());
+      delayEls.status.innerHTML = delayCalendarExists
+        ? `${ratified} signed off` +
+          (unratified ? ` · <span class="unratified">${unratified} awaiting sign-off</span>` : "")
+        : "No calendar yet — the built-in bridge-day rule is still in force.";
+      delayEls.note.textContent = delayCalendarExists
+        ? "Only signed-off days move a payment date. Postal days apply to checks; bank days apply to every method. Export, edit in Excel, and import back — the file is plain CSV."
+        : "Suggest a year or add a day to start one. Once a calendar exists it replaces the built-in rule, so a suggested day only counts after you sign it off.";
+
+      delayEls.rows.innerHTML = "";
+      if (!delayCalendar.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 5;
+        td.className = "delay-empty";
+        td.textContent = "No delay days.";
+        tr.appendChild(td);
+        delayEls.rows.appendChild(tr);
+        return;
+      }
+      for (const entry of delayCalendar) {
+        const tr = document.createElement("tr");
+        if (!entry.ratified) tr.className = "unratified";
+
+        const sign = document.createElement("td");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = !!entry.ratified;
+        box.setAttribute("aria-label", `Sign off ${entry.date}`);
+        box.onchange = () => {
+          entry.ratified = box.checked;
+          void saveDelayCalendar();
+        };
+        sign.appendChild(box);
+        tr.appendChild(sign);
+
+        const date = document.createElement("td");
+        date.textContent = entry.date;
+        tr.appendChild(date);
+
+        const scope = document.createElement("td");
+        scope.textContent = entry.scope === "postal" ? "Checks" : "All methods";
+        tr.appendChild(scope);
+
+        const why = document.createElement("td");
+        why.className = "why";
+        why.textContent = entry.reason || (entry.source === "suggested" ? "Suggested" : "");
+        tr.appendChild(why);
+
+        const drop = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "drop";
+        btn.textContent = "×";
+        btn.title = `Remove ${entry.date}`;
+        btn.onclick = () => {
+          delayCalendar = delayCalendar.filter((e) => e !== entry);
+          void saveDelayCalendar();
+        };
+        drop.appendChild(btn);
+        tr.appendChild(drop);
+
+        delayEls.rows.appendChild(tr);
+      }
+    }
+
+    /** Persist, then re-render the dashboard: a signature changes real payment dates. */
+    async function saveDelayCalendar() {
+      delayCalendarExists = true;
+      paintDelayPanel();
+      render();
+      if (api && api.setDelayCalendar) {
+        await api.setDelayCalendar(serializeDelayCalendarCsv(delayCalendar)).catch(() => null);
+      }
+    }
+
+    document.getElementById("delay-add").onclick = () => {
+      const parsed = normalizeDelayDate(delayEls.newDate.value);
+      if (!parsed.date) {
+        showDelayMsgs([`"${delayEls.newDate.value || "(blank)"}" is not a date this can read.`], "err");
+        return;
+      }
+      showDelayMsgs([]);
+      // source "user": a day typed here is the user's own statement, so it arrives signed off.
+      delayCalendar = mergeDelayCalendar(delayCalendar, [
+        {
+          date: parsed.date,
+          scope: delayEls.newScope.value === "bank" ? "bank" : "postal",
+          reason: delayEls.newReason.value.trim(),
+          source: "user",
+          ratified: true,
+        },
+      ]);
+      delayEls.newReason.value = "";
+      void saveDelayCalendar();
+    };
+
+    document.getElementById("delay-propose").onclick = () => {
+      const year = new Date().getFullYear();
+      const before = delayCalendar.length;
+      delayCalendar = mergeDelayCalendar(delayCalendar, proposeDelayCalendar(year));
+      const added = delayCalendar.length - before;
+      showDelayMsgs(
+        added
+          ? [`${added} suggested day${added === 1 ? "" : "s"} added for ${year}. They move nothing until you sign them off.`]
+          : [`Nothing new to suggest for ${year}.`],
+      );
+      void saveDelayCalendar();
+    };
+
+    document.getElementById("delay-export").onclick = async () => {
+      if (!api || !api.exportDelayCalendar) return;
+      // Excel flavour: BOM so a reason with an apostrophe or an accent survives, CRLF so the file
+      // does not open as one long line.
+      const r = await api
+        .exportDelayCalendar(serializeDelayCalendarCsv(delayCalendar, { excel: true }))
+        .catch(() => null);
+      if (r && r.ok) showDelayMsgs([`Exported to ${r.path}`]);
+      else if (r && !r.canceled) showDelayMsgs([(r && r.error) || "Could not export."], "err");
+    };
+
+    document.getElementById("delay-import").onclick = async () => {
+      if (!api || !api.importDelayCalendar) return;
+      const r = await api.importDelayCalendar().catch(() => null);
+      if (!r || !r.ok) {
+        if (r && !r.canceled) showDelayMsgs([(r && r.error) || "Could not read that file."], "err");
+        return;
+      }
+      const { entries, errors, warnings } = parseDelayCalendarCsv(r.text);
+      delayCalendar = mergeDelayCalendar(delayCalendar, entries);
+      // Errors first: a dropped row is a delay day that silently stops applying, which is the one
+      // failure this whole layer exists to prevent.
+      showDelayMsgs([...errors, ...warnings, `Imported ${entries.length} day${entries.length === 1 ? "" : "s"}.`],
+        errors.length ? "err" : "");
+      void saveDelayCalendar();
+    };
+
+    async function loadDelayCalendar() {
+      if (!api || !api.getDelayCalendar) return;
+      const r = await api.getDelayCalendar().catch(() => null);
+      if (!r) return;
+      delayCalendarExists = !!r.exists;
+      const parsed = parseDelayCalendarCsv(r.csv || "");
+      delayCalendar = parsed.entries;
+      if (parsed.errors.length) showDelayMsgs(parsed.errors, "err");
+    }
+
     async function init() {
       buildMethodFeeInputs();
       buildTermModalOptions();
       prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);
       paintPrefsInputs();
+      await loadDelayCalendar();
+      paintDelayPanel();
       if (!api || !api.getOutstandingBills) {
         showError("Shell bridge unavailable — cannot load outstanding bills.");
         render();

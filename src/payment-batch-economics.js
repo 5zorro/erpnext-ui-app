@@ -73,6 +73,7 @@ function floatCost(amount, apr, days) {
  *   apr: number,
  *   feeForMethod?: (method: string) => number,
  *   runBreaks?: string[],
+ *   delayDay?: (iso: string, method: string) => string,
  * }} args `runBreaks` (C8) are dates no batch may cross — `checkRunSplits` from
  *   `check-run-schedule.js`. A bill payable on or after a boundary is never combined with one
  *   payable before it; within each stretch the grouping is still the exact cheapest one. Omitted or
@@ -80,11 +81,16 @@ function floatCost(amount, apr, days) {
  *   `paymentMethodFeeResolver(prefs)` from `payment-batch-prefs.js`. Omit it and behaviour is
  *   byte-identical to before: one partition, one flat `perPaymentFee`. There is no `groupWindowDays`
  *   any more (retired 2026-09-12 — see `cheapestPartition`); an old caller passing it changes nothing.
+ *   `delayDay` is the ratified delay calendar (P3d), taking the method as well as the date because
+ *   a postal delay day is not a bank one. 🔴 It must be passed here whenever it is passed to the
+ *   audit: the grouping and the explanation walk the same dates, and an audit that can disagree
+ *   with the engine it audits is worse than none.
  * @returns {{ groups: PaymentBatchGroup[] }}
  */
 export function paymentBatchEconomics(args) {
   const { bills, perPaymentFee, apr, feeForMethod } = args || {};
   const byMethodPricing = typeof feeForMethod === "function";
+  const payByFor = payByResolver(args && args.delayDay);
   const runBreaks = normalizeRunBreaks(args && args.runBreaks);
   const list = Array.isArray(bills) ? bills : [];
 
@@ -95,8 +101,8 @@ export function paymentBatchEconomics(args) {
   // Pass 1: discount capture always wins its own comparison first, independent of any group the
   // bill could otherwise join (OI-161: "do not let batching logic bury it").
   for (const bill of list) {
-    const effectiveDueDate = effectivePayByDate(bill.dueDate);
-    const captured = tryDiscountCapture(bill, effectiveDueDate, apr);
+    const effectiveDueDate = payByFor(bill.dueDate, bill);
+    const captured = tryDiscountCapture(bill, effectiveDueDate, apr, payByFor);
     if (captured) {
       // A discount capture never reaches the method partitioning below (it is decided first, by
       // design), so it has to be tagged here or it reports itself as having no method at all.
@@ -172,6 +178,19 @@ function methodKeyOf(bill) {
 }
 
 /**
+ * Wrap the pay-by walk so every call in this module goes through the same calendar, with the
+ * bill's own method attached — `methodKeyOf` is the one place that decides what a bill's rail is,
+ * and the delay calendar is scoped by rail (a cheque observes postal delay days; ACH does not).
+ *
+ * @param {((iso: string, method: string) => string)|undefined|null} delayDay
+ * @returns {(iso: string, bill: OutstandingBillRow) => string}
+ */
+function payByResolver(delayDay) {
+  if (typeof delayDay !== "function") return (iso) => effectivePayByDate(iso);
+  return (iso, bill) => effectivePayByDate(iso, { delayDay: (d) => delayDay(d, methodKeyOf(bill)) });
+}
+
+/**
  * The fee for one method partition, falling back to the flat `perPaymentFee` when the resolver
  * declines. Never falls back to `0` — a free payment would make the engine invent fee savings.
  *
@@ -224,11 +243,12 @@ function assignGroupIds(groups) {
  * @param {OutstandingBillRow} bill
  * @param {string} effectiveDueDate
  * @param {number} apr
+ * @param {(iso: string, bill: OutstandingBillRow) => string} payByFor
  * @returns {PaymentBatchGroup|null}
  */
-function tryDiscountCapture(bill, effectiveDueDate, apr) {
+function tryDiscountCapture(bill, effectiveDueDate, apr, payByFor) {
   if (!bill.discountDate || !(bill.discountAmount > 0)) return null;
-  const discountPayOn = effectivePayByDate(bill.discountDate);
+  const discountPayOn = payByFor(bill.discountDate, bill);
   const daysEarly = daysBetween(discountPayOn, effectiveDueDate);
   if (daysEarly < 0) return null; // malformed data — discount date after due date; ignore
   const cost = round2(floatCost(bill.outstanding, apr, daysEarly));
@@ -509,7 +529,8 @@ export function explainGroupMembership(group, bill, opts = {}) {
 
   let ownPayOn = "";
   try {
-    ownPayOn = effectivePayByDate(g.reason === "discount-capture" ? bill.discountDate : bill.dueDate);
+    const payByFor = payByResolver(opts && opts.delayDay);
+    ownPayOn = payByFor(g.reason === "discount-capture" ? bill.discountDate : bill.dueDate, bill);
   } catch {
     ownPayOn = "";
   }

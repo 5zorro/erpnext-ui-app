@@ -146,7 +146,7 @@ export function isBridgeDay(isoDate) {
 }
 
 /**
- * @typedef {{ date: string, reasons: Array<"weekend"|"holiday"|"bridge"> }} SkippedDay
+ * @typedef {{ date: string, reasons: Array<"weekend"|"holiday"|"bridge"|"delay">, note?: string }} SkippedDay
  * @typedef {{
  *   from: string,          // the date we were asked about
  *   date: string,          // the payable date we landed on
@@ -173,25 +173,52 @@ export function isBridgeDay(isoDate) {
  * weekend, holiday, bridge — so a caller rendering "why" never sees the same day explained two
  * different ways on two renders.
  *
+ * 🔴 **`opts.delayDay` is the ratified-calendar switch (Packet C2 / P3d).** Pass a probe — a
+ * `(iso) => reason | ""` built by `delay-calendar.js::delayDayProbe` — and it **replaces** the
+ * built-in bridge rule entirely, because the whole point of that module is that the algorithm
+ * proposes and the user ratifies. Pass nothing and the bridge rule fires directly, exactly as
+ * before.
+ *
+ * That "replaces" is why the caller must only pass a probe once a calendar actually exists: with
+ * no stored calendar every entry is unratified, so a probe built from it would silently switch
+ * every bridge day off at once, with nothing on screen to turn them back on. A probe is a
+ * statement that the user has been through the panel; its absence is not.
+ *
+ * The parameter is a function rather than the calendar itself so this module keeps knowing nothing
+ * about methods, scopes or ratification — and so `delay-calendar.js` can keep importing this one
+ * without a cycle.
+ *
  * @param {string} isoDate
- * @param {{ includeBridge?: boolean }} [opts] includeBridge default true
+ * @param {{ includeBridge?: boolean, delayDay?: (iso: string) => string }} [opts] includeBridge default true
  * @returns {PayByDateWalk}
  */
 export function explainPayByDate(isoDate, opts = {}) {
   const includeBridge = opts.includeBridge !== false;
+  const delayDay = typeof opts.delayDay === "function" ? opts.delayDay : null;
   const from = formatYmd(parseIso(isoDate));
   /** @type {SkippedDay[]} */
   const skipped = [];
   let d = parseIso(isoDate);
   for (let i = 0; i < 30; i++) {
     const iso = formatYmd(d);
-    /** @type {Array<"weekend"|"holiday"|"bridge">} */
+    /** @type {Array<"weekend"|"holiday"|"bridge"|"delay">} */
     const reasons = [];
+    let note = "";
     if (isWeekend(iso)) reasons.push("weekend");
     if (isFederalHoliday(iso)) reasons.push("holiday");
-    if (includeBridge && isBridgeDay(iso)) reasons.push("bridge");
+    if (delayDay) {
+      // The calendar is the SSoT for judgement days once it exists, so the bridge rule does not
+      // also get a vote — a day the user declined to ratify must actually stop applying.
+      const why = delayDay(iso);
+      if (why) {
+        reasons.push("delay");
+        note = why;
+      }
+    } else if (includeBridge && isBridgeDay(iso)) {
+      reasons.push("bridge");
+    }
     if (!reasons.length) return { from, date: iso, skipped, exhausted: false };
-    skipped.push({ date: iso, reasons });
+    skipped.push(note ? { date: iso, reasons, note } : { date: iso, reasons });
     d = addDaysUtc(d, -1);
   }
   return { from, date: formatYmd(d), skipped, exhausted: true };
@@ -202,7 +229,7 @@ export function explainPayByDate(isoDate, opts = {}) {
  * Defaults to earlier, always (5zorro 2026-09-05) — see module doc for why. `opts` is intentionally
  * open for a future per-vendor override; nothing beyond `includeBridge` is built yet.
  * @param {string} isoDate
- * @param {{ includeBridge?: boolean }} [opts] includeBridge default true
+ * @param {{ includeBridge?: boolean, delayDay?: (iso: string) => string }} [opts] includeBridge default true
  * @returns {string} ISO date
  */
 export function effectivePayByDate(isoDate, opts = {}) {

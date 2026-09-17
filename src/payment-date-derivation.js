@@ -66,6 +66,9 @@ const RULE_LABEL = Object.freeze({
   weekend: "Weekend",
   holiday: "Federal holiday",
   bridge: "Bridge day",
+  // A day off the user's own ratified calendar (P3d). It replaces "bridge" once a calendar
+  // exists, which is why both labels live here rather than one superseding the other.
+  delay: "Delay day",
 });
 
 /**
@@ -75,7 +78,11 @@ const RULE_LABEL = Object.freeze({
  * throw, because this feeds a popup on a dashboard that must render whatever the ERP hands it.
  *
  * @param {Partial<OutstandingBillRow>|null|undefined} bill
- * @param {{ includeBridge?: boolean, billDate?: string, obligation?: "due-date"|"discount-window" }} [opts]
+ * `delayDay` is the ratified-calendar probe (P3d); passing it replaces the bridge-day rule, and
+ * the step it produces carries the user's own reason so the audit says "Nor'easter, carrier
+ * stopped" rather than a rule name.
+ *
+ * @param {{ includeBridge?: boolean, billDate?: string, obligation?: "due-date"|"discount-window", delayDay?: (iso: string) => string }} [opts]
  *   `billDate` is the supplier's own invoice date when the caller has it — ERPNext derives the due
  *   date from `bill_date or posting_date` (`party.py::get_due_date`), so passing it makes the term
  *   comparison exact instead of merely indicative. `obligation: "discount-window"` says the date in
@@ -116,7 +123,10 @@ export function derivePaymentDate(bill, opts = {}) {
   // being derived here, and attaching it would invite a renderer to compare the two.
   const termImpliedDueDate = opts.obligation === "discount-window" ? "" : termImplied(row, opts);
 
-  const walk = explainPayByDate(dueDate, { includeBridge: opts.includeBridge !== false });
+  const walk = explainPayByDate(dueDate, {
+    includeBridge: opts.includeBridge !== false,
+    ...(typeof opts.delayDay === "function" ? { delayDay: opts.delayDay } : {}),
+  });
 
   /** @type {Record<string, number>} */
   const countsByRule = {};
@@ -270,16 +280,21 @@ function deadlineNoun(opts) {
   return opts && opts.obligation === "discount-window" ? "discount deadline" : "due date";
 }
 
-/** @param {{ date: string, reasons: string[] }} skip */
+/** @param {{ date: string, reasons: string[], note?: string }} skip */
 function skipDetail(skip) {
   const named = skip.reasons.map((r) => (RULE_LABEL[r] || r).toLowerCase());
   const extra = named.length > 1 ? ` (also ${named.slice(1).join(", ")})` : "";
-  return `${skip.date} is not a payable day${extra}.`;
+  // The user's own words for why they ratified the day, when there are any — the reason a
+  // ratified calendar beats a heuristic is that it can say something a rule never could.
+  const why = skip.note ? ` ${skip.note}.` : "";
+  return `${skip.date} is not a payable day${extra}.${why}`;
 }
 
 /** @param {string} rule @param {number} n */
 function pluralRule(rule, n) {
-  const one = { weekend: "weekend day", holiday: "federal holiday", bridge: "bridge day" }[rule] || rule;
+  const one =
+    { weekend: "weekend day", holiday: "federal holiday", bridge: "bridge day", delay: "delay day" }[rule] ||
+    rule;
   if (n === 1) return one;
   return one === "federal holiday" ? "federal holidays" : `${one}s`;
 }
