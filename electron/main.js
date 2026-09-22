@@ -44,6 +44,7 @@ import {
   appendNavIncident,
   serializeNavIncidentLine,
 } from "../src/nav-incident.js";
+import { DROP_STALE_AMEND_ROWS_JS } from "../src/doc-actions.js";
 import {
   FOCUS_INCIDENT_NOTE_MAX,
   buildFocusIncident,
@@ -7043,7 +7044,9 @@ async function voidAndAmendDoc(doctype, name) {
   const payload = JSON.stringify({ doctype: dt, name: nm });
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
+    ${DROP_STALE_AMEND_ROWS_JS}
     var cancelled = false;
+    var droppedRows = [];
     try {
       if (!window.frappe || !frappe.call) return { ok: false, cancelled: false, reason: "ERP Desk not ready." };
       if (!frappe.model || typeof frappe.model.copy_doc !== "function") {
@@ -7074,43 +7077,59 @@ async function voidAndAmendDoc(doctype, name) {
         return { ok: false, cancelled: false, reason: reasonFrom(eAm), step: "is_document_amended" };
       }
 
-      // Read the whole document BEFORE cancelling: the copy is made from the submitted values, and
-      // fetching after the cancel would also work but gives the failure one more place to happen
-      // while the bill is already down.
-      var source;
-      try {
+      var read = async function (step) {
         var got = await frappe.call({
           method: "frappe.client.get",
           args: { doctype: i.doctype, name: i.name },
         });
-        source = got && got.message;
+        var d = got && got.message;
+        if (!d || !d.name) throw new Error("Could not read " + i.name + ".");
+        return d;
+      };
+
+      var source;
+      try {
+        source = await read();
       } catch (eGet) {
         return { ok: false, cancelled: false, reason: reasonFrom(eGet), step: "get" };
       }
-      if (!source || !source.name) {
-        return { ok: false, cancelled: false, reason: "Could not read " + i.name + ".", step: "get" };
-      }
-      if (Number(source.docstatus) !== 1) {
-        return { ok: false, cancelled: false, reason: i.name + " is not submitted, so there is nothing to void.", step: "docstatus" };
+      var startedAt = Number(source.docstatus);
+      // 2 is a legitimate starting point, not an error: Desk offers Amend on a cancelled document,
+      // and it is exactly where a half-done attempt leaves one. Retrying then skips the cancel.
+      if (startedAt !== 1 && startedAt !== 2) {
+        return { ok: false, cancelled: false, reason: i.name + " is a draft, so there is nothing to void.", step: "docstatus" };
       }
 
-      try {
-        await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name });
-        cancelled = true;
-      } catch (eCancel) {
-        return { ok: false, cancelled: false, reason: reasonFrom(eCancel), step: "cancel" };
+      if (startedAt === 1) {
+        try {
+          await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name });
+        } catch (eCancel) {
+          return { ok: false, cancelled: false, reason: reasonFrom(eCancel), step: "cancel" };
+        }
       }
+      cancelled = true;
 
       // From here on a failure strands a cancelled document, so every return says cancelled: true.
       var draft;
       try {
+        // 🔴 Re-read AFTER the cancel, and copy from that — the order Desk uses, and the reason it
+        // uses it. \`on_cancel\` mutates the document: Tax Withholding Entry rows carry Dynamic
+        // Links back to the invoice itself, and \`_clear_old_references()\`
+        // (tax_withholding_entry.py:1091) clears them as part of cancelling. Copying the
+        // pre-cancel snapshot keeps those links pointing at a document that is cancelled by the
+        // time the insert runs, and Frappe refuses it: "Cannot link cancelled document: Row #1:
+        // Taxable Document Name: …". Found by dogfood 2026-09-22, which stranded a real bill.
+        var fresh = await read();
         // \`frappe.model.copy_doc\` registers the copy in the client-side locals cache; the copy is
         // what gets inserted, so it must be taken as a plain object afterwards.
-        draft = frappe.model.copy_doc(source, 1);
+        draft = frappe.model.copy_doc(fresh, 1);
         draft.amended_from = i.name;
         if (frappe.meta.has_field(i.doctype, "amendment_date")) {
           draft.amendment_date = frappe.datetime.obj_to_str(new Date());
         }
+        // See DROP_STALE_AMEND_ROWS_JS: child rows that link back to the document being amended
+        // cannot be true of the amendment, and ERPNext refuses them before it would rebuild them.
+        droppedRows = dropStaleAmendRows(draft, i.name);
       } catch (eCopy) {
         return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(eCopy), step: "copy_doc" };
       }
@@ -7124,7 +7143,7 @@ async function voidAndAmendDoc(doctype, name) {
         if (!made || !made.name) {
           return { ok: false, cancelled: true, name: i.name, reason: "The amended copy returned no name.", step: "insert" };
         }
-        return { ok: true, cancelled: true, name: i.name, amendedName: made.name, docstatus: made.docstatus };
+        return { ok: true, cancelled: true, name: i.name, amendedName: made.name, docstatus: made.docstatus, droppedRows: droppedRows };
       } catch (eIns) {
         return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -7241,6 +7260,17 @@ ipcMain.handle("bill-void-and-amend", async (_e, name) => {
     "bill-void-and-amend",
     `${name} ok=${result && result.ok ? 1 : 0} cancelled=${result && result.cancelled ? 1 : 0} step=${(result && result.step) || ""} amended=${(result && result.amendedName) || ""}${result && result.reason ? ` reason=${result.reason}` : ""}`,
   );
+  // 🔴 A failed attempt can still have cancelled the document, and the page is then showing a
+  // "Submitted" chip over a bill ERP now calls cancelled — so the next click is refused with
+  // "not submitted, so there is nothing to void" against a form that plainly says otherwise
+  // (dogfood 2026-09-22). Re-open it so the skin reads ERP's truth: the chip turns Cancelled and
+  // the action relabels to amend-only, which is the move that actually gets the clerk out of this.
+  if (result && !result.ok && result.cancelled) {
+    dirtyState = { isDirty: false, isNew: false, userEdited: false, baselineJson: null, doc: null };
+    await showBill(`/app/purchase-invoice/${encodeURIComponent(result.name || name)}`, {
+      skipDirtyGate: true,
+    });
+  }
   if (result && result.ok && result.amendedName) {
     // Land the clerk in the amended draft. The old document is cancelled, so leaving the page on it
     // would show a document that no longer means anything — and the draft is where the edit that
