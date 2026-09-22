@@ -4,9 +4,10 @@
 printed purchase-order sheet, count blind, and file a receipt in ERPNext, on a machine holding no
 company data.
 
-**Source spec:** `docs/Receiving Scanner App - Functional Spec.pdf` (17 pages, written 2026-09-21).
+**Source spec:** the Receiving Scanner functional spec (17 pages, written 2026-09-21) — **private,
+not in this repo**; museum **OI-176** says where it lives and what this plan may repeat from it.
 Section numbers below (§3.1, §4A.2 …) refer to it. The spec is the business document; this plan is
-the build document and does not restate the spec's reasoning.
+the build document and does not restate its reasoning.
 
 **Runs beside, not instead of,** `implementation-plan-2026-09-16.md` (Pay Outstanding). Different
 area of the codebase, different agent. The list of files this tranche must not open is under
