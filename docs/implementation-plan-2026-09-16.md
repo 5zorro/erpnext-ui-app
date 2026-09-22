@@ -132,6 +132,39 @@ That last row is the sharp edge of this whole packet, and it is the reason stage
 than first: "change the method on this vendor's five bills" is five cancels, and any of those bills
 that has been partly paid silently loses its payment allocation.
 
+### Stage 1 status — ✅ built and dogfooded 2026-09-22, except OI-170
+
+`src/doc-actions.js` (the registry) + the `main.js` write path + the Bill skin button are built,
+and 5zorro amended two real bills with them. **P1e (OI-170's dominant-number toggle) is not built.**
+Stage 2 (PO / IR / Payment Entry) and stage 3 (the dashboard's just-in-time multi-bill change) are
+not started.
+
+Three things the dogfood taught, all fixed:
+
+1. **A method on the preload is not a method on the page.** `bill-doc-api-adapter.js` is an explicit
+   allow-list, so a method added to the preload and not to it is simply `undefined` — and the page
+   then blamed the shell and advised a restart that could not help. A test now reads what
+   `bill-form-page.js` calls on `api` and fails naming anything the adapter does not provide; it
+   immediately found a second, older instance (`navDebug`, wired to nothing, so a guarded
+   diagnostic had been silently dead).
+2. 🔴 **ERPNext cannot amend a document whose child rows link back to it**, and this is upstream, not
+   ours. A v16 Purchase Invoice carries `Tax Withholding Entry` rows whose Dynamic Links point at
+   the invoice itself; `copy_doc` keeps them on amend (`from_amend` does **not** strip `no_copy`,
+   and these are not `no_copy` anyway) and `_validate_links` (`document.py:477`) rejects them
+   *before* `before_insert` or `validate` could rebuild them. Running the Desk-identical sequence by
+   hand fails the same way, so pressing Amend in Vanilla fails too. We drop child rows that link
+   back to the document being amended — stale by construction — and say which ones did not carry
+   over. A draft issue for upstream is at `erpnext-issue-draft.md` (untracked, not filed).
+3. **A cancelled document is a legitimate starting point**, not a refusal: Desk offers Amend there,
+   and it is exactly where a half-done attempt leaves one. The first failure stranded a real bill
+   (cancel landed, insert failed) and the skin then refused to retry while its chip still read
+   Submitted.
+
+**What the clerk must still do by hand:** cancelling detaches any payments applied to the bill
+(this site unlinks rather than refusing), so they survive unallocated and must be re-applied to the
+amendment. That happened for real on 2026-09-22 — `ACC-PAY-2026-00002` holds 9.00 unallocated
+against an amended bill that reads Unpaid. The confirm warns about it; nothing automates it.
+
 ### What gets built
 
 **A declarative action registry, not a button** (decision 7, 5zorro 2026-09-16: *"this will likely
@@ -431,6 +464,55 @@ a traceback (portions total exactly 100; no two rows the same term; every row ge
 
 **Deliberately not built:** a per-row discount quartet. Vanilla allows it; nobody asked for it, and
 inventing discount numbers on a term master is worse than leaving the feature to Custom.
+
+### 2026-09-22 — P4e's open question, answered, and the trap underneath it
+
+P4e left one thing to confirm: *"the detail row carries its own `mode_of_payment`, so one bill's
+installments can legitimately sit on different rails… Confirm whether a mixed-rail installment bill
+partitions per row or per bill before P1 lands."*
+
+**Per row, and it already works.** `pickTermFields` (`outstanding-bills.js:49`) carries
+`mode_of_payment` onto each exploded installment, so 50% by wire and 50% by ACH on one bill
+partitions correctly. Nothing to build.
+
+**But checking it turned up a live trap.** 5zorro asked whether ERPNext allows paying one bill
+half by card and half by cheque, and whether that collides with our multiple-payments model. The
+answers, read from source and from this instance 2026-09-22:
+
+- **Split payment is always allowed, and payment terms do not constrain it.** One invoice can be
+  referenced by any number of Payment Entries, each with its own method. Terms say what is owed
+  when, not how it may be paid. The only constraint is the one already modelled: one Payment Entry
+  carries one `mode_of_payment`, so two methods means two payments.
+- **A schedule row needs no Payment Term at all.** Only `due_date` and `payment_amount` are
+  required (`payment_schedule.json`), so a fully custom schedule — arbitrary dates and splits, no
+  template — is ordinary ERPNext. Two rules to respect: the rows must sum to the grand total (0.1
+  tolerance) and **no two rows may share a due date** (`validate_payment_schedule_dates` throws).
+  Setting a `payment_terms_template` afterwards regenerates the schedule, so it is either/or.
+- 🔴 **`allocate_payment_based_on_payment_terms` is a flag on the Template, and with it off the
+  schedule rows are never updated by payments.** `PaymentEntry.update_payment_schedule` returns on
+  its first line (`if not ref.payment_term: continue`), so a payment reduces the invoice's own
+  `outstanding_amount` while every row keeps its original `paid_amount`/`outstanding`. Proved on a
+  fully paid bill whose row still read `outstanding 201.00`. All nine templates in this instance had
+  the flag off — which is why 5zorro saw term-level behaviour on some terms and not others.
+
+**Why that is our problem:** `explodeInstallments` decides what is still owed from each row's own
+`outstanding`. On a single-installment bill that never matters (the invoice-level figure is used and
+ERPNext does maintain it). On a multi-installment bill it matters a lot — a part-paid installment
+would keep being proposed and the vendor's total would be overstated.
+
+**Fixed at the source:** `planPaymentTermsCreate` now sets
+`allocate_payment_based_on_payment_terms: 1` on any template with more than one installment, so
+ERPNext maintains the rows and allocates per term. Left off for a single installment, where it buys
+nothing and would change how every ordinary one-row bill is paid in Vanilla.
+
+This was **latent, not live** — multi-installment bills exist here (two 90-row, three 3-row) but
+none had been part-paid, so invoice and row totals still agreed. *Lazier path not taken:* have the
+shell reconcile row outstanding against the invoice's when they disagree. That is the shell
+second-guessing ERP's own numbers, and it would have hidden the cause rather than removed it.
+
+**Still open:** templates created *before* this change still have the flag off. Nothing has been
+part-paid against them yet, so nothing is wrong today, but a multi-installment one would need the
+flag set by hand (or be re-created) before it is part-paid.
 
 ### Still gated: P4a and P4d
 
