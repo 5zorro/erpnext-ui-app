@@ -5,6 +5,7 @@ import {
   nextLinkHighlightIndex,
   resolveLinkPickIndex,
   linkPickerKeyAction,
+  linkPickerOpenQuery,
   nextFieldAfterLinkPick,
   nextItemFieldAfterEdit,
   nextItemFocusAfterEdit,
@@ -195,5 +196,34 @@ describe("scrollLinkOptionIntoView", () => {
     assert.equal(scrollLinkOptionIntoView(el), true);
     assert.deepEqual(seen, { block: "nearest" });
     assert.equal(scrollLinkOptionIntoView(null), false);
+  });
+});
+
+// 🔴 Dogfood 2026-09-22: opening the payment-terms dropdown on a Bill offered only the term the
+// Bill already had, with eight other templates sitting in the ERP -- because opening the picker
+// searched for whatever was in the field, and what was in the field was the committed value. Every
+// populated Link field had the same problem, which on a submitted document is most of them.
+describe("linkPickerOpenQuery", () => {
+  it("does not filter by a value that is merely already selected", () => {
+    assert.equal(linkPickerOpenQuery("NET_30_DAYS (POSTAL) -3", "NET_30_DAYS (POSTAL) -3"), "");
+  });
+
+  it("keeps text typed since the last commit as a filter", () => {
+    assert.equal(linkPickerOpenQuery("NET", "NET_30_DAYS (POSTAL) -3"), "NET");
+  });
+
+  it("offers everything on an empty field", () => {
+    assert.equal(linkPickerOpenQuery("", ""), "");
+    assert.equal(linkPickerOpenQuery("", undefined), "");
+  });
+
+  it("treats a never-committed field's text as a filter", () => {
+    assert.equal(linkPickerOpenQuery("ACME", undefined), "ACME");
+    assert.equal(linkPickerOpenQuery("ACME", null), "ACME");
+  });
+
+  it("does not throw on junk", () => {
+    assert.equal(linkPickerOpenQuery(null, null), "");
+    assert.equal(linkPickerOpenQuery(undefined, undefined), "");
   });
 });
