@@ -67,6 +67,10 @@ contextBridge.exposeInMainWorld("erpDoc", {
   fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
   createCreditMemo: (sourceBillName) =>
     ipcRenderer.invoke("bill-create-credit-memo", sourceBillName || ""),
+  // P1 / OI-171. Two channels on purpose: the facts are read first so the confirm can name what it
+  // is about to do, and the clerk can still back out after reading them.
+  voidAmendFacts: (name) => ipcRenderer.invoke("bill-void-amend-facts", name || ""),
+  voidAndAmend: (name) => ipcRenderer.invoke("bill-void-and-amend", name || ""),
   retryLoad: () => invokeSkin("bill-retry-load", "doc-retry-load"),
   openVanilla: async () =>
     ipcRenderer.send((await billActive()) ? "bill-open-vanilla" : "doc-open-vanilla"),
