@@ -13,11 +13,23 @@ the build document and does not restate its reasoning.
 area of the codebase, different agent. The list of files this tranche must not open is under
 **Boundary with the 2026-09-16 tranche**.
 
-> **Status 2026-09-21: direction set by 5zorro, nothing built.** Six packets, ordered at the bottom.
+> **Status, end of 2026-09-21.** Direction set by 5zorro; six packets, ordered at the bottom.
+> **Built:** P1a (Code 128 encoder) and P1b (label payload codec), 22 tests, `npm test` green at
+> 1812. **Next action:** P1c — the printable sheet model, whose defining test is that no quantity
+> can appear in it under any name — then P1d, the page that prints it.
+>
+> **Nothing has been run against a phone, a printer or a scanner yet.** Every claim in this plan
+> about how a device behaves is still a claim.
 
 **A note on language.** This plan is meant to be audited by someone who does not write the code, so
 technical terms are explained the first time they appear. Where a term is an exact ERPNext name it
 is kept exactly, because getting it wrong later costs more than the awkwardness now.
+
+**A note on what this file may say.** It is tracked and public. It must not name the legacy
+accounting system, state the size of the item master, or frame the work as a migration — write "the
+legacy system" and "~20k item numbers" instead (5zorro 2026-09-21). Museum **OI-176** holds the
+mapping. The rule covers code and test comments too, which is where one slipped through the first
+time.
 
 ---
 
@@ -119,9 +131,16 @@ This tranche is **new files only**, plus `docs/`. Do not open:
 `src/pay-flow-*` · `src/flow-node-density.js` · `e2e/scaffold-pay-outstanding.spec.js` ·
 `docs/implementation-plan-2026-09-08.md` · `docs/implementation-plan-2026-09-16.md`.
 
-`HANDOFF.md` and `CLAUDE.md` are **also deferred**, deliberately. Two entries are owed there and are
-listed under **Registration owed** at the bottom — they are one-line edits to make once the other
-tranche is clear of those files, not now.
+**That list is a snapshot, not a fence.** It was written from `git status` on 2026-09-21 and the
+other tranche's working set grew during that same day — `electron/main.js`, `electron/doc-form.html`,
+`src/bill-form-page.js`, `src/doc-actions.js` and more appeared after the list was drafted. Run
+`git status` and look before opening anything outside `src/receiving/`, `pwa/receiving/`,
+`ops/receiving-*/` and this file.
+
+`HANDOFF.md` is **deferred**, deliberately: two entries are owed there and are listed under
+**Registration owed** at the bottom — one-line edits to make once the other tranche is clear of that
+file, not now. `CLAUDE.md` is gitignored and therefore safe to edit; it already carries a pointer to
+this tranche, so a fresh session finds this plan from the first file in the read order.
 
 ---
 
@@ -144,6 +163,15 @@ the current process on day one, and speed is what stops people from working arou
   *Lazier path:* the `bwip-js` package. Rejected because it only solves printing — the phone side
   still needs its own code to take a scanned string apart — and because this repo currently ships
   zero runtime dependencies and an extra one would have to be cached on the phone for offline use.
+
+  **How to regenerate the table or the test vectors** (the working files were scratch and are gone;
+  this recipe is the whole of what was done). `pip install python-barcode`, then
+  `barcode.charsets.code128` exposes `CODES` — 106 module patterns, index = symbol value — plus
+  `STOP`, which needs `"11"` appended to close the symbol. `Code128(text).build()[0]` gives a full
+  reference encoding. **Its encoder switches to code set C on digit runs**, producing a different
+  and narrower symbol for the same data, so a vector is only usable for exact comparison if it came
+  back in code set B alone: decode it symbol by symbol and reject any containing 99, 100, 101 or 98,
+  which are the code-set switches. That is also the observation behind the width lever in P1e.
 - **P1b — ✅ BUILT 2026-09-21. `src/receiving/label-payload.js`** (pure) + 13 tests. Builds and takes
   apart the payload described in §4A.2: company prefix, the item number exactly as it already
   exists, and a trailing check character. Taking one apart returns either the item number or a
@@ -425,6 +453,18 @@ the logic is testable without a phone and the screens are not.
 - Optional location capture at submit. §8 is right that this is a labour-relations decision before
   it is a technical one, and phase 1 does not need it.
 - Any change to `electron/`.
+
+## Waiting on 5zorro (nothing here is an agent's call)
+
+| # | What | Why it blocks something |
+|---|---|---|
+| 1 | **Do the ~20k item numbers use lowercase letters, or anything outside digits, capitals and `- . $ / + %`?** Export the item list from the legacy system and look | The cheapest question here, and it gates P1e and the final payload format. A printed label cannot carry lowercase. The code refuses it rather than quietly changing it, so this surfaces on the first real item number either way — better to know now (**R5**) |
+| 2 | **The label-width measurement** (P1e) — longest item number, plus prefix and check character, against the label maker's maximum width | The payload format is not final until this exists. If it comes out too wide, the first lever is the encoder's numeric mode, not the item numbers |
+| 3 | **Veto or accept mod-43** in place of the spec's Luhn check digit (P1b) | Already built that way. Reversing it is a one-function change, and it gets more expensive once labels are printed |
+| 4 | **Does the line barcode encode the item number or the specific order line?** (**R1**) | Recommendation is the item number, with a prompt when an item repeats on one order. Decides P1c |
+| 5 | **Restrict, or only attribute?** (P3a vs its lazier path, and spec Q8) | Raising the order quantity to a restricted permission tier changes the purchase-order form for every role. Phase 1 exists partly to measure that, but the fallback — timestamp and attribute rather than restrict — is a legitimate end state, not a failure |
+| 6 | **Keep this plan tracked, or make it private?** | It is scrubbed and safe to track, and the three-file orientation contract assumes an off-machine agent can read it. Gitignoring it would quietly break that. Recommendation: keep it tracked |
+| 7 | **Three pre-existing public mentions** of the legacy system, listed in museum **OI-176** | Removing them from history means rewriting pushed history and force-pushing a repo with a merged PR on `main`. Editing the files going forward is cheap; erasing history is not. No agent should do either unasked |
 
 ## Registration owed (deliberately deferred)
 
