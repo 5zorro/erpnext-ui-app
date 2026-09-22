@@ -232,6 +232,11 @@ import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
 import {
+  offeredDocActions,
+  describeVoidAndAmend,
+  describeVoidAndAmendResult,
+} from "../src/doc-actions.js";
+import {
   isTaxTableNavField,
   neighborTaxCell,
   nextTaxAddRowTabTarget,
@@ -555,6 +560,7 @@ export async function bootBillFormPage(api) {
     find: document.getElementById("btn-find"),
     newBill: document.getElementById("btn-new"),
     creditMemo: document.getElementById("btn-credit-memo"),
+    voidAmend: document.getElementById("btn-void-amend"),
     creditMemoToggleSection: document.getElementById("credit-memo-toggle"),
     isReturn: document.getElementById("f-is-return"),
     creditLinksBlock: document.getElementById("credit-links-block"),
@@ -4392,6 +4398,17 @@ export async function bootBillFormPage(api) {
     if (el.creditMemo) {
       el.creditMemo.hidden = Number(doc.docstatus) !== 1 || isCreditMemoBill(doc);
     }
+    // P1 / OI-171: the registry decides, so this skin does not carry its own opinion about when
+    // an action applies. `alreadyAmended` is deliberately not consulted here — it costs an ERP
+    // round trip, and a repaint happens far more often than a click. The click reads it along with
+    // the rest of the facts it needs for the confirm, and refuses there if ERP says no.
+    if (el.voidAmend) {
+      const [action] = offeredDocActions("purchase-invoice", {
+        docstatus: doc.docstatus,
+        dirty: userEdited,
+      });
+      el.voidAmend.hidden = !action;
+    }
     void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
@@ -5050,6 +5067,80 @@ export async function bootBillFormPage(api) {
           "err",
         );
       }
+    };
+  }
+  if (el.voidAmend) {
+    el.voidAmend.onclick = async () => {
+      const sourceName = lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "";
+      const [action] = offeredDocActions("purchase-invoice", {
+        docstatus: lastDoc && lastDoc.docstatus,
+        dirty: userEdited,
+      });
+      if (!sourceName || !action) {
+        setStatus("Only a saved, submitted Bill with no unsaved changes can be voided and amended.", "warn");
+        return;
+      }
+      if (!api || !api.voidAndAmend || !api.voidAmendFacts) {
+        // Not "restart the shell": this is a wiring gap (the adapter in bill-doc-api-adapter.js
+        // has to name every method it forwards), and a restart cannot fix it. Saying the wrong
+        // remedy costs more than saying none — dogfood 2026-09-22.
+        setStatus(
+          "Void and amend is not wired into this build — the Bill page's API adapter is missing it.",
+          "err",
+        );
+        return;
+      }
+
+      // Read first, ask second. The three things that matter — whether ERP will allow it at all,
+      // how many payments come unstuck, and which way this site handles that — are all invisible
+      // on the form, and a confirm that cannot name them is not worth showing.
+      setStatus(`Checking what voiding ${sourceName} would affect…`);
+      let facts;
+      try {
+        facts = await api.voidAmendFacts(sourceName);
+      } catch (err) {
+        setStatus(`Could not check ${sourceName}: ${String(err && err.message ? err.message : err)}`, "err");
+        return;
+      }
+      if (!facts || !facts.ok) {
+        setStatus((facts && facts.reason) || `Could not check ${sourceName}.`, "err");
+        return;
+      }
+      if (facts.alreadyAmended) {
+        setStatus(
+          `${sourceName} has already been amended once, which is all ERPNext allows. Open the amendment and edit that instead.`,
+          "warn",
+        );
+        return;
+      }
+
+      const warning = describeVoidAndAmend({
+        name: sourceName,
+        supplierRef: lastDoc && lastDoc.bill_no ? String(lastDoc.bill_no) : "",
+        linkedPaymentCount: facts.linkedPaymentCount,
+        unlinksPaymentsOnCancel: facts.unlinksPaymentsOnCancel,
+      });
+      setStatus("");
+      // Markdown emphasis is for the terminal-style panels elsewhere; strip it for a native confirm.
+      const body = warning.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
+      if (!window.confirm(`${warning.title}\n\n${body}`)) return;
+
+      setStatus(`Voiding ${sourceName} and creating the amended copy…`);
+      let result;
+      try {
+        result = await api.voidAndAmend(sourceName);
+      } catch (err) {
+        // An exception here is the worst case: the cancel may or may not have landed, and this
+        // page cannot tell. Say that, rather than implying nothing happened.
+        setStatus(
+          `Lost contact while voiding ${sourceName}: ${String(err && err.message ? err.message : err)}. ` +
+            "Check the Bill in ERPNext before retrying — it may already be cancelled.",
+          "err",
+        );
+        return;
+      }
+      const told = describeVoidAndAmendResult(result);
+      setStatus(`${told.headline}${told.detail ? ` ${told.detail}` : ""}`, told.ok ? "" : "err");
     };
   }
   if (el.informalLinkBill) {
