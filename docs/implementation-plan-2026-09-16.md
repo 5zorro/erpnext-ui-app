@@ -91,6 +91,87 @@ Closes open question 6 from the 2026-09-08 plan. Nothing to build.
 
 ---
 
+## P1 — OI-169 + OI-171 + OI-170: edit means void and amend
+
+> **Re-scoped 2026-09-21 (5zorro).** The original P1 below proposed a shell-side override map that
+> never reaches ERPNext. That was the wrong layer. `mode_of_payment` sets no `allow_on_submit` on
+> either the invoice header or the payment-schedule row (`purchase_invoice.json`,
+> `payment_schedule.json`, read 2026-09-21), so once a bill is submitted **ERPNext's only way to
+> change it is cancel + amend**. 5zorro: *"if i want the mode of payment to be ach, then i think
+> vanilla requires that i void and amend the associated bills until it is ach."* Correct. So P1 is
+> now the Edit (void and amend) action, and the old override map is dead — a shell-side fiction
+> sitting on top of a document ERP still holds the old value for is worse than the honest write.
+
+**Three stages, in order** (5zorro 2026-09-21): an Edit button on the **Bill** Doc skin first, then
+the same action on the **other Doc skins** (PO, IR, Payment Entry), then the **Pay Outstanding
+dashboard's** just-in-time mode-of-payment change, which may amend several bills at once.
+
+**OI-170 ships with stage 1, not after it.** Amending stamps a *new* ERPNext ID on the document —
+`_set_amended_name` (`naming.py:549`) names it `<original>-1`, then `-2` — while the vendor's own
+invoice number and the PO logbook number stay put. 5zorro: *"i mostly track bills and po's based on
+their 'logbook number' or their 'supplier ref number' and not the 'unique id stamped by erpnext'."*
+The moment amend becomes an everyday action, the number the clerk tracks by is the one that
+survives it, so which number reads as dominant stops being cosmetic.
+
+### Verified against the running ERPNext, 2026-09-21
+
+Terms: **void and amend** is ERPNext's own two-step — cancel the submitted document (it stays in the
+system, marked cancelled), then create an editable copy of it that points back at the original.
+
+| Fact | Where it was read | What it means for the build |
+|---|---|---|
+| `frappe.client.cancel(doctype, name)` is whitelisted | `frappe/client.py:285` | The cancel half is one ordinary call over the bridge we already use |
+| There is **no** server-side "amend" call | `form.js:1129 amend_doc` | Amend is client-side: copy the cancelled doc, set `amended_from`, insert it. We do the same, in the ERP view, with ERPNext's own function |
+| `frappe.model.copy_doc(doc, from_amend)` builds the copy | `create_new.js:281` | 🔴 `from_amend` **keeps** `no_copy` fields rather than stripping them (`is_no_copy = !from_amend && …`) — the opposite of the obvious guess. It also drops any key that is not a real docfield, and all Password fields. **We call it rather than reimplement it** |
+| A document can be amended **once** | `client.py:416 is_document_amended`, checked by Desk before amending | The action must make the same check, or the clerk meets a traceback on insert |
+| The amendment cannot be made until the original is cancelled | `document.py:618 validate_amended_from` | Cancel and amend are one action to the clerk, but two steps that can fail independently — and failing between them leaves a cancelled document and no replacement |
+| The new document gets a **new name** | `naming.py:549 _set_amended_name` | This is OI-170's whole reason. `ACC-PINV-2026-00001` becomes `…-00001-1` |
+| 🔴 **`unlink_payment_on_cancellation_of_invoice = 1` in this sandbox** | `tabSingles`, read 2026-09-21; enforced at `accounts_controller.py:2048` | Cancelling a bill that has payments against it **does not stop** — it quietly **detaches** them. The payments stay submitted and become unallocated, and the bill's outstanding goes back up. The clerk must re-apply them to the amended bill by hand |
+
+That last row is the sharp edge of this whole packet, and it is the reason stage 3 is last rather
+than first: "change the method on this vendor's five bills" is five cancels, and any of those bills
+that has been partly paid silently loses its payment allocation.
+
+### What gets built
+
+**A declarative action registry, not a button** (decision 7, 5zorro 2026-09-16: *"this will likely
+be reused on every form entry doc skin. Im hoping that the architecture for this can be dynamic and
+easily extended to the shapes of the other forms."*). This is what P7 scoped; P1 now builds it,
+because P1 is its first member and a registry with one member written inline is a button.
+
+- **P1a — `src/doc-actions.js` (pure).** Per doctype, a list of actions: id, label, when it is
+  offered (`docstatus`, whether the form is dirty, whether the document has already been amended),
+  what the clerk is told before it runs, and where the shell goes afterwards. `offeredActions(ctx)`
+  returns what to render; nothing about ERP calls lives here. Void-and-amend (OI-171) is the first
+  entry; copy-as-draft (OI-175) and the Bill ↔ IR switch (OI-174) are later rows in the same table,
+  which is the evidence the shape is right rather than speculative.
+- **P1b — the consequences, stated before the click.** Not a generic "are you sure": the count of
+  payments that will be detached (read first, from the live document), the new ID the document will
+  get, and the fact that the vendor's own number does not change. A confirm that does not name what
+  it is about to do is not a confirm.
+- **P1c — the ERP call, mirroring Desk.** In `main.js` over `erpEval`: check `is_document_amended`,
+  `frappe.client.cancel`, then `frappe.model.copy_doc(doc, 1)` + `amended_from` + `frappe.client.insert`.
+  🔴 **Use ERPNext's own `copy_doc`.** Reimplementing its field rules in `src/` would be a second
+  copy of a rule we do not own, and it has already surprised us once (the `no_copy` inversion above).
+  Needs `frappe.model.with_doctype` first, since the meta may not be loaded in the ERP view.
+- **P1d — the half-done state is the dangerous one.** Cancel can succeed and insert can fail. The
+  result must say exactly which, name the cancelled document, and offer to retry the amend against
+  it — never report a flat "failed" over a bill that is now cancelled with no replacement.
+- **P1e — OI-170's toggle.** Which number is dominant on Bill and PO surfaces, persisted the way
+  `lens-prefs.js` persists the lens, with the demoted number one click away.
+
+**Stage 2** adds PO / IR / Payment Entry as rows in the registry, plus whatever each one's cancel
+rules turn out to forbid. **Stage 3** is the dashboard's just-in-time change: default the new method
+to *all this vendor's outstanding bills* (5zorro: *"all payment methods are generally the same for a
+single vendor, so if it is weird, then there is a reason"*), let a single bill opt out, and run the
+amend per bill with a per-bill result — because a batch that reports one outcome for five documents
+will be wrong about at least one of them.
+
+**Not in P1:** editing `payment_schedule` in place (still impossible), and any attempt to preserve
+the ERPNext ID across an amendment (`_set_amended_name` owns that; fighting it is not Clean Core).
+
+### (Original statement — superseded 2026-09-21, kept until closeout)
+
 ## P1 — OI-169: the mode of payment is a suggestion, so stop enforcing it
 
 **Observed** (5zorro 2026-09-16, dogfooding): the Create Payment grouping would not allow overriding
@@ -139,7 +220,79 @@ vendor has one wire bill among twenty cheques — which is the case that produce
 
 ---
 
-## P2 — OI-172: batch all overdue, and the clamp underneath it
+## P2 — ✅ BUILT 2026-09-21. OI-172: batch all overdue, and the clamp underneath it
+
+**What landed.** `paymentBatchEconomics` takes `today` and clamps the *proposal* — never the
+obligation. **P2b was not built and is not needed:** the clamp alone collapses the overdue groups,
+which is what the finding below predicted and a test now pins (four groups 28 days apart become one
+payment at zero float cost). P2c needed no code — the method partition already gives mixed-rail
+overdue bills two Payment Entries. P2d is moot without a button.
+
+**Backdating (5zorro 2026-09-21):** *"i think erpnext allows backdating, don't make it default, but
+allow it if im right."* Correct — `posting_date` on Payment Entry carries no restriction (checked
+`payment_entry.json` + the controller), and the write path already passed `payOn` through unvalidated.
+The gap was upstream: the check drawer's date line was fixed text in *every* mode. It is now a real
+editable date field in proposal/blank (disabled in edit/view, where ERP forbids it and
+`mountCheckDocEdit` does not save it), pre-filled with the clamped default, refusing empty rather
+than silently re-substituting the suggestion.
+
+### Review 2026-09-21 — two places the same fact was worked out twice, and the copies could disagree
+
+Terms used below: the **clamp** is the rule that moves an overdue payment forward to today, since a
+payment cannot be dated in the past. A **rail** is how a payment physically travels — cheque, ACH,
+wire — which matters because a postal delay day stops a cheque and not an ACH. The **audit** is the
+balloon that explains why a payment is on the date it is on.
+
+The first cut had the engine decide a date and then had the audit work the same date out again from
+scratch. Two calculations of one fact can drift apart, and both of these would have. Both were
+already settled by rules written down elsewhere, so neither needed a new decision.
+
+1. **The audit re-walked the calendar instead of reading what the engine recorded.**
+   `explainGroupMembership` recomputed each bill's pay-by date from `bill.dueDate`, so it agreed
+   with the engine only while the caller remembered to hand it an identical `delayDay` — a second
+   walk, structurally able to disagree. The governing rule is this plan's predecessor, on the fee:
+   *"read off the group (recorded per-method fee…), **never re-derived from prefs**"*, and
+   `bank-business-days.js`'s *"one walk, not two — an audit trail that can disagree with the engine
+   it audits is worse than none, because it is believed."* Dates are the same kind of input, so they
+   now get the same treatment: each suggested payment writes down the dates it was built from
+   (`payByOf`) and the clamp date that applied to it (`clampedTo`), and the audit reads those
+   instead of recalculating. 🔴 **This is the one P1 would have broken.** Overriding a bill's method
+   changes its rail, which changes which delay days apply, which changes the date — so the engine's
+   answer and the audit's answer would have parted company, and the audit would have announced
+   "already overdue" about a bill that was never late. Saying *why* a date moved is now allowed only
+   when the engine wrote down that it moved it; otherwise the audit reports what it can see and
+   claims no cause.
+2. **Lateness was measured from the pay-by date, not the obligation.**
+   `payment-date-derivation.js` already fixes this: *"everything starts from the stored `due_date`…
+   the stored date is what the vendor is owed"*, and it carries `dueDate` and `payOn` as separate
+   fields precisely because they are different things (plus an `obligation` field that exists
+   because *"a discount deadline called a 'due date' is a wrong claim"*). The pay-by date walks
+   *earlier* over weekends, so measuring from it reported a bill due Sunday as two days later than
+   ERP's own count — and `bill-paid.js` already derives overdue state from ERP, so the dashboard
+   would have disagreed with itself. Lateness is now `due_date → payOn`.
+
+Two more fixed in the same pass:
+
+- **The clamp could land on a day you cannot pay on.** Every payment date the app proposes had
+  always been a real banking day, because the calendar only ever walked *backward* off a weekend or
+  holiday ("earlier, always" — being early is recoverable, being late is not). Using today's date
+  raw broke that: it could propose a Saturday, or one of the very days the delay calendar you signed
+  off calls closed. The calendar now also walks *forward*, for the overdue case only, sharing the
+  same loop so a day cannot be closed in one direction and open in the other — and scoped by rail,
+  so a cheque waits out a postal delay day and an ACH does not.
+- **The derivation walk stopped short of the date on screen** — the bug 5zorro caught on 2026-09-12,
+  re-opened one rule further down. The clamp is now a step in `payment-date-derivation.js`
+  (`rule: "overdue"`, the only rule in that module that moves a date *later*, with the forward
+  weekend/holiday/delay days as their own steps), so the table ends on the date the node shows.
+  `derivationEl`'s silent `|| derivations[0]` anchor fallback now says so instead of printing one
+  date's summary under another's heading.
+
+**Known residual:** a bill whose discount window has already closed still proposes a discount
+capture dated in the past. The clamp deliberately does not touch that path (a missed discount is
+missed, not moved), but it is now the only node on the dashboard that can show a past date. Decide
+whether to refuse the capture or mark it — not scheduled here.
+
+### (Original statement)
 
 **5zorro:** *"it is worse than the apps own math, but if today is 2 weeks later because the
 paperwork wasn't filed, then it needs to be filed 2 weeks ago… It is already 'earning float' in
@@ -404,6 +557,17 @@ test is `npm run start:chaos`.
 
 ---
 
+## P7 — absorbed into P1 on 2026-09-21
+
+The registry this packet scoped is now being built in **P1**, because P1's void-and-amend turned out
+to be its first member and a registry with one member written inline is just a button. OI-175
+(copy-as-draft) and OI-174 (the Bill ↔ IR switch) stay unbuilt, but they are now rows to add to an
+existing table rather than a mechanism still to be designed. The precondition this packet named —
+*"needs the ERPNext cancel/amend and duplicate call shapes confirmed first"* — was met 2026-09-21;
+the findings are in P1's table.
+
+### (Original statement)
+
 ## P7 — OI-171 / OI-175: scoped, not built
 
 5zorro wants void-and-amend (OI-171) and copy-as-draft (OI-175) as **doc-skin actions**, extensible
@@ -420,12 +584,29 @@ and not speculative.
 
 ## Order
 
-`P1` → `P2a` (the clamp, which may absorb most of `P2b`) → `P5` → `P6` → `P3` → `P4`.
+Originally `P1` → `P2a` → `P5` → `P6` → `P3` → `P4`. What actually happened, and why:
 
-P1 and P2 are corrections to a surface being dogfooded now and outrank everything else. P5 and P6
-are small and land while the corrections are still warm. P3 is the largest remaining surface and the
-least blocking. P4 is last because its precondition (P4a) is a live write-path run, and because the
-modal is worth little until a clerk has hit a wrong term on a dashboard that now reads honestly.
+`P3` → `P4` (2026-09-16) → `P2` (2026-09-21) → **`P1` next** → `P5` → `P6`.
+
+P1 did not slip, it changed shape. Scoped here as a shell-side override map that never reaches ERP,
+it turned out to be solving at the wrong layer: `mode_of_payment` sets no `allow_on_submit` on
+either the header or the schedule row (`purchase_invoice.json` / `payment_schedule.json`, checked
+2026-09-21), so on a submitted bill **cancel + amend is the only way to change it** — which is
+OI-171, already scoped in P7. So P1 is now the void-and-amend action, in three stages: the Bill Doc
+skin's edit button, then the other skins, then the dashboard's just-in-time possibly-multi-bill
+mode edits. **OI-170 comes with it, not after it**: `_set_amended_name` (`naming.py:549`) stamps a
+new `name` on every amendment, so the ERPNext ID you were tracking by changes each time while the
+logbook / supplier ref does not — which makes "which number is dominant on screen" load-bearing the
+moment amend becomes an everyday action rather than a rare escape hatch.
+
+P3 and P4 went first because that re-derivation had to happen before P1 was buildable at all.
+
+**What P1 inherits from P2's review:** the bill's method decides a date in two engine resolvers
+(`payByResolver`, `clampResolver`) and once in the view (`derivationForBill`'s probe,
+`pay-outstanding.src.html`). The engine pair both reach it through `methodKeyOf`, so making that one
+function override-aware carries both; the view one is separate and is the easy one to miss. The
+audit no longer re-derives dates at all, so an override changing the rail can no longer desynchronise
+it from the engine.
 
 ## Out of this tranche
 
