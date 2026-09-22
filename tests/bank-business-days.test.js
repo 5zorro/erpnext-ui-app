@@ -8,6 +8,8 @@ import {
   isBridgeDay,
   effectivePayByDate,
   explainPayByDate,
+  explainNextPayableDate,
+  nextPayableOnOrAfter,
 } from "../src/bank-business-days.js";
 
 // Ground truth below was computed independently with plain `new Date(Date.UTC(...)).getUTCDay()`
@@ -199,5 +201,48 @@ describe("bank-business-days: explainPayByDate", () => {
     // 2026-11-27 is the Friday after Thanksgiving: a bridge day, but not a weekend or a holiday.
     const [first] = explainPayByDate("2026-11-27").skipped;
     assert.deepEqual(first, { date: "2026-11-27", reasons: ["bridge"] });
+  });
+});
+
+// P2a / OI-172. The clamp needs the first payable day *after* a date, which is the opposite of
+// everything else this module does — so the one thing worth nailing down is that "unpayable" means
+// the same thing in both directions. One loop, approached from either side.
+describe("nextPayableOnOrAfter — the forward walk the overdue clamp uses", () => {
+  it("returns an already-payable day unchanged", () => {
+    assert.equal(nextPayableOnOrAfter("2026-03-23"), "2026-03-23"); // a plain Monday
+  });
+
+  it("walks forward over a weekend instead of back over it", () => {
+    assert.equal(nextPayableOnOrAfter("2026-03-21"), "2026-03-23"); // Saturday -> Monday
+    assert.equal(effectivePayByDate("2026-03-21"), "2026-03-20", "the pay-by walk still goes back");
+  });
+
+  it("walks forward over a federal holiday and the weekend behind it", () => {
+    // 2026-07-04 is a Saturday, so Independence Day is observed Friday the 3rd.
+    assert.equal(nextPayableOnOrAfter("2026-07-03"), "2026-07-06");
+  });
+
+  it("agrees with the backward walk about which days are unpayable, every day of 2026", () => {
+    let d = new Date(Date.UTC(2026, 0, 1));
+    for (let i = 0; i < 365; i++) {
+      const iso = d.toISOString().slice(0, 10);
+      const forward = explainNextPayableDate(iso);
+      const backward = explainPayByDate(iso);
+      // A day is payable iff neither walk had to move off it.
+      assert.equal(
+        forward.date === iso,
+        backward.date === iso,
+        `${iso}: forward says ${forward.date}, backward says ${backward.date}`,
+      );
+      d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+    }
+  });
+
+  it("takes the ratified calendar the same way the backward walk does", () => {
+    const probe = (iso) => (iso === "2026-04-03" ? "Good Friday — mail delayed" : "");
+    assert.equal(nextPayableOnOrAfter("2026-04-03"), "2026-04-03", "no calendar, no delay");
+    assert.equal(nextPayableOnOrAfter("2026-04-03", { delayDay: probe }), "2026-04-06");
+    const walk = explainNextPayableDate("2026-04-03", { delayDay: probe });
+    assert.equal(walk.skipped[0].note, "Good Friday — mail delayed");
   });
 });

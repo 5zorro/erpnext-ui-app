@@ -1664,9 +1664,15 @@
       // bound to this bill's own method here rather than passed through method-blind.
       const probe = delayProbe();
       const delay = probe ? { delayDay: (iso) => probe(iso, bill.modeOfPayment || "") } : {};
+      // P2a / OI-172: the same `today` the engine was given, so this walk ends on the date the node
+      // beside it shows. Without it the table stopped on an already-passed date while the node said
+      // today — the exact disconnect 5zorro caught on 2026-09-12, one rule further down the walk.
+      // A discount capture is excluded: its deadline is the discount window, and a window that has
+      // already closed is not clamped forward, it is simply missed (see `tryDiscountCapture`).
+      const clamp = isDiscount ? {} : { today: todayIso() };
       return derivePaymentDate(
         isDiscount ? { ...bill, dueDate: bill.discountDate || bill.dueDate } : bill,
-        isDiscount ? { obligation: "discount-window", ...delay } : delay,
+        isDiscount ? { obligation: "discount-window", ...delay } : { ...delay, ...clamp },
       );
     }
 
@@ -1766,7 +1772,13 @@
       if (!members.length) return null;
 
       const derivations = members.map((bill) => ({ bill, d: derivationForBill(bill, group) }));
-      const anchor = derivations.find((x) => x.d.payOn === group.payOn) || derivations[0];
+      // The anchor is the member whose own derivation lands on the group's date -- that derivation
+      // is the one that explains it. The fallback exists for a group whose date no member derives
+      // (which should not happen now that the clamp is a step in the same walk), and it must not
+      // pass silently: printing `${group.payOn}: <summary of some other date's walk>` is a sentence
+      // that reads as an explanation while explaining a different date.
+      const matched = derivations.find((x) => x.d.payOn === group.payOn);
+      const anchor = matched || derivations[0];
 
       const wrap = document.createElement("div");
       wrap.className = "deriv";
@@ -1775,7 +1787,9 @@
       const short = document.createElement("div");
       short.className = "deriv-note";
       short.dataset.testid = "derivation-summary";
-      short.textContent = `${group.payOn}: ${summarizePaymentDate(anchor.d)}`;
+      short.textContent = matched
+        ? `${group.payOn}: ${summarizePaymentDate(anchor.d)}`
+        : `${group.payOn}: no member's own derivation lands on this date — ${summarizePaymentDate(anchor.d)} describes ${anchor.d.payOn}.`;
       wrap.appendChild(short);
 
       const hint = document.createElement("div");
@@ -2503,6 +2517,7 @@
           apr: prefs.apr,
           feeForMethod,
           runBreaks, // C8: no batch crosses the check run
+          today: todayIso(), // P2a / OI-172: an overdue proposal can't be backdated, only the past can
           ...delayOpt(), // P3d: the ratified calendar, once there is one
         });
         shownGroups.push(...groups);
