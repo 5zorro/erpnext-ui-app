@@ -109,6 +109,28 @@
   color: #475569;
   font-size: 12px;
 }
+/* P2a / OI-172: the date line is editable (like a physical check's own date), so it gets the
+   payee/amount treatment -- blends into the printed face rather than looking like a form widget --
+   not the boxed `.check-doc-input` used in the write section below. Disabled (edit/view) keeps
+   full-opacity text via -webkit-text-fill-color, since the UA's default greyed-out disabled look
+   would otherwise make a real document's own date read as unset. */
+.check-doc-date-input {
+  border: none;
+  border-bottom: 1px solid #cbd5e1;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  padding: 0 0 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.check-doc-date-input:disabled {
+  border-bottom-color: transparent;
+  opacity: 1;
+  -webkit-text-fill-color: currentColor;
+}
 
 .check-doc-stub {
   margin-top: 14px;

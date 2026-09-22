@@ -298,3 +298,75 @@ describe("payment-date-derivation: the ratified calendar in the audit (P3d)", ()
     assert.match(summarizePaymentDate(withCalendar), /delay day/);
   });
 });
+
+// P2a / OI-172. 5zorro 2026-09-12 caught a walk that ended on 7/31 while the payment beside it said
+// 7/28, "and nothing connected the two". The overdue clamp moves a date for a new reason, so it has
+// to be a step in this same list or it re-opens exactly that gap one rule further down.
+describe("derivePaymentDate — the overdue clamp (P2a / OI-172)", () => {
+  const overdue = (over = {}) => ({
+    installmentKey: "PI-LATE",
+    supplier: "SUP-A",
+    postingDate: "2026-01-30",
+    dueDate: "2026-03-02", // a Monday: the calendar itself moves nothing
+    outstanding: 500,
+    ...over,
+  });
+
+  it("does nothing at all without `today`", () => {
+    const d = derivePaymentDate(overdue());
+    assert.equal(d.payOn, "2026-03-02");
+    assert.equal(d.overdueClamped, false);
+    assert.equal(d.onTime, true);
+    assert.ok(!d.steps.some((s) => s.rule === "overdue"));
+  });
+
+  it("ends the walk on the date the payment is actually proposed for", () => {
+    const d = derivePaymentDate(overdue(), { today: "2026-03-20" });
+    assert.equal(d.payOn, "2026-03-20");
+    assert.equal(d.steps[d.steps.length - 1].date, d.payOn, "the last step IS the answer");
+    assert.equal(d.overdueClamped, true);
+    assert.equal(d.totalDeltaDays, 18, "positive: the one rule that moves a date later");
+
+    const step = d.steps.find((s) => s.rule === "overdue");
+    assert.equal(step.label, "Already overdue");
+    assert.equal(step.deltaDays, 18);
+    assert.equal(step.severity, "warn");
+    assert.match(step.detail, /cannot be backdated/);
+  });
+
+  it("is never 'exactly on time', even when its own due date was a payable day", () => {
+    const d = derivePaymentDate(overdue(), { today: "2026-03-20" });
+    assert.equal(d.onTime, false);
+    assert.ok(!d.steps.some((s) => s.rule === "on-time"), "that row would contradict the one above it");
+    assert.match(summarizePaymentDate(d), /18 days past the 2026-03-02 due date — payable on 2026-03-20/);
+  });
+
+  it("keeps walking when today itself is not a payable day, one step per day", () => {
+    const d = derivePaymentDate(overdue(), { today: "2026-03-21" }); // Saturday
+    assert.equal(d.payOn, "2026-03-23");
+    assert.deepEqual(
+      d.steps.slice(-3).map((s) => [s.rule, s.date]),
+      [
+        ["overdue", "2026-03-21"],
+        ["weekend", "2026-03-22"],
+        ["weekend", "2026-03-23"],
+      ],
+    );
+  });
+
+  it("clamps through the ratified calendar, not around it", () => {
+    const probe = (iso) => (iso === "2026-04-03" ? "Good Friday — mail delayed" : "");
+    const d = derivePaymentDate(overdue(), { today: "2026-04-03", delayDay: probe });
+    assert.equal(d.payOn, "2026-04-06");
+    assert.match(d.steps.find((s) => s.rule === "delay").detail, /Good Friday — mail delayed/);
+  });
+
+  it("still walks the obligation backward — the clamp only moves the proposal", () => {
+    // Due Sunday: the calendar walks back to Friday, and only then does the clamp apply.
+    const d = derivePaymentDate(overdue({ dueDate: "2026-03-01" }), { today: "2026-03-20" });
+    assert.equal(d.steps[1].rule, "weekend");
+    assert.equal(d.steps[1].date, "2026-02-28");
+    assert.equal(d.dueDate, "2026-03-01", "the obligation never moves");
+    assert.equal(d.payOn, "2026-03-20");
+  });
+});

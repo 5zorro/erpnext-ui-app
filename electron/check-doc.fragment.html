@@ -23,8 +23,13 @@
     </div>
     <div class="check-doc-row check-doc-meta-row">
       <div class="check-doc-field">
-        <span class="check-doc-label">Date</span>
-        <span class="check-doc-value" data-testid="check-doc-date"></span>
+        <label class="check-doc-label" for="check-doc-date">Date</label>
+        <!-- Editable in proposal/blank mode, like a physical check's own date line -- ERPNext's
+             `posting_date` carries no restriction against a past date (P2a / OI-172: backdating
+             is real ERPNext usage, just never the *default*). Disabled in edit/view: an existing
+             document's date is not part of this pass's write scope (see mountCheckDocEdit). -->
+        <input type="date" id="check-doc-date" class="check-doc-input check-doc-date-input"
+          data-testid="check-doc-date" />
       </div>
       <div class="check-doc-field" data-testid="check-doc-no-field" hidden>
         <span class="check-doc-label">Check no.</span>

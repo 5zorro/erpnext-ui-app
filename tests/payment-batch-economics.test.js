@@ -888,17 +888,197 @@ describe("payment-batch-economics: the ratified delay calendar (P3d)", () => {
     assert.equal(byMethod.ACH, "2026-04-03", "ACH does not");
   });
 
-  // 🔴 The engine and the audit walk the same dates. If only one of them is given the calendar,
-  // the balloon explains a date the dashboard is not showing.
+  // 🔴 The engine and the audit agree on the dates. This used to hold only while the caller
+  // remembered to hand the audit the same calendar probe; the group now records the dates it was
+  // formed from, so agreement is structural rather than a thing the caller can get wrong.
   it("the membership audit agrees with the grouping it explains", () => {
     const one = bill({ modeOfPayment: "USPS_Check" });
     const { groups } = paymentBatchEconomics({ bills: [one], perPaymentFee: 0.83, apr: 0.09, delayDay: probe });
+    assert.equal(groups[0].payByOf[one.installmentKey], "2026-04-02", "the group records what it walked");
+
     const membership = explainGroupMembership(groups[0], one, { apr: 0.09, delayDay: probe });
     assert.equal(membership.ownPayOn, groups[0].payOn);
 
-    // Without the calendar the audit would quote 04-03 against a 04-02 payment — the disagreement
-    // this test exists to prevent.
+    // The point of recording it: forgetting the probe no longer makes the balloon quote 04-03
+    // against a 04-02 payment, because the audit reads the date instead of walking for it.
     const blind = explainGroupMembership(groups[0], one, { apr: 0.09 });
-    assert.notEqual(blind.ownPayOn, groups[0].payOn);
+    assert.equal(blind.ownPayOn, groups[0].payOn);
+  });
+
+  // The fallback is for a group built by something other than the engine. It re-derives, so it is
+  // the one path that can still disagree — which is why it is a fallback and not the rule.
+  it("re-derives only for a group that recorded nothing, and needs the calendar to agree there", () => {
+    const one = bill({ modeOfPayment: "USPS_Check" });
+    const { groups } = paymentBatchEconomics({ bills: [one], perPaymentFee: 0.83, apr: 0.09, delayDay: probe });
+    const handBuilt = { ...groups[0] };
+    delete handBuilt.payByOf;
+
+    assert.equal(explainGroupMembership(handBuilt, one, { apr: 0.09, delayDay: probe }).ownPayOn, "2026-04-02");
+    assert.equal(explainGroupMembership(handBuilt, one, { apr: 0.09 }).ownPayOn, "2026-04-03");
+  });
+});
+
+// P2a / OI-172: "if today is 2 weeks later because the paperwork wasn't filed, then it needs to be
+// filed 2 weeks ago… it should be an easy 'oops' and batch override for ONLY OVERDUE grouped
+// payments" (5zorro 2026-09-16). The finding: the engine had no notion of today, so four overdue
+// groups were four proposals on four dates that can no longer happen. The clamp gives it one.
+describe("paymentBatchEconomics — the today clamp (P2a / OI-172)", () => {
+  const mk = (invoice, dueDate, outstanding = 300) => bill({ invoice, dueDate, outstanding, invoiced: outstanding });
+
+  it("collapses four separately-overdue groups into one, at zero float cost", () => {
+    // Four Mondays 28 days apart: far enough that the un-clamped float cost (28 days x 0.09 APR)
+    // beats the $0.83 fee every time, so these are genuinely four separate proposals without a
+    // clamp — the merge below is the clamp's doing, not something the exact grouping already did.
+    const bills = [
+      mk("PI-01", "2026-01-05"),
+      mk("PI-02", "2026-02-02"),
+      mk("PI-03", "2026-03-02"),
+      mk("PI-04", "2026-03-30"),
+    ];
+    const withoutToday = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09 }).groups;
+    assert.equal(withoutToday.length, 4, "no clamp: four past dates, four separate proposals");
+
+    const { groups } = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: "2026-04-15" });
+    assert.equal(groups.length, 1, "clamped: the same date for all four, so the exact grouping merges them");
+    const g = groups[0];
+    assert.equal(g.payOn, "2026-04-15");
+    assert.deepEqual(g.bills, ["PI-01", "PI-02", "PI-03", "PI-04"]);
+    assert.equal(g.floatCost, 0, "the past is past — no float cost between dates that can't happen any more");
+    assert.equal(g.feesSaved, 2.49); // (4-1) * 0.83
+  });
+
+  it("never clamps a bill that is not yet due", () => {
+    const bills = [mk("OVERDUE", "2026-03-01"), mk("NOT-YET-DUE", "2026-04-15")];
+    const { groups } = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: "2026-03-20" });
+    assert.deepEqual(
+      groups.map((g) => g.bills),
+      [["OVERDUE"], ["NOT-YET-DUE"]],
+      "clamping the overdue bill to today does not pull a future bill's own date forward or backward",
+    );
+    assert.equal(groups[0].payOn, "2026-03-20");
+    assert.equal(groups[1].payOn, "2026-04-15");
+  });
+
+  it("leaves discount capture comparing against the real due date, never the clamp", () => {
+    // Due date is 15 days overdue; the discount deadline is earlier still (also past). If the
+    // clamp leaked into tryDiscountCapture's own comparison, this would price float against
+    // "today" instead of the bill's real due date and could refuse a capture it should take.
+    const b = bill({
+      invoice: "DISC",
+      dueDate: "2026-03-05",
+      outstanding: 1000,
+      invoiced: 1000,
+      discountDate: "2026-02-23",
+      discountAmount: 50,
+    });
+    const plain = paymentBatchEconomics({ bills: [b], perPaymentFee: 0.83, apr: 0.09 }).groups[0];
+    const clamped = paymentBatchEconomics({
+      bills: [b],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+      today: "2026-03-20",
+    }).groups[0];
+    assert.equal(clamped.reason, "discount-capture");
+    assert.equal(clamped.payOn, plain.payOn, "the clamp changes nothing about a discount capture's own date");
+    assert.equal(clamped.netBenefit, plain.netBenefit);
+  });
+
+  it("explainGroupMembership reports the clamp as daysLate, not as daysEarly gone quiet", () => {
+    // Monday / Friday, both plain business days — no bank-calendar adjustment to account for.
+    const bills = [mk("PI-01", "2026-03-02"), mk("PI-02", "2026-03-06")];
+    const { groups } = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: "2026-03-20" });
+    const g = groups[0];
+
+    const anchor = explainGroupMembership(g, bills[0], { apr: 0.09 });
+    assert.equal(anchor.ownPayOn, "2026-03-02");
+    assert.equal(anchor.daysLate, 18);
+    assert.equal(anchor.daysEarly, 0);
+    assert.equal(anchor.clamped, true);
+    assert.match(
+      describeGroupMembership(anchor).note,
+      /18 days past its 2026-03-02 due date — paid on 2026-03-20/,
+    );
+
+    const joiner = explainGroupMembership(g, bills[1], { apr: 0.09 });
+    assert.equal(joiner.ownPayOn, "2026-03-06");
+    assert.equal(joiner.daysLate, 14);
+    assert.equal(joiner.daysEarly, 0);
+    assert.equal(joiner.clamped, true);
+  });
+
+  // 🔴 The clamp lands on a day the payment can actually go out. The calendar only ever walked
+  // *back* (pay early, never late), so taking `today` raw would have let the engine propose a
+  // Saturday — a date the delay-calendar panel itself calls unpayable.
+  it("clamps forward to a payable day, never to a raw calendar today", () => {
+    const bills = [mk("PI-01", "2026-03-02")];
+    // 2026-03-21 is a Saturday; the soonest the payment can go out is Monday the 23rd.
+    const { groups } = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: "2026-03-21" });
+    assert.equal(groups[0].payOn, "2026-03-23");
+    assert.equal(groups[0].clampedTo, "2026-03-23", "the floor in force is recorded, already walked");
+  });
+
+  it("scopes the clamp by rail, like every other date this engine walks", () => {
+    // Good Friday: a postal delay day for the cheque, an ordinary banking day for ACH (P3d).
+    const calendar = [
+      { date: "2026-04-03", scope: "postal", reason: "Good Friday", source: "user", ratified: true },
+    ];
+    const probe = (iso, method) => delayDayProbe(delayCalendarIndex(calendar), method)(iso);
+    const bills = [
+      { ...mk("CHQ", "2026-03-02"), modeOfPayment: "USPS_Check" },
+      { ...mk("ACH", "2026-03-02"), modeOfPayment: "ACH" },
+    ];
+    const { groups } = paymentBatchEconomics({
+      bills,
+      perPaymentFee: 0.83,
+      apr: 0.09,
+      feeForMethod: paymentMethodFeeResolver({}),
+      delayDay: probe,
+      today: "2026-04-03",
+    });
+    const byMethod = Object.fromEntries(groups.map((g) => [g.method, g.payOn]));
+    assert.equal(byMethod.USPS_Check, "2026-04-06", "the cheque waits out the postal delay day");
+    assert.equal(byMethod.ACH, "2026-04-03", "ACH can go out on it");
+  });
+
+  // 🔴 Lateness is measured from the STORED due date, not from the pay-by date derived from it.
+  // A bill due on a Sunday has a pay-by date of the Friday before (the calendar walks back), so
+  // measuring from the proposal would report it as 2 days later than ERP's own overdue count.
+  it("measures lateness from the stored due date, not from the pay-by date", () => {
+    const sunday = mk("PI-SUN", "2026-03-01"); // Sunday; pay-by walks back to Friday 2026-02-27
+    const { groups } = paymentBatchEconomics({
+      bills: [sunday],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+      today: "2026-03-20",
+    });
+    const m = explainGroupMembership(groups[0], sunday, { apr: 0.09 });
+    assert.equal(m.ownPayOn, "2026-02-27", "the pay-by date the group was formed from");
+    assert.equal(m.dueDate, "2026-03-01", "the obligation, as ERPNext stores it");
+    assert.equal(m.daysLate, 19, "03-01 → 03-20, not 02-27 → 03-20");
+    assert.match(describeGroupMembership(m).note, /19 days past its 2026-03-01 due date/);
+  });
+
+  // 🔴 The clamp sentence is a causal claim, so it may only appear when the engine recorded that
+  // the clamp is what moved the date. A group whose dates merely differ gets the measurement and
+  // no explanation — this is what stops P1's method override from manufacturing a false "overdue".
+  it("never claims the clamp caused a date it did not record", () => {
+    const one = mk("PI-01", "2026-03-02");
+    const { groups } = paymentBatchEconomics({ bills: [one], perPaymentFee: 0.83, apr: 0.09 });
+    // No `today` was given, so nothing was clamped. Move the group's date by hand, as a consumer
+    // scoping the calendar differently would.
+    const moved = { ...groups[0], payOn: "2026-03-20" };
+    const m = explainGroupMembership(moved, one, { apr: 0.09 });
+    assert.equal(m.clamped, false);
+    assert.equal(m.daysLate, 18, "still measured — the fact is real even when the cause is unknown");
+    const note = describeGroupMembership(m).note;
+    assert.match(note, /Paid 18 days after its 2026-03-02 due date\./);
+    assert.doesNotMatch(note, /cannot be backdated/);
+  });
+
+  it("omitting today changes nothing (backward compatible)", () => {
+    const bills = [mk("PI-01", "2026-03-01"), mk("PI-02", "2026-03-05")];
+    const withToday = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09 }).groups;
+    const withoutToday = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: undefined }).groups;
+    assert.deepEqual(withToday, withoutToday);
   });
 });

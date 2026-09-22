@@ -114,8 +114,6 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
   if (payee) payee.textContent = vm.payTo || "";
   const amount = field(root, "check-doc-amount");
   if (amount) amount.innerHTML = moneyHtml(vm.amount || 0);
-  const date = field(root, "check-doc-date");
-  if (date) date.textContent = vm.payOn || "";
   const memo = field(root, "check-doc-memo");
   if (memo) memo.textContent = vm.memo || "";
 
@@ -170,6 +168,20 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
   const blank = mode === "blank";
   const prefill = mode === "edit" || mode === "view";
   const disabled = mode === "view";
+  // Which fields this mount can actually *write*, named rather than inlined per field. `view` is
+  // ERP's own rule (a submitted document cannot be edited). The date is narrower on purpose: only
+  // the two modes whose submit paths read it back (mountCheckDocWrite / mountCheckDocBlank).
+  // Enabling it in `edit` would let a clerk type a date that Save then silently drops, since
+  // mountCheckDocEdit's patch deliberately does not carry it.
+  const dateWritable = mode === "proposal" || mode === "blank";
+
+  // P2a / OI-172: ERPNext places no restriction on `posting_date`, so backdating is real usage --
+  // just never the default. The suggested date arrives pre-filled and the clerk can type over it.
+  const date = field(root, "check-doc-date");
+  if (date) {
+    date.value = vm.payOn || "";
+    date.disabled = !dateWritable;
+  }
 
   // Blank mode swaps the payee/amount *display* for inputs — the one mount where those two come
   // from the clerk rather than from a batch or a saved document.
@@ -313,12 +325,16 @@ export function mountCheckDocWrite(root, deps = {}) {
   const mopInput = field(root, "check-doc-mop");
   const acctInput = field(root, "check-doc-cash-account");
   const refInput = field(root, "check-doc-reference-no");
+  const dateInput = field(root, "check-doc-date");
   const submitBtn = field(root, "check-doc-submit");
   const statusEl = field(root, "check-doc-write-status");
 
   const markDirty = () => {
     if (onDirty) onDirty(true);
   };
+  // Not routed through `edited()` -- date isn't one of C9's autofilled fields, it just needs the
+  // dirty flag so closing the drawer confirms discarding a backdated proposal.
+  if (dateInput) dateInput.addEventListener("input", markDirty);
   /** The clerk owns this field now: stop treating it as autofilled, and let the page re-propose. */
   const edited = (el) => {
     if (el && el.dataset) delete el.dataset.autofilled;
@@ -363,13 +379,23 @@ export function mountCheckDocWrite(root, deps = {}) {
       if (statusEl) statusEl.textContent = "Pick a Pay from account first.";
       return;
     }
+    // 🔴 Refused, not substituted. A date input reads `""` for a cleared field *and* for a
+    // half-typed one, so falling back to the engine's suggestion here would post a date the clerk
+    // did not choose -- on the one field whose whole purpose is disagreeing with the suggestion.
+    // Every sibling field above says what is missing instead of guessing; so does this one.
+    const payOn = dateInput ? dateInput.value.trim() : currentGroup.payOn;
+    if (!payOn) {
+      if (statusEl) statusEl.textContent = "Enter the payment date.";
+      return;
+    }
     const intent = {
       modeOfPayment: mopInput ? mopInput.value.trim() : "",
       cashBankAccount,
       referenceNo: refInput ? refInput.value.trim() : "",
       // C9: the memo box used to be ignored on this path — typed, shown, and never sent.
       memo: memoInput ? memoInput.value.trim() : "",
-      payOn: currentGroup.payOn,
+      // An <input type="date">'s value is already "YYYY-MM-DD", so no reformatting either way.
+      payOn,
     };
     const groupBillKeys = new Set(currentGroup.bills || []);
     const bills = currentBills.filter((b) => groupBillKeys.has(b.installmentKey));
@@ -550,10 +576,17 @@ export function mountCheckDocBlank(root, deps = {}) {
       if (statusEl) statusEl.textContent = "Pick a Pay from account first.";
       return;
     }
+    // Same rule as the batch path: a cleared or half-typed date is refused by name. Sending `""`
+    // would let ERPNext apply its own `default: "Today"` silently, which looks like it worked.
+    const payOn = dateEl ? dateEl.value.trim() : "";
+    if (!payOn) {
+      if (statusEl) statusEl.textContent = "Enter the payment date.";
+      return;
+    }
     const intent = {
       party,
       amount: amountValue,
-      payOn: dateEl ? (dateEl.textContent || "").trim() : "",
+      payOn,
       modeOfPayment: mopInput ? mopInput.value.trim() : "",
       cashBankAccount,
       referenceNo: refInput ? refInput.value.trim() : "",
