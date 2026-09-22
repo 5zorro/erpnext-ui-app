@@ -5116,6 +5116,7 @@ export async function bootBillFormPage(api) {
 
       const warning = describeVoidAndAmend({
         name: sourceName,
+        docstatus: lastDoc && lastDoc.docstatus,
         supplierRef: lastDoc && lastDoc.bill_no ? String(lastDoc.bill_no) : "",
         linkedPaymentCount: facts.linkedPaymentCount,
         unlinksPaymentsOnCancel: facts.unlinksPaymentsOnCancel,
