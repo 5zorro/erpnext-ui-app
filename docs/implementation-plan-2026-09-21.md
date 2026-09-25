@@ -13,12 +13,14 @@ the build document and does not restate its reasoning.
 area of the codebase, different agent. The list of files this tranche must not open is under
 **Boundary with the 2026-09-16 tranche**.
 
-> **Status, 2026-09-24.** Direction set by 5zorro; six packets, ordered at the bottom.
+> **Status, 2026-09-24 (late).** Direction set by 5zorro; six packets, ordered at the bottom.
 > **Built:** P1a (Code 128 encoder), P1b (label payload, check reworked for underscores), P1c (the
-> blind sheet model) and P4a (the counting session) — 51 receiving tests, `npm test` green at 1860.
-> R1 and R5 are answered. **Next action needs a decision:** P1d, the page that prints the sheet,
-> has to reach ERPNext from outside the Electron app, which is what P2 sets up. Either do P2 first,
-> or give P1d a temporary route and replace it. P4b–P4d are pure and can go on meanwhile.
+> blind sheet model), P4a (the counting session) and **P2 (the secure front door, the installable
+> shell and the setup card)** — 87 receiving tests, `npm test` green at 1887. R1 and R5 are answered.
+> **The proxy is running** on this computer (`docker compose -f ops/receiving-proxy/compose.yml ps`).
+> **Next action:** P1d, the page that prints the sheet — P2 has given it its route to ERPNext. Then
+> **the first real-phone run** of the setup card, which is 5zorro's, not an agent's.
+> **Open from P2:** waiting-on item 8 (ERPNext reachable from the Wi-Fi) and the 7-day login.
 >
 > **Nothing has been run against a phone, a printer or a scanner yet.** Every claim in this plan
 > about how a device behaves is still a claim.
@@ -231,7 +233,38 @@ only camera-based scanners read it.
 
 ---
 
-## P2 — The secure address, and how a receiver installs it
+## P2 — ✅ BUILT 2026-09-24. The secure address, and how a receiver installs it
+
+> **What was built, and what it was checked against.** Caddy in its own container
+> (`ops/receiving-proxy/`), joined to the ERPNext containers' network and forwarding to their
+> `frontend` web server; frappe_docker is unchanged. It serves `pwa/receiving/` at `/receiving/`,
+> `src/receiving/*.js` at `/receiving/lib/` (the same modules the tests run, mounted read-only — no
+> build step), everything else to ERPNext, and a plain-HTTP door on `:8081` that hands out the
+> certificate authority and nothing else. Running now, at the Wi-Fi address in the gitignored
+> `ops/receiving-proxy/.env`.
+> **Verified through the Wi-Fi address, the way a phone reaches it:** the certificate validates
+> against the downloaded authority alone; ERPNext login, a Purchase Order read with that session,
+> Desk's redirects (kept on `https`, because ERPNext's nginx honours `X-Forwarded-Proto`) and the
+> realtime socket all work through it; scanner pages carry the security headers and ERPNext's
+> responses do not; folder listings and path-climbing attempts are 404. **In a headless Android
+> browser:** the setup page shows the Android steps, the phone check renders, the name is tidied and
+> saved, the offline copy installs, **the page reloads with the network off**, and the console
+> reports nothing — so the security policy blocks none of the pages' own code. `npm test`: 36 new
+> tests, including guards that fail if the proxy's rules are loosened (each checked by planting the
+> loosening).
+> 🔴 **Two traps found, both now handled.** (1) Phones reach this by IP address, and a browser sends
+> no site name in the handshake for a bare IP, so Caddy could not choose a certificate and every
+> connection failed — fixed by `default_sni`. (2) Browsers refuse the offline copy on a site whose
+> certificate they merely clicked past; confirmed in Chromium ("An SSL certificate error occurred
+> when fetching the script"). That is why the setup card makes trusting the certificate step 1.
+> **To test with a headless browser**, trust the proxy's current key rather than ignoring errors:
+> launch Chromium with `--ignore-certificate-errors-spki-list=<base64 SHA-256 of the leaf's public
+> key>` (`openssl s_client` → `x509 -pubkey` → `pkey -pubin -outform der` → `dgst -sha256 -binary`
+> → `base64`). The leaf is reissued roughly twice a day, so recompute it per run.
+> **Not yet run on a real phone** — nothing here has touched an iPhone or an Android handset. The
+> two platform steps most likely to differ from the card are iPhone accepting the certificate as a
+> downloaded profile, and Android versions that refuse a certificate opened from the browser
+> (the card's Settings path covers those). The camera test button has only run without a camera.
 
 A phone's camera refuses to work on a page served insecurely (§9.1). That blocks scanning *and*
 blocks saving the page to the home screen, and it will surface on the first day of real device
@@ -256,7 +289,14 @@ testing, so it is scheduled second rather than discovered later.
   2. Android offers to install; **iPhone does not** — it is the share menu, then "Add to Home
      Screen." The instructions must be per-platform.
 - **P2d — the device name.** Asked once at setup and stored, so the audit trail can tell one
-  person's phone from a shared handheld later (§7.1).
+  person's phone from a shared handheld later (§7.1). Built as `src/receiving/device-name.js`,
+  stored in the phone's browser storage. It is a label, never an access control: who did something
+  comes from the ERPNext login.
+- **Also built: the phone check** (`src/receiving/phone-check.js`, shown by `index.html`). It lists
+  secure connection, camera, home-screen install, offline copy, name, and whether the phone has a
+  built-in barcode reader — each failure with its fix in plain words. The last item never blocks,
+  since the app brings its own reader; it is there so the pilot records what each test phone has,
+  which P5a needs.
 
 ### What the proxy does and does not add (asked 2026-09-21)
 
@@ -437,6 +477,7 @@ is why Clean Core holds — and why it needs a script, since there is no app to 
 | `Purchase Receipt` — one added field for the captured page count | extra field | Makes a missing page detectable later (§7.5) |
 | `Receiving Scan Event` — a small new document type, insert-only | new document type, site-local | §8's immutable log: every scan, not just the filed document. **Must not** be a child table of the receipt, because it has to survive that receipt being amended or cancelled |
 | Over-receipt tolerance, if P5e shows a bounce | setting | An over count must file, not fail |
+| Session length for the receiving role — spec says 12 hours; ERPNext here issues **7-day** logins (seen on the `sid` cookie through the proxy, 2026-09-24) | setting | A lost phone stays signed in for a week otherwise. ERPNext's session expiry is site-wide in System Settings, so a shorter one affects every user — decide with P3, do not just change it |
 
 All applied by **`ops/receiving-setup/apply.mjs`**, re-runnable and safe to run twice, so the pilot
 instance can be rebuilt from scratch. This script is the price of having no custom app, and it is
@@ -499,6 +540,7 @@ the logic is testable without a phone and the screens are not.
 | 5 | **Restrict, or only attribute?** (P3a vs its lazier path, and spec Q8) | Raising the order quantity to a restricted permission tier changes the purchase-order form for every role. Phase 1 exists partly to measure that, but the fallback — timestamp and attribute rather than restrict — is a legitimate end state, not a failure |
 | 6 | **Keep this plan tracked, or make it private?** | It is scrubbed and safe to track, and the three-file orientation contract assumes an off-machine agent can read it. Gitignoring it would quietly break that. Recommendation: keep it tracked |
 | 7 | **Three pre-existing public mentions** of the legacy system, listed in museum **OI-176** | Removing them from history means rewriting pushed history and force-pushing a repo with a merged PR on `main`. Editing the files going forward is cheap; erasing history is not. No agent should do either unasked |
+| 8 | **ERPNext is reachable from the Wi-Fi, unencrypted, with the sandbox password** (found 2026-09-24, not caused by this tranche) | Docker Desktop publishes port 8080 on every Windows network interface, and its firewall rule allows all ports on Private networks, which the Wi-Fi is. Anyone on the Wi-Fi can reach the ERPNext login. Cheapest fix: change the `Administrator` password. Stricter: publish 8080 on `127.0.0.1` only in the frappe_docker compose file, so the Electron app keeps working and phones use the proxy. Both are 5zorro's infrastructure, so neither was done |
 
 ## Registration owed (deliberately deferred)
 

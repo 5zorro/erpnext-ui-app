@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Receiving</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#18212b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="index.js"></script>
+</head>
+<body>
+<main>
+  <h1>Receiving</h1>
+  <p class="muted" id="summary">Checking this phone…</p>
+
+  <h2>Phone check</h2>
+  <ul class="checks" id="checks"></ul>
+
+  <h2>This phone’s name</h2>
+  <form id="name-form">
+    <input type="text" id="name" autocomplete="off" maxlength="60" placeholder="e.g. Dock 1">
+    <p class="message" id="name-message" role="status"></p>
+    <button class="button" type="submit">Save name</button>
+  </form>
+
+  <h2>Camera</h2>
+  <p class="muted">Asks for the camera once and shows it for a few seconds, to prove scanning can
+    work on this phone.</p>
+  <video id="preview" playsinline muted hidden></video>
+  <button class="button" id="camera" type="button">Test the camera</button>
+
+  <a class="button" href="install.html">Setup steps</a>
+</main>
+</body>
+</html>
