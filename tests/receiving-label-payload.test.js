@@ -12,9 +12,18 @@ import {
 const PREFIX = "W";
 const opts = { prefix: PREFIX };
 
-test("charset is the 43 characters mod-43 is defined over", () => {
+test("charset is 43 distinct characters, so the check works modulo a prime", () => {
   assert.equal(LABEL_CHARSET.length, 43);
   assert.equal(new Set(LABEL_CHARSET).size, 43);
+});
+
+test("the characters real item numbers use are all carried: capitals, digits, dash, underscore", () => {
+  // R5, answered 2026-09-24. Underscore is the one Code 39's set lacked.
+  for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") assert.ok(LABEL_CHARSET.includes(ch), ch);
+});
+
+test("no check character is a space, which would print as nothing and be trimmed", () => {
+  assert.equal(LABEL_CHARSET.includes(" "), false);
 });
 
 test("builds prefix + item number + check character", () => {
@@ -25,7 +34,7 @@ test("builds prefix + item number + check character", () => {
 });
 
 test("round-trips every shape of item number we expect to meet", () => {
-  for (const itemNumber of ["10042", "AC-DELCO-PF46", "FL820S", "0", "A B", "X/Y+Z"]) {
+  for (const itemNumber of ["10042", "AC-DELCO-PF46", "FL820S", "0", "AB_12-C", "X/Y+Z", "_"]) {
     const parsed = parseLabelPayload(buildLabelPayload(itemNumber, opts), opts);
     assert.deepEqual(parsed, { ok: true, itemNumber }, itemNumber);
   }
@@ -51,8 +60,8 @@ test("a single mistyped character fails the check", () => {
 });
 
 test("every single-character substitution in the body is caught", () => {
-  // Mod-43 catches all of these, which is the keying-error benefit §4A.2 is buying.
-  const itemNumber = "10042";
+  // Every one of these is caught, which is the keying-error benefit §4A.2 is buying.
+  const itemNumber = "AB_12-C";
   const payload = buildLabelPayload(itemNumber, opts);
   let checked = 0;
   for (let i = PREFIX.length; i < payload.length - 1; i += 1) {
@@ -66,24 +75,51 @@ test("every single-character substitution in the body is caught", () => {
   assert.ok(checked > 200, "expected a broad sweep of substitutions");
 });
 
-test("a transposition is caught only when the swapped characters differ", () => {
-  // Honest limit of a plain mod-43 sum: it is order-independent, so swapping two characters is
-  // invisible to it. Code 128's own check character covers scan misreads; this one covers typing.
-  const payload = buildLabelPayload("10042", opts);
-  const swapped = payload.slice(0, 1) + payload[2] + payload[1] + payload.slice(3);
-  assert.equal(parseLabelPayload(swapped, opts).ok, true);
+test("swapping any two different characters of the item number is caught", () => {
+  // The weighting is what buys this: a plain sum is order-blind and would pass every swap.
+  const payload = buildLabelPayload("AB_12-C9", opts);
+  let checked = 0;
+  for (let i = PREFIX.length; i < payload.length - 1; i += 1) {
+    for (let j = i + 1; j < payload.length - 1; j += 1) {
+      if (payload[i] === payload[j]) continue;
+      const chars = [...payload];
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+      const swapped = chars.join("");
+      assert.equal(parseLabelPayload(swapped, opts).ok, false, swapped);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 20);
+});
+
+test("swapping the last character with the check character is caught too", () => {
+  // Undetected only if the last character's weight were 42, i.e. a 42-character body.
+  for (const itemNumber of ["10042", "AB_12-C9", "FL820S", "X-1", "Q_"]) {
+    const payload = buildLabelPayload(itemNumber, opts);
+    const [a, b] = [payload.at(-2), payload.at(-1)];
+    if (a === b) continue;
+    const swapped = payload.slice(0, -2) + b + a;
+    assert.equal(parseLabelPayload(swapped, opts).ok, false, swapped);
+  }
+});
+
+test("the check is the weighted sum the module documents, pinned so it cannot drift", () => {
+  // W=32, 1=1, 0=0, 0=0, 4=4, 2=2 → 32·1 + 1·2 + 0·3 + 0·4 + 4·5 + 2·6 = 66 → 66 mod 43 = 23 → N.
+  assert.equal(labelCheckCharacter("W10042"), "N");
+  assert.equal(buildLabelPayload("10042", opts), "W10042N");
 });
 
 test("characters no label can carry are refused at build time", () => {
   assert.throws(() => buildLabelPayload("café", opts), /no label can carry/);
   assert.throws(() => buildLabelPayload("lowercase", opts), /no label can carry/);
+  assert.throws(() => buildLabelPayload("A B", opts), /no label can carry/);
   assert.throws(() => buildLabelPayload("", opts), /nothing to encode/);
 });
 
 test("a prefix must be supplied — there is no default to ship by accident", () => {
   // The final format is gated on the label-width measurement (plan P1e), so no placeholder.
   assert.throws(() => buildLabelPayload("10042"), /company prefix is required/);
-  assert.throws(() => parseLabelPayload("W100428"), /company prefix is required/);
+  assert.throws(() => parseLabelPayload("W10042N"), /company prefix is required/);
 });
 
 test("too short to carry a body and a check character", () => {

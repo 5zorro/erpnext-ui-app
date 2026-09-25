@@ -8,18 +8,14 @@
  */
 
 /**
- * The 43 characters a check character can be computed over (the Code 39 set, in its standard
- * order). §4A.2 suggested mod-10 (Luhn), which is defined over digits only; mod-43 is the same
- * idea over a set that can also carry letters, and it behaves identically on an all-digit item
- * number — so it is the choice that does not have to be revisited once the real item numbers are
- * known. See open question R5 in the 2026-09-21 plan.
- *
- * TODO(R5, answered 2026-09-24): real item numbers are capitals, digits, dashes **and
- * underscores**. `_` is not in this set, so buildLabelPayload refuses any item number containing
- * one. Decide before printing labels: map `_` to a spare character, or compute the check over a
- * wider alphabet. Code 128 itself carries `_` fine; only the check character is the limit.
+ * The 43 characters a label may carry, in the order that gives each its value: Code 39's set with
+ * the space replaced by an underscore. Real item numbers are capitals, digits, dashes and
+ * underscores (5zorro, R5, 2026-09-24). The space had to go twice over: no item number uses one,
+ * and as a check character it would print as nothing and be trimmed from any text box it was
+ * typed into. Code 128, which prints the label, carries every one of these as an ordinary
+ * character, so nothing is escaped or rewritten.
  */
-export const LABEL_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%";
+export const LABEL_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-._$/+%";
 
 /** Why a scanned string was not accepted. The app says something different for each. */
 export const REJECTED = Object.freeze({
@@ -37,15 +33,25 @@ function requirePrefix(prefix) {
   return prefix;
 }
 
-/** The mod-43 check character for a body of text, or null if the body is not encodable. */
+/**
+ * The check character for a body of text, or null if the body is not encodable.
+ *
+ * Each character's value is weighted by its position, the way Code 128 weights its own check, and
+ * the sum is taken mod 43. Because 43 is prime and no weight is a multiple of it, changing any one
+ * character always changes the result, and so does swapping any two different characters — the two
+ * mistakes people make typing a code. §4A.2 asked for Luhn, which does the same job for digits only.
+ */
 export function labelCheckCharacter(body) {
+  const modulus = LABEL_CHARSET.length;
   let sum = 0;
+  let position = 0;
   for (const ch of body) {
     const value = LABEL_CHARSET.indexOf(ch);
     if (value < 0) return null;
-    sum += value;
+    sum += value * ((position % (modulus - 1)) + 1);
+    position += 1;
   }
-  return LABEL_CHARSET[sum % 43];
+  return LABEL_CHARSET[sum % modulus];
 }
 
 /** prefix + item number + check character. Throws if the item number cannot be carried. */
