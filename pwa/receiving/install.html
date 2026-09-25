@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Set up Receiving</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#18212b">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="install.js"></script>
+</head>
+<body>
+<main>
+  <h1>Set up this phone for receiving</h1>
+  <p class="muted">About two minutes, once per phone. If you reached this page without a warning,
+    step 1 is already done.</p>
+
+  <section class="platform" data-platform="ios">
+    <h2>iPhone</h2>
+    <ol class="steps">
+      <li><strong>Trust the certificate.</strong> Follow step 1 on the setup card. After installing
+        it, go to Settings → General → About → Certificate Trust Settings and switch it on. Without
+        that last switch, the phone installs the certificate but still refuses it.</li>
+      <li><strong>Add to Home Screen.</strong> In Safari, tap the Share button, then
+        “Add to Home Screen”. iPhones never offer this on their own — it is always the Share
+        menu, and it has to be Safari.</li>
+      <li><strong>Open it from the new icon</strong> and finish the phone check.</li>
+    </ol>
+  </section>
+
+  <section class="platform" data-platform="android">
+    <h2>Android</h2>
+    <ol class="steps">
+      <li><strong>Trust the certificate.</strong> Follow step 1 on the setup card: open the
+        certificate file, and when asked, install it as a “CA certificate”.</li>
+      <li><strong>Install the app.</strong> Use the button below, or the browser menu (⋮) →
+        “Install app” / “Add to Home screen”.</li>
+      <li><strong>Open it from the new icon</strong> and finish the phone check.</li>
+    </ol>
+    <button class="button" id="install" type="button" hidden>Install Receiving</button>
+  </section>
+
+  <section class="platform" data-platform="other">
+    <h2>This looks like a computer</h2>
+    <p>Receiving is set up on the phone that will be used at the dock. Open this page on that
+      phone.</p>
+  </section>
+
+  <a class="button" href="index.html">Check this phone</a>
+</main>
+</body>
+</html>

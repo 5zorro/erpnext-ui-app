@@ -1,0 +1,61 @@
+/* Receiving scanner. Built for a loading dock: gloves (64px targets), direct sun and dim aisles
+   (high contrast, large type), one column at phone width. */
+:root {
+  --bg: #ffffff;
+  --fg: #111418;
+  --muted: #4a5561;
+  --line: #d5dbe1;
+  --ok: #0b6b2e;
+  --bad: #a3141b;
+  --accent: #18212b;
+  --accent-fg: #ffffff;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1319;
+    --fg: #f2f5f8;
+    --muted: #aab4bf;
+    --line: #2c3743;
+    --ok: #5fd08a;
+    --bad: #ff7a7f;
+    --accent: #f2f5f8;
+    --accent-fg: #0e1319;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 18px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 34rem; margin: 0 auto; padding: 16px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 8px 0 4px; }
+h2 { font-size: 1.2rem; margin: 28px 0 8px; }
+p, li { color: var(--fg); }
+.muted { color: var(--muted); }
+.button {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 64px; width: 100%; margin: 12px 0; padding: 0 20px;
+  border: 0; border-radius: 12px;
+  background: var(--accent); color: var(--accent-fg);
+  font: inherit; font-weight: 600; text-decoration: none;
+}
+.button[hidden] { display: none; }
+input[type="text"] {
+  width: 100%; min-height: 56px; padding: 0 14px;
+  border: 2px solid var(--line); border-radius: 10px;
+  background: var(--bg); color: var(--fg); font: inherit;
+}
+.checks { list-style: none; padding: 0; margin: 0; }
+.checks li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.checks .mark { font-weight: 700; margin-right: 8px; }
+.checks .ok .mark { color: var(--ok); }
+.checks .bad .mark { color: var(--bad); }
+.checks .fix { display: block; margin-top: 4px; color: var(--muted); font-size: 0.95rem; }
+.message { min-height: 1.45em; color: var(--bad); }
+.steps li { margin-bottom: 14px; }
+.platform[hidden] { display: none; }
+video { width: 100%; border-radius: 12px; background: #000; }
+video[hidden] { display: none; }
