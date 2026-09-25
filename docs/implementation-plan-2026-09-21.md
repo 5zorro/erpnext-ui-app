@@ -181,15 +181,29 @@ the current process on day one, and speed is what stops people from working arou
   this plan does not reopen that. No default prefix exists, so a placeholder cannot ship by accident
   while P1e is still open.
   **Deviation from the spec, for 5zorro to veto:** §4A.2 named mod-10 (Luhn), which is defined over
-  digits only. The build uses mod-43 over the same 43 characters Code 39 uses, because it behaves
-  identically on an all-digit item number *and* survives letters — so it does not have to be
-  revisited once the real item numbers are known. Its honest limit, recorded in the tests: it
-  catches every single-character typo but not a transposition of two different characters.
-- **P1c — `src/receiving/blind-po-sheet.js`** (pure). Turn a purchase order plus its lines into the
-  printable model: vendor, order number, order date, line count, and per line the barcode payload,
-  item number, description, unit of measure, and an empty count box. A unit test asserts the model
-  contains **no** quantity value under any name — the blind control, proven in the test suite rather
-  than by reading the template.
+  digits only. The build uses a check over 43 characters instead, so it survives letters.
+  **Revised 2026-09-24** once R5 was answered (capitals, digits, dashes, underscores): the set is
+  Code 39's with the space swapped for an underscore — still 43, still prime — and each character is
+  weighted by its position, as Code 128 weights its own check. The tests now prove it catches every
+  single-character typo **and** every swap of two different characters; the first version caught
+  typos only. Dropping the space also removed a real trap: one label in 43 would have ended in an
+  invisible space that any trimmed text box drops. Nothing is escaped or rewritten — Code 128 prints
+  the underscore as an ordinary character.
+- **P1c — ✅ BUILT 2026-09-24. `src/receiving/blind-po-sheet.js`** (pure) + 10 tests. Turns a
+  submitted Purchase Order into the printable model: vendor, order number, order date, line count,
+  and per line the barcode payload, item number, description and unit. The empty count box is the
+  page's job, so the model has no field for it. It refuses a draft or cancelled order.
+  **How the blind control is proven.** A Purchase Order row gives the quantity away under more names
+  than `qty` — `stock_qty`, `received_qty`, `fg_item_qty`, and `total_weight`, which is weight ×
+  quantity. So the model is built from an **allowlist**, and the tests seed every numeric field on
+  this ERPNext version with a distinct five-digit prime, then assert none of them appears anywhere in
+  the output, even as text; that the only numbers left are line numbers; and that a field ERPNext
+  might add later stays off the sheet. Each assertion was checked by planting a leak — a quantity in
+  a new field, inside a string, and nested — and watching it fail.
+  An item number no label can carry (lowercase, spaces) prints **without a barcode** and is listed
+  in `keyedByHand`, rather than stopping the whole sheet. One sandbox item is like that today.
+  Not done, deliberately: the vendor's own part number (`supplier_part_no`) would help a receiver
+  match a packing slip, but it was not in the scope above. Adding it is one line.
 - **P1d — `pwa/receiving/po-sheet.html`**. A plain page: type or scan an order number, fetch the
   lines over ERPNext's normal web interface, render the sheet, print it. No shell wiring.
 - **P1e — the width measurement (a physical task, not code).** §4A.2 closes on this and §11 Q6 keeps
@@ -203,11 +217,15 @@ the current process on day one, and speed is what stops people from working arou
   contained change to one module, and it comes before shortening a prefix or touching an item
   number.
 
-**Open design point, for 5zorro** — see open question R1. The per-line barcode can encode either the
-item number (one format used everywhere, including future shelf labels) or the specific order line
-(unambiguous when the same item appears twice on one order). Recommendation: **the item number**,
-with the app asking which line when an item repeats. One format in the system is worth more than
-removing a rare prompt.
+**Decided 2026-09-24 (5zorro), R1: the per-line barcode is the item number.** 5zorro wants large
+shelf labels with descriptions and small stickers on the items themselves; both carry the item
+number, which is also ordinary industry practice for internal labels — retail GTIN/UPC codes name a
+*product* and belong to its maker, so a business prints its own item number in Code 128. One format
+covers the sheet, the shelf and the sticker. When an item repeats on one order, the app asks which
+line (P4a). Two things recorded so they are not rediscovered: in bigger warehouses shelf labels
+usually name the *location* rather than the item, which can be added later without touching this;
+and on a very small sticker a 2D code (QR or DataMatrix) fits where a long Code 128 may not, but
+only camera-based scanners read it.
 
 ---
 
@@ -423,11 +441,11 @@ Raised by this plan:
 
 | # | Question | Why it matters |
 |---|---|---|
-| R1 | Does the sheet's per-line barcode encode the **item number** or the **specific order line**? | Item number keeps one payload format across the whole system and matches future shelf labels, but needs a prompt when an item appears twice on one order. Line encoding is unambiguous and creates a second format. Recommendation: item number |
+| R1 | ✅ **Answered 2026-09-24: the item number** (see P1). Does the sheet's per-line barcode encode the **item number** or the **specific order line**? | Item number keeps one payload format across the whole system and matches future shelf labels, but needs a prompt when an item appears twice on one order. Line encoding is unambiguous and creates a second format. Recommendation: item number |
 | R2 | Which warehouse do phase-1 receipts post to? | A receipt line needs one. Defaulting from the order line is the obvious answer; it needs confirming, not assuming |
 | R3 | Is price visible to the receiver? | Blind receiving is about quantity only, so price is not part of the control. Worth stating on purpose, because the submission should not come to depend on a field that might later be restricted |
 | R4 | Does the unit-of-measure field on a barcode behave as expected — does scanning a case label credit a case? | §4A assumes it does. It is the difference between one label per item and one per packaging level. Verify on this version before designing around it |
-| R5 | **What characters do the ~20k item numbers actually use?** Digits only, uppercase and digits, or mixed case and punctuation? | Raised by building P1b. A printed label can carry digits, uppercase letters and a handful of symbols; lowercase has no place in the symbology's alphanumeric set. The code currently refuses anything outside that set rather than quietly changing it, so if item numbers are mixed case this surfaces immediately instead of after ~20k labels are printed. Cheap to answer: export the item list from the legacy system and look |
+| R5 | ✅ **Answered 2026-09-24: capital letters, digits, dashes and underscores** — no lowercase, no spaces. The label set was changed to fit (P1b). **What characters do the ~20k item numbers actually use?** | Raised by building P1b. A printed label can carry digits, uppercase letters and a handful of symbols; lowercase has no place in the symbology's alphanumeric set. The code currently refuses anything outside that set rather than quietly changing it, so if item numbers are mixed case this surfaces immediately instead of after ~20k labels are printed. Cheap to answer: export the item list from the legacy system and look |
 
 ---
 
@@ -458,10 +476,10 @@ the logic is testable without a phone and the screens are not.
 
 | # | What | Why it blocks something |
 |---|---|---|
-| 1 | **Do the ~20k item numbers use lowercase letters, or anything outside digits, capitals and `- . $ / + %`?** Export the item list from the legacy system and look | The cheapest question here, and it gates P1e and the final payload format. A printed label cannot carry lowercase. The code refuses it rather than quietly changing it, so this surfaces on the first real item number either way — better to know now (**R5**) |
+| 1 | ✅ ~~Which characters do the item numbers use?~~ Answered 2026-09-24 (**R5**): capitals, digits, dashes, underscores | Closed; P1b's check character was reworked to carry underscores |
 | 2 | **The label-width measurement** (P1e) — longest item number, plus prefix and check character, against the label maker's maximum width | The payload format is not final until this exists. If it comes out too wide, the first lever is the encoder's numeric mode, not the item numbers |
-| 3 | **Veto or accept mod-43** in place of the spec's Luhn check digit (P1b) | Already built that way. Reversing it is a one-function change, and it gets more expensive once labels are printed |
-| 4 | **Does the line barcode encode the item number or the specific order line?** (**R1**) | Recommendation is the item number, with a prompt when an item repeats on one order. Decides P1c |
+| 3 | **Veto or accept the position-weighted mod-43 check** in place of the spec's Luhn check digit (P1b) | Already built that way. Reversing it is a one-function change, and it gets more expensive once labels are printed |
+| 4 | ✅ ~~Item number or order line?~~ Answered 2026-09-24 (**R1**): the item number | Closed; P1c built on it |
 | 5 | **Restrict, or only attribute?** (P3a vs its lazier path, and spec Q8) | Raising the order quantity to a restricted permission tier changes the purchase-order form for every role. Phase 1 exists partly to measure that, but the fallback — timestamp and attribute rather than restrict — is a legitimate end state, not a failure |
 | 6 | **Keep this plan tracked, or make it private?** | It is scrubbed and safe to track, and the three-file orientation contract assumes an off-machine agent can read it. Gitignoring it would quietly break that. Recommendation: keep it tracked |
 | 7 | **Three pre-existing public mentions** of the legacy system, listed in museum **OI-176** | Removing them from history means rewriting pushed history and force-pushing a repo with a merged PR on `main`. Editing the files going forward is cheap; erasing history is not. No agent should do either unasked |
