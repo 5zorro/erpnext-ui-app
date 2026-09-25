@@ -13,6 +13,11 @@
  * idea over a set that can also carry letters, and it behaves identically on an all-digit item
  * number — so it is the choice that does not have to be revisited once the real item numbers are
  * known. See open question R5 in the 2026-09-21 plan.
+ *
+ * TODO(R5, answered 2026-09-24): real item numbers are capitals, digits, dashes **and
+ * underscores**. `_` is not in this set, so buildLabelPayload refuses any item number containing
+ * one. Decide before printing labels: map `_` to a spare character, or compute the check over a
+ * wider alphabet. Code 128 itself carries `_` fine; only the check character is the limit.
  */
 export const LABEL_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%";
 
