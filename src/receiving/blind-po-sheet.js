@@ -11,12 +11,13 @@
  * the sheet until someone adds it here on purpose.
  */
 
+import { encodableCode128B } from "./code128.js";
 import { buildLabelPayload } from "./label-payload.js";
 
 /**
  * Build the sheet model.
  *
- * Every line gets a barcode payload for its item number (R1: the item, not the order line — one
+ * The header carries the order's own barcode. Every line gets a barcode payload for its item number (R1: the item, not the order line — one
  * format for the sheet, the shelf label and the item sticker). An item number no label can carry
  * does not stop the sheet: its line prints without a barcode, and `keyedByHand` lists it so the
  * page can say which lines must be typed in.
@@ -28,6 +29,11 @@ export function buildBlindPoSheet(po, { prefix } = {}) {
   if (!po || typeof po !== "object") throw new Error("blind sheet: no purchase order");
   if (po.docstatus !== 1) {
     throw new Error(`blind sheet: ${po.name || "this order"} is not submitted, so it cannot be received against`);
+  }
+
+  if (typeof prefix === "string" && prefix && String(po.name || "").startsWith(prefix)) {
+    // The phone tells an item label from an order barcode by the prefix, so they must not share it.
+    throw new Error(`blind sheet: order numbers here start with the label prefix “${prefix}” — choose a prefix they do not start with`);
   }
 
   const lines = (po.items || []).map((row, index) => {
@@ -50,6 +56,10 @@ export function buildBlindPoSheet(po, { prefix } = {}) {
 
   return {
     orderNumber: po.name,
+    // The order's own barcode, scanned at the dock to open this order on the phone (spec §7.3).
+    // Its name is printed as-is; the check above guarantees it does not start with the label
+    // prefix, so the two cannot be confused. Null if the name has a character a barcode cannot carry.
+    orderBarcode: encodableCode128B(po.name) ? po.name : null,
     supplier: po.supplier_name || po.supplier,
     orderDate: po.transaction_date || "",
     lineCount: lines.length,

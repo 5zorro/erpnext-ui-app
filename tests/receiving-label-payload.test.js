@@ -5,6 +5,7 @@ import {
   LABEL_CHARSET,
   REJECTED,
   buildLabelPayload,
+  checkLabelPrefix,
   labelCheckCharacter,
   parseLabelPayload,
 } from "../src/receiving/label-payload.js";
@@ -137,4 +138,12 @@ test("a multi-character prefix works the same way", () => {
     ok: false,
     reason: REJECTED.NOT_OURS,
   });
+});
+
+test("a usable prefix is short, from the label set, and tidied to capitals", () => {
+  assert.deepEqual(checkLabelPrefix(" rx "), { ok: true, prefix: "RX" });
+  assert.deepEqual(checkLabelPrefix("W-"), { ok: true, prefix: "W-" });
+  assert.match(checkLabelPrefix("").reason, /Enter/);
+  assert.match(checkLabelPrefix("ABCDE").reason, /4 characters/);
+  assert.match(checkLabelPrefix("W#").reason, /capital letters/);
 });

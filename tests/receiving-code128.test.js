@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  code128Bars,
   code128BValues,
   code128CheckValue,
   code128Modules,
@@ -150,4 +151,16 @@ test("svg defaults to the quiet zone the standard requires", () => {
   const svg = code128Svg("A");
   const expectedWidth = (code128Modules("A").length + 20) * 2;
   assert.match(svg, new RegExp(`width="${expectedWidth}"`));
+});
+
+test("bar positions cover exactly the dark modules, inside the quiet zones", () => {
+  for (const text of ["A", "W10042N", "PUR-ORD-2026-00386"]) {
+    const modules = code128Modules(text);
+    const { totalModules, bars } = code128Bars(text, { quietZone: 10 });
+    assert.equal(totalModules, modules.length + 20);
+    const drawn = new Array(modules.length).fill("0");
+    for (const bar of bars) for (let i = 0; i < bar.width; i += 1) drawn[bar.x - 10 + i] = "1";
+    assert.equal(drawn.join(""), modules, text);
+    assert.ok(bars[0].x >= 10 && bars.at(-1).x + bars.at(-1).width <= totalModules - 10);
+  }
 });
