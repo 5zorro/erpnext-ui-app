@@ -13,14 +13,16 @@ the build document and does not restate its reasoning.
 area of the codebase, different agent. The list of files this tranche must not open is under
 **Boundary with the 2026-09-16 tranche**.
 
-> **Status, 2026-09-24 (late).** Direction set by 5zorro; six packets, ordered at the bottom.
-> **Built:** P1a (Code 128 encoder), P1b (label payload, check reworked for underscores), P1c (the
-> blind sheet model), P4a (the counting session) and **P2 (the secure front door, the installable
-> shell and the setup card)** — 87 receiving tests, `npm test` green at 1887. R1 and R5 are answered.
+> **Status, 2026-09-25.** Direction set by 5zorro; six packets, ordered at the bottom.
+> **Built:** all of **P1 except the physical measurement** (encoder, label payload, sheet model,
+> and the printable sheet page), **P2** (secure front door, installable shell, setup card) and
+> **P4a** (the counting session). `npm test` green. R1 and R5 are answered.
 > **The proxy is running** on this computer (`docker compose -f ops/receiving-proxy/compose.yml ps`).
-> **Next action:** P1d, the page that prints the sheet — P2 has given it its route to ERPNext. Then
-> **the first real-phone run** of the setup card, which is 5zorro's, not an agent's.
-> **Open from P2:** waiting-on item 8 (ERPNext reachable from the Wi-Fi) and the 7-day login.
+> **Next actions are 5zorro's, not an agent's:** print a real sheet from a workstation and scan it
+> (P1e — the width table under P1e says what to expect), and run the setup card on a real phone.
+> **Next agent work:** P4b–P4d (pure), or P3 — which changes who can see order quantities
+> site-wide and must not start without 5zorro's go-ahead on waiting-on item 5.
+> **Open:** waiting-on item 8 (ERPNext reachable from the Wi-Fi) and the 7-day login.
 >
 > **Nothing has been run against a phone, a printer or a scanner yet.** Every claim in this plan
 > about how a device behaves is still a claim.
@@ -208,12 +210,44 @@ the current process on day one, and speed is what stops people from working arou
   in `keyedByHand`, rather than stopping the whole sheet. One sandbox item is like that today.
   Not done, deliberately: the vendor's own part number (`supplier_part_no`) would help a receiver
   match a packing slip, but it was not in the scope above. Adding it is one line.
-- **P1d — `pwa/receiving/po-sheet.html`**. A plain page: type or scan an order number, fetch the
-  lines over ERPNext's normal web interface, render the sheet, print it. No shell wiring.
+- **P1d — ✅ BUILT 2026-09-25. `pwa/receiving/po-sheet.html`** (+ `po-sheet.js`, `po-sheet.css`,
+  and `src/receiving/erp-read.js` + tests). Printed **from a workstation** (5zorro, 2026-09-25), not a
+  phone: the workstation opens `https://HOST:8443/receiving/po-sheet.html` and signs in to ERPNext
+  at that same address — a login at `:8080` does not carry over, because the browser keeps logins
+  per address. Type or scan an order number, give the label prefix (remembered by that browser),
+  show, print. The header carries the order's own barcode (spec §7.3: the phone opens an order by
+  scanning it), each line its item label, and an empty count box. It refuses a draft or cancelled
+  order, says plainly when not signed in (with a link back), when there is no such order, and when
+  the prefix is unusable. **A prefix that order numbers also start with is refused** — with prefix
+  `P`, the phone would read `PUR-ORD-…` as a damaged item label instead of an order.
+  **Checked 2026-09-25 in a desktop browser against the sandbox:** every failure case shows its own
+  message; a real order renders with no quantity, rate or total anywhere on it; nothing is blocked
+  by the page's security policy; and an independent reader (ZXing) decodes the order barcode and
+  both item labels **exactly**, from a render at printer resolution (~576 dpi). At screen
+  resolution it reads none — a 0.33 mm bar is about 1.25 screen pixels — which is expected and is
+  why a real print and a real scanner are still owed.
+  **The label prefix is typed on this page for now.** The phone must use the same one; where the
+  shared value lives is decided with P5. The page is not in the offline copy, since it is a
+  workstation page.
 - **P1e — the width measurement (a physical task, not code).** §4A.2 closes on this and §11 Q6 keeps
   it open: measure the printed width of prefix + longest item number + check digit against the
   label maker's maximum label width. **The payload format is not final until that measurement
   exists.** Print a test sheet carrying the longest item number in the sandbox and measure it.
+  **What the arithmetic says, before any printing** (2-character prefix, check character, the
+  standard 10-module quiet zone each side; width = (11 × payload length + 55) × bar width):
+
+  | Item number length | at 0.33 mm bars (the sheet's size) | at 0.25 mm bars |
+  |---|---|---|
+  | 6 | 51 mm | 38 mm |
+  | 8 | 58 mm | 44 mm |
+  | 10 | 65 mm | 50 mm |
+  | 12 | 73 mm | 55 mm |
+  | 16 | 87 mm | 66 mm |
+  | 20 | 102 mm | 77 mm |
+
+  Common label-maker tapes are roughly 50–62 mm wide, so at 0.33 mm an item number much past 8
+  characters does not fit, and at 0.25 mm about 12 does. Thinner bars are the second lever after the
+  numeric mode below; both have to be tried on the real printer and scanner, not assumed.
   **If it comes out too wide, the first lever is not the item numbers.** Code 128 can carry a run of
   digits at half width by switching to its numeric mode mid-symbol — observed 2026-09-21 in the
   reference implementation, which does exactly that on digit runs. Our encoder does not, because a

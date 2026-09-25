@@ -54,6 +54,20 @@ export function labelCheckCharacter(body) {
   return LABEL_CHARSET[sum % modulus];
 }
 
+/**
+ * Is this usable as the company prefix? Returns `{ ok: true, prefix }` or `{ ok: false, reason }`.
+ * Kept short on purpose: every character of it is printed on every label (plan P1e).
+ */
+export function checkLabelPrefix(input) {
+  const prefix = String(input ?? "").trim().toUpperCase();
+  if (!prefix) return { ok: false, reason: "Enter the label prefix." };
+  if (prefix.length > 4) return { ok: false, reason: "Keep the label prefix to 4 characters or fewer." };
+  if ([...prefix].some((ch) => !LABEL_CHARSET.includes(ch))) {
+    return { ok: false, reason: "The label prefix can use capital letters, digits and - . _ $ / + % only." };
+  }
+  return { ok: true, prefix };
+}
+
 /** prefix + item number + check character. Throws if the item number cannot be carried. */
 export function buildLabelPayload(itemNumber, { prefix } = {}) {
   requirePrefix(prefix);

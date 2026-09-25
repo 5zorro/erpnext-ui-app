@@ -1,0 +1,60 @@
+/* Blind receiving sheet — printed from a workstation. On screen it follows the system theme; on
+   paper it is always black on white. */
+:root {
+  --bg: #ffffff; --fg: #111418; --muted: #4a5561; --line: #c9d0d7; --bad: #a3141b;
+  --accent: #18212b; --accent-fg: #ffffff;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e1319; --fg: #f2f5f8; --muted: #aab4bf; --line: #2c3743; --bad: #ff7a7f;
+          --accent: #f2f5f8; --accent-fg: #0e1319; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.controls { max-width: 52rem; margin: 0 auto; padding: 16px; }
+.controls h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+.muted { color: var(--muted); }
+.fields { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.fields label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; flex: 1 1 14rem; }
+.fields label:last-child { flex: 0 1 9rem; }
+input[type="text"] { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px;
+                     background: var(--bg); color: var(--fg); font: inherit; }
+.actions { display: flex; gap: 8px; }
+button { min-height: 40px; padding: 0 18px; border: 0; border-radius: 6px; font: inherit; font-weight: 600;
+         background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+button:disabled { opacity: 0.4; cursor: default; }
+.message { min-height: 1.45em; color: var(--bad); }
+.message a { color: inherit; }
+
+/* The sheet itself: paper colours even on screen, so what you see is what prints. */
+.sheet { --ink: #000; --rule: #000; background: #fff; color: var(--ink);
+         max-width: 52rem; margin: 0 auto 32px; padding: 16px 20px; border: 1px solid var(--line); }
+.sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.sheet h2 { font-size: 1.25rem; margin: 0 0 6px; }
+.sheet dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+.sheet dt { font-weight: 600; }
+.sheet dd { margin: 0; }
+.order-code { margin: 0; text-align: center; }
+.order-code figcaption, .code-text { font: 11px/1.2 ui-monospace, "Cascadia Mono", Menlo, monospace; }
+.instruction { margin: 12px 0; font-weight: 600; }
+.sheet table { width: 100%; border-collapse: collapse; }
+.sheet th, .sheet td { border: 1px solid var(--rule); padding: 6px 8px; text-align: left; vertical-align: middle; }
+.sheet th { font-size: 0.85rem; }
+.sheet .n { width: 2.2em; text-align: right; }
+.sheet .count { width: 7.5em; }
+.sheet td.count { height: 16mm; }
+.sheet .item-number { font-weight: 700; font-size: 1.05rem; }
+.sheet .no-code { font-style: italic; }
+.sheet .by-hand { margin-top: 8px; font-size: 0.9rem; }
+.sign { display: flex; justify-content: space-between; margin-top: 24px; }
+svg.barcode { display: block; }
+
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff; color: #000; font-size: 11pt; }
+  .controls { display: none; }
+  .sheet { border: 0; padding: 0; max-width: none; margin: 0; }
+  .sheet thead { display: table-header-group; }
+  .sheet tr { break-inside: avoid; }
+}

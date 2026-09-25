@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blind receiving sheet</title>
+  <link rel="stylesheet" href="po-sheet.css">
+  <script type="module" src="po-sheet.js"></script>
+</head>
+<body>
+<form class="controls" id="controls">
+  <h1>Blind receiving sheet</h1>
+  <p class="muted">Prints a purchase order for the dock with every quantity left off. Type or scan
+    the order number.</p>
+  <div class="fields">
+    <label>Order number
+      <input type="text" id="order" autocomplete="off" spellcheck="false" autofocus placeholder="PUR-ORD-2026-00386">
+    </label>
+    <label>Label prefix
+      <input type="text" id="prefix" autocomplete="off" spellcheck="false" maxlength="4" placeholder="e.g. RX">
+    </label>
+  </div>
+  <div class="actions">
+    <button type="submit" id="show">Show sheet</button>
+    <button type="button" id="print" disabled>Print</button>
+  </div>
+  <p class="message" id="message" role="status"></p>
+</form>
+
+<article class="sheet" id="sheet" hidden>
+  <header class="sheet-head">
+    <div>
+      <h2>Blind receiving sheet</h2>
+      <dl>
+        <dt>Vendor</dt><dd id="s-supplier"></dd>
+        <dt>Order</dt><dd id="s-order"></dd>
+        <dt>Order date</dt><dd id="s-date"></dd>
+        <dt>Lines</dt><dd id="s-lines"></dd>
+      </dl>
+    </div>
+    <figure class="order-code" id="s-order-code"></figure>
+  </header>
+  <p class="instruction">Count what arrived and write the count in the box. The ordered quantity is
+    left off this sheet on purpose.</p>
+  <table>
+    <thead>
+      <tr><th class="n">#</th><th>Barcode</th><th>Item</th><th>Unit</th><th class="count">Count</th></tr>
+    </thead>
+    <tbody id="s-rows"></tbody>
+  </table>
+  <p class="by-hand" id="s-by-hand" hidden></p>
+  <footer class="sign">
+    <span>Counted by ______________________</span>
+    <span>Date ____________</span>
+  </footer>
+</article>
+</body>
+</html>

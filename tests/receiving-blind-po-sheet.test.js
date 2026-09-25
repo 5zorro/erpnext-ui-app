@@ -78,6 +78,7 @@ test("the sheet carries the order header and one line per order row, in order", 
   assert.equal(sheet.orderNumber, "PUR-ORD-2026-00386");
   assert.equal(sheet.supplier, "Example Supply Co");
   assert.equal(sheet.orderDate, "2026-09-08");
+  assert.equal(sheet.orderBarcode, "PUR-ORD-2026-00386");
   assert.equal(sheet.lineCount, 3);
   assert.deepEqual(
     sheet.lines.map((l) => [l.lineNumber, l.itemNumber, l.description, l.unit]),
@@ -156,4 +157,18 @@ test("falls back sensibly when optional fields are empty", () => {
     unit: "Nos",
     payload: bare.lines[0].payload,
   });
+});
+
+test("the order barcode is the order's name, and cannot be mistaken for an item label", () => {
+  assert.ok(encodableCode128B(sheet.orderBarcode));
+  assert.equal(parseLabelPayload(sheet.orderBarcode, opts).ok, false);
+  const odd = buildBlindPoSheet(purchaseOrder([row(1, "10042")], { name: "PO-é" }), opts);
+  assert.equal(odd.orderBarcode, null);
+});
+
+test("a label prefix that order numbers also start with is refused", () => {
+  // With prefix "P", the phone would read PUR-ORD-… as a damaged item label instead of an order.
+  assert.throws(() => buildBlindPoSheet(po, { prefix: "P" }), /start with the label prefix/);
+  assert.throws(() => buildBlindPoSheet(po, { prefix: "PUR" }), /start with the label prefix/);
+  assert.ok(buildBlindPoSheet(po, { prefix: "RX" }));
 });

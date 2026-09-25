@@ -90,15 +90,13 @@ export function code128Modules(text) {
 }
 
 /**
- * SVG markup for the symbol. `quietZone` is in modules and defaults to the 10 the standard
- * requires — a barcode printed hard against a table border is the classic unreadable label.
+ * The bars of the symbol as positions, in modules (the narrowest bar width): `{ totalModules,
+ * bars: [{ x, width }] }`, quiet zones included. For drawing with DOM elements rather than markup.
+ * `quietZone` defaults to the 10 modules the standard requires — a barcode printed hard against a
+ * table border is the classic unreadable label.
  */
-export function code128Svg(text, options = {}) {
-  const { moduleWidth = 2, height = 56, quietZone = 10, title = "" } = options;
+export function code128Bars(text, { quietZone = 10 } = {}) {
   const modules = code128Modules(text);
-  const totalModules = modules.length + quietZone * 2;
-  const width = totalModules * moduleWidth;
-
   const bars = [];
   let index = 0;
   while (index < modules.length) {
@@ -108,15 +106,24 @@ export function code128Svg(text, options = {}) {
     }
     let run = 0;
     while (index + run < modules.length && modules[index + run] === "1") run += 1;
-    const x = (quietZone + index) * moduleWidth;
-    bars.push(`<rect x="${x}" y="0" width="${run * moduleWidth}" height="${height}"/>`);
+    bars.push({ x: quietZone + index, width: run });
     index += run;
   }
+  return { totalModules: modules.length + quietZone * 2, bars };
+}
 
+/** SVG markup for the symbol, for places that want a string (a file, a test). */
+export function code128Svg(text, options = {}) {
+  const { moduleWidth = 2, height = 56, quietZone = 10, title = "" } = options;
+  const { totalModules, bars } = code128Bars(text, { quietZone });
+  const width = totalModules * moduleWidth;
+  const rects = bars.map(
+    (bar) => `<rect x="${bar.x * moduleWidth}" y="0" width="${bar.width * moduleWidth}" height="${height}"/>`,
+  );
   const label = title ? `<title>${title.replace(/[<>&]/g, "")}</title>` : "";
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
     `viewBox="0 0 ${width} ${height}" role="img" shape-rendering="crispEdges" fill="#000">` +
-    `${label}${bars.join("")}</svg>`
+    `${label}${rects.join("")}</svg>`
   );
 }

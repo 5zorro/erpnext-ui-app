@@ -79,6 +79,21 @@ camera**. When every line shows ✓, the phone is ready.
 
 ---
 
+## Printing the blind sheet — from a workstation
+
+1. On a computer on the same network, open **`https://HOST:8443/receiving/po-sheet.html`**.
+   Trusting the certificate on that computer too (same file as step 1 of the card, added to the
+   computer's trusted authorities) removes the warning; for printing alone the warning is
+   harmless.
+2. Sign in to ERPNext **at that address** if the page asks — a login at the ordinary ERPNext
+   address does not carry over, because a browser keeps logins per address.
+3. Type or scan the order number, enter the label prefix (the browser remembers it), **Show sheet**,
+   then **Print**. Only submitted orders print; drafts and cancelled orders are refused.
+
+Print at 100% scale, not "fit to page", so the barcodes keep the size they were designed at.
+
+---
+
 ## What trusting the certificate means
 
 Said plainly, because it is the one real cost of this setup:
