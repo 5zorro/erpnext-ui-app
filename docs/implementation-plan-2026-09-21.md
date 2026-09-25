@@ -13,10 +13,12 @@ the build document and does not restate its reasoning.
 area of the codebase, different agent. The list of files this tranche must not open is under
 **Boundary with the 2026-09-16 tranche**.
 
-> **Status, end of 2026-09-21.** Direction set by 5zorro; six packets, ordered at the bottom.
-> **Built:** P1a (Code 128 encoder) and P1b (label payload codec), 22 tests, `npm test` green at
-> 1812. **Next action:** P1c — the printable sheet model, whose defining test is that no quantity
-> can appear in it under any name — then P1d, the page that prints it.
+> **Status, 2026-09-24.** Direction set by 5zorro; six packets, ordered at the bottom.
+> **Built:** P1a (Code 128 encoder), P1b (label payload, check reworked for underscores), P1c (the
+> blind sheet model) and P4a (the counting session) — 51 receiving tests, `npm test` green at 1860.
+> R1 and R5 are answered. **Next action needs a decision:** P1d, the page that prints the sheet,
+> has to reach ERPNext from outside the Electron app, which is what P2 sets up. Either do P2 first,
+> or give P1d a temporary route and replace it. P4b–P4d are pure and can go on meanwhile.
 >
 > **Nothing has been run against a phone, a printer or a scanner yet.** Every claim in this plan
 > about how a device behaves is still a claim.
@@ -334,12 +336,23 @@ back to this and say so out loud rather than half-enforcing.**
 All of this is ordinary testable logic with no camera and no network, so it lands in `src/` with
 tests first, per the pure-first invariant.
 
-- **P4a — `src/receiving/blind-count.js`.** The state of a receiving session: a scan resolves to a
-  line, a count is keyed, a line can be corrected before submission. Rules that are easy to get
+- **P4a — ✅ BUILT 2026-09-24. `src/receiving/blind-count.js`** (pure) + 16 tests. The state of a
+  receiving session: a scan resolves to a line, a count is keyed, a line can be corrected before
+  submission. It starts from the P1c sheet, never a raw order, and copies only the fields it names.
+  Each rule below failed its test when a bug was planted against it. Rules that are easy to get
   wrong and are therefore tests:
   - the quantity box starts **blank, never 1** — a defaulted 1 gets accepted without looking and
     destroys the count (§7.4);
-  - scanning the same payload again quickly adds 1, as the convenience path;
+  - **scanning the line already on screen adds one**, as the convenience path. **Deviation from
+    §7.4, for 5zorro to veto:** the spec says a *rapid* re-scan adds 1. Read literally, scanning five
+    stickers counts four, because the first scan only selects the line. So the second scan counts
+    the first as well: five stickers make five, and a single scan still leaves the box blank for
+    the keypad. There is no timer: a slow receiver whose re-scan silently did nothing would be worse,
+    and a phone camera re-reads one label many times a second anyway. **Dropping those repeat reads
+    is P5a's job** — without it, one sticker held in view would count dozens;
+  - once a count is **typed**, scanning that line again changes nothing and says so, so a habit
+    re-scan cannot turn 12 into 13; typing replaces a scanned count; **zero** is a real answer,
+    distinct from blank;
   - an unresolvable payload produces a **blocking** prompt, never a silent failure — §7.4 is explicit
     that a silent scan failure is the fastest way to lose the receiver's trust;
   - when one item appears on two lines of the same order, the app asks which line (see R1);
@@ -366,7 +379,10 @@ One chain, end to end, on a real phone: sign in → choose an order (scan the sh
 or search) → scan a line → key a count → submit → confirmation. Everything else in §7 is deferred.
 
 - **P5a — reading barcodes.** Use the phone's built-in barcode reader where it exists, with the
-  `ZXing` library as the fallback. **Verify on the actual test phones before designing around
+  `ZXing` library as the fallback. 🔴 **It must drop the camera's repeat reads of one label** — a
+  camera reports the same code every frame while it is in view, and P4a counts every scan it is
+  handed (see P4a). Usual shape: after a read, ignore that same code until it has left the view or a
+  short pause has passed. **Verify on the actual test phones before designing around
   either** — the built-in reader is absent on some platforms, and a wrong assumption here changes
   what has to be cached for offline use.
 - **P5b — hardware scanners.** A paired ring scanner behaves like a keyboard, so the page keeps a
