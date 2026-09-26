@@ -2295,7 +2295,8 @@
         textDiv(
           "method-panel-status",
           `Re-linked automatically after an amendment detached ${payments.length === 1 ? "a payment" : "these payments"}. ` +
-            "The books are already correct — this is only asking you to check.",
+            "The books are already correct — this is only asking you to check. Each payment also " +
+            "carries a permanent comment recording that the shell, not a person, made the link.",
         ),
       );
 
@@ -2315,7 +2316,14 @@
         okay.type = "button";
         okay.className = "btn-primary";
         okay.dataset.testid = "relink-review-ok";
-        okay.textContent = "Seems okay";
+        // 🔴 "Reviewed", not "Seems okay" and not "Approve": the allocation already posted, so this
+        // records that somebody looked. Who *made* it is a separate, permanent record — a Comment
+        // on the payment — which is what a reviewer needs after this flag is gone (5zorro
+        // 2026-09-26: "a reviewer could see created by a human vs created by autolink").
+        okay.textContent = "Reviewed";
+        okay.title =
+          "Closes this request to look. The payment keeps a permanent comment saying it was " +
+          "auto-linked, so how it came about stays visible afterwards.";
         okay.onclick = async () => {
           okay.disabled = true;
           const res = await api
@@ -2340,7 +2348,9 @@
         open.className = "btn-secondary";
         open.dataset.testid = "relink-review-open";
         open.textContent = "Open payment";
-        open.title = "Opens the Payment Entry in Vanilla. Its UnReconcile button undoes this.";
+        open.title =
+          "Opens the Payment Entry in Vanilla. Its timeline carries the provenance comment, and " +
+          "its UnReconcile button undoes the allocation.";
         open.onclick = () => {
           if (api && api.openErp) api.openErp(`/app/payment-entry/${encodeURIComponent(pe)}`);
         };
@@ -2429,7 +2439,14 @@
           const status = row.querySelector(".method-panel-status");
           if (status) status.textContent = `Re-linking ${p.payment}…`;
           const res = await api
-            .relinkPayment({ supplier, payment: p.payment, invoice: p.invoice, amount: p.amount })
+            .relinkPayment({
+              supplier,
+              payment: p.payment,
+              invoice: p.invoice,
+              amount: p.amount,
+              auto: false,
+              why: p.why,
+            })
             .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
           go.disabled = false;
           if (!res || !res.ok) {

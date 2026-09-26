@@ -80,6 +80,7 @@ import {
   proposeRelinks,
   splitAutoRelinks,
   relinkReviewNote,
+  relinkProvenanceNote,
 } from "../src/payment-relink.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
@@ -9828,7 +9829,20 @@ async function relinkPayment(req) {
   if (!raw.ok) {
     return { ok: false, reason: formatClientErrorReason(raw.reason || raw, "ERPNext refused the re-link.") };
   }
-  return { ok: true, payment, invoice, amount: row.allocated_amount };
+  // Posted. Now say who did it — permanently, and whichever path got here.
+  const note = relinkProvenanceNote(
+    { payment, invoice, amount: row.allocated_amount, confidence: "high", auto: req.auto === true, why: req.why || "" },
+    { auto: req.auto === true, user: req.user || "" },
+  );
+  const noted = await commentRelinkProvenance(payment, note);
+  return {
+    ok: true,
+    payment,
+    invoice,
+    amount: row.allocated_amount,
+    provenanceRecorded: noted.ok,
+    provenanceReason: noted.reason || "",
+  };
 }
 
 /**
@@ -9864,6 +9878,44 @@ async function flagRelinkForReview(payment, note) {
     }
   })()`);
   return raw && raw.ok ? { ok: true } : { ok: false, reason: (raw && raw.reason) || "Could not flag for review." };
+}
+
+/**
+ * The durable half of the record: a Comment on the payment saying who made the allocation.
+ *
+ * 🔴 **Why this is separate from the review flag.** An assignment closes, and a closed one is
+ * invisible — so on its own it cannot answer "was this typed by a person or posted by a rule?",
+ * which is the question a reviewer needs *after* the review (5zorro 2026-09-26). A Comment never
+ * closes, shows in the Desk timeline, and needs no custom field.
+ *
+ * Failing to write it does **not** fail the re-link: the allocation is already posted and correct,
+ * and refusing to report success over a missing annotation would be the wrong trade. It is
+ * reported instead, so the caller can say the record is thinner than it should be.
+ *
+ * @param {string} payment @param {string} content
+ */
+async function commentRelinkProvenance(payment, content) {
+  const nm = normalizeEditableText(payment);
+  if (!nm) return { ok: false, reason: "Payment required." };
+  const payload = JSON.stringify({ name: nm, content });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      await frappe.xcall("frappe.desk.form.utils.add_comment", {
+        reference_doctype: "Payment Entry",
+        reference_name: i.name,
+        content: i.content,
+        comment_email: frappe.session.user,
+        comment_by: frappe.session.user_fullname || frappe.session.user,
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e) };
+    }
+  })()`);
+  return raw && raw.ok ? { ok: true } : { ok: false, reason: (raw && raw.reason) || "Could not write the provenance comment." };
 }
 
 ipcMain.handle("relink-reviews", async () => {
@@ -9984,6 +10036,8 @@ async function autoRelinkForSupplier(supplier) {
       payment: p.payment,
       invoice: p.invoice,
       amount: p.amount,
+      auto: true,
+      why: p.why,
     });
     navDebug(
       "auto-relink",

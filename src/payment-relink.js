@@ -242,6 +242,44 @@ export function relinkReviewNote(p) {
 }
 
 /**
+ * 🔴 **Who made this allocation — written to stay, not to be closed.**
+ *
+ * 5zorro 2026-09-26: *"I wanted something that a reviewer could see 'created by a human vs created
+ * by autolink' as there is a difference in the source of the errors when one is created from
+ * either."* Exactly right, and it is a hole in the review flag on its own: an assignment *closes*,
+ * and once closed an auto-linked allocation is indistinguishable from one somebody typed.
+ *
+ * So provenance is a **Comment** on the payment — permanent, in the Desk timeline, readable in a
+ * plain browser — and the assignment stays what it is: the transient "somebody still has to look".
+ * Both re-link paths write one, because "no comment" would otherwise mean three different things.
+ *
+ * The difference it records is **blast radius**, which is what a reviewer actually needs:
+ * a wrong auto-link means the *matching rule* is wrong, so other payments may be wrong the same
+ * way; a wrong manual one is a misread of that day's paperwork and stops there.
+ *
+ * `PROVENANCE_TOKEN` opens the text so the shell (and any later report) can find these again.
+ *
+ * @param {RelinkProposal} p
+ * @param {{ auto?: boolean, user?: string }} [by]
+ */
+export const PROVENANCE_TOKEN = "Allocation source:";
+
+export function relinkProvenanceNote(p, by = {}) {
+  const head = `${PROVENANCE_TOKEN} ${by.auto ? "AUTO-LINK" : "PERSON"} (Doc shell)`;
+  const what = `${fmt(p.amount)} of ${p.payment} applied to ${p.invoice}.`;
+  const why =
+    "Amending a bill detaches its payment and ERPNext keeps no record of which bill it paid, so " +
+    `the pairing was inferred: ${p.why}`;
+  const consequence = by.auto
+    ? "Nobody was asked — this posted automatically because the match was near-certain. " +
+      "🔴 If it is wrong, the matching rule is wrong, so other payments may be wrong the same way: " +
+      "undo it with UnReconcile and say so, do not just fix this one."
+    : `${by.user || "A person"} was shown that reasoning and accepted it. ` +
+      "If it is wrong it is a one-off misread rather than a bad rule — undo it with UnReconcile.";
+  return `${head}\n\n${what}\n\n${why}\n\n${consequence}`;
+}
+
+/**
  * One line for the chip, and the longer sentence for the confirm.
  *
  * 🔴 A `low` proposal says so in the button itself. A one-click action whose label looks identical
