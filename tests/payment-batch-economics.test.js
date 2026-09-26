@@ -148,6 +148,7 @@ describe("paymentBatchEconomics", () => {
   it("6. empty bills -> no groups; single bill -> one pay-alone group with netBenefit 0", () => {
     assert.deepEqual(paymentBatchEconomics({ bills: [], perPaymentFee: 0.83, apr: 0.09 }), {
       groups: [],
+      unschedulable: [],
     });
     const { groups } = paymentBatchEconomics({
       bills: [bill({ invoice: "PI-SOLO", dueDate: "2026-04-15" })],
@@ -1080,5 +1081,74 @@ describe("paymentBatchEconomics — the today clamp (P2a / OI-172)", () => {
     const withToday = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09 }).groups;
     const withoutToday = paymentBatchEconomics({ bills, perPaymentFee: 0.83, apr: 0.09, today: undefined }).groups;
     assert.deepEqual(withToday, withoutToday);
+  });
+});
+
+/**
+ * 🔴 The crash that emptied the whole dashboard (2026-09-26).
+ *
+ * The Accounts Payable report returns more than bills. An **unallocated payment** comes back with a
+ * negative outstanding and no due date at all, and the bank-calendar walk throws on an empty date —
+ * which killed `render()` mid-loop, so the board drew nothing at all, with no error on screen and
+ * nothing in the console. 5zorro: *"the drawer … seems to be so high as to cover up all suggested
+ * payment grouping (or there are no unpaid bills due to a db wipe)."*
+ *
+ * These rows are not exotic. P1's void-and-amend detaches a bill's payments by design
+ * (`unlink_payment_on_cancellation_of_invoice`), so every amend of a paid bill leaves one behind —
+ * the one in the sandbox came from the 2026-09-22 dogfood.
+ */
+describe("paymentBatchEconomics — rows that are not payable obligations", () => {
+  const payable = { invoice: "PI-1", installmentKey: "PI-1", supplier: "V", dueDate: "2026-04-15", outstanding: 100 };
+  const unallocatedPayment = {
+    invoice: "ACC-PAY-2026-00002",
+    installmentKey: "ACC-PAY-2026-00002",
+    supplier: "V",
+    dueDate: "",
+    outstanding: -9,
+  };
+
+  it("does not throw on a row with no due date", () => {
+    assert.doesNotThrow(() =>
+      paymentBatchEconomics({ bills: [unallocatedPayment], perPaymentFee: 0.83, apr: 0.09 }),
+    );
+  });
+
+  it("hands the row back rather than dropping it — it is real money", () => {
+    const out = paymentBatchEconomics({
+      bills: [payable, unallocatedPayment],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+    });
+    assert.deepEqual(out.unschedulable, [unallocatedPayment]);
+    assert.equal(out.groups.length, 1, "the payable bill is still scheduled");
+    assert.deepEqual(out.groups[0].bills, ["PI-1"]);
+  });
+
+  it("skips a zero-outstanding row too — there is nothing to pay", () => {
+    const out = paymentBatchEconomics({
+      bills: [{ ...payable, outstanding: 0 }],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+    });
+    assert.deepEqual(out.groups, []);
+    assert.equal(out.unschedulable.length, 1);
+  });
+
+  it("one bad row does not take the good ones with it", () => {
+    const out = paymentBatchEconomics({
+      bills: [
+        unallocatedPayment,
+        payable,
+        { ...payable, invoice: "PI-2", installmentKey: "PI-2", dueDate: "2026-05-20" },
+      ],
+      perPaymentFee: 0.83,
+      apr: 0.09,
+    });
+    assert.equal(out.unschedulable.length, 1);
+    assert.equal(
+      out.groups.reduce((n, g) => n + g.bills.length, 0),
+      2,
+      "both payable bills survived the row that could not be scheduled",
+    );
   });
 });

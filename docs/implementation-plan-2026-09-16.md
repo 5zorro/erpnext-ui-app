@@ -132,12 +132,85 @@ That last row is the sharp edge of this whole packet, and it is the reason stage
 than first: "change the method on this vendor's five bills" is five cancels, and any of those bills
 that has been partly paid silently loses its payment allocation.
 
-### Stage 1 status — ✅ built and dogfooded 2026-09-22, except OI-170
+### Status — stages 1, 2 and 3 built. Only OI-170's toggle (P1e) is outstanding.
 
-`src/doc-actions.js` (the registry) + the `main.js` write path + the Bill skin button are built,
-and 5zorro amended two real bills with them. **P1e (OI-170's dominant-number toggle) is not built.**
-Stage 2 (PO / IR / Payment Entry) and stage 3 (the dashboard's just-in-time multi-bill change) are
-not started.
+| | What it is | State |
+|---|---|---|
+| Stage 1 | the Edit button on the **Bill** skin | ✅ built, dogfooded by 5zorro 2026-09-22 (two real bills) |
+| Stage 2 | the same action on **PO, Item Receipt and Payment Entry** | ✅ built 2026-09-24; confirms read against live ERP on all four skins, writes not yet run live |
+| Stage 3 | the dashboard's **just-in-time, multi-bill method change** | ✅ built 2026-09-26; plan + confirm read against live ERP, the batch write not yet run live |
+| P1e | OI-170's **dominant-number toggle** | ❌ not built — the one thing still owed |
+
+🔴 **What has and has not touched ERP.** Every *read* path is verified against the running sandbox:
+the facts probes, the confirms, the per-doctype consequence sentences, the name predictions. The
+stage-2 and stage-3 *write* paths run the same `voidAndAmendDoc` that stage 1 dogfooded, but they
+have only been exercised as far as the confirm — every verification run dismissed the dialog. The
+batch path additionally submits and re-reads, which stage 1 never did. That is 5zorro's dogfood.
+
+#### Stage 1's three lessons (below) still hold. Stage 2 and 3 added four more:
+
+4. **The registry earned its keep.** Adding PO, Item Receipt and Payment Entry was a row in
+   `ACTIONS_BY_DOCTYPE` plus a row in the new `CANCEL_COST` table each — no new mechanism, and no
+   per-doctype logic in any skin. The flow itself moved to `src/void-amend-flow.js` so four surfaces
+   share one careful sequence instead of four copies of it.
+5. 🔴 **Each doctype's cancel costs something different, and a shared "are you sure" would be wrong
+   about three of the four.** A Bill's payments get **detached**; a PO is **refused** while receipts
+   or bills stand against it; an Item Receipt puts the **stock back off the shelf** until the
+   amendment is submitted; a Payment Entry puts the **bills it paid back to outstanding**. Those
+   probes are declared in `doc-actions.js` and *executed* by `main.js`, so the query and the
+   sentence it produces cannot drift apart.
+6. 🔴 **Blockers are named, never enforced.** `check_no_back_links_exist` (`document.py:1578`) runs
+   *after* `on_cancel` and rolls the whole transaction back, so a refusal changes nothing and cannot
+   strand a document. That makes it safe to let ERP be the one that says no — and wrong for a skin
+   to pre-empt it, since our list of what links to what is an approximation of a rule we do not own.
+7. 🔴 **`<name>-1` is right exactly once.** `_set_amended_name` (`naming.py:549`) strips the trailing
+   counter and increments it, so amending `…-00231-1` gives `…-00231-2`, not `…-00231-1-1` — and the
+   whole scheme is off entirely when `Document Naming Settings.default_amend_naming` is "Default
+   Naming". Caught 2026-09-26 by *reading a live confirm*, which was promising a name the sandbox's
+   own data already contradicted. `predictAmendedName` now mirrors Frappe, and says nothing when it
+   cannot know.
+
+#### Stage 3 — what it actually does
+
+The dashboard's vendor card gets a **Method…** panel: pick the target Mode of Payment, and every
+one of that vendor's outstanding installments starts ticked (5zorro: *"all payment methods are
+generally the same for a single vendor, so if it is weird, then there is a reason"*), with a
+per-row opt-out.
+
+🔴 **Five payments are not five amends**, and that is the point of the packet. The rows on the board
+are `payment_schedule` installments, and a bill's installments live inside one document — so
+`planModeChange` collapses the row selection to invoice-level work and the confirm counts the
+*documents* that will be cancelled. Rows are matched by **due date**, never by index or by
+`installmentKey`: the key is the dashboard's own ordinal over *unpaid* rows, so on a bill whose
+first installment is paid, key `#1` is document row 2.
+
+The batch write is `voidAndAmendDoc` with two additions: an inert patch applied to the draft between
+`copy_doc` and `insert`, and a submit afterwards — an amended bill left as a draft is not
+outstanding, so a batch that left drafts would take the vendor's bills *off* the board the clerk is
+standing on. It then **reads the method back**, because `set_payment_schedule`
+(`accounts_controller.py:2658`) can refetch the whole schedule from the linked order when
+`automatically_fetch_payment_terms` and `allocate_payment_based_on_payment_terms` are both on, which
+would quietly undo the patch. Verifying is cheaper than enumerating every such path. The loop is
+sequential and **stops at the first stranding** — a second irreversible half-step on top of an
+unresolved first helps nobody — and reports one outcome per bill.
+
+#### Two bugs this tranche found in its own foundations
+
+- 🔴 **The Pay Outstanding board was drawing nothing at all** (found 2026-09-26; 5zorro: *"the
+  drawer … seems to be so high as to cover up all suggested payment grouping (or there are no unpaid
+  bills due to a db wipe)"*). Not the drawer, and not a wipe: the Accounts Payable report returns
+  more than bills, and an **unallocated payment** comes back with a *negative* outstanding and no
+  due date. `effectivePayByDate` threw on the empty date, `render()` died mid-loop, and the board
+  drew zero vendor cards with nothing on screen and nothing in the console. These rows are not
+  exotic — P1's own amend *creates* them, since cancelling a paid bill detaches its payment. The
+  engine now returns them as `unschedulable` rather than throwing or dropping them, and the vendor
+  card shows the credit as a chip, because it is real money the clerk is owed.
+- 🔴 **`npm test` could be fully green over a `main.js` that would not start.** No unit test imports
+  it (it needs Electron), and the `erpEval` write paths are JavaScript inside a template literal —
+  so a comment naming a function the ordinary way, with backticks, silently ends the literal and
+  inverts everything after it. That happened twice while building stage 3. `tests/erp-eval-scripts.test.js`
+  now parses every shell entry point and separately forbids the specific mistake, because the parse
+  error it produces points 20 lines away from the cause.
 
 Three things the dogfood taught, all fixed:
 
@@ -147,14 +220,23 @@ Three things the dogfood taught, all fixed:
    `bill-form-page.js` calls on `api` and fails naming anything the adapter does not provide; it
    immediately found a second, older instance (`navDebug`, wired to nothing, so a guarded
    diagnostic had been silently dead).
-2. 🔴 **ERPNext cannot amend a document whose child rows link back to it**, and this is upstream, not
-   ours. A v16 Purchase Invoice carries `Tax Withholding Entry` rows whose Dynamic Links point at
-   the invoice itself; `copy_doc` keeps them on amend (`from_amend` does **not** strip `no_copy`,
-   and these are not `no_copy` anyway) and `_validate_links` (`document.py:477`) rejects them
-   *before* `before_insert` or `validate` could rebuild them. Running the Desk-identical sequence by
-   hand fails the same way, so pressing Amend in Vanilla fails too. We drop child rows that link
-   back to the document being amended — stale by construction — and say which ones did not carry
-   over. A draft issue for upstream is at `erpnext-issue-draft.md` (untracked, not filed).
+2. 🔴 **A document whose child rows link back to it cannot be amended from code — but Vanilla's
+   Amend button works.** *(Corrected 2026-09-24; the original claim that Vanilla fails too was
+   inferred from the code path and never clicked. 5zorro reproduced it by hand and it worked.)*
+   A v16 Purchase Invoice carries `Tax Withholding Entry` rows whose Dynamic Links point at the
+   invoice itself; `copy_doc` keeps them on amend (`from_amend` does **not** strip `no_copy`, and
+   these are not `no_copy` anyway) and `_validate_links` (`document.py:477`) rejects them *before*
+   `before_insert` or `validate` could rebuild them.
+
+   Desk escapes it not by copying differently — it is the same `copy_doc` call — but by routing the
+   copy to a **form**: `purchase_invoice.js:706`'s `onload` runs `frm.clear_table(
+   "tax_withholding_entries")` on any new document, so by the time a human presses Save the table
+   is empty. We never open a form, so nothing clears it for us. Clearing costs nothing either way —
+   `_generate_withholding_entries` (`tax_withholding_entry.py:388`) empties and rebuilds the table
+   during `validate`, so the rows we send are discarded regardless and only ever get as far as
+   failing the link check. So we drop child rows that link back to the document being amended —
+   stale by construction — and say which ones did not carry over. **The upstream draft at
+   `erpnext-issue-draft.md` must not be filed**; there is no upstream bug here.
 3. **A cancelled document is a legitimate starting point**, not a refusal: Desk offers Amend there,
    and it is exactly where a half-done attempt leaves one. The first failure stranded a real bill
    (cancel landed, insert failed) and the skin then refused to retry while its chip still read

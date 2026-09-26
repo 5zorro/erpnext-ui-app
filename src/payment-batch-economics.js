@@ -109,7 +109,10 @@ function floatCost(amount, apr, days) {
  *   force (`clampedTo`), so nothing downstream re-derives either. Omitted, nothing changes — no bill
  *   is ever clamped. Discount capture is untouched: it is compared against the bill's real
  *   bank-calendar due date, never the clamp, since a discount missed in the past stays missed.
- * @returns {{ groups: PaymentBatchGroup[] }}
+ * @returns {{ groups: PaymentBatchGroup[], unschedulable: OutstandingBillRow[] }} `unschedulable`
+ *   holds the rows that carry no payable obligation — no usable due date, or nothing owed (an
+ *   unallocated payment sits at a *negative* outstanding). They are never batched and never
+ *   silently dropped.
  */
 export function paymentBatchEconomics(args) {
   const { bills, perPaymentFee, apr, feeForMethod } = args || {};
@@ -123,10 +126,27 @@ export function paymentBatchEconomics(args) {
   /** @type {PaymentBatchGroup[]} */
   const groups = [];
   const candidates = [];
+  /** @type {OutstandingBillRow[]} */
+  const unschedulable = [];
 
   // Pass 1: discount capture always wins its own comparison first, independent of any group the
   // bill could otherwise join (OI-161: "do not let batching logic bury it").
   for (const bill of list) {
+    // 🔴 Not every row the Accounts Payable report returns is a payable obligation, and one that
+    // is not cannot be scheduled: an **unallocated payment** arrives with a negative outstanding
+    // and no due date at all, and the bank-calendar walk throws on an empty date. That crashed the
+    // entire dashboard — render() died mid-loop, so the board drew *nothing*, with no error on
+    // screen and nothing in the console (found 2026-09-26; 5zorro: "the drawer … seems to be so
+    // high as to cover up all suggested payment grouping (or there are no unpaid bills)").
+    //
+    // Unallocated payments are not exotic here — P1's amend detaches them by design
+    // (`unlink_payment_on_cancellation_of_invoice`), so every void-and-amend of a paid bill leaves
+    // one. They are handed back as `unschedulable` rather than dropped: it is real money, and a
+    // caller that silently loses a vendor credit is worse than one that crashes.
+    if (!isIsoDate(bill.dueDate) || !(Number(bill.outstanding) > 0)) {
+      unschedulable.push(bill);
+      continue;
+    }
     const bankDueDate = payByFor(bill.dueDate, bill);
     const captured = tryDiscountCapture(bill, bankDueDate, apr, payByFor);
     if (captured) {
@@ -189,7 +209,7 @@ export function paymentBatchEconomics(args) {
     }
   }
 
-  return { groups: assignGroupIds(groups) };
+  return { groups: assignGroupIds(groups), unschedulable };
 }
 
 /**
