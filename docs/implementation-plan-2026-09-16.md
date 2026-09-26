@@ -242,10 +242,28 @@ Three things the dogfood taught, all fixed:
    (cancel landed, insert failed) and the skin then refused to retry while its chip still read
    Submitted.
 
-**What the clerk must still do by hand:** cancelling detaches any payments applied to the bill
-(this site unlinks rather than refusing), so they survive unallocated and must be re-applied to the
-amendment. That happened for real on 2026-09-22 — `ACC-PAY-2026-00002` holds 9.00 unallocated
-against an amended bill that reads Unpaid. The confirm warns about it; nothing automates it.
+**The payment that comes unstuck — now answered (2026-09-26).** Cancelling detaches any payments
+applied to the bill (this site unlinks rather than refusing), so they survive unallocated while the
+amendment reads Unpaid, and the vendor's statement then chases money already sent.
+
+🔴 **ERPNext keeps no record of what the payment paid.** The Payment Entry Reference row is
+deleted, `against_voucher` is blanked on the ledgers, and the change is written through the query
+builder so it is not even in the document's version history — verified on the sandbox. Its own
+`allocate_entries` therefore falls back to oldest-invoice-first, which for an amended bill is
+actively wrong: on this sandbox it would have put the loose 9.00 against a 107.00 bill and left the
+9.00 amendment outstanding.
+
+The shell proposes the pairing instead (`src/payment-relink.js`), using the one fact the allocator
+ignores — an amendment carries `amended_from`, and a payment stranded by an amend is looking for
+exactly such an invoice. High confidence when the amendment's outstanding matches the loose amount
+to the cent; the doubt goes in the button label when it is a sole candidate at a different amount;
+no proposal at all when two amendments match or none does. **Proposed, never posted on its own** —
+the click hands the pairing to ERPNext's own Payment Reconciliation, which does the accounting.
+
+Proven end to end on 2026-09-26: `ACC-PAY-2026-00002`'s stranded 9.00 was re-linked to
+`ACC-PINV-2026-00231-1` from the board. The payment's `unallocated_amount` went 9.00 → 0.00, it
+kept its name and docstatus, a reference row now names the amendment, and the bill reads **Paid**.
+That was the last unproven write path in this packet.
 
 ### What gets built
 
