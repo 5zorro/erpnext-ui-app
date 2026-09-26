@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   exportDelayCalendar: (csv) => ipcRenderer.invoke("export-delay-calendar", csv || ""),
   importDelayCalendar: () => ipcRenderer.invoke("import-delay-calendar"),
   getPaymentDefaults: (supplier) => ipcRenderer.invoke("get-payment-defaults", supplier || ""),
+  // P1 stage 3 / OI-169: the just-in-time method change. Read first (which of these bills already
+  // has a payment against it, and what this site does about that), then run the plan bill by bill.
+  modeChangeFacts: (invoices) =>
+    ipcRenderer.invoke("mode-change-facts", Array.isArray(invoices) ? invoices : []),
+  runModeChange: (work) => ipcRenderer.invoke("run-mode-change", Array.isArray(work) ? work : []),
 });
