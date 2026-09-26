@@ -28,4 +28,7 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   // Payment Reconciliation.
   paymentRelinkFacts: (supplier) => ipcRenderer.invoke("payment-relink-facts", supplier || ""),
   relinkPayment: (req) => ipcRenderer.invoke("payment-relink", req || {}),
+  autoRelink: (supplier) => ipcRenderer.invoke("auto-relink", supplier || ""),
+  relinkReviews: () => ipcRenderer.invoke("relink-reviews"),
+  closeRelinkReview: (payment) => ipcRenderer.invoke("relink-review-close", payment || ""),
 });
