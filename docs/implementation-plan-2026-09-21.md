@@ -13,7 +13,9 @@ the build document and does not restate its reasoning.
 area of the codebase, different agent. The list of files this tranche must not open is under
 **Boundary with the 2026-09-16 tranche**.
 
-> **Status, 2026-09-25.** Direction set by 5zorro; six packets, ordered at the bottom.
+> **Status, 2026-09-25 — PARKED.** 5zorro is not developing this tranche for a while. Everything
+> built is committed; nothing is half-done. **Resuming?** Read *Resuming after the pause* just below
+> this box first. Direction set by 5zorro; six packets, ordered at the bottom.
 > **Built:** all of **P1 except the physical measurement** (encoder, label payload, sheet model,
 > and the printable sheet page), **P2** (secure front door, installable shell, setup card) and
 > **P4a** (the counting session). `npm test` green. R1 and R5 are answered.
@@ -26,6 +28,34 @@ area of the codebase, different agent. The list of files this tranche must not o
 >
 > **Nothing has been run against a phone, a printer or a scanner yet.** Every claim in this plan
 > about how a device behaves is still a claim.
+
+### Resuming after the pause
+
+Checks for whoever picks this up, in order — each has changed on its own before:
+
+1. **Is the proxy still running, and on the right address?**
+   `docker compose -f ops/receiving-proxy/compose.yml ps`. It restarts with Docker by itself. Its
+   address lives in the gitignored `ops/receiving-proxy/.env`; if this computer's Wi-Fi address has
+   changed, edit that file and `up -d --force-recreate`, and phones will see a certificate error
+   until then. If the `receiving-proxy_caddy_data` volume is gone, a new certificate authority was
+   minted and every phone must trust it again.
+2. **Has 5zorro done the two physical tasks?** Printing a real sheet and scanning it (P1e), and the
+   setup card on a real phone. Their results decide the label format and whether P2 holds on real
+   devices. Nothing downstream should assume either.
+3. **Waiting-on items 5 and 8** — P3 cannot start without item 5, and item 8 (ERPNext reachable from
+   the Wi-Fi with the sandbox password) may have been fixed in frappe_docker meanwhile.
+4. **Re-run `git status`** before opening anything outside `src/receiving/`, `pwa/receiving/`,
+   `ops/receiving-proxy/`, `docs/receiving-phone-setup.md` and this file. The other tranche's working
+   set was large and moving on 2026-09-25.
+5. **ERPNext may have been upgraded.** Facts verified against 16.31/16.32 (field names in P1c's
+   allowlist test, status codes in `erp-read.js`, the proxy headers) are pinned by tests or by the
+   dates beside them; re-check the ones a change would touch.
+
+**Tools this tranche used that are not in the repo:** `pip install python-barcode` (P1a's vectors,
+recipe under P1a); ZXing for reading printed barcodes back — `pip install --target <dir> zxing-cpp
+pillow`, then `zxingcpp.read_barcodes(Image.open(png))` on a page rendered at printer resolution
+(Playwright `deviceScaleFactor: 6`, about 576 dpi; at screen resolution nothing decodes). Headless
+browser against the proxy: see the SPKI recipe in P2.
 
 **A note on language.** This plan is meant to be audited by someone who does not write the code, so
 technical terms are explained the first time they appear. Where a term is an exact ERPNext name it
@@ -544,6 +574,10 @@ Raised by this plan:
 
 `P1` → `P2` → `P3` → `P4` → `P5` → `P6`.
 
+**Where it stands (2026-09-25):** P1 ✅ except P1e (physical, 5zorro's) · P2 ✅ (not yet on a real
+phone) · P3 not started, gated on waiting-on item 5 · P4 — P4a ✅, P4b–P4d not started and pure, so
+they need nothing from anyone · P5, P6 not started.
+
 P1 first because the sheet is the only thing that makes the app faster than today, and because
 nothing can be scanned until something is printed. P2 second because the camera does not work
 without it and it will otherwise be discovered on the first day of device testing. P3 before any
@@ -578,12 +612,17 @@ the logic is testable without a phone and the screens are not.
 
 ## Registration owed (deliberately deferred)
 
-Two one-line edits, to be made once the 2026-09-16 tranche is clear of those files:
+Edits to make once the 2026-09-16 tranche is clear of those files:
 
 1. `HANDOFF.md` § Read order — add this plan to the list of dated plans.
 2. `HANDOFF.md` § Invariants — note that invariant 6 ("one window") governs the **desktop shell**;
    the phone client is a separate client, not a second window. Fold at closeout with the rest of
    this tranche's durable rules.
+3. `HANDOFF.md` architecture map — the second client and its front door: `pwa/receiving/` (pages),
+   `src/receiving/` (pure logic, also served to the pages as `/receiving/lib/`),
+   `ops/receiving-proxy/` (Caddy in front of ERPNext's own web server; frappe_docker untouched), and
+   `docs/receiving-phone-setup.md`. Invariant 4 (one configured ERP base) holds because the phone
+   uses the proxy's address for both.
 
 Until then, an agent that has only `HANDOFF.md` will not find this plan. That is the accepted cost
 of not editing a contended file, and it expires the moment the other tranche closes.
@@ -601,8 +640,13 @@ of not editing a contended file, and it expires the moment the other tranche clo
 cd ~/erpnext-ui-app && npm test
 ```
 
-Layer 1 (pure unit tests) is the gate, as always. The phone app itself is layer 4 — manual, on a real
-device, at a dock if possible. There is no Electron smoke test here because there is no Electron
-surface in this tranche.
+Layer 1 (pure unit tests) is the gate, as always. It includes guards on the proxy configuration and
+the pages (`tests/receiving-proxy-config.test.js`) that fail if the security rules are loosened. The
+phone app itself is layer 4 — manual, on a real device, at a dock if possible. There is no Electron
+smoke test here because there is no Electron surface in this tranche.
+
+Between the two, what was run by hand on 2026-09-24/25 and is worth repeating after any proxy or
+page change: the proxy checks and the headless-browser run in P2's status box, and the sheet
+checks in P1d.
 
 **Git:** commit on `alpha`; only **5zorro** pushes.
