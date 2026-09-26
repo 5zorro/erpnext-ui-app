@@ -501,9 +501,61 @@ windowed. It is a Layer 3 smoke on purpose: these numbers do not exist until a r
 has resized a real window, so no unit test can see this bug class. Verified by reverting the fix —
 the smoke fails on the fullscreen assertion.
 
+## G12 — `npm test` can be green over a shell that will not start (2026-09-26)
+
+**Observed:** Twice while building P1 stage 3, `electron/main.js` was left syntactically invalid and
+the whole suite stayed green — 2000+ passing tests over a main process that could not boot. The
+second time, the error Node reported (`missing ) after argument list`) pointed about twenty lines
+away from the cause.
+
+**Expected:** A shell entry point that cannot parse fails the gate.
+
+**Architecture / fix:** No unit test imports `main.js` — it needs Electron — so nothing ever parsed
+it. And the `erpEval` write paths are JavaScript written **inside a template literal**, which makes
+one specific mistake invisible: a comment that names a function the ordinary way, with backticks,
+*ends the literal* and inverts everything after it. Both times it was a comment like
+`` // so by carrying `amendedName`. `` inside the injected script.
+
+`tests/erp-eval-scripts.test.js` now does two things, and it needs both:
+1. Writes every shell entry point out under the extension that matches how the shell loads it
+   (`.mjs` / `.cjs`) and runs `node --check` on it. Nothing is executed.
+2. Separately scans each `erpEval(\`…\`)` template and fails on any **unescaped** backtick, naming
+   the line. The parse error alone points somewhere else, so this is the half that says what to fix.
+
+**Do not regress:** inside an `erpEval` template, escape every backtick (`` \` ``). Verified by
+re-introducing the exact comment that broke it: both tests fail, and the second one prints the line.
+
 ---
 
-## Template (append G11+)
+## G13 — Render died mid-loop and the board drew nothing, silently (2026-09-26)
+
+**Observed:** 5zorro: *"the drawer in the pay outstanding document skin seems to be so high as to
+cover up all suggested payment grouping (or there are no unpaid bills due to a db wipe)."* Neither.
+The board drew **zero vendor cards** over 212 loaded bills, with no error on screen, nothing in the
+console, and the "Nothing outstanding" banner correctly hidden. Two Layer 3 smokes had been failing
+on it for days and were read as flaky.
+
+**Expected:** One unusable row does not take the other 211 with it.
+
+**Architecture / fix:** The Accounts Payable report returns more than bills. An **unallocated
+payment** comes back with a *negative* outstanding and **no due date**, and
+`effectivePayByDate("")` throws. The throw escaped from inside `render()`'s per-supplier loop,
+which had already emptied the container and hidden the empty-state banner — so the failure mode was
+a blank page rather than an error. Nothing surfaced it because `render()` is called from an `async`
+init, where an uncaught throw becomes an unhandled rejection that Playwright's `pageerror` does not
+report either.
+
+These rows are not exotic: P1's own void-and-amend detaches payments by design, so every amend of a
+paid bill creates one. `paymentBatchEconomics` now returns them as `unschedulable` rather than
+throwing **or** dropping them — it is real money — and the vendor card shows the credit.
+
+**Do not regress:** when a render loop can throw per item, the item is the unit of failure, not the
+page. Diagnosing this needed a listener installed *inside* the page (`window.onerror`) and a forced
+re-render; neither the console nor `pageerror` showed anything.
+
+---
+
+## Template (append G13+)
 
 ```markdown
 ### Gn — Short title (OI-xxx, date)

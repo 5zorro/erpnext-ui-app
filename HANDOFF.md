@@ -118,6 +118,41 @@ flowchart LR
    because the opposite instinct is easy to have twice — it was specced into the Doc Pay skin
    tranche's Payment Entry step and had to be reversed before build (plan since closed).
 
+### Editing a submitted document (OI-171, built 2026-09-22…26)
+
+ERPNext cannot edit a submitted document, so *edit* means **void and amend**: cancel it, then insert
+an editable copy that points back at the original. The shell does exactly what `form.js::amend_doc`
+does — `frappe.client.cancel`, `frappe.model.copy_doc(doc, 1)`, insert — and never reimplements
+`copy_doc`'s field rules.
+
+Four things about it are worth knowing before touching the code:
+
+1. **The registry is the extension point.** A doctype offers the action by being a row in
+   `doc-actions.js`, plus a row saying what cancelling it *costs*. Those costs are all different —
+   a Bill's payments are detached, a PO is refused while receipts stand against it, an Item Receipt
+   puts stock back off the shelf, a Payment Entry puts the bills it paid back to outstanding — so a
+   single "are you sure" would be wrong about three of the four.
+2. **Blockers are named, never enforced.** `check_no_back_links_exist` (`document.py:1578`) runs
+   *after* `on_cancel` and rolls the transaction back, so a refusal changes nothing and cannot
+   strand a document. Letting ERP be the one that says no is both safe and correct; our list of
+   what links to what is only an approximation of a rule we do not own.
+3. **The half-done state is the dangerous one.** Cancel can succeed and the insert still fail,
+   leaving a cancelled document with no replacement. Every result distinguishes that case and names
+   the document, because "it failed" would get the bill re-entered and it would then exist twice.
+4. **The amendment's name is not `<name>-1` in general.** `_set_amended_name` (`naming.py:549`)
+   increments a trailing counter, so amending `…-1` gives `…-2`; and under
+   `Document Naming Settings.default_amend_naming = "Default Naming"` no prediction is possible at
+   all. `predictAmendedName` mirrors both and returns `""` rather than guessing.
+
+**What it leaves behind, and what closes it:** cancelling detaches the bill's payments on a site
+where `unlink_payment_on_cancellation_of_invoice` is on, and ERPNext keeps **no record** of which
+bill a payment paid — the reference row is deleted, `against_voucher` is blanked on the ledgers, and
+the change bypasses the ORM so it is not in the version history either. So the pairing can only be
+inferred. `payment-relink.js` infers it from the one fact ERPNext's own allocator ignores
+(`amended_from`), posts the near-certain ones without asking, and leaves a Frappe assignment on the
+payment so an allocation nobody typed explains itself. Re-linking is an *update-after-submit*, not a
+second amend; the undo is `Unreconcile Payment`.
+
 ### ERP site settings this shell reads (never assumes)
 
 🔴 **Clean Core forbids editing vendor code; it does not forbid configuring ERPNext.** A value in
@@ -160,6 +195,9 @@ using the one fact the allocator ignores: an amendment carries `amended_from`.
 | Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
+| **What a skin can *do* to a document** | `doc-actions.js` (the registry: which actions a doctype has, whether each applies now, and what cancelling one costs), `void-amend-flow.js` (the single-document sequence, shared by four skins) | Edit (void and amend) on the Bill / PO / Item Receipt chrome (`btn-void-amend`) and on the Payment Entry check face (`check-doc-void-amend`) |
+| Changing a vendor's payment method after the fact | `mode-change-plan.js` (collapses an installment selection into one amend per *invoice*, and says what the batch will cost) | **Method…** panel on each Pay Outstanding vendor card |
+| Payments an amendment detached | `payment-relink.js` (proposes which bill a loose payment belongs to, from `amended_from` + an exact amount match; decides what may post unasked) | The vendor card's *unapplied* chip and *auto-linked · review* badge |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
 | Where a route opens | `nav-destination.js` (`resolveOpenTarget`, `lensPrefKey`) | Every door in `main.js` asks `openTargetFor()` and hands the answer to `openResolvedTarget()` — Home tiles, Recent/Drafts/Submitted, both lens tabs, Find, the hijack (plan 2026-09-26 F2) |
 | Shell pages | `shell-surfaces.js` (`SHELL_SURFACES`) | One row per `surfaceMode`: its view, whether it is the Doc lens, whether it owns its address |
