@@ -3,7 +3,13 @@
  * Pure string builder — no DOM.
  */
 
-import { sourceGrandTotal, sourceSubtotal } from "./dogfood-ap-sources.js";
+import {
+  sourceGrandTotal,
+  sourceSubtotal,
+  sourceFlow,
+  sourceTarget,
+  sourceOi,
+} from "./dogfood-ap-sources.js";
 
 /**
  * @param {import("./dogfood-ap-sources.js").DogfoodSourceDoc} doc
@@ -15,6 +21,11 @@ export function renderDogfoodSourceHtml(doc) {
   const grand = sourceGrandTotal(doc);
   const title = kindTitle(doc.kind);
   const skin = doc.template || "classic";
+  const flow = sourceFlow(doc);
+  // 🔴 On money-in paper the company across the top is the CUSTOMER, not a vendor. The field is
+  // still called `vendor` because renaming it across two dozen documents buys nothing, but the
+  // labels a human reads have to be right or the paper teaches the wrong habit.
+  const counterparty = flow === "ar" ? "Customer" : "Vendor";
 
   const lines = (doc.lines || [])
     .map(
@@ -34,7 +45,9 @@ export function renderDogfoodSourceHtml(doc) {
   if (doc.bolNo) metaBits.push(`<div><b>BOL #:</b> ${esc(doc.bolNo)}</div>`);
   if (doc.terms) metaBits.push(`<div><b>Terms:</b> ${esc(doc.terms)}</div>`);
   if (doc.vendor.accountNo)
-    metaBits.push(`<div><b>Your account #:</b> ${esc(doc.vendor.accountNo)}</div>`);
+    metaBits.push(
+      `<div><b>${flow === "ar" ? "Their reference #" : "Your account #"}:</b> ${esc(doc.vendor.accountNo)}</div>`,
+    );
 
   const notes = (doc.notes || [])
     .map((n) => `<li>${esc(n)}</li>`)
@@ -56,8 +69,12 @@ ${skinCss(skin)}
 </head>
 <body class="skin-${esc(skin)}">
   <header class="banner">
-    <div class="dogfood">DOGFOOD SOURCE · ${esc(doc.id)} · OI-103${doc.oi103 != null ? "." + doc.oi103 : ""}</div>
+    <div class="dogfood">DOGFOOD SOURCE · ${esc(doc.id)} · ${esc(flow.toUpperCase())} → ${esc(sourceTarget(doc))}${
+      sourceOi(doc) ? " · " + esc(sourceOi(doc)) : ""
+    }</div>
+    <div class="scenario">${esc(doc.scenario)}</div>
     <div class="hint">${esc(doc.dogfoodHint)}</div>
+    ${doc.expect ? `<div class="expect"><b>Watch for:</b> ${esc(doc.expect)}</div>` : ""}
   </header>
 
   <main>
@@ -94,9 +111,9 @@ ${skinCss(skin)}
     </div>
 
     ${notes ? `<ul class="notes">${notes}</ul>` : ""}
-    <p class="scenario"><b>Scenario:</b> ${esc(doc.scenario)}</p>
+    <p class="scenario"><b>Watch for:</b> ${esc(doc.expect || doc.scenario)}</p>
   </main>
-  <footer>Synthetic vendor paper for erpnext-ui-app dogfood — not a real invoice.</footer>
+  <footer>Synthetic ${esc(counterparty.toLowerCase())} paper for erpnext-ui-app dogfood — not a real document.</footer>
 </body>
 </html>`;
 }
@@ -118,6 +135,10 @@ function addrBlock(label, block) {
 function kindTitle(kind) {
   if (kind === "purchase_order") return "Purchase Order";
   if (kind === "packing_list") return "Packing List";
+  if (kind === "vendor_statement") return "Statement of Account";
+  if (kind === "customer_rfq") return "Request for Quote";
+  if (kind === "customer_po") return "Customer Purchase Order";
+  if (kind === "billing_instruction") return "Shipping Notice / Billing Instruction";
   return "Invoice";
 }
 
@@ -146,7 +167,9 @@ function skinCss(skin) {
     @page { margin: 0.6in; }
     body { font-family: Georgia, "Times New Roman", serif; color: #111; margin: 0; padding: 0; }
     .banner { background: #1e293b; color: #e2e8f0; padding: 8px 12px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; }
+    .banner .scenario { color: #f8fafc; font-weight: 600; margin-top: 3px; }
     .banner .hint { color: #94a3b8; margin-top: 4px; }
+    .banner .expect { color: #fcd34d; margin-top: 4px; }
     .dogfood { font-weight: 700; letter-spacing: 0.04em; }
     main { padding: 16px 20px 32px; }
     .top { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 16px; }

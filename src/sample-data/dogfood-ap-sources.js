@@ -1,11 +1,54 @@
 /**
- * AP dogfood **source documents** (vendor paper) — pure SSoT.
- * These are what 5zorro types from — not ERP seed rows.
- * Scenarios align with museum OI-103 + common Bill/PO/IR entry.
+ * Dogfood **source documents** — the paper 5zorro types from. Pure SSoT; nothing here is posted to
+ * ERP.
+ *
+ * 🔴 **Each entry is one edge case, and the catalogue is the list of edge cases we claim to handle.**
+ * That is the whole point of the pack: the unit tests prove the pure logic, and these prove the
+ * *surface* — a person entering real-looking paper into the real UI, which is the only thing that
+ * catches a button that is wired to nothing. Adding a scenario here is how an edge case gets
+ * formalized rather than remembered.
+ *
+ * Every document carries four things a reader needs and cannot infer:
+ *
+ * | Field | Answers |
+ * |---|---|
+ * | `flow` | which side of the business — `ap` (money out) or `ar` (money in) |
+ * | `target` | the ERPNext doctype this paper is typed **into** |
+ * | `scenario` | the edge case, in one line |
+ * | `expect` | what proves it worked, or the trap to watch for |
+ *
+ * `dogfoodHint` stays what it always was: how to actually do it, including anything already
+ * confirmed against Vanilla.
  */
 
-/** @typedef {"purchase_order"|"packing_list"|"vendor_invoice"} SourceKind */
+/**
+ * @typedef {"purchase_order"|"packing_list"|"vendor_invoice"|"vendor_statement"
+ *   |"customer_rfq"|"customer_po"|"billing_instruction"} SourceKind
+ */
 /** @typedef {"classic"|"grid"|"plain"|"ack"} TemplateId */
+/** @typedef {"ap"|"ar"} SourceFlow */
+
+/** Every `kind`, and the ERPNext doctype its paper is normally typed into. */
+export const SOURCE_KIND_TARGET = Object.freeze({
+  purchase_order: "Purchase Order",
+  packing_list: "Purchase Receipt",
+  vendor_invoice: "Purchase Invoice",
+  vendor_statement: "Payment Reconciliation",
+  customer_rfq: "Quotation",
+  customer_po: "Sales Order",
+  billing_instruction: "Sales Invoice",
+});
+
+/** Which side of the business each kind belongs to. */
+export const SOURCE_KIND_FLOW = Object.freeze({
+  purchase_order: "ap",
+  packing_list: "ap",
+  vendor_invoice: "ap",
+  vendor_statement: "ap",
+  customer_rfq: "ar",
+  customer_po: "ar",
+  billing_instruction: "ar",
+});
 
 /**
  * @typedef {{
@@ -20,9 +63,12 @@
 /**
  * @typedef {{
  *   id: string,
- *   scenario: string,
- *   oi103?: number,
+ *   scenario: string,        // the edge case, one line
+ *   expect?: string,         // what proves it worked, or the trap to watch for
+ *   oi103?: number,          // museum OI-103's own numbered scenarios
+ *   oi?: string,             // any other museum item this paper exists for, e.g. "OI-171"
  *   kind: SourceKind,
+ *   target?: string,         // ERPNext doctype it is typed into; defaults from `kind`
  *   template: TemplateId,
  *   dogfoodHint: string,
  *   vendor: { legalName: string, dba?: string, accountNo?: string, address: string[] },
@@ -42,7 +88,7 @@
  */
 
 /** @type {DogfoodSourceDoc[]} */
-export const DOGFOOD_AP_SOURCES = [
+export const DOGFOOD_SOURCES = [
   {
     id: "DF-01",
     scenario: "Invoice includes tax that should be backed out when paying in full",
@@ -510,6 +556,131 @@ export const DOGFOOD_AP_SOURCES = [
     terms: "Net 30",
     lines: [{ sku: "SAMPLE-SKU-05", description: "Sample Item 05", qty: 2, rate: 30 }],
   },
+  {
+    id: "DF-17",
+    scenario: "Vendor statement still shows a bill you already paid — because amending it detached the payment",
+    oi: "OI-171",
+    kind: "vendor_statement",
+    template: "plain",
+    dogfoodHint:
+      "IMPORTANT: The trap P1's own Edit (void and amend) creates. Cancelling a bill DETACHES its payments here (Accounts Settings > unlink_payment_on_cancellation_of_invoice is ON), so the payment survives submitted-but-unallocated and the amended bill reads Unpaid. The vendor's statement then chases you for money you already sent. ERPNext's own fix is Accounts > Payment Reconciliation: party type Supplier, pick the vendor, Get Unreconciled Entries, tick the payment against the amended bill, Reconcile. Do NOT cut a second check. Live example on this sandbox: ACC-PAY-2026-00002 holds 9.00 unallocated against ACC-PINV-2026-00231-1.",
+    expect:
+      "Pay Outstanding shows an 'unapplied' chip on the vendor for the loose payment. After reconciling, the chip is gone and the amended bill leaves the board. Paying again would leave the vendor holding a credit — that is the double-payment this scenario exists to prevent.",
+    vendor: {
+      legalName: "ALPINE SUPPLY CO.",
+      accountNo: "CUST-44192",
+      address: ["1200 Ridge Rd", "Salt Lake City, UT 84101"],
+    },
+    docNo: "STMT-2026-09",
+    docDate: "09/30/2026",
+    terms: "Net 30 — balance shown is PAST DUE per our records",
+    notes: [
+      "Statement of account — amounts shown are open per OUR records.",
+      "If payment has been sent, please provide the check/ACH reference.",
+      "IMPORTANT: Before paying: check whether this bill was amended. An amendment gets a NEW ERPNext ID and the original payment is left unallocated against the vendor, not against the bill.",
+    ],
+    lines: [
+      { sku: "STMT-LINE", description: "Invoice ASI-77821 — open balance", qty: 1, rate: 9 },
+    ],
+  },
+  {
+    id: "DF-18",
+    scenario: "Customer RFQ priced under THEIR part numbers, with a quantity break and an expiry",
+    oi: "OI-143",
+    kind: "customer_rfq",
+    template: "plain",
+    dogfoodHint:
+      "Customer asks for a quote using their own part numbers, which are not our SKUs. Enter a Quotation: map each of their numbers to ours, honour the quantity break on line 2, and set Valid Till from the 'respond by' date — not today+default. Their RFQ number is what they will reference back, so it has to survive onto the Quotation.",
+    expect:
+      "The Quotation carries the customer's RFQ number somewhere findable, their part number stays visible next to our SKU, and Valid Till matches the paper rather than the ERP default.",
+    vendor: {
+      legalName: "NORTHWIND FABRICATION LLC",
+      accountNo: "RFQ-2026-0442",
+      address: ["4400 Industrial Pkwy", "Boise, ID 83702"],
+    },
+    shipTo: {
+      name: "Northwind Fabrication — Plant 2",
+      address: ["77 Foundry Rd", "Nampa, ID 83651"],
+    },
+    docNo: "RFQ-2026-0442",
+    docDate: "09/14/2026",
+    terms: "Respond by 09/28/2026 — quote must hold 30 days",
+    notes: [
+      "Please quote using OUR part numbers below; cross-reference yours on the response.",
+      "Line 2: quote BOTH price breaks (25 ea and 100 ea). We will order against whichever we choose.",
+      "Quotes received after the respond-by date will not be considered.",
+    ],
+    lines: [
+      { sku: "NW-PN-4471", description: "Their PN 4471 — our SAMPLE-SKU-03", qty: 25, rate: 21 },
+      { sku: "NW-PN-4472", description: "Their PN 4472 — our SAMPLE-SKU-04 (break at 100)", qty: 100, rate: 24.75 },
+    ],
+  },
+  {
+    id: "DF-19",
+    scenario: "Customer PO: bill-to is head office, ship-to is a jobsite, and their PO# is the only number they will quote",
+    oi: "OI-134",
+    kind: "customer_po",
+    template: "ack",
+    dogfoodHint:
+      "Their PO number — not ours — is what shows up on every later phone call, so it has to be the number the Sales Order is findable by (same problem OI-170 names on the buying side). Bill-to and ship-to differ: head office pays, the jobsite receives. Partial shipment is explicitly allowed, which is what makes the Sales Invoice in DF-20 a partial one.",
+    expect:
+      "The Sales Order is findable by CPO-88120, ship-to is the jobsite and bill-to is head office, and the partial-ship permission is recorded somewhere the person invoicing will see it.",
+    vendor: {
+      legalName: "NORTHWIND FABRICATION LLC",
+      accountNo: "CPO-88120",
+      address: ["4400 Industrial Pkwy", "Boise, ID 83702"],
+    },
+    shipTo: {
+      name: "Northwind — Riverbend Jobsite",
+      address: ["Gate 4, Riverbend Access Rd", "Caldwell, ID 83605"],
+    },
+    docNo: "CPO-88120",
+    docDate: "09/21/2026",
+    terms: "Net 45 from invoice date",
+    notes: [
+      "BILL TO: Accounts Payable, 4400 Industrial Pkwy, Boise ID 83702.",
+      "SHIP TO: Riverbend jobsite address above. Do NOT ship to Boise.",
+      "Partial shipment ACCEPTED. Invoice only what ships.",
+      "IMPORTANT: Our PO number CPO-88120 must appear on the packing slip and the invoice or payment will be held.",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-03", description: "Sample Item 03", qty: 40, rate: 21 },
+      { sku: "SAMPLE-SKU-05", description: "Sample Item 05", qty: 12, rate: 30 },
+    ],
+  },
+  {
+    id: "DF-20",
+    scenario: "Bill only what shipped: partial invoice against a customer PO, with the rest on backorder",
+    oi: "OI-134",
+    kind: "billing_instruction",
+    template: "grid",
+    dogfoodHint:
+      "Follows DF-19 — enter that Sales Order first. Only part of it shipped, so the Sales Invoice bills the shipped quantity and leaves the balance open on the order. Their PO number must print on the invoice (see the note on DF-19) or they hold payment. The backorder line is NOT invoiced now and must not quietly close the order.",
+    expect:
+      "The Sales Invoice totals the shipped quantities only, the Sales Order stays partly open for the backorder, and CPO-88120 appears on the invoice. Closing the order at this point is the failure this paper is looking for.",
+    vendor: {
+      legalName: "NORTHWIND FABRICATION LLC",
+      accountNo: "CPO-88120",
+      address: ["4400 Industrial Pkwy", "Boise, ID 83702"],
+    },
+    shipTo: {
+      name: "Northwind — Riverbend Jobsite",
+      address: ["Gate 4, Riverbend Access Rd", "Caldwell, ID 83605"],
+    },
+    docNo: "SHIP-4471-A",
+    docDate: "09/25/2026",
+    poNos: ["CPO-88120"],
+    terms: "Net 45 — customer PO# required on invoice",
+    notes: [
+      "Shipped today against CPO-88120: 25 of 40 SAMPLE-SKU-03, 12 of 12 SAMPLE-SKU-05.",
+      "BACKORDER: 15 × SAMPLE-SKU-03 — do not invoice, do not close the order.",
+      "Invoice must show customer PO CPO-88120.",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-03", description: "Sample Item 03 — SHIPPED 25 of 40", qty: 25, rate: 21 },
+      { sku: "SAMPLE-SKU-05", description: "Sample Item 05 — SHIPPED 12 of 12", qty: 12, rate: 30 },
+    ],
+  },
 ];
 
 /**
@@ -529,13 +700,47 @@ export function sourceGrandTotal(doc) {
 }
 
 /**
- * @returns {{ id: string, scenario: string, kind: string, oi103: number|null }[]}
+ * Which side of the business a document belongs to, and which doctype it is typed into. Both are
+ * derived from `kind` unless the document overrides `target`, so a new scenario cannot forget them.
+ * @param {DogfoodSourceDoc} doc
+ */
+export function sourceFlow(doc) {
+  return SOURCE_KIND_FLOW[doc.kind] || "ap";
+}
+
+/** @param {DogfoodSourceDoc} doc */
+export function sourceTarget(doc) {
+  return doc.target || SOURCE_KIND_TARGET[doc.kind] || "";
+}
+
+/** The museum item this paper exists for, as one label. @param {DogfoodSourceDoc} doc */
+export function sourceOi(doc) {
+  if (doc.oi103 != null) return `OI-103.${doc.oi103}`;
+  return doc.oi || "";
+}
+
+/** Money-out paper only — what the pack was before it grew a sales side. */
+export const DOGFOOD_AP_SOURCES = DOGFOOD_SOURCES.filter((d) => sourceFlow(d) === "ap");
+
+/** Money-in paper. */
+export const DOGFOOD_AR_SOURCES = DOGFOOD_SOURCES.filter((d) => sourceFlow(d) === "ar");
+
+/**
+ * The catalogue as a table — this is what the generated README prints, so the index and the
+ * documents cannot disagree about what the pack covers.
+ *
+ * @returns {{ id: string, scenario: string, expect: string, kind: string, flow: string,
+ *   target: string, oi: string, oi103: number|null }[]}
  */
 export function listDogfoodSourceIndex() {
-  return DOGFOOD_AP_SOURCES.map((d) => ({
+  return DOGFOOD_SOURCES.map((d) => ({
     id: d.id,
     scenario: d.scenario,
+    expect: d.expect || "",
     kind: d.kind,
+    flow: sourceFlow(d),
+    target: sourceTarget(d),
+    oi: sourceOi(d),
     oi103: d.oi103 ?? null,
   }));
 }

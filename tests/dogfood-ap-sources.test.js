@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DOGFOOD_SOURCES,
   DOGFOOD_AP_SOURCES,
+  DOGFOOD_AR_SOURCES,
+  SOURCE_KIND_TARGET,
+  SOURCE_KIND_FLOW,
   listDogfoodSourceIndex,
+  sourceFlow,
+  sourceTarget,
+  sourceOi,
   sourceGrandTotal,
   sourceSubtotal,
 } from "../src/sample-data/dogfood-ap-sources.js";
@@ -49,7 +56,7 @@ describe("dogfood AP sources", () => {
   });
 
   it("index length matches catalog", () => {
-    assert.equal(listDogfoodSourceIndex().length, DOGFOOD_AP_SOURCES.length);
+    assert.equal(listDogfoodSourceIndex().length, DOGFOOD_SOURCES.length);
   });
 });
 
@@ -67,6 +74,120 @@ describe("renderDogfoodSourceHtml", () => {
 
   it("renders each template without throwing", () => {
     for (const d of DOGFOOD_AP_SOURCES) {
+      const html = renderDogfoodSourceHtml(d);
+      assert.match(html, /<!DOCTYPE html>/);
+      assert.match(html, new RegExp(d.docNo));
+    }
+  });
+});
+
+/**
+ * 🔴 The catalogue is the list of edge cases we claim to handle, so it is worth holding to a
+ * shape. These are the properties a reader (or a later agent) relies on without checking.
+ */
+describe("the dogfood catalogue is well formed", () => {
+  it("splits cleanly into money-out and money-in, with nothing lost", () => {
+    assert.equal(DOGFOOD_AP_SOURCES.length + DOGFOOD_AR_SOURCES.length, DOGFOOD_SOURCES.length);
+    assert.ok(DOGFOOD_AR_SOURCES.length > 0, "the pack has a sales side now");
+    for (const d of DOGFOOD_AP_SOURCES) assert.equal(sourceFlow(d), "ap", d.id);
+    for (const d of DOGFOOD_AR_SOURCES) assert.equal(sourceFlow(d), "ar", d.id);
+  });
+
+  // Flow and target are derived from `kind`, so a new scenario cannot forget either — but only if
+  // every kind it could use is actually in both tables.
+  it("every kind declares a target doctype and a flow", () => {
+    for (const d of DOGFOOD_SOURCES) {
+      assert.ok(SOURCE_KIND_TARGET[d.kind], `${d.id}: kind ${d.kind} has no target doctype`);
+      assert.ok(SOURCE_KIND_FLOW[d.kind], `${d.id}: kind ${d.kind} has no flow`);
+      assert.ok(sourceTarget(d), d.id);
+    }
+    assert.deepEqual(
+      Object.keys(SOURCE_KIND_TARGET).sort(),
+      Object.keys(SOURCE_KIND_FLOW).sort(),
+      "the two kind tables must cover exactly the same kinds",
+    );
+  });
+
+  it("every document says what edge case it is, in one line", () => {
+    for (const d of DOGFOOD_SOURCES) {
+      assert.ok(d.scenario && d.scenario.length > 10, `${d.id} has no scenario`);
+      assert.ok(d.dogfoodHint && d.dogfoodHint.length > 10, `${d.id} has no hint`);
+    }
+  });
+
+  it("ids are unique and the index reports each one once", () => {
+    const rows = listDogfoodSourceIndex();
+    const ids = rows.map((r) => r.id);
+    assert.equal(new Set(ids).size, ids.length, "duplicate id in the catalogue");
+    for (const r of rows) assert.ok(r.target && r.flow && r.kind, r.id);
+  });
+
+  // OI-103 numbering and the newer OI-NNN labels are two different things; one label covers both.
+  it("labels the museum item the same way whichever numbering it uses", () => {
+    assert.equal(sourceOi({ oi103: 3 }), "OI-103.3");
+    assert.equal(sourceOi({ oi: "OI-171" }), "OI-171");
+    assert.equal(sourceOi({}), "");
+  });
+
+  it("the three sales-side scenarios target the three sales doctypes", () => {
+    assert.deepEqual(
+      DOGFOOD_AR_SOURCES.map((d) => sourceTarget(d)),
+      ["Quotation", "Sales Order", "Sales Invoice"],
+    );
+  });
+
+  // 🔴 DF-17 is the one that stops a bill being paid twice — the residue P1's own amend creates.
+  it("carries the void-and-amend re-link trap, and names the vanilla tool that fixes it", () => {
+    const df17 = DOGFOOD_SOURCES.find((d) => d.id === "DF-17");
+    assert.ok(df17, "DF-17 missing");
+    assert.equal(sourceTarget(df17), "Payment Reconciliation");
+    assert.match(df17.dogfoodHint, /Payment Reconciliation/);
+    assert.match(df17.dogfoodHint, /unlink_payment_on_cancellation_of_invoice/);
+    assert.match(df17.expect, /double-payment|credit/i);
+  });
+
+  // DF-20 is only enterable after DF-19, and says so — a scenario with an unstated prerequisite is
+  // a scenario that fails for the wrong reason.
+  it("names its prerequisite when one scenario depends on another", () => {
+    const df20 = DOGFOOD_SOURCES.find((d) => d.id === "DF-20");
+    assert.match(df20.dogfoodHint, /DF-19/);
+    assert.deepEqual(df20.poNos, ["CPO-88120"]);
+  });
+});
+
+describe("renderDogfoodSourceHtml — the sales side", () => {
+  it("titles each new kind as the paper a person would recognise", () => {
+    const titles = DOGFOOD_AR_SOURCES.map((d) => {
+      const m = /<h1>([^<]*)<\/h1>/.exec(renderDogfoodSourceHtml(d));
+      return m && m[1];
+    });
+    assert.deepEqual(titles, [
+      "Request for Quote",
+      "Customer Purchase Order",
+      "Shipping Notice / Billing Instruction",
+    ]);
+  });
+
+  // The company across the top of money-in paper is the customer. The field is still called
+  // `vendor`, but a label that says "Your account #" on a customer's PO teaches the wrong habit.
+  it("calls the counterparty's reference theirs, not ours, on money-in paper", () => {
+    const html = renderDogfoodSourceHtml(DOGFOOD_AR_SOURCES[0]);
+    assert.match(html, /Their reference #/);
+    assert.doesNotMatch(html, /Your account #/);
+    assert.match(renderDogfoodSourceHtml(DOGFOOD_AP_SOURCES[0]), /Your account #/);
+  });
+
+  // The banner used to print "OI-103" on every page, including the ones that have nothing to do
+  // with OI-103 — so it said something false on 12 of 24 documents.
+  it("banners the real museum item, the flow and the target doctype", () => {
+    const html = renderDogfoodSourceHtml(DOGFOOD_SOURCES.find((d) => d.id === "DF-19"));
+    assert.match(html, /AR → Sales Order/);
+    assert.match(html, /OI-134/);
+    assert.doesNotMatch(html, /OI-103/);
+  });
+
+  it("renders every document in the pack without throwing", () => {
+    for (const d of DOGFOOD_SOURCES) {
       const html = renderDogfoodSourceHtml(d);
       assert.match(html, /<!DOCTYPE html>/);
       assert.match(html, new RegExp(d.docNo));

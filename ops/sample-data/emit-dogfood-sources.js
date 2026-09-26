@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DOGFOOD_AP_SOURCES, listDogfoodSourceIndex } from "../../src/sample-data/dogfood-ap-sources.js";
+import { DOGFOOD_SOURCES, listDogfoodSourceIndex } from "../../src/sample-data/dogfood-ap-sources.js";
 import { renderDogfoodSourceHtml } from "../../src/sample-data/render-dogfood-html.js";
 import { buildMessyImportPaste, MESSY_VENDOR_11COL } from "../../src/sample-data/dogfood-import-paste.js";
 
@@ -23,7 +23,7 @@ fs.mkdirSync(outDir, { recursive: true });
 /** @type {{ id: string, html: string, pdf?: string }[]} */
 const written = [];
 
-for (const doc of DOGFOOD_AP_SOURCES) {
+for (const doc of DOGFOOD_SOURCES) {
   const html = renderDogfoodSourceHtml(doc);
   const base = `${doc.id}_${doc.kind}`;
   const htmlName = `${base}.html`;
@@ -59,29 +59,61 @@ Files: \`${tsvName}\`, \`${csvName}\`
   }
 }
 
-const indexRows = listDogfoodSourceIndex()
-  .map((r) => {
-    const html = written.find((w) => w.id === r.id)?.html;
-    return `| ${r.id} | ${r.kind} | ${r.oi103 ?? "—"} | ${r.scenario.replace(/\|/g, "/")} | [${html}](./${html}) |`;
-  })
-  .join("\n");
+const index = listDogfoodSourceIndex();
+const esc = (v) => String(v ?? "").replace(/\|/g, "/");
+const rowsFor = (flow) =>
+  index
+    .filter((r) => r.flow === flow)
+    .map((r) => {
+      const html = written.find((w) => w.id === r.id)?.html;
+      return `| ${r.id} | ${esc(r.target)} | ${esc(r.oi) || "—"} | ${esc(r.scenario)} | ${esc(r.expect) || "—"} | [pdf](./${html?.replace(/\.html$/, ".pdf")}) · [html](./${html}) |`;
+    })
+    .join("\n");
 
-const indexMd = `# AP dogfood source pack (generated)
+const header =
+  "| ID | Typed into | Museum | Edge case | Watch for | Files |\n|----|----|----|----|----|----|";
 
-Synthetic vendor paper for human data-entry dogfood. **Not** posted to ERP by this script.
+// 🔴 Named, not hidden. "Watch for" is what turns a scenario into something a dogfood run can
+// pass or fail; a row without one only says what paper to type, not what it proves. The count is
+// printed so the gap stays visible instead of reading as a tidy row of dashes.
+const missingExpect = index.filter((r) => !r.expect).map((r) => r.id);
+const gapNote = missingExpect.length
+  ? `\n> **${missingExpect.length} of ${index.length} scenarios do not yet say what to watch for** — ` +
+    `${missingExpect.join(", ")}. Fill \`expect\` in as each one is dogfooded; a scenario with no ` +
+    `pass/fail condition is a suggestion, not a test.\n`
+  : "";
 
-Open an HTML file → browser **Print → Save as PDF** (or re-run with \`--pdf\`).
+const indexMd = `# Dogfood source pack (generated — do not edit by hand)
 
-| ID | Kind | OI-103 | Scenario | File |
-|----|------|--------|----------|------|
-${indexRows}
+Synthetic paper for **human data-entry dogfood**: the unit tests prove the pure logic, these prove
+the *surface*. Nothing here is posted to ERP by this script.
 
-Regenerate:
+🔴 **The catalogue is the list of edge cases we claim to handle.** Adding a scenario to
+\`src/sample-data/dogfood-ap-sources.js\` is how an edge case gets formalized rather than remembered;
+this file is regenerated from it, so the two cannot drift.
+
+Each PDF's dark banner carries the same four facts as the table: which side of the business, the
+ERPNext doctype it is typed into, the edge case, and what to watch for.
+
+${gapNote}
+## AP — money out (${index.filter((r) => r.flow === "ap").length})
+
+${header}
+${rowsFor("ap")}
+
+## AR — money in (${index.filter((r) => r.flow === "ar").length})
+
+${header}
+${rowsFor("ar")}
+
+## Regenerate
 
 \`\`\`bash
-npm run dogfood:ap-sources
-npm run dogfood:ap-sources -- --pdf
+npm run dogfood:ap-sources           # HTML only
+npm run dogfood:ap-sources -- --pdf  # HTML + PDF
 \`\`\`
+
+Without \`--pdf\`, open an HTML file and use the browser's **Print → Save as PDF**.
 `;
 
 fs.writeFileSync(path.join(outDir, "README.md"), indexMd, "utf8");
@@ -91,7 +123,7 @@ if (wantPdf) {
   const { chromium } = await import("@playwright/test");
   const browser = await chromium.launch();
   try {
-    for (const doc of DOGFOOD_AP_SOURCES) {
+    for (const doc of DOGFOOD_SOURCES) {
       const base = `${doc.id}_${doc.kind}`;
       const htmlPath = path.join(outDir, `${base}.html`);
       const pdfPath = path.join(outDir, `${base}.pdf`);
@@ -111,4 +143,4 @@ if (wantPdf) {
   }
 }
 
-console.log(`\nDone — ${DOGFOOD_AP_SOURCES.length} sources in ${outDir}`);
+console.log(`\nDone — ${DOGFOOD_SOURCES.length} sources in ${outDir}`);
