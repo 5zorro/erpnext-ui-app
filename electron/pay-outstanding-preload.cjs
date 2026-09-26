@@ -24,4 +24,8 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   modeChangeFacts: (invoices) =>
     ipcRenderer.invoke("mode-change-facts", Array.isArray(invoices) ? invoices : []),
   runModeChange: (work) => ipcRenderer.invoke("run-mode-change", Array.isArray(work) ? work : []),
+  // OI-171 after-effects: what this vendor has loose, and one re-link posted through ERPNext's own
+  // Payment Reconciliation.
+  paymentRelinkFacts: (supplier) => ipcRenderer.invoke("payment-relink-facts", supplier || ""),
+  relinkPayment: (req) => ipcRenderer.invoke("payment-relink", req || {}),
 });

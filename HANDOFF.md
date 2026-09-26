@@ -117,6 +117,35 @@ flowchart LR
    because the opposite instinct is easy to have twice — it was specced into the Doc Pay skin
    tranche's Payment Entry step and had to be reversed before build (plan since closed).
 
+### ERP site settings this shell reads (never assumes)
+
+🔴 **Clean Core forbids editing vendor code; it does not forbid configuring ERPNext.** A value in
+Accounts Settings or Document Naming Settings is site *data*, written through ERPNext's own form —
+it is the surface ERPNext provides precisely so that nobody patches. What the shell must not do is
+*assume* one of these values, because every one of them changes what an honest confirm should say.
+So each is read live, and each has a defined behaviour at either value.
+
+Everything below is at its **stock default** on the sandbox as of 2026-09-26, so nothing here is a
+local deviation — but a second deployment may differ, which is the reason for the table.
+
+| Setting | Stock | What it changes | What the shell does at the other value |
+|---|---|---|---|
+| `Accounts Settings.unlink_payment_on_cancellation_of_invoice` | `1` | On: cancelling an invoice **detaches** its payments (they stay submitted, unallocated). Off: ERPNext **refuses** the cancel until the payments are cancelled | The void-and-amend confirm says "will be detached" or "ERPNext will refuse to cancel" — opposite sentences, so it is read rather than guessed (`voidAndAmendFacts`) |
+| `Accounts Settings.auto_reconcile_payments` | `0` | A **gate**, not an automation: it only enables the *Process Payment Reconciliation* tool, whose cron (`auto_reconciliation_job_trigger`, 15 min) processes PPR documents somebody already queued. Turning it on reconciles nothing by itself | The unapplied-credit advice says whether a loose payment may clear on its own. 🔴 It also allocates **oldest invoice first** (`allocate_entries` over a `posting_date` sort), which is wrong for an amended bill — see below |
+| `Accounts Settings.automatically_fetch_payment_terms` | `0` | With the template's `allocate_payment_based_on_payment_terms`, lets `set_payment_schedule` refetch a bill's whole schedule from its order | The batch method change **reads the mode back** after amending rather than trusting the patch stuck (`accounts_controller.py:2658` is the path that would undo it) |
+| `Document Naming Settings.default_amend_naming` | `Amend Counter` | Whether an amendment is `<name>-1` / `<name>-2`, or takes a fresh series name | `predictAmendedName` returns `""` under "Default Naming" and the confirm simply does not name the new ID, rather than promising one |
+| `Payment Terms Template.allocate_payment_based_on_payment_terms` | per template | Whether payments maintain `paid_amount`/`outstanding` on schedule **rows** | Multi-installment templates the shell creates set it; pre-existing ones may not (`payment-term-plan.js`) |
+
+**Why `auto_reconcile_payments` stays off** (5zorro 2026-09-26, after reading the source): it would
+not have solved the case that prompted the question, and when it does run it gets that case wrong.
+Cancelling an invoice destroys every trace of which bill a payment paid — the Payment Entry
+Reference row is deleted, `against_voucher` is blanked on the ledgers, and the change is written
+through the query builder so it is not even in the document's version history. ERPNext's allocator
+therefore falls back to oldest-invoice-first, which on a supplier with more than one open bill puts
+the loose money against the wrong one and leaves the amended bill outstanding — a wrong ledger
+*and* still exposed to paying twice. The shell proposes the pairing instead (`payment-relink.js`),
+using the one fact the allocator ignores: an amendment carries `amended_from`.
+
 ### Extension points (where new work plugs in)
 
 | Capability | Pure module(s) | Electron surface |

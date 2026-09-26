@@ -348,6 +348,16 @@
     .method-panel-status.warn { color: #b45309; }
     .method-panel-outcome { margin: 0; padding-left: 18px; font-size: 12px; color: #334155; }
     .method-panel-outcome[hidden] { display: none; }
+    .relink-panel { background: #faf5ff; border-bottom: 1px solid #d8b4fe; }
+    .relink-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 6px 0; border-bottom: 1px solid #ede9fe;
+    }
+    .relink-row:last-of-type { border-bottom: none; }
+    .relink-what { flex: 1; min-width: 240px; font-size: 12px; color: #0f172a; }
+    .relink-why { color: #6b21a8; font-size: 11px; margin-top: 2px; }
+    .relink-foot { display: flex; justify-content: flex-end; margin-top: 6px; }
+    .vendor-head .run-chip.credit { border: none; cursor: pointer; font: inherit; }
     .flow-grid {
       /* The invoice column is sized to hold a whole ERPNext naming-series name (ACC-PINV-2026-
          00904) *plus* its peek button. At 150px it had 94px for a 137px name, so every invoice
@@ -1030,6 +1040,7 @@
       describeModeChange,
       summarizeModeChange,
     } from "../src/mode-change-plan.js";
+    import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
     import { uiIconHtml } from "../src/ui-icons.js";
     import { formatUsdAmount, formatUsdAmountHtml, moneyTextHtml } from "../src/money.js";
     import {
@@ -2360,6 +2371,166 @@
      * @param {string} supplier
      * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills this vendor's rows
      */
+    /**
+     * Where a vendor's loose payments probably belong (OI-171, after P1's amend).
+     *
+     * 🔴 **Proposed, not posted.** ERPNext destroys the record of which bill a payment paid when
+     * the invoice is cancelled, so this is an inference — a good one (an amendment whose
+     * outstanding matches the loose amount to the cent), but an inference. The pairing is shown
+     * with its reason and its confidence, and a click posts it through ERPNext's own Payment
+     * Reconciliation. Nothing allocates itself.
+     *
+     * The escape hatch is always offered: Payment Reconciliation in Vanilla, already filtered to
+     * this vendor, for when the clerk would rather choose.
+     *
+     * @param {string} supplier
+     * @param {HTMLElement} panel
+     */
+    async function loadRelinkPanel(supplier, panel) {
+      panel.innerHTML = `<div class="method-panel-status">Reading ${escapeHtml(supplier)}'s unapplied payments…</div>`;
+      if (!api || !api.paymentRelinkFacts) {
+        panel.innerHTML = `<div class="method-panel-status err">Re-linking is not wired into this build.</div>`;
+        return;
+      }
+      const facts = await api
+        .paymentRelinkFacts(supplier)
+        .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+      if (!facts || !facts.ok) {
+        panel.innerHTML = `<div class="method-panel-status err">${escapeHtml((facts && facts.reason) || "Could not read unapplied payments.")}</div>`;
+        return;
+      }
+
+      const { proposals, unmatched } = proposeRelinks({
+        payments: (facts.payments || []).map((p) => ({
+          name: p.reference_name,
+          unallocated: p.amount,
+          supplier,
+        })),
+        invoices: (facts.invoices || []).map((i) => ({
+          name: i.invoice_number,
+          outstanding: i.outstanding_amount,
+          amendedFrom: (facts.amendedFrom || {})[i.invoice_number] || "",
+          supplier,
+        })),
+      });
+
+      panel.innerHTML = "";
+      const openVanilla = () => {
+        if (api && api.openErp) api.openErp("/app/payment-reconciliation");
+      };
+
+      if (!proposals.length && !unmatched.length) {
+        panel.appendChild(
+          textDiv("method-panel-status", `Nothing unapplied for ${supplier} right now.`),
+        );
+        return;
+      }
+
+      for (const p of proposals) {
+        const told = describeRelink(p);
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-proposal";
+        const what = document.createElement("div");
+        what.className = "relink-what";
+        what.innerHTML =
+          `<strong>${escapeHtml(p.payment)}</strong> → <strong>${escapeHtml(p.invoice)}</strong> ` +
+          `· ${moneyHtml(p.amount)}<div class="relink-why">${escapeHtml(p.why)}</div>`;
+        row.appendChild(what);
+
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = p.confidence === "high" ? "btn-primary" : "btn-secondary";
+        go.dataset.testid = "relink-go";
+        go.textContent = told.button;
+        go.onclick = async () => {
+          const body = told.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
+          if (!window.confirm(`${told.title}\n\n${body}`)) return;
+          go.disabled = true;
+          const status = row.querySelector(".method-panel-status");
+          if (status) status.textContent = `Re-linking ${p.payment}…`;
+          const res = await api
+            .relinkPayment({ supplier, payment: p.payment, invoice: p.invoice, amount: p.amount })
+            .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+          go.disabled = false;
+          if (!res || !res.ok) {
+            if (status) {
+              status.textContent = (res && res.reason) || "ERPNext refused the re-link.";
+              status.className = "method-panel-status err";
+            }
+            return;
+          }
+          // The bill is paid now, so it leaves the board — re-read rather than patch in place.
+          await reloadBills();
+        };
+        row.appendChild(go);
+        row.appendChild(textDiv("method-panel-status", ""));
+        panel.appendChild(row);
+      }
+
+      for (const u of unmatched) {
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-unmatched";
+        row.appendChild(
+          htmlDiv(
+            "relink-what",
+            `<strong>${escapeHtml(u.payment)}</strong> · ${moneyHtml(u.amount)} loose` +
+              `<div class="relink-why">${escapeHtml(u.why)}${
+                u.candidates.length ? ` Candidates: ${escapeHtml(u.candidates.join(", "))}.` : ""
+              }</div>`,
+          ),
+        );
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "btn-secondary";
+        open.dataset.testid = "relink-open-vanilla";
+        open.textContent = "Choose in Vanilla";
+        open.onclick = openVanilla;
+        row.appendChild(open);
+        panel.appendChild(row);
+      }
+
+      // 🔴 Said whichever way the site is configured, because it changes what happens if the clerk
+      // walks away: with auto-reconcile on, ERPNext may allocate this itself — oldest bill first,
+      // which is exactly the wrong answer for an amended one.
+      if (facts.autoReconcile) {
+        panel.appendChild(
+          textDiv(
+            "method-panel-status warn",
+            "Auto-reconciliation is enabled on this site. If a Process Payment Reconciliation is queued for this vendor, ERPNext may allocate these oldest-bill-first before you do.",
+          ),
+        );
+      }
+
+      const foot = document.createElement("div");
+      foot.className = "relink-foot";
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "btn-secondary";
+      link.dataset.testid = "relink-open-vanilla-all";
+      link.textContent = "Open Payment Reconciliation in Vanilla";
+      link.onclick = openVanilla;
+      foot.appendChild(link);
+      panel.appendChild(foot);
+    }
+
+    /** @param {string} cls @param {string} text */
+    function textDiv(cls, text) {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      return d;
+    }
+
+    /** @param {string} cls @param {string} html */
+    function htmlDiv(cls, html) {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.innerHTML = html;
+      return d;
+    }
+
     function methodPanelEl(supplier, bills) {
       const panel = document.createElement("div");
       panel.className = "method-panel";
@@ -2542,14 +2713,19 @@
       }
       const credit = unschedulable.reduce((sum, b) => sum + (Number(b.outstanding) < 0 ? -Number(b.outstanding) : 0), 0);
       if (credit > 0) {
-        const chip = document.createElement("span");
+        const chip = document.createElement("button");
+        chip.type = "button";
         chip.className = "run-chip credit";
         chip.dataset.testid = "vendor-unapplied-credit";
         chip.textContent = `${formatUsdAmount(credit)} unapplied`;
         chip.title =
           `${supplier} has ${formatUsdAmount(credit)} in payments that are not applied to any bill. ` +
           "Cancelling a paid bill detaches its payment, so a void-and-amend leaves one of these. " +
-          "Apply it to a bill in ERPNext — nothing on this board can.";
+          "Click to see where it probably belongs.";
+        chip.onclick = () => {
+          relinkPanel.hidden = !relinkPanel.hidden;
+          if (!relinkPanel.hidden) void loadRelinkPanel(supplier, relinkPanel);
+        };
         total.prepend(chip);
       }
       head.appendChild(total);
@@ -2563,6 +2739,12 @@
       methodBtn.title = `Change the Mode of Payment on ${supplier}'s outstanding bills. ERPNext cannot edit a submitted bill, so each one is cancelled and replaced by an amended copy.`;
       head.appendChild(methodBtn);
       card.appendChild(head);
+
+      const relinkPanel = document.createElement("div");
+      relinkPanel.className = "method-panel relink-panel";
+      relinkPanel.dataset.testid = "relink-panel";
+      relinkPanel.hidden = true;
+      card.appendChild(relinkPanel);
 
       const methodPanel = methodPanelEl(supplier, sortBillsForSchedule(bills, scheduleSortMode));
       methodBtn.onclick = () => {
