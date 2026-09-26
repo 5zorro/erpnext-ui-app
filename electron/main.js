@@ -75,6 +75,7 @@ import {
   mergePaymentBatchPrefs,
   validatePaymentBatchPrefs,
 } from "../src/payment-batch-prefs.js";
+import { allocationRowFor } from "../src/payment-relink.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -9839,6 +9840,196 @@ ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefau
  * an ordinary case, and twelve round trips to draw one confirm is how a dashboard gets slow enough
  * that a clerk stops reading it.
  */
+/**
+ * What a supplier has loose, and what it could belong to — both read from ERPNext's **own**
+ * Payment Reconciliation tool rather than from a query of ours (OI-171, after P1's amend).
+ *
+ * 🔴 **The tool is a virtual doctype**, so it is driven through `run_doc_method` with the document
+ * passed as JSON — which its own `load_from_db` comment says is the intended path. Asking it for
+ * the candidates means the rows we then hand back to `reconcile` are the rows it already believes
+ * in: same filters, same outstanding amounts, same exchange rates, same cost centres. A
+ * hand-rolled query would be a second opinion about which payments are reconcilable, and the
+ * allocation would be validated against ERP's list, not ours.
+ *
+ * `amended_from` is read separately, because it is the one fact the tool does not return and the
+ * only one that distinguishes "the bill this payment paid, re-issued" from "another open bill".
+ *
+ * @param {string} supplier
+ */
+async function paymentRelinkFacts(supplier) {
+  const party = normalizeEditableText(supplier);
+  if (!party) return { ok: false, reason: "Supplier required." };
+  const payload = JSON.stringify({ party });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var company = frappe.defaults.get_user_default("Company");
+      if (!company) {
+        var cs = await frappe.db.get_list("Company", { limit: 1 });
+        company = cs && cs[0] && cs[0].name;
+      }
+      if (!company) return { ok: false, reason: "No Company configured." };
+      var account = await frappe.xcall("erpnext.accounts.party.get_party_account", {
+        party_type: "Supplier", party: i.party, company: company,
+      });
+      var doc = {
+        doctype: "Payment Reconciliation",
+        company: company,
+        party_type: "Supplier",
+        party: i.party,
+        receivable_payable_account: account,
+      };
+      var res = await frappe.call({
+        method: "run_doc_method",
+        args: { docs: JSON.stringify(doc), method: "get_unreconciled_entries" },
+      });
+      var got = (res && res.docs && res.docs[0]) || {};
+      var invoices = got.invoices || [];
+      // The tool does not say which of these is an amendment, and that is the whole question.
+      var amendedFrom = {};
+      if (invoices.length) {
+        var names = invoices.map(function (r) { return r.invoice_number; });
+        var av = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Purchase Invoice",
+            filters: [["name", "in", names]],
+            fields: ["name", "amended_from"],
+            limit_page_length: 0,
+          },
+        });
+        var rows = (av && av.message) || [];
+        for (var a = 0; a < rows.length; a++) amendedFrom[rows[a].name] = rows[a].amended_from || "";
+      }
+      // Read, never assumed — same rule as every other site setting the shell depends on. With
+      // auto-reconcile on, a loose payment may clear itself within the job interval (and may clear
+      // itself onto the WRONG bill, since ERPNext allocates oldest-first), so the advice differs.
+      var autoReconcile = null;
+      try {
+        var ar = await frappe.xcall("frappe.client.get_single_value", {
+          doctype: "Accounts Settings", field: "auto_reconcile_payments",
+        });
+        autoReconcile = !!Number(ar);
+      } catch (eAr) {
+        autoReconcile = null;
+      }
+      return {
+        ok: true,
+        company: company,
+        account: account,
+        payments: got.payments || [],
+        invoices: invoices,
+        amendedFrom: amendedFrom,
+        autoReconcile: autoReconcile,
+      };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "get_unreconciled_entries" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object") || !raw.ok) {
+    return {
+      ok: false,
+      reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read this vendor's unapplied payments."),
+    };
+  }
+  return raw;
+}
+
+ipcMain.handle("payment-relink-facts", async (_e, supplier) => {
+  const facts = await paymentRelinkFacts(supplier);
+  navDebug(
+    "payment-relink-facts",
+    `${supplier} ok=${facts.ok ? 1 : 0} payments=${(facts.payments || []).length} invoices=${(facts.invoices || []).length}${facts.reason ? ` reason=${facts.reason}` : ""}`,
+  );
+  return facts;
+});
+
+/**
+ * Post one re-link, through ERPNext's own reconciler.
+ *
+ * 🔴 **We choose the pairing; ERPNext does the accounting.** `reconcile` runs
+ * `reconcile_against_document`, which cancels the Payment Entry, rewrites its references, splits
+ * where it has to and re-submits — none of which is ours to reimplement. The `allocation` row is
+ * built from the rows the *fetch* returned (see `allocationRowFor`), so `validate_allocation` is
+ * checking ERP's own numbers against themselves and the only thing we contributed is which invoice.
+ *
+ * The fetch is repeated here rather than trusting what the page held: between reading the board and
+ * clicking, the bill may have been part-paid, and allocating a stale amount would throw mid-post.
+ *
+ * @param {{ supplier: string, payment: string, invoice: string, amount: number }} req
+ */
+async function relinkPayment(req) {
+  const party = normalizeEditableText(req && req.supplier);
+  const payment = normalizeEditableText(req && req.payment);
+  const invoice = normalizeEditableText(req && req.invoice);
+  const amount = Number(req && req.amount);
+  if (!party || !payment || !invoice || !(amount > 0)) {
+    return { ok: false, reason: "Supplier, payment, bill and amount are all required." };
+  }
+  const facts = await paymentRelinkFacts(party);
+  if (!facts.ok) return facts;
+  const row = allocationRowFor(
+    { payment, invoice, amount, confidence: "high", why: "" },
+    facts.payments,
+    facts.invoices,
+  );
+  if (!row) {
+    return {
+      ok: false,
+      reason: `ERPNext no longer offers ${payment} against ${invoice} — it may have been reconciled or part-paid since this screen was drawn. Reopen Pay Outstanding.`,
+    };
+  }
+  const payload = JSON.stringify({
+    doc: {
+      doctype: "Payment Reconciliation",
+      company: facts.company,
+      party_type: "Supplier",
+      party,
+      receivable_payable_account: facts.account,
+      payments: facts.payments,
+      invoices: facts.invoices,
+      allocation: [row],
+    },
+  });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var res = await frappe.call({
+        method: "run_doc_method",
+        args: { docs: JSON.stringify(i.doc), method: "reconcile" },
+      });
+      if (res && res.exc) return { ok: false, reason: reasonFrom(res) };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "reconcile" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return {
+      ok: false,
+      reason: "The shell lost contact with ERP during the re-link. Check the payment in ERPNext before retrying.",
+    };
+  }
+  if (!raw.ok) {
+    return { ok: false, reason: formatClientErrorReason(raw.reason || raw, "ERPNext refused the re-link.") };
+  }
+  return { ok: true, payment, invoice, amount: row.allocated_amount };
+}
+
+ipcMain.handle("payment-relink", async (_e, req) => {
+  navDebug("payment-relink", `start ${req && req.supplier} ${req && req.payment} -> ${req && req.invoice}`);
+  const out = await relinkPayment(req);
+  navDebug(
+    "payment-relink",
+    `${req && req.payment} ok=${out.ok ? 1 : 0}${out.reason ? ` reason=${out.reason}` : ""}`,
+  );
+  return out;
+});
+
 ipcMain.handle("mode-change-facts", async (_e, invoices) => {
   const names = (Array.isArray(invoices) ? invoices : [])
     .map((n) => normalizeEditableText(n))
