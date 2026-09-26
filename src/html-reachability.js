@@ -23,6 +23,7 @@ export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
   "home.html": "Doc Workflow Home (Home button / default Doc surface)",
   "doc-form.html": "DOC_SKIN_INDEX bill + po + receipt → shared Doc form shell",
   "payment-doc.html": "DOC_SKIN_INDEX payment-entry, isNew: false target (Packet 4b step 5)",
+  "find-doc.html": "DOC_SKIN_INDEX find:* rows → a document list's Find page (OI-056, plan 2026-09-26)",
 });
 
 /** Legacy shells retained for reference; not loaded at runtime (tranche 10). */

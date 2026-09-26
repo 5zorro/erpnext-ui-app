@@ -259,6 +259,8 @@ import {
   submittedEntryRoute,
 } from "../src/submitted-docs.js";
 import { poFindListFilterPayload, poFindPrefillFromLogbook } from "../src/po-find-prefill.js";
+import { resolveOpenTarget, lensPrefKey, pageHasOwnDocSkin } from "../src/nav-destination.js";
+import { findSkinFor } from "../src/find-skin-registry.js";
 import {
   BILL_FIND_TIMEOUT_MS,
   BILL_PRINT_TIMEOUT_MS,
@@ -297,7 +299,7 @@ const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
   "utf8",
 );
 
-/** @typedef {"home"|"erp"|"bill"|"doc"|"pay-outstanding"|"payment-doc"} SurfaceMode */
+/** @typedef {"home"|"erp"|"bill"|"doc"|"pay-outstanding"|"payment-doc"|"find-doc"} SurfaceMode */
 /** @typedef {"po"|"receipt"|"bill"} DocFormSkinId */
 
 let win = null;
@@ -312,6 +314,8 @@ let hist = null;
 let payOutstanding = null;
 /** Packet 4b step 5: read-only full-page mount of an existing Payment Entry. */
 let paymentDoc = null;
+/** Find pages (OI-056, plan 2026-09-26): one shell page serves every document list's Find skin. */
+let findDoc = null;
 /** @type {SurfaceMode} */
 let surfaceMode = "home";
 /** @type {DocFormSkinId|null} */
@@ -557,7 +561,10 @@ function isDocLensSurface() {
  */
 function isShellDocSurface() {
   return (
-    surfaceMode === "doc" || surfaceMode === "pay-outstanding" || surfaceMode === "payment-doc"
+    surfaceMode === "doc" ||
+    surfaceMode === "pay-outstanding" ||
+    surfaceMode === "payment-doc" ||
+    surfaceMode === "find-doc"
   );
 }
 
@@ -881,12 +888,13 @@ function syncE2eApi() {
       bill: bill ? bill.getBounds() : null,
       docForm: docForm ? docForm.getBounds() : null,
       erp: erp ? erp.getBounds() : null,
+      findDoc: findDoc ? findDoc.getBounds() : null,
     }),
     docSkinAvailable: () => true,
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
-      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding, paymentDoc };
+      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding, paymentDoc, findDoc };
       const view = map[name];
       if (!view || view.webContents.isDestroyed()) {
         return Promise.reject(new Error(`view not ready: ${name}`));
@@ -969,18 +977,14 @@ function sendUiState() {
       : "";
     const lensTabs = lensTabsFor({
       onDoc,
-      hasDocSkinnedRecord: !!(
-        contextInfo.doctype &&
-        contextInfo.record &&
-        (profileByDoctypeKey(contextInfo.doctype) ||
-          (contextInfo.doctype === "payment-entry" &&
-            // Isolated from doc-form.html's profile registry on purpose (Packet 4b step 5) --
-            // routes to pay-outstanding.html/payment-doc.html instead. /new suppresses the tab
-            // for a Receive-direction visit (AR isn't built); an existing record always offers
-            // it -- payment-doc.html reads the real payment_type itself once open.
-            (!isNewDocRecord(contextInfo.record) ||
-              preferredPaymentDirection(paymentDirectionPrefs) !== "Receive")))
-      ),
+      // Asked of the skin index (lens-context.js), not re-derived here: a Bill/PO/IR record, a
+      // payment (a new Receive has none — AR isn't built), or a list with a Find page.
+      hasOwnDocSkin: pageHasOwnDocSkin({
+        route: contextInfo.path,
+        doctype: contextInfo.doctype,
+        record: contextInfo.record,
+        paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
+      }),
       hasSimplifiedLens: hasSimplifiedLens(contextInfo.doctype, contextInfo.record),
       parkedIsDocSkinned: !!(parkedInfo && parkedInfo.doctype && profileByDoctypeKey(parkedInfo.doctype)),
       peekParentIsDocSkinned: !!(peekParentDt && profileByDoctypeKey(peekParentDt)),
@@ -1588,30 +1592,39 @@ function openDocSkinProfile(profile, route, opts = {}) {
  * @returns {boolean} true when a shell-local Doc surface took the navigation
  */
 function openShellDocSurface(route) {
-  const info = routeInfo(typeof route === "string" ? route : "", ERP_BASE);
-  if (!info.doctype || !info.record) return false;
+  // The one destination answer (nav-destination.js) — lists included since the Find pages.
+  const t = openTargetFor(route);
   // doc-form.html doctypes keep their existing path (park/rebind, dirty gate, skin reload).
-  if (profileByDoctypeKey(info.doctype)) return false;
-  if (!shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })) return false;
-  const target = resolveDocSkinTarget({
-    route: info.path || route,
-    doctype: info.doctype,
-    record: info.record,
-    lens: "doc",
-    paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
-  });
-  if (!target) return false;
-  if (target.kind === "pay-outstanding") {
-    navDebug("openShellDocSurface", `pay-outstanding ← ${info.path || route}`);
+  if (t.surface === "erp" || t.surface === "doc-form") return false;
+  if (t.surface === "pay-outstanding") {
+    navDebug("openShellDocSurface", `pay-outstanding ← ${t.route}`);
     showPayOutstanding();
     return true;
   }
-  if (target.kind === "payment-doc") {
-    navDebug("openShellDocSurface", `payment-doc ${target.record}`);
-    showPaymentDoc(target.record);
+  if (t.surface === "payment-doc") {
+    navDebug("openShellDocSurface", `payment-doc ${t.record}`);
+    showPaymentDoc(t.record);
     return true;
   }
+  if (t.surface === "find-doc") {
+    navDebug("openShellDocSurface", `find-doc ${t.doctype}`);
+    return showFindDoc(t.doctype, { via: "browse" });
+  }
   return false;
+}
+
+/**
+ * Where `route` opens for this clerk right now (nav-destination.js). Every door should ask
+ * this rather than re-deriving it — see implementation-plan-2026-09-26 Part B row 1.
+ * @param {string} route
+ */
+function openTargetFor(route) {
+  return resolveOpenTarget({
+    route: typeof route === "string" ? route : "",
+    lensPrefs,
+    paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
+    erpBase: ERP_BASE,
+  });
 }
 
 /**
@@ -1678,9 +1691,9 @@ function openHistoryRoute(route) {
   }
   resumeParkedDoc(path).then((ok) => {
     if (ok) return;
-    const wantDoc = shouldOpenDocLens(classified.doctype, classified.record, lensPrefs, {
-      hasDocSkin: true,
-    });
+    // A "Find Bills" row has no record, so the old record-only test sent it to the Vanilla
+    // list even when the list lens is Doc; the destination answer covers lists.
+    const wantDoc = openTargetFor(path).surface !== "erp";
     // Warm Vanilla: in-SPA hop back to the Bill, not loadURL (unsaved Account traps hard nav).
     if (
       !wantDoc &&
@@ -2097,6 +2110,13 @@ function maybeHijackErpToDoc(url) {
  */
 function trackNav(url, opts = {}) {
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return;
+  // A hidden page does not narrate (plan 2026-09-26): while the Find page is on screen, the ERP
+  // view behind it is not what the clerk sees, so its late events must not move currentRoute
+  // or add a Recent row. ponytail: Find only; the payment pages get the same rule in stage F2.
+  if (opts.fromBrowser && surfaceMode === "find-doc") {
+    navDebug("trackNav-hidden", url);
+    return;
+  }
   if (erpNavIntentPath && !shouldAcceptErpTrackNav(erpNavIntentPath, url, ERP_BASE)) {
     navDebug("trackNav-stale", `${url} (intent ${erpNavIntentPath})`);
     return;
@@ -2964,7 +2984,9 @@ function scheduleRelayout() {
 }
 
 function place() {
-  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc) return;
+  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc || !findDoc) {
+    return;
+  }
   const b = win.getContentBounds();
   placedAgainst = { width: b.width, height: b.height };
   const H = TAB_BAR_HEIGHT;
@@ -2983,6 +3005,7 @@ function place() {
   erp.setBounds(surfaceMode === "erp" ? main : OFF);
   payOutstanding.setBounds(surfaceMode === "pay-outstanding" ? main : OFF);
   paymentDoc.setBounds(surfaceMode === "payment-doc" ? main : OFF);
+  findDoc.setBounds(surfaceMode === "find-doc" ? main : OFF);
 }
 
 /** @type {BrowserWindow|null} */
@@ -3718,6 +3741,72 @@ function showPaymentDoc(record) {
 }
 
 /**
+ * A document list's Find page (OI-056, plan 2026-09-26) — the list half of an entry form.
+ *
+ * Claims the list's own `/app/<doctype>` address, the one the Vanilla list uses, so Recent keeps
+ * one "Find Bills" slot for both lenses (G9). Remembers the *list* lens as Doc, never the form's
+ * (nav-destination.js `lensPrefKey`). Reloaded fresh each time, like the payment pages.
+ *
+ * @param {string} doctypeKey
+ * @param {{ via?: "find-button"|"browse", prefill?: Record<string, string>, skipDirtyGate?: boolean }} [opts]
+ * @returns {boolean} false when this list has no Find page
+ */
+function showFindDoc(doctypeKey, opts = {}) {
+  const skin = findSkinFor(doctypeKey);
+  if (!skin) return false;
+  const go = () => {
+    collapsePeekStackHard("find-doc");
+    parkedDocSurface = null;
+    armSoftPeekEscHook(false).catch(() => {});
+    surfaceMode = "find-doc";
+    lensPrefs = rememberLens(lensPrefs, lensPrefKey(skin.doctypeKey, ""), "doc");
+    savePrefs();
+    noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "find-doc", route: `/app/${skin.doctypeKey}` }));
+    navDebug("showFindDoc", `${skin.doctypeKey} via=${opts.via || "browse"}`);
+    place();
+    if (findDoc && !findDoc.webContents.isDestroyed()) {
+      findDoc.webContents.loadFile(path.join(__dirname, "find-doc.html"), {
+        query: {
+          doctype: skin.doctypeKey,
+          via: opts.via === "find-button" ? "find-button" : "browse",
+          prefill: JSON.stringify(opts.prefill && typeof opts.prefill === "object" ? opts.prefill : {}),
+          direction: preferredPaymentDirection(paymentDirectionPrefs),
+        },
+      });
+      try {
+        findDoc.webContents.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+  };
+  if (opts.skipDirtyGate) go();
+  else gateDirtyThen(go);
+  return true;
+}
+
+/**
+ * The Find button on a Doc form: the list's Find page when the list lens is Doc, else null and
+ * the caller opens the Vanilla list as it always has (plan 2026-09-26, stage F1).
+ * @param {string} doctypeKey
+ * @param {Record<string, string>} prefill keyed by fieldname
+ */
+function openFindPageIfPreferred(doctypeKey, prefill) {
+  if (openTargetFor(`/app/${doctypeKey}`).surface !== "find-doc") return null;
+  showFindDoc(doctypeKey, { via: "find-button", prefill, skipDirtyGate: true });
+  return {
+    ok: true,
+    surface: "find-doc",
+    focusOk: true,
+    focusField: "",
+    prefilled: Object.values(prefill || {}).some((v) => String(v || "").trim()),
+  };
+}
+
+/**
  * Home's "Pay Bills"/"Write Checks" (Vendors) vs "Receive Payments" (Customers) tiles all route
  * to the same blank `/app/payment-entry/new` -- the tile clicked is the strongest direction
  * signal payment-direction-prefs.js's resolution order names, so record it here before
@@ -3750,7 +3839,9 @@ function openPaymentEntryTile(direction) {
 async function erpForceReopenRoute(appPath, opts = {}) {
   if (!erp || erp.webContents.isDestroyed()) return;
   const path = normalizeAppRoute(appPath, ERP_BASE).path || appPath;
-  const target = erpUrl(ERP_BASE, path);
+  const search =
+    typeof opts.search === "string" && opts.search ? `?${opts.search.replace(/^\?/, "")}` : "";
+  const target = erpUrl(ERP_BASE, path) + search;
   const forceLoad = !!opts.forceLoad;
   if (!forceLoad) {
     const soft = await erpSoftSetRoute(path);
@@ -3831,7 +3922,10 @@ function showErp(route = "/desk", opts = {}) {
       savePrefs();
     }
     place();
-    const target = erpUrl(ERP_BASE, info.path || path);
+    // `search` (no leading "?") rides only on a real load — a soft set_route cannot carry it.
+    const search =
+      typeof opts.search === "string" && opts.search ? `?${opts.search.replace(/^\?/, "")}` : "";
+    const target = erpUrl(ERP_BASE, info.path || path) + search;
     const trySoft =
       inSpa &&
       alreadyOnErp &&
@@ -3876,7 +3970,7 @@ function showErp(route = "/desk", opts = {}) {
       }) &&
       (info.path || path).startsWith("/app/")
     ) {
-      erpForceReopenRoute(info.path || path, { forceLoad: true }).then(afterNav);
+      erpForceReopenRoute(info.path || path, { forceLoad: true, search: opts.search }).then(afterNav);
       return;
     }
 
@@ -4421,6 +4515,10 @@ function openDocSkinContinue() {
       lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
       savePrefs();
       showPaymentDoc(target.record);
+      return;
+    }
+    if (target.kind === "find-doc") {
+      showFindDoc(target.doctype, { via: "browse" });
       return;
     }
   }
@@ -6245,6 +6343,13 @@ function createWindow() {
       preload: path.join(__dirname, "payment-doc-preload.cjs"),
     },
   });
+  findDoc = new WebContentsView({
+    webPreferences: {
+      ...pref,
+      focusOnNavigation: false,
+      preload: path.join(__dirname, "find-doc-preload.cjs"),
+    },
+  });
 
   applyWebContentsListenerBudget(erp.webContents);
   applyWebContentsListenerBudget(docForm.webContents);
@@ -6257,6 +6362,7 @@ function createWindow() {
   win.contentView.addChildView(erp);
   win.contentView.addChildView(payOutstanding);
   win.contentView.addChildView(paymentDoc);
+  win.contentView.addChildView(findDoc);
 
   chrome.webContents.loadFile(path.join(__dirname, "chrome.html"));
   home.webContents.loadFile(path.join(__dirname, "home.html"));
@@ -6266,6 +6372,9 @@ function createWindow() {
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
   payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
   paymentDoc.webContents.loadFile(path.join(__dirname, "payment-doc.html"));
+  // Filled per doctype by showFindDoc. A view that never loads anything leaves a page target
+  // that never finishes starting, and Playwright's electron.launch waits on it forever.
+  findDoc.webContents.loadURL("about:blank");
 
   if (process.env.E2E === "1") {
     win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
@@ -8258,6 +8367,8 @@ ipcMain.handle("bill-find", async (_e, payload) => {
   const billNo = String(opts.billNo ?? opts.bill_no ?? "").trim();
   const supplier = String(opts.supplier ?? "").trim();
   dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  const findPage = openFindPageIfPreferred("purchase-invoice", { bill_no: billNo, supplier });
+  if (findPage) return findPage;
   const route = "/app/purchase-invoice";
   // Same surface transition as toolbar/history Find — avoids Doc-skin hijack race (OI-127).
   showErp(route, { forceLoad: true, skipDirtyGate: true });
@@ -8343,6 +8454,8 @@ ipcMain.handle("erp-refocus-list-filter", async (_e, fieldname) => {
     typeof fieldname === "string" && fieldname.trim()
       ? fieldname.trim()
       : findListFocusField("purchase-invoice") || "bill_no";
+  // Find went to the Find page, which places its own cursor — nothing to fight for here.
+  if (surfaceMode === "find-doc") return { ok: true, focusField: "", skipped: "find-doc" };
   if (surfaceMode !== "erp") {
     return { ok: false, reason: "Not on Vanilla list surface." };
   }
@@ -9137,6 +9250,13 @@ ipcMain.handle("doc-find", async (_e, payload) => {
   }
   const opts = payload && typeof payload === "object" ? payload : {};
   dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  const findPage = openFindPageIfPreferred(
+    profile.doctypeKey,
+    profile.doctypeKey === "purchase-order"
+      ? poFindListFilterPayload(poFindPrefillFromLogbook({ name: opts.name, title: opts.title ?? opts.logbook }))
+      : {},
+  );
+  if (findPage) return findPage;
   const route = profile.listRoute;
   activeDocSkin = null;
   showErp(route, { forceLoad: true, skipDirtyGate: true });
@@ -9530,8 +9650,15 @@ ipcMain.on("open-vanilla-skin", () => {
   // Explicitly reset simplified pref to vanilla so ensureSimplifiedSkin won't re-inject
   // after the page reloads. Must happen before showErp so the did-finish-load handler sees it.
   if (info.doctype) {
-    lensPrefs = rememberLens(lensPrefs, info.doctype, "vanilla");
+    // A list remembers its own lens: clicking Vanilla on a list used to switch how the
+    // *form* opens too (lens-prefs.js says a list must never do that).
+    lensPrefs = rememberLens(lensPrefs, lensPrefKey(info.doctype, info.record), "vanilla");
     savePrefs();
+  }
+  if (info.doctype && !info.record && isShellDocSurface()) {
+    // Leaving a Find page: its Vanilla twin is the same list.
+    showErp(info.path || currentRoute, { forceLoad: true });
+    return;
   }
   if (info.doctype && info.record) {
     // A shell Doc surface owns `currentRoute`, so it names the document in front of the clerk
@@ -9615,6 +9742,29 @@ ipcMain.on("open-mockup", (_e, name) => {
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
 ipcMain.on("open-payment-entry", (_e, direction) => openPaymentEntryTile(direction));
+/** "Open this address in the lens the clerk prefers" — shell pages (Find) use this door. */
+ipcMain.on("open-preferred", (_e, route) => {
+  const r = typeof route === "string" && route.startsWith("/app/") ? route : "";
+  if (!r) return;
+  navDebug("ipc-open-preferred", r);
+  openRoutePreferred(r, { forceLoad: true });
+});
+/**
+ * Find page → Vanilla list with the page's searches as `?field=value` filters, which Frappe
+ * applies itself (router.js set_route_options_from_url) — nothing typed into its page. The
+ * path is rebuilt from the registry; only the query is taken from the page.
+ */
+ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
+  const skin = findSkinFor(doctypeKey);
+  if (!skin) return;
+  const r = typeof route === "string" ? route : "";
+  const q = r.includes("?") ? r.slice(r.indexOf("?") + 1) : "";
+  const search = /^[\w%.~=&+-]*$/.test(q) ? q : "";
+  lensPrefs = rememberLens(lensPrefs, lensPrefKey(skin.doctypeKey, ""), "vanilla");
+  savePrefs();
+  navDebug("find-doc-open-vanilla", `${skin.doctypeKey}${search ? `?${search}` : ""}`);
+  showErp(`/app/${skin.doctypeKey}`, { forceLoad: true, search });
+});
 ipcMain.handle("get-payment-entry", async (_e, name) => fetchPaymentEntry(name));
 ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));

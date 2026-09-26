@@ -130,10 +130,15 @@ describe("Payment Entry routing (Packet 4b step 5)", () => {
     assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
   });
 
-  it("a payment-entry list (no record) has no Doc tab", () => {
+  it("a payment-entry list (no record) opens Find Payments, not a payment (2026-09-26)", () => {
+    // Was "no Doc tab" until the Find pages: a list is still never a single payment.
     const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry" };
-    assert.equal(hasDocSkin(ctx), false);
-    assert.equal(resolveDocSkinTarget(ctx), null);
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), {
+      kind: "find-doc",
+      doctype: "payment-entry",
+      route: "/app/payment-entry",
+    });
   });
 });
 

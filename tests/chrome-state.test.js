@@ -280,3 +280,12 @@ describe("lensTabEmphasis — the toolbar renders the selected tab, it never re-
     assert.equal(lensTabEmphasis({ lens: "doc", docAvailable: false }).doc, false);
   });
 });
+
+describe("lensTabsFor — a page with its own skin that is not a record (Find pages, 2026-09-26)", () => {
+  it("hasOwnDocSkin earns the Doc tab like a skinned record does", () => {
+    const tabs = lensTabsFor({ hasOwnDocSkin: true });
+    assert.equal(tabs.doc, true);
+    assert.equal(tabs.docHint, "Document-skin for this page");
+    assert.equal(tabs.simplified, false);
+  });
+});

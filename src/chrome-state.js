@@ -35,9 +35,13 @@ export function historyRailWidth(collapsed) {
  * Two steps out is deliberately not modelled: peek children are depth-1, and 5zorro's call
  * is that re-entering the form is acceptable in that narrow case.
  *
+ * `hasOwnDocSkin` is the general form of `hasDocSkinnedRecord`: this page has a skin of its
+ * own, record or not — a Find page (Find Bills) is the first one that is not a record.
+ *
  * @param {{
  *   onDoc?: boolean,
  *   hasDocSkinnedRecord?: boolean,
+ *   hasOwnDocSkin?: boolean,
  *   hasSimplifiedLens?: boolean,
  *   parkedIsDocSkinned?: boolean,
  *   peekParentIsDocSkinned?: boolean,
@@ -63,7 +67,9 @@ export function lensTabsFor(state = {}) {
  */
 export function docTabState(state = {}) {
   if (state.onDoc) return { available: true, hint: "Document-skin" };
-  if (state.hasDocSkinnedRecord) return { available: true, hint: "Document-skin for this page" };
+  if (state.hasDocSkinnedRecord || state.hasOwnDocSkin) {
+    return { available: true, hint: "Document-skin for this page" };
+  }
   if (state.parkedIsDocSkinned || state.peekParentIsDocSkinned) {
     const label = state.returnLabel != null ? String(state.returnLabel).trim() : "";
     return { available: true, hint: label ? `Back to ${label}` : "Back to the form you came from" };
