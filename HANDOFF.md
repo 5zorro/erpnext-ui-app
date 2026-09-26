@@ -10,6 +10,8 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
+   `implementation-plan-2026-09-26.md` (navigation audit + Find pages as Doc skins, OI-056) —
+   **active**; its Part B is the audit of the nav code and history, Part D the architecture.
    `implementation-plan-2026-09-16.md` (Pay Outstanding corrections, the delay calendar panel,
    the terms-name builder) — **the active plan**.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
@@ -100,9 +102,10 @@ flowchart LR
    deliberately spawns a second *all-purpose* window (not a feature-specific one). A tile/action
    that wants its own "page" gets a new `surfaceMode` value + persistent view (see `place()` /
    `showHome()` / `showPayOutstanding()` in `main.js` for the pattern), not a `new BrowserWindow`.
-   Doc skins themselves stay scoped to the **transaction-entry forms** — Purchase Order, Item
-   Receipt, Bill, Payment Entry, Sales Order, Sales Invoice, Quotation, Journal Entry — not spread
-   across list views, reports, or other Vanilla surfaces.
+   Doc skins themselves stay scoped to the **transaction-entry forms and each form's own Find
+   page** — Purchase Order, Item Receipt, Bill, Payment Entry, Sales Order, Sales Invoice,
+   Quotation (Estimate), Journal Entry — not spread across reports, workspaces, masters, or other
+   lists (5zorro 2026-09-26: a Find page is the list half of an entry form, not a list skin).
 
 7. **A Doc skin is still a form** (5zorro 2026-09-08) — *"it is supposed to still be a form, but
    it is supposed to be easier for humans who handle documents… I don't want to force the lens of
@@ -128,8 +131,10 @@ flowchart LR
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
+| Where a route opens | `nav-destination.js` (`resolveOpenTarget`, `lensPrefKey`) | Every door in `main.js` should ask `openTargetFor()`; the Find doors, Recent and the toolbar do (the rest: plan 2026-09-26 stage F2) |
+| Find pages (OI-056) | `find-skin-registry.js` (`FIND_SKINS`); `find-skin-mock.js` until live rows (F3) | `find-doc.html`, `surfaceMode: "find-doc"`, `showFindDoc()`; a doctype gets a Find page by gaining a registry row |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
-| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style) |
+| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style: Bill, Vendor, Item Receipt, Estimate). Vanilla keeps ERPNext's words |
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
@@ -181,6 +186,22 @@ Nav paths must ask the former (`resolveDocSkinTarget`) and use the latter only t
 doc-form shell — asking the subset is how a remembered Doc lens gets silently downgraded to
 Vanilla (G9).
 
+**One question, one answer** (plan 2026-09-26). "Which page does this address open on?" is
+`nav-destination.js` `resolveOpenTarget`, for forms and lists alike. A door that re-derives it
+from `profileByDoctypeKey` or `surfaceMode === "doc"` is the G9/G10 bug waiting for the next kind
+of skin. Three rules ride with it:
+
+- **A list remembers its own lens** (`purchase-invoice:list`), apart from its form, default Doc.
+  Choosing Vanilla on Find Bills never changes how Bills open.
+- **Lists are never hijacked.** A Vanilla list stays Vanilla however the clerk got there; the Find
+  page opens only from a Find button, the Doc tab, or a Recent row. Vanilla stays the escape hatch.
+- **A hidden page does not narrate.** While a shell page is on screen, address changes reported by
+  the hidden ERP view must not move `currentRoute` or Recent (the Find page today; the payment
+  pages in stage F2).
+
+Filters travel in the address — `/app/<doctype>?field=value` is applied by Frappe's own list
+(`router.js` `set_route_options_from_url`), so nothing needs typing into its page.
+
 **Persistence contract** (`userData/nav-state.json`): Drafts, Calculator history, Submitted
 docs and the rail's collapsed state survive restart (calc and submitted rows restored from
 disk are marked *previous session*, so the "this session" counter stays honest).
@@ -197,7 +218,8 @@ under the same rule, after the toolbar re-derived it and lit the wrong one, G10)
 | Bill record | Vanilla · Simplified · Doc |
 | PO record | Vanilla · Simplified · Doc |
 | IR (Purchase Receipt) record | Vanilla · Simplified · Doc |
-| Desk, dashboards, lists, masters | Vanilla only |
+| List with a Find page (Bills, POs, Item Receipts, Payments, Estimates, Sales Orders, Sales Invoices — incl. Report/Kanban views) | Vanilla · Doc |
+| Desk, dashboards, other lists, masters | Vanilla only |
 
 (2026-09-05: Simplified's seed now covers all three anchored doc-skin doctypes, not just
 Bill — see `simplified-seed-profiles.js`. Any future doctype with a Doc skin but no seed

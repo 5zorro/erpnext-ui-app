@@ -14,8 +14,8 @@ OI-062 (Find is its own Recent slot — done, relied on here) · OI-128 (peek gr
 > green (2000+ units). Layer-3 smoke green, 15/15, including the new
 > `e2e/scaffold-find-doc.spec.js`, which drives the Doc tab on a list, *Find Bill…* from a Doc
 > Bill, the peek drawer, and *Search in Vanilla list* against the live sandbox. 5zorro has not
-> clicked through it yet. Stages F2–F4 are proposals. Three decisions are 5zorro's — see
-> **Decisions needed**.
+> clicked through it yet. Stages F2–F4 are proposals. 5zorro's three decisions are in, and HANDOFF
+> is updated.
 
 ---
 
@@ -113,7 +113,7 @@ Not as it stood. Every layer assumed "Doc skin ⇒ a single document":
 - `lens-prefs.js` `shouldOpenDocLens` returns false with no record ("lists stay Vanilla").
 - The toolbar rule in HANDOFF: "Desk, dashboards, lists, masters → Vanilla only".
 - HANDOFF invariant 6: Doc skins stay on the transaction-entry forms, "not spread across list
-  views". **This tranche changes that rule, on 5zorro's direction — see Decisions needed.**
+  views". **Changed 2026-09-26 on 5zorro's direction — see Decisions taken.**
 
 What *was* ready: Recent already keeps a separate slot for a list (OI-062, "Find Bills"); the "every
 surface claims a route" rule (G9) already covers shell pages; the ERP page parses list routes.
@@ -186,22 +186,20 @@ doctype either way), Sales Invoices.
 | **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | proposed — after sample data (5zorro's step 2) |
 | **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | with each skin |
 
-## Decisions needed (5zorro)
+## Decisions taken 2026-09-26 (5zorro) — do not re-litigate
 
-1. **Invariant 6 wording.** Proposed: *"Doc skins stay scoped to the transaction-entry forms **and
-   each form's own Find page** — not spread across reports, workspaces, masters or other lists."*
-   F1 is built as if this is accepted. HANDOFF is not edited yet (see Registration owed).
-2. **Lists default to Doc**, like forms? Built that way: a first Recent click on *Find Bills* opens
-   the mockup, and one click on Vanilla there switches Find back to Vanilla for good.
-3. **Estimate vs Quotation.** Home says *Estimates*; Recent and the Find page say *Find Quotations*
-   (the Recent label table has no entry). Say which and it is a one-line label.
+| # | Decision | Consequence |
+|---|---|---|
+| 1 | **Invariant 6:** Doc skins cover the transaction-entry forms *and each form's own Find page* — not reports, workspaces, masters or other lists | Written into HANDOFF invariant 6 |
+| 2 | **Lists default to the Doc lens**, like forms | A first *Find Bills* opens the Find page; one click on Vanilla there switches that list back for good |
+| 3 | **Doc skins say "Estimate"; Vanilla keeps "Quotation".** ERPNext's word stays in ERPNext's own screens, which are never edited; every shell page (Find, Recent, Home) says Estimate | `doc-terms.js` Quotation→Estimate pair; `doctype-labels.js` `quotation` / `quotation:list`. The A/R Estimate Doc skin (5zorro's step 1) uses the same pair |
 
-## Registration owed (HANDOFF — deferred until 5zorro confirms decision 1)
+## Registration (done 2026-09-26)
 
-- Invariant 6: the wording above.
-- *Lens tabs are earned per page* table: add "Find page of a Doc-skinned type → Vanilla · Doc".
-- Extension points: `find-skin-registry.js` / `nav-destination.js` → `find-doc.html`.
-- Navigation spine: rules 1, 3, 4 and the hidden-page guard.
+HANDOFF now carries: invariant 6 as above; the *Lens tabs are earned per page* row for lists with
+a Find page; extension points for `nav-destination.js` and `find-skin-registry.js`; the Navigation
+spine rules (one destination answer, list lens, no list hijack, hidden page does not narrate,
+filters in the address).
 
 ## What changed in `main.js` (F1)
 

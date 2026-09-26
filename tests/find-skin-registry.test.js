@@ -52,6 +52,11 @@ describe("labels", () => {
     assert.equal(findSkinEntryLabel("purchase-invoice"), "Bill");
   });
 
+  it("the Doc lens says Estimate where ERPNext says Quotation (5zorro 2026-09-26)", () => {
+    assert.equal(findSkinTitle("quotation"), "Find Estimates");
+    assert.equal(findSkinEntryLabel("quotation"), "Estimate");
+  });
+
   it("payments name the party by direction", () => {
     const pe = findSkinFor("Payment Entry");
     assert.equal(findPartyLabel(pe, "Pay"), "Vendor");
