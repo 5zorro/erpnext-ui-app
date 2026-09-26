@@ -841,10 +841,12 @@ it from the engine.
 
 ## Dogfood residuals
 
-*(Empty — new tranche.)*
-
 | Family | Status | Notes |
 |---|---|---|
+| P1 / OI-171 — sandbox state | 🟡 one harmless artifact | `Unreconcile Payment` **fog3it52jk** is submitted against `ACC-PAY-2026-00002`. It was created on 2026-09-26 to recreate a stranded payment for testing; its net effect was undone by an `update_voucher_outstanding` repost, so it has no live ledger effect and the books read correctly (payment applied, `ACC-PINV-2026-00231-1` Paid). Left in place rather than cancelling a submitted accounting document to tidy up |
+| P1e — OI-170's dominant-number toggle | ❌ not built | The one outstanding item of P1. Which number reads as dominant on Bill / PO surfaces (the vendor's own ref and the PO logbook number survive an amend; the ERPNext ID does not), persisted the way `lens-prefs.js` persists the lens |
+| P1 stage 2 / 3 — writes | 🟡 unproven in situ | The confirms and every read path are verified against live ERP; the stage-2 and stage-3 *writes* have only been exercised as far as the confirm. They share `voidAndAmendDoc`, which stage 1 dogfooded, but stage 3 additionally submits and reads back |
+| Auto re-link trigger | 🟡 unproven in situ | The posting call (`relinkPayment`) and the whole review loop (flag → badge → *Seems okay* → ToDo `Closed`) are verified live; nothing has yet watched the board-load pass fire on a freshly stranded payment. The clean way to prove it is the next real void-and-amend of a paid bill |
 
 ## Validate
 
