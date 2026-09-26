@@ -19,7 +19,7 @@ area of the codebase, different agent. The list of files this tranche must not o
 > **Built:** all of **P1 except the physical measurement** (encoder, label payload, sheet model,
 > and the printable sheet page), **P2** (secure front door, installable shell, setup card) and
 > **P4a** (the counting session). `npm test` green. R1 and R5 are answered.
-> **The proxy is running** on this computer (`docker compose -f ops/receiving-proxy/compose.yml ps`).
+> **The proxy comes up whenever Docker Desktop runs** (`docker compose -f ops/receiving-proxy/compose.yml ps`).
 > **Next actions are 5zorro's, not an agent's:** print a real sheet from a workstation and scan it
 > (P1e — the width table under P1e says what to expect), and run the setup card on a real phone.
 > **Next agent work:** P4b–P4d (pure), or P3 — which changes who can see order quantities
