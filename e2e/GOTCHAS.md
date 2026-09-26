@@ -43,4 +43,17 @@
  *    Run `npm run test:e2e:xvfb` when touching shell wiring. It was 2/6 red for an unknown
  *    stretch before 2026-09-05 — all three failures were stale assertions (7/8/9 above),
  *    none were product defects.
+ *
+ * 11. Every WebContentsView must load *something* at startup
+ *    A view created in createWindow() and left empty until first use leaves a page target that
+ *    never finishes starting; electron.launch waits on it and times out after 60s, so every
+ *    spec "skip-OK"s on launch and the suite looks green while testing nothing. Found
+ *    2026-09-26 with the Find page view — fix was `loadURL("about:blank")` at creation (the
+ *    old `bill` view does the same). If *all* specs start skipping, suspect a new view first.
+ *
+ * 12. On WSLg, xvfb-run alone may not keep the app off the real desktop
+ *    2026-09-26 an `xvfb-run` launch appeared on 5zorro's screen and took keyboard focus while
+ *    they typed. xvfb-run replaces DISPLAY, but WSLg also exports WAYLAND_DISPLAY, which
+ *    Electron can use instead — the likely route (not proven). Clear both:
+ *    `WAYLAND_DISPLAY= DISPLAY= xvfb-run -a npx playwright test …`.
  */

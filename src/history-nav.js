@@ -6,6 +6,7 @@ import { routeInfo, normalizeAppRoute, routesReferToSameDoc } from "./route-info
 import { profileByDoctypeKey } from "./doc-skin-registry.js";
 import { hasDocSkin } from "./lens-context.js";
 import { normalizeDoctypeKey } from "./lens-prefs.js";
+import { findSkinFor } from "./find-skin-registry.js";
 
 /** Default escape hatch when on a Vanilla master with no Doc skin. */
 export const FALLBACK_DOC_ROUTE = "/app/purchase-invoice/new";
@@ -172,9 +173,12 @@ export function classifyHistoryOpen(routeOrUrl, erpBase) {
     path: n.path || "/",
     record: n.record || "",
     // Additive on purpose: a Bill/PO/IR *list* row has no record and stays "doc" through
-    // `mode`, while Payment Entry earns "doc" through the skin index (routeIsDocSkinned).
+    // `mode`, while Payment Entry earns "doc" through the skin index (routeIsDocSkinned), and
+    // any list with a Find page (Find Payments, Find Sales Orders) is a document list too.
     kind:
-      mode === "doc-preferred" || routeIsDocSkinned(doctype, n.record || "")
+      mode === "doc-preferred" ||
+      routeIsDocSkinned(doctype, n.record || "") ||
+      (!n.record && !!findSkinFor(doctype))
         ? "doc"
         : "setup",
   };

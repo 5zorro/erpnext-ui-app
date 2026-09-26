@@ -11,6 +11,8 @@ export const DOCTYPE_LABELS = {
   "purchase-order:list": "Find Purchase Orders",
   "purchase-receipt": "Item Receipt",
   "purchase-receipt:list": "Find Item Receipts",
+  // The plural rule below would say "Find Payment Entrys"; one page covers paid and received.
+  "payment-entry:list": "Find Payments",
   "sales-order": "Sales Order",
   "sales-invoice": "Sales Invoice",
   item: "Item",

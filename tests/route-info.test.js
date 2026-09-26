@@ -127,6 +127,19 @@ describe("routesReferToSameDoc", () => {
   });
 });
 
+describe("list views are lists, not a record named 'view' (2026-09-26)", () => {
+  it("Report / Kanban / Calendar views parse with no record", () => {
+    assert.equal(routeInfo("/app/purchase-invoice/view/report").record, "");
+    assert.equal(routeInfo("/app/purchase-invoice/view/report").doctype, "purchase-invoice");
+    assert.equal(routeInfo("/app/event/view/calendar/default").record, "");
+    assert.equal(isDocListRoute("purchase-invoice", "/app/purchase-invoice/view/report"), true);
+  });
+
+  it("a bare trailing 'view' is still a record, as in Frappe's router", () => {
+    assert.equal(routeInfo("/app/note/view").record, "view");
+  });
+});
+
 describe("isDocListRoute", () => {
   it("true for list, false for form/new", () => {
     assert.equal(isDocListRoute("purchase-invoice", "/app/purchase-invoice"), true);
