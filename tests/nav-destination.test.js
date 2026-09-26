@@ -113,3 +113,14 @@ describe("pageHasOwnDocSkin (toolbar Doc tab)", () => {
     assert.equal(pe("ACC-PAY-2026-00001", "Receive"), true);
   });
 });
+
+describe("resolveOpenTarget — explicit lens (the toolbar Doc tab)", () => {
+  it("overrides the remembered lens", () => {
+    const prefs = { "purchase-invoice": "vanilla", "purchase-invoice:list": "vanilla" };
+    assert.equal(open("/app/purchase-invoice/X", prefs, { lens: "doc" }).surface, "doc-form");
+    assert.equal(open("/app/purchase-invoice", prefs, { lens: "doc" }).surface, "find-doc");
+  });
+  it("still cannot conjure a skin", () => {
+    assert.equal(open("/app/item", {}, { lens: "doc" }).surface, "erp");
+  });
+});

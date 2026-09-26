@@ -117,4 +117,50 @@ test.describe("scaffold: find pages", () => {
         .toBe(title);
     }
   });
+
+  test("F2 doors: Home Enter tile, and Find with the list lens on Vanilla", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+
+    // Home's Enter Bills goes through the shared door and still lands on the Doc Bill.
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-bill-new"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+
+    // Put the Bill list lens on Vanilla the way a clerk does: Find page → Search in Vanilla list.
+    await openVanillaList(app, "/app/purchase-invoice");
+    await clickDocTab(app);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await inFind(app, `document.getElementById("btn-vanilla").click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("erp");
+
+    // Find Bill… from a Doc Bill now opens the Vanilla list, not the Find page.
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(
+        async () =>
+          e2eCall(app, "execInView", "docForm", `(() => { const b = document.getElementById("btn-find"); return !!(b && !b.disabled); })()`),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await e2eCall(app, "execInView", "docForm", `document.getElementById("btn-find").click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("erp");
+    await expect
+      .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 20_000 })
+      .toMatch(/\/(app|desk)\/purchase-invoice(\?|$)/);
+    // The one focus step that survives: the cursor lands in the Ref No. filter.
+    await expect
+      .poll(
+        async () =>
+          e2eCall(app, "execInView", "erp", `(() => { const a = document.activeElement; const w = a && a.closest("[data-fieldname]"); return w ? w.getAttribute("data-fieldname") : ""; })()`),
+        { timeout: 15_000 },
+      )
+      .toBe("bill_no");
+
+    // Leave the list lens on Doc for whoever runs next.
+    await clickDocTab(app);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+  });
 });

@@ -4,10 +4,14 @@ import {
   DEFAULT_LENS,
   preferredLens,
   rememberLens,
-  resolveEntryOpen,
   shouldOpenDocLens,
   normalizeDoctypeKey,
 } from "../src/lens-prefs.js";
+import { resolveOpenTarget } from "../src/nav-destination.js";
+
+// Home's Enter tiles open `/app/<doctype>/new` through the one destination answer (plan
+// 2026-09-26 F2); these scenarios used to be pinned on the retired resolveEntryOpen.
+const enter = (key, prefs) => resolveOpenTarget({ route: `/app/${key}/new`, lensPrefs: prefs });
 import { DOC_SKIN_PROFILES, profileByDoctypeKey } from "../src/doc-skin-registry.js";
 
 describe("normalizeDoctypeKey", () => {
@@ -62,7 +66,7 @@ describe("rememberLens", () => {
 describe("lens preference scenarios (5zorro)", () => {
   it("1) no history → Enter / form → Doc (default)", () => {
     for (const key of ["purchase-invoice", "purchase-order", "purchase-receipt"]) {
-      const t = resolveEntryOpen(key, {});
+      const t = enter(key, {});
       assert.equal(t.lens, "doc", key);
       assert.equal(t.surface, "doc-form", key);
       assert.equal(shouldOpenDocLens(key, "new", {}), true, key);
@@ -77,9 +81,9 @@ describe("lens preference scenarios (5zorro)", () => {
       "purchase-receipt": "vanilla",
     };
     for (const key of Object.keys(fromPriorSession)) {
-      const t = resolveEntryOpen(key, fromPriorSession);
+      const t = enter(key, fromPriorSession);
       assert.equal(t.lens, "vanilla", key);
-      assert.equal(t.surface, "erp-form", key);
+      assert.equal(t.surface, "erp", key);
       assert.equal(shouldOpenDocLens(key, "new", fromPriorSession), false, key);
       assert.equal(shouldOpenDocLens(key, "ACC-1", fromPriorSession), false, key);
       // Lists still never Doc-hijack
@@ -90,9 +94,9 @@ describe("lens preference scenarios (5zorro)", () => {
   it("3) opening Vanilla form sticks; Doc form restores Doc", () => {
     let prefs = rememberLens({}, "purchase-invoice", "doc");
     prefs = rememberLens(prefs, "purchase-invoice", "vanilla");
-    assert.equal(resolveEntryOpen("purchase-invoice", prefs).surface, "erp-form");
+    assert.equal(enter("purchase-invoice", prefs).surface, "erp");
     prefs = rememberLens(prefs, "purchase-invoice", "doc");
-    assert.equal(resolveEntryOpen("purchase-invoice", prefs).surface, "doc-form");
+    assert.equal(enter("purchase-invoice", prefs).surface, "doc-form");
   });
 
   it("prefs are per-doctype (Bill Doc does not force PO Doc)", () => {
@@ -101,8 +105,8 @@ describe("lens preference scenarios (5zorro)", () => {
       "purchase-order",
       "vanilla",
     );
-    assert.equal(resolveEntryOpen("purchase-invoice", prefs).surface, "doc-form");
-    assert.equal(resolveEntryOpen("purchase-order", prefs).surface, "erp-form");
+    assert.equal(enter("purchase-invoice", prefs).surface, "doc-form");
+    assert.equal(enter("purchase-order", prefs).surface, "erp");
   });
 });
 
@@ -113,7 +117,7 @@ describe("doc-skin registry extensibility", () => {
       assert.ok(p.shell === "bill" || p.shell === "doc-form", `${p.id} shell`);
       assert.equal(profileByDoctypeKey(p.doctypeKey)?.id, p.id);
       // Default path uses shared helpers — no per-skin lens branch required
-      assert.equal(resolveEntryOpen(p.doctypeKey, {}).surface, "doc-form");
+      assert.equal(enter(p.doctypeKey, {}).surface, "doc-form");
     }
   });
 });
