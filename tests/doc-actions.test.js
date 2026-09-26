@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   docActionsFor,
   offeredDocActions,
+  voidAmendProbes,
+  predictAmendedName,
   docActionById,
   describeVoidAndAmend,
   describeVoidAndAmendResult,
@@ -292,5 +294,259 @@ describe("describeVoidAndAmendResult — and especially the half-done one", () =
       assert.equal(typeof r.headline, "string");
       assert.ok(r.headline.length);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// P1 stage 2 (2026-09-24): three more doctypes, each with a different sharp edge.
+// ---------------------------------------------------------------------------------------------
+
+describe("the stage-2 doctypes are rows, not new mechanisms", () => {
+  it("offers void-and-amend on all four submittable skins", () => {
+    for (const dt of ["Purchase Invoice", "Purchase Order", "Purchase Receipt", "Payment Entry"]) {
+      const [action] = offeredDocActions(dt, submitted);
+      assert.ok(action, `${dt} should offer the action`);
+      assert.equal(action.id, "void-and-amend");
+    }
+  });
+
+  it("still has nothing to say about a doctype nobody added", () => {
+    assert.deepEqual(docActionsFor("Sales Invoice", submitted), []);
+    assert.equal(voidAmendProbes("Sales Invoice"), null);
+  });
+
+  // The same availability rules apply everywhere — that is the point of a registry.
+  it("withholds it on a draft PO and on an already-amended receipt", () => {
+    const [po] = docActionsFor("purchase-order", { docstatus: 0 });
+    assert.equal(po.offered, false);
+    assert.match(po.reason, /draft/i);
+    const [pr] = docActionsFor("purchase-receipt", { docstatus: 1, alreadyAmended: true });
+    assert.equal(pr.offered, false);
+    assert.match(pr.reason, /once/i);
+  });
+});
+
+describe("voidAmendProbes — what the shell must read, per doctype", () => {
+  it("names the ERP doctype so the shell needs no second mapping", () => {
+    assert.equal(voidAmendProbes("purchase-invoice").erpDoctype, "Purchase Invoice");
+    assert.equal(voidAmendProbes("payment-entry").erpDoctype, "Payment Entry");
+    assert.equal(voidAmendProbes("purchase-receipt").erpDoctype, "Purchase Receipt");
+  });
+
+  // 🔴 Each doctype asks for a *different* set. A Bill reads payments applied to it; a Payment
+  // reads what it pays off; a PO reads neither, because neither is what cancelling one costs.
+  it("asks for the facts that doctype's cancel actually affects", () => {
+    const bill = voidAmendProbes("purchase-invoice");
+    assert.equal(bill.payments, true);
+    assert.equal(bill.unlinkSetting, true);
+    assert.equal(bill.allocations, false);
+
+    const pay = voidAmendProbes("payment-entry");
+    assert.equal(pay.allocations, true);
+    assert.equal(pay.payments, false, "a payment is not paid by payments");
+
+    const po = voidAmendProbes("purchase-order");
+    assert.equal(po.payments, false);
+    assert.equal(po.allocations, false);
+    assert.equal(po.reversesStock, false);
+
+    assert.equal(voidAmendProbes("purchase-receipt").reversesStock, true);
+  });
+
+  it("describes blocker queries without running one", () => {
+    const po = voidAmendProbes("purchase-order");
+    assert.deepEqual(
+      po.blockers.map((b) => [b.parent, b.child, b.field]),
+      [
+        ["Purchase Receipt", "Purchase Receipt Item", "purchase_order"],
+        ["Purchase Invoice", "Purchase Invoice Item", "purchase_order"],
+      ],
+    );
+    // A header-level link carries no child table — the shell branches on that, so it must be absent
+    // rather than empty.
+    const ret = voidAmendProbes("purchase-receipt").blockers.find((b) => b.field === "return_against");
+    assert.equal(ret.child, undefined);
+    assert.equal(ret.parent, "Purchase Receipt");
+  });
+
+  it("hands back frozen rows, so a caller cannot edit the registry by accident", () => {
+    const b = voidAmendProbes("purchase-order").blockers[0];
+    assert.throws(() => {
+      b.field = "nope";
+    }, TypeError);
+  });
+});
+
+describe("describeVoidAndAmend — a different sharp edge per doctype", () => {
+  const joined = (facts) => describeVoidAndAmend(facts).lines.join("\n");
+
+  it("warns a receipt about the shelf, not about payments", () => {
+    const text = joined({
+      name: "MAT-PRE-2026-00007",
+      doctype: "purchase-receipt",
+      docstatus: 1,
+      blockers: [],
+    });
+    assert.match(text, /back off the shelf/i);
+    assert.match(text, /stays off until you submit/i);
+    assert.doesNotMatch(text, /payment/i);
+  });
+
+  // Already cancelled: the stock is off *now*. Saying "will be taken off" would describe something
+  // that already happened, and would understate a shelf that is wrong at this moment.
+  it("switches the receipt sentence to the present tense once it is cancelled", () => {
+    const text = joined({ name: "MAT-PRE-2026-00007", doctype: "purchase-receipt", docstatus: 2 });
+    assert.match(text, /off the shelf.*right now/i);
+    assert.match(text, /amended receipt is submitted/i);
+  });
+
+  it("warns a payment about the bills that go back to outstanding", () => {
+    const text = joined({
+      name: "ACC-PAY-2026-00002",
+      doctype: "payment-entry",
+      docstatus: 1,
+      allocatedInvoiceCount: 3,
+    });
+    assert.match(text, /3 bills/);
+    assert.match(text, /back to outstanding/i);
+  });
+
+  it("says a payment's bills could not be checked rather than implying none", () => {
+    const text = joined({ name: "ACC-PAY-2026-00002", doctype: "payment-entry", docstatus: 1 });
+    assert.match(text, /could not be checked/i);
+    assert.doesNotMatch(text, /\b0 bills\b/);
+  });
+
+  // 🔴 Named, never enforced. ERPNext raises in check_no_back_links_exist *after* on_cancel and
+  // rolls the transaction back, so a refusal costs nothing — and our list of what links to what is
+  // an approximation of a rule we do not own.
+  it("names what will refuse a PO's cancel, and says the refusal is harmless", () => {
+    const text = joined({
+      name: "PUR-ORD-2026-00031",
+      doctype: "purchase-order",
+      docstatus: 1,
+      blockers: [
+        { label: "Item Receipt", name: "MAT-PRE-2026-00007" },
+        { label: "Bill", name: "ACC-PINV-2026-00240" },
+      ],
+    });
+    assert.match(text, /MAT-PRE-2026-00007/);
+    assert.match(text, /ACC-PINV-2026-00240/);
+    assert.match(text, /refuse to cancel/i);
+    assert.match(text, /changes nothing/i);
+  });
+
+  it("summarises a long blocker list instead of printing all of it", () => {
+    const blockers = Array.from({ length: 7 }, (_, i) => ({ label: "Bill", name: `B-${i}` }));
+    const text = joined({ name: "PUR-ORD-2026-00031", doctype: "purchase-order", docstatus: 1, blockers });
+    assert.match(text, /and 3 more/);
+  });
+
+  it("says so when the blocker check itself failed", () => {
+    const text = joined({
+      name: "PUR-ORD-2026-00031",
+      doctype: "purchase-order",
+      docstatus: 1,
+      blockers: [],
+      blockersChecked: false,
+    });
+    assert.match(text, /could not be checked/i);
+  });
+
+  // OI-170's reason, said while both numbers are on screen. Each profile tracks by a different one.
+  it("names the number that survives the rename, per doctype", () => {
+    assert.match(
+      joined({
+        name: "PUR-ORD-2026-00031",
+        doctype: "purchase-order",
+        docstatus: 1,
+        supplierRef: "LB-4471",
+        supplierRefLabel: "The PO# (logbook)",
+      }),
+      /PUR-ORD-2026-00031-1.*The PO# \(logbook\), LB-4471, stays the same/s,
+    );
+  });
+
+  it("still describes a Bill exactly as stage 1 did", () => {
+    const text = joined({
+      name: "ACC-PINV-2026-00231",
+      doctype: "purchase-invoice",
+      docstatus: 1,
+      linkedPaymentCount: 1,
+      unlinksPaymentsOnCancel: true,
+      blockers: [],
+    });
+    assert.match(text, /detached/);
+    assert.doesNotMatch(text, /shelf/i);
+    assert.doesNotMatch(text, /back to outstanding/i);
+  });
+
+  it("titles the cancelled case as an amend, since there is nothing left to void", () => {
+    assert.match(
+      describeVoidAndAmend({ name: "X-1", doctype: "payment-entry", docstatus: 2 }).title,
+      /^Amend X-1\?$/,
+    );
+  });
+});
+
+/**
+ * 🔴 The confirm promised the wrong name (caught 2026-09-26 by reading a live confirm). `<name>-1`
+ * is right exactly once: amending an amendment strips the trailing counter and increments it
+ * (`naming.py:549`), so a bill already at `-1` becomes `-2`, not `-1-1`. The sandbox holds a `-2`
+ * already, so the batch confirm was making a promise its own data contradicted.
+ */
+describe("predictAmendedName — what ERPNext will actually call it", () => {
+  it("appends the first counter to an original", () => {
+    assert.equal(predictAmendedName("ACC-PINV-2026-00231"), "ACC-PINV-2026-00231-1");
+  });
+
+  it("increments rather than stacking, when the source is itself an amendment", () => {
+    assert.equal(
+      predictAmendedName("ACC-PINV-2026-00231-1", { isAmendment: true }),
+      "ACC-PINV-2026-00231-2",
+    );
+    assert.equal(
+      predictAmendedName("ACC-PINV-2026-00231-9", { isAmendment: true }),
+      "ACC-PINV-2026-00231-10",
+    );
+  });
+
+  // A name ending in a digit is not proof of anything — `amended_from` is. Without it the source
+  // is an original, whatever its name looks like.
+  it("does not treat a trailing number as an amendment counter on its own", () => {
+    assert.equal(predictAmendedName("PO-2026-12"), "PO-2026-12-1");
+  });
+
+  // The scheme is a site setting. Under "Default Naming" the amendment takes a fresh series name,
+  // and there is nothing honest to say.
+  it("says nothing when the site does not use the amend counter", () => {
+    assert.equal(predictAmendedName("ACC-PINV-2026-00231", { amendCounter: false }), "");
+  });
+
+  it("says nothing rather than guessing on junk", () => {
+    assert.equal(predictAmendedName(""), "");
+    assert.equal(predictAmendedName(null), "");
+    assert.equal(predictAmendedName("ABC", { isAmendment: true }), "");
+  });
+
+  it("feeds the confirm, so the sentence matches what ERP will do", () => {
+    const text = describeVoidAndAmend({
+      name: "ACC-PINV-2026-00231-1",
+      doctype: "purchase-invoice",
+      docstatus: 1,
+      isAmendment: true,
+    }).lines.join("\n");
+    assert.match(text, /new ERPNext ID — ACC-PINV-2026-00231-2\./);
+    assert.doesNotMatch(text, /00231-1-1/);
+  });
+
+  it("drops the ID from the sentence when it cannot be predicted", () => {
+    const text = describeVoidAndAmend({
+      name: "ACC-PINV-2026-00231",
+      doctype: "purchase-invoice",
+      docstatus: 1,
+      amendCounter: false,
+    }).lines.join("\n");
+    assert.match(text, /The copy gets a new ERPNext ID\./);
   });
 });

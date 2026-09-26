@@ -44,8 +44,10 @@
         <!-- P1 / OI-171. ERPNext's own cancel-then-amend, which is the only way a submitted bill's
              fields (the mode of payment among them) can be changed at all. Offered only where ERP
              allows it; src/doc-actions.js decides, and says why when it does not. -->
+        <!-- Label and tooltip are set per doctype at paint time (src/doc-actions.js) — this shell
+             serves the Bill, PO and Item Receipt skins, and what cancelling one costs differs. -->
         <button type="button" id="btn-void-amend" data-testid="bill-void-amend" hidden
-          title="Cancel this submitted Bill and open an editable copy of it (ERPNext's own void-and-amend). The copy gets a new ERPNext ID; the vendor's own number does not change.">Edit (void and amend)</button>
+          title="Cancel this submitted document and open an editable copy of it.">Edit (void and amend)</button>
         <button type="button" id="btn-refresh" data-testid="doc-refresh"
           title="Re-read the open Vanilla form into this page (keeps your Doc edits and Amount Due on Bill). Does not discard changes — use Revert for that. Does not force ERP tax recalc.">Refresh</button>
         <button type="button" class="ghost" id="btn-vanilla" data-testid="doc-vanilla">Open in Default-skin</button>

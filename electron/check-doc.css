@@ -199,7 +199,10 @@
  * button stayed on screen over an already-submitted document (found 2026-09-07).
  */
 .check-doc-write-actions[hidden] { display: none; }
+/* Same guard, same reason: the view-mode row is toggled by the `hidden` property too. */
+.check-doc-view-actions[hidden] { display: none; }
 
+.check-doc-view-actions,
 .check-doc-write-actions {
   display: flex;
   align-items: center;
