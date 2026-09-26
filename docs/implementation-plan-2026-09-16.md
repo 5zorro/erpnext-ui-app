@@ -291,14 +291,24 @@ Three things keep that defensible:
 2. **A cap of three per pass** (`AUTO_LINK_LIMIT`). Each pairing is near-certain on its own; a
    screenful of them is not. A rule that turns out to be wrong multiplies by the batch size before
    a human sees it. Past the cap the proposals are still offered, they just wait for a click.
-3. **The flag lives in ERPNext, not the shell.** `frappe.desk.form.assign_to.add` puts a ToDo plus
-   `_assign` on the payment, so an allocation nobody typed carries its own explanation — who did
-   it, why it was inferred, and that *UnReconcile* undoes it — visible to anyone opening the
-   document in a plain browser. "Seems okay" closes the assignment; it is not an approval, because
-   there is nothing pending to approve.
+3. **The record lives in ERPNext, not the shell — and it is *two* records.**
+   `frappe.desk.form.assign_to.add` puts a ToDo plus `_assign` on the payment: the transient
+   "somebody still has to look", closed by a button labelled **Reviewed** (not *Approve* — the
+   allocation already posted, so there is nothing pending to approve).
+
+   🔴 But an assignment closes, and a closed one is invisible, so it cannot answer the question a
+   reviewer has *afterwards*. 5zorro 2026-09-26: *"I wanted something that a reviewer could see
+   'created by a human vs created by autolink' as there is a difference in the source of the errors
+   when one is created from either."* So a permanent **Comment** carries provenance
+   (`relinkProvenanceNote`, opening with `Allocation source:` then `AUTO-LINK` or `PERSON`), on
+   **both** paths — "no comment" would otherwise mean three different things. What it records is
+   **blast radius**, which is the actionable difference: a wrong auto-link means the matching *rule*
+   is wrong, so other payments may be wrong the same way and fixing just this one is not enough; a
+   wrong manual one is a misread of that day's paperwork and stops there.
 
 **Verified live 2026-09-26:** the flag, the vendor badge (*"1 auto-linked · review"*), the note in
-the panel, and *Seems okay* closing the ToDo to `Closed` in ERP. The auto **trigger** itself (the
+the panel, *Reviewed* closing the ToDo to `Closed` in ERP, and both provenance comments landing in
+the payment's Desk timeline with their distinguishing token. The auto **trigger** itself (the
 board-load pass) is unproven in situ — its posting call is the same `relinkPayment` that was proven
 above, and the gating is pure and unit-tested, but nothing has yet watched it fire on a freshly
 stranded payment. 🔴 Recreating one by driving `Unreconcile Payment` over HTTP left the invoice's
