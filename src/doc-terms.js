@@ -15,6 +15,9 @@ export const DOC_TERM_PAIRS = [
   ["Supplier Name", "Vendor Name"],
   ["Suppliers", "Vendors"],
   ["Supplier", "Vendor"],
+  // ERPNext says Quotation; the Doc lens says Estimate (5zorro 2026-09-26). Vanilla keeps its word.
+  ["Quotations", "Estimates"],
+  ["Quotation", "Estimate"],
 ];
 
 /**
