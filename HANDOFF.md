@@ -100,8 +100,9 @@ flowchart LR
 6. **One window** (5zorro 2026-09-05) — the whole app stays in the single main window (chrome +
    history rail + a `surfaceMode`-switched `WebContentsView`), never a popup, unless the user
    deliberately spawns a second *all-purpose* window (not a feature-specific one). A tile/action
-   that wants its own "page" gets a new `surfaceMode` value + persistent view (see `place()` /
-   `showHome()` / `showPayOutstanding()` in `main.js` for the pattern), not a `new BrowserWindow`.
+   that wants its own "page" gets a new `surfaceMode` value + persistent view — a row in
+   `src/shell-surfaces.js`, which `place()`, the toolbar's Doc-lens test and the route guard all
+   read (see `showFindDoc()` in `main.js` for the pattern) — not a `new BrowserWindow`.
    Doc skins themselves stay scoped to the **transaction-entry forms and each form's own Find
    page** — Purchase Order, Item Receipt, Bill, Payment Entry, Sales Order, Sales Invoice,
    Quotation (Estimate), Journal Entry — not spread across reports, workspaces, masters, or other
@@ -160,7 +161,8 @@ using the one fact the allocator ignores: an amendment carries `amended_from`.
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
 | Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
-| Where a route opens | `nav-destination.js` (`resolveOpenTarget`, `lensPrefKey`) | Every door in `main.js` should ask `openTargetFor()`; the Find doors, Recent and the toolbar do (the rest: plan 2026-09-26 stage F2) |
+| Where a route opens | `nav-destination.js` (`resolveOpenTarget`, `lensPrefKey`) | Every door in `main.js` asks `openTargetFor()` and hands the answer to `openResolvedTarget()` — Home tiles, Recent/Drafts/Submitted, both lens tabs, Find, the hijack (plan 2026-09-26 F2) |
+| Shell pages | `shell-surfaces.js` (`SHELL_SURFACES`) | One row per `surfaceMode`: its view, whether it is the Doc lens, whether it owns its address |
 | Find pages (OI-056) | `find-skin-registry.js` (`FIND_SKINS`); `find-skin-mock.js` until live rows (F3) | `find-doc.html`, `surfaceMode: "find-doc"`, `showFindDoc()`; a doctype gets a Find page by gaining a registry row |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
 | Doc terms | `doc-terms.js` | Bill / Home labels (QB-style: Bill, Vendor, Item Receipt, Estimate). Vanilla keeps ERPNext's words |
@@ -225,8 +227,8 @@ of skin. Three rules ride with it:
 - **Lists are never hijacked.** A Vanilla list stays Vanilla however the clerk got there; the Find
   page opens only from a Find button, the Doc tab, or a Recent row. Vanilla stays the escape hatch.
 - **A hidden page does not narrate.** While a shell page is on screen, address changes reported by
-  the hidden ERP view must not move `currentRoute` or Recent (the Find page today; the payment
-  pages in stage F2).
+  the hidden ERP view must not move `currentRoute` or Recent (`ownsRoute` in `shell-surfaces.js`:
+  Find, Pay Bills, a payment — not the Doc form, whose hidden ERP form *is* its document).
 
 Filters travel in the address — `/app/<doctype>?field=value` is applied by Frappe's own list
 (`router.js` `set_route_options_from_url`), so nothing needs typing into its page.

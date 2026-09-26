@@ -62,7 +62,7 @@ import {
   RELAYOUT_SETTLE_MS,
   contentSizeChanged,
 } from "../src/shell-relayout.js";
-import { DOCTYPE_LABELS } from "../src/doctype-labels.js";
+import { DOCTYPE_LABELS, listLabelForDoctype } from "../src/doctype-labels.js";
 import {
   resolveDocSkinTarget,
   docSkinTargetRoute,
@@ -92,8 +92,6 @@ import {
 } from "../src/route-info.js";
 import {
   rememberLens,
-  resolveEntryOpen,
-  shouldOpenDocLens,
   normalizeDoctypeKey,
   preferredLens,
 } from "../src/lens-prefs.js";
@@ -238,7 +236,6 @@ import {
   DOC_SKIN_PROFILES,
   docFormUiPayload,
   profileByDoctypeKey,
-  profileByLayoutKey,
 } from "../src/doc-skin-registry.js";
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
@@ -262,13 +259,12 @@ import {
 import { poFindListFilterPayload, poFindPrefillFromLogbook } from "../src/po-find-prefill.js";
 import { resolveOpenTarget, lensPrefKey, pageHasOwnDocSkin } from "../src/nav-destination.js";
 import { findSkinFor } from "../src/find-skin-registry.js";
+import { surfaceIsDocLens, surfaceOwnsRoute, surfacePlacement } from "../src/shell-surfaces.js";
 import {
   BILL_FIND_TIMEOUT_MS,
   BILL_PRINT_TIMEOUT_MS,
   BILL_SAVE_TIMEOUT_MS,
-  classifyFindBillResult,
   classifyPrintNavResult,
-  isPurchaseInvoiceListRoute,
   normalizePrintIpcResult,
   printFormMatchesBill,
   timeoutFailure,
@@ -300,13 +296,12 @@ const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
   "utf8",
 );
 
-/** @typedef {"home"|"erp"|"bill"|"doc"|"pay-outstanding"|"payment-doc"|"find-doc"} SurfaceMode */
+/** @typedef {"home"|"erp"|"doc"|"pay-outstanding"|"payment-doc"|"find-doc"} SurfaceMode — rows of src/shell-surfaces.js */
 /** @typedef {"po"|"receipt"|"bill"} DocFormSkinId */
 
 let win = null;
 let chrome = null;
 let home = null;
-let bill = null;
 /** Shared PO + Item Receipt Doc shell. */
 let docForm = null;
 let erp = null;
@@ -561,12 +556,7 @@ function isDocLensSurface() {
  * after step 3's dirty gate and step 5's route split.
  */
 function isShellDocSurface() {
-  return (
-    surfaceMode === "doc" ||
-    surfaceMode === "pay-outstanding" ||
-    surfaceMode === "payment-doc" ||
-    surfaceMode === "find-doc"
-  );
+  return surfaceIsDocLens(surfaceMode);
 }
 
 /** Packet 4b step 3 — the pay-outstanding drawer's own dirty-gate condition. */
@@ -886,7 +876,6 @@ function syncE2eApi() {
       chrome: chrome ? chrome.getBounds() : null,
       hist: hist ? hist.getBounds() : null,
       home: home ? home.getBounds() : null,
-      bill: bill ? bill.getBounds() : null,
       docForm: docForm ? docForm.getBounds() : null,
       erp: erp ? erp.getBounds() : null,
       findDoc: findDoc ? findDoc.getBounds() : null,
@@ -895,7 +884,7 @@ function syncE2eApi() {
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     execInView: (name, js) => {
-      const map = { chrome, home, hist, erp, bill, docForm, payOutstanding, paymentDoc, findDoc };
+      const map = { chrome, home, hist, erp, docForm, payOutstanding, paymentDoc, findDoc };
       const view = map[name];
       if (!view || view.webContents.isDestroyed()) {
         return Promise.reject(new Error(`view not ready: ${name}`));
@@ -1597,34 +1586,53 @@ function openShellDocSurface(route) {
   const t = openTargetFor(route);
   // doc-form.html doctypes keep their existing path (park/rebind, dirty gate, skin reload).
   if (t.surface === "erp" || t.surface === "doc-form") return false;
-  if (t.surface === "pay-outstanding") {
-    navDebug("openShellDocSurface", `pay-outstanding ← ${t.route}`);
-    showPayOutstanding();
-    return true;
+  navDebug("openShellDocSurface", `${t.surface} ← ${t.route}`);
+  return openResolvedTarget(t);
+}
+
+/**
+ * Carry out a destination `resolveOpenTarget` already chose. Deciding is not done here — this
+ * only knows which show* function paints which surface. Returns false for "erp" so the caller
+ * can pick how to load Vanilla (hard load, in-SPA hop, soft peek).
+ *
+ * A Doc choice is remembered for the payment pages here because nothing else would: doc-form and
+ * Find remember their own lens as they open (nav incident 2026-09-08T04:33).
+ *
+ * @param {import("../src/nav-destination.js").OpenTarget} t
+ * @param {{ forceLoad?: boolean, skipDirtyGate?: boolean, via?: "find-button"|"browse" }} [opts]
+ * @returns {boolean}
+ */
+function openResolvedTarget(t, opts = {}) {
+  if (t.surface === "doc-form") {
+    const profile = profileByDoctypeKey(t.doctype);
+    return !!profile && openDocSkinProfile(profile, t.route, opts);
   }
-  if (t.surface === "payment-doc") {
-    navDebug("openShellDocSurface", `payment-doc ${t.record}`);
-    showPaymentDoc(t.record);
+  if (t.surface === "pay-outstanding" || t.surface === "payment-doc") {
+    lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
+    savePrefs();
+    if (t.surface === "pay-outstanding") showPayOutstanding();
+    else showPaymentDoc(t.record);
     return true;
   }
   if (t.surface === "find-doc") {
-    navDebug("openShellDocSurface", `find-doc ${t.doctype}`);
-    return showFindDoc(t.doctype, { via: "browse" });
+    return showFindDoc(t.doctype, { via: opts.via || "browse", skipDirtyGate: opts.skipDirtyGate });
   }
   return false;
 }
 
 /**
- * Where `route` opens for this clerk right now (nav-destination.js). Every door should ask
- * this rather than re-deriving it — see implementation-plan-2026-09-26 Part B row 1.
+ * Where `route` opens for this clerk right now (nav-destination.js). Every door asks this rather
+ * than re-deriving it — see implementation-plan-2026-09-26 Part B row 1.
  * @param {string} route
+ * @param {{ lens?: "doc"|"vanilla"|"simplified" }} [opts] `lens` = an explicit tab click
  */
-function openTargetFor(route) {
+function openTargetFor(route, opts = {}) {
   return resolveOpenTarget({
     route: typeof route === "string" ? route : "",
     lensPrefs,
     paymentDirection: preferredPaymentDirection(paymentDirectionPrefs),
     erpBase: ERP_BASE,
+    lens: opts.lens,
   });
 }
 
@@ -1641,20 +1649,12 @@ function openRoutePreferred(route, opts = {}) {
       navDebug("openRoutePreferred", `park-resume → ${r}`);
       return;
     }
-    const info = routeInfo(r, ERP_BASE);
-    const lens = preferredLens(info.doctype, lensPrefs);
-    const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
-    const wantDoc =
-      !!profile &&
-      shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true });
+    const t = openTargetFor(r);
     navDebug(
       "openRoutePreferred",
-      `lens=${lens} wantDoc=${wantDoc} same=${routesReferToSameDoc(currentRoute, r, ERP_BASE)} → ${r}`,
+      `surface=${t.surface} lens=${t.lens} same=${routesReferToSameDoc(currentRoute, r, ERP_BASE)} → ${r}`,
     );
-    if (wantDoc && openDocSkinProfile(profile, info.path || r, opts)) {
-      return;
-    }
-    if (openShellDocSurface(r)) return;
+    if (openResolvedTarget(t, opts)) return;
     showErp(r, {
       forceLoad: opts.forceLoad !== false,
       skipDirtyGate: opts.skipDirtyGate,
@@ -2083,17 +2083,14 @@ function maybeHijackErpToDoc(url) {
     navDebug("hijack-skip-stale", url);
     return false;
   }
-  const info = routeInfo(url, ERP_BASE);
-  const profile = info.doctype ? profileByDoctypeKey(info.doctype) : null;
-  if (
-    !profile ||
-    !shouldOpenDocLens(info.doctype, info.record, lensPrefs, { hasDocSkin: true })
-  ) {
-    return false;
-  }
+  // Only a Doc *form* is ever pulled out of Vanilla. A list stays Vanilla however the clerk got
+  // there (plan 2026-09-26 rule 4), and the payment pages have never been hijack targets.
+  const t = openTargetFor(url);
+  const profile = t.surface === "doc-form" ? profileByDoctypeKey(t.doctype) : null;
+  if (!profile) return false;
   lensHijackLock = true;
   try {
-    if (!openDocSkinProfile(profile, info.path || url, { skipDirtyGate: true })) {
+    if (!openDocSkinProfile(profile, t.route, { skipDirtyGate: true })) {
       return false;
     }
   } finally {
@@ -2111,10 +2108,10 @@ function maybeHijackErpToDoc(url) {
  */
 function trackNav(url, opts = {}) {
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return;
-  // A hidden page does not narrate (plan 2026-09-26): while the Find page is on screen, the ERP
-  // view behind it is not what the clerk sees, so its late events must not move currentRoute
-  // or add a Recent row. ponytail: Find only; the payment pages get the same rule in stage F2.
-  if (opts.fromBrowser && surfaceMode === "find-doc") {
+  // A hidden page does not narrate (plan 2026-09-26): while a page that claims its own address
+  // is on screen (Find, Pay Bills, a payment), the ERP view behind it is not what the clerk
+  // sees, so its late events must not move currentRoute or add a Recent row.
+  if (opts.fromBrowser && surfaceOwnsRoute(surfaceMode)) {
     navDebug("trackNav-hidden", url);
     return;
   }
@@ -2211,26 +2208,6 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Wait until Vanilla URL is the Purchase Invoice list (Find), not a form. */
-async function waitForPurchaseInvoiceList(timeoutMs = BILL_FIND_TIMEOUT_MS) {
-  const start = Date.now();
-  let last = "";
-  while (Date.now() - start < timeoutMs) {
-    if (!erp || erp.webContents.isDestroyed()) {
-      return { ok: false, reason: "ERP view not ready" };
-    }
-    last = erp.webContents.getURL() || "";
-    if (/\/login/i.test(last)) {
-      return { ok: false, reason: "Please log in on Vanilla skin, then try Find Bill again." };
-    }
-    if (isPurchaseInvoiceListRoute(last, ERP_BASE)) {
-      return classifyFindBillResult(last, ERP_BASE);
-    }
-    await sleep(150);
-  }
-  return classifyFindBillResult(last, ERP_BASE);
-}
-
 /** Wait until Vanilla URL is the list for this doctype (no record). */
 async function waitForDocListRoute(doctypeKey, timeoutMs = BILL_FIND_TIMEOUT_MS) {
   const start = Date.now();
@@ -2278,7 +2255,7 @@ function scheduleErpKeyboardFocus() {
 function blurNonErpWebContents() {
   // Include chrome + history: otherwise Tab stays trapped in the left toolbar
   // after opening Vanilla (clerk data entry is almost always in the ERP view).
-  for (const view of [bill, docForm, home, chrome, hist]) {
+  for (const view of [docForm, home, chrome, hist, payOutstanding, paymentDoc, findDoc]) {
     try {
       if (!view || view.webContents.isDestroyed()) continue;
       if (view.webContents.isFocused && view.webContents.isFocused()) {
@@ -2985,9 +2962,9 @@ function scheduleRelayout() {
 }
 
 function place() {
-  if (!win || !chrome || !home || !erp || !hist || !bill || !docForm || !payOutstanding || !paymentDoc || !findDoc) {
-    return;
-  }
+  /** @type {Record<string, WebContentsView|null>} */
+  const views = { home, docForm, erp, payOutstanding, paymentDoc, findDoc };
+  if (!win || !chrome || !hist || Object.values(views).some((v) => !v)) return;
   const b = win.getContentBounds();
   placedAgainst = { width: b.width, height: b.height };
   const H = TAB_BAR_HEIGHT;
@@ -3000,13 +2977,10 @@ function place() {
   };
   chrome.setBounds({ x: 0, y: 0, width: b.width, height: H });
   hist.setBounds({ x: 0, y: H, width: HW, height: Math.max(100, b.height - H) });
-  home.setBounds(surfaceMode === "home" ? main : OFF);
-  bill.setBounds(OFF);
-  docForm.setBounds(surfaceMode === "doc" ? main : OFF);
-  erp.setBounds(surfaceMode === "erp" ? main : OFF);
-  payOutstanding.setBounds(surfaceMode === "pay-outstanding" ? main : OFF);
-  paymentDoc.setBounds(surfaceMode === "payment-doc" ? main : OFF);
-  findDoc.setBounds(surfaceMode === "find-doc" ? main : OFF);
+  // One row per page in src/shell-surfaces.js: its view gets the main area, the rest park off-screen.
+  for (const { view, shown } of surfacePlacement(surfaceMode)) {
+    views[view].setBounds(shown ? main : OFF);
+  }
 }
 
 /** @type {BrowserWindow|null} */
@@ -3069,7 +3043,7 @@ function bindTransientPopoverDismiss(popover, closeFn) {
     win.on("focus", onShellFocus);
   }
 
-  for (const view of [chrome, hist, home, bill, docForm, erp]) {
+  for (const view of [chrome, hist, home, docForm, erp, payOutstanding, paymentDoc, findDoc]) {
     if (!view || !view.webContents || view.webContents.isDestroyed()) continue;
     const fn = () => onShellFocus();
     view.webContents.on("focus", fn);
@@ -3687,6 +3661,19 @@ function noteShellDocSurfaceRoute(route) {
 }
 
 /**
+ * Leave whatever was on screen for a shell page (a row of src/shell-surfaces.js): drop the peek
+ * tree and any parked Doc form, disarm the soft-peek Esc hook. The caller still claims its own
+ * route — that line stays visible in each show* function on purpose (G9).
+ * @param {SurfaceMode} mode
+ */
+function enterShellSurface(mode) {
+  collapsePeekStackHard(mode);
+  parkedDocSurface = null;
+  armSoftPeekEscHook(false).catch(() => {});
+  surfaceMode = mode;
+}
+
+/**
  * OI-161: Home's "Pay Outstanding" tile — in-window surface, not a popup (5zorro 2026-09-05:
  * "stay in window unless I spawn a second all-purpose window"). Triggered directly by the tile,
  * so it does not need lens-context to *route* it — but it still borrows lens-context's answer
@@ -3695,10 +3682,7 @@ function noteShellDocSurfaceRoute(route) {
  */
 function showPayOutstanding() {
   gateDirtyThen(() => {
-    collapsePeekStackHard("home");
-    parkedDocSurface = null;
-    armSoftPeekEscHook(false).catch(() => {});
-    surfaceMode = "pay-outstanding";
+    enterShellSurface("pay-outstanding");
     noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "pay-outstanding" }));
     place();
     // A fresh load always starts clean -- reset here too, not just on the gate's own discard
@@ -3722,10 +3706,7 @@ function showPayOutstanding() {
  */
 function showPaymentDoc(record) {
   gateDirtyThen(() => {
-    collapsePeekStackHard("home");
-    parkedDocSurface = null;
-    armSoftPeekEscHook(false).catch(() => {});
-    surfaceMode = "payment-doc";
+    enterShellSurface("payment-doc");
     noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "payment-doc", record }));
     place();
     // A fresh load always starts clean; same defensive reset as showPayOutstanding.
@@ -3756,10 +3737,7 @@ function showFindDoc(doctypeKey, opts = {}) {
   const skin = findSkinFor(doctypeKey);
   if (!skin) return false;
   const go = () => {
-    collapsePeekStackHard("find-doc");
-    parkedDocSurface = null;
-    armSoftPeekEscHook(false).catch(() => {});
-    surfaceMode = "find-doc";
+    enterShellSurface("find-doc");
     lensPrefs = rememberLens(lensPrefs, lensPrefKey(skin.doctypeKey, ""), "doc");
     savePrefs();
     noteShellDocSurfaceRoute(docSkinTargetRoute({ kind: "find-doc", route: `/app/${skin.doctypeKey}` }));
@@ -3822,12 +3800,9 @@ function openPaymentEntryTile(direction) {
   // 2026-09-08T04:33 — this used to hardcode Vanilla). "Receive" is excluded on purpose:
   // a new Receive has no Doc skin at all (lens-context isSuppressedPaymentEntryReceive),
   // because pay-outstanding is the Pay decision surface.
-  if (dir === "Pay" && preferredLens("payment-entry", lensPrefs) === "doc") {
-    navDebug("openPaymentEntryTile", "lens=doc → pay-outstanding");
-    showPayOutstanding();
-    return;
-  }
-  navDebug("openPaymentEntryTile", `lens=vanilla dir=${dir} → /app/payment-entry/new`);
+  const t = openTargetFor("/app/payment-entry/new");
+  navDebug("openPaymentEntryTile", `dir=${dir} → ${t.surface}`);
+  if (openResolvedTarget(t)) return;
   showErp("/app/payment-entry/new", { forceLoad: true });
 }
 
@@ -4489,39 +4464,19 @@ function openDocSkin() {
 }
 
 function openDocSkinContinue() {
-  const target = resolveDocSkinTarget(shellCtx());
-  if (target) {
-    navDebug("openDocSkin", target.kind + (target.route ? ` ${target.route}` : ""));
-    if (target.kind === "workflow-home") {
-      showHome();
-      return;
-    }
-    if (target.kind === "doc-form") {
-      const profile = profileByLayoutKey(target.layoutKey) || profileByDoctypeKey(target.doctype);
-      if (!profile) return;
-      openDocSkinProfile(profile, target.route);
-      return;
-    }
-    // Payment Entry's Doc skin is not a doc-form.html layout, so it never went through
-    // showDocForm's rememberLens. That left "vanilla" as the only lens ever written for
-    // payment-entry (open-vanilla-skin and showErp both record it), so the tile reopened
-    // on Vanilla every time — nav incident 2026-09-08T04:33.
-    if (target.kind === "pay-outstanding") {
-      lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
-      savePrefs();
-      showPayOutstanding();
-      return;
-    }
-    if (target.kind === "payment-doc") {
-      lensPrefs = rememberLens(lensPrefs, "payment-entry", "doc");
-      savePrefs();
-      showPaymentDoc(target.record);
-      return;
-    }
-    if (target.kind === "find-doc") {
-      showFindDoc(target.doctype, { via: "browse" });
-      return;
-    }
+  const ctx = shellCtx();
+  // Home and Desk answer "Workflow Home" — the one Doc target that is not a document address.
+  if (ctx.showingHome || (resolveDocSkinTarget(ctx) || {}).kind === "workflow-home") {
+    navDebug("openDocSkin", "workflow-home");
+    showHome();
+    return;
+  }
+  // The tab is an explicit choice, so it overrides the remembered lens; the destination is still
+  // the one answer every other door gets.
+  const t = openTargetFor(ctx.route, { lens: "doc" });
+  if (t.surface !== "erp") {
+    navDebug("openDocSkin", `${t.surface} ${t.route}`);
+    if (openResolvedTarget(t)) return;
   }
   // OI-112: Tax Category / Purchase Taxes template / Company — Doc tab returns to last Bill/PO/IR.
   const dirtyDoc = dirtyState && dirtyState.doc;
@@ -4539,14 +4494,11 @@ function openDocSkinContinue() {
 }
 
 function openEntry(doctypeKey) {
-  const key = doctypeKey || "purchase-invoice";
-  const t = resolveEntryOpen(key, lensPrefs);
-  navDebug("openEntry", `${key} lens=${t.lens} surface=${t.surface} → ${t.route}`);
-  if (t.surface === "doc-form") {
-    const profile = profileByDoctypeKey(key);
-    if (profile && openDocSkinProfile(profile, t.route)) return;
-    showBill(t.route);
-  } else showErp(t.route, { forceLoad: true });
+  const key = normalizeDoctypeKey(doctypeKey) || "purchase-invoice";
+  navDebug("openEntry", key);
+  // Same door as every other "open in the preferred lens" — the old per-door copy fell back to
+  // the Bill skin for any doctype without a doc-form profile.
+  openRoutePreferred(`/app/${key}/new`, { forceLoad: true });
 }
 
 /**
@@ -6300,13 +6252,6 @@ function createWindow() {
       preload: path.join(__dirname, "home-preload.cjs"),
     },
   });
-  bill = new WebContentsView({
-    webPreferences: {
-      ...pref,
-      focusOnNavigation: false,
-      preload: path.join(__dirname, "bill-preload.cjs"),
-    },
-  });
   docForm = new WebContentsView({
     webPreferences: {
       ...pref,
@@ -6358,7 +6303,6 @@ function createWindow() {
   win.contentView.addChildView(chrome);
   win.contentView.addChildView(hist);
   win.contentView.addChildView(home);
-  win.contentView.addChildView(bill);
   win.contentView.addChildView(docForm);
   win.contentView.addChildView(erp);
   win.contentView.addChildView(payOutstanding);
@@ -6367,14 +6311,14 @@ function createWindow() {
 
   chrome.webContents.loadFile(path.join(__dirname, "chrome.html"));
   home.webContents.loadFile(path.join(__dirname, "home.html"));
-  bill.webContents.loadURL("about:blank");
   docForm.webContents.loadFile(path.join(__dirname, "doc-form.html"));
   hist.webContents.loadFile(path.join(__dirname, "history.html"));
   erp.webContents.loadURL(erpUrl(ERP_BASE, "/desk"));
   payOutstanding.webContents.loadFile(path.join(__dirname, "pay-outstanding.html"));
   paymentDoc.webContents.loadFile(path.join(__dirname, "payment-doc.html"));
   // Filled per doctype by showFindDoc. A view that never loads anything leaves a page target
-  // that never finishes starting, and Playwright's electron.launch waits on it forever.
+  // that never finishes starting, and Playwright's electron.launch waits on it forever
+  // (e2e/GOTCHAS.md #11).
   findDoc.webContents.loadURL("about:blank");
 
   if (process.env.E2E === "1") {
@@ -6416,7 +6360,6 @@ function createWindow() {
     win = null;
     chrome = null;
     home = null;
-    bill = null;
     docForm = null;
     erp = null;
     hist = null;
@@ -6710,8 +6653,7 @@ ipcMain.on("focus-debug", (e, payload) => {
   const p = payload && typeof payload === "object" ? payload : {};
   let surface = p.surface != null ? String(p.surface) : "";
   if (!surface) {
-    if (bill && !bill.webContents.isDestroyed() && e.sender === bill.webContents) surface = "bill";
-    else if (docForm && !docForm.webContents.isDestroyed() && e.sender === docForm.webContents) {
+    if (docForm && !docForm.webContents.isDestroyed() && e.sender === docForm.webContents) {
       surface = "doc-form";
     }
   }
@@ -8313,137 +8255,67 @@ ipcMain.handle("bill-save", async (_e, opts) =>
 ipcMain.handle("bill-list-mandatory", async () => listBillMandatoryMissing());
 
 /**
- * Set Vanilla list standard-filter values and refresh (full ERP list query).
- * @param {Record<string, string>} filters fieldname -> value
+ * The Find button on a Doc form — one implementation for Bill, PO and Item Receipt (the
+ * `bill-find` / `doc-find` twins were near-copies, plan 2026-09-26 Part B row 4). The renderer
+ * has already handled unsaved edits (commit gate) before calling.
+ *
+ * The list's Find page when its lens is Doc. Otherwise the Vanilla list, with the prefill handed
+ * over in the address (`?bill_no=…&supplier=…`) — Frappe applies it to the list's filters itself
+ * (router.js `set_route_options_from_url`), which replaced polling each filter box and setting it
+ * from outside. Placing the cursor in a filter box is still done from outside: that fight is with
+ * OS keyboard focus between views, which no address can carry.
+ *
+ * @param {string} doctypeKey
+ * @param {Record<string, string>} prefill keyed by fieldname
  */
-async function setListStandardFilterValues(filters) {
-  if (!filters || typeof filters !== "object") return { ok: true, applied: [] };
-  const entries = Object.entries(filters).filter(
-    ([, v]) => v != null && String(v).trim() !== "",
-  );
-  if (!entries.length) return { ok: true, applied: [] };
-  const filtersLit = JSON.stringify(Object.fromEntries(entries));
-  const raw = await erpEval(`(async () => {
-    try {
-      if (!window.cur_list || !cur_list.page) {
-        return { ok: false, reason: "cur_list not ready" };
-      }
-      var filters = ${filtersLit};
-      var dict = cur_list.page.fields_dict || {};
-      var applied = [];
-      for (var field in filters) {
-        if (!Object.prototype.hasOwnProperty.call(filters, field)) continue;
-        var val = filters[field];
-        var df = dict[field];
-        if (df && typeof df.set_value === "function") {
-          await df.set_value(val);
-          applied.push(field);
-          continue;
-        }
-        var el = document.querySelector('.standard-filter-section [data-fieldname="' + field + '"] input')
-          || document.querySelector('[data-fieldname="' + field + '"] input');
-        if (el) {
-          el.value = val;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          applied.push(field);
-        }
-      }
-      if (cur_list.filter_area && typeof cur_list.filter_area.refresh === "function") {
-        cur_list.filter_area.refresh();
-      } else if (typeof cur_list.refresh === "function") {
-        cur_list.refresh();
-      }
-      return { ok: true, applied: applied };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  return raw && typeof raw === "object" ? raw : { ok: false, reason: "set filters failed" };
-}
-
-/** Find Bills list in Vanilla (T3a / OI-056). Caller handles dirty commit first. */
-ipcMain.handle("bill-find", async (_e, payload) => {
-  const opts = payload && typeof payload === "object" ? payload : {};
-  const billNo = String(opts.billNo ?? opts.bill_no ?? "").trim();
-  const supplier = String(opts.supplier ?? "").trim();
+async function openDocFind(doctypeKey, prefill) {
   dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
-  const findPage = openFindPageIfPreferred("purchase-invoice", { bill_no: billNo, supplier });
+  const findPage = openFindPageIfPreferred(doctypeKey, prefill);
   if (findPage) return findPage;
-  const route = "/app/purchase-invoice";
-  // Same surface transition as toolbar/history Find — avoids Doc-skin hijack race (OI-127).
-  showErp(route, { forceLoad: true, skipDirtyGate: true });
-  const confirm = await waitForPurchaseInvoiceList(BILL_FIND_TIMEOUT_MS);
+
+  const filled = Object.entries(prefill || {})
+    .map(([k, v]) => [k, v == null ? "" : String(v).trim()])
+    .filter(([, v]) => v);
+  const search = new URLSearchParams(filled).toString().replace(/\+/g, "%20");
+  const label = listLabelForDoctype(doctypeKey);
+  navDebug("doc-find-vanilla", `${doctypeKey}${search ? `?${search}` : ""}`);
+  showErp(`/app/${doctypeKey}`, { forceLoad: true, skipDirtyGate: true, search });
+  const confirm = await waitForDocListRoute(doctypeKey, BILL_FIND_TIMEOUT_MS);
   sendUiState();
   syncE2eApi();
   if (!(confirm && confirm.ok)) {
-    return {
-      ok: false,
-      reason: (confirm && confirm.reason) || "Could not open Bill list.",
-    };
+    return { ok: false, reason: (confirm && confirm.reason) || `Could not open ${label}.` };
   }
-  /** @type {Record<string, string>} */
-  const filterPayload = {};
-  if (billNo) filterPayload.bill_no = billNo;
-  if (supplier) filterPayload.supplier = supplier;
-  const focusField =
-    billNo ? "bill_no" : supplier ? "supplier" : findListFocusField("purchase-invoice");
-  const focusLabel = findListFocusLabel("purchase-invoice") || focusField;
-  let focus = { ok: false };
-  if (focusField) {
-    const ready = await waitForListFilterField(focusField);
-    if (!(ready && ready.ok)) {
-      scheduleErpKeyboardFocus();
-      return {
-        ok: true,
-        focusOk: false,
-        focusField,
-        prefilled: false,
-        reason: `Bill list opened; ${focusLabel} filter not ready yet.`,
-      };
-    }
-    await dismissOnboardingAndSettle();
-    let prefilled = false;
-    if (Object.keys(filterPayload).length) {
-      for (const field of Object.keys(filterPayload)) {
-        const fieldReady = await waitForListFilterField(field);
-        if (!(fieldReady && fieldReady.ok)) {
-          scheduleErpKeyboardFocus();
-          return {
-            ok: true,
-            focusOk: false,
-            focusField,
-            prefilled: false,
-            reason: `Bill list opened; ${field} filter not ready for prefill.`,
-          };
-        }
-      }
-      const applied = await setListStandardFilterValues(filterPayload);
-      prefilled = !!(applied && applied.ok && applied.applied && applied.applied.length);
-    }
-    focus = await focusListStandardFilter(focusField);
+  const prefilled = filled.length > 0;
+  // A prefilled box wins the cursor; otherwise the doctype's usual first box.
+  const usual = findListFocusField(doctypeKey);
+  const focusField = usual && filled.some(([k]) => k === usual) ? usual : (filled[0] || [usual])[0] || "";
+  const focusLabel = findListFocusLabel(doctypeKey) || focusField;
+  if (!focusField) {
     scheduleErpKeyboardFocus();
-    if (!(focus && focus.ok)) {
-      return {
-        ok: true,
-        focusOk: false,
-        focusField,
-        prefilled,
-        reason: prefilled
-          ? `Bill list filtered; could not focus ${focusLabel}.`
-          : `Bill list opened; could not focus ${focusLabel}.`,
-      };
-    }
-    return {
-      ok: true,
-      focusOk: true,
-      focusField,
-      prefilled,
-      reason: prefilled ? "Bill list opened with Ref / vendor filters." : undefined,
-    };
+    return { ok: true, focusOk: false, focusField: "", prefilled };
   }
+  const ready = await waitForListFilterField(focusField);
+  if (!(ready && ready.ok)) {
+    scheduleErpKeyboardFocus();
+    return { ok: true, focusOk: false, focusField, prefilled, reason: `${label}: ${focusLabel} filter not ready yet.` };
+  }
+  await dismissOnboardingAndSettle();
+  const focus = await focusListStandardFilter(focusField);
   scheduleErpKeyboardFocus();
-  return { ok: true, focusOk: false, focusField: "", prefilled: false };
+  if (!(focus && focus.ok)) {
+    return { ok: true, focusOk: false, focusField, prefilled, reason: `${label} opened; could not focus ${focusLabel}.` };
+  }
+  return { ok: true, focusOk: true, focusField, prefilled, reason: prefilled ? `${label} opened with filters.` : undefined };
+}
+
+/** Find on the Bill skin (T3a / OI-056; Ref-dupe prefill OI-054). */
+ipcMain.handle("bill-find", async (_e, payload) => {
+  const opts = payload && typeof payload === "object" ? payload : {};
+  return openDocFind("purchase-invoice", {
+    bill_no: String(opts.billNo ?? opts.bill_no ?? "").trim(),
+    supplier: String(opts.supplier ?? "").trim(),
+  });
 });
 
 /**
@@ -8842,16 +8714,12 @@ ipcMain.on("bill-open-payment-terms-add", () => {
 ipcMain.on("bill-focus-surface", () => {
   try {
     if (win && !win.isDestroyed()) win.focus();
-    // Tranche 10: Bill UI lives in docForm; legacy bill view stays off-screen.
+    // Tranche 10: Bill UI lives in docForm (the legacy bill view is gone, plan 2026-09-26 F2).
     const wc =
       activeDocSkin === "bill" && docForm && !docForm.webContents.isDestroyed()
         ? docForm.webContents
-        : bill && !bill.webContents.isDestroyed()
-          ? bill.webContents
-          : null;
-    focusDebug("bill-focus-surface", currentRoute || "", {
-      surface: wc && docForm && wc === docForm.webContents ? "doc-form" : "bill-legacy",
-    });
+        : null;
+    focusDebug("bill-focus-surface", currentRoute || "", { surface: wc ? "doc-form" : "none" });
     if (wc) wc.focus();
   } catch {
     /* ignore */
@@ -9250,97 +9118,12 @@ ipcMain.handle("doc-find", async (_e, payload) => {
     return { ok: false, reason: "No Doc form skin active." };
   }
   const opts = payload && typeof payload === "object" ? payload : {};
-  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
-  const findPage = openFindPageIfPreferred(
+  return openDocFind(
     profile.doctypeKey,
     profile.doctypeKey === "purchase-order"
       ? poFindListFilterPayload(poFindPrefillFromLogbook({ name: opts.name, title: opts.title ?? opts.logbook }))
       : {},
   );
-  if (findPage) return findPage;
-  const route = profile.listRoute;
-  activeDocSkin = null;
-  showErp(route, { forceLoad: true, skipDirtyGate: true });
-  const confirm = await waitForDocListRoute(profile.doctypeKey, BILL_FIND_TIMEOUT_MS);
-  sendUiState();
-  syncE2eApi();
-  if (!(confirm && confirm.ok)) {
-    return {
-      ok: false,
-      reason: (confirm && confirm.reason) || "Could not open list.",
-    };
-  }
-  /** @type {Record<string, string>} */
-  let filterPayload = {};
-  if (profile.doctypeKey === "purchase-order") {
-    filterPayload = poFindListFilterPayload(
-      poFindPrefillFromLogbook({
-        name: opts.name,
-        title: opts.title ?? opts.logbook,
-      }),
-    );
-  }
-  let focusField = findListFocusField(profile.doctypeKey);
-  if (profile.doctypeKey === "purchase-order" && filterPayload.title) {
-    focusField = "title";
-  }
-  const focusLabel =
-    focusField === "title"
-      ? "Title (logbook PO#)"
-      : findListFocusLabel(profile.doctypeKey) || focusField;
-  let focus = { ok: false };
-  let prefilled = false;
-  if (focusField) {
-    const ready = await waitForListFilterField(focusField);
-    if (!(ready && ready.ok)) {
-      scheduleErpKeyboardFocus();
-      return {
-        ok: true,
-        focusOk: false,
-        focusField,
-        prefilled: false,
-        reason: `List opened; ${focusLabel} filter not ready yet.`,
-      };
-    }
-    await dismissOnboardingAndSettle();
-    if (Object.keys(filterPayload).length) {
-      for (const field of Object.keys(filterPayload)) {
-        const fieldReady = await waitForListFilterField(field);
-        if (!(fieldReady && fieldReady.ok)) {
-          scheduleErpKeyboardFocus();
-          return {
-            ok: true,
-            focusOk: false,
-            focusField,
-            prefilled: false,
-            reason: `List opened; ${field} filter not ready for prefill.`,
-          };
-        }
-      }
-      const applied = await setListStandardFilterValues(filterPayload);
-      prefilled = !!(applied && applied.ok && applied.applied && applied.applied.length);
-    }
-    focus = await focusListStandardFilter(focusField);
-  }
-  scheduleErpKeyboardFocus();
-  if (!(focus && focus.ok)) {
-    return {
-      ok: true,
-      focusOk: false,
-      focusField,
-      prefilled,
-      reason: prefilled
-        ? `List opened with filters; could not focus ${focusLabel}.`
-        : `List opened; could not focus ${focusLabel}.`,
-    };
-  }
-  return {
-    ok: true,
-    focusOk: true,
-    focusField,
-    prefilled,
-    reason: prefilled ? "List opened with filters." : undefined,
-  };
 });
 
 ipcMain.handle("doc-new", async () => {
@@ -10184,7 +9967,7 @@ ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) =>
   createBatchPaymentEntryForBills(bills, intent),
 );
 ipcMain.on("open-devtools", (_e, target) => {
-  const map = { erp, chrome, home, hist, bill, docForm, payOutstanding, paymentDoc };
+  const map = { erp, chrome, home, hist, docForm, payOutstanding, paymentDoc, findDoc };
   const key = typeof target === "string" && map[target] ? target : "erp";
   const view = map[key];
   if (view && !view.webContents.isDestroyed()) {

@@ -10,12 +10,10 @@ told apart from the 09-16 work sharing that file.
 **Museum OIs in play:** OI-056 (Find Bills Doc skin — find vs enter are different jobs) ·
 OI-062 (Find is its own Recent slot — done, relied on here) · OI-128 (peek granularity, open).
 
-> **Status 2026-09-26:** audit written, stage F1 built (plumbing + static mockups). `npm test`
-> green (2000+ units). Layer-3 smoke green, 15/15, including the new
-> `e2e/scaffold-find-doc.spec.js`, which drives the Doc tab on a list, *Find Bill…* from a Doc
-> Bill, the peek drawer, and *Search in Vanilla list* against the live sandbox. 5zorro has not
-> clicked through it yet. Stages F2–F4 are proposals. 5zorro's three decisions are in, and HANDOFF
-> is updated.
+> **Status 2026-09-26:** audit written; stages **F1** (plumbing + static mockups) and **F2** (every
+> door on the one answer) built. `npm test` green (2050). Layer-3 smoke green, 16/16 against the
+> live sandbox, including `e2e/scaffold-find-doc.spec.js`. 5zorro has not clicked through it yet.
+> F3–F4 are proposals. 5zorro's three decisions are in, and HANDOFF is updated.
 
 ---
 
@@ -118,7 +116,7 @@ Not as it stood. Every layer assumed "Doc skin ⇒ a single document":
 What *was* ready: Recent already keeps a separate slot for a list (OI-062, "Find Bills"); the "every
 surface claims a route" rule (G9) already covers shell pages; the ERP page parses list routes.
 
-## Part D — The architecture (proposed; F1 built)
+## Part D — The architecture (F1 and F2 built)
 
 Five rules. Each one removes a row from Part B's table rather than adding a patch.
 
@@ -182,7 +180,7 @@ doctype either way), Sales Invoices.
 | Stage | What | State |
 |---|---|---|
 | **F1** | Rules 1–4 for the Find doors; registry; skin-index rows; list lens memory; `find-doc.html` static mockup ×7; three latent bugs | **built 2026-09-26** |
-| **F2** | Every remaining door through `resolveOpenTarget` (Home tiles, Drafts, Submitted, Doc tab fallback, hijack); merge `bill-find`/`doc-find`; replace the Vanilla-Find focus machinery with address filters; a small table of shell pages so `place()` / `isShellDocSurface()` / the dirty gate read one list; delete the unused `bill` view; extend the hidden-page guard | proposed — after 09-16 commits, since it edits the same functions |
+| **F2** | Every remaining door through `resolveOpenTarget`; one Find implementation; filters in the address; a table of shell pages; the unused `bill` view deleted; the hidden-page guard on all three shell pages | **built 2026-09-26** — see *What F2 changed* |
 | **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | proposed — after sample data (5zorro's step 2) |
 | **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | with each skin |
 
@@ -221,7 +219,48 @@ So these hunks can be told apart from the 09-16 work in the same file:
 - `trackNav()` ignores the hidden ERP page while the Find page is on screen.
 - New IPC: `open-preferred`, `find-doc-open-vanilla`.
 
-## Dogfood checklist (F1)
+## What F2 changed (and what it deliberately did not)
+
+**Done:**
+
+- **One answer, every door.** `openResolvedTarget()` in `main.js` carries out whatever
+  `resolveOpenTarget` decided. Every door now goes through the pair: `openRoutePreferred` (Home
+  tiles via `openEntry`, Drafts, the Doc-tab fallback), `openHistoryRoute` (Recent, Submitted),
+  `openShellDocSurface`, the Doc tab (with an explicit `lens: "doc"` override), `openPaymentEntryTile`
+  and the hijack. `resolveEntryOpen` and the doors' own `shouldOpenDocLens` checks are gone; its
+  tests moved onto the resolver unchanged in meaning. `openEntry` had its own copy of the rule that
+  fell back to the *Bill* skin for any doctype without a doc-form profile (harmless while Home only
+  offered Bill/PO/IR, wrong the day an A/R tile used it).
+- **One Find.** `bill-find` and `doc-find` are three-line handlers over `openDocFind()`. The Vanilla
+  path hands the prefill over in the address, so `setListStandardFilterValues`, the per-field waits
+  for each prefilled box, and `waitForPurchaseInvoiceList` are deleted.
+- **A table of shell pages** (`src/shell-surfaces.js`). `place()`, `isShellDocSurface()` and the
+  route guard read it. `enterShellSurface()` replaced the copied setup lines (and the copied
+  `"home"` log reason) in the three show* functions.
+- **The hidden-page guard covers Pay Bills and the payment page too.** Checked first: nothing on
+  those pages relies on the hidden ERP view navigating (they use in-page calls, and the amend flow
+  re-opens through `showPaymentDoc`).
+- **The legacy `bill` view is gone**, with `bill-preload.cjs`. ⚠ The deletion landed in the
+  other session's commit `e75bd86` (staged with `git rm`, swept up by their `git commit`); the
+  `main.js` side that stops referencing it is in the F2 commit. Lesson for parallel sessions:
+  delete with plain `rm` and stage at commit time.
+
+**Kept on purpose:**
+
+- **The cursor step on the Vanilla list** (`focusListStandardFilter`, the short focus keeper, the
+  renderer's follow-up refocus). The address carries filters, not keyboard focus; that fight is
+  between Electron views for the OS focus, and 5zorro dogfooded it into shape. The smoke now proves
+  the cursor lands in *Ref No.* headlessly; whether the belt-and-braces parts can go needs a real
+  desktop, so it waits for dogfood.
+- **The dirty gate is not table-driven.** Only two pages can hold unsaved input and each asks a
+  different question (the check drawer vs a Draft payment); a table row for that would be an
+  abstraction with two members.
+- **The hijack is narrower, not gone.** It now fires only when the one answer says "Doc form", and
+  never for lists or the payment pages. It is still *reactive* (Vanilla moves, then the shell pulls
+  it back), because an in-page link click inside ERPNext is an event the shell does not start;
+  `lensHijackLock` stays with it.
+
+## Dogfood checklist (F1 + F2)
 
 1. Doc Bill → **Find Bill…** → the Find Bills mockup, cursor in *Vendor's invoice no.* Recent shows
    *Find Bills*. Toolbar: Document-skin lit, Default-skin available.
@@ -235,6 +274,11 @@ So these hunks can be told apart from the 09-16 work in the same file:
    Find Sales Orders mockup. Payments: the Pay/Receive switch changes the columns' party label.
 7. Vanilla Report view of Bills (`…/purchase-invoice/view/report`) → the Doc tab offers *Find Bills*,
    not a Bill named "view".
+8. (F2) Home → Enter Bills / Purchase Orders / Receive Inventory → each opens its Doc skin as before.
+   Pay Bills → Pay Bills dashboard. Recent, Drafts and Submitted rows reopen in the lens you last used.
+9. (F2) With Find Bills set to Vanilla (step 2), a dupe-Ref warning's Find link on a Doc Bill →
+   Vanilla list with Ref No. and vendor already filtered, cursor in Ref No.
+10. (F2) While on Pay Bills or a payment, nothing you do there adds stray rows to Recent.
 
 ## Dogfood residuals
 

@@ -3,7 +3,7 @@
  * Rendered by electron/home.html; not ERP Desk HTML.
  *
  * Enter Bills: same path as Vanilla / Simplified PI; open target follows last lens
- * (default Doc) via `resolveEntryOpen` — last lens wins per doctype.
+ * (default Doc) via `nav-destination.js` `resolveOpenTarget` — last lens wins per doctype.
  *
  * Routes use `/app/…` (Frappe Desk SPA). Exact `/desk` is allowed for Vanilla Desk root.
  *

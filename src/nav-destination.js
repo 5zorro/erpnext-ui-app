@@ -45,11 +45,15 @@ export function lensPrefKey(doctype, record) {
  */
 
 /**
+ * `lens` overrides the remembered lens — the toolbar's Doc tab is an explicit "show me this page's
+ * Doc skin", whatever was used last.
+ *
  * @param {{
  *   route?: string,
  *   lensPrefs?: Record<string, string>,
  *   paymentDirection?: string,
  *   erpBase?: string,
+ *   lens?: "doc"|"vanilla"|"simplified",
  * }} [opts]
  * @returns {OpenTarget}
  */
@@ -59,7 +63,7 @@ export function resolveOpenTarget(opts = {}) {
   const base = { route: path, doctype: n.doctype || "", record: n.record || "", target: null };
   if (!n.doctype) return { ...base, surface: "erp", lens: "vanilla" };
 
-  const lens = preferredLens(lensPrefKey(n.doctype, n.record), opts.lensPrefs || {});
+  const lens = opts.lens || preferredLens(lensPrefKey(n.doctype, n.record), opts.lensPrefs || {});
   if (lens !== "doc") return { ...base, surface: "erp", lens };
 
   const target = resolveDocSkinTarget({

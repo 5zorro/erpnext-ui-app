@@ -27,7 +27,7 @@ const files = [
   "../electron/doc-form-preload.cjs",
   "../electron/payment-doc-preload.cjs",
   "../electron/pay-outstanding-preload.cjs",
-  "../electron/bill-preload.cjs",
+  "../electron/find-doc-preload.cjs",
   "../electron/home-preload.cjs",
 ];
 
