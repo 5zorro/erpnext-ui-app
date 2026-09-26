@@ -231,11 +231,8 @@ import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
-import {
-  offeredDocActions,
-  describeVoidAndAmend,
-  describeVoidAndAmendResult,
-} from "../src/doc-actions.js";
+import { offeredDocActions } from "../src/doc-actions.js";
+import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import {
   isTaxTableNavField,
   neighborTaxCell,
@@ -4408,6 +4405,12 @@ export async function bootBillFormPage(api) {
         dirty: userEdited,
       });
       el.voidAmend.hidden = !action;
+      if (action) {
+        // A cancelled Bill has nothing left to void, and the registry relabels for that — a button
+        // still reading "void and amend" over a cancelled document describes the wrong half.
+        el.voidAmend.textContent = action.label;
+        el.voidAmend.title = action.hint;
+      }
     }
     void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
@@ -5070,78 +5073,21 @@ export async function bootBillFormPage(api) {
     };
   }
   if (el.voidAmend) {
+    // P1 stage 2: the sequence itself lives in `void-amend-flow.js`, shared with the PO / Item
+    // Receipt skin and the Payment Entry one. What stays here is only what this page knows —
+    // which document is on screen, whether it has unsaved edits, and the vendor's own number.
     el.voidAmend.onclick = async () => {
-      const sourceName = lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "";
-      const [action] = offeredDocActions("purchase-invoice", {
+      await runVoidAndAmend({
+        doctype: "purchase-invoice",
+        name: lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "",
         docstatus: lastDoc && lastDoc.docstatus,
         dirty: userEdited,
-      });
-      if (!sourceName || !action) {
-        setStatus("Only a saved, submitted Bill with no unsaved changes can be voided and amended.", "warn");
-        return;
-      }
-      if (!api || !api.voidAndAmend || !api.voidAmendFacts) {
-        // Not "restart the shell": this is a wiring gap (the adapter in bill-doc-api-adapter.js
-        // has to name every method it forwards), and a restart cannot fix it. Saying the wrong
-        // remedy costs more than saying none — dogfood 2026-09-22.
-        setStatus(
-          "Void and amend is not wired into this build — the Bill page's API adapter is missing it.",
-          "err",
-        );
-        return;
-      }
-
-      // Read first, ask second. The three things that matter — whether ERP will allow it at all,
-      // how many payments come unstuck, and which way this site handles that — are all invisible
-      // on the form, and a confirm that cannot name them is not worth showing.
-      setStatus(`Checking what voiding ${sourceName} would affect…`);
-      let facts;
-      try {
-        facts = await api.voidAmendFacts(sourceName);
-      } catch (err) {
-        setStatus(`Could not check ${sourceName}: ${String(err && err.message ? err.message : err)}`, "err");
-        return;
-      }
-      if (!facts || !facts.ok) {
-        setStatus((facts && facts.reason) || `Could not check ${sourceName}.`, "err");
-        return;
-      }
-      if (facts.alreadyAmended) {
-        setStatus(
-          `${sourceName} has already been amended once, which is all ERPNext allows. Open the amendment and edit that instead.`,
-          "warn",
-        );
-        return;
-      }
-
-      const warning = describeVoidAndAmend({
-        name: sourceName,
-        docstatus: lastDoc && lastDoc.docstatus,
         supplierRef: lastDoc && lastDoc.bill_no ? String(lastDoc.bill_no) : "",
-        linkedPaymentCount: facts.linkedPaymentCount,
-        unlinksPaymentsOnCancel: facts.unlinksPaymentsOnCancel,
+        supplierRefLabel: "The vendor's own number",
+        api,
+        confirm: (title, body) => window.confirm(`${title}\n\n${body}`),
+        setStatus,
       });
-      setStatus("");
-      // Markdown emphasis is for the terminal-style panels elsewhere; strip it for a native confirm.
-      const body = warning.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
-      if (!window.confirm(`${warning.title}\n\n${body}`)) return;
-
-      setStatus(`Voiding ${sourceName} and creating the amended copy…`);
-      let result;
-      try {
-        result = await api.voidAndAmend(sourceName);
-      } catch (err) {
-        // An exception here is the worst case: the cancel may or may not have landed, and this
-        // page cannot tell. Say that, rather than implying nothing happened.
-        setStatus(
-          `Lost contact while voiding ${sourceName}: ${String(err && err.message ? err.message : err)}. ` +
-            "Check the Bill in ERPNext before retrying — it may already be cancelled.",
-          "err",
-        );
-        return;
-      }
-      const told = describeVoidAndAmendResult(result);
-      setStatus(`${told.headline}${told.detail ? ` ${told.detail}` : ""}`, told.ok ? "" : "err");
     };
   }
   if (el.informalLinkBill) {

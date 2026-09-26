@@ -50,11 +50,16 @@
     import {
       paintCheckDoc,
       mountCheckDocEdit,
+      mountCheckDocAmend,
       setCheckDocDocument,
     } from "../src/check-doc-mount.js";
     import { buildCheckDocViewModelFromPaymentEntry } from "../src/check-doc-view.js";
+    import { offeredDocActions } from "../src/doc-actions.js";
+    import { runVoidAndAmend } from "../src/void-amend-flow.js";
 
     const api = window.erpPaymentDoc;
+    /** The document this page is showing, for the actions that act on it. */
+    let lastPaymentDoc = null;
     const checkDocEl = document.getElementById("check-doc");
     const errorEl = document.getElementById("load-error");
     const notPayEl = document.getElementById("not-pay");
@@ -96,6 +101,11 @@
         return;
       }
       const vm = buildCheckDocViewModelFromPaymentEntry(doc);
+      // P1 stage 2 / OI-171: the registry decides whether this document can be amended, exactly as
+      // it does on the Bill and PO skins. This page never holds unsaved edits on a submitted
+      // document — the write block is hidden — so `dirty` is false by construction.
+      lastPaymentDoc = doc;
+      const [amendAction] = offeredDocActions("payment-entry", { docstatus: doc.docstatus });
       // A Draft is a form you can work in; a Submitted/Cancelled one is read-only because
       // ERPNext says so, not because this skin prefers documents to feel read-only
       // (5zorro 2026-09-08). The document's own docstatus is the only input to that choice.
@@ -103,6 +113,7 @@
       paintCheckDoc(checkDocEl, vm, {
         mode: vm.isDraft ? "edit" : "view",
         badgeText: `${vm.status} Payment Entry`,
+        amend: amendAction ? { offered: true, label: amendAction.label } : null,
       });
       // paintCheckDoc clears the status line, so a post-save confirmation has to land after it.
       if (statusText) {
@@ -110,6 +121,30 @@
         if (statusEl) statusEl.textContent = statusText;
       }
     }
+
+    function setAmendStatus(text, cls) {
+      const elStatus = checkDocEl.querySelector('[data-testid="check-doc-amend-status"]');
+      if (!elStatus) return;
+      elStatus.textContent = text || "";
+      elStatus.classList.toggle("err", cls === "err");
+    }
+
+    mountCheckDocAmend(checkDocEl, {
+      onAmend: async () => {
+        const doc = lastPaymentDoc;
+        await runVoidAndAmend({
+          doctype: "payment-entry",
+          name: (doc && doc.name) || "",
+          docstatus: doc && doc.docstatus,
+          dirty: false,
+          supplierRef: (doc && doc.reference_no) || "",
+          supplierRefLabel: "The check number / reference",
+          api,
+          confirm: (title, body) => window.confirm(`${title}\n\n${body}`),
+          setStatus: setAmendStatus,
+        });
+      },
+    });
 
     mountCheckDocEdit(checkDocEl, {
       api: api || {},

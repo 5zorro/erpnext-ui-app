@@ -44,10 +44,10 @@ export function billApiFromErpDoc(api) {
     // P1 / OI-171. 🔴 This adapter is an explicit allow-list, not a spread of the preload — a
     // method added to `erpDoc` and not added here is simply absent on the page, with no error
     // anywhere. That is what broke the first void-and-amend dogfood (2026-09-22).
-    voidAmendFacts: (name) =>
-      api.voidAmendFacts ? api.voidAmendFacts(name || "") : Promise.resolve({ ok: false, reason: "Void and amend is not wired in this build." }),
-    voidAndAmend: (name) =>
-      api.voidAndAmend ? api.voidAndAmend(name || "") : Promise.resolve({ ok: false, cancelled: false, reason: "Void and amend is not wired in this build." }),
+    voidAmendFacts: (doctype, name) =>
+      api.voidAmendFacts ? api.voidAmendFacts(doctype || "", name || "") : Promise.resolve({ ok: false, reason: "Void and amend is not wired in this build." }),
+    voidAndAmend: (doctype, name) =>
+      api.voidAndAmend ? api.voidAndAmend(doctype || "", name || "") : Promise.resolve({ ok: false, cancelled: false, reason: "Void and amend is not wired in this build." }),
     listSalesOrdersForPicker: (payload) => api.listSalesOrdersForPicker(payload || {}),
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>

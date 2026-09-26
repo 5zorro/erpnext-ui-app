@@ -93,7 +93,12 @@ export function setCheckDocBatchSource(group, bills) {
 /**
  * @param {Element|null|undefined} root the check-doc fragment's own container
  * @param {import("./check-doc-view.js").CheckDocViewModel|null|undefined} viewModel
- * @param {{ mode?: "proposal"|"edit"|"view", readOnly?: boolean, badgeText?: string }} [opts]
+ * @param {{
+ *   mode?: "proposal"|"edit"|"view",
+ *   readOnly?: boolean,
+ *   badgeText?: string,
+ *   amend?: { offered?: boolean, label?: string }|null,
+ * }} [opts]
  *   `mode` (5zorro 2026-09-08 — "the doc skin is supposed to still be a form"):
  *   - `proposal` (default): the drawer's unsaved batch. Inputs blank and enabled, submit shown.
  *   - `edit`: an existing **Draft** document. Inputs prefilled and enabled, Save shown.
@@ -223,8 +228,21 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
     autofill.innerHTML = "";
     autofill.hidden = true;
   }
-  // A submitted document has nothing to act on; a draft is saved; a proposal is created.
+  // A submitted document has nothing to *write*; a draft is saved; a proposal is created.
   if (actions) actions.hidden = disabled;
+  // …but it does have something to do: void and amend (P1 stage 2 / OI-171). Whether that is
+  // offered is the action registry's call, made by the caller who holds the document — this mount
+  // is shared with the pay-outstanding drawer, where there is no document yet to amend.
+  const amend = opts.amend && opts.amend.offered ? opts.amend : null;
+  const amendBtn = field(root, "check-doc-void-amend");
+  const viewActions = field(root, "check-doc-view-actions");
+  if (amendBtn) {
+    amendBtn.hidden = !amend;
+    if (amend && amend.label) amendBtn.textContent = amend.label;
+  }
+  if (viewActions) viewActions.hidden = !amend;
+  const amendStatus = field(root, "check-doc-amend-status");
+  if (amendStatus) amendStatus.textContent = "";
   if (submit) {
     submit.hidden = mode !== "proposal";
     submit.disabled = false;
@@ -514,6 +532,32 @@ export function mountCheckDocEdit(root, deps = {}) {
  *   onPayeePicked?: (supplier: string) => void,
  * }} [deps] `onPayeePicked` (C9): once the payee is known the page can propose the rest.
  */
+/**
+ * Wire the view-mode "Edit (void and amend)" button once per fragment mount — same contract as
+ * `mountCheckDocWrite`/`mountCheckDocEdit`: bind once, `paintCheckDoc` decides visibility.
+ *
+ * The button is disabled for the duration of the call. This is the one action on this surface that
+ * cancels a submitted document, and a double-click on a slow ERP would send the second cancel
+ * against a document the first one had already cancelled.
+ *
+ * @param {HTMLElement|null} root
+ * @param {{ onAmend?: () => Promise<void>|void }} [deps]
+ */
+export function mountCheckDocAmend(root, deps = {}) {
+  if (!root) return;
+  const btn = field(root, "check-doc-void-amend");
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (!deps.onAmend) return;
+    btn.disabled = true;
+    try {
+      await deps.onAmend();
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
 export function mountCheckDocBlank(root, deps = {}) {
   if (!root) return;
   const { api, linkMounted, onDirty, onCreated, onPayeePicked } = deps;

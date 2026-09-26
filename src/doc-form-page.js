@@ -96,6 +96,8 @@ import {
   focusTargetAfterDocSourceModal,
   splitHeaderColumns,
 } from "./doc-action-flow.js";
+import { offeredDocActions } from "./doc-actions.js";
+import { runVoidAndAmend } from "./void-amend-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
 import { showSourceModal } from "./source-modal-ui.js";
 import {
@@ -235,6 +237,29 @@ function publishCalcHistory(payload) {
   });
 }
 
+/**
+ * The number this profile's clerk actually tracks by — which is *not* the ERPNext ID, and is the
+ * whole reason OI-170 exists. Amending renames `ACC-PINV-…-00012` to `…-00012-1`; the PO's logbook
+ * number and the receipt's packing-list reference survive untouched, so the confirm says so while
+ * both are on screen.
+ *
+ * @param {object|null|undefined} doc
+ */
+function docTrackingRef(doc) {
+  if (!doc || !ui) return "";
+  const field = ui.profileId === "po" ? "title" : ui.profileId === "receipt" ? "lr_no" : "";
+  if (!field) return "";
+  const v = /** @type {Record<string, unknown>} */ (doc)[field];
+  return v == null ? "" : String(v).trim();
+}
+
+function docTrackingRefLabel() {
+  if (!ui) return "";
+  if (ui.profileId === "po") return "The PO# (logbook)";
+  if (ui.profileId === "receipt") return "The packing list / BOL reference";
+  return "";
+}
+
 /** @type {ReturnType<typeof buildDocFormEl> | null} */
 let el = null;
 
@@ -295,6 +320,7 @@ function buildDocFormEl() {
     sourceTermsFields: document.getElementById("source-terms-fields"),
     hint: document.getElementById("doc-hint"),
     selectSource: document.getElementById("btn-select-source"),
+    voidAmend: document.getElementById("btn-void-amend"),
     caps: document.getElementById("btn-caps"),
     headerLeft: document.getElementById("header-left"),
     headerRight: document.getElementById("header-right"),
@@ -2388,6 +2414,21 @@ function paint(doc, snapScratch, opts = {}) {
   }
 
   const canEdit = editable();
+  // P1 stage 2 / OI-171: the registry decides, so this skin carries no opinion about when the
+  // action applies — and the PO and Item Receipt rows arrived without a line of logic here.
+  // `alreadyAmended` is deliberately not consulted: it costs an ERP round trip, and a repaint
+  // happens far more often than a click. The click reads it with the rest of the confirm's facts.
+  if (el.voidAmend) {
+    const [amendAction] = offeredDocActions(ui.doctypeKey, {
+      docstatus: doc.docstatus,
+      dirty: userEdited,
+    });
+    el.voidAmend.hidden = !amendAction;
+    if (amendAction) {
+      el.voidAmend.textContent = amendAction.label;
+      el.voidAmend.title = amendAction.hint;
+    }
+  }
   for (const meta of ui.headerFields) {
     const inp = headerInputs[meta.label];
     if (!inp) continue;
@@ -2779,6 +2820,25 @@ function wireStaticControls() {
   }
   const btnVanilla = el.vanilla;
   if (btnVanilla) btnVanilla.onclick = () => api && api.openVanilla();
+  if (el.voidAmend) {
+    // Everything careful about this sequence lives in `void-amend-flow.js`; what belongs here is
+    // only what this page knows. The vendor's own number differs by profile — a PO is tracked by
+    // its logbook number, an Item Receipt by the packing list / BOL it arrived with — so the
+    // label is named rather than assumed.
+    el.voidAmend.onclick = async () => {
+      await runVoidAndAmend({
+        doctype: (ui && ui.doctypeKey) || "",
+        name: lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "",
+        docstatus: lastDoc && lastDoc.docstatus,
+        dirty: userEdited,
+        supplierRef: docTrackingRef(lastDoc),
+        supplierRefLabel: docTrackingRefLabel(),
+        api,
+        confirm: (title, body) => window.confirm(`${title}\n\n${body}`),
+        setStatus,
+      });
+    };
+  }
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
   if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");

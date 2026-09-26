@@ -44,7 +44,11 @@ import {
   appendNavIncident,
   serializeNavIncidentLine,
 } from "../src/nav-incident.js";
-import { DROP_STALE_AMEND_ROWS_JS } from "../src/doc-actions.js";
+import {
+  DROP_STALE_AMEND_ROWS_JS,
+  APPLY_AMEND_PATCH_JS,
+  voidAmendProbes,
+} from "../src/doc-actions.js";
 import {
   FOCUS_INCIDENT_NOTE_MAX,
   buildFocusIncident,
@@ -6940,13 +6944,19 @@ ipcMain.handle("bill-merge-sources", async (_e, items) => mergeBillSources(items
 
 /**
  * What a clerk needs to know *before* a void-and-amend, read from the live document rather than
- * assumed (P1b / OI-171). Three facts, none of which are visible on the form:
+ * assumed (P1b / OI-171). Which facts those are depends on the doctype, and `voidAmendProbes`
+ * (`src/doc-actions.js`) is the one place that decides — this function only runs what it is
+ * handed.
  *
- * - whether ERPNext will even allow the amendment (a document may be amended once);
- * - how many submitted payments are applied to the bill, because cancelling it affects them;
- * - whether this **site** detaches those payments on cancel or refuses the cancel outright —
- *   `unlink_payment_on_cancellation_of_invoice` decides which, and the two outcomes need opposite
- *   sentences. Read, never guessed: it is a per-site setting.
+ * 🔴 **That split is the point.** Knowing that a Purchase Receipt is blocked by a Bill's
+ * `purchase_receipt` field, and a Purchase Order by its `purchase_order` field, is a fact about
+ * ERPNext's shape. Keeping it beside the sentence it produces means the two cannot drift; writing
+ * the queries out here as well would be a second copy of the same rule, and the tranche has
+ * already been bitten twice by exactly that (P2's audit/engine divergence, and the payment-terms
+ * allocation flag).
+ *
+ * Every probe fails soft. A fact that could not be read is reported as *unknown* — never as zero,
+ * which would silently promise there is nothing to lose.
  *
  * @param {string} doctype @param {string} name
  */
@@ -6954,12 +6964,29 @@ async function voidAndAmendFacts(doctype, name) {
   const dt = normalizeEditableText(doctype);
   const nm = normalizeEditableText(name);
   if (!dt || !nm) return { ok: false, reason: "Document name required." };
-  const payload = JSON.stringify({ doctype: dt, name: nm });
+  const probes = voidAmendProbes(dt);
+  if (!probes) {
+    return { ok: false, reason: `${dt} does not offer void and amend.` };
+  }
+  const payload = JSON.stringify({ doctype: dt, name: nm, probes });
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       var i = ${payload};
+
+      async function listRows(doctype, filters, fields, parentDoctype) {
+        var args = {
+          doctype: doctype,
+          filters: filters,
+          fields: fields,
+          limit_page_length: 0,
+        };
+        if (parentDoctype) args.parent = parentDoctype;
+        var res = await frappe.call({ method: "frappe.client.get_list", args: args });
+        return (res && res.message) || [];
+      }
+
       var amended = null;
       try {
         amended = await frappe.xcall("frappe.client.is_document_amended", {
@@ -6968,35 +6995,113 @@ async function voidAndAmendFacts(doctype, name) {
       } catch (eAm) {
         return { ok: false, reason: reasonFrom(eAm), step: "is_document_amended" };
       }
-      // Submitted payments only: a draft allocation is not a posted fact, and a cancelled one is
-      // already gone. Matches what cancelling actually acts on.
+
+      // Whether THIS document is itself an amendment, and whether the site appends a counter —
+      // the two inputs to predicting what the copy will be called. Amending an amendment gives
+      // \`<prefix>-2\`, not \`<name>-1\` (naming.py:549), and under "Default Naming" no prediction is
+      // possible at all. Both fail soft: unknown means the confirm simply does not name the ID.
+      var isAmendment = null;
+      try {
+        isAmendment = !!(await frappe.db.get_value(i.doctype, i.name, "amended_from")).message.amended_from;
+      } catch (eAf) {
+        isAmendment = null;
+      }
+      var amendCounter = null;
+      try {
+        var rule = await frappe.xcall("frappe.client.get_single_value", {
+          doctype: "Document Naming Settings", field: "default_amend_naming",
+        });
+        amendCounter = String(rule || "") !== "Default Naming";
+      } catch (eRule) {
+        amendCounter = null;
+      }
+
+      // Submitted only, everywhere below: a draft allocation is not a posted fact, a cancelled one
+      // is already gone, and it is submitted documents that ERPNext's own cancel checks act on.
       var paid = null;
-      try {
-        var refs = await frappe.call({
-          method: "frappe.client.get_list",
-          args: {
-            doctype: "Payment Entry Reference",
-            filters: [["reference_doctype", "=", i.doctype], ["reference_name", "=", i.name], ["docstatus", "=", 1]],
-            fields: ["parent", "allocated_amount"],
-            limit_page_length: 0,
-            parent: "Payment Entry",
-          },
-        });
-        var rows = (refs && refs.message) || [];
-        paid = { count: rows.length, names: rows.map(function (r) { return r.parent; }) };
-      } catch (ePaid) {
-        paid = null; // said out loud by describeVoidAndAmend rather than rendered as zero
+      if (i.probes.payments) {
+        try {
+          var rows = await listRows(
+            "Payment Entry Reference",
+            [["reference_doctype", "=", i.doctype], ["reference_name", "=", i.name], ["docstatus", "=", 1]],
+            ["parent", "allocated_amount"],
+            "Payment Entry",
+          );
+          paid = { count: rows.length, names: rows.map(function (r) { return r.parent; }) };
+        } catch (ePaid) {
+          paid = null; // said out loud by describeVoidAndAmend rather than rendered as zero
+        }
       }
+
+      // The mirror image: this document's *own* reference rows, i.e. what it pays off. Cancelling
+      // a Payment Entry puts each of those back to outstanding.
+      var allocated = null;
+      if (i.probes.allocations) {
+        try {
+          var aRows = await listRows(
+            "Payment Entry Reference",
+            [["parent", "=", i.name], ["docstatus", "=", 1]],
+            ["reference_doctype", "reference_name", "allocated_amount"],
+            "Payment Entry",
+          );
+          allocated = {
+            count: aRows.length,
+            names: aRows.map(function (r) { return r.reference_name; }),
+          };
+        } catch (eAlloc) {
+          allocated = null;
+        }
+      }
+
       var unlinks = null;
-      try {
-        var s = await frappe.xcall("frappe.client.get_single_value", {
-          doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
-        });
-        unlinks = !!Number(s);
-      } catch (eSet) {
-        unlinks = null;
+      if (i.probes.unlinkSetting) {
+        try {
+          var s = await frappe.xcall("frappe.client.get_single_value", {
+            doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
+          });
+          unlinks = !!Number(s);
+        } catch (eSet) {
+          unlinks = null;
+        }
       }
-      return { ok: true, alreadyAmended: !!amended, paid: paid, unlinks: unlinks };
+
+      // What would refuse the cancel. ERPNext raises in check_no_back_links_exist *after*
+      // on_cancel and rolls the whole transaction back, so a refusal costs nothing — this list
+      // exists to warn, never to block.
+      var blockers = [];
+      var blockersChecked = true;
+      for (var b = 0; b < (i.probes.blockers || []).length; b++) {
+        var spec = i.probes.blockers[b];
+        try {
+          var filters = [[spec.field, "=", i.name], ["docstatus", "=", 1]];
+          var found = spec.child
+            ? await listRows(spec.child, filters, ["parent"], spec.parent)
+            : await listRows(spec.parent, filters, ["name"], null);
+          for (var r2 = 0; r2 < found.length; r2++) {
+            var who = spec.child ? found[r2].parent : found[r2].name;
+            if (!who) continue;
+            var dup = false;
+            for (var k = 0; k < blockers.length; k++) {
+              if (blockers[k].name === who) { dup = true; break; }
+            }
+            if (!dup) blockers.push({ label: spec.label, name: who, doctype: spec.parent });
+          }
+        } catch (eBlk) {
+          blockersChecked = false;
+        }
+      }
+
+      return {
+        ok: true,
+        alreadyAmended: !!amended,
+        isAmendment: isAmendment,
+        amendCounter: amendCounter,
+        paid: paid,
+        allocated: allocated,
+        unlinks: unlinks,
+        blockers: blockers,
+        blockersChecked: blockersChecked,
+      };
     } catch (e) {
       return { ok: false, reason: reasonFrom(e), step: "unknown" };
     }
@@ -7011,12 +7116,21 @@ async function voidAndAmendFacts(doctype, name) {
       step: raw.step,
     };
   }
+  const countOf = (bag) =>
+    bag && Number.isFinite(Number(bag.count)) ? Number(bag.count) : undefined;
   return {
     ok: true,
     alreadyAmended: !!raw.alreadyAmended,
-    linkedPaymentCount: raw.paid && Number.isFinite(Number(raw.paid.count)) ? Number(raw.paid.count) : null,
+    isAmendment: raw.isAmendment === true,
+    // Unknown reads as "no counter", which suppresses the prediction rather than inventing one.
+    amendCounter: raw.amendCounter === null ? false : raw.amendCounter !== false,
+    linkedPaymentCount: probes.payments ? (countOf(raw.paid) ?? null) : undefined,
     linkedPaymentNames: (raw.paid && raw.paid.names) || [],
+    allocatedInvoiceCount: probes.allocations ? (countOf(raw.allocated) ?? null) : undefined,
+    allocatedInvoiceNames: (raw.allocated && raw.allocated.names) || [],
     unlinksPaymentsOnCancel: raw.unlinks === null ? undefined : !!raw.unlinks,
+    blockers: Array.isArray(raw.blockers) ? raw.blockers : [],
+    blockersChecked: raw.blockersChecked !== false,
   };
 }
 
@@ -7036,17 +7150,26 @@ async function voidAndAmendFacts(doctype, name) {
  *
  * @param {string} doctype @param {string} name
  */
-async function voidAndAmendDoc(doctype, name) {
+async function voidAndAmendDoc(doctype, name, opts = {}) {
   const dt = normalizeEditableText(doctype);
   const nm = normalizeEditableText(name);
   if (!dt || !nm) return { ok: false, cancelled: false, reason: "Document name required." };
   await ensureErpFormBridge();
-  const payload = JSON.stringify({ doctype: dt, name: nm });
+  const payload = JSON.stringify({
+    doctype: dt,
+    name: nm,
+    // P1 stage 3: an inert patch applied to the draft between `copy_doc` and `insert`, and an
+    // optional submit. Stage 1 and 2 pass neither, and behave exactly as before.
+    patch: opts.patch && typeof opts.patch === "object" ? opts.patch : null,
+    submit: opts.submit === true,
+  });
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
     ${DROP_STALE_AMEND_ROWS_JS}
+    ${APPLY_AMEND_PATCH_JS}
     var cancelled = false;
     var droppedRows = [];
+    var patched = null;
     try {
       if (!window.frappe || !frappe.call) return { ok: false, cancelled: false, reason: "ERP Desk not ready." };
       if (!frappe.model || typeof frappe.model.copy_doc !== "function") {
@@ -7112,13 +7235,14 @@ async function voidAndAmendDoc(doctype, name) {
       // From here on a failure strands a cancelled document, so every return says cancelled: true.
       var draft;
       try {
-        // 🔴 Re-read AFTER the cancel, and copy from that — the order Desk uses, and the reason it
-        // uses it. \`on_cancel\` mutates the document: Tax Withholding Entry rows carry Dynamic
-        // Links back to the invoice itself, and \`_clear_old_references()\`
-        // (tax_withholding_entry.py:1091) clears them as part of cancelling. Copying the
-        // pre-cancel snapshot keeps those links pointing at a document that is cancelled by the
-        // time the insert runs, and Frappe refuses it: "Cannot link cancelled document: Row #1:
-        // Taxable Document Name: …". Found by dogfood 2026-09-22, which stranded a real bill.
+        // 🔴 Re-read AFTER the cancel, and copy from that — the order Desk uses. \`on_cancel\`
+        // rewrites the document (docstatus, and the Tax Withholding Entry rows' own status), so
+        // the pre-cancel snapshot is stale by the time the insert runs. The re-read is not what
+        // makes the amend land, though: the self-links in those rows are cancelled either way, and
+        // it is \`dropStaleAmendRows\` below that gets us past "Cannot link cancelled document:
+        // Row #1: Taxable Document Name: …". Found by dogfood 2026-09-22, which stranded a real
+        // bill; \`_clear_old_references()\` (tax_withholding_entry.py:254) was the first suspect
+        // and is innocent — it only touches *other*, already-settled entries.
         var fresh = await read();
         // \`frappe.model.copy_doc\` registers the copy in the client-side locals cache; the copy is
         // what gets inserted, so it must be taken as a plain object afterwards.
@@ -7130,23 +7254,70 @@ async function voidAndAmendDoc(doctype, name) {
         // See DROP_STALE_AMEND_ROWS_JS: child rows that link back to the document being amended
         // cannot be true of the amendment, and ERPNext refuses them before it would rebuild them.
         droppedRows = dropStaleAmendRows(draft, i.name);
+        // 🔴 The patch goes on *before* the insert, on purpose. The whole reason stage 3 exists is
+        // that a submitted bill's method cannot be edited; inserting a faithful copy and then
+        // editing it would be editing a draft we would have to save again, and a failure between
+        // the two would leave a draft that silently still says the old method.
+        patched = applyAmendPatch(draft, i.patch);
       } catch (eCopy) {
         return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(eCopy), step: "copy_doc" };
       }
 
+      var made = null;
       try {
         var ins = await frappe.call({ method: "frappe.client.insert", args: { doc: draft } });
         if (ins && ins.exc) {
           return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(ins), step: "insert" };
         }
-        var made = ins && ins.message;
+        made = ins && ins.message;
         if (!made || !made.name) {
           return { ok: false, cancelled: true, name: i.name, reason: "The amended copy returned no name.", step: "insert" };
         }
-        return { ok: true, cancelled: true, name: i.name, amendedName: made.name, docstatus: made.docstatus, droppedRows: droppedRows };
       } catch (eIns) {
         return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(eIns), step: "insert" };
       }
+
+      // 🔴 From here the amendment EXISTS. Anything that fails below leaves a draft, not a hole —
+      // a far better place to stop than between the cancel and the insert, and every return says
+      // so by carrying \`amendedName\`.
+      if (i.submit) {
+        try {
+          var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: made } });
+          if (sub && sub.exc) {
+            return { ok: false, cancelled: true, name: i.name, amendedName: made.name, reason: reasonFrom(sub), step: "submit", droppedRows: droppedRows, patched: patched };
+          }
+          made = (sub && sub.message) || made;
+        } catch (eSub) {
+          return { ok: false, cancelled: true, name: i.name, amendedName: made.name, reason: reasonFrom(eSub), step: "submit", droppedRows: droppedRows, patched: patched };
+        }
+      }
+
+      // 🔴 Read the value back rather than trusting that it stuck. ERPNext recomputes the payment
+      // schedule during validate, and \`set_payment_schedule\` can refetch it wholesale from the
+      // linked order when Accounts Settings' \`automatically_fetch_payment_terms\` and the
+      // template's \`allocate_payment_based_on_payment_terms\` are both on
+      // (accounts_controller.py:2658). That path would quietly undo the patch, and verifying is
+      // cheaper than enumerating every such path.
+      var verified = null;
+      if (i.patch) {
+        try {
+          var back = await frappe.xcall("frappe.client.get", { doctype: i.doctype, name: made.name });
+          verified = verifyAmendPatch(back, i.patch);
+        } catch (eVer) {
+          verified = null;
+        }
+      }
+
+      return {
+        ok: true,
+        cancelled: true,
+        name: i.name,
+        amendedName: made.name,
+        docstatus: made.docstatus,
+        droppedRows: droppedRows,
+        patched: patched,
+        verified: verified,
+      };
     } catch (e) {
       return { ok: false, cancelled: cancelled, name: ${JSON.stringify(nm)}, reason: reasonFrom(e), step: "unknown" };
     }
@@ -7241,47 +7412,77 @@ ipcMain.handle("bill-create-credit-memo", async (_e, sourceBillName) =>
   createCreditMemoFrom(sourceBillName),
 );
 
-ipcMain.handle("bill-void-amend-facts", async (_e, name) => {
-  const facts = await voidAndAmendFacts("Purchase Invoice", name);
+/**
+ * Put the clerk back in front of ERP's truth after a void-and-amend, whichever skin asked.
+ *
+ * Stage 2 made this generic because the *reason* it exists is generic: after the write the page is
+ * showing a document that either no longer means anything (cancelled) or no longer exists as the
+ * clerk knew it (renamed to `-1`). A Payment Entry reached its own full-page mount rather than the
+ * doc-form shell, so the two routes differ — but the obligation does not.
+ *
+ * @param {string} doctypeKey @param {string} name
+ */
+async function reopenAfterVoidAndAmend(doctypeKey, name) {
+  const target = normalizeEditableText(name);
+  if (!target) return;
+  dirtyState = { isDirty: false, isNew: false, userEdited: false, baselineJson: null, doc: null };
+  if (doctypeKey === "payment-entry") {
+    paymentDocDirty = false;
+    showPaymentDoc(target);
+    return;
+  }
+  const profile = profileByDoctypeKey(doctypeKey);
+  if (!profile) return;
+  if (doctypeKey === "purchase-invoice") {
+    // Amount Due is a Bill-only scratch value belonging to the document we just left.
+    amountDueScratch = "";
+    amountDueCommitted = "";
+  }
+  await showDocForm(
+    /** @type {DocFormSkinId} */ (profile.id),
+    `/app/${doctypeKey}/${encodeURIComponent(target)}`,
+    { skipDirtyGate: true },
+  );
+}
+
+ipcMain.handle("doc-void-amend-facts", async (_e, doctype, name) => {
+  const key = normalizeDoctypeKey(doctype);
+  const probes = voidAmendProbes(key);
+  if (!probes) return { ok: false, reason: `${doctype} does not offer void and amend.` };
+  const facts = await voidAndAmendFacts(probes.erpDoctype, name);
   navDebug(
-    "bill-void-amend-facts",
-    `${name} ok=${facts && facts.ok ? 1 : 0} amended=${facts && facts.alreadyAmended ? 1 : 0} payments=${facts && facts.linkedPaymentCount}${facts && facts.reason ? ` reason=${facts.reason}` : ""}`,
+    "doc-void-amend-facts",
+    `${key} ${name} ok=${facts && facts.ok ? 1 : 0} amended=${facts && facts.alreadyAmended ? 1 : 0} payments=${facts && facts.linkedPaymentCount} allocated=${facts && facts.allocatedInvoiceCount} blockers=${facts && facts.blockers ? facts.blockers.length : "?"}${facts && facts.reason ? ` reason=${facts.reason}` : ""}`,
   );
   return facts;
 });
 
-ipcMain.handle("bill-void-and-amend", async (_e, name) => {
+ipcMain.handle("doc-void-and-amend", async (_e, doctype, name) => {
   // 🔴 Logged on both sides of the call. This is the one write path that can leave a document
   // cancelled with no replacement, so "what did the shell actually attempt" has to survive in
   // nav-debug.log — the first dogfood failure (2026-09-22) left no trace there at all.
-  navDebug("bill-void-and-amend", `start ${name}`);
-  const result = await voidAndAmendDoc("Purchase Invoice", name);
+  const key = normalizeDoctypeKey(doctype);
+  const probes = voidAmendProbes(key);
+  if (!probes) return { ok: false, cancelled: false, reason: `${doctype} does not offer void and amend.` };
+  navDebug("doc-void-and-amend", `start ${key} ${name}`);
+  const result = await voidAndAmendDoc(probes.erpDoctype, name);
   navDebug(
-    "bill-void-and-amend",
-    `${name} ok=${result && result.ok ? 1 : 0} cancelled=${result && result.cancelled ? 1 : 0} step=${(result && result.step) || ""} amended=${(result && result.amendedName) || ""}${result && result.reason ? ` reason=${result.reason}` : ""}`,
+    "doc-void-and-amend",
+    `${key} ${name} ok=${result && result.ok ? 1 : 0} cancelled=${result && result.cancelled ? 1 : 0} step=${(result && result.step) || ""} amended=${(result && result.amendedName) || ""}${result && result.reason ? ` reason=${result.reason}` : ""}`,
   );
   // 🔴 A failed attempt can still have cancelled the document, and the page is then showing a
-  // "Submitted" chip over a bill ERP now calls cancelled — so the next click is refused with
+  // "Submitted" chip over a document ERP now calls cancelled — so the next click is refused with
   // "not submitted, so there is nothing to void" against a form that plainly says otherwise
   // (dogfood 2026-09-22). Re-open it so the skin reads ERP's truth: the chip turns Cancelled and
   // the action relabels to amend-only, which is the move that actually gets the clerk out of this.
   if (result && !result.ok && result.cancelled) {
-    dirtyState = { isDirty: false, isNew: false, userEdited: false, baselineJson: null, doc: null };
-    await showBill(`/app/purchase-invoice/${encodeURIComponent(result.name || name)}`, {
-      skipDirtyGate: true,
-    });
+    await reopenAfterVoidAndAmend(key, result.name || name);
   }
   if (result && result.ok && result.amendedName) {
     // Land the clerk in the amended draft. The old document is cancelled, so leaving the page on it
     // would show a document that no longer means anything — and the draft is where the edit that
-    // prompted all this actually gets made. Dirty state is reset first: what was on screen belonged
-    // to the document we just cancelled.
-    dirtyState = { isDirty: false, isNew: false, userEdited: false, baselineJson: null, doc: null };
-    amountDueScratch = "";
-    amountDueCommitted = "";
-    await showBill(`/app/purchase-invoice/${encodeURIComponent(result.amendedName)}`, {
-      skipDirtyGate: true,
-    });
+    // prompted all this actually gets made.
+    await reopenAfterVoidAndAmend(key, result.amendedName);
   }
   return result;
 });
@@ -9479,6 +9680,158 @@ ipcMain.handle("import-delay-calendar", async () => {
 });
 ipcMain.handle("create-payment-term", async (_e, input) => createPaymentTermDocs(input));
 ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefaultsFacts(supplier));
+
+/**
+ * P1 stage 3 — what the batch confirm needs before it can name its consequences: which of these
+ * bills already has a submitted payment against it, and whether this site detaches or refuses.
+ *
+ * One query for the whole set rather than one per bill. A vendor with twelve outstanding bills is
+ * an ordinary case, and twelve round trips to draw one confirm is how a dashboard gets slow enough
+ * that a clerk stops reading it.
+ */
+ipcMain.handle("mode-change-facts", async (_e, invoices) => {
+  const names = (Array.isArray(invoices) ? invoices : [])
+    .map((n) => normalizeEditableText(n))
+    .filter(Boolean);
+  if (!names.length) return { ok: true, paymentsByInvoice: {}, unlinksPaymentsOnCancel: undefined };
+  const payload = JSON.stringify({ names });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      var counts = {};
+      try {
+        var res = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Payment Entry Reference",
+            filters: [
+              ["reference_doctype", "=", "Purchase Invoice"],
+              ["reference_name", "in", i.names],
+              ["docstatus", "=", 1],
+            ],
+            fields: ["reference_name", "parent"],
+            limit_page_length: 0,
+            parent: "Payment Entry",
+          },
+        });
+        var rows = (res && res.message) || [];
+        for (var r = 0; r < rows.length; r++) {
+          var key = rows[r].reference_name;
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      } catch (ePaid) {
+        return { ok: false, reason: reasonFrom(ePaid), step: "payments" };
+      }
+      var unlinks = null;
+      try {
+        var sVal = await frappe.xcall("frappe.client.get_single_value", {
+          doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
+        });
+        unlinks = !!Number(sVal);
+      } catch (eSet) {
+        unlinks = null;
+      }
+      // Same two inputs the single-document confirm reads, for the same reason: amending an
+      // amendment gives \`<prefix>-2\`, not \`<name>-1\`.
+      var amendments = {};
+      try {
+        var av = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Purchase Invoice",
+            filters: [["name", "in", i.names]],
+            fields: ["name", "amended_from"],
+            limit_page_length: 0,
+          },
+        });
+        var arows = (av && av.message) || [];
+        for (var a = 0; a < arows.length; a++) amendments[arows[a].name] = !!arows[a].amended_from;
+      } catch (eAmend) {
+        amendments = {};
+      }
+      var amendCounter = null;
+      try {
+        var rule = await frappe.xcall("frappe.client.get_single_value", {
+          doctype: "Document Naming Settings", field: "default_amend_naming",
+        });
+        amendCounter = String(rule || "") !== "Default Naming";
+      } catch (eRule) {
+        amendCounter = null;
+      }
+      return { ok: true, counts: counts, unlinks: unlinks, amendments: amendments, amendCounter: amendCounter };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object") || !raw.ok) {
+    return {
+      ok: false,
+      reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read payments against these bills."),
+    };
+  }
+  return {
+    ok: true,
+    paymentsByInvoice: raw.counts || {},
+    unlinksPaymentsOnCancel: raw.unlinks === null ? undefined : !!raw.unlinks,
+    amendmentsByInvoice: raw.amendments || {},
+    amendCounter: raw.amendCounter === null ? false : raw.amendCounter !== false,
+  };
+});
+
+/**
+ * P1 stage 3 — run the plan, one bill at a time, and report one outcome per bill.
+ *
+ * 🔴 **Sequential, and it stops at the first stranding.** Each bill is its own cancel-then-insert,
+ * and the outcome that needs a human immediately is a document cancelled with no replacement.
+ * Carrying on past one would pile a second irreversible half-step on top of an unresolved first,
+ * so the loop stops and the remaining bills are reported as untouched — which they are.
+ *
+ * Every bill is submitted after the amend. An amended bill sitting as a draft is not outstanding,
+ * so a batch that left drafts behind would take the vendor's bills *off* the very dashboard the
+ * clerk is standing on.
+ */
+ipcMain.handle("run-mode-change", async (_e, work) => {
+  const items = (Array.isArray(work) ? work : [])
+    .map((w) => ({
+      invoice: normalizeEditableText(w && w.invoice),
+      patch: w && w.patch && typeof w.patch === "object" ? w.patch : null,
+    }))
+    .filter((w) => w.invoice && w.patch);
+  if (!items.length) return { ok: false, reason: "Nothing to change.", results: [] };
+
+  navDebug("run-mode-change", `start ${items.length} bill(s): ${items.map((i) => i.invoice).join(",")}`);
+  const results = [];
+  let stopped = "";
+  for (const item of items) {
+    if (stopped) {
+      results.push({ invoice: item.invoice, ok: false, cancelled: false, reason: `Not attempted — stopped after ${stopped}.` });
+      continue;
+    }
+    const r = await voidAndAmendDoc("Purchase Invoice", item.invoice, { patch: item.patch, submit: true });
+    navDebug(
+      "run-mode-change",
+      `${item.invoice} ok=${r && r.ok ? 1 : 0} cancelled=${r && r.cancelled ? 1 : 0} step=${(r && r.step) || ""} amended=${(r && r.amendedName) || ""} verified=${r && r.verified ? (r.verified.ok ? 1 : 0) : "?"}${r && r.reason ? ` reason=${r.reason}` : ""}`,
+    );
+    results.push({
+      invoice: item.invoice,
+      ok: !!(r && r.ok),
+      cancelled: !!(r && r.cancelled),
+      amendedName: (r && r.amendedName) || "",
+      // `undefined` when nothing was read back; `false` only when ERP was read and disagreed.
+      verified: r && r.verified ? r.verified.ok === true : undefined,
+      mismatches: (r && r.verified && r.verified.mismatches) || [],
+      missedRows: (r && r.patched && r.patched.missed) || [],
+      reason: (r && r.reason) || "",
+      step: (r && r.step) || "",
+    });
+    if (r && !r.ok && r.cancelled && !r.amendedName) stopped = `${item.invoice} was cancelled without a replacement`;
+  }
+  navDebug("run-mode-change", `done ok=${results.filter((r) => r.ok).length}/${results.length}${stopped ? ` stopped=${stopped}` : ""}`);
+  // The dashboard is now describing documents that no longer exist under those names.
+  return { ok: results.every((r) => r.ok), results, stopped };
+});
 ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;

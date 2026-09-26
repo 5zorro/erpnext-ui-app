@@ -87,4 +87,11 @@
       <button type="button" class="check-doc-submit" id="check-doc-create" data-testid="check-doc-create" hidden>Create draft payment</button>
     </div>
   </div>
+  <!-- P1 stage 2 / OI-171. A submitted Payment Entry hides the whole write block (its inputs
+       belong to a document ERP will not accept edits to), so the one thing still offered on it
+       needs a row of its own. Hidden until the registry says the action applies. -->
+  <div class="check-doc-view-actions" data-testid="check-doc-view-actions" hidden>
+    <span class="check-doc-write-status" data-testid="check-doc-amend-status"></span>
+    <button type="button" class="check-doc-submit" id="check-doc-void-amend" data-testid="check-doc-void-amend" hidden>Edit (void and amend)</button>
+  </div>
 </div>
