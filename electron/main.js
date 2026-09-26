@@ -75,7 +75,12 @@ import {
   mergePaymentBatchPrefs,
   validatePaymentBatchPrefs,
 } from "../src/payment-batch-prefs.js";
-import { allocationRowFor } from "../src/payment-relink.js";
+import {
+  allocationRowFor,
+  proposeRelinks,
+  splitAutoRelinks,
+  relinkReviewNote,
+} from "../src/payment-relink.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -9672,6 +9677,7 @@ async function paymentRelinkFacts(supplier) {
       var invoices = got.invoices || [];
       // The tool does not say which of these is an amendment, and that is the whole question.
       var amendedFrom = {};
+      var createdOf = {};
       if (invoices.length) {
         var names = invoices.map(function (r) { return r.invoice_number; });
         var av = await frappe.call({
@@ -9679,12 +9685,33 @@ async function paymentRelinkFacts(supplier) {
           args: {
             doctype: "Purchase Invoice",
             filters: [["name", "in", names]],
-            fields: ["name", "amended_from"],
+            fields: ["name", "amended_from", "creation"],
             limit_page_length: 0,
           },
         });
         var rows = (av && av.message) || [];
-        for (var a = 0; a < rows.length; a++) amendedFrom[rows[a].name] = rows[a].amended_from || "";
+        for (var a = 0; a < rows.length; a++) {
+          amendedFrom[rows[a].name] = rows[a].amended_from || "";
+          createdOf[rows[a].name] = rows[a].creation || "";
+        }
+      }
+      // The payments' own creation, for the same reason: an auto-link is only defensible when the
+      // payment is older than the amendment it is being attached to.
+      if ((got.payments || []).length) {
+        try {
+          var pn = got.payments.map(function (r) { return r.reference_name; });
+          var pv = await frappe.call({
+            method: "frappe.client.get_list",
+            args: {
+              doctype: "Payment Entry",
+              filters: [["name", "in", pn]],
+              fields: ["name", "creation"],
+              limit_page_length: 0,
+            },
+          });
+          var prows = (pv && pv.message) || [];
+          for (var b2 = 0; b2 < prows.length; b2++) createdOf[prows[b2].name] = prows[b2].creation || "";
+        } catch (eCr) { /* unknown creation simply blocks the auto-link */ }
       }
       // Read, never assumed — same rule as every other site setting the shell depends on. With
       // auto-reconcile on, a loose payment may clear itself within the job interval (and may clear
@@ -9705,6 +9732,7 @@ async function paymentRelinkFacts(supplier) {
         payments: got.payments || [],
         invoices: invoices,
         amendedFrom: amendedFrom,
+        createdOf: createdOf,
         autoReconcile: autoReconcile,
       };
     } catch (e) {
@@ -9802,6 +9830,181 @@ async function relinkPayment(req) {
   }
   return { ok: true, payment, invoice, amount: row.allocated_amount };
 }
+
+/**
+ * The review flag an auto-link leaves behind, and the way it gets cleared.
+ *
+ * 🔴 **It lives in ERPNext, not in the shell.** The payment now carries an allocation nobody
+ * typed; the only thing that stops that feeling like a glitch is an explanation attached to the
+ * document itself, visible to anyone who opens it in a plain browser. Frappe's assignment (a ToDo
+ * plus `_assign` on the document) is the native object for "somebody still has to look at this" —
+ * it has an Open/Closed status, it shows on the form, and it needs no custom field, so nothing
+ * about the site's schema changes.
+ *
+ * @param {string} payment @param {string} note
+ */
+async function flagRelinkForReview(payment, note) {
+  const nm = normalizeEditableText(payment);
+  if (!nm) return { ok: false, reason: "Payment required." };
+  const payload = JSON.stringify({ name: nm, note });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var i = ${payload};
+      await frappe.xcall("frappe.desk.form.assign_to.add", {
+        doctype: "Payment Entry",
+        name: i.name,
+        assign_to: [frappe.session.user],
+        description: i.note,
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e) };
+    }
+  })()`);
+  return raw && raw.ok ? { ok: true } : { ok: false, reason: (raw && raw.reason) || "Could not flag for review." };
+}
+
+ipcMain.handle("relink-reviews", async () => {
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      var res = await frappe.call({
+        method: "frappe.client.get_list",
+        args: {
+          doctype: "ToDo",
+          filters: [
+            ["reference_type", "=", "Payment Entry"],
+            ["status", "=", "Open"],
+            ["description", "like", "%Auto-linked by the Doc shell%"],
+          ],
+          fields: ["name", "reference_name", "description", "allocated_to"],
+          limit_page_length: 0,
+        },
+      });
+      var todos = (res && res.message) || [];
+      // 🔴 Whose payment each one is, read rather than parsed out of the note. The bill it was
+      // linked to has left the board by then — it is paid — so the vendor cannot be recovered from
+      // what is on screen, and matching a supplier name inside prose would break on the first
+      // vendor whose name appears in another vendor's note.
+      var partyOf = {};
+      if (todos.length) {
+        try {
+          var names = todos.map(function (t) { return t.reference_name; });
+          var pe = await frappe.call({
+            method: "frappe.client.get_list",
+            args: {
+              doctype: "Payment Entry",
+              filters: [["name", "in", names]],
+              fields: ["name", "party"],
+              limit_page_length: 0,
+            },
+          });
+          var prows = (pe && pe.message) || [];
+          for (var k = 0; k < prows.length; k++) partyOf[prows[k].name] = prows[k].party || "";
+        } catch (eP) { /* an unattributed review still shows, just not on a vendor card */ }
+      }
+      for (var t2 = 0; t2 < todos.length; t2++) {
+        todos[t2].party = partyOf[todos[t2].reference_name] || "";
+      }
+      return { ok: true, reviews: todos };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e) };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return { ok: false, reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read pending reviews.") };
+  }
+  return raw;
+});
+
+ipcMain.handle("relink-review-close", async (_e, payment) => {
+  const nm = normalizeEditableText(payment);
+  if (!nm) return { ok: false, reason: "Payment required." };
+  const payload = JSON.stringify({ name: nm });
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var i = ${payload};
+      await frappe.xcall("frappe.desk.form.assign_to.close", {
+        doctype: "Payment Entry", name: i.name, assign_to: frappe.session.user,
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e) };
+    }
+  })()`);
+  navDebug("relink-review-close", `${nm} ok=${raw && raw.ok ? 1 : 0}`);
+  if (!(raw && raw.ok)) {
+    return { ok: false, reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not close the review.") };
+  }
+  return { ok: true };
+});
+
+/**
+ * Post the near-certain re-links for one supplier without asking, and flag each for review.
+ *
+ * 🔴 **Why posting beats asking here** (5zorro 2026-09-26): an unallocated payment *is* an open end
+ * in the accounting. Holding the books wrong until somebody clicks is worse than making them right
+ * and asking somebody to check — the first leaves a real error outstanding, the second leaves only
+ * a question. So the click moved from *before* the posting to *after* it, and became optional.
+ *
+ * Only `auto` proposals qualify: exact amount, a single candidate, same supplier, and the payment
+ * demonstrably older than the amendment. Everything else still waits for a click.
+ *
+ * @param {string} supplier
+ */
+async function autoRelinkForSupplier(supplier) {
+  const facts = await paymentRelinkFacts(supplier);
+  if (!facts.ok) return { ok: false, reason: facts.reason, posted: [] };
+  const { proposals } = proposeRelinks({
+    payments: (facts.payments || []).map((p) => ({
+      name: p.reference_name,
+      unallocated: p.amount,
+      supplier,
+      created: (facts.createdOf || {})[p.reference_name] || "",
+    })),
+    invoices: (facts.invoices || []).map((i) => ({
+      name: i.invoice_number,
+      outstanding: i.outstanding_amount,
+      amendedFrom: (facts.amendedFrom || {})[i.invoice_number] || "",
+      supplier,
+      created: (facts.createdOf || {})[i.invoice_number] || "",
+    })),
+  });
+  const { auto, cappedOut } = splitAutoRelinks(proposals);
+  if (!auto.length) return { ok: true, posted: [], cappedOut };
+
+  const posted = [];
+  for (const p of auto) {
+    const res = await relinkPayment({
+      supplier,
+      payment: p.payment,
+      invoice: p.invoice,
+      amount: p.amount,
+    });
+    navDebug(
+      "auto-relink",
+      `${supplier} ${p.payment} -> ${p.invoice} ok=${res.ok ? 1 : 0}${res.reason ? ` reason=${res.reason}` : ""}`,
+    );
+    if (!res.ok) {
+      // Stop at the first refusal. The rest are re-proposed next time from fresh facts, which is
+      // safer than pressing on against a ledger that just disagreed with us.
+      return { ok: false, reason: res.reason, posted, cappedOut };
+    }
+    const flag = await flagRelinkForReview(p.payment, relinkReviewNote(p));
+    posted.push({ ...p, flagged: flag.ok, flagReason: flag.reason || "" });
+  }
+  return { ok: true, posted, cappedOut };
+}
+
+ipcMain.handle("auto-relink", async (_e, supplier) => {
+  const out = await autoRelinkForSupplier(supplier);
+  navDebug("auto-relink", `${supplier} posted=${(out.posted || []).length} ok=${out.ok ? 1 : 0}`);
+  return out;
+});
 
 ipcMain.handle("payment-relink", async (_e, req) => {
   navDebug("payment-relink", `start ${req && req.supplier} ${req && req.payment} -> ${req && req.invoice}`);

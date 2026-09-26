@@ -263,7 +263,47 @@ the click hands the pairing to ERPNext's own Payment Reconciliation, which does 
 Proven end to end on 2026-09-26: `ACC-PAY-2026-00002`'s stranded 9.00 was re-linked to
 `ACC-PINV-2026-00231-1` from the board. The payment's `unallocated_amount` went 9.00 → 0.00, it
 kept its name and docstatus, a reference row now names the amendment, and the bill reads **Paid**.
-That was the last unproven write path in this packet.
+
+🔴 **And it is not a second amend.** `reconcile_against_document`'s docstring claims it cancels and
+re-submits, but the code does `update_reference_in_payment_entry(do_not_save=True)` then
+`doc.save()` on a submitted document and rebuilds the ledger entries directly
+(`accounts/utils.py:553`) — the payment keeps its name and `docstatus`. The undo is
+`Unreconcile Payment`, reachable from the Payment Entry form, and also not an amend. So putting a
+payment back on an amended bill creates no new IDs and strands nothing.
+
+#### Posted first, reviewed after (5zorro 2026-09-26)
+
+5zorro: *"let it auto link on high but leave a checkbox or something that would say 'seems okay'…
+the difference of clicking through before clicking to link vs an optional review click only that
+could be skipped and wouldn't leave open ends in the accounting."*
+
+That is the better trade and the reason is worth keeping: **an unallocated payment is itself an
+open end in the accounting.** Holding the books wrong until somebody clicks leaves a real error
+outstanding; posting and asking somebody to check leaves only a question. So the click moved from
+before the posting to after it, and became optional.
+
+Three things keep that defensible:
+
+1. **`auto` is stricter than `high`.** On top of exact amount, single candidate and same supplier,
+   the payment must be demonstrably **older** than the amendment — a payment created after the
+   amendment existed was never attached to its predecessor, so however well the amount matches,
+   that is not the story. An unknown date counts as "ask", never as "yes".
+2. **A cap of three per pass** (`AUTO_LINK_LIMIT`). Each pairing is near-certain on its own; a
+   screenful of them is not. A rule that turns out to be wrong multiplies by the batch size before
+   a human sees it. Past the cap the proposals are still offered, they just wait for a click.
+3. **The flag lives in ERPNext, not the shell.** `frappe.desk.form.assign_to.add` puts a ToDo plus
+   `_assign` on the payment, so an allocation nobody typed carries its own explanation — who did
+   it, why it was inferred, and that *UnReconcile* undoes it — visible to anyone opening the
+   document in a plain browser. "Seems okay" closes the assignment; it is not an approval, because
+   there is nothing pending to approve.
+
+**Verified live 2026-09-26:** the flag, the vendor badge (*"1 auto-linked · review"*), the note in
+the panel, and *Seems okay* closing the ToDo to `Closed` in ERP. The auto **trigger** itself (the
+board-load pass) is unproven in situ — its posting call is the same `relinkPayment` that was proven
+above, and the gating is pure and unit-tested, but nothing has yet watched it fire on a freshly
+stranded payment. 🔴 Recreating one by driving `Unreconcile Payment` over HTTP left the invoice's
+stored `outstanding_amount` disagreeing with its ledger until a `update_voucher_outstanding` repost;
+use the Desk *UnReconcile* button instead.
 
 ### What gets built
 

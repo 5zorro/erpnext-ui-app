@@ -29,6 +29,7 @@
  *   name: string,
  *   unallocated: number,
  *   supplier?: string,
+ *   created?: string,       // ERP `creation` — used only to rule an auto-link OUT
  * }} LoosePayment
  *
  * @typedef {{
@@ -36,6 +37,7 @@
  *   outstanding: number,
  *   amendedFrom?: string,   // set when this invoice IS an amendment of another
  *   supplier?: string,
+ *   created?: string,
  * }} OpenInvoice
  *
  * @typedef {{
@@ -43,9 +45,18 @@
  *   amount: number,          // what would be allocated
  *   invoice: string,
  *   confidence: "high"|"low",
+ *   auto: boolean,           // safe to post without asking first
  *   why: string,
  * }} RelinkProposal
  */
+
+/**
+ * 🔴 **The most auto-links one pass will post.** Auto-linking is safe because each pairing is
+ * near-certain on its own; it is *not* safe to assume a screen full of them is. A systematic
+ * mistake — a rule that turns out to be wrong — multiplies by exactly this number before a human
+ * sees it. Past the cap the proposals are still made, they just wait for a click.
+ */
+export const AUTO_LINK_LIMIT = 3;
 
 const CENT = 0.005;
 
@@ -114,13 +125,24 @@ export function proposeRelinks(input = {}) {
 
     const exact = amendments.filter((i) => sameMoney(num(i.outstanding), loose));
     if (exact.length === 1) {
-      claimed.add(exact[0].name);
+      const hit = exact[0];
+      claimed.add(hit.name);
+      // 🔴 The guard that makes an auto-post defensible: a payment can only have been stranded by
+      // an amendment that did not exist yet when the payment was made. A payment created *after*
+      // the amendment was never attached to its predecessor, so however well the amount matches,
+      // this is not that story — propose it, but make someone look.
+      const ordered = isBefore(pay.created, hit.created);
       proposals.push({
         payment: pay.name,
-        invoice: exact[0].name,
+        invoice: hit.name,
         amount: loose,
         confidence: "high",
-        why: `${exact[0].name} is an amendment of ${text(exact[0].amendedFrom)} and its outstanding is exactly this payment's loose amount.`,
+        auto: ordered,
+        why:
+          `${hit.name} is an amendment of ${text(hit.amendedFrom)} and its outstanding is exactly this payment's loose amount.` +
+          (ordered
+            ? ""
+            : ` But this payment is not older than ${hit.name}, so it cannot have been stranded by that amendment — check before posting.`),
       });
       continue;
     }
@@ -144,6 +166,7 @@ export function proposeRelinks(input = {}) {
         invoice: only.name,
         amount,
         confidence: "low",
+        auto: false,
         why:
           `${only.name} is the only amended bill open for this supplier (amended from ${text(only.amendedFrom)}), ` +
           `but its outstanding is ${fmt(num(only.outstanding))} and this payment has ${fmt(loose)} loose — check before posting.`,
@@ -164,9 +187,58 @@ export function proposeRelinks(input = {}) {
   return { proposals, unmatched };
 }
 
+/**
+ * Strictly older, and only when both dates are actually known. Unknown is not "yes" — the whole
+ * point of the check is to withhold an automatic posting when the story cannot be confirmed.
+ * @param {string|undefined} a @param {string|undefined} b
+ */
+function isBefore(a, b) {
+  const x = text(a);
+  const y = text(b);
+  if (!x || !y) return false;
+  return x < y;
+}
+
 /** @param {number} n */
 function fmt(n) {
   return Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+/**
+ * Split proposals into the ones safe to post without asking and the ones that must be clicked.
+ *
+ * 🔴 The cap is applied here, not in `proposeRelinks`, so the *reasoning* about one pairing stays
+ * separate from the policy about how many of them to act on at once.
+ *
+ * @param {RelinkProposal[]} proposals
+ * @param {number} [limit]
+ * @returns {{ auto: RelinkProposal[], ask: RelinkProposal[], cappedOut: number }}
+ */
+export function splitAutoRelinks(proposals, limit = AUTO_LINK_LIMIT) {
+  const all = Array.isArray(proposals) ? proposals : [];
+  const eligible = all.filter((p) => p && p.auto);
+  const auto = eligible.slice(0, Math.max(0, limit));
+  const cappedOut = eligible.length - auto.length;
+  const autoNames = new Set(auto.map((p) => p.payment));
+  return { auto, ask: all.filter((p) => !autoNames.has(p.payment)), cappedOut };
+}
+
+/**
+ * What the review flag says, on the payment itself, in ERPNext.
+ *
+ * 🔴 It has to read as an explanation to somebody who was not here — the payment now carries an
+ * allocation nobody typed, and the only defence against that feeling like a glitch is a sentence
+ * that says who did it, why, and what to do if it is wrong.
+ *
+ * @param {RelinkProposal} p
+ */
+export function relinkReviewNote(p) {
+  return (
+    `Auto-linked by the Doc shell: ${fmt(p.amount)} applied to ${p.invoice}. ` +
+    `Amending a bill detaches its payment and ERPNext keeps no record of which bill it paid, so this ` +
+    `pairing was inferred — ${p.why} ` +
+    `Please review. If it is wrong, undo it with the UnReconcile button on this Payment Entry.`
+  );
 }
 
 /**

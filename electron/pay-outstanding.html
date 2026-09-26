@@ -357,7 +357,9 @@
     .relink-what { flex: 1; min-width: 240px; font-size: 12px; color: #0f172a; }
     .relink-why { color: #6b21a8; font-size: 11px; margin-top: 2px; }
     .relink-foot { display: flex; justify-content: flex-end; margin-top: 6px; }
-    .vendor-head .run-chip.credit { border: none; cursor: pointer; font: inherit; }
+    .vendor-head .run-chip.credit,
+    .vendor-head .run-chip.review { border: none; cursor: pointer; font: inherit; }
+    .run-chip.review { background: #0e7490; color: #fff; }
     .flow-grid {
       /* The invoice column is sized to hold a whole ERPNext naming-series name (ACC-PINV-2026-
          00904) *plus* its peek button. At 150px it had 94px for a 137px name, so every invoice
@@ -2372,6 +2374,79 @@
      * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills this vendor's rows
      */
     /**
+     * What the shell re-linked on its own, and the one optional click that closes it.
+     *
+     * 🔴 **"Seems okay" is not an approval — the posting already happened.** It closes the
+     * question, nothing more. That distinction is why the button does not say "Approve": there is
+     * no pending state to approve, only a review somebody has or has not done. If it is *not* okay,
+     * ERPNext undoes it with the UnReconcile button on the payment itself — no amend, no new ID.
+     *
+     * @param {string} supplier
+     * @param {string[]} payments Payment Entry names with an open review
+     * @param {HTMLElement} panel
+     */
+    function paintRelinkReviews(supplier, payments, panel) {
+      panel.innerHTML = "";
+      panel.appendChild(
+        textDiv(
+          "method-panel-status",
+          `Re-linked automatically after an amendment detached ${payments.length === 1 ? "a payment" : "these payments"}. ` +
+            "The books are already correct — this is only asking you to check.",
+        ),
+      );
+
+      for (const pe of payments) {
+        const entry = relinkReviews.get(pe) || { note: "" };
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-review-row";
+        row.appendChild(
+          htmlDiv(
+            "relink-what",
+            `<strong>${escapeHtml(pe)}</strong><div class="relink-why">${escapeHtml(entry.note)}</div>`,
+          ),
+        );
+
+        const okay = document.createElement("button");
+        okay.type = "button";
+        okay.className = "btn-primary";
+        okay.dataset.testid = "relink-review-ok";
+        okay.textContent = "Seems okay";
+        okay.onclick = async () => {
+          okay.disabled = true;
+          const res = await api
+            .closeRelinkReview(pe)
+            .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+          if (!res || !res.ok) {
+            okay.disabled = false;
+            const st = row.querySelector(".method-panel-status");
+            if (st) {
+              st.textContent = (res && res.reason) || "Could not close the review.";
+              st.className = "method-panel-status err";
+            }
+            return;
+          }
+          relinkReviews.delete(pe);
+          render();
+        };
+        row.appendChild(okay);
+
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "btn-secondary";
+        open.dataset.testid = "relink-review-open";
+        open.textContent = "Open payment";
+        open.title = "Opens the Payment Entry in Vanilla. Its UnReconcile button undoes this.";
+        open.onclick = () => {
+          if (api && api.openErp) api.openErp(`/app/payment-entry/${encodeURIComponent(pe)}`);
+        };
+        row.appendChild(open);
+        row.appendChild(textDiv("method-panel-status", ""));
+        panel.appendChild(row);
+      }
+    }
+
+    /**
      * Where a vendor's loose payments probably belong (OI-171, after P1's amend).
      *
      * 🔴 **Proposed, not posted.** ERPNext destroys the record of which bill a payment paid when
@@ -2727,6 +2802,27 @@
           if (!relinkPanel.hidden) void loadRelinkPanel(supplier, relinkPanel);
         };
         total.prepend(chip);
+      }
+      // 🔴 What the shell did on its own, said on the vendor it did it to. An allocation nobody
+      // typed is only acceptable if it is impossible to miss — and this is the click that was
+      // moved from *before* the posting to after it, where it is optional.
+      const mine = [...relinkReviews.entries()]
+        .filter(([, r]) => r.party === supplier)
+        .map(([pe]) => pe);
+      if (mine.length) {
+        const badge = document.createElement("button");
+        badge.type = "button";
+        badge.className = "run-chip review";
+        badge.dataset.testid = "vendor-relink-review";
+        badge.textContent = `${mine.length} auto-linked · review`;
+        badge.title =
+          "The shell re-linked a payment that an amendment had detached, and is asking you to check it. " +
+          "Nothing is wrong if this looks right — the books are already correct.";
+        badge.onclick = () => {
+          relinkPanel.hidden = !relinkPanel.hidden;
+          if (!relinkPanel.hidden) paintRelinkReviews(supplier, mine, relinkPanel);
+        };
+        total.prepend(badge);
       }
       head.appendChild(total);
       // P1 stage 3: the method change lives on the vendor, because that is the scope 5zorro asked
@@ -3593,11 +3689,48 @@
      * touched have new ERPNext IDs, so leaving the old rows on screen would show documents that no
      * longer exist under those names.
      */
+    /** Payment Entry name -> { note, party }, for auto-links nobody has confirmed yet. */
+    let relinkReviews = new Map();
+
+    /**
+     * P1 after-effects, run once per load: post the near-certain re-links and flag each for review.
+     *
+     * 🔴 **Posted, then reviewed — not the other way round** (5zorro 2026-09-26). An unallocated
+     * payment *is* an open end in the accounting, so holding the books wrong until somebody clicks
+     * is worse than making them right and asking somebody to check. The click moved from before
+     * the posting to after it, and became optional.
+     *
+     * Only the near-certain ones qualify (exact amount, single candidate, same vendor, and the
+     * payment demonstrably older than the amendment). Everything else still waits for a click.
+     */
+    async function runAutoRelinks(suppliers) {
+      if (!api || !api.autoRelink) return false;
+      let posted = 0;
+      for (const supplier of suppliers) {
+        const res = await api.autoRelink(supplier).catch(() => null);
+        posted += ((res && res.posted) || []).length;
+      }
+      return posted > 0;
+    }
+
+    /** Which auto-links are still unreviewed, read from ERP's own assignments. */
+    async function loadRelinkReviews() {
+      relinkReviews = new Map();
+      if (!api || !api.relinkReviews) return;
+      const res = await api.relinkReviews().catch(() => null);
+      for (const r of (res && res.reviews) || []) {
+        if (r && r.reference_name) {
+          relinkReviews.set(r.reference_name, { note: r.description || "", party: r.party || "" });
+        }
+      }
+    }
+
     async function reloadBills() {
       if (!api || !api.getOutstandingBills) return;
       const res = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
       allBills = (res && res.ok && res.bills) || [];
       if (!res || !res.ok) showError((res && res.reason) || "Could not reload outstanding bills.");
+      await loadRelinkReviews();
       render();
     }
 
@@ -3616,6 +3749,23 @@
       const result = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
       allBills = (result && result.ok && result.bills) || [];
       if (!result || !result.ok) showError((result && result.reason) || "Could not load outstanding bills.");
+
+      // Vendors carrying a credit are the only ones worth a re-link pass, and there are usually
+      // none — so this costs nothing on an ordinary load.
+      const withCredit = [
+        ...new Set(
+          allBills
+            .filter((b) => !/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || "")) || !(Number(b.outstanding) > 0))
+            .map((b) => b.supplier)
+            .filter(Boolean),
+        ),
+      ];
+      if (withCredit.length && (await runAutoRelinks(withCredit))) {
+        // Something was posted, so the board is describing bills that are now paid.
+        const again = await api.getOutstandingBills().catch(() => null);
+        if (again && again.ok) allBills = again.bills || [];
+      }
+      await loadRelinkReviews();
       render();
     }
 

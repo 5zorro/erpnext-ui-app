@@ -1,6 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { proposeRelinks, describeRelink, allocationRowFor } from "../src/payment-relink.js";
+import {
+  proposeRelinks,
+  describeRelink,
+  allocationRowFor,
+  splitAutoRelinks,
+  relinkReviewNote,
+  AUTO_LINK_LIMIT,
+} from "../src/payment-relink.js";
 
 const pay = (name, unallocated, supplier = "V1") => ({ name, unallocated, supplier });
 const inv = (name, outstanding, amendedFrom, supplier = "V1") => ({
@@ -203,5 +210,116 @@ describe("allocationRowFor — built from ERP's own rows", () => {
     assert.equal(allocationRowFor(p, [], erpInvoices), null);
     assert.equal(allocationRowFor(p, erpPayments, []), null);
     assert.equal(allocationRowFor(p, erpPayments, [{ ...erpInvoices[0], outstanding_amount: 0 }]), null);
+  });
+});
+
+/**
+ * 🔴 Auto-linking (5zorro 2026-09-26). The click moved from *before* the posting to *after* it, and
+ * became optional: an unallocated payment is itself an open end in the accounting, so holding the
+ * books wrong until somebody clicks is worse than making them right and asking somebody to check.
+ *
+ * That only holds if "high confidence" is genuinely near-certain, so `auto` is a stricter test than
+ * `confidence: "high"`.
+ */
+describe("auto-linking — what may post without being asked", () => {
+  const older = { created: "2026-09-12 10:00:00" };
+  const newer = { created: "2026-09-22 10:00:00" };
+
+  it("auto-links a payment that predates the amendment", () => {
+    const [p] = proposeRelinks({
+      payments: [{ ...pay("P1", 9), ...older }],
+      invoices: [{ ...inv("A-1", 9, "A"), ...newer }],
+    }).proposals;
+    assert.equal(p.confidence, "high");
+    assert.equal(p.auto, true);
+  });
+
+  // 🔴 The guard that makes the posting defensible. A payment made *after* the amendment existed
+  // was never attached to its predecessor, so however well the amount matches, this is not that
+  // story — it is still proposed, but somebody has to look.
+  it("refuses to auto-link a payment younger than the amendment", () => {
+    const [p] = proposeRelinks({
+      payments: [{ ...pay("P1", 9), ...newer }],
+      invoices: [{ ...inv("A-1", 9, "A"), ...older }],
+    }).proposals;
+    assert.equal(p.confidence, "high", "still the best candidate");
+    assert.equal(p.auto, false, "but not one to post unasked");
+    assert.match(p.why, /cannot have been stranded/i);
+  });
+
+  it("treats an unknown date as a reason to ask, not as a yes", () => {
+    const [p] = proposeRelinks({
+      payments: [pay("P1", 9)],
+      invoices: [inv("A-1", 9, "A")],
+    }).proposals;
+    assert.equal(p.auto, false);
+  });
+
+  it("never auto-links a low-confidence proposal", () => {
+    const [p] = proposeRelinks({
+      payments: [{ ...pay("P1", 40), ...older }],
+      invoices: [{ ...inv("A-1", 100, "A"), ...newer }],
+    }).proposals;
+    assert.equal(p.confidence, "low");
+    assert.equal(p.auto, false);
+  });
+});
+
+describe("splitAutoRelinks — the cap", () => {
+  const auto = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      payment: `P${i}`,
+      invoice: `A${i}-1`,
+      amount: 9,
+      confidence: "high",
+      auto: true,
+      why: "",
+    }));
+
+  it("posts up to the limit and leaves the rest to be clicked", () => {
+    const { auto: go, ask, cappedOut } = splitAutoRelinks(auto(5), 3);
+    assert.equal(go.length, 3);
+    assert.equal(cappedOut, 2);
+    assert.equal(ask.length, 2, "the capped ones are still offered, just not posted");
+  });
+
+  // Each pairing being near-certain on its own does not make a screenful of them safe: a rule that
+  // turns out to be wrong multiplies by the batch size before a human sees it.
+  it("defaults to a small limit", () => {
+    assert.equal(AUTO_LINK_LIMIT, 3);
+    assert.equal(splitAutoRelinks(auto(10)).auto.length, 3);
+  });
+
+  it("keeps ask-only proposals in `ask`", () => {
+    const mixed = [...auto(1), { payment: "PX", invoice: "AX", amount: 1, confidence: "low", auto: false, why: "" }];
+    const { auto: go, ask } = splitAutoRelinks(mixed);
+    assert.deepEqual(go.map((p) => p.payment), ["P0"]);
+    assert.deepEqual(ask.map((p) => p.payment), ["PX"]);
+  });
+
+  it("posts nothing when the limit is zero", () => {
+    const { auto: go, cappedOut } = splitAutoRelinks(auto(2), 0);
+    assert.deepEqual(go, []);
+    assert.equal(cappedOut, 2);
+  });
+});
+
+describe("relinkReviewNote — an allocation nobody typed has to explain itself", () => {
+  const [p] = proposeRelinks({
+    payments: [{ ...pay("PAY-1", 9), created: "2026-09-12" }],
+    invoices: [{ ...inv("A-1", 9, "A"), created: "2026-09-22" }],
+  }).proposals;
+
+  it("says who did it, why, and how to undo it", () => {
+    const note = relinkReviewNote(p);
+    assert.match(note, /Auto-linked by the Doc shell/);
+    assert.match(note, /\$9\.00 applied to A-1/);
+    assert.match(note, /inferred/i);
+    assert.match(note, /UnReconcile/);
+  });
+
+  // The shell finds its own flags again by this phrase, so it is load-bearing, not decoration.
+  it("starts with the phrase the shell queries ToDos by", () => {
+    assert.ok(relinkReviewNote(p).startsWith("Auto-linked by the Doc shell"));
   });
 });
