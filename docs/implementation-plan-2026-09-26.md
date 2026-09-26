@@ -49,6 +49,24 @@ treated as one blob. Prefer **error classes / architecture families**, not a sin
 
 ---
 
+## Where this sits — 5zorro's sequence (2026-09-26)
+
+This tranche is the groundwork under a three-step goal: Doc skins on the "Find" pages. The steps
+below are what "step 1 / 2 / 3" mean elsewhere in this plan.
+
+1. **A/R Doc skins, "good enough"** — one for each A/R entry page (Estimate, Sales Order, Sales
+   Invoice, Receive Payment), shaped like the existing mockups. Not started.
+2. **Sample data for one full flow** — Estimate → Sales Order → Purchase Order → Item Receipt →
+   Bill → vendor payment → Sales Invoice → customer payment received. 25 customers and 25 vendors,
+   with activity per party on a bell curve (a few busy, most light). Not started; `ops/sample-data/`
+   is the existing seed runner to extend.
+3. **A Doc skin for each Find page** — like the Pay Bills dashboard, but the bottom drawer is for
+   read-only peeking, if there is a drawer at all. This plan's F1 (mockups) and F2 (navigation)
+   are its groundwork; F3 makes it live once step 2's data exists.
+
+Everything depended on the navigation being able to hold a Doc skin anchored to a list — which is
+why this plan starts with the audit.
+
 ## Part A — How navigation works today (plain map)
 
 The app is one window holding several stacked pages. Only one is on screen at a time; a variable
