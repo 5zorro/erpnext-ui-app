@@ -90,9 +90,40 @@ npm run dogfood:ap-sources
 npm run dogfood:ap-sources:pdf
 ```
 
-Output: `ops/sample-data/dogfood-sources/generated/` (gitignored). Catalog SSoT:
-`src/sample-data/dogfood-ap-sources.js` (OI-103 scenarios 1–8 + packing / partial /
-house-of-brands extras). This path does **not** post to MariaDB.
+Output: `ops/sample-data/dogfood-sources/generated/` (gitignored — one `.html` and one `.pdf` per
+scenario, plus a generated `README.md` index). Catalogue SSoT:
+`src/sample-data/dogfood-ap-sources.js`. This path does **not** post to MariaDB.
+
+### The catalogue is the list of edge cases we claim to handle
+
+Unit tests prove the pure logic; this pack proves the **surface** — a person entering real-looking
+paper into the real UI, which is the only thing that catches a button wired to nothing. Adding a
+scenario here is how an edge case gets *formalized* rather than remembered.
+
+Every entry carries four things, and `tests/dogfood-ap-sources.test.js` holds the catalogue to them:
+
+| Field | Answers |
+|---|---|
+| `flow` | which side of the business — `ap` (money out) or `ar` (money in) |
+| `target` | the ERPNext doctype the paper is typed **into** (derived from `kind`) |
+| `scenario` | the edge case, in one line |
+| `expect` | what proves it worked, or the trap to watch for |
+
+`expect` is optional only because the original 20 scenarios predate it; the generated index prints
+how many are still missing one, and a scenario with no pass/fail condition is a suggestion rather
+than a test. Fill it in as each is dogfooded.
+
+Both the generated index and each PDF's banner are built from those fields, so the catalogue and
+the paper cannot drift apart.
+
+**Money-in paper (AR).** `DF-18`–`DF-20` are the sales side: a customer RFQ → **Quotation**, a
+customer PO → **Sales Order**, and a shipping notice → a partial **Sales Invoice**. `DF-20` depends
+on `DF-19` being entered first, and says so.
+
+**`DF-17` — the double-payment trap P1 creates.** Cancelling a bill *detaches* its payments on this
+site, so a void-and-amend leaves the payment submitted-but-unallocated while the amended bill reads
+Unpaid — and the vendor's statement then chases money you already sent. Vanilla's fix is
+**Accounts → Payment Reconciliation**; there is no automatic re-link.
 
 **OI-132 Import lines:** `DF-13` also emits `DF-13_purchase_order_import_paste.tsv` /
 `.csv` — messy 11-column vendor export (2 junk header rows). Use **Import lines…** on
