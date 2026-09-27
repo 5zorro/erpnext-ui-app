@@ -114,18 +114,41 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
     created: dict[str, list[str]] = {k: [] for k in order}
 
     by_kind: dict[str, list[dict]] = {k: [] for k in order}
+    # 🔴 `applyLast` rows are held back until every other kind is in. The negative-inventory
+    # fixtures need their Delivery Note on file BEFORE their Item Receipt, whatever the dates say —
+    # insert the receipt first and there is stock on hand, so neither the "no repost" nor the
+    # "backdated repost" behaviour happens and the fixture proves nothing.
+    deferred: list[tuple[str, dict]] = []
+    # 🔴 A `chronoGroup` row is applied in ONE date-ordered pass across every kind, not kind by
+    # kind. The reselling year needs this: applying all receipts before any shipment leaves each
+    # shipment backdated against the newest receipt on file, which is exactly what queues a
+    # `Repost Item Valuation`. A two-month run left 59 of them queued before this existed. The plan
+    # already emits these in the right order, so this pass only has to preserve it.
+    chrono: list[dict] = []
     for doc in plan["docs"]:
-        by_kind[doc["kind"]].append(doc)
+        if doc.get("applyLast"):
+            deferred.append((doc["kind"], doc))
+        elif doc.get("chronoGroup"):
+            chrono.append(doc)
+        else:
+            by_kind[doc["kind"]].append(doc)
+
+    def _apply(kind: str, spec: dict) -> None:
+        posting = spec.get("postingDate") or _date_for_offset(as_of, spec["dayOffset"])
+        erp_name = _create_one(
+            kind, spec, plan, party_map, name_map, company, warehouse, tag, posting, as_of
+        )
+        name_map[spec["key"]] = erp_name
+        created[kind].append(erp_name)
+        frappe.db.commit()
 
     for kind in order:
         for spec in by_kind[kind]:
-            posting = spec.get("postingDate") or _date_for_offset(as_of, spec["dayOffset"])
-            erp_name = _create_one(
-                kind, spec, plan, party_map, name_map, company, warehouse, tag, posting, as_of
-            )
-            name_map[spec["key"]] = erp_name
-            created[kind].append(erp_name)
-            frappe.db.commit()
+            _apply(kind, spec)
+    for spec in chrono:
+        _apply(spec["kind"], spec)
+    for kind, spec in deferred:
+        _apply(kind, spec)
 
     summary = {k: len(v) for k, v in created.items()}
     _print_costing_expectations(plan)
@@ -629,6 +652,11 @@ def _ensure_masters(
             )
             if it.get("valuationMethod"):
                 doc.valuation_method = it["valuationMethod"]
+            if it.get("allowNegativeStock"):
+                # Per item rather than site-wide: `Stock Settings.allow_negative_stock` is 5zorro's
+                # call (and is the real answer for "all items default to allow negative"), and a
+                # corpus this size should not lose a seed run to one date landing out of order.
+                doc.allow_negative_stock = 1
             doc.insert(ignore_permissions=True)
             # OI-177: opening qty is 500 by default so every receipt and invoice values, but the
             # costing and traced-chain SKUs ask for 0 — 500 units of prior stock would bury the two
@@ -642,8 +670,14 @@ def _ensure_masters(
         # Idempotent: valuation_method is the fixture, so a re-seed must not leave an older value
         # behind (it decides whether stock_queue gets layers at all).
         want_method = it.get("valuationMethod")
+        dirty = False
         if want_method and (doc.get("valuation_method") or "") != want_method:
             doc.valuation_method = want_method
+            dirty = True
+        if it.get("allowNegativeStock") and not cint(doc.get("allow_negative_stock")):
+            doc.allow_negative_stock = 1
+            dirty = True
+        if dirty:
             doc.save(ignore_permissions=True)
         out["items"][it["key"]] = code
 
