@@ -177,9 +177,8 @@ not writing.**
   (Esc closes). The preview is a *preview*: opening the document for work is a separate button that
   lands on the real form, editable as usual (invariant 7 is untouched — nothing editable is made
   read-only).
-- **Mockup honesty:** a band says *Mockup — sample rows, not your data*. Rows come from
-  `src/find-skin-mock.js` (delete that file when F3 lands). The "Open" button in the peek is disabled
-  in the mockup because a sample row has no real document behind it.
+- **Mockup honesty (F1 only):** a band said *Mockup — sample rows, not your data*, with rows from
+  `src/find-skin-mock.js`. Both went at F3 — rows are live and the peek's Open works.
 
 Seven Find pages, one per document in the sample-data flow: Estimates (Quotation), Sales Orders,
 Purchase Orders, Item Receipts, Bills, Payments (one page, Pay/Receive switch — a Payment Entry is one
@@ -199,7 +198,7 @@ doctype either way), Sales Invoices.
 |---|---|---|
 | **F1** | Rules 1–4 for the Find doors; registry; skin-index rows; list lens memory; `find-doc.html` static mockup ×7; three latent bugs | **built 2026-09-26** |
 | **F2** | Every remaining door through `resolveOpenTarget`; one Find implementation; filters in the address; a table of shell pages; the unused `bill` view deleted; the hidden-page guard on all three shell pages | **built 2026-09-26** — see *What F2 changed* |
-| **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | proposed — after sample data (5zorro's step 2) |
+| **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | **built 2026-09-26** — see *F3: live Find pages* |
 | **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | A/R skins have it (the doc-form chrome's Find…, → their Find page mockup); payment pages still owed |
 | **A1** | 5zorro's step 1: A/R Doc skins — Estimate, Sales Order, Invoice, Receive Payment | **built 2026-09-26** — see *Step 1* |
 
@@ -355,6 +354,33 @@ Selling stamp sits under the white sections of the card. The setting itself had 
   Center after a divider (`src/customer-process-flow.js`; the renderer is shared with Vendors).
   One lane, not two, and Employees moved to the right column — otherwise Home stops fitting a
   maximized 1080p window (`tests/surface-width.test.js`; checked at 1920×1040: no scroll).
+
+### F3: live Find pages (5zorro 2026-09-26: "wire it to pull from the same kind of data as the vanilla ERPNext find")
+
+All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
+
+- **Same question as the Vanilla list.** Same doctype and fields, the Vanilla list's own order
+  (`creation desc` — the DocType `sort_field` of all seven, read from the sandbox), cancelled and
+  draft documents included, read over HTTP with the ERP session's cookies (`find-doc-list` in
+  `main.js` → `frappeResourceGetList`, which gained `order_by` and `or_filters`). The query is
+  pure: `src/find-skin-query.js` `findListQuery`.
+- **Where it differs, on purpose:** a box matches *part* of a value, as you type (250 ms pause;
+  only the newest answer paints), and the party box matches the id *or* the display name.
+  Vanilla's `?field=value` filters are exact; "Search in Vanilla list →" still hands over those.
+- **Newest 200**, then "type to narrow" — one more is asked for, to know whether there are more.
+- Groups are ordered by their newest document (they were "busiest first" on the mockup).
+- **Peek** reads the full document (`find-doc-peek`) for its lines — items, or for a payment the
+  documents it was applied to. **Open this …** goes through `open-preferred`, so it lands on the
+  document's Doc skin or Vanilla by the remembered lens.
+- Checked live: each page's blank count equals the table's row count (Bills differed by 4 only
+  because the sample-data session was seeding at that moment); Receive payments list under
+  "Received from customers"; searching one customer leaves only that customer's card; Open from
+  the peek lands on the Invoice Doc skin at that invoice (`e2e/scaffold-find-doc.spec.js`).
+- Fixed on the way: the hatch change had marked the Find page `data-doc-desk`, which made
+  `doc-wash.css` paint the desk stamp behind every result card, over its columns. The page now
+  uses its own `data-find-desk`.
+
+Not done: paging beyond 200, per-column sorting, and remembering a page's last search.
 
 ### Dogfood checklist (A1)
 

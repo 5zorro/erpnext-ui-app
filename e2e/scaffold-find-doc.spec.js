@@ -1,5 +1,5 @@
 /**
- * Scaffold — Find pages (OI-056, implementation-plan-2026-09-26 stage F1).
+ * Scaffold — Find pages (OI-056, implementation-plan-2026-09-26 stages F1–F3; rows are live since F3).
  *
  * Drives the doors that lead to a Find page and the ways out of it, against the live sandbox.
  * The pure decisions are unit-tested (nav-destination, find-skin-registry); this proves the
@@ -60,9 +60,19 @@ test.describe("scaffold: find pages", () => {
     const history = await e2eCall(app, "getHistory");
     expect(history.some((h) => h.label === "Find Bills")).toBe(true);
 
-    // 2. A sample row opens the read-only peek; Esc closes it.
+    // 2. Live rows (F3): a real Bill opens the read-only peek with its lines read from ERPNext;
+    //    Esc closes it.
+    await expect
+      .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 })
+      .toBeGreaterThan(0);
+    expect(await inFind(app, `document.querySelector("tr.row").dataset.name`)).toMatch(/^ACC-PINV-/);
     await inFind(app, `document.querySelector("tr.row").click(); true`);
     expect(await inFind(app, `document.getElementById("peek").hidden`)).toBe(false);
+    await expect
+      .poll(async () => inFind(app, `document.querySelectorAll('[data-testid="find-doc-peek-lines"] tr').length`), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(0);
     await inFind(app, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); true`);
     expect(await inFind(app, `document.getElementById("peek").hidden`)).toBe(true);
 
@@ -162,5 +172,37 @@ test.describe("scaffold: find pages", () => {
     // Leave the list lens on Doc for whoever runs next.
     await clickDocTab(app);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+  });
+
+  test("F3: a search narrows live rows; the peek's Open lands on that document's Doc skin", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openVanillaList(app, "/app/sales-invoice");
+    await clickDocTab(app);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await expect
+      .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 })
+      .toBeGreaterThan(0);
+    const before = await inFind(app, `document.querySelectorAll("tr.row").length`);
+
+    // Search by one customer — every card left is that customer.
+    await inFind(
+      app,
+      `(() => { const i = document.querySelector('input[data-field="customer"]'); i.value = "SAMPLE Customer 01"; i.dispatchEvent(new Event("input")); return true; })()`,
+    );
+    await expect
+      .poll(async () => inFind(app, `[...document.querySelectorAll(".card-head h2")].map((h) => h.textContent).join("|")`), {
+        timeout: 15_000,
+      })
+      .toBe("SAMPLE Customer 01");
+    expect(await inFind(app, `document.querySelectorAll("tr.row").length`)).toBeLessThan(before);
+
+    const name = await inFind(app, `document.querySelector("tr.row").dataset.name`);
+    await inFind(app, `document.querySelector("tr.row").click(); true`);
+    await inFind(app, `document.getElementById("peek-open").click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    expect(await e2eCall(app, "getActiveDocSkin")).toBe("invoice");
+    expect(await e2eCall(app, "currentRoute")).toBe(`/app/sales-invoice/${name}`);
   });
 });

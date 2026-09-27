@@ -21,16 +21,13 @@
       background: var(--role-wash); border-bottom: 1px solid #d6dee6;
       box-shadow: inset 4px 0 0 var(--role-accent);
     }
-    html[data-pattern="ar"][data-doc-desk="ar"] header,
-    html[data-pattern="ap"][data-doc-desk="ap"] header,
-    html[data-pattern="both"][data-doc-desk] header { background-image: var(--hatch-desk); }
+    /* Own attribute, not data-doc-desk: doc-wash.css paints the desk stamp behind every .card
+       on a data-doc-desk page, and here .card is a result group — the stamp covered its columns. */
+    html[data-pattern="ar"][data-find-desk="ar"] header,
+    html[data-pattern="ap"][data-find-desk="ap"] header,
+    html[data-pattern="both"][data-find-desk] header { background-image: var(--hatch-desk); }
     .stamp { width: 22px; height: 22px; opacity: .7; }
     h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
-    .mock-pill {
-      font-size: 10px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600;
-      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 999px;
-      padding: 3px 9px;
-    }
     .hdr-actions { margin-left: auto; display: flex; gap: 8px; }
     .btn {
       border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 6px;
@@ -130,7 +127,6 @@
   <header>
     <img class="stamp" id="stamp" alt="" />
     <h1 id="title" data-testid="find-doc-title">Find</h1>
-    <span class="mock-pill" id="mock-pill" title="Stage F1 of implementation-plan-2026-09-26: the page is laid out on sample rows until the live list query lands.">Mockup — sample rows, not your data</span>
     <div class="hdr-actions">
       <button type="button" class="btn" id="btn-new" data-testid="find-doc-new">New</button>
       <button type="button" class="btn primary" id="btn-vanilla" data-testid="find-doc-vanilla"
@@ -157,8 +153,7 @@
       <span class="peek-tag">Peek · read-only</span>
       <span class="peek-title" id="peek-title"></span>
       <span class="spacer"></span>
-      <span class="peek-note" id="peek-open-note">Sample row — there is no real document behind it yet.</span>
-      <button type="button" class="btn" id="peek-open" disabled>Open</button>
+      <button type="button" class="btn" id="peek-open" data-testid="find-doc-peek-open">Open</button>
       <button type="button" class="btn" id="peek-close" title="Esc">Close</button>
     </div>
     <div class="peek-body"><div class="peek-inner" id="peek-body"></div></div>
@@ -173,7 +168,7 @@
       focusFor,
       findVanillaListRoute,
     } from "../src/find-skin-registry.js";
-    import { findSkinSampleRows, groupRowsByParty } from "../src/find-skin-mock.js";
+    import { groupRowsByParty, findPeekLines, FIND_LIST_LIMIT } from "../src/find-skin-query.js";
 
     const api = window.erpFindDoc || null;
     const q = new URLSearchParams(location.search);
@@ -186,12 +181,21 @@
       status: "",
       values: {},
       selected: "",
+      rows: [],
+      more: false,
+      loading: false,
+      error: "",
     };
+    // Only the newest answer paints: typing fires a query per pause, and a slow early one must
+    // not overwrite a later one.
+    let querySeq = 0;
+    let queryTimer = 0;
 
     const $ = (id) => document.getElementById(id);
     const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-    const money = (n) => Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const money = (n) => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
     const date = (s) => {
+      if (!s) return "";
       const d = new Date(`${s}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
     };
@@ -202,7 +206,7 @@
     const cell = (col, row) => {
       const v = row[col.field];
       if (col.kind === "money") return `<td class="num">${esc(money(v))}</td>`;
-      if (col.kind === "percent") return `<td class="num">${esc(v)}%</td>`;
+      if (col.kind === "percent") return `<td class="num">${esc(Math.round(Number(v) || 0))}%</td>`;
       if (col.kind === "date") return `<td>${esc(date(v))}</td>`;
       if (col.kind === "status") return `<td><span class="status ${statusClass(v)}">${esc(v)}</span></td>`;
       return `<td>${esc(v)}</td>`;
@@ -220,8 +224,7 @@
       document.title = title;
       $("stamp").src = desk() === "ar" ? "assets/selling-stamp.svg" : "assets/buying-stamp.svg";
       // Desk hatch (OI-125): the header wears the same global pattern as the Doc skins.
-      document.documentElement.dataset.docDesk = desk();
-      $("mock-pill").hidden = skin.stage !== "mockup";
+      document.documentElement.dataset.findDesk = desk();
       const entry = skin.directional
         ? state.direction === "Receive" ? "Receive Payment" : "Pay Bills"
         : `New ${findSkinEntryLabel(doctypeKey)}`;
@@ -239,7 +242,7 @@
           b.type = "button";
           b.textContent = label;
           b.className = state.direction === dir ? "active" : "";
-          b.onclick = () => { state.direction = dir; state.selected = ""; paintAll(); };
+          b.onclick = () => { state.direction = dir; state.selected = ""; paintAll(); runQuery(); };
           sw.appendChild(b);
         }
         boxes.appendChild(sw);
@@ -255,7 +258,7 @@
         label.innerHTML = `<span>${esc(text)}</span><input data-field="${esc(s.field)}" data-id="${esc(s.id)}" autocomplete="off" /><small>${esc(hint)}</small>`;
         const input = label.querySelector("input");
         input.value = state.values[s.field] || "";
-        input.addEventListener("input", () => { state.values[s.field] = input.value; paintResults(); });
+        input.addEventListener("input", () => { state.values[s.field] = input.value; queueQuery(); });
         boxes.appendChild(label);
       }
       const chips = $("chips");
@@ -265,33 +268,53 @@
         c.type = "button";
         c.className = `chip${state.status === st ? " active" : ""}`;
         c.textContent = st || "Any";
-        c.onclick = () => { state.status = st; paintSearch(); paintResults(); };
+        c.onclick = () => { state.status = st; paintSearch(); runQuery(); };
         chips.appendChild(c);
       }
     }
 
-    function matching() {
-      const rows = findSkinSampleRows(doctypeKey, { count: 24, direction: state.direction });
-      return rows.filter((r) => {
-        if (state.status && r.status !== state.status) return false;
-        for (const s of skin.searches) {
-          const want = String(state.values[s.field] || "").trim().toLowerCase();
-          if (!want) continue;
-          const have = String(s.id === "party" ? r.party : r[s.field] ?? r.name).toLowerCase();
-          if (!have.includes(want)) return false;
-        }
-        return true;
-      });
+    function queueQuery() {
+      clearTimeout(queryTimer);
+      queryTimer = setTimeout(runQuery, 250);
+    }
+
+    /** Ask ERPNext (over HTTP, via main) for the rows these searches match. */
+    async function runQuery() {
+      clearTimeout(queryTimer);
+      const seq = ++querySeq;
+      state.loading = true;
+      paintSummary();
+      const res = api && api.list
+        ? await api.list(doctypeKey, { values: state.values, status: state.status, direction: state.direction }).catch((e) => ({ ok: false, reason: String(e) }))
+        : { ok: false, reason: "Shell bridge unavailable." };
+      if (seq !== querySeq) return;
+      state.loading = false;
+      state.error = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
+      state.rows = res && res.ok ? res.rows : [];
+      state.more = !!(res && res.more);
+      paintResults();
+    }
+
+    function paintSummary() {
+      const el = $("summary");
+      if (state.loading) { el.textContent = "Searching…"; return; }
+      const rows = state.rows;
+      if (!rows.length) { el.textContent = ""; return; }
+      const groups = groupRowsByParty(rows);
+      const party = findPartyLabel(skin, state.direction).toLowerCase();
+      const count = state.more ? `Newest ${FIND_LIST_LIMIT}` : `${rows.length}`;
+      el.textContent = `${count} ${rows.length === 1 ? "document" : "documents"} across ${groups.length} ${party}${groups.length === 1 ? "" : "s"}${state.more ? " — type to narrow" : ""} · click one to peek`;
     }
 
     function paintResults() {
-      const rows = matching();
+      const rows = state.rows;
       const groups = groupRowsByParty(rows);
-      const party = findPartyLabel(skin, state.direction).toLowerCase();
-      $("summary").textContent = rows.length
-        ? `${rows.length} ${rows.length === 1 ? "document" : "documents"} across ${groups.length} ${party}${groups.length === 1 ? "" : "s"} — click one to peek`
-        : "";
+      paintSummary();
       const host = $("results");
+      if (state.error) {
+        host.innerHTML = `<div class="empty" data-testid="find-doc-error">Could not read the list from ERPNext: ${esc(state.error)}</div>`;
+        return;
+      }
       if (!rows.length) {
         host.innerHTML = `<div class="empty">Nothing matches. Try fewer letters, or a different status.</div>`;
         return;
@@ -315,26 +338,38 @@
       });
     }
 
-    function peek(row) {
+    async function peek(row) {
       if (!row) return;
       state.selected = row.name;
       document.querySelectorAll("tr.row").forEach((tr) => tr.classList.toggle("selected", tr.dataset.name === row.name));
       const noun = skin.directional ? "Payment" : findSkinEntryLabel(doctypeKey);
       $("peek-title").textContent = `${noun} ${row.name} · ${row.party}`;
       $("peek-open").textContent = `Open this ${noun}`;
+      $("peek-open").onclick = () => api && api.openPreferred(`/app/${doctypeKey}/${encodeURIComponent(row.name)}`);
       const facts = [[findPartyLabel(skin, state.direction), row.party], ...skin.columns.map((c) => {
         const v = row[c.field];
-        const shown = c.kind === "money" ? money(v) : c.kind === "percent" ? `${v}%` : c.kind === "date" ? date(v) : v;
+        const shown = c.kind === "money" ? money(v) : c.kind === "percent" ? `${Math.round(Number(v) || 0)}%` : c.kind === "date" ? date(v) : v;
         return [c.label, shown];
       })];
-      const mc = moneyCol();
-      const lines = row.items.map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${esc(l.qty)}</td><td class="num">${esc(money(l.amount))}</td></tr>`).join("");
-      $("peek-body").innerHTML = `<div class="paper">
-        <div class="facts">${facts.map(([k, v]) => `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>
-        <table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
-        <tbody>${lines}</tbody>
-        <tfoot><tr><td>Total</td><td></td><td class="num">${esc(money(row[mc.field]))}</td></tr></tfoot></table></div>`;
+      const factsHtml = `<div class="facts">${facts.map(([k, v]) => `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>`;
+      $("peek-body").innerHTML = `<div class="paper">${factsHtml}<p class="peek-note">Reading lines…</p></div>`;
       $("peek").hidden = false;
+      // Lines come from the full document — the list only carries the header fields.
+      const res = api && api.peek ? await api.peek(doctypeKey, row.name).catch((e) => ({ ok: false, reason: String(e) })) : null;
+      if (state.selected !== row.name) return;
+      if (!res || !res.ok) {
+        $("peek-body").innerHTML = `<div class="paper">${factsHtml}<p class="peek-note">Could not read the lines: ${esc((res && res.reason) || "no shell bridge")}</p></div>`;
+        return;
+      }
+      const mc = moneyCol();
+      const { heads, lines } = findPeekLines(doctypeKey, res.doc);
+      const body = lines.length
+        ? lines.map((l) => `<tr><td>${esc(l.label)}</td><td class="num">${esc(l.qty)}</td><td class="num">${esc(money(l.amount))}</td></tr>`).join("")
+        : `<tr><td colspan="3" class="peek-note">No lines.</td></tr>`;
+      $("peek-body").innerHTML = `<div class="paper">${factsHtml}
+        <table><thead><tr><th>${esc(heads[0])}</th><th class="num">${esc(heads[1])}</th><th class="num">${esc(heads[2])}</th></tr></thead>
+        <tbody data-testid="find-doc-peek-lines">${body}</tbody>
+        <tfoot><tr><td>Total</td><td></td><td class="num">${esc(money(row[mc.field]))}</td></tr></tfoot></table></div>`;
     }
 
     function closePeek() {
@@ -357,6 +392,7 @@
         if (prefill[s.field] != null && String(prefill[s.field]).trim()) state.values[s.field] = String(prefill[s.field]).trim();
       }
       paintAll();
+      runQuery();
       const focusId = focusFor(skin, { via: q.get("via") === "find-button" ? "find-button" : "browse", prefill });
       const box = document.querySelector(`.box input[data-id="${focusId}"]`);
       if (box) { box.focus(); box.select(); }
