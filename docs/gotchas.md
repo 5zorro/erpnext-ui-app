@@ -565,3 +565,54 @@ re-render; neither the console nor `pageerror` showed anything.
 **Architecture / fix:** …
 **Dogfood:** …
 ```
+
+## G14 — A pending repost makes the books read wrong, not incomplete (2026-09-26)
+
+**Observed:** After seeding a year of reselling history, the two ageing rules the corpus is built
+around looked broken: **29** Sales Invoices older than 25 days and **31** Purchase Invoices older
+than 60 days still carried an outstanding balance, despite every one of them having a submitted
+payment allocated in full. Minutes later, with nothing changed but a `Repost Item Valuation` queue
+draining in the background, both counts were **0**.
+
+**Expected:** A payment that has been submitted and allocated has settled its invoice. Either it did
+or it did not.
+
+**Architecture:** `outstanding_amount` on an invoice is a **stored field**, recalculated from the
+ledger by `update_voucher_outstanding` — and a repost rebuilds GL entries, so any invoice caught in a
+pending repost's range is reporting a number from before the rebuild. It is not a partial value, and
+nothing about the invoice says it is provisional: the field, the status ("Overdue") and the AP/AR
+reports all agree with each other and are all stale together.
+
+The same is true of the stock side, more visibly: mid-drain, `SAMPLE-RS-01`'s `stock_queue` totalled
+**540** units against a `qty_after_transaction` of **172**. That is what *FIFO Queue vs Qty After
+Transaction* exists to find, and here it was not corruption — just work not yet done.
+
+🔴 **So "is a repost pending?" has to be part of reading any costing or ageing number**, not a
+background detail. Anything the shell shows from `outstanding_amount`, a stock queue or a valuation
+has to check for an unfinished `Repost Item Valuation` over that item or voucher and say so —
+which is the third bullet of the negative-inventory proposal in
+`docs/mockups/negative-inventory-timeline.html`, arrived at from the opposite direction.
+
+**Draining them by hand**, which is also the recipe for a seed run that queued a few thousand:
+
+```python
+from erpnext.stock.doctype.repost_item_valuation.repost_item_valuation import repost
+for n in frappe.get_all("Repost Item Valuation",
+                        filters={"status": ("in", ("Queued", "In Progress"))}, pluck="name"):
+    repost(frappe.get_doc("Repost Item Valuation", n)); frappe.db.commit()
+```
+
+Expect most to come back **Skipped** — ERPNext collapses redundant reposts over the same item and
+warehouse, so 1,135 skipped against 171 completed is normal rather than a failure.
+
+🔴 **A repost can also fail permanently and stay failed.** One here died with `[Errno 2] No such
+file or directory` in `get_reposting_data` (`stock_ledger.py:457`): reposting stores its progress as a
+gzipped **File attachment**, and this sandbox had a File row whose file was gone from disk. The
+valuation after that point is then simply never recalculated, and nothing retries it. Worth checking
+`status='Failed'` after any bulk seed.
+
+**Avoiding them in the first place** is G14's sibling lesson and lives in
+`ops/sample-data/README.md`: seed stock movements in one globally chronological order, and give every
+document an **explicit `posting_time`**. Without the latter a seeded document takes its insert's
+wall-clock time, and `future_sle_exists` matches at `posting_datetime >= …`, so two documents sharing
+a date and a second each queue a repost for the other.
