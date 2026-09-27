@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 22;
+  var VERSION = 23;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1222,9 +1222,13 @@
   /**
    * @param {string} field
    * @param {unknown} value
-   * @param {{ keepTypedPostingDate?: boolean }} [opts] keepTypedPostingDate: tick
-   *   `set_posting_time` first, so ERPNext keeps the date instead of resetting it to today on
-   *   save (A/R Invoice; what Vanilla's "Edit Posting Date and Time" box does).
+   * @param {{ keepTypedPostingDate?: boolean, postingDateFollows?: boolean }} [opts]
+   *   keepTypedPostingDate: tick `set_posting_time` first, so ERPNext keeps a typed posting
+   *   date instead of resetting it to today on save (Invoice, Item Receipt; what Vanilla's
+   *   "Edit Posting Date and Time" box does).
+   *   postingDateFollows (Bill's Invoice date): the typed date is also the posting date — the
+   *   rule ERPNext itself uses for due dates, `bill_date or posting_date` (5zorro 2026-09-26:
+   *   "use typed date and if not exists, then posted date"). Clearing it goes back to today.
    */
   function setHeader(field, value, opts) {
     return (async function () {
@@ -1235,15 +1239,26 @@
         var supplierSnapshot = null;
         var paymentTermsSettle = null;
         var dueDateScheduleSync = null;
+        var hasPostingTime = frappe.meta.has_field(f.doc.doctype, "set_posting_time");
         if (
           opts &&
           opts.keepTypedPostingDate &&
           field === "posting_date" &&
-          frappe.meta.has_field(f.doc.doctype, "set_posting_time") &&
+          hasPostingTime &&
           !f.doc.set_posting_time
         ) {
           var tick = f.set_value("set_posting_time", 1);
           if (tick && typeof tick.then === "function") await tick;
+        }
+        // Posting date first, then the typed date: the terms settle below keys off bill_date and
+        // must run last, or the posting_date script would recompute the due date after it.
+        if (opts && opts.postingDateFollows && hasPostingTime) {
+          var typed = value != null ? String(value).trim() : "";
+          var follow = typed
+            ? f.set_value({ set_posting_time: 1, posting_date: typed })
+            : f.set_value({ set_posting_time: 0, posting_date: frappe.datetime.get_today() });
+          if (follow && typeof follow.then === "function") await follow;
+          await afterAjaxQuiet();
         }
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
