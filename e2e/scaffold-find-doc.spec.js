@@ -205,4 +205,70 @@ test.describe("scaffold: find pages", () => {
     expect(await e2eCall(app, "getActiveDocSkin")).toBe("invoice");
     expect(await e2eCall(app, "currentRoute")).toBe(`/app/sales-invoice/${name}`);
   });
+
+  test("sort by a column across every match, page on from an offset, and remember the search", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openVanillaList(app, "/app/purchase-invoice");
+    await clickDocTab(app);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await expect
+      .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 })
+      .toBeGreaterThan(0);
+
+    // Sort by Amount: the first card's first row is the biggest bill of all.
+    await inFind(app, `document.querySelector('th[data-sort="grand_total"]').click(); true`);
+    await expect
+      .poll(async () => inFind(app, `document.querySelector("th.sorted") && document.querySelector("th.sorted").dataset.sort`), { timeout: 15_000 })
+      .toBe("grand_total");
+    const amounts = await inFind(
+      app,
+      `(async () => { const r = await window.erpFindDoc.list("purchase-invoice", { sort: { field: "grand_total", dir: "desc" } }); return r.rows.map((x) => x.grand_total); })()`,
+    );
+    for (let i = 1; i < amounts.length; i++) expect(amounts[i - 1]).toBeGreaterThanOrEqual(amounts[i]);
+
+    // The next page starts after the rows already shown (the "Show more" button asks for this).
+    const paged = await inFind(
+      app,
+      `(async () => { const all = await window.erpFindDoc.list("purchase-invoice", {}); const rest = await window.erpFindDoc.list("purchase-invoice", { start: 10 }); return { all: all.rows.map((r) => r.name), rest: rest.rows.map((r) => r.name) }; })()`,
+    );
+    // Both answers are capped at the page size, so compare where they overlap.
+    expect(paged.rest.slice(0, paged.all.length - 10)).toEqual(paged.all.slice(10));
+
+    // With more than a page of bills, "Show more" appends the next page below the first.
+    const firstPage = await inFind(app, `document.querySelectorAll("tr.row").length`);
+    if (!(await inFind(app, `document.getElementById("more-row").hidden`))) {
+      await inFind(app, `document.getElementById("btn-more").click(); true`);
+      await expect
+        .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 15_000 })
+        .toBeGreaterThan(firstPage);
+    }
+
+    // Remember: type a vendor, restart the app, come back — the search is still there.
+    await inFind(
+      app,
+      `(() => { const i = document.querySelector('input[data-field="supplier"]'); i.value = "SAMPLE Vendor 01"; i.dispatchEvent(new Event("input")); return true; })()`,
+    );
+    await expect
+      .poll(async () => inFind(app, `[...document.querySelectorAll(".card-head h2")].map((h) => h.textContent).join("|")`), { timeout: 15_000 })
+      .toBe("SAMPLE Vendor 01");
+    await app.close();
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openVanillaList(app, "/app/purchase-invoice");
+    await clickDocTab(app);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await expect
+      .poll(async () => inFind(app, `document.querySelector('input[data-field="supplier"]').value`), { timeout: 15_000 })
+      .toBe("SAMPLE Vendor 01");
+    expect(await inFind(app, `document.querySelector("th.sorted") && document.querySelector("th.sorted").dataset.sort`)).toBe("grand_total");
+
+    // Clear puts the page back to every bill, newest first — and leaves it that way for the clerk.
+    await inFind(app, `document.getElementById("btn-clear").click(); true`);
+    await expect
+      .poll(async () => inFind(app, `document.querySelector('input[data-field="supplier"]').value`), { timeout: 10_000 })
+      .toBe("");
+    await expect.poll(async () => inFind(app, `document.getElementById("btn-clear").hidden`), { timeout: 15_000 }).toBe(true);
+  });
 });

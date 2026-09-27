@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld("erpFindDoc", {
   // Live rows (plan 2026-09-26 F3): the list query and one document for the peek, over HTTP.
   list: (doctypeKey, opts) => ipcRenderer.invoke("find-doc-list", doctypeKey || "", opts || {}),
   peek: (doctypeKey, name) => ipcRenderer.invoke("find-doc-peek", doctypeKey || "", name || ""),
+  // The page's last search, kept by main in userData (find-doc-searches.json).
+  loadSearch: (doctypeKey) => ipcRenderer.invoke("find-doc-load-search", doctypeKey || ""),
+  saveSearch: (doctypeKey, search) => ipcRenderer.send("find-doc-save-search", doctypeKey || "", search || {}),
   // Pay Bills / Receive Payment: the same door as the Home tiles (it records the direction).
   openPaymentEntry: (direction) => ipcRenderer.send("open-payment-entry", direction || "Pay"),
 });

@@ -7,6 +7,10 @@
  * doctypes sets `sort_field: creation`, checked on the sandbox 2026-09-26). main.js sends it over
  * HTTP (`/api/resource`, the G1 path), never through the hidden ERP page.
  *
+ * The page can also sort by any column it shows (server-side, so the order covers every matching
+ * document, not just the ones loaded), load the next page, and remember its last search
+ * (`findSavedSearch`) — 5zorro 2026-09-26.
+ *
  * Differences from Vanilla, on purpose:
  *   - A search box matches *part* of a value (`like %text%`) — the page searches as you type,
  *     where Vanilla's `?field=value` filters are exact. "Search in Vanilla list →" still hands
@@ -30,8 +34,55 @@ export const FIND_LIST_ORDER = "creation desc";
  *   orFilters: Array<[string, string, string]>,
  *   orderBy: string,
  *   limit: number,
+ *   start: number,
  * }} FindListQuery
+ *
+ * @typedef {{ field: string, dir: "asc"|"desc" }} FindSort
  */
+
+/**
+ * Fields a Find page may sort by: its own columns, the document number, and Vanilla's default.
+ * @param {string} doctypeKey
+ * @returns {string[]}
+ */
+export function findSortableFields(doctypeKey) {
+  const skin = findSkinFor(doctypeKey);
+  if (!skin) return [];
+  return [...new Set(["creation", "name", ...skin.columns.map((c) => c.field)])];
+}
+
+/**
+ * A sort the page may send, or Vanilla's default. Anything else is dropped — it becomes an SQL
+ * ORDER BY on the server, so only known fieldnames and asc/desc get through.
+ * @param {string} doctypeKey
+ * @param {unknown} sort
+ * @returns {FindSort}
+ */
+export function findSortFor(doctypeKey, sort) {
+  const s = sort && typeof sort === "object" ? /** @type {Record<string, unknown>} */ (sort) : {};
+  const field = typeof s.field === "string" ? s.field : "";
+  const dir = s.dir === "asc" ? "asc" : "desc";
+  if (field && findSortableFields(doctypeKey).includes(field)) return { field, dir };
+  return { field: "creation", dir: "desc" };
+}
+
+/**
+ * Next sort after a click on a column heading: same column flips, a new column starts with its
+ * natural order (dates, money and percents biggest/newest first; text A→Z).
+ * @param {string} doctypeKey
+ * @param {FindSort} current
+ * @param {string} field
+ * @returns {FindSort}
+ */
+export function findNextSort(doctypeKey, current, field) {
+  const skin = findSkinFor(doctypeKey);
+  if (current && current.field === field) {
+    return findSortFor(doctypeKey, { field, dir: current.dir === "asc" ? "desc" : "asc" });
+  }
+  const col = skin ? skin.columns.find((c) => c.field === field) : null;
+  const textish = !col || col.kind === "text" || col.kind === "status";
+  return findSortFor(doctypeKey, { field, dir: textish ? "asc" : "desc" });
+}
 
 /**
  * @param {string} text
@@ -43,7 +94,13 @@ function likeValue(text) {
 
 /**
  * @param {string} doctypeKey
- * @param {{ values?: Record<string, unknown>, status?: string, direction?: string }} [opts]
+ * @param {{
+ *   values?: Record<string, unknown>,
+ *   status?: string,
+ *   direction?: string,
+ *   sort?: unknown,
+ *   start?: unknown,
+ * }} [opts]
  * @returns {FindListQuery|null} null when there is no Find page for this doctype
  */
 export function findListQuery(doctypeKey, opts = {}) {
@@ -82,8 +139,12 @@ export function findListQuery(doctypeKey, opts = {}) {
     fields: [...new Set(fields)],
     filters,
     orFilters,
-    orderBy: FIND_LIST_ORDER,
+    orderBy: (() => {
+      const sort = findSortFor(skin.doctypeKey, opts.sort);
+      return `${sort.field} ${sort.dir}`;
+    })(),
     limit: FIND_LIST_LIMIT + 1,
+    start: Number.isInteger(Number(opts.start)) && Number(opts.start) > 0 ? Number(opts.start) : 0,
   };
 }
 
@@ -162,5 +223,29 @@ export function findPeekLines(doctypeKey, doc) {
       qty: it.qty == null ? "" : String(it.qty),
       amount: Number(it.amount) || 0,
     })),
+  };
+}
+
+/**
+ * The last search a Find page remembers (per doctype; main keeps them in
+ * `userData/find-doc-searches.json`). Whatever was
+ * stored is re-checked against the registry, so a renamed field or a stale status is dropped
+ * rather than sent to ERPNext.
+ * @param {string} doctypeKey
+ * @param {unknown} raw parsed JSON, possibly corrupt or absent
+ * `direction` is kept for completeness; the page takes Pay / Receive from the app-wide remembered
+ * direction instead (main passes it on the address).
+ * @returns {{ values: Record<string, string>, status: string, direction: "Pay"|"Receive", sort: FindSort }}
+ */
+export function findSavedSearch(doctypeKey, raw) {
+  const skin = findSkinFor(doctypeKey);
+  const r = raw && typeof raw === "object" ? /** @type {Record<string, unknown>} */ (raw) : {};
+  const values = findSearchValues(skin, /** @type {Record<string, unknown>} */ (r.values));
+  const status = typeof r.status === "string" && skin && skin.statuses.includes(r.status) ? r.status : "";
+  return {
+    values,
+    status,
+    direction: r.direction === "Receive" ? "Receive" : "Pay",
+    sort: findSortFor(doctypeKey, r.sort),
   };
 }

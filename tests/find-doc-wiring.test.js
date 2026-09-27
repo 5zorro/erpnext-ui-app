@@ -93,7 +93,7 @@ describe("Find page is live (plan 2026-09-26 F3)", () => {
 
   it("reads rows and peeks through main over HTTP — no sample rows left", () => {
     assert.doesNotMatch(page, /find-skin-mock/);
-    assert.match(page, /api\.list\(/);
+    assert.match(page, /api\s*\.list\(/);
     assert.match(page, /api\.peek\(/);
     for (const channel of ["find-doc-list", "find-doc-peek"]) {
       assert.ok(preload.includes(`ipcRenderer.invoke("${channel}"`), `preload invokes ${channel}`);

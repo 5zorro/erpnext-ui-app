@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { pingHealth } from "../src/health.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
-import { findListQuery, findRowsFromList } from "../src/find-skin-query.js";
+import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
@@ -9667,6 +9667,7 @@ ipcMain.handle("find-doc-list", async (_e, doctypeKey, opts) => {
     orFilters: q.orFilters,
     orderBy: q.orderBy,
     limit: q.limit,
+    start: q.start,
     fetchImpl,
   });
   if (!res.ok) {
@@ -9674,6 +9675,43 @@ ipcMain.handle("find-doc-list", async (_e, doctypeKey, opts) => {
     return { ok: false, reason: res.reason || "Could not read the list.", status: res.status, rows: [], more: false };
   }
   return { ok: true, ...findRowsFromList(String(doctypeKey), res.rows) };
+});
+
+/**
+ * Each Find page's last search (5zorro 2026-09-26), keyed by doctype, in userData like the other
+ * prefs. Not the page's own localStorage: that was not reliably on disk when the app closed, so
+ * the search could be lost across a restart. Always re-checked against the registry.
+ */
+function findSearchesPath() {
+  return path.join(app.getPath("userData"), "find-doc-searches.json");
+}
+/** @type {Record<string, unknown>|null} */
+let findSearches = null;
+function readFindSearches() {
+  if (findSearches) return findSearches;
+  try {
+    const raw = JSON.parse(fs.readFileSync(findSearchesPath(), "utf8"));
+    findSearches = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    findSearches = {};
+  }
+  return findSearches;
+}
+ipcMain.handle("find-doc-load-search", (_e, doctypeKey) => {
+  const skin = findSkinFor(String(doctypeKey || ""));
+  if (!skin) return null;
+  return findSavedSearch(skin.doctypeKey, readFindSearches()[skin.doctypeKey]);
+});
+ipcMain.on("find-doc-save-search", (_e, doctypeKey, search) => {
+  const skin = findSkinFor(String(doctypeKey || ""));
+  if (!skin) return;
+  const all = readFindSearches();
+  all[skin.doctypeKey] = findSavedSearch(skin.doctypeKey, search);
+  try {
+    fs.writeFileSync(findSearchesPath(), JSON.stringify(all));
+  } catch {
+    /* ignore — the search is simply not remembered */
+  }
 });
 
 ipcMain.handle("find-doc-peek", async (_e, doctypeKey, name) => {

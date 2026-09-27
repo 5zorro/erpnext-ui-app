@@ -96,6 +96,14 @@
     .status.open { background: #fef3c7; color: #92400e; }
     .status.draft { background: #f1f5f9; color: #64748b; font-style: italic; }
     .empty { text-align: center; color: #94a3b8; font-size: 13px; padding: 40px 0; }
+    /* Column headings sort the whole list on the server (click again to flip). */
+    th[data-sort] { cursor: pointer; user-select: none; }
+    th[data-sort]:hover { color: #1f2d3d; }
+    th.sorted { color: #1f2d3d; }
+    .summary-row { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; }
+    .summary-row .summary { margin: 0; }
+    .linkish { border: 0; background: none; padding: 0; font-size: 12px; color: var(--role-accent); cursor: pointer; text-decoration: underline; }
+    .more-row { text-align: center; padding: 6px 0 12px; }
 
     /* The peek drawer — read-only preview, rises from the bottom, Esc closes. */
     .peek {
@@ -143,8 +151,15 @@
 
   <section class="results" id="results-scroll">
     <div class="results-inner">
-      <p class="summary" id="summary"></p>
+      <div class="summary-row">
+        <p class="summary" id="summary"></p>
+        <button type="button" class="linkish" id="btn-clear" data-testid="find-doc-clear" hidden
+          title="Empty the boxes, back to every status and the newest-first order">Clear search</button>
+      </div>
       <div id="results"></div>
+      <div class="more-row" id="more-row" hidden>
+        <button type="button" class="btn" id="btn-more" data-testid="find-doc-more">Show more</button>
+      </div>
     </div>
   </section>
 
@@ -168,7 +183,14 @@
       focusFor,
       findVanillaListRoute,
     } from "../src/find-skin-registry.js";
-    import { groupRowsByParty, findPeekLines, FIND_LIST_LIMIT } from "../src/find-skin-query.js";
+    import {
+      groupRowsByParty,
+      findPeekLines,
+      findSortFor,
+      findNextSort,
+      findSavedSearch,
+      FIND_LIST_LIMIT,
+    } from "../src/find-skin-query.js";
 
     const api = window.erpFindDoc || null;
     const q = new URLSearchParams(location.search);
@@ -185,7 +207,25 @@
       more: false,
       loading: false,
       error: "",
+      sort: findSortFor(doctypeKey, null),
     };
+
+    // The last search, per Find page (5zorro 2026-09-26), kept by main in userData — the page's
+    // own localStorage was not reliably on disk when the app closed.
+    async function loadSaved() {
+      const raw = api && api.loadSearch ? await api.loadSearch(doctypeKey).catch(() => null) : null;
+      return findSavedSearch(doctypeKey, raw);
+    }
+    function saveSearch() {
+      if (api && api.saveSearch) {
+        api.saveSearch(doctypeKey, { values: state.values, status: state.status, direction: state.direction, sort: state.sort });
+      }
+    }
+    const searchIsDefault = () =>
+      !state.status &&
+      !Object.values(state.values).some((v) => String(v || "").trim()) &&
+      state.sort.field === "creation" &&
+      state.sort.dir === "desc";
     // Only the newest answer paints: typing fires a query per pause, and a slow early one must
     // not overwrite a later one.
     let querySeq = 0;
@@ -278,19 +318,33 @@
       queryTimer = setTimeout(runQuery, 250);
     }
 
-    /** Ask ERPNext (over HTTP, via main) for the rows these searches match. */
-    async function runQuery() {
+    /**
+     * Ask ERPNext (over HTTP, via main) for the rows these searches match. `append` fetches the
+     * next page after the rows already shown, in the same order.
+     */
+    async function runQuery(opts = {}) {
       clearTimeout(queryTimer);
+      const append = !!opts.append;
       const seq = ++querySeq;
       state.loading = true;
+      if (!append) saveSearch();
       paintSummary();
       const res = api && api.list
-        ? await api.list(doctypeKey, { values: state.values, status: state.status, direction: state.direction }).catch((e) => ({ ok: false, reason: String(e) }))
+        ? await api
+            .list(doctypeKey, {
+              values: state.values,
+              status: state.status,
+              direction: state.direction,
+              sort: state.sort,
+              start: append ? state.rows.length : 0,
+            })
+            .catch((e) => ({ ok: false, reason: String(e) }))
         : { ok: false, reason: "Shell bridge unavailable." };
       if (seq !== querySeq) return;
       state.loading = false;
       state.error = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
-      state.rows = res && res.ok ? res.rows : [];
+      const got = res && res.ok ? res.rows : [];
+      state.rows = append && !state.error ? [...state.rows, ...got] : got;
       state.more = !!(res && res.more);
       paintResults();
     }
@@ -302,8 +356,13 @@
       if (!rows.length) { el.textContent = ""; return; }
       const groups = groupRowsByParty(rows);
       const party = findPartyLabel(skin, state.direction).toLowerCase();
-      const count = state.more ? `Newest ${FIND_LIST_LIMIT}` : `${rows.length}`;
-      el.textContent = `${count} ${rows.length === 1 ? "document" : "documents"} across ${groups.length} ${party}${groups.length === 1 ? "" : "s"}${state.more ? " — type to narrow" : ""} · click one to peek`;
+      const sortCol = skin.columns.find((c) => c.field === state.sort.field);
+      const order =
+        state.sort.field === "creation"
+          ? state.sort.dir === "desc" ? "newest first" : "oldest first"
+          : `by ${sortCol ? sortCol.label.toLowerCase() : "number"} (${state.sort.dir === "asc" ? "low → high" : "high → low"})`;
+      const count = state.more ? `First ${rows.length}` : `${rows.length}`;
+      el.textContent = `${count} ${rows.length === 1 ? "document" : "documents"} across ${groups.length} ${party}${groups.length === 1 ? "" : "s"}, ${order}${state.more ? " — more below" : ""} · click one to peek`;
     }
 
     function paintResults() {
@@ -311,6 +370,9 @@
       const groups = groupRowsByParty(rows);
       paintSummary();
       const host = $("results");
+      $("btn-clear").hidden = searchIsDefault();
+      $("more-row").hidden = !(state.more && !state.error);
+      $("btn-more").textContent = `Show ${FIND_LIST_LIMIT} more`;
       if (state.error) {
         host.innerHTML = `<div class="empty" data-testid="find-doc-error">Could not read the list from ERPNext: ${esc(state.error)}</div>`;
         return;
@@ -326,11 +388,25 @@
         const open = oc ? g.rows.reduce((a, r) => a + Number(r[oc.field] || 0), 0) : null;
         const head = `<div class="card-head"><h2>${esc(g.party)}</h2>
           <span class="meta">${g.rows.length} · <b>${esc(money(total))}</b>${open != null ? ` · ${esc(oc.label.toLowerCase())} <b>${esc(money(open))}</b>` : ""}</span></div>`;
-        const ths = `<th>No.</th>${skin.columns.filter((c) => c.field !== "name").map((c) => `<th class="${c.kind === "money" || c.kind === "percent" ? "num" : ""}">${esc(c.label)}</th>`).join("")}`;
+        const arrow = (field) => (state.sort.field === field ? (state.sort.dir === "asc" ? " ▲" : " ▼") : "");
+        const th = (field, label, num) =>
+          `<th data-sort="${esc(field)}" class="${num ? "num" : ""}${state.sort.field === field ? " sorted" : ""}" title="Sort every match by ${esc(label.toLowerCase())}">${esc(label)}${arrow(field)}</th>`;
+        const ths = th("name", "No.", false) + skin.columns
+          .filter((c) => c.field !== "name")
+          .map((c) => th(c.field, c.label, c.kind === "money" || c.kind === "percent"))
+          .join("");
         const trs = g.rows.map((r) => `<tr class="row${state.selected === r.name ? " selected" : ""}" tabindex="0" data-name="${esc(r.name)}">
             <td class="name">${esc(r.name)}</td>${skin.columns.filter((c) => c.field !== "name").map((c) => cell(c, r)).join("")}</tr>`).join("");
         return `<div class="card">${head}<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`;
       }).join("");
+      host.querySelectorAll("th[data-sort]").forEach((thEl) => {
+        thEl.addEventListener("click", () => {
+          state.sort = findNextSort(doctypeKey, state.sort, thEl.dataset.sort);
+          state.selected = "";
+          $("peek").hidden = true;
+          runQuery();
+        });
+      });
       host.querySelectorAll("tr.row").forEach((tr) => {
         const pick = () => peek(rows.find((r) => r.name === tr.dataset.name));
         tr.addEventListener("click", pick);
@@ -388,11 +464,33 @@
     if (!skin) {
       document.body.innerHTML = `<p class="empty">No Find page for “${esc(doctypeKey)}”.</p>`;
     } else {
-      for (const s of skin.searches) {
-        if (prefill[s.field] != null && String(prefill[s.field]).trim()) state.values[s.field] = String(prefill[s.field]).trim();
+      // A Find button hands over what it knows (a vendor, a ref no.) — that wins, and the page
+      // starts from it alone. Otherwise the page picks up where the clerk left it.
+      const handed = skin.searches.some((s) => String(prefill[s.field] ?? "").trim());
+      if (handed) {
+        for (const s of skin.searches) {
+          const v = String(prefill[s.field] ?? "").trim();
+          if (v) state.values[s.field] = v;
+        }
+      } else {
+        const saved = await loadSaved();
+        state.values = { ...saved.values };
+        state.status = saved.status;
+        state.sort = saved.sort;
+        // Pay / Receive is not restored here: main hands over the app-wide remembered direction
+        // (payment-direction-prefs.js), which the Home tiles set too.
       }
       paintAll();
       runQuery();
+      $("btn-more").onclick = () => runQuery({ append: true });
+      $("btn-clear").onclick = () => {
+        state.values = {};
+        state.status = "";
+        state.sort = findSortFor(doctypeKey, null);
+        state.selected = "";
+        paintAll();
+        runQuery();
+      };
       const focusId = focusFor(skin, { via: q.get("via") === "find-button" ? "find-button" : "browse", prefill });
       const box = document.querySelector(`.box input[data-id="${focusId}"]`);
       if (box) { box.focus(); box.select(); }

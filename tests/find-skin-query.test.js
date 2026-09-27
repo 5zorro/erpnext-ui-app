@@ -120,3 +120,51 @@ describe("findPeekLines", () => {
     assert.deepEqual(findPeekLines("purchase-order", null).lines, []);
   });
 });
+
+describe("sorting, paging and the remembered search (5zorro 2026-09-26)", async () => {
+  const q = await import("../src/find-skin-query.js");
+
+  it("sorts only by fields the page shows (it becomes SQL ORDER BY); anything else is Vanilla's order", () => {
+    assert.deepEqual(q.findSortFor("purchase-invoice", { field: "grand_total", dir: "asc" }), { field: "grand_total", dir: "asc" });
+    assert.deepEqual(q.findSortFor("purchase-invoice", { field: "name", dir: "desc" }), { field: "name", dir: "desc" });
+    assert.deepEqual(q.findSortFor("purchase-invoice", { field: "owner; drop", dir: "asc" }), { field: "creation", dir: "desc" });
+    assert.deepEqual(q.findSortFor("purchase-invoice", null), { field: "creation", dir: "desc" });
+    assert.equal(q.findListQuery("purchase-invoice", { sort: { field: "due_date", dir: "asc" } }).orderBy, "due_date asc");
+  });
+
+  it("a heading click flips the same column; a new column starts in its natural order", () => {
+    const start = { field: "creation", dir: "desc" };
+    assert.deepEqual(q.findNextSort("purchase-invoice", start, "grand_total"), { field: "grand_total", dir: "desc" });
+    assert.deepEqual(q.findNextSort("purchase-invoice", start, "bill_no"), { field: "bill_no", dir: "asc" });
+    assert.deepEqual(
+      q.findNextSort("purchase-invoice", { field: "bill_no", dir: "asc" }, "bill_no"),
+      { field: "bill_no", dir: "desc" },
+    );
+  });
+
+  it("the next page starts after the rows already shown", () => {
+    assert.equal(q.findListQuery("sales-order").start, 0);
+    assert.equal(q.findListQuery("sales-order", { start: 200 }).start, 200);
+    assert.equal(q.findListQuery("sales-order", { start: -5 }).start, 0);
+    const url = new URL(buildFrappeResourceListUrl("http://erp", "Sales Order", { start: 200, limit: 201 }));
+    assert.equal(url.searchParams.get("limit_start"), "200");
+  });
+
+  it("a remembered search is re-checked against the registry", () => {
+    const saved = q.findSavedSearch("purchase-invoice", {
+      values: { supplier: "SAMPLE Vendor 01", owner: "x" },
+      status: "Unpaid",
+      sort: { field: "grand_total", dir: "asc" },
+    });
+    assert.deepEqual(saved.values, { supplier: "SAMPLE Vendor 01" });
+    assert.equal(saved.status, "Unpaid");
+    assert.deepEqual(saved.sort, { field: "grand_total", dir: "asc" });
+    assert.deepEqual(q.findSavedSearch("purchase-invoice", { status: "Lost" }).status, "");
+    assert.deepEqual(q.findSavedSearch("purchase-invoice", "garbage"), {
+      values: {},
+      status: "",
+      direction: "Pay",
+      sort: { field: "creation", dir: "desc" },
+    });
+  });
+});
