@@ -10,7 +10,8 @@
  * AP and AR tile washes align with `DOC_WASH_BY_PROFILE` / OI-125 (`src/doc-wash.js`).
  *
  * @typedef {"request"|"order"|"fulfill"|"invoice"|"payment"} DocWashRole
- * @typedef {{ id: string, label: string, route: string, disabled?: boolean, washRole?: DocWashRole }} HomeTile
+ * @typedef {{ id: string, label: string, route: string, disabled?: boolean, washRole?: DocWashRole, desk?: "ap"|"ar" }} HomeTile
+ * `desk` puts the tile under the global desk pattern (doc-wash.js), as its Doc skin is.
  * @typedef {{ id: string, title: string, tiles: HomeTile[] }} HomeGroup
  */
 
@@ -50,11 +51,11 @@ export const HOME_GROUPS = {
       id: "vendors",
       title: "Vendors",
       tiles: [
-        { id: "bill-new", label: "Enter Bills", route: "/app/purchase-invoice/new", washRole: "invoice" },
-        { id: "pay-bills", label: "Pay Bills", route: "/app/payment-entry/new", washRole: "payment" },
-        { id: "po-new", label: "Purchase Orders", route: "/app/purchase-order/new", washRole: "order" },
-        { id: "mr-new", label: "Material Request", route: "/app/material-request/new", washRole: "request" },
-        { id: "receipt-new", label: "Receive Inventory", route: "/app/purchase-receipt/new", washRole: "fulfill" },
+        { id: "bill-new", label: "Enter Bills", route: "/app/purchase-invoice/new", washRole: "invoice", desk: "ap" },
+        { id: "pay-bills", label: "Pay Bills", route: "/app/payment-entry/new", washRole: "payment", desk: "ap" },
+        { id: "po-new", label: "Purchase Orders", route: "/app/purchase-order/new", washRole: "order", desk: "ap" },
+        { id: "mr-new", label: "Material Request", route: "/app/material-request/new", washRole: "request", desk: "ap" },
+        { id: "receipt-new", label: "Receive Inventory", route: "/app/purchase-receipt/new", washRole: "fulfill", desk: "ap" },
         { id: "vendors", label: "Vendor Center", route: "/app/supplier" },
       ],
     },
@@ -62,20 +63,11 @@ export const HOME_GROUPS = {
       id: "customers",
       title: "Customers",
       tiles: [
-        { id: "estimate-new", label: "Estimates", route: "/app/quotation/new", washRole: "request" },
-        { id: "so-new", label: "Sales Orders", route: "/app/sales-order/new", washRole: "order" },
-        { id: "invoice-new", label: "Create Invoices", route: "/app/sales-invoice/new", washRole: "invoice" },
-        { id: "receive-pay", label: "Receive Payments", route: "/app/payment-entry/new", washRole: "payment" },
+        { id: "estimate-new", label: "Estimates", route: "/app/quotation/new", washRole: "request", desk: "ar" },
+        { id: "so-new", label: "Sales Orders", route: "/app/sales-order/new", washRole: "order", desk: "ar" },
+        { id: "invoice-new", label: "Create Invoices", route: "/app/sales-invoice/new", washRole: "invoice", desk: "ar" },
+        { id: "receive-pay", label: "Receive Payments", route: "/app/payment-entry/new", washRole: "payment", desk: "ar" },
         { id: "customers", label: "Customer Center", route: "/app/customer" },
-      ],
-    },
-    {
-      id: "employees",
-      title: "Employees",
-      tiles: [
-        { id: "employees", label: "Employees", route: "/app/employee" },
-        { id: "timesheet-new", label: "Enter Time", route: "/app/timesheet/new" },
-        { id: "payroll", label: "Payroll", route: "", disabled: true },
       ],
     },
   ],
@@ -106,6 +98,17 @@ export const HOME_GROUPS = {
           label: "Balance Sheet",
           route: "/app/query-report/Balance%20Sheet",
         },
+      ],
+    },
+    // Moved from the left column 2026-09-26: the Customers swimlane made the left column too
+    // tall for a maximized 1080p window (tests/surface-width.test.js).
+    {
+      id: "employees",
+      title: "Employees",
+      tiles: [
+        { id: "employees", label: "Employees", route: "/app/employee" },
+        { id: "timesheet-new", label: "Enter Time", route: "/app/timesheet/new" },
+        { id: "payroll", label: "Payroll", route: "", disabled: true },
       ],
     },
     {
@@ -159,6 +162,9 @@ export function validateHomeTiles(input = HOME_GROUPS) {
     if (t.disabled) continue;
     if (t.washRole != null && !HOME_TILE_WASH_ROLES.has(t.washRole)) {
       errors.push(`tile ${t.id || "?"}: invalid washRole ${t.washRole}`);
+    }
+    if (t.desk != null && t.desk !== "ap" && t.desk !== "ar") {
+      errors.push(`tile ${t.id || "?"}: invalid desk ${t.desk}`);
     }
     if (typeof t.route !== "string" || !t.route.startsWith("/")) {
       errors.push(`tile ${t.id || "?"}: route must start with /`);

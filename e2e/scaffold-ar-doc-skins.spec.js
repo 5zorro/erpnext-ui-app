@@ -6,8 +6,9 @@
  * Needs ERP up, a logged-in session, and the SAMPLE customers (SAMPLE Customer 01 has open
  * invoices; SKU005 has a current Standard Selling price).
  *
- * ⚠ Runs against the real userData folder: it leaves the payment direction on Receive. Back up
- * `payment-direction-prefs.json` / `lens-prefs.json` first (CLAUDE.md Layer-3 smoke).
+ * ⚠ Runs against the real userData folder: it leaves the payment direction on Receive and writes
+ * `doc-wash-prefs.json` (put back to the A/R default). Back up `payment-direction-prefs.json` /
+ * `lens-prefs.json` / `doc-wash-prefs.json` first (CLAUDE.md Layer-3 smoke).
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
@@ -157,5 +158,21 @@ test.describe("scaffold: A/R Doc skins", () => {
       .toBeGreaterThan(0);
     expect(await inDoc(app, `document.getElementById("doc-lines-title").textContent`)).toBe("Open invoices");
     expect(await inDoc(app, `document.getElementById("btn-add-line").hidden`)).toBe(true);
+  });
+
+  test("Home's desk-hatch toggle repaints an open Doc form at once", async () => {
+    test.setTimeout(120_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openFromHomeTile(app, "so-new", "sales-order");
+    expect(await inDoc(app, `document.documentElement.dataset.docDesk`)).toBe("ar");
+    await e2eCall(app, "showLauncher");
+    const home = (js) => e2eCall(app, "execInView", "home", js);
+    await home(`document.querySelector('[data-testid="wash-ap"]').click(); true`);
+    await expect.poll(async () => inDoc(app, `document.documentElement.dataset.pattern`)).toBe("ap");
+    expect(await home(`document.querySelector('[data-testid="wash-ap"]').getAttribute("aria-pressed")`)).toBe("true");
+    // Back to the default so the next run (and the clerk) start where they were.
+    await home(`document.querySelector('[data-testid="wash-ar"]').click(); true`);
+    await expect.poll(async () => inDoc(app, `document.documentElement.dataset.pattern`)).toBe("ar");
   });
 });
