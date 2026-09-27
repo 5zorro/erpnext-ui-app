@@ -13,6 +13,8 @@
  *   purchase-invoice form → Bill entry
  *   purchase-order form → Purchase Order entry
  *   purchase-receipt form → Item Receipt entry
+ *   quotation / sales-order / sales-invoice form → Estimate / Sales Order / Invoice entry
+ *   a new payment-entry, direction Receive → Receive Payment entry (a doc-form layout)
  *   a list with a find-skin-registry.js row → its Find page (Find Bills, …)
  *   most other pages → none
  */
@@ -94,6 +96,28 @@ export const DOC_SKIN_INDEX = [
     label: "Item Receipt entry",
     match: { doctypes: ["purchase-receipt"], needsRecord: true },
     layoutKey: "item-receipt",
+    ready: true,
+  },
+  // A/R entry forms (plan 2026-09-26, stage A1) — doc-form.html layouts like PO and IR.
+  {
+    id: "estimate",
+    label: "Estimate entry",
+    match: { doctypes: ["quotation"], needsRecord: true },
+    layoutKey: "estimate",
+    ready: true,
+  },
+  {
+    id: "sales-order",
+    label: "Sales Order entry",
+    match: { doctypes: ["sales-order"], needsRecord: true },
+    layoutKey: "sales-order",
+    ready: true,
+  },
+  {
+    id: "invoice",
+    label: "Invoice entry",
+    match: { doctypes: ["sales-invoice"], needsRecord: true },
+    layoutKey: "invoice",
     ready: true,
   },
   {
@@ -180,19 +204,21 @@ export function lookupDocSkin(ctx = {}, index = DOC_SKIN_INDEX) {
   return null;
 }
 
+/** doc-skin-registry.js layout key of the A/R Receive Payment form. */
+export const RECEIVE_PAYMENT_LAYOUT_KEY = "receive-payment";
+
 /**
  * Payment Entry's `/new` route carries no `payment_type`, so which direction (AP "Pay" vs AR
  * "Receive") is ambiguous from the route alone -- resolved by payment-direction-prefs.js and
- * passed in as `ctx.paymentDirection`. AR has no Doc skin yet, so "Receive" stays in Vanilla
- * (no tab) rather than showing an AP check. Existing records are unaffected: the real
- * `payment_type` is truth there, not this pref (see payment-doc.html, which reads the actual
- * document after opening).
- * @param {DocSkinIndexEntry} entry
+ * passed in as `ctx.paymentDirection`. "Pay" opens the Pay Bills dashboard; "Receive" opens the
+ * Receive Payment form (plan 2026-09-26, stage A1 — it used to stay in Vanilla with no tab).
+ * Existing records are unaffected: the real `payment_type` is truth there, not this pref
+ * (payment-doc.html reads the document and forwards a Receive to the Receive Payment form).
  * @param {boolean} isNew
- * @param {Parameters<typeof classifySurface>[0]} ctx
+ * @param {Parameters<typeof classifySurface>[0] & { paymentDirection?: string }} ctx
  */
-function isSuppressedPaymentEntryReceive(entry, isNew, ctx) {
-  return entry.id === "payment-entry" && isNew && ctx.paymentDirection === "Receive";
+function isNewPaymentEntryReceive(isNew, ctx) {
+  return isNew && ctx.paymentDirection === "Receive";
 }
 
 /**
@@ -201,12 +227,7 @@ function isSuppressedPaymentEntryReceive(entry, isNew, ctx) {
  */
 export function hasDocSkin(ctx = {}) {
   const entry = lookupDocSkin(ctx);
-  if (!entry || !entry.ready) return false;
-  if (entry.id === "payment-entry") {
-    const rec = ctx.record != null && ctx.record !== "" ? String(ctx.record) : recordFromRoute(ctx.route);
-    if (isSuppressedPaymentEntryReceive(entry, isNewDocRecord(rec), ctx)) return false;
-  }
-  return true;
+  return !!(entry && entry.ready);
 }
 
 /**
@@ -243,7 +264,15 @@ export function resolveDocSkinTarget(ctx = {}) {
 
   if (entry.id === "payment-entry") {
     const isNew = isNewDocRecord(rec);
-    if (isSuppressedPaymentEntryReceive(entry, isNew, ctx)) return null;
+    if (isNewPaymentEntryReceive(isNew, ctx)) {
+      return {
+        kind: "doc-form",
+        doctype: dt,
+        record: rec,
+        route: PAYMENT_ENTRY_NEW_ROUTE,
+        layoutKey: RECEIVE_PAYMENT_LAYOUT_KEY,
+      };
+    }
     if (isNew) return { kind: "pay-outstanding" };
     return { kind: "payment-doc", doctype: dt, record: rec, route: deriveDocFormRoute(dt, rec, ctx) };
   }
@@ -327,16 +356,34 @@ export function docSkinRouteMatrix() {
       expectKind: "find-doc",
     },
     {
-      name: "Sales Order list → Find page (no Doc form yet)",
+      name: "Sales Order list → Find page",
       ctx: { showingHome: false, route: "/app/sales-order" },
       expectTab: true,
       expectKind: "find-doc",
     },
     {
-      name: "Sales Order form (no Doc form skin yet)",
+      name: "Sales Order form (A/R, stage A1)",
       ctx: { showingHome: false, route: "/app/sales-order/SAL-ORD-2026-00001" },
-      expectTab: false,
-      expectKind: null,
+      expectTab: true,
+      expectKind: "doc-form",
+    },
+    {
+      name: "Estimate (Quotation) form",
+      ctx: { showingHome: false, route: "/app/quotation/new" },
+      expectTab: true,
+      expectKind: "doc-form",
+    },
+    {
+      name: "Invoice (Sales Invoice) form",
+      ctx: { showingHome: false, route: "/app/sales-invoice/ACC-SINV-2026-00001" },
+      expectTab: true,
+      expectKind: "doc-form",
+    },
+    {
+      name: "New payment, direction Receive → Receive Payment form",
+      ctx: { showingHome: false, route: "/app/payment-entry/new", paymentDirection: "Receive" },
+      expectTab: true,
+      expectKind: "doc-form",
     },
     {
       name: "Item",

@@ -7,7 +7,7 @@
  *
  * Routes use `/app/…` (Frappe Desk SPA). Exact `/desk` is allowed for Vanilla Desk root.
  *
- * AP tile washes align with `DOC_WASH_BY_PROFILE` / OI-125 (`src/doc-wash.js`).
+ * AP and AR tile washes align with `DOC_WASH_BY_PROFILE` / OI-125 (`src/doc-wash.js`).
  *
  * @typedef {"request"|"order"|"fulfill"|"invoice"|"payment"} DocWashRole
  * @typedef {{ id: string, label: string, route: string, disabled?: boolean, washRole?: DocWashRole }} HomeTile
@@ -24,6 +24,14 @@ export const AP_HOME_TILE_WASH = Object.freeze({
   "receipt-new": "fulfill",
   "bill-new": "invoice",
   "pay-bills": "payment",
+});
+
+/** AR customer-column tiles → doc wash role (the A/R Doc skins, plan 2026-09-26 stage A1). */
+export const AR_HOME_TILE_WASH = Object.freeze({
+  "estimate-new": "request",
+  "so-new": "order",
+  "invoice-new": "invoice",
+  "receive-pay": "payment",
 });
 
 /**
@@ -54,10 +62,10 @@ export const HOME_GROUPS = {
       id: "customers",
       title: "Customers",
       tiles: [
-        { id: "estimate-new", label: "Estimates", route: "/app/quotation/new" },
-        { id: "so-new", label: "Sales Orders", route: "/app/sales-order/new" },
-        { id: "invoice-new", label: "Create Invoices", route: "/app/sales-invoice/new" },
-        { id: "receive-pay", label: "Receive Payments", route: "/app/payment-entry/new" },
+        { id: "estimate-new", label: "Estimates", route: "/app/quotation/new", washRole: "request" },
+        { id: "so-new", label: "Sales Orders", route: "/app/sales-order/new", washRole: "order" },
+        { id: "invoice-new", label: "Create Invoices", route: "/app/sales-invoice/new", washRole: "invoice" },
+        { id: "receive-pay", label: "Receive Payments", route: "/app/payment-entry/new", washRole: "payment" },
         { id: "customers", label: "Customer Center", route: "/app/customer" },
       ],
     },

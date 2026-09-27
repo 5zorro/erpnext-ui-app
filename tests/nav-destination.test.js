@@ -28,11 +28,21 @@ describe("resolveOpenTarget — forms answer as the doors did before 2026-09-26"
     assert.equal(s.lens, "simplified");
   });
 
-  it("a new payment opens Pay Bills; a Receive one stays Vanilla (AR not built)", () => {
+  it("a new payment opens Pay Bills; a Receive one opens the Receive Payment form (A1)", () => {
     const pay = open("/app/payment-entry/new", {}, { paymentDirection: "Pay" });
     assert.equal(pay.surface, "pay-outstanding");
     assert.equal(pay.route, "/app/payment-entry/new");
-    assert.equal(open("/app/payment-entry/new", {}, { paymentDirection: "Receive" }).surface, "erp");
+    const recv = open("/app/payment-entry/new", {}, { paymentDirection: "Receive" });
+    assert.equal(recv.surface, "doc-form");
+    assert.equal(recv.route, "/app/payment-entry/new");
+    assert.equal(recv.target && recv.target.kind === "doc-form" && recv.target.layoutKey, "receive-payment");
+  });
+
+  it("the A/R entry forms open their Doc skins by default (A1)", () => {
+    for (const dt of ["quotation", "sales-order", "sales-invoice"]) {
+      assert.equal(open(`/app/${dt}/new`).surface, "doc-form", dt);
+    }
+    assert.equal(open("/app/sales-order/new", { "sales-order": "vanilla" }).surface, "erp");
   });
 
   it("an existing payment opens the check page", () => {
@@ -42,7 +52,7 @@ describe("resolveOpenTarget — forms answer as the doors did before 2026-09-26"
   });
 
   it("a record with no skin is Vanilla whatever the lens memory says", () => {
-    const t = open("/app/sales-order/SAL-ORD-2026-00001", { "sales-order": "doc" });
+    const t = open("/app/journal-entry/ACC-JV-2026-00001", { "journal-entry": "doc" });
     assert.equal(t.surface, "erp");
     assert.equal(t.lens, "vanilla");
     assert.equal(open("/app/supplier/SAMPLE%20Vendor%2001").surface, "erp");
@@ -109,7 +119,7 @@ describe("pageHasOwnDocSkin (toolbar Doc tab)", () => {
     const pe = (record, paymentDirection) =>
       pageHasOwnDocSkin({ route: `/app/payment-entry/${record}`, doctype: "payment-entry", record, paymentDirection });
     assert.equal(pe("new", "Pay"), true);
-    assert.equal(pe("new", "Receive"), false);
+    assert.equal(pe("new", "Receive"), true);
     assert.equal(pe("ACC-PAY-2026-00001", "Receive"), true);
   });
 });

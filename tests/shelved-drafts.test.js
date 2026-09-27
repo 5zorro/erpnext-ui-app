@@ -32,7 +32,14 @@ describe("draftableDoctypeKeys completeness", () => {
     for (const dt of fromIndex) {
       assert.ok(keys.includes(dt), `missing draftable ${dt}`);
     }
-    assert.deepEqual(keys, ["purchase-invoice", "purchase-order", "purchase-receipt"]);
+    assert.deepEqual(keys, [
+      "purchase-invoice",
+      "purchase-order",
+      "purchase-receipt",
+      "quotation",
+      "sales-invoice",
+      "sales-order",
+    ]);
   });
 });
 

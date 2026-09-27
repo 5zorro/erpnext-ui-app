@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld("erpPaymentDoc", {
   voidAndAmend: (doctype, name) =>
     ipcRenderer.invoke("doc-void-and-amend", doctype || "", name || ""),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
+  // A/R stage A1: a Receive payment is shown by the Receive Payment Doc form, not the check.
+  openReceivePayment: (name) => ipcRenderer.send("payment-doc-open-receive", name || ""),
 });

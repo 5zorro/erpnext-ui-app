@@ -4,6 +4,7 @@ import {
   HOME_GROUPS,
   HOME_TILES,
   AP_HOME_TILE_WASH,
+  AR_HOME_TILE_WASH,
   SHELL_ROUTE_TILE_IDS,
   flattenHomeTiles,
   validateHomeTiles,
@@ -45,6 +46,17 @@ describe("HOME_GROUPS", () => {
     assert.deepEqual(AP_HOME_TILE_WASH["bill-new"], DOC_WASH_BY_PROFILE.bill.role);
     assert.equal(AP_HOME_TILE_WASH["pay-bills"], "payment");
     for (const [tileId, role] of Object.entries(AP_HOME_TILE_WASH)) {
+      const tile = flattenHomeTiles().find((t) => t.id === tileId);
+      assert.equal(tile?.washRole, role, tileId);
+    }
+  });
+
+  it("AR customer tiles carry the A/R Doc skins' wash roles (stage A1)", () => {
+    assert.equal(AR_HOME_TILE_WASH["estimate-new"], DOC_WASH_BY_PROFILE.estimate.role);
+    assert.equal(AR_HOME_TILE_WASH["so-new"], DOC_WASH_BY_PROFILE["sales-order"].role);
+    assert.equal(AR_HOME_TILE_WASH["invoice-new"], DOC_WASH_BY_PROFILE.invoice.role);
+    assert.equal(AR_HOME_TILE_WASH["receive-pay"], DOC_WASH_BY_PROFILE["receive-payment"].role);
+    for (const [tileId, role] of Object.entries(AR_HOME_TILE_WASH)) {
       const tile = flattenHomeTiles().find((t) => t.id === tileId);
       assert.equal(tile?.washRole, role, tileId);
     }

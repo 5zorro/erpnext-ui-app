@@ -68,6 +68,7 @@ import {
   docSkinTargetRoute,
   DOC_FORM_DOCTYPES,
   hasSimplifiedLens,
+  paymentEntryRoute,
 } from "../src/lens-context.js";
 import { buildOutstandingBillRows } from "../src/outstanding-bills.js";
 import {
@@ -190,12 +191,10 @@ import {
   LAST_ITEM_ROW_TOAST,
 } from "../src/bill-item-guard.js";
 import {
-  isEditablePoItemField,
   resolvePoStampDate,
   poRowsNeedingScheduleStamp,
   shouldStampPoDateExpectedOnSave,
 } from "../src/po-map.js";
-import { isEditableReceiptItemField } from "../src/receipt-map.js";
 import { normalizeSearchLinkResults, PAYMENT_TERMS_TEMPLATE_NEW_ROUTE } from "../src/link-search.js";
 import {
   annotateAccountLinkOptions,
@@ -241,7 +240,9 @@ import { buildReceiptSourceGroups } from "../src/receipt-source.js";
 import {
   DOC_SKIN_PROFILES,
   docFormUiPayload,
+  docFormMapFor,
   profileByDoctypeKey,
+  profileByLayoutKey,
 } from "../src/doc-skin-registry.js";
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
@@ -303,7 +304,7 @@ const ERP_BRIDGE_PAGE_JS = fs.readFileSync(
 );
 
 /** @typedef {"home"|"erp"|"doc"|"pay-outstanding"|"payment-doc"|"find-doc"} SurfaceMode — rows of src/shell-surfaces.js */
-/** @typedef {"po"|"receipt"|"bill"} DocFormSkinId */
+/** @typedef {"po"|"receipt"|"bill"|"estimate"|"sales-order"|"invoice"|"receive-payment"} DocFormSkinId */
 
 let win = null;
 let chrome = null;
@@ -1610,7 +1611,7 @@ function openShellDocSurface(route) {
  */
 function openResolvedTarget(t, opts = {}) {
   if (t.surface === "doc-form") {
-    const profile = profileByDoctypeKey(t.doctype);
+    const profile = docFormProfileForTarget(t);
     return !!profile && openDocSkinProfile(profile, t.route, opts);
   }
   if (t.surface === "pay-outstanding" || t.surface === "payment-doc") {
@@ -1624,6 +1625,16 @@ function openResolvedTarget(t, opts = {}) {
     return showFindDoc(t.doctype, { via: opts.via || "browse", skipDirtyGate: opts.skipDirtyGate });
   }
   return false;
+}
+
+/**
+ * Which doc-form layout a "doc-form" answer means. The layout key wins: Receive Payment shares
+ * Payment Entry with the Pay Bills pages, so its doctype alone names no layout (A/R stage A1).
+ * @param {import("../src/nav-destination.js").OpenTarget} t
+ */
+function docFormProfileForTarget(t) {
+  const layoutKey = t.target && t.target.kind === "doc-form" ? t.target.layoutKey : "";
+  return (layoutKey && profileByLayoutKey(layoutKey)) || profileByDoctypeKey(t.doctype);
 }
 
 /**
@@ -2092,7 +2103,7 @@ function maybeHijackErpToDoc(url) {
   // Only a Doc *form* is ever pulled out of Vanilla. A list stays Vanilla however the clerk got
   // there (plan 2026-09-26 rule 4), and the payment pages have never been hijack targets.
   const t = openTargetFor(url);
-  const profile = t.surface === "doc-form" ? profileByDoctypeKey(t.doctype) : null;
+  const profile = t.surface === "doc-form" ? docFormProfileForTarget(t) : null;
   if (!profile) return false;
   lensHijackLock = true;
   try {
@@ -3496,12 +3507,11 @@ async function gateDirtyThen(doNav) {
   const view = activeFormView();
   const openChannel = "doc-open-nav-gate";
   const cancelChannel = "doc-cancel-nav-gate";
+  const leavingUi = activeDocSkin === "bill" ? null : docFormUiPayload(activeDocSkin);
   const leaving =
     activeDocSkin === "bill"
       ? "leaving this Bill"
-      : activeDocSkin === "po"
-        ? "leaving this Purchase Order"
-        : "leaving this Item Receipt";
+      : (leavingUi && leavingUi.leavingLabel) || "leaving this document";
 
   // SSoT: drive the SAME in-page commit-gate the toolbar uses. Native dialog is only
   // a fallback for when the Doc renderer is gone (destroyed / crashed).
@@ -3803,9 +3813,9 @@ function openPaymentEntryTile(direction) {
   paymentDirectionPrefs = rememberPaymentDirection(paymentDirectionPrefs, dir);
   savePaymentDirectionPrefs();
   // Follow the remembered lens like every other Doc-skinned doctype (nav incident
-  // 2026-09-08T04:33 — this used to hardcode Vanilla). "Receive" is excluded on purpose:
-  // a new Receive has no Doc skin at all (lens-context isSuppressedPaymentEntryReceive),
-  // because pay-outstanding is the Pay decision surface.
+  // 2026-09-08T04:33 — this used to hardcode Vanilla). The direction just recorded decides
+  // which Doc page answers: Pay → the Pay Bills dashboard, Receive → the Receive Payment form
+  // (lens-context resolveDocSkinTarget, A/R stage A1).
   const t = openTargetFor("/app/payment-entry/new");
   navDebug("openPaymentEntryTile", `dir=${dir} → ${t.surface}`);
   if (openResolvedTarget(t)) return;
@@ -4327,7 +4337,17 @@ async function showDocForm(skinId, route, opts = {}) {
       dateExpectedScratch = "";
     }
     if (openingFreshNew && skinId !== "bill") {
-      const fresh = await forceFreshNewDocInErp(profile.doctype);
+      let fresh = await forceFreshNewDocInErp(profile.doctype);
+      // A layout that is one kind of its doctype (Receive Payment) sets that kind on the blank
+      // form first, the way Vanilla's own Payment Type field would be chosen (A/R stage A1).
+      const defaults = (docFormUiPayload(skinId) || {}).newDocDefaults;
+      if (fresh && fresh.ok && Array.isArray(defaults) && defaults.length) {
+        for (const [field, value] of defaults) {
+          const set = await bridgeCall("setHeader", field, value);
+          if (set && set.ok && set.doc) fresh = { ...fresh, doc: set.doc };
+          else navDebug("new-doc-default-failed", `${field}=${value}: ${(set && set.reason) || "?"}`);
+        }
+      }
       if (fresh && fresh.ok && fresh.doc) {
         dirtyState = finishLensApply(
           {
@@ -5865,11 +5885,21 @@ async function setBillItemField(rowIndex, field, value) {
 
 async function addBillItem() {
   dirtyState = markUserEdited(dirtyState);
+  // A/R layouts (stage A1) run the doctype's own "row added" script, as Vanilla's grid does —
+  // that is what copies a Sales Order's header Ship by onto the new line (sales_order.js
+  // items_add). A/P keeps its existing behaviour: this was not dogfooded there.
+  const profile = activeDocProfile();
+  const runRowAdded = !!(profile && profile.desk === "ar");
   const raw = await erpEval(`(async () => {
     try {
       var f = window.cur_frm;
       if (!f) return { ok: false, reason: "No form." };
-      f.add_child("items", {});
+      var added = f.add_child("items", {});
+      if (${runRowAdded} && added && f.script_manager) {
+        try {
+          await f.script_manager.trigger("items_add", added.doctype, added.name);
+        } catch (eAdd) {}
+      }
       f.refresh_field("items");
       await new Promise(function (r) { setTimeout(r, 100); });
       return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
@@ -8782,7 +8812,11 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
       scratch: { dateExpected: dateExpectedScratch },
     };
   }
-  const raw = await bridgeCall("setHeader", field, next);
+  const profile = activeDocProfile();
+  const features = (profile && profile.features) || {};
+  const raw = features.keepTypedPostingDate
+    ? await bridgeCall("setHeader", field, next, { keepTypedPostingDate: true })
+    : await bridgeCall("setHeader", field, next);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     if (field === "supplier" && activeDocSkin === "receipt") {
@@ -8790,6 +8824,21 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
         ...raw,
         openSourcePicker: true,
         supplier: next,
+        scratch: { dateExpected: dateExpectedScratch },
+      };
+    }
+    // Receive Payment (A/R stage A1): a customer means "list what they owe" — ERPNext's own
+    // Get Outstanding Invoices, which also spreads the amount received oldest-first.
+    if (features.fetchOutstandingOnParty && profile && field === profile.partyField && next) {
+      const listed = await bridgeCall("fetchOutstanding");
+      navDebug("receive-fetch-outstanding", listed && listed.ok ? "ok" : (listed && listed.reason) || "failed");
+      if (listed && listed.ok && listed.doc) {
+        dirtyState = { ...dirtyState, doc: listed.doc };
+        return { ...raw, doc: listed.doc, scratch: { dateExpected: dateExpectedScratch } };
+      }
+      return {
+        ...raw,
+        warning: (listed && listed.reason) || "Could not list the customer's open invoices.",
         scratch: { dateExpected: dateExpectedScratch },
       };
     }
@@ -8829,9 +8878,14 @@ ipcMain.handle("doc-set-date-expected", async (_e, value) => {
 });
 
 function isEditableActiveDocItemField(field) {
-  if (activeDocSkin === "po") return isEditablePoItemField(field);
-  if (activeDocSkin === "receipt") return isEditableReceiptItemField(field);
-  return false;
+  const map = docFormMapFor(activeDocSkin);
+  return !!(map && map.isEditableItemField(field));
+}
+
+/** The active layout's line table — `items`, or a Receive Payment's `references`. */
+function activeDocLinesTable() {
+  const ui = activeDocSkin ? docFormUiPayload(activeDocSkin) : null;
+  return (ui && ui.linesTable) || "items";
 }
 
 async function setDocItemField(rowIndex, field, value) {
@@ -8844,12 +8898,9 @@ async function setDocItemField(rowIndex, field, value) {
   const kind = dirtyCompareKindForField(field);
   const next =
     kind === "number" ? (value == null ? "" : String(value)) : normalizeEditableText(value);
-  const prev =
-    dirtyState.doc &&
-    Array.isArray(dirtyState.doc.items) &&
-    dirtyState.doc.items[rowIndex]
-      ? dirtyState.doc.items[rowIndex][field]
-      : undefined;
+  const table = activeDocLinesTable();
+  const rows = dirtyState.doc && Array.isArray(dirtyState.doc[table]) ? dirtyState.doc[table] : [];
+  const prev = rows[rowIndex] ? rows[rowIndex][field] : undefined;
   if (valuesMeaningfullyEqual(prev, next, { kind })) {
     return {
       ok: true,
@@ -8858,7 +8909,10 @@ async function setDocItemField(rowIndex, field, value) {
       scratch: { dateExpected: dateExpectedScratch },
     };
   }
-  const raw = await bridgeCall("setRow", rowIndex, field, next);
+  const raw =
+    table === "items"
+      ? await bridgeCall("setRow", rowIndex, field, next)
+      : await bridgeCall("setRow", rowIndex, field, next, table);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     if (activeDocSkin === "po" && field === "schedule_date") {
@@ -9532,6 +9586,13 @@ ipcMain.on("open-mockup", (_e, name) => {
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
 ipcMain.on("open-payment-entry", (_e, direction) => openPaymentEntryTile(direction));
+// payment-doc.html found a Receive payment: show it in the Receive Payment Doc form (A/R A1).
+ipcMain.on("payment-doc-open-receive", (_e, name) => {
+  const rec = typeof name === "string" ? name.trim() : "";
+  if (!rec || surfaceMode !== "payment-doc" || !/^[\w .\-]+$/.test(rec)) return;
+  navDebug("payment-doc-open-receive", rec);
+  showDocForm("receive-payment", paymentEntryRoute(rec), { skipDirtyGate: true });
+});
 /** "Open this address in the lens the clerk prefers" — shell pages (Find) use this door. */
 ipcMain.on("open-preferred", (_e, route) => {
   const r = typeof route === "string" && route.startsWith("/app/") ? route : "";

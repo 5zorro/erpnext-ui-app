@@ -55,7 +55,7 @@ This tranche is the groundwork under a three-step goal: Doc skins on the "Find" 
 below are what "step 1 / 2 / 3" mean elsewhere in this plan.
 
 1. **A/R Doc skins, "good enough"** — one for each A/R entry page (Estimate, Sales Order, Sales
-   Invoice, Receive Payment), shaped like the existing mockups. Not started.
+   Invoice, Receive Payment), shaped like the existing mockups. Stage A1 below.
 2. **Sample data for one full flow** — Estimate → Sales Order → Purchase Order → Item Receipt →
    Bill → vendor payment → Sales Invoice → customer payment received. 25 customers and 25 vendors,
    with activity per party on a bell curve (a few busy, most light). Not started; `ops/sample-data/`
@@ -200,7 +200,8 @@ doctype either way), Sales Invoices.
 | **F1** | Rules 1–4 for the Find doors; registry; skin-index rows; list lens memory; `find-doc.html` static mockup ×7; three latent bugs | **built 2026-09-26** |
 | **F2** | Every remaining door through `resolveOpenTarget`; one Find implementation; filters in the address; a table of shell pages; the unused `bill` view deleted; the hidden-page guard on all three shell pages | **built 2026-09-26** — see *What F2 changed* |
 | **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | proposed — after sample data (5zorro's step 2) |
-| **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | with each skin |
+| **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | A/R skins have it (the doc-form chrome's Find…, → their Find page mockup); payment pages still owed |
+| **A1** | 5zorro's step 1: A/R Doc skins — Estimate, Sales Order, Invoice, Receive Payment | **built 2026-09-26** — see *Step 1* |
 
 ## Decisions taken 2026-09-26 (5zorro) — do not re-litigate
 
@@ -278,6 +279,80 @@ So these hunks can be told apart from the 09-16 work in the same file:
   it back), because an in-page link click inside ERPNext is an event the shell does not start;
   `lensHijackLock` stays with it.
 
+## Step 1 — A/R Doc skins (stage A1, 5zorro 2026-09-26)
+
+*"A quick set of doc skins for the A/R process (estimate, sales order, invoice, and payment
+receipt)… use a similar architecture"* to the A/P ones, linked into navigation: the Home tiles and
+the toolbar's Document-skin tab.
+
+**How:** each is one more layout of the existing Doc form page (`doc-form.html`), the page Purchase
+Order and Item Receipt already share. That page drives the real ERPNext form hidden behind it, so
+ERPNext's own scripts still fill prices, tax templates, addresses and outstanding invoices — the
+skin only chooses what to show and in what words.
+
+| Doc skin | ERPNext form | Header | Lines | Wash |
+|---|---|---|---|---|
+| **Estimate** | Quotation | Customer, Date, Valid until, Payment terms, Sales tax | Item · Description · Qty · Rate · Amount | request |
+| **Sales Order** | Sales Order | Customer, Date, Ship by (stamps every line's delivery date — ERPNext's own header field does this), Customer PO No., Terms, Sales tax, Ship to | … · Ship by · Amount · Delivered · Billed, plus a progress strip (delivered % / billed % / status) | order |
+| **Invoice** | Sales Invoice | Customer, Date, Due date, Customer PO No., Terms, Sales tax, Bill to | Item · Description · Qty · Rate · Amount · Sales Order | invoice |
+| **Receive Payment** | Payment Entry, *Receive* | Customer, Date, Amount, Method, Check/Ref No., Ref date, Deposit to | The customer's open invoices (ERPNext's own "get outstanding" call, run when the customer is picked) · the **Payment** column is the one editable cell | payment |
+
+- Sales tax is shown, not typed: the tax rows come from the customer's Sales Taxes template, and
+  the skin lists them read-only with the subtotal / tax / total stack. Changing the template is the
+  header field.
+- **The Sales Order will grow.** 5zorro: it is "both a dashboard and a form entry", and will likely
+  end up as involved as the Bill. A1 builds the form plus a small read-only progress strip; the
+  dashboard half (linked POs, receipts, what is left to bill) is left for dogfood to shape.
+- **Receive Payment** is a layout of the same Payment Entry doctype the Pay Bills dashboard uses, so
+  it is picked by *layout*, not by doctype: a new payment follows the remembered direction
+  (`payment-direction-prefs.js`: the Receive Payments tile says Receive), and an existing payment
+  whose type turns out to be Receive is forwarded from the check page to this form. Pay is untouched.
+- Deliberately out of A1: A/R Find buttons wired to live results (F3/F4), void-and-amend on A/R
+  (the `doc-actions.js` registry has no A/R rows, so the Edit button simply does not appear),
+  Simplified seeds for A/R, address pickers, credit notes.
+
+Touches shared files: `main.js` (the doc-form IPC asks the profile instead of `=== "po"`),
+`erp-form-bridge-page.js` (a child-table name on `setRow`, a fetch-outstanding call, and no
+purchase-price fallback on sales lines), `payment-doc.src.html` (the Receive forward).
+
+**State: built 2026-09-26.** Verified against the live sandbox, never saving (the smoke only
+types into drafts and closes): `e2e/scaffold-ar-doc-skins.spec.js` opens each from its Home tile,
+fills a customer and a selling-priced line on the Estimate, carries the Sales Order's Ship by onto
+an existing and a new line, and lists SAMPLE Customer 01's open invoices on Receive Payment with
+the amount spread oldest-first. The whole e2e suite (19) and `npm test` pass. **Not yet run:** any
+Save or Submit of an A/R document, and the Receive forward from `payment-doc.html` (the sandbox
+has no Receive payment to open).
+
+What else A1 changed on the way:
+
+- "Invoice" / "Find Invoices" on shell pages, as "Estimate" — Vanilla keeps "Sales Invoice"
+  (same rule as decision 3; `doc-terms.js`, `doctype-labels.js`).
+- New A/R lines run ERPNext's own `items_add` script (that is what copies Ship by); A/P lines do
+  not, unchanged, since that was never dogfooded there.
+- A typed Invoice date ticks `set_posting_time` first, so ERPNext keeps it instead of resetting
+  it to today on save. 🔴 **The Item Receipt skin has the same trap and does not do this**: a
+  backdated IR date is silently reset to today on save (`alignPostingDateLikeVanillaOk` resets it
+  when the box is unticked). Left alone — A/P, not asked — and listed under residuals.
+- Drafts: A/R saves shelve like PO / IR (label: number · customer · date). Receive Payment does
+  not — it shares Payment Entry with the Pay Bills pages, which have no shelf.
+
+### Dogfood checklist (A1)
+
+1. Home → **Estimates** → Doc Estimate, cursor in Customer, blue "request" wash with the Selling
+   stripes. Pick a customer, then an item: rate is the *selling* price. Save draft, then Submit.
+2. Home → **Sales Orders** → type a Ship by in the header; every line takes it, and Add line
+   starts with it too. Save needs every line to have one. The Delivered / Billed / Status strip
+   shows under the addresses.
+3. Home → **Create Invoices** → type a Date other than today, Save: the date stays.
+4. Home → **Receive Payments** → pick a customer: their open invoices list. Type Amount received:
+   ERPNext spreads it oldest-first; type in Payment to change one. Method fills Deposit to; a bank
+   needs Check / Ref No. and Ref date. Save, Submit.
+5. Open that submitted payment from Recent → it opens in the Receive Payment form (via the check
+   page's forward), not the AP check.
+6. On any of the four, the toolbar shows **Document-skin** lit and **Default-skin** available;
+   Default-skin opens the same document in ERPNext.
+7. Home → Pay Bills still opens the Pay Bills dashboard.
+
 ## Dogfood checklist (F1 + F2)
 
 1. Doc Bill → **Find Bill…** → the Find Bills mockup, cursor in *Vendor's invoice no.* Recent shows
@@ -302,4 +377,5 @@ So these hunks can be told apart from the 09-16 work in the same file:
 
 | Family | Residual | State |
 |---|---|---|
-| — | — | — |
+| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | open — 5zorro to decide whether IR should keep a typed date |
+| A1 | Save / Submit of an A/R document, and the Receive forward from the check page, have not run | open — dogfood checklist A1 |
