@@ -320,8 +320,8 @@ types into drafts and closes): `e2e/scaffold-ar-doc-skins.spec.js` opens each fr
 fills a customer and a selling-priced line on the Estimate, carries the Sales Order's Ship by onto
 an existing and a new line, and lists SAMPLE Customer 01's open invoices on Receive Payment with
 the amount spread oldest-first. The whole e2e suite (19) and `npm test` pass. **Not yet run:** any
-Save or Submit of an A/R document, and the Receive forward from `payment-doc.html` (the sandbox
-has no Receive payment to open).
+Save or Submit of an A/R document. (The Receive forward from `payment-doc.html` ran once the
+sample data brought Receive payments — `scaffold-pay-outstanding.spec.js` now expects it.)
 
 What else A1 changed on the way:
 
@@ -335,6 +335,26 @@ What else A1 changed on the way:
   when the box is unticked). Left alone — A/P, not asked — and listed under residuals.
 - Drafts: A/R saves shelve like PO / IR (label: number · customer · date). Receive Payment does
   not — it shares Payment Entry with the Pay Bills pages, which have no shelf.
+
+### A/R ≠ A/P at a glance, and the Customers flow on Home (5zorro 2026-09-26, after A1)
+
+*"The doc wash between AR and AP should have some kind of change… a global toggle to be easily
+set… I currently see them as the exact same."* The difference existed but could not be seen:
+the desk hatch was **white** lines over washes that are already near-white, and the Buying /
+Selling stamp sits under the white sections of the card. The setting itself had no control
+(OI-125: "settings UI later"), only a per-page localStorage value.
+
+- The hatch is now drawn in the page's own role accent (`--hatch-desk` in `doc-wash.css`), on the
+  Doc skins' card and toolbar, on the Find page header, and on the Home tiles.
+- **One global toggle**, top right of Doc Workflow Home: *Hatch — A/R · A/P · Both · Off*, default
+  A/R (so A/R is hatched and A/P plain, as OI-125 decided). `main.js` keeps it in
+  `userData/doc-wash-prefs.json` and pushes it into every shell page at once
+  (`washPatternSyncScript`); a page's localStorage only mirrors it.
+- Home's Customers group is now a swimlane like Vendors': **Estimates above Sales Orders with a
+  small down arrow** ("estimate optional") → Create Invoices → Receive Payments, then Customer
+  Center after a divider (`src/customer-process-flow.js`; the renderer is shared with Vendors).
+  One lane, not two, and Employees moved to the right column — otherwise Home stops fitting a
+  maximized 1080p window (`tests/surface-width.test.js`; checked at 1920×1040: no scroll).
 
 ### Dogfood checklist (A1)
 
@@ -352,6 +372,9 @@ What else A1 changed on the way:
 6. On any of the four, the toolbar shows **Document-skin** lit and **Default-skin** available;
    Default-skin opens the same document in ERPNext.
 7. Home → Pay Bills still opens the Pay Bills dashboard.
+8. Home, top right: click **A/P** — the Vendors tiles take the hatch and the Customers tiles lose
+   it; an open Doc Purchase Order (or Bill) is hatched when you return to it. **Off** clears both.
+   The choice survives a restart.
 
 ## Dogfood checklist (F1 + F2)
 
@@ -378,4 +401,4 @@ What else A1 changed on the way:
 | Family | Residual | State |
 |---|---|---|
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | open — 5zorro to decide whether IR should keep a typed date |
-| A1 | Save / Submit of an A/R document, and the Receive forward from the check page, have not run | open — dogfood checklist A1 |
+| A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1 |

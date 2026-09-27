@@ -468,17 +468,23 @@ test.describe("scaffold: pay outstanding", () => {
         .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
         .toMatch(new RegExp(found.receive.name));
       await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
-      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("payment-doc");
-      const notPayVisible = await expect
+      // A/R stage A1 (plan 2026-09-26): a Receive payment is not shown as an AP check — the check
+      // page reads its type and forwards it to the Receive Payment Doc form, same document.
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("doc");
+      expect(await e2eCall(app, "getActiveDocSkin")).toBe("receive-payment");
+      await expect
         .poll(
           async () =>
-            e2eCall(app, "execInView", "paymentDoc", `document.getElementById("not-pay").hidden`),
-          { timeout: 10_000 },
+            e2eCall(
+              app,
+              "execInView",
+              "docForm",
+              `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`,
+            ),
+          { timeout: 30_000 },
         )
-        .toBe(false)
-        .then(() => true)
-        .catch(() => false);
-      expect(notPayVisible).toBe(true);
+        .toBe(found.receive.name);
+      expect(await e2eCall(app, "currentRoute")).toBe(`/app/payment-entry/${found.receive.name}`);
     }
   });
 });

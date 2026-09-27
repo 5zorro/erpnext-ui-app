@@ -69,6 +69,31 @@
       border-color: var(--accent-payment);
       background: color-mix(in srgb, var(--wash-payment) 55%, white);
     }
+    /* Desk pattern (OI-125; one global setting, the control top right): the same hatch the Doc
+       skins wear, so a tile shows which desk it opens and the toggle previews itself here. */
+    .item[data-wash-role="request"] { --role-accent: var(--accent-request); }
+    .item[data-wash-role="order"] { --role-accent: var(--accent-order); }
+    .item[data-wash-role="fulfill"] { --role-accent: var(--accent-fulfill); }
+    .item[data-wash-role="invoice"] { --role-accent: var(--accent-invoice); }
+    .item[data-wash-role="payment"] { --role-accent: var(--accent-payment); }
+    html[data-pattern="ar"] .item[data-desk="ar"],
+    html[data-pattern="ap"] .item[data-desk="ap"],
+    html[data-pattern="both"] .item[data-desk] { background-image: var(--hatch-desk); }
+
+    .home-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      max-width: var(--surface-dashboard-max, 1560px); margin: 0 auto; padding: 0 20px 0 0; box-sizing: border-box;
+    }
+    .wash-toggle { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 11px; color: #64748b; }
+    .wash-toggle .seg { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 7px; overflow: hidden; background: #fff; }
+    .wash-toggle button {
+      border: 0; border-left: 1px solid #e2e8f0; background: transparent; padding: 4px 10px;
+      font-size: 11.5px; color: #475569; cursor: pointer;
+    }
+    .wash-toggle button:first-child { border-left: 0; }
+    .wash-toggle button[aria-pressed="true"] { background: #2c3e50; color: #fff; }
+    .wash-toggle button:not([aria-pressed="true"]):hover { background: #f1f5f9; }
+
     .item .ic { font-size: 20px; margin-bottom: 5px; line-height: 1; display: flex; align-items: center; justify-content: center; }
     .ui-ico svg { display: block; }
     .item.disabled { opacity: .42; cursor: not-allowed; }
@@ -128,6 +153,8 @@
     .item[data-wash-role="payment"] .step-badge  { background: var(--accent-payment); }
 
     .source-stack { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .stack-arrow { display: flex; color: #94a3b8; margin: -3px 0; }
+    .stack-arrow svg { width: 12px; height: 12px; display: block; }
     .stack-caption {
       margin: -2px 0 0; font-size: 9px; font-weight: 600; letter-spacing: .04em;
       text-transform: uppercase; color: #94a3b8;
@@ -149,7 +176,14 @@
   </style>
 </head>
 <body>
-  <h1 data-testid="home-title">Doc Workflow Home</h1>
+  <div class="home-head">
+    <h1 data-testid="home-title">Doc Workflow Home</h1>
+    <div class="wash-toggle" data-testid="wash-toggle"
+      title="Which desk's Doc skins wear the diagonal hatch, so A/R and A/P documents differ at a glance without relying on colour. Applies everywhere, at once.">
+      <span>Hatch</span>
+      <span class="seg" id="wash-seg" role="group" aria-label="Desk hatch"></span>
+    </div>
+  </div>
   <div class="wrap" data-testid="home-tiles">
     <div class="col" id="left"></div>
     <div class="col" id="right"></div>
@@ -165,6 +199,14 @@
     import { HOME_GROUPS } from "../src/home-tiles.js";
     import { homeTileIconHtml, missingHomeTileIcons, homeGroupIconHtml } from "../src/ui-icons.js";
     import { VENDOR_FLOW_LANES, VENDOR_FLOW_BRIDGES } from "../src/vendor-process-flow.js";
+    import { CUSTOMER_FLOW_LANES, CUSTOMER_FLOW_BRIDGES } from "../src/customer-process-flow.js";
+    import { PATTERN_PREF_LABELS, normalizePatternPref } from "../src/doc-wash.js";
+
+    /** Groups drawn as a swimlane instead of a flat tile row. */
+    const FLOWS = {
+      vendors: { lanes: VENDOR_FLOW_LANES, bridges: VENDOR_FLOW_BRIDGES },
+      customers: { lanes: CUSTOMER_FLOW_LANES, bridges: CUSTOMER_FLOW_BRIDGES },
+    };
 
     const api = window.erpHome;
 
@@ -173,6 +215,7 @@
       b.className = "item" + (t.disabled ? " disabled" : "");
       b.dataset.testid = `tile-${t.id}`;
       if (t.washRole) b.dataset.washRole = t.washRole;
+      if (t.desk) b.dataset.desk = t.desk;
       b.innerHTML = `<div class="ic">${homeTileIconHtml(t.id)}</div>${t.label}`;
       if (t.disabled) {
         b.title = "Requires an ERP module that may not be installed";
@@ -213,12 +256,21 @@
       return s;
     }
 
+    function stackArrowEl() {
+      const s = document.createElement("span");
+      s.className = "stack-arrow";
+      s.setAttribute("aria-hidden", "true");
+      s.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M6 13l6 6 6-6"/></svg>';
+      return s;
+    }
+
     function bridgeIconSvg() {
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6"/></svg>';
     }
 
-    /** Vendors group as a two-lane process flow instead of a flat tile row (OI-161 dogfood). */
-    function renderVendorsFlow(group) {
+    /** Vendors / Customers as a two-lane process flow instead of a flat tile row (OI-161 dogfood). */
+    function renderFlow(group, flow) {
       const box = document.createElement("div");
       box.className = "box";
       box.dataset.testid = `group-${group.id}`;
@@ -233,7 +285,7 @@
 
       const tileById = (id) => group.tiles.find((t) => t.id === id);
 
-      for (const lane of VENDOR_FLOW_LANES) {
+      for (const lane of flow.lanes) {
         const laneEl = document.createElement("div");
         laneEl.className = "lane";
         laneEl.dataset.cadence = lane.id;
@@ -252,19 +304,22 @@
               ? (() => {
                   const stack = document.createElement("div");
                   stack.className = "source-stack";
+                  stack.dataset.join = step.join || "either";
                   step.tileIds.forEach((id, j) => {
                     const t = tileById(id);
                     if (!t) return;
+                    if (j > 0 && step.join === "then") stack.appendChild(stackArrowEl());
                     const el = buildTileEl(t);
                     const badge = document.createElement("span");
                     badge.className = "step-badge";
-                    badge.textContent = `${step.step}${String.fromCharCode(97 + j)}`;
+                    badge.textContent =
+                      (step.badges && step.badges[j]) || `${step.step}${String.fromCharCode(97 + j)}`;
                     el.appendChild(badge);
                     stack.appendChild(el);
                   });
                   const cap = document.createElement("span");
                   cap.className = "stack-caption";
-                  cap.textContent = "either source";
+                  cap.textContent = step.caption || "either source";
                   stack.appendChild(cap);
                   return stack;
                 })()
@@ -279,15 +334,18 @@
                   return el;
                 })();
           if (stepEl) track.appendChild(stepEl);
-          if (i < lane.steps.length - 1) track.appendChild(lane.sequential ? arrowEl() : dividerEl());
+          if (i < lane.steps.length - 1) {
+            const next = lane.steps[i + 1];
+            track.appendChild(lane.sequential && !next.detached ? arrowEl() : dividerEl());
+          }
         });
         laneEl.appendChild(track);
         lanesEl.appendChild(laneEl);
 
-        if (lane.id === "daily") {
+        if (lane.id === "daily" && flow.bridges.length) {
           const bridge = document.createElement("div");
           bridge.className = "bridge";
-          for (const b of VENDOR_FLOW_BRIDGES) {
+          for (const b of flow.bridges) {
             const item = document.createElement("div");
             item.className = "bridge-item";
             item.innerHTML = `${bridgeIconSvg()}<span>${b.label}</span>`;
@@ -304,8 +362,8 @@
 
     function render(groups, el) {
       for (const g of groups) {
-        if (g.id === "vendors") {
-          el.appendChild(renderVendorsFlow(g));
+        if (FLOWS[g.id]) {
+          el.appendChild(renderFlow(g, FLOWS[g.id]));
           continue;
         }
         const box = document.createElement("div");
@@ -321,6 +379,39 @@
         el.appendChild(box);
       }
     }
+
+    // Desk hatch toggle — one app-wide setting. main.js stores it and pushes it into every shell
+    // page (doc-wash.js washPatternSyncScript), which fires `doc-wash-pattern` back here.
+    function paintWashToggle(current) {
+      const seg = document.getElementById("wash-seg");
+      seg.replaceChildren();
+      for (const [id, label] of Object.entries(PATTERN_PREF_LABELS)) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.dataset.testid = `wash-${id}`;
+        b.setAttribute("aria-pressed", id === current ? "true" : "false");
+        b.title =
+          id === "none" ? "No hatch on either desk" : id === "both" ? "Hatch A/R and A/P" : `Hatch ${label} documents only`;
+        b.onclick = () => {
+          document.documentElement.dataset.pattern = id;
+          paintWashToggle(id);
+          if (api && api.setWashPattern) api.setWashPattern(id);
+        };
+        seg.appendChild(b);
+      }
+    }
+    window.addEventListener("doc-wash-pattern", (ev) => paintWashToggle(normalizePatternPref(ev.detail)));
+    document.documentElement.dataset.pattern = normalizePatternPref(
+      (() => {
+        try {
+          return localStorage.getItem("doc-wash-pattern");
+        } catch {
+          return null;
+        }
+      })(),
+    );
+    paintWashToggle(document.documentElement.dataset.pattern);
 
     render(HOME_GROUPS.left, document.getElementById("left"));
     render(HOME_GROUPS.right, document.getElementById("right"));

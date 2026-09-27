@@ -8,7 +8,19 @@
  * do not feed one another.
  */
 
-/** @typedef {{ step: string, tileIds: string[] }} FlowStep */
+/**
+ * @typedef {{
+ *   step: string,
+ *   tileIds: string[],
+ *   join?: "either"|"then",
+ *   badges?: string[],
+ *   caption?: string,
+ *   detached?: boolean,
+ * }} FlowStep
+ * A stack of more than one tile: `join` "either" (default — alternative sources, badges 1a/1b)
+ * or "then" (the first leads into the second, drawn with a small down arrow; see
+ * customer-process-flow.js). `badges` / `caption` override the defaults.
+ */
 /**
  * @typedef {{ id: string, label: string, shortLabel: string, subtitle: string,
  *   sequential: boolean, steps: FlowStep[] }} FlowLane

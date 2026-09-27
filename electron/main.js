@@ -63,6 +63,7 @@ import {
   contentSizeChanged,
 } from "../src/shell-relayout.js";
 import { DOCTYPE_LABELS, listLabelForDoctype } from "../src/doctype-labels.js";
+import { DOC_WASH_PREFS_FILENAME, mergeDocWashPrefs, washPatternSyncScript } from "../src/doc-wash.js";
 import {
   resolveDocSkinTarget,
   docSkinTargetRoute,
@@ -338,6 +339,8 @@ let lensPrefs = {};
 let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
+/** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
+let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
 let shelvedDrafts = [];
 /** @type {import("../src/calc/session-history.js").CalcHistoryEntry[]} */
@@ -616,6 +619,9 @@ function prefsPath() {
 function paymentBatchPrefsPath() {
   return path.join(app.getPath("userData"), "payment-batch-prefs.json");
 }
+function docWashPrefsPath() {
+  return path.join(app.getPath("userData"), DOC_WASH_PREFS_FILENAME);
+}
 function paymentDirectionPrefsPath() {
   return path.join(app.getPath("userData"), "payment-direction-prefs.json");
 }
@@ -677,6 +683,27 @@ function loadPrefs() {
   } catch {
     paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
   }
+  try {
+    docWashPrefs = mergeDocWashPrefs(JSON.parse(fs.readFileSync(docWashPrefsPath(), "utf8")));
+  } catch {
+    docWashPrefs = mergeDocWashPrefs(null);
+  }
+}
+
+/**
+ * Desk hatch (OI-125) is one app-wide setting, set on Doc Workflow Home. Push it into a shell
+ * page now; each page's localStorage only mirrors it.
+ * @param {Electron.WebContentsView|null} view
+ */
+function syncWashPattern(view) {
+  if (!view || view.webContents.isDestroyed()) return;
+  const url = view.webContents.getURL() || "";
+  if (!url.startsWith("file:")) return;
+  view.webContents.executeJavaScript(washPatternSyncScript(docWashPrefs.pattern)).catch(() => {});
+}
+
+function syncWashPatternEverywhere() {
+  for (const v of [home, docForm, findDoc, payOutstanding, paymentDoc]) syncWashPattern(v);
 }
 function savePaymentBatchPrefs() {
   try {
@@ -6356,6 +6383,9 @@ function createWindow() {
   // that never finishes starting, and Playwright's electron.launch waits on it forever
   // (e2e/GOTCHAS.md #11).
   findDoc.webContents.loadURL("about:blank");
+  for (const v of [home, docForm, findDoc, payOutstanding, paymentDoc]) {
+    v.webContents.on("did-finish-load", () => syncWashPattern(v));
+  }
 
   if (process.env.E2E === "1") {
     win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
@@ -9586,6 +9616,17 @@ ipcMain.on("open-mockup", (_e, name) => {
   w.loadFile(p).catch((e) => navDebug("open-mockup-err", String(e && e.message ? e.message : e)));
 });
 ipcMain.on("open-payment-entry", (_e, direction) => openPaymentEntryTile(direction));
+// Home's desk-hatch toggle (OI-125): store it, then repaint every open shell page.
+ipcMain.on("set-wash-pattern", (_e, pattern) => {
+  docWashPrefs = mergeDocWashPrefs({ pattern });
+  try {
+    fs.writeFileSync(docWashPrefsPath(), JSON.stringify(docWashPrefs));
+  } catch {
+    /* ignore */
+  }
+  navDebug("set-wash-pattern", docWashPrefs.pattern);
+  syncWashPatternEverywhere();
+});
 // payment-doc.html found a Receive payment: show it in the Receive Payment Doc form (A/R A1).
 ipcMain.on("payment-doc-open-receive", (_e, name) => {
   const rec = typeof name === "string" ? name.trim() : "";

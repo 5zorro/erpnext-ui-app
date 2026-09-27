@@ -51,6 +51,16 @@ describe("HOME_GROUPS", () => {
     }
   });
 
+  it("process tiles carry their desk, so the global hatch marks them like their Doc skins", () => {
+    for (const id of Object.keys(AP_HOME_TILE_WASH)) {
+      assert.equal(flattenHomeTiles().find((t) => t.id === id)?.desk, "ap", id);
+    }
+    for (const id of Object.keys(AR_HOME_TILE_WASH)) {
+      assert.equal(flattenHomeTiles().find((t) => t.id === id)?.desk, "ar", id);
+    }
+    assert.ok(validateHomeTiles([{ id: "x", label: "X", route: "/app/x", desk: "gl" }]).length > 0);
+  });
+
   it("AR customer tiles carry the A/R Doc skins' wash roles (stage A1)", () => {
     assert.equal(AR_HOME_TILE_WASH["estimate-new"], DOC_WASH_BY_PROFILE.estimate.role);
     assert.equal(AR_HOME_TILE_WASH["so-new"], DOC_WASH_BY_PROFILE["sales-order"].role);

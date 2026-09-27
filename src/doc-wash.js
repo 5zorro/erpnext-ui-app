@@ -199,6 +199,48 @@ export function applyDocWashToDocument(doc, opts = {}) {
 export const PATTERN_PREF_STORAGE_KEY = "doc-wash-pattern";
 
 /**
+ * The desk pattern is one app-wide setting (5zorro 2026-09-26: "a global toggle to be easily
+ * set"), chosen on Doc Workflow Home. main.js owns it — `userData/doc-wash-prefs.json` — and
+ * pushes it into every shell page, because each page's own localStorage is only a mirror.
+ */
+export const DOC_WASH_PREFS_FILENAME = "doc-wash-prefs.json";
+
+/** What the Home control calls each choice. Order is the control's order. */
+export const PATTERN_PREF_LABELS = Object.freeze({
+  ar: "A/R",
+  ap: "A/P",
+  both: "Both",
+  none: "Off",
+});
+
+/**
+ * @param {unknown} raw parsed JSON, possibly corrupt or absent
+ * @returns {{ pattern: DocWashPatternPref }}
+ */
+export function mergeDocWashPrefs(raw) {
+  const v = raw && typeof raw === "object" ? /** @type {{ pattern?: unknown }} */ (raw).pattern : null;
+  return { pattern: normalizePatternPref(typeof v === "string" ? v : null) };
+}
+
+/**
+ * Script main.js runs in a shell page to apply the pattern now: mirror it into localStorage (so
+ * the page's own later `applyDocWashToDocument` agrees), set `data-pattern`, and tell the page
+ * (Home's control listens for `doc-wash-pattern`).
+ * @param {DocWashPatternPref|string} pref
+ * @returns {string}
+ */
+export function washPatternSyncScript(pref) {
+  const v = JSON.stringify(normalizePatternPref(pref));
+  const key = JSON.stringify(PATTERN_PREF_STORAGE_KEY);
+  return `(() => {
+    try { localStorage.setItem(${key}, ${v}); } catch (e) {}
+    document.documentElement.dataset.pattern = ${v};
+    try { window.dispatchEvent(new CustomEvent("doc-wash-pattern", { detail: ${v} })); } catch (e) {}
+    return ${v};
+  })()`;
+}
+
+/**
  * @param {DocWashPatternPref|string} pref
  * @param {{ setItem?: (k: string, v: string) => void }|null} [storage]
  * @returns {DocWashPatternPref}
