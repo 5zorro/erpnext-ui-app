@@ -85,3 +85,25 @@ describe("Find page wiring", () => {
     assert.match(page, /from "\.\.\/src\/find-skin-registry\.js"/);
   });
 });
+
+describe("Find page is live (plan 2026-09-26 F3)", () => {
+  const page = read("../electron/find-doc.html");
+  const preload = read("../electron/find-doc-preload.cjs");
+  const main = read("../electron/main.js");
+
+  it("reads rows and peeks through main over HTTP — no sample rows left", () => {
+    assert.doesNotMatch(page, /find-skin-mock/);
+    assert.match(page, /api\.list\(/);
+    assert.match(page, /api\.peek\(/);
+    for (const channel of ["find-doc-list", "find-doc-peek"]) {
+      assert.ok(preload.includes(`ipcRenderer.invoke("${channel}"`), `preload invokes ${channel}`);
+      assert.ok(main.includes(`ipcMain.handle("${channel}"`), `main handles ${channel}`);
+    }
+    assert.match(main, /findListQuery\(/);
+  });
+
+  it("does not mark itself data-doc-desk (that paints the desk stamp behind every result card)", () => {
+    assert.doesNotMatch(page, /dataset\.docDesk/);
+    assert.match(page, /dataset\.findDesk/);
+  });
+});

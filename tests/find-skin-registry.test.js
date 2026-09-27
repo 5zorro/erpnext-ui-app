@@ -12,7 +12,6 @@ import {
   findVanillaListRoute,
 } from "../src/find-skin-registry.js";
 import { DOC_SKIN_INDEX } from "../src/lens-context.js";
-import { findSkinSampleRows, groupRowsByParty } from "../src/find-skin-mock.js";
 
 describe("FIND_SKINS table", () => {
   it("covers every document in the sample-data flow", () => {
@@ -109,34 +108,5 @@ describe("findVanillaListRoute (filters in the address, not typed into the page)
       findSearchValues(findSkinFor("purchase-order"), { title: " L-1 ", name: "PO-1", supplier: "" }),
       { title: "L-1" },
     );
-  });
-});
-
-describe("find-skin-mock (stage F1 only)", () => {
-  it("is deterministic and fills every column", () => {
-    for (const dt of FIND_SKIN_DOCTYPES) {
-      const a = findSkinSampleRows(dt);
-      const b = findSkinSampleRows(dt);
-      assert.deepEqual(a, b, dt);
-      assert.equal(a.length, 12);
-      for (const row of a) {
-        for (const col of FIND_SKINS[dt].columns) {
-          assert.ok(row[col.field] !== undefined && row[col.field] !== "", `${dt}.${col.field}`);
-        }
-        const lines = row.items.reduce((sum, l) => sum + Math.round(l.amount * 100), 0);
-        const total = row.grand_total ?? row.paid_amount;
-        assert.equal(lines, Math.round(total * 100), `${dt} lines add up`);
-      }
-    }
-  });
-
-  it("sample parties are SAMPLE-named and grouped busiest first", () => {
-    const groups = groupRowsByParty(findSkinSampleRows("purchase-invoice", { count: 30 }));
-    assert.ok(groups.every((g) => g.party.startsWith("SAMPLE Vendor ")));
-    for (let i = 1; i < groups.length; i++) {
-      assert.ok(groups[i - 1].rows.length >= groups[i].rows.length);
-    }
-    const receive = findSkinSampleRows("payment-entry", { direction: "Receive" });
-    assert.ok(receive.every((r) => r.party.startsWith("SAMPLE Customer ")));
   });
 });

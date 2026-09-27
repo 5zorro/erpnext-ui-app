@@ -6,7 +6,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { pingHealth } from "../src/health.js";
-import { frappeResourceGetList, frappeResourceGetDocs } from "../src/erp-http-list.js";
+import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
+import { findListQuery, findRowsFromList } from "../src/find-skin-query.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
@@ -9646,6 +9647,39 @@ ipcMain.on("open-preferred", (_e, route) => {
  * applies itself (router.js set_route_options_from_url) — nothing typed into its page. The
  * path is rebuilt from the registry; only the query is taken from the page.
  */
+// Find pages, live (plan 2026-09-26 F3): the list and the peek are read over HTTP with the ERP
+// session's cookies — the same data the Vanilla list shows, without touching the ERP page.
+ipcMain.handle("find-doc-list", async (_e, doctypeKey, opts) => {
+  const q = findListQuery(String(doctypeKey || ""), opts && typeof opts === "object" ? opts : {});
+  if (!q) return { ok: false, reason: "No Find page for this document type.", rows: [], more: false };
+  const fetchImpl = erpSessionFetchImpl();
+  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", rows: [], more: false };
+  const res = await frappeResourceGetList({
+    erpBase: ERP_BASE,
+    doctype: q.doctype,
+    fields: q.fields,
+    filters: q.filters,
+    orFilters: q.orFilters,
+    orderBy: q.orderBy,
+    limit: q.limit,
+    fetchImpl,
+  });
+  if (!res.ok) {
+    navDebug("find-doc-list-failed", `${q.doctype}: ${res.status || ""} ${res.reason || ""}`);
+    return { ok: false, reason: res.reason || "Could not read the list.", status: res.status, rows: [], more: false };
+  }
+  return { ok: true, ...findRowsFromList(String(doctypeKey), res.rows) };
+});
+
+ipcMain.handle("find-doc-peek", async (_e, doctypeKey, name) => {
+  const skin = findSkinFor(String(doctypeKey || ""));
+  const rec = typeof name === "string" ? name.trim() : "";
+  if (!skin || !rec) return { ok: false, reason: "Nothing to peek at.", doc: null };
+  const fetchImpl = erpSessionFetchImpl();
+  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", doc: null };
+  return frappeResourceGetDoc({ erpBase: ERP_BASE, doctype: skin.doctype, name: rec, fetchImpl });
+});
+
 ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
   const skin = findSkinFor(doctypeKey);
   if (!skin) return;

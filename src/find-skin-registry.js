@@ -9,6 +9,10 @@
  * tabs from `SEED_PROFILES`), so a document type gets a Find page by gaining a row here — there
  * is no second list to keep in step.
  *
+ * Rows are live (stage F3): `find-skin-query.js` turns the page's searches into a Frappe list
+ * query, read over HTTP like the Vanilla list reads them. `party.nameField` is the party's
+ * display name on the document (supplier_name, customer_name, party_name).
+ *
  * Every `field` below is a real fieldname on that doctype, checked against the doctype JSON on
  * the sandbox tag (2026-09-26). They double as the `?field=value` filters handed to the Vanilla
  * list, which Frappe applies by itself (router.js `set_route_options_from_url`).
@@ -30,8 +34,7 @@ import { listLabelForDoctype, formLabelForDoctype } from "./doctype-labels.js";
  *   doctype: string,
  *   desk: "ap"|"ar"|"both",
  *   washRole: FindWashRole,
- *   stage: "mockup"|"live",
- *   party: { field: string, label: string },
+ *   party: { field: string, label: string, nameField: string },
  *   searches: FindSearch[],
  *   statuses: string[],
  *   columns: FindColumn[],
@@ -46,8 +49,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Quotation",
     desk: "ar",
     washRole: "request",
-    stage: "mockup",
-    party: { field: "party_name", label: "Customer" },
+    party: { field: "party_name", label: "Customer", nameField: "customer_name" },
     searches: [
       { id: "party", field: "party_name", label: "Customer", hint: "Every estimate for one customer" },
       { id: "ref", field: "name", label: "Estimate no.", hint: "One estimate by its number" },
@@ -66,8 +68,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Sales Order",
     desk: "ar",
     washRole: "order",
-    stage: "mockup",
-    party: { field: "customer", label: "Customer" },
+    party: { field: "customer", label: "Customer", nameField: "customer_name" },
     searches: [
       { id: "party", field: "customer", label: "Customer", hint: "Every order for one customer" },
       { id: "ref", field: "po_no", label: "Customer's PO no.", hint: "One order by the customer's PO" },
@@ -89,8 +90,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Purchase Order",
     desk: "ap",
     washRole: "order",
-    stage: "mockup",
-    party: { field: "supplier", label: "Vendor" },
+    party: { field: "supplier", label: "Vendor", nameField: "supplier_name" },
     searches: [
       { id: "ref", field: "title", label: "PO# (logbook)", hint: "One order by its logbook number" },
       { id: "party", field: "supplier", label: "Vendor", hint: "Every order to one vendor" },
@@ -111,8 +111,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Purchase Receipt",
     desk: "ap",
     washRole: "fulfill",
-    stage: "mockup",
-    party: { field: "supplier", label: "Vendor" },
+    party: { field: "supplier", label: "Vendor", nameField: "supplier_name" },
     searches: [
       { id: "party", field: "supplier", label: "Vendor", hint: "Every receipt from one vendor" },
       {
@@ -137,8 +136,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Purchase Invoice",
     desk: "ap",
     washRole: "invoice",
-    stage: "mockup",
-    party: { field: "supplier", label: "Vendor" },
+    party: { field: "supplier", label: "Vendor", nameField: "supplier_name" },
     searches: [
       { id: "ref", field: "bill_no", label: "Vendor's invoice no.", hint: "One bill by the vendor's Ref No." },
       { id: "party", field: "supplier", label: "Vendor", hint: "Every bill from one vendor" },
@@ -158,11 +156,10 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Payment Entry",
     desk: "both",
     washRole: "payment",
-    stage: "mockup",
     // Pay and Receive are one doctype; the page switches direction (payment_type) and the
     // party label follows it. See findPartyLabel.
     directional: true,
-    party: { field: "party", label: "Vendor" },
+    party: { field: "party", label: "Vendor", nameField: "party_name" },
     searches: [
       { id: "party", field: "party", label: "Vendor", hint: "Every payment to one vendor" },
       { id: "ref", field: "reference_no", label: "Check / reference no.", hint: "One payment by its check no." },
@@ -182,8 +179,7 @@ export const FIND_SKINS = Object.freeze({
     doctype: "Sales Invoice",
     desk: "ar",
     washRole: "invoice",
-    stage: "mockup",
-    party: { field: "customer", label: "Customer" },
+    party: { field: "customer", label: "Customer", nameField: "customer_name" },
     searches: [
       { id: "party", field: "customer", label: "Customer", hint: "Every invoice for one customer" },
       { id: "ref", field: "po_no", label: "Customer's PO no.", hint: "One invoice by the customer's PO" },
