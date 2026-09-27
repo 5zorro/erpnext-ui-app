@@ -603,13 +603,33 @@ for n in frappe.get_all("Repost Item Valuation",
 ```
 
 Expect most to come back **Skipped** — ERPNext collapses redundant reposts over the same item and
-warehouse, so 1,135 skipped against 171 completed is normal rather than a failure.
+warehouse, so 1,135 skipped against 536 completed is normal rather than a failure.
+
+🔴 **One pass is not enough — loop until the queue is actually empty.** A drain over 363 entries left
+exactly **2** behind, and they were the two that mattered: the backdated negative-inventory fixtures,
+whose whole purpose is to be reposted. `Stock Reposting Settings.limit_reposting_timeslot` was off, so
+no time window was blocking them; they simply were not picked up on that pass. Re-running finished
+them, and the restatement was then exactly as designed — one shipment 61.00 → **55.00** (COGS −366 →
+−330) and the other 15.50 → **18.00** (COGS −93 → −108, the opposite direction, because its master
+rate sat below cost rather than above). **Verify by count, never by "the drain finished".**
 
 🔴 **A repost can also fail permanently and stay failed.** One here died with `[Errno 2] No such
 file or directory` in `get_reposting_data` (`stock_ledger.py:457`): reposting stores its progress as a
 gzipped **File attachment**, and this sandbox had a File row whose file was gone from disk. The
 valuation after that point is then simply never recalculated, and nothing retries it. Worth checking
 `status='Failed'` after any bulk seed.
+
+**Recovering one** — delete the stale attachment so it starts clean rather than trying to resume:
+
+```python
+for att in frappe.get_all("File", filters={"attached_to_doctype": "Repost Item Valuation",
+                                           "attached_to_name": name}, pluck="name"):
+    frappe.delete_doc("File", att, force=1, ignore_permissions=True)
+frappe.get_doc("Repost Item Valuation", name).db_set("status", "Queued", update_modified=False)
+```
+
+Then repost it as above. Done here 2026-09-26 for `SAMPLE-SKU-08` (failed at 2026-06-26): completed
+on the retry, and the sandbox now carries nothing queued and nothing failed.
 
 **Avoiding them in the first place** is G14's sibling lesson and lives in
 `ops/sample-data/README.md`: seed stock movements in one globally chronological order, and give every
