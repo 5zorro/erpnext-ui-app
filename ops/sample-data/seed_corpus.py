@@ -813,6 +813,7 @@ def _create_one(
         doc = _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, posting, as_of)
 
     _apply_tag_fields(doc, tag, key)
+    _stamp_posting_time(doc, spec)
     _apply_doc_taxes(doc, kind, spec, party_map)
     if kind == "purchase_invoice":
         _normalize_pi_dates(doc, posting, spec)
@@ -1165,6 +1166,22 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
     return doc
 
 
+def _stamp_posting_time(doc, spec: dict) -> None:
+    """Honour an explicit `postingTime` from the plan.
+
+    🔴 Without one, a seeded document takes the wall-clock time of its insert, and
+    `future_sle_exists` matches SLEs at `posting_datetime >= this one` — so two documents sharing a
+    posting date and a wall-clock second each queue a `Repost Item Valuation` for the other. A
+    correctly ordered run still left 363 queued before the plan started stamping times.
+    """
+    t = spec.get("postingTime")
+    if not t or not hasattr(doc, "posting_time"):
+        return
+    doc.posting_time = t
+    if hasattr(doc, "set_posting_time"):
+        doc.set_posting_time = 1
+
+
 def _stamp_dates(doc, kind: str, posting: str) -> None:
     if kind in {"quotation", "sales_order", "purchase_order"}:
         doc.transaction_date = posting
@@ -1322,6 +1339,8 @@ def _create_payment_entry(spec: dict, name_map: dict, company: str, tag: str, po
         pe.company = company
         pe.posting_date = posting
         pe.set_posting_time = 1
+        if spec.get("postingTime"):
+            pe.posting_time = spec["postingTime"]
         if spec.get("modeOfPayment"):
             pe.mode_of_payment = spec["modeOfPayment"]
         # Every seeded mode is a Bank type, and ERPNext requires a reference number for those.
