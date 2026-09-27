@@ -88,6 +88,7 @@ import {
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
+  normalizePaymentDirection,
   preferredPaymentDirection,
   rememberPaymentDirection,
 } from "../src/payment-direction-prefs.js";
@@ -8380,6 +8381,34 @@ async function openDocFind(doctypeKey, prefill) {
   }
   return { ok: true, focusOk: true, focusField, prefilled, reason: prefilled ? `${label} opened with filters.` : undefined };
 }
+
+/**
+ * Find Payments from the payment pages — Pay Bills and the check (plan 2026-09-26, stage F4).
+ * Unlike a Doc form's Find, these pages keep their own unsaved state (the drawer preview, a
+ * draft check), so this goes through the general gate instead of clearing a flag, and it never
+ * touches the Doc form's `dirtyState`. The page names the direction it is showing, which is
+ * remembered like a Home tile click, so Find Payments opens on the same side.
+ * @param {{ via?: string, direction?: string }} [opts]
+ */
+function openFindPayments(opts = {}) {
+  const dir = normalizePaymentDirection(opts.direction);
+  if (dir) {
+    paymentDirectionPrefs = rememberPaymentDirection(paymentDirectionPrefs, dir);
+    savePaymentDirectionPrefs();
+  }
+  const via = opts.via === "find-button" ? "find-button" : "browse";
+  const go = () => {
+    if (openTargetFor("/app/payment-entry").surface === "find-doc") {
+      showFindDoc("payment-entry", { via, skipDirtyGate: true });
+      return;
+    }
+    const search = `payment_type=${preferredPaymentDirection(paymentDirectionPrefs)}`;
+    navDebug("find-payments-vanilla", search);
+    showErp("/app/payment-entry", { forceLoad: true, skipDirtyGate: true, search });
+  };
+  gateDirtyThen(go);
+}
+ipcMain.on("open-find-payments", (_e, opts) => openFindPayments(opts && typeof opts === "object" ? opts : {}));
 
 /** Find on the Bill skin (T3a / OI-056; Ref-dupe prefill OI-054). */
 ipcMain.handle("bill-find", async (_e, payload) => {

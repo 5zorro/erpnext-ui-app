@@ -13,7 +13,7 @@ OI-062 (Find is its own Recent slot — done, relied on here) · OI-128 (peek gr
 > **Status 2026-09-26:** audit written; stages **F1** (plumbing + static mockups) and **F2** (every
 > door on the one answer) built. `npm test` green (2050). Layer-3 smoke green, 16/16 against the
 > live sandbox, including `e2e/scaffold-find-doc.spec.js`. 5zorro has not clicked through it yet.
-> F1–F3 and A1 are built; F4 is half done (see the stage table). 5zorro's three decisions are in, and HANDOFF is updated.
+> F1–F4 and A1 are built (see the stage table). 5zorro's three decisions are in, and HANDOFF is updated.
 
 ---
 
@@ -199,7 +199,7 @@ doctype either way), Sales Invoices.
 | **F1** | Rules 1–4 for the Find doors; registry; skin-index rows; list lens memory; `find-doc.html` static mockup ×7; three latent bugs | **built 2026-09-26** |
 | **F2** | Every remaining door through `resolveOpenTarget`; one Find implementation; filters in the address; a table of shell pages; the unused `bill` view deleted; the hidden-page guard on all three shell pages | **built 2026-09-26** — see *What F2 changed* |
 | **F3** | Live results: an IPC that reads the list over HTTP (`/api/resource`, the G1 path — not through the busy ERP page), the peek drawer fills from the real document, Open goes through `resolveOpenTarget` | **built 2026-09-26** — see *F3: live Find pages* |
-| **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | A/R skins have it (the doc-form chrome's Find…, → their live Find page); the payment pages still owed |
+| **F4** | A Find button on the payment pages and on each A/R Doc skin as it ships | **built 2026-09-26** — A/R skins via the doc-form chrome; **Find Payments…** on Pay Bills (opens on "Paid to vendors", vendor box) and on the check page (the payment's own side, check-no. box). One door, `openFindPayments()` in main: through the general unsaved-changes gate, never touching the Doc form's flag; Vanilla list with `?payment_type=` when the list lens is Vanilla |
 | **A1** | 5zorro's step 1: A/R Doc skins — Estimate, Sales Order, Invoice, Receive Payment | **built 2026-09-26** — see *Step 1* |
 
 ## Decisions taken 2026-09-26 (5zorro) — do not re-litigate

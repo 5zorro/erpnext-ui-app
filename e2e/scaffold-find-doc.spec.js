@@ -34,6 +34,19 @@ async function openVanillaList(app, route) {
   await expect.poll(async () => e2eGet(app, "surfaceMode")).toBe("erp");
 }
 
+/**
+ * Each Find page remembers its last search (userData/find-doc-searches.json), so a test that
+ * counts rows starts from a cleared page rather than whatever an earlier run left behind.
+ * @param {import('@playwright/test').ElectronApplication} app
+ */
+async function clearFindSearch(app) {
+  await expect
+    .poll(async () => inFind(app, `!!document.getElementById("btn-clear")`), { timeout: 15_000 })
+    .toBe(true);
+  await inFind(app, `(() => { const b = document.getElementById("btn-clear"); if (!b.hidden) b.click(); return true; })()`);
+  await expect.poll(async () => inFind(app, `document.getElementById("btn-clear").hidden`), { timeout: 15_000 }).toBe(true);
+}
+
 test.describe("scaffold: find pages", () => {
   /** @type {import('@playwright/test').ElectronApplication | undefined} */
   let app;
@@ -181,6 +194,7 @@ test.describe("scaffold: find pages", () => {
     await openVanillaList(app, "/app/sales-invoice");
     await clickDocTab(app);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await clearFindSearch(app);
     await expect
       .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 })
       .toBeGreaterThan(0);
@@ -213,6 +227,7 @@ test.describe("scaffold: find pages", () => {
     await openVanillaList(app, "/app/purchase-invoice");
     await clickDocTab(app);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("find-doc");
+    await clearFindSearch(app);
     await expect
       .poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 })
       .toBeGreaterThan(0);
@@ -262,7 +277,9 @@ test.describe("scaffold: find pages", () => {
     await expect
       .poll(async () => inFind(app, `document.querySelector('input[data-field="supplier"]').value`), { timeout: 15_000 })
       .toBe("SAMPLE Vendor 01");
-    expect(await inFind(app, `document.querySelector("th.sorted") && document.querySelector("th.sorted").dataset.sort`)).toBe("grand_total");
+    await expect
+      .poll(async () => inFind(app, `document.querySelector("th.sorted") && document.querySelector("th.sorted").dataset.sort`), { timeout: 15_000 })
+      .toBe("grand_total");
 
     // Clear puts the page back to every bill, newest first — and leaves it that way for the clerk.
     await inFind(app, `document.getElementById("btn-clear").click(); true`);
@@ -270,5 +287,35 @@ test.describe("scaffold: find pages", () => {
       .poll(async () => inFind(app, `document.querySelector('input[data-field="supplier"]').value`), { timeout: 10_000 })
       .toBe("");
     await expect.poll(async () => inFind(app, `document.getElementById("btn-clear").hidden`), { timeout: 15_000 }).toBe(true);
+  });
+
+  test("F4: Find Payments from Pay Bills and from a payment's check page", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+
+    // Pay Bills dashboard → Find Payments, on the "Paid to vendors" side, party box first.
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "payOutstanding", `document.querySelector('[data-testid="pay-outstanding-find"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
+    await expect
+      .poll(async () => inFind(app, `document.querySelector('[data-testid="find-doc-title"]').textContent`))
+      .toBe("Find Payments");
+    expect(await inFind(app, `document.querySelector(".direction button.active").textContent`)).toBe("Paid to vendors");
+    await expect.poll(async () => inFind(app, `document.activeElement && document.activeElement.dataset.id`)).toBe("party");
+
+    // A payment's check page → Find Payments, cursor in the check-no. box (a Find button on a document).
+    const pay = await inFind(app, `(async () => { const r = await window.erpFindDoc.list("payment-entry", { direction: "Pay", status: "Submitted" }); return r.rows[0] && r.rows[0].name; })()`);
+    test.skip(!pay, "no submitted Pay payment in this sandbox");
+    await inFind(app, `(async () => { window.erpFindDoc.openPreferred("/app/payment-entry/${pay}"); return true; })()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("payment-doc");
+    await expect
+      .poll(async () => e2eCall(app, "execInView", "paymentDoc", `document.querySelector('[data-testid="check-doc-badge"]')?.textContent || ""`), { timeout: 15_000 })
+      .toMatch(/Submitted/);
+    await e2eCall(app, "execInView", "paymentDoc", `document.querySelector('[data-testid="payment-doc-find"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
+    await expect.poll(async () => inFind(app, `document.activeElement && document.activeElement.dataset.id`)).toBe("ref");
   });
 });

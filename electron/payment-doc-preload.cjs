@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld("erpPaymentDoc", {
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
   // A/R stage A1: a Receive payment is shown by the Receive Payment Doc form, not the check.
   openReceivePayment: (name) => ipcRenderer.send("payment-doc-open-receive", name || ""),
+  // F4 (plan 2026-09-26): the payments' own Find page, through main's unsaved-changes gate.
+  openFindPayments: (opts) => ipcRenderer.send("open-find-payments", opts || {}),
 });
