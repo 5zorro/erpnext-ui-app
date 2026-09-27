@@ -3,7 +3,8 @@
 Deterministic corpus for dogfooding **create from nothing** vs **create from source**
 across Quotation, Sales Order, Sales Invoice, Purchase Order, Purchase Receipt, and
 Purchase Invoice (~25 **submitted** each + **5 drafts** each, last 60 days, multiple
-SAMPLE vendors/customers). Drafts are create-from-nothing and use distinct parties
+SAMPLE vendors/customers), plus **Delivery Note** and **Payment Entry** rows that exist
+only inside the named fixtures below. Drafts are create-from-nothing and use distinct parties
 (first 5 vendors / customers) so Find Bill can open real `docstatus === 0` rows.
 
 ## Tax mix (OI-115)
@@ -41,7 +42,7 @@ CONFIRM_SAMPLE_SEED=1 npm run seed:sample -- --reset
 ```
 
 Idempotent without `--reset`: skips docs whose `remarks` already contain the current tag
-(`ui-app-sample-v2` — see `SAMPLE_TAG` in `corpus-plan.js`).
+(`ui-app-sample-v5` — see `SAMPLE_TAG` in `corpus-plan.js`).
 
 **Dupe-check dogfood (OI-054 / OI-087):** After you have typed seeded `bill_no` values once, a
 **soft reset** avoids stale duplicate warnings:
@@ -53,6 +54,110 @@ npm run dogfood:ap-sources   # refresh HTML paper sources (gitignored output)
 
 Use **fresh refs** (`DOGFOOD-…`) when manually testing entry — not the seeded `SMP-V…-INV-…` series.
 
+## The traced chain ("the bowtie") — keys `BT-*`
+
+Everything else in this corpus links along **one** side of the business. This is the single row
+that crosses: one customer order walked all the way through, nine documents deep.
+
+```
+Quotation → Sales Order ─┬→ Purchase Order → Item Receipt → Bill → Payment (Pay, cheque)
+                         └→ Delivery Note → Invoice → Payment (Receive, ACH)
+```
+
+The hinge is **`Purchase Order Item.sales_order`** — the only field in stock ERPNext that says
+*this purchase exists because of that customer order*. Without it the two halves are just documents
+that happen to share a week.
+
+| Key | Doc | Day (before asOf) | Notes |
+|-----|-----|------|-------|
+| `BT-Q` | Quotation | 56 | 4 × 150.00 |
+| `BT-SO` | Sales Order | 52 | ← `BT-Q` |
+| `BT-PO` | Purchase Order | 48 | 4 × 125.00; **carries `sales_order` → `BT-SO`**; logbook `BT-1001` |
+| `BT-PR` | Item Receipt | 40 | ← `BT-PO` |
+| `BT-PI` | Bill | 38 | ← `BT-PR`; `SMP-BOWTIE-INV-01` |
+| `BT-PE-PAY` | Payment Entry (Pay) | 30 | `USPS_Check` — the chain "cuts a check" |
+| `BT-DN` | Delivery Note | 26 | ← `BT-SO` |
+| `BT-SI` | Invoice | 26 | ← `BT-DN`, **same posting date as the shipment** |
+| `BT-PE-RCV` | Payment Entry (Receive) | 12 | `ACH` |
+
+Deliberate choices, each of which a later edit would quietly undo:
+
+- **Receipt (40) precedes Delivery Note (26)** — the stock that ships is the stock that arrived, so
+  the costing panel has a real layer to point at.
+- **Shipment and invoice share a date** — 5zorro's process is "create an invoice at the same time as
+  I ship". Two documents rather than one `update_stock` invoice, so the stock movement stays
+  separable from the billing.
+- **Its own vendor and customer, both outside the rotation, neither taxed.** `SUP-BOWTIE` has no tax
+  withholding and `CUS-BOWTIE` is sales-tax exempt: the chain exists to show one clean amount
+  travelling, and a TDS deduction or a pass-through tax would make the payment disagree with the
+  bill for reasons that have nothing to do with the trail. Margin is exactly **100.00**
+  (4 × 150 − 4 × 125).
+- **Neither payment names an amount.** Each settles whatever its invoice actually owes — a number in
+  the plan would make the fixture disagree with its own bill the first time a rounding rule moved.
+
+🔴 The 1.2× markup is **sample data, not a rule**. Pricing belongs to the CRM and the salesman
+(OI-179); nothing in the shell reads `BOWTIE_SELL` or derives a price from it.
+
+## Costing layers (OI-177) — keys `PR-COST-*` / `DN-COST-*`
+
+Three SKUs that differ **only** in `valuation_method`, given identical movements:
+buy 2 @ 50, buy 1 @ 75, sell 2. `valuation_method` is per Item, so one SKU can never show two
+answers — three is the minimum that makes the methods disagree visibly.
+
+All three leave **one unit** on hand. Only its value differs:
+
+| SKU | Method | Layers after (`stock_queue`) | On hand | Cost booked by the sale |
+|-----|--------|------------------------------|---------|------|
+| `SAMPLE-SKU-COST-FIFO` | FIFO | `[[1.0, 75.0]]` | **75.00** | 100.00 |
+| `SAMPLE-SKU-COST-LIFO` | LIFO | `[[1.0, 50.0]]` | **50.00** | 125.00 |
+| `SAMPLE-SKU-COST-AVG` | Moving Average | `[]` *(empty)* | **58.33** | 116.67 |
+
+✅ **Read back off this sandbox 2026-09-26**, not predicted: every column above is what
+`tabStock Ledger Entry` actually holds after the seed runs. The last column is the real payload —
+the *same* sale of 2 units books three different costs, a 25.00 spread on a 175.00 purchase.
+
+🔴 **The layers are stored, not derived.** `Stock Ledger Entry.stock_queue` is a Long Text holding
+`[[qty, rate], ...]` as of that transaction, and `stock_value_difference` on the same row is the
+cost that movement booked. A costing panel must **read** those — recomputing FIFO in the shell would
+be a second opinion that silently drifts from the books.
+
+🔴 **Moving Average writes no layers at all.** ERPNext keeps one running rate for it
+(`get_moving_average_values`), so `stock_queue` stays empty. Saying so is the audit finding, not a
+hole in the panel.
+
+The seed prints this table at the end of a run, so the fixture states its own pass condition.
+`tests/sample-data-corpus.test.js` re-derives all three values from the movements rather than
+trusting the constants.
+
+**Movements ride on real documents** (two Item Receipts and one Delivery Note each, from nothing)
+because the panel is reached *from a document* — a clerk looking at one shipment asking what it
+cost. The buy rates are on the receipt lines; that is the only way one SKU ends up with two
+different incoming rates.
+
+🔴 **Zero opening stock.** `ITM-BOWTIE` and the three costing SKUs carry `openingQty: 0`. Every
+other SAMPLE SKU is seeded with 500 units so receipts and invoices always value — but 500 units of
+prior stock buries the receipts these fixtures are meant to point at.
+
+**Not covered:** negative inventory (shipping before receiving). Deliberately — see **OI-178** and
+the static walk-through at `docs/mockups/negative-inventory-timeline.html`.
+
+## Money-in stress fixtures — keys `SI-INST` / `SI-SPLIT-*` / `SI-OVER`
+
+The Receive Payment side's answer to the AP batching fixtures.
+
+| Key(s) | Shape | Why |
+|--------|-------|-----|
+| `SI-INST` | one invoice, **12 monthly installments** of 250 (3,000 total) | the explode path on the receive side |
+| `SI-SPLIT-A/B/C` + `PE-SPLIT` | three invoices (400 / 700 / 900), **one payment of 1,000** — A settled, B and C left part-paid | multi-reference partial allocation |
+| `SI-OVER` + `PE-OVER` | 500 owed, **800 arrives** → 300 unallocated credit | see below |
+
+🔴 `SI-OVER` is the one to keep. Its leftover credit has the same shape as the row that silently
+emptied the whole Pay Outstanding board (gotchas **G13**) — negative outstanding, no due date. The
+receive side now meets that row in a fixture instead of in front of a clerk.
+
+All four stress customers are sales-tax **exempt**: these fixtures are about allocation arithmetic,
+and a pass-through tax would make every total a number you have to back out first.
+
 ## Link graph (summary)
 
 | Doc | From source | From nothing | Leftover open sources |
@@ -61,6 +166,15 @@ Use **fresh refs** (`DOGFOOD-…`) when manually testing entry — not the seede
 | SI | 12 ← SO | 13 | SO 12–24 uninvoiced |
 | PR | 12 ← PO | 13 (NIC) | |
 | PI | 8 ← PR, 8 ← PO | 9 | PO 20–24 open (no PR/PI) |
+| DN | 1 ← SO (`BT-DN`) | 3 (costing) | — |
+| PE | 4, all inside fixtures | — | — |
+
+Counts above are the **rotation**; the named fixtures add to them. `CHAIN_FIXTURE_EXTRA_COUNTS` in
+`corpus-plan.js` declares exactly how many, so adding a fixture forces the number to be stated.
+
+🔴 **Apply order changed 2026-09-26:** `sales_invoice` now runs **after** `delivery_note`, because
+the traced chain invoices a shipment. Every other invoice still sources a Sales Order, which comes
+earlier either way.
 
 Every 4th PO also sets `sales_order` on lines (SO picker on PO).
 

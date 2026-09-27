@@ -13,10 +13,117 @@
  */
 
 /** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
-export const SAMPLE_TAG = "ui-app-sample-v4";
+export const SAMPLE_TAG = "ui-app-sample-v5";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
 export const SAMPLE_TDS_CATEGORY = "SAMPLE-TDS";
+
+/**
+ * The traced chain ("bowtie"): one customer order walked all the way through both sides of the
+ * business, so a link-trail view has something real to draw. Nine documents, one SKU, dates
+ * marching forward:
+ *
+ *   Quotation → Sales Order ─┬→ Purchase Order → Item Receipt → Bill → Payment (Pay)
+ *                            └→ Delivery Note → Invoice → Payment (Receive)
+ *
+ * The hinge is `Purchase Order Item.sales_order` — the only field in stock ERPNext that says
+ * *this purchase exists because of that customer order*. Everything else in the corpus links
+ * along one side only; this fixture is the sole row that crosses.
+ */
+export const BOWTIE_QTY = 4;
+/** What we pay the vendor, per unit. */
+export const BOWTIE_COST = 125.0;
+/**
+ * What we quote the customer, per unit. The 1.2 is **sample data, not a rule** — markup belongs to
+ * the CRM and to the salesman talking to the customer (OI-179 / OI-177), and nothing in the shell
+ * reads this number or derives a price from it. It is here only so the chain has a visible margin
+ * (4 × 150 − 4 × 125 = 100) for a trail view to total up.
+ */
+export const BOWTIE_SELL = 150.0;
+
+export const TRACED_CHAIN_KEYS = Object.freeze([
+  "BT-Q",
+  "BT-SO",
+  "BT-PO",
+  "BT-PR",
+  "BT-PI",
+  "BT-PE-PAY",
+  "BT-DN",
+  "BT-SI",
+  "BT-PE-RCV",
+]);
+
+/**
+ * OI-177 costing fixture — the same three movements against three SKUs that differ only in
+ * `valuation_method`, which is the only way to see the methods disagree (the field is per Item,
+ * so one SKU can never show two answers).
+ *
+ * Buy 2 @ 50, buy 1 @ 75, sell 2. All three leave **one unit** on hand; only its value differs.
+ */
+export const COSTING_LAYER_MOVES = Object.freeze([
+  { step: "buy", qty: 2, rate: 50.0 },
+  { step: "buy", qty: 1, rate: 75.0 },
+  { step: "sell", qty: 2 },
+]);
+
+/**
+ * Expected outcome per method — the oracle a costing panel is checked against, kept here so the
+ * fixture states its own pass condition rather than leaving it to be re-derived.
+ *
+ * `layers` is what ERPNext writes to `Stock Ledger Entry.stock_queue` (`[[qty, rate], ...]`) after
+ * the sale. 🔴 Moving Average writes **nothing** there — it keeps a single running rate
+ * (`stock_ledger.py` `get_moving_average_values`), so a layer panel has nothing to itemize for it,
+ * and saying so *is* the finding rather than a hole in the panel.
+ */
+export const COSTING_LAYER_METHODS = Object.freeze([
+  { key: "ITM-COST-FIFO", suffix: "FIFO", valuationMethod: "FIFO", onHandValue: 75.0, layers: [[1, 75.0]] },
+  { key: "ITM-COST-LIFO", suffix: "LIFO", valuationMethod: "LIFO", onHandValue: 50.0, layers: [[1, 50.0]] },
+  {
+    key: "ITM-COST-AVG",
+    suffix: "AVG",
+    valuationMethod: "Moving Average",
+    onHandValue: 58.33,
+    layers: null,
+  },
+]);
+
+export const COSTING_FIXTURE_KEYS = Object.freeze(
+  COSTING_LAYER_METHODS.flatMap((m) => [
+    `PR-COST-${m.suffix}-1`,
+    `PR-COST-${m.suffix}-2`,
+    `DN-COST-${m.suffix}`,
+  ]),
+);
+
+/**
+ * Money-in stress fixtures — the Receive Payment side's answer to the AP batching fixtures.
+ * Three shapes the allocation UI has to survive:
+ *   installments (many schedule rows on one invoice) · one payment split across three invoices ·
+ *   an overpayment that leaves an unallocated credit.
+ *
+ * 🔴 The overpayment is not a curiosity. An unallocated payment comes back from the AP report with
+ * a negative outstanding and no due date, and that row silently emptied the whole Pay Outstanding
+ * board (gotchas G13). The receive side has the same shape and deserves a fixture that produces it
+ * on purpose.
+ */
+export const AR_PAYMENT_FIXTURE_KEYS = Object.freeze([
+  "SI-INST",
+  "SI-SPLIT-A",
+  "SI-SPLIT-B",
+  "SI-SPLIT-C",
+  "PE-SPLIT",
+  "SI-OVER",
+  "PE-OVER",
+]);
+
+/** Installment fixture shape: 12 rows, one a month, summing to the invoice total. */
+export const AR_INSTALLMENT_ROWS = 12;
+export const AR_INSTALLMENT_AMOUNT = 250.0;
+
+/** @param {number} n */
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
 
 export const DEFAULT_COUNTS = Object.freeze({
   quotation: 25,
@@ -203,6 +310,26 @@ export function buildCorpusPlan(opts = {}) {
       taxWithholding: false,
       paymentTermsKey: "PT-NET30-ACH",
     },
+    // The traced chain's vendor. Deliberately outside the rotation and deliberately **not** a
+    // withholding vendor: the chain exists to show one clean amount travelling from quote to
+    // cheque, and a TDS deduction would make the payment disagree with the bill for a reason that
+    // has nothing to do with the trail. A cheque term, because the chain "cuts a check".
+    {
+      key: "SUP-BOWTIE",
+      name: "SAMPLE Vendor Bowtie Trace",
+      taxWithholding: false,
+      paymentTermsKey: "PT-NET30-POST-STRICT",
+    },
+  );
+  // Chain + money-in stress customers. All four are sales-tax **exempt** on purpose: these
+  // fixtures are about link trails and allocation arithmetic, and a pass-through tax would make
+  // every total in them a number you have to back out before you can check the interesting part.
+  // The taxable rotation above already covers sales tax (OI-115).
+  customers.push(
+    { key: "CUS-BOWTIE", name: "SAMPLE Customer Bowtie Trace", taxable: false },
+    { key: "CUS-INST", name: "SAMPLE Customer Installments", taxable: false },
+    { key: "CUS-SPLIT", name: "SAMPLE Customer Split Payment", taxable: false },
+    { key: "CUS-OVER", name: "SAMPLE Customer Overpayment", taxable: false },
   );
   const items = Array.from({ length: partyCounts.items }, (_, i) => ({
     key: `ITM-${pad2(i)}`,
@@ -210,6 +337,31 @@ export function buildCorpusPlan(opts = {}) {
     name: `SAMPLE Item ${pad2(i + 1)}`,
     rate: 10 + (i % 7) * 5.5,
   }));
+  // 🔴 These four carry `openingQty: 0`. Every generic SAMPLE SKU is seeded with 500 units so that
+  // receipts and invoices always value, but 500 units of prior stock bury the two receipts a
+  // costing panel is supposed to point at — and make the traced chain's "we shipped what we bought"
+  // unprovable. A zero opening balance is what makes their Stock Ledger short enough to read.
+  items.push({
+    key: "ITM-BOWTIE",
+    code: "SAMPLE-SKU-BOWTIE",
+    name: "SAMPLE Item Bowtie Trace",
+    cost: BOWTIE_COST,
+    rate: BOWTIE_SELL,
+    openingQty: 0,
+  });
+  for (const method of COSTING_LAYER_METHODS) {
+    items.push({
+      key: method.key,
+      code: `SAMPLE-SKU-COST-${method.suffix}`,
+      name: `SAMPLE Item Costing ${method.suffix}`,
+      // The buy rates live on the movements, not the master — the whole point is two different
+      // incoming rates for one SKU. This is only the fallback ERPNext values an unrated row at.
+      rate: COSTING_LAYER_MOVES[0].rate,
+      valuationMethod: method.valuationMethod,
+      openingQty: 0,
+      expect: { onHandValue: method.onHandValue, layers: method.layers },
+    });
+  }
   const projects = [
     { key: "PRJ-00", name: "SAMPLE Project Alpha", customerKey: "CUS-00" },
     { key: "PRJ-01", name: "SAMPLE Project Beta", customerKey: "CUS-01" },
@@ -341,6 +493,9 @@ export function buildCorpusPlan(opts = {}) {
 
   appendApDogfoodFixtures(docs, { windowDays, suppliers, items, supplierByKey });
   appendPaymentBatchFixture(docs, { windowDays, items });
+  appendTracedChainFixture(docs, { windowDays });
+  appendCostingLayerFixture(docs, { windowDays });
+  appendArPaymentFixtures(docs, { windowDays, items });
 
   return {
     tag,
@@ -360,6 +515,22 @@ export function buildCorpusPlan(opts = {}) {
     summary: summarizePlan(docs),
   };
 }
+
+/**
+ * Extra submitted rows beyond DEFAULT_COUNTS contributed by the 2026-09-26 fixtures: the traced
+ * chain, the OI-177 costing SKUs, and the money-in stress set. Kept as a declared table rather
+ * than a magic number in the tests, so adding a fixture forces the count to be stated.
+ */
+export const CHAIN_FIXTURE_EXTRA_COUNTS = Object.freeze({
+  quotation: 1, // BT-Q
+  sales_order: 1, // BT-SO
+  purchase_order: 1, // BT-PO
+  purchase_receipt: 7, // BT-PR + 2 costing receipts x 3 methods
+  purchase_invoice: 1, // BT-PI
+  delivery_note: 4, // BT-DN + 1 costing note x 3 methods
+  sales_invoice: 6, // BT-SI + SI-INST + SI-SPLIT-A/B/C + SI-OVER
+  payment_entry: 4, // BT-PE-PAY / BT-PE-RCV + PE-SPLIT + PE-OVER
+});
 
 /** Extra submitted sandbox rows beyond DEFAULT_COUNTS (T0 AP fixtures + OI-161 Packet G). */
 export const AP_FIXTURE_EXTRA_COUNTS = Object.freeze({
@@ -583,6 +754,267 @@ function appendOverlappingScheduleFixture(docs, ctx) {
   }
 }
 
+/**
+ * The traced chain — one customer order walked through both sides, nine documents deep.
+ *
+ * Dates march strictly forward (larger `dayOffset` = older), and two of them are deliberate:
+ *   - the Item Receipt (40) precedes the Delivery Note (26), so the stock that ships is the stock
+ *     that arrived and the costing panel has a real layer to point at;
+ *   - the Delivery Note and the Invoice share a posting date (26), because 5zorro's process is
+ *     "create an invoice at the same time as I ship". Two documents rather than one
+ *     `update_stock` invoice, so the stock movement stays separable from the billing (OI-177).
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number }} ctx
+ */
+function appendTracedChainFixture(docs, ctx) {
+  const { windowDays } = ctx;
+  const buyLine = { itemKey: "ITM-BOWTIE", qty: BOWTIE_QTY, rate: BOWTIE_COST, salesOrderRef: null };
+  const sellLine = { itemKey: "ITM-BOWTIE", qty: BOWTIE_QTY, rate: BOWTIE_SELL, salesOrderRef: null };
+  const scenario = "bowtie-traced-chain";
+  /** @param {object} extra */
+  const chainDoc = (kind, key, dayOffset, extra) => ({
+    ...baseDoc(kind, 920, windowDays, 0, {
+      ...extra,
+      dayOffset,
+      dogfoodScenario: scenario,
+    }),
+    key,
+  });
+
+  docs.push(
+    chainDoc("quotation", "BT-Q", 56, {
+      partyKey: "CUS-BOWTIE",
+      items: [{ ...sellLine }],
+      source: null,
+    }),
+    chainDoc("sales_order", "BT-SO", 52, {
+      partyKey: "CUS-BOWTIE",
+      items: [{ ...sellLine }],
+      source: { kind: "quotation", key: "BT-Q" },
+    }),
+    // The hinge. `salesOrderLink` puts the Sales Order on the PO's lines
+    // (`Purchase Order Item.sales_order`) — bought *for* that order, not merely on the same day.
+    chainDoc("purchase_order", "BT-PO", 48, {
+      partyKey: "SUP-BOWTIE",
+      items: [{ ...buyLine, salesOrderRef: { kind: "sales_order", key: "BT-SO" } }],
+      source: null,
+      salesOrderLink: { kind: "sales_order", key: "BT-SO" },
+      logbookPoNo: "BT-1001",
+    }),
+    chainDoc("purchase_receipt", "BT-PR", 40, {
+      partyKey: "SUP-BOWTIE",
+      items: [{ ...buyLine }],
+      source: { kind: "purchase_order", key: "BT-PO" },
+    }),
+    chainDoc("purchase_invoice", "BT-PI", 38, {
+      partyKey: "SUP-BOWTIE",
+      items: [{ ...buyLine }],
+      source: { kind: "purchase_receipt", key: "BT-PR" },
+      billNo: "SMP-BOWTIE-INV-01",
+      updateStock: false,
+      taxWithholding: false,
+    }),
+    chainDoc("payment_entry", "BT-PE-PAY", 30, {
+      direction: "Pay",
+      partyKey: "SUP-BOWTIE",
+      modeOfPayment: "USPS_Check",
+      // No amount: settle whatever the bill actually owes. Stating a number here would make the
+      // fixture disagree with the bill the first time a tax or rounding rule changes.
+      allocations: [{ key: "BT-PI" }],
+      source: null,
+    }),
+    chainDoc("delivery_note", "BT-DN", 26, {
+      partyKey: "CUS-BOWTIE",
+      items: [{ ...sellLine }],
+      source: { kind: "sales_order", key: "BT-SO" },
+    }),
+    chainDoc("sales_invoice", "BT-SI", 26, {
+      partyKey: "CUS-BOWTIE",
+      items: [{ ...sellLine }],
+      source: { kind: "delivery_note", key: "BT-DN" },
+      updateStock: false,
+      salesTax: false,
+    }),
+    chainDoc("payment_entry", "BT-PE-RCV", 12, {
+      direction: "Receive",
+      partyKey: "CUS-BOWTIE",
+      modeOfPayment: "ACH",
+      allocations: [{ key: "BT-SI" }],
+      source: null,
+    }),
+  );
+}
+
+/** Selling rate on the costing SKUs — above both buy rates, so no below-cost noise (OI-179). */
+export const COSTING_SELL = 90.0;
+
+/**
+ * OI-177 — buy 2 @ 50, buy 1 @ 75, sell 2, against three SKUs that differ only in
+ * `valuation_method`. Two Item Receipts and one Delivery Note each, from nothing.
+ *
+ * Real stock documents rather than bare Stock Entries, because the panel this feeds is reached
+ * *from a document* — a clerk looking at one shipment asking what it cost. The buy rates ride on
+ * the receipt lines, which is the only way one SKU ends up with two different incoming rates.
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number }} ctx
+ */
+function appendCostingLayerFixture(docs, ctx) {
+  const { windowDays } = ctx;
+  const [buy1, buy2, sell] = COSTING_LAYER_MOVES;
+  // Strictly decreasing: both receipts land before the shipment draws on them.
+  const offsets = { buy1: 44, buy2: 38, sell: 30 };
+
+  COSTING_LAYER_METHODS.forEach((method, i) => {
+    const scenario = `oi177-cost-layers-${method.suffix.toLowerCase()}`;
+    const line = (qty, rate) => [{ itemKey: method.key, qty, rate, salesOrderRef: null }];
+    docs.push(
+      {
+        ...baseDoc("purchase_receipt", 930 + i * 2, windowDays, 0, {
+          partyKey: "SUP-BOWTIE",
+          items: line(buy1.qty, buy1.rate),
+          source: null,
+          dogfoodScenario: scenario,
+          dayOffset: offsets.buy1,
+        }),
+        key: `PR-COST-${method.suffix}-1`,
+      },
+      {
+        ...baseDoc("purchase_receipt", 931 + i * 2, windowDays, 0, {
+          partyKey: "SUP-BOWTIE",
+          items: line(buy2.qty, buy2.rate),
+          source: null,
+          dogfoodScenario: scenario,
+          dayOffset: offsets.buy2,
+        }),
+        key: `PR-COST-${method.suffix}-2`,
+      },
+      {
+        ...baseDoc("delivery_note", 930 + i, windowDays, 0, {
+          partyKey: "CUS-BOWTIE",
+          items: line(sell.qty, COSTING_SELL),
+          source: null,
+          dogfoodScenario: scenario,
+          dayOffset: offsets.sell,
+        }),
+        key: `DN-COST-${method.suffix}`,
+      },
+    );
+  });
+}
+
+/**
+ * Money-in stress fixtures (5zorro 2026-09-26: *"perhaps have a few stress tests on the payment
+ * receipt side?"*). Three shapes, each the AR twin of something that already bit us on the AP side:
+ *
+ *   `SI-INST`        one invoice, 12 monthly installments — the explode path, Receive side
+ *   `SI-SPLIT-A/B/C` one payment allocated across three invoices, two of them partly
+ *   `SI-OVER`        a payment larger than the invoice, leaving an unallocated credit
+ *
+ * 🔴 `SI-OVER` is the one to keep. Its leftover credit is the same shape as the row that emptied
+ * the Pay Outstanding board (gotchas G13) — negative outstanding, no due date — so the receive side
+ * now has that row on purpose instead of meeting it for the first time in front of a clerk.
+ *
+ * @param {object[]} docs
+ * @param {{ windowDays: number, items: object[] }} ctx
+ */
+function appendArPaymentFixtures(docs, ctx) {
+  const { windowDays, items } = ctx;
+  const item = items[0];
+  const scenario = "ar-receive-stress";
+
+  // Installments: posting 40 days back, one row a month, so the run spans overdue → future.
+  const instPosting = 40;
+  const instSchedule = Array.from({ length: AR_INSTALLMENT_ROWS }, (_, i) => ({
+    dayOffset: instPosting - (i + 1) * 30,
+    amount: AR_INSTALLMENT_AMOUNT,
+  }));
+  docs.push({
+    ...baseDoc("sales_invoice", 940, windowDays, 2, {
+      partyKey: "CUS-INST",
+      items: [
+        {
+          itemKey: item.key,
+          qty: AR_INSTALLMENT_ROWS,
+          rate: AR_INSTALLMENT_AMOUNT,
+          salesOrderRef: null,
+        },
+      ],
+      source: null,
+      updateStock: false,
+      salesTax: false,
+      paymentSchedule: instSchedule,
+      dogfoodScenario: scenario,
+      dayOffset: instPosting,
+    }),
+    key: "SI-INST",
+  });
+
+  // Split: three invoices, one payment. 400 + 700 + 900 = 2000 owed, 1000 paid.
+  const splits = [
+    { key: "SI-SPLIT-A", index: 941, amount: 400.0, allocate: 400.0 },
+    { key: "SI-SPLIT-B", index: 942, amount: 700.0, allocate: 300.0 },
+    { key: "SI-SPLIT-C", index: 943, amount: 900.0, allocate: 300.0 },
+  ];
+  for (const sp of splits) {
+    docs.push({
+      ...baseDoc("sales_invoice", sp.index, windowDays, 2, {
+        partyKey: "CUS-SPLIT",
+        items: [{ itemKey: item.key, qty: 1, rate: sp.amount, salesOrderRef: null }],
+        source: null,
+        updateStock: false,
+        salesTax: false,
+        dogfoodScenario: scenario,
+        dayOffset: 34,
+      }),
+      key: sp.key,
+    });
+  }
+  docs.push({
+    kind: "payment_entry",
+    index: 941,
+    key: "PE-SPLIT",
+    dayOffset: 20,
+    direction: "Receive",
+    partyKey: "CUS-SPLIT",
+    modeOfPayment: "ACH",
+    // A fully settles; B and C are left part-paid, which is what makes the board interesting.
+    amount: 1000.0,
+    allocations: splits.map((sp) => ({ key: sp.key, amount: sp.allocate })),
+    source: null,
+    dogfoodScenario: scenario,
+  });
+
+  // Overpayment: 500 owed, 800 arrives. 300 stays unallocated as a credit on the customer.
+  docs.push({
+    ...baseDoc("sales_invoice", 944, windowDays, 2, {
+      partyKey: "CUS-OVER",
+      items: [{ itemKey: item.key, qty: 1, rate: 500.0, salesOrderRef: null }],
+      source: null,
+      updateStock: false,
+      salesTax: false,
+      dogfoodScenario: scenario,
+      dayOffset: 30,
+    }),
+    key: "SI-OVER",
+  });
+  docs.push({
+    kind: "payment_entry",
+    index: 942,
+    key: "PE-OVER",
+    dayOffset: 16,
+    direction: "Receive",
+    partyKey: "CUS-OVER",
+    modeOfPayment: "DOM_WIRE",
+    amount: 800.0,
+    allocations: [{ key: "SI-OVER", amount: 500.0 }],
+    unallocated: 300.0,
+    source: null,
+    dogfoodScenario: scenario,
+  });
+}
+
 /** @param {object[]} docs */
 export function summarizeApFixtures(docs) {
   const roles = AP_DOGFOOD_FIXTURE_KEYS.map((key) => {
@@ -717,6 +1149,10 @@ function kindAbbrev(kind) {
       return "PR";
     case "purchase_invoice":
       return "PI";
+    case "delivery_note":
+      return "DN";
+    case "payment_entry":
+      return "PE";
     default:
       return "X";
   }
