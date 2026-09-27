@@ -650,6 +650,8 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
+      <button type="button" class="sort-btn" id="find-payments" data-testid="pay-outstanding-find"
+        title="Find a payment already made — every check and transfer, by vendor or check no.">Find Payments…</button>
       <button type="button" id="prefs-toggle" aria-expanded="false"></button>
     </div>
   </header>
@@ -1439,6 +1441,10 @@
       }
     };
 
+    // F4 (plan 2026-09-26): this is the Pay side, so Find Payments opens on "Paid to vendors".
+    document.getElementById("find-payments").onclick = () => {
+      if (api && api.openFindPayments) api.openFindPayments({ via: "browse", direction: "Pay" });
+    };
     const sortDateBtn = document.getElementById("sort-date");
     const sortInvoiceBtn = document.getElementById("sort-invoice");
     function setSortMode(mode) {

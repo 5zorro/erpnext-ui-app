@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
     ipcRenderer.invoke("create-batch-payment-entry", bills, intent),
   createBlankPaymentEntry: (intent) => ipcRenderer.invoke("create-blank-payment-entry", intent),
   openPaymentDoc: (name) => ipcRenderer.send("open-payment-doc", name),
+  // F4 (plan 2026-09-26): the payments' own Find page, through main's unsaved-changes gate.
+  openFindPayments: (opts) => ipcRenderer.send("open-find-payments", opts || {}),
   createPaymentTerm: (input) => ipcRenderer.invoke("create-payment-term", input),
   getDelayCalendar: () => ipcRenderer.invoke("get-delay-calendar"),
   setDelayCalendar: (csv) => ipcRenderer.invoke("set-delay-calendar", csv || ""),

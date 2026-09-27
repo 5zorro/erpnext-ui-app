@@ -30,12 +30,16 @@
     #not-pay[hidden] { display: none; }
     .view-link { color: #0072b2; text-decoration: none; font-size: 12px; }
     .view-link:hover { text-decoration: underline; }
+    .hdr-links { display: flex; gap: 16px; }
   </style>
 </head>
 <body>
   <header>
     <h1 data-testid="payment-doc-title">Payment Entry</h1>
-    <a href="#" class="view-link" id="open-vanilla" data-testid="payment-doc-open-vanilla">Open in Vanilla →</a>
+    <span class="hdr-links">
+      <a href="#" class="view-link" id="find-payments" data-testid="payment-doc-find">Find Payments…</a>
+      <a href="#" class="view-link" id="open-vanilla" data-testid="payment-doc-open-vanilla">Open in Vanilla →</a>
+    </span>
   </header>
   <main>
     <div id="load-error" hidden data-testid="payment-doc-error"></div>
@@ -170,6 +174,18 @@
     async function init(statusText) {
       const params = new URLSearchParams(location.search);
       const name = params.get("name") || "";
+
+      // F4 (plan 2026-09-26): a Find button on a document looks for *one* other document, so
+      // the page opens with the cursor in the check-no. box, on this payment's side.
+      document.getElementById("find-payments").onclick = (ev) => {
+        ev.preventDefault();
+        if (api && api.openFindPayments) {
+          api.openFindPayments({
+            via: "find-button",
+            direction: lastPaymentDoc && lastPaymentDoc.payment_type === "Receive" ? "Receive" : "Pay",
+          });
+        }
+      };
 
       openVanillaLink.onclick = (ev) => {
         ev.preventDefault();

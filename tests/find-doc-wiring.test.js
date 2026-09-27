@@ -107,3 +107,25 @@ describe("Find page is live (plan 2026-09-26 F3)", () => {
     assert.match(page, /dataset\.findDesk/);
   });
 });
+
+describe("F4: Find Payments from the payment pages (plan 2026-09-26)", () => {
+  const main = read("../electron/main.js");
+  it("both pages have the button and reach main's one door", () => {
+    for (const [page, preload, testid] of [
+      ["../electron/pay-outstanding.src.html", "../electron/pay-outstanding-preload.cjs", "pay-outstanding-find"],
+      ["../electron/payment-doc.src.html", "../electron/payment-doc-preload.cjs", "payment-doc-find"],
+    ]) {
+      assert.match(read(page), new RegExp(`data-testid="${testid}"`), page);
+      assert.match(read(page), /api\.openFindPayments\(/, page);
+      assert.ok(read(preload).includes('ipcRenderer.send("open-find-payments"'), preload);
+    }
+    assert.ok(main.includes('ipcMain.on("open-find-payments"'));
+  });
+
+  it("goes through the general unsaved-changes gate and never clears the Doc form's flag", () => {
+    const body = main.slice(main.indexOf("function openFindPayments("), main.indexOf('ipcMain.on("open-find-payments"'));
+    assert.match(body, /gateDirtyThen\(go\)/);
+    assert.doesNotMatch(body, /dirtyState\s*=/);
+    assert.match(body, /openTargetFor\("\/app\/payment-entry"\)/);
+  });
+});
