@@ -1,3 +1,5 @@
+import { buildResellingCorpus } from "./reselling-corpus.js";
+
 /**
  * Deterministic sample-data corpus plan (OI-055 / plan S−1).
  * Pure: no ERP I/O. The ops runner applies this JSON via sandbox-only bench seed.
@@ -12,7 +14,14 @@
  * applied on their submitted PIs → Tax Withholding Details report.
  */
 
-/** Bump when corpus shape or bill_no series changes — `--reset` deletes prior tag. */
+/**
+ * Bump when corpus shape or bill_no series changes — `--reset` deletes docs carrying **this** tag.
+ *
+ * 🔴 Deliberately **not** bumped for the 2026-09-26 reselling expansion. A bump makes the seeder
+ * recreate everything, but it also orphans the previous tag's rows, since `_reset_tagged` only
+ * sweeps the current one. The v5 fixtures are still valid members of this corpus, so holding the tag
+ * lets a re-run skip them as already-present and create only what is new.
+ */
 export const SAMPLE_TAG = "ui-app-sample-v5";
 
 /** Tax Withholding Category name created by seed_corpus (SSoT for plan + applicator). */
@@ -254,6 +263,8 @@ export function pad2(n) {
  * @param {number} [opts.draftsPerKind] draft (unsubmitted) extras per kind
  * @param {typeof DEFAULT_PARTY_COUNTS} [opts.parties]
  * @param {string} [opts.tag]
+ * @param {boolean} [opts.reselling] include the 25×25 year-long reselling population (default true)
+ * @param {number} [opts.resellingMonths] shorten the reselling year — the knob for a faster seed
  */
 export function buildCorpusPlan(opts = {}) {
   const windowDays = Number.isFinite(opts.windowDays) ? opts.windowDays : 60;
@@ -497,6 +508,22 @@ export function buildCorpusPlan(opts = {}) {
   appendCostingLayerFixture(docs, { windowDays });
   appendArPaymentFixtures(docs, { windowDays, items });
 
+  // A year of reselling across 25 vendors and 25 customers, with its own parties, its own SKUs and
+  // its own 360-day window. Kept as a separate population so the 60-day rotation above — which the
+  // tax mix, the batching fixtures and the Find dogfood are all calibrated against — does not move.
+  const reselling =
+    opts.reselling === false
+      ? null
+      : buildResellingCorpus(
+          Number.isFinite(opts.resellingMonths) ? { months: opts.resellingMonths } : {},
+        );
+  if (reselling) {
+    suppliers.push(...reselling.vendors);
+    customers.push(...reselling.customers);
+    items.push(...reselling.items);
+    docs.push(...reselling.docs);
+  }
+
   return {
     tag,
     windowDays,
@@ -512,6 +539,14 @@ export function buildCorpusPlan(opts = {}) {
     },
     docs,
     apFixtures: summarizeApFixtures(docs),
+    reselling: reselling
+      ? {
+          months: reselling.months,
+          windowDays: reselling.windowDays,
+          settleDays: reselling.settleDays,
+          ...reselling.summary,
+        }
+      : null,
     summary: summarizePlan(docs),
   };
 }

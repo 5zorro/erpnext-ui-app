@@ -158,6 +158,83 @@ receive side now meets that row in a fixture instead of in front of a clerk.
 All four stress customers are sales-tax **exempt**: these fixtures are about allocation arithmetic,
 and a pass-through tax would make every total a number you have to back out first.
 
+## The reselling year — 25 vendors x 25 customers x 12 months
+
+A second population entirely, with its own 360-day window. SSoT: `src/sample-data/reselling-corpus.js`
+(pure, unit-tested in `tests/reselling-corpus.test.js`); it is **on by default** and switched off with
+`buildCorpusPlan({ reselling: false })`.
+
+🔴 **Deliberately separate from the 8-vendor rotation above.** That rotation is calibrated for the
+tax mix (OI-115), the batching fixtures and the Find dogfood; growing it to 25 would have moved all
+of it. These are new parties (`SAMPLE Reseller Vendor 01-25` / `SAMPLE Reseller Customer 01-25`) and
+new SKUs (`SAMPLE-RS-*`).
+
+| | |
+|---|---|
+| Documents | **~2,726** — 365 PO, 460 IR, 456 Bill, 460 DN, 460 Invoice, 525 Payment |
+| Window | 360 days, twelve 30-day months |
+| Floor | **every party trades every month** — asserted per party per month, not on average |
+| Activity spread | 3 heavy (3 cycles/mo), 7 steady (2), 15 light (1); tiers interleaved so vendor 01 is not automatically the busiest |
+| Seed time | **~14 min** (measured: 465 docs in 2m24s, ~0.31s/doc) |
+
+A **cycle** is one reselling transaction: `[PO] → Item Receipt → Bill` and `Delivery Note → Invoice`,
+plus its share of a payment. 4 cycles in 5 carry a Purchase Order; the rest are bare receipts, which
+resale does both ways and which keeps the create-from-source / create-from-nothing mix honest. Each
+cycle sells **fewer** units than it bought, so ordinary stock accumulates and never goes negative by
+accident.
+
+### Cost moves every month — that is the point
+
+Each resale SKU has a **different cost in each of the twelve months**, so a rate sitting in the FIFO
+queue *names the month it was bought in*. That is the whole trace from purchase to sale: ERPNext has
+no document link for resale, so the cost layer is the only evidence, and identical monthly rates
+would make it unreadable.
+
+`costForMonth(item, m) = baseCost + costStep * m`, with the tests asserting all twelve are distinct
+and every month's price clears that month's cost. 🔴 **Two SKUs deflate** (`RS-ITM-03`, `RS-ITM-06`)
+so nothing downstream may assume cost only rises.
+
+### The two ageing rules
+
+| Side | Rule | Result |
+|---|---|---|
+| Money in | an invoice **older than 25 days is paid in full** | nothing outstanding in AR is over 25 days old |
+| Money out | a bill **older than 60 days is paid in full** | nothing outstanding in AP is over 60 days old |
+
+Collect faster than you pay. Payments are **grouped per party per month** — one cheque settling
+several bills, which is both what really happens and what the Pay Outstanding board exists for — and
+dated at the *latest* settle date in the group, so the newest invoice in it lands exactly on the
+limit. No allocation names an amount: each reference settles what its invoice really owes.
+
+### Negative inventory, both flavours — keys `RS-NEG-*`
+
+Four cases on **four dedicated SKUs**. Dedicated because a backdated receipt reposts every later
+movement for that item and warehouse: on a shared SKU it would cascade through a year of unrelated
+history (slow) and bury the case you came to look at (illegible).
+
+| SKU | Flavour | Receipt dated | What you see |
+|---|---|---|---|
+| `SAMPLE-RS-NEG-F1` / `-F2` | forward | **after** the shipment | no repost, ever — the shipment keeps its guessed cost permanently, and the difference lands on the receipt |
+| `SAMPLE-RS-NEG-B1` / `-B2` | backdated | **before** the shipment | `Repost Item Valuation` → the shipment's cost is genuinely rewritten |
+
+🔴 Both need the Delivery Note **inserted before** the receipt, whatever the dates say — insert the
+receipt first and there is stock on hand, so neither behaviour happens. That is what `applyLast` on
+the receipt spec is for, and the seeder applies those rows in a final pass. Each item's
+`valuation_rate` is deliberately **wrong** (above cost for F1/B1, below for F2/B2) so the correction
+has a visible sign.
+
+Every resale SKU sets `Item.allow_negative_stock`, per item rather than site-wide: `Stock
+Settings.allow_negative_stock` is 5zorro's call and is the real answer to "all items default to allow
+negative", and a 2,700-document seed should not fail over one date landing out of order.
+
+### Insert order is load-bearing
+
+`buildResellingCorpus` returns documents **sorted oldest-first within each kind**, and
+`tests/reselling-corpus.test.js` asserts it. Inserting a stock movement dated earlier than one
+already on file makes ERPNext queue a `Repost Item Valuation`; emit these out of order and a year of
+history reposts itself thousands of times. The first version of the sort got this wrong — comparing
+across kinds by returning 0 made the comparator non-transitive — and the test caught it.
+
 ## Link graph (summary)
 
 | Doc | From source | From nothing | Leftover open sources |

@@ -41,6 +41,12 @@ function sourcePlanKey(source) {
   return null;
 }
 
+/**
+ * The suites below pin the **60-day rotation** and the named fixtures, so they build with
+ * `{ reselling: false }`. The 25x25 year-long reselling population is a separate body of data with
+ * its own window and its own guarantees — `tests/reselling-corpus.test.js` holds those, and mixing
+ * the two would turn every count here into a sum nobody can check.
+ */
 describe("sample-data corpus plan", () => {
   it("pads indices", () => {
     assert.equal(pad2(3), "03");
@@ -48,7 +54,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("builds ~25 of each doctype with tag and 60-day window", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.equal(plan.tag, SAMPLE_TAG);
     assert.equal(plan.windowDays, 60);
     for (const [kind, n] of Object.entries(DEFAULT_COUNTS)) {
@@ -75,7 +81,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("drafts are create-from-nothing and spread across distinct parties", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const draftPi = plan.docs.filter((d) => d.kind === "purchase_invoice" && d.asDraft);
     assert.equal(draftPi.length, 5);
     for (const d of draftPi) {
@@ -87,7 +93,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("varies create-from-source vs create-from-nothing", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const submitted = plan.docs.filter((d) => !d.asDraft);
     const { bySource } = summarizePlan(submitted);
 
@@ -113,7 +119,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("leaves open POs for source-picker dogfood (20..24)", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const prFromPo = new Set(
       plan.docs
         .filter((d) => d.kind === "purchase_receipt" && d.source?.kind === "purchase_order")
@@ -131,7 +137,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("keeps linked chains chronological (source older than child)", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const byKey = Object.fromEntries(plan.docs.map((d) => [d.key, d]));
     for (const d of plan.docs) {
       if (!d.source) continue;
@@ -145,7 +151,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("rotates parties and spreads dayOffsets across the window", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const supplierKeys = new Set(
       plan.docs.filter((d) => d.kind === "purchase_order").map((d) => d.partyKey)
     );
@@ -162,7 +168,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("OI-131 includes one idle vendor (old PO) and one never-PO vendor", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.ok(plan.parties.suppliers.some((s) => s.key === "SUP-IDLE" && s.activity === "idle"));
     assert.ok(plan.parties.suppliers.some((s) => s.key === "SUP-NEVER" && s.activity === "never"));
     const idlePos = plan.docs.filter((d) => d.kind === "purchase_order" && d.partyKey === "SUP-IDLE");
@@ -173,7 +179,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("links some PO lines to sales orders for SO picker dogfood", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const linked = plan.docs.filter((d) => d.kind === "purchase_order" && d.salesOrderLink);
     assert.equal(linked.length, 8); // rotation 0,4,8,12,16,20,24 + the traced chain's BT-PO
   });
@@ -186,18 +192,18 @@ describe("sample-data corpus plan", () => {
 
   it("PO-IDLE postingDate is prior calendar year (inside FY N−1)", () => {
     assert.equal(idleVendorPoPostingDate("2026-08-21"), "2025-11-15");
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const idle = plan.docs.find((d) => d.key === "PO-IDLE");
     assert.equal(postingDateForDoc("2026-08-21", idle), "2025-11-15");
   });
 
   it("summarizePlan matches buildCorpusPlan.summary", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.deepEqual(summarizePlan(plan.docs), plan.summary);
   });
 
   it("T0 AP fixtures for OI-149 / OI-153 / OI-154", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.equal(plan.apFixtures.keys.length, AP_DOGFOOD_FIXTURE_KEYS.length);
     for (const key of AP_DOGFOOD_FIXTURE_KEYS) {
       const row = plan.docs.find((d) => d.key === key);
@@ -224,7 +230,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("OI-161: three bills whose schedules interleave into cross-bill groups (2026-09-08)", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     const keys = ["PI-OVERLAP-A", "PI-OVERLAP-B", "PI-OVERLAP-C"];
     const rows = keys.map((k) => plan.docs.find((d) => d.key === k));
     for (const [i, row] of rows.entries()) {
@@ -265,7 +271,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("OI-161 Packet G: daily payment-schedule fixture at two dollar scales", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.equal(PAYMENT_BATCH_FIXTURE_KEYS.length, 5);
 
     const cases = [
@@ -308,7 +314,7 @@ describe("sample-data corpus plan", () => {
   });
 
   it("OI-115 tax mix: ~7/8 customers taxable, ~2/8 suppliers TW", () => {
-    const plan = buildCorpusPlan();
+    const plan = buildCorpusPlan({ reselling: false });
     assert.equal(plan.tax.tdsCategory, "SAMPLE-TDS");
     assert.equal(plan.tax.taxableCustomers, 7);
     assert.equal(plan.tax.withholdingSuppliers, 2);
@@ -552,7 +558,7 @@ function valueAfter(method, moves) {
 }
 
 describe("traced chain fixture (the bowtie)", () => {
-  const plan = buildCorpusPlan();
+  const plan = buildCorpusPlan({ reselling: false });
   const byKey = Object.fromEntries(plan.docs.map((d) => [d.key, d]));
 
   it("walks all nine documents, one SKU, both sides of the business", () => {
@@ -626,7 +632,7 @@ describe("traced chain fixture (the bowtie)", () => {
 });
 
 describe("costing layer fixture (OI-177)", () => {
-  const plan = buildCorpusPlan();
+  const plan = buildCorpusPlan({ reselling: false });
   const byKey = Object.fromEntries(plan.docs.map((d) => [d.key, d]));
   const itemByKey = Object.fromEntries(plan.parties.items.map((i) => [i.key, i]));
 
@@ -689,7 +695,7 @@ describe("costing layer fixture (OI-177)", () => {
 });
 
 describe("money-in stress fixtures", () => {
-  const plan = buildCorpusPlan();
+  const plan = buildCorpusPlan({ reselling: false });
   const byKey = Object.fromEntries(plan.docs.map((d) => [d.key, d]));
 
   it("creates every declared key", () => {
