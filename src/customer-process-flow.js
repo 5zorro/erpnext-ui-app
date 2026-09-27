@@ -1,7 +1,7 @@
 /**
  * Customers Home swimlane layout (5zorro 2026-09-26) — the A/R twin of vendor-process-flow.js.
  *
- * "The flow on the home screen is estimate > sales order > sales invoice > payment receipt.
+ * First pass (same day): "estimate > sales order > sales invoice > payment receipt.
  * Sometimes the estimate is skipped… arrange the tiles to be where estimate is above sales order
  * (like the AP part… material order and purchase order) just with a tiny arrow pointing down."
  *
@@ -24,24 +24,33 @@ export const CUSTOMER_FLOW_LANES = Object.freeze([
     shortLabel: "Daily",
     subtitle: "Estimate → Order → Invoice → Payment received",
     sequential: true,
+    // The mirror of Vendors' shape (5zorro 2026-09-26): Vendors fans *in* (two sources stacked,
+    // then one line), Customers fans *out* — Estimate → Sales Order → the two things an order
+    // leads to, stacked. It puts the Sales Order in the middle, where the work is.
     steps: [
+      Object.freeze({ step: "1", tileIds: ["estimate-new"], caption: "optional" }),
+      Object.freeze({ step: "2", tileIds: ["so-new"] }),
       Object.freeze({
-        step: "1",
-        tileIds: ["estimate-new", "so-new"],
+        step: "3",
+        tileIds: ["invoice-new", "receive-pay"],
         join: "then",
-        badges: ["1", "2"],
-        caption: "estimate optional",
+        badges: ["3", "4"],
+        caption: "invoice, then get paid",
       }),
-      Object.freeze({ step: "3", tileIds: ["invoice-new"] }),
-      Object.freeze({ step: "4", tileIds: ["receive-pay"] }),
-      // Research, not a next step: a divider, not an arrow. Kept in this one lane (not a second
-      // "As needed" lane like Vendors') so Home still fits a maximized 1080p window.
-      Object.freeze({ step: "5", tileIds: ["customers"], detached: true }),
     ],
+  }),
+  // Research, not a step the payment depends on — its own lane, as Vendor Center is.
+  Object.freeze({
+    id: "weekly",
+    label: "Weekly / monthly",
+    shortLabel: "As needed",
+    subtitle: "Follow up & research",
+    sequential: false,
+    steps: [Object.freeze({ step: "5", tileIds: ["customers"] })],
   }),
 ]);
 
-/** No second lane, so nothing to bridge to. */
+/** Home draws bridges between lanes; Customers' second lane needs no explanation. */
 export const CUSTOMER_FLOW_BRIDGES = Object.freeze([]);
 
 /** @returns {string[]} every tile id in CUSTOMER_FLOW_LANES, in order, deduped */
