@@ -46,6 +46,11 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto
   font-family: inherit;
 }
 
+/* Sales Order progress strip (A/R stage A1): ERPNext's own delivered / billed / status. */
+.doc-progress { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 2px 0 10px; font-size: 13px; }
+.doc-progress-cell { padding: 3px 10px; border: 1px solid #d6dee6; border-radius: 999px; background: rgba(255,255,255,.7); }
+.doc-progress-label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+
 .addr-hint { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; }
 
 @media (max-width: 900px) {

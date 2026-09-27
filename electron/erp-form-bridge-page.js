@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 21;
+  var VERSION = 22;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1219,7 +1219,14 @@
     return meta;
   }
 
-  function setHeader(field, value) {
+  /**
+   * @param {string} field
+   * @param {unknown} value
+   * @param {{ keepTypedPostingDate?: boolean }} [opts] keepTypedPostingDate: tick
+   *   `set_posting_time` first, so ERPNext keeps the date instead of resetting it to today on
+   *   save (A/R Invoice; what Vanilla's "Edit Posting Date and Time" box does).
+   */
+  function setHeader(field, value, opts) {
     return (async function () {
       try {
         var f = window.cur_frm;
@@ -1228,6 +1235,16 @@
         var supplierSnapshot = null;
         var paymentTermsSettle = null;
         var dueDateScheduleSync = null;
+        if (
+          opts &&
+          opts.keepTypedPostingDate &&
+          field === "posting_date" &&
+          frappe.meta.has_field(f.doc.doctype, "set_posting_time") &&
+          !f.doc.set_posting_time
+        ) {
+          var tick = f.set_value("set_posting_time", 1);
+          if (tick && typeof tick.then === "function") await tick;
+        }
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
@@ -1312,11 +1329,29 @@
     })();
   }
 
-  function setRow(rowIndex, field, value) {
+  /**
+   * @param {number} rowIndex
+   * @param {string} field
+   * @param {unknown} value
+   * @param {string} [table="items"] child table — a payment's lines are `references`
+   */
+  function setRow(rowIndex, field, value, table) {
     return (async function () {
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
+        if (table && table !== "items") {
+          var other = (f.doc[table] || [])[rowIndex];
+          if (!other || !other.name || !other.doctype) {
+            return { ok: false, reason: "Row missing — refresh and retry." };
+          }
+          await setValueAsync(other.doctype, other.name, field, value);
+          await afterAjaxQuiet();
+          try {
+            f.refresh_field(table);
+          } catch (eTbl) {}
+          return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+        }
         var row = (f.doc.items || [])[rowIndex];
         if (!row || !row.name || !row.doctype) {
           return { ok: false, reason: "Row missing — refresh and retry." };
@@ -1362,7 +1397,10 @@
                 await setValueAsync(row.doctype, row.name, "description", desc);
               }
               if (row.rate == null || Number(row.rate) === 0) {
-                var rate = msg.last_purchase_rate || msg.standard_rate || 0;
+                // A last *purchase* rate is a cost; on a selling document it would quote the
+                // customer our cost. Selling forms get the price list from get_item_details.
+                var buying = /^(Purchase |Supplier Quotation|Material Request)/.test(f.doctype || "");
+                var rate = buying ? msg.last_purchase_rate || msg.standard_rate || 0 : msg.standard_rate || 0;
                 if (rate) await setValueAsync(row.doctype, row.name, "rate", rate);
               }
               await afterAjaxQuiet();
@@ -1736,8 +1774,43 @@
     }
   }
 
+  /**
+   * Receive Payment (A/R stage A1): list the customer's open invoices with ERPNext's own
+   * `get_outstanding_documents` — the call behind Vanilla's "Get Outstanding Invoices" button —
+   * which also allocates the amount received oldest-first. Needs the party's account, which the
+   * `party` script fills from `get_party_details`; waits for that first.
+   */
+  function fetchOutstanding() {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f || !f.doc) return { ok: false, reason: "No form." };
+        if (!f.doc.party) return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)), skipped: true };
+        await afterAjaxQuiet();
+        var account = f.doc.payment_type == "Receive" ? f.doc.paid_from : f.doc.paid_to;
+        if (!account) {
+          return { ok: false, reason: "ERPNext has not filled the customer's account yet — Refresh, then pick the customer again." };
+        }
+        if (!f.events || typeof f.events.get_outstanding_documents !== "function") {
+          return { ok: false, reason: "This ERPNext build has no get_outstanding_documents." };
+        }
+        frappe.flags.allocate_payment_amount = true;
+        var r = f.events.get_outstanding_documents(f, { allocate_payment_amount: 1 }, true, false);
+        if (r && typeof r.then === "function") await r;
+        await afterAjaxQuiet();
+        try {
+          f.refresh_field("references");
+        } catch (eRef) {}
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
   window.__docFormBridge = {
     version: VERSION,
+    fetchOutstanding: fetchOutstanding,
     waitForForm: waitForForm,
     snapshot: snapshot,
     setHeader: setHeader,

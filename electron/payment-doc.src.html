@@ -40,8 +40,8 @@
   <main>
     <div id="load-error" hidden data-testid="payment-doc-error"></div>
     <div id="not-pay" hidden data-testid="payment-doc-not-pay">
-      This is a Receive-type Payment Entry. The Doc skin for receiving payments (AR) isn't built
-      yet — open it in Vanilla instead.
+      This Payment Entry is neither paid nor received (an internal transfer) — there is no Doc skin
+      for it; open it in Vanilla instead.
     </div>
     <!-- inject: check-doc.fragment.html -->
   </main>
@@ -97,6 +97,12 @@
       }
       const doc = result.doc;
       if (doc.payment_type !== "Pay") {
+        // A received payment has its own Doc skin (A/R stage A1) — hand it over rather than
+        // showing an AP check. The route this page claimed is the same, so Recent keeps one row.
+        if (doc.payment_type === "Receive" && api.openReceivePayment) {
+          api.openReceivePayment(doc.name || name);
+          return;
+        }
         notPayEl.hidden = false;
         return;
       }

@@ -114,6 +114,12 @@ describe("doc-skin registry extensibility", () => {
   it("every ready Doc skin profile has a doctypeKey resolvable for lens routing", () => {
     for (const p of Object.values(DOC_SKIN_PROFILES)) {
       assert.ok(p.doctypeKey, p.id);
+      // A layout-only profile is reached by layout key (resolveDocSkinTarget's layoutKey), not by
+      // doctype — its doctype belongs to another skin (Receive Payment ↔ the Pay Bills pages).
+      if (p.layoutOnly) {
+        assert.equal(profileByDoctypeKey(p.doctypeKey)?.id !== p.id, true);
+        continue;
+      }
       assert.ok(p.shell === "bill" || p.shell === "doc-form", `${p.id} shell`);
       assert.equal(profileByDoctypeKey(p.doctypeKey)?.id, p.id);
       // Default path uses shared helpers — no per-skin lens branch required

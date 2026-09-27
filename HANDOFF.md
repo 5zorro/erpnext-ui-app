@@ -203,7 +203,8 @@ using the one fact the allocator ignores: an amendment carries `amended_from`.
 | Shell pages | `shell-surfaces.js` (`SHELL_SURFACES`) | One row per `surfaceMode`: its view, whether it is the Doc lens, whether it owns its address |
 | Find pages (OI-056) | `find-skin-registry.js` (`FIND_SKINS`); `find-skin-mock.js` until live rows (F3) | `find-doc.html`, `surfaceMode: "find-doc"`, `showFindDoc()`; a doctype gets a Find page by gaining a registry row |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
-| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style: Bill, Vendor, Item Receipt, Estimate). Vanilla keeps ERPNext's words |
+| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style: Bill, Vendor, Item Receipt, Estimate, Invoice). Vanilla keeps ERPNext's words |
+| A/R Doc skins (plan 2026-09-26 A1) | `estimate-map.js`, `sales-order-map.js`, `sales-invoice-map.js`, `receive-payment-map.js` (layouts as data), read by `sales-doc-map.js`; `doc-skin-registry.js` `DOC_FORM_MAPS` / `docFormMapFor` is what the page and `main.js` ask instead of `profileId === "po"` | More `doc-form.html` layouts. Receive Payment is `layoutOnly` (it shares Payment Entry with Pay Bills): reached by layout key, never by `profileByDoctypeKey` — see *Two registries* |
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
@@ -253,7 +254,9 @@ incident snapshots — `docs/gotchas.md` G9.
 a Doc skin*; `doc-skin-registry.js` (`DOC_SKIN_PROFILES`) only knows the doc-form.html layouts.
 Nav paths must ask the former (`resolveDocSkinTarget`) and use the latter only to dispatch a
 doc-form shell — asking the subset is how a remembered Doc lens gets silently downgraded to
-Vanilla (G9).
+Vanilla (G9). Dispatch goes by the target's **layout key** first (`docFormProfileForTarget` in
+`main.js`), because one doctype can have two Doc pages: Payment Entry is Pay Bills *and* the A/R
+Receive Payment form, and `profileByDoctypeKey("payment-entry")` deliberately answers null.
 
 **One question, one answer** (plan 2026-09-26). "Which page does this address open on?" is
 `nav-destination.js` `resolveOpenTarget`, for forms and lists alike. A door that re-derives it
@@ -287,6 +290,8 @@ under the same rule, after the toolbar re-derived it and lit the wrong one, G10)
 | Bill record | Vanilla · Simplified · Doc |
 | PO record | Vanilla · Simplified · Doc |
 | IR (Purchase Receipt) record | Vanilla · Simplified · Doc |
+| Estimate (Quotation), Sales Order, Invoice (Sales Invoice) record | Vanilla · Doc |
+| New payment, direction Receive | Vanilla · Doc (the Receive Payment form; Pay → the Pay Bills dashboard) |
 | List with a Find page (Bills, POs, Item Receipts, Payments, Estimates, Sales Orders, Sales Invoices — incl. Report/Kanban views) | Vanilla · Doc |
 | Desk, dashboards, other lists, masters | Vanilla only |
 

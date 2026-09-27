@@ -51,6 +51,11 @@ export const DOC_WASH_BY_PROFILE = Object.freeze({
   bill: { role: "invoice", desk: "ap" },
   po: { role: "order", desk: "ap" },
   receipt: { role: "fulfill", desk: "ap" },
+  // A/R (plan 2026-09-26, stage A1) — same role hues; the desk sets the Selling stamp + pattern.
+  estimate: { role: "request", desk: "ar" },
+  "sales-order": { role: "order", desk: "ar" },
+  invoice: { role: "invoice", desk: "ar" },
+  "receive-payment": { role: "payment", desk: "ar" },
 });
 
 /**

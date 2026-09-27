@@ -75,7 +75,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 21);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 22);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -291,7 +291,7 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 21/);
+    assert.match(page, /var VERSION = 22/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     // A mapped doc's party fields must be applied through set_value, and before the item
     // merge — see src/mapped-header-fields.js and the 2026-09-09 vendor-dropped dogfood.

@@ -16,7 +16,9 @@ export const DOCTYPE_LABELS = {
   quotation: "Estimate",
   "quotation:list": "Find Estimates",
   "sales-order": "Sales Order",
-  "sales-invoice": "Sales Invoice",
+  // The Doc skins' A/R word, as Bill is the A/P one. Vanilla keeps "Sales Invoice".
+  "sales-invoice": "Invoice",
+  "sales-invoice:list": "Find Invoices",
   item: "Item",
   supplier: "Vendor",
   customer: "Customer",
