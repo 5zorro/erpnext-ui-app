@@ -499,9 +499,10 @@ export const CHRONO_KIND_RANK = Object.freeze({
  * @param {object[]} docs
  */
 function chronologicalOrder(docs) {
-  return docs
-    .map((d, i) => ({ d, i }))
-    .sort((a, b) => {
+  return stampPostingTimes(
+    docs
+      .map((d, i) => ({ d, i }))
+      .sort((a, b) => {
       const lastA = a.d.applyLast ? 1 : 0;
       const lastB = b.d.applyLast ? 1 : 0;
       if (lastA !== lastB) return lastA - lastB;
@@ -509,10 +510,41 @@ function chronologicalOrder(docs) {
       if (a.d.dayOffset !== b.d.dayOffset) return b.d.dayOffset - a.d.dayOffset;
       const rankA = CHRONO_KIND_RANK[a.d.kind] ?? 99;
       const rankB = CHRONO_KIND_RANK[b.d.kind] ?? 99;
-      if (rankA !== rankB) return rankA - rankB;
-      return a.i - b.i;
-    })
-    .map((x) => x.d);
+        if (rankA !== rankB) return rankA - rankB;
+        return a.i - b.i;
+      })
+      .map((x) => x.d),
+  );
+}
+
+/** Documents per day are numbered from here, a minute apart. 08:00 is an ordinary working start. */
+export const FIRST_POSTING_MINUTE = 8 * 60;
+
+/**
+ * Give every document an explicit `postingTime`, one minute apart within its own date.
+ *
+ * 🔴 Without this a seeded document takes the **wall-clock time of its insert** as its posting time,
+ * and `future_sle_exists` (`stock_controller.py:2434`) asks for SLEs at
+ * `posting_datetime >= <this doc's>` — note the `>=`. Two documents on the same posting date inserted
+ * inside the same second therefore see each other as "the future", and ERPNext queues a
+ * `Repost Item Valuation` for each. At ~0.3s a document that happens constantly: a clean, perfectly
+ * ordered run still left **363** queued. Explicit times make the stream strictly increasing, so the
+ * seed stops depending on how fast the machine happens to be.
+ *
+ * @param {object[]} ordered documents already in global chronological order
+ */
+function stampPostingTimes(ordered) {
+  /** @type {Map<number, number>} */
+  const perDay = new Map();
+  for (const doc of ordered) {
+    const n = perDay.get(doc.dayOffset) || 0;
+    perDay.set(doc.dayOffset, n + 1);
+    const minute = FIRST_POSTING_MINUTE + n;
+    const hh = String(Math.floor(minute / 60) % 24).padStart(2, "0");
+    const mm = String(minute % 60).padStart(2, "0");
+    doc.postingTime = `${hh}:${mm}:00`;
+  }
+  return ordered;
 }
 
 /** @param {object[]} docs @param {object[]} vendors @param {object[]} customers @param {number} months */

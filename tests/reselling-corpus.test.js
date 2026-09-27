@@ -325,3 +325,42 @@ describe("reselling corpus — how it joins the main plan", () => {
     assert.equal(new Set(keys).size, keys.length, "duplicate plan key — the seeder keys on these");
   });
 });
+
+describe("reselling corpus — posting times keep the stream unambiguous", () => {
+  it("stamps an explicit time on every document", () => {
+    for (const d of corpus.docs) {
+      assert.match(d.postingTime, /^\d{2}:\d{2}:00$/, d.key);
+    }
+  });
+
+  it("never lets two documents share a date and a time", () => {
+    // 🔴 `future_sle_exists` asks for SLEs at `posting_datetime >= this document's`. Without an
+    // explicit time a seeded document takes its insert's wall clock, so two on the same date inside
+    // the same second each see the other as the future and each queues a repost. A correctly
+    // ordered run still left 363 queued before this existed.
+    const seen = new Set();
+    for (const d of corpus.docs) {
+      const stamp = `${d.dayOffset}|${d.postingTime}`;
+      assert.ok(!seen.has(stamp), `${d.key} collides with another document at ${stamp}`);
+      seen.add(stamp);
+    }
+  });
+
+  it("keeps time ascending within a date, matching the insert order", () => {
+    const rows = corpus.docs.filter((d) => !d.applyLast);
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].dayOffset !== rows[i - 1].dayOffset) continue;
+      assert.ok(
+        rows[i].postingTime > rows[i - 1].postingTime,
+        `${rows[i].key} is stamped at or before ${rows[i - 1].key} on the same day`,
+      );
+    }
+  });
+
+  it("stays inside the day it belongs to", () => {
+    for (const d of corpus.docs) {
+      const [hh] = d.postingTime.split(":").map(Number);
+      assert.ok(hh >= 8 && hh < 24, `${d.key} at ${d.postingTime} ran past midnight`);
+    }
+  });
+});
