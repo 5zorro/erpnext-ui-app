@@ -13,6 +13,7 @@
  * @param {unknown} [query.orFilters] any one of these must match (Frappe `or_filters`)
  * @param {string} [query.orderBy] e.g. "creation desc"
  * @param {number} [query.limit]
+ * @param {number} [query.start] rows to skip (Frappe `limit_start`) — the next page
  */
 export function buildFrappeResourceListUrl(erpBase, doctype, query = {}) {
   const base = String(erpBase || "").replace(/\/+$/, "");
@@ -33,6 +34,9 @@ export function buildFrappeResourceListUrl(erpBase, doctype, query = {}) {
   }
   if (query.limit != null && Number(query.limit) > 0) {
     params.set("limit_page_length", String(query.limit));
+  }
+  if (query.start != null && Number.isInteger(Number(query.start)) && Number(query.start) > 0) {
+    params.set("limit_start", String(Number(query.start)));
   }
   const qs = params.toString();
   return `${base}/api/resource/${dt}${qs ? `?${qs}` : ""}`;
@@ -172,6 +176,7 @@ export function parseFrappeResourceListResponse(json) {
  * @param {unknown} [opts.orFilters]
  * @param {string} [opts.orderBy]
  * @param {number} [opts.limit]
+ * @param {number} [opts.start]
  * @param {typeof fetch} [opts.fetchImpl]
  * @param {number} [opts.timeoutMs]
  */
@@ -183,13 +188,14 @@ export async function frappeResourceGetList({
   orFilters,
   orderBy,
   limit = 100,
+  start,
   fetchImpl = globalThis.fetch,
   timeoutMs = 12000,
 }) {
   if (typeof fetchImpl !== "function") {
     return { ok: false, reason: "fetch unavailable", rows: [] };
   }
-  const url = buildFrappeResourceListUrl(erpBase, doctype, { fields, filters, orFilters, orderBy, limit });
+  const url = buildFrappeResourceListUrl(erpBase, doctype, { fields, filters, orFilters, orderBy, limit, start });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

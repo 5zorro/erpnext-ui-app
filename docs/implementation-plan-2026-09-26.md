@@ -380,7 +380,18 @@ All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
   `doc-wash.css` paint the desk stamp behind every result card, over its columns. The page now
   uses its own `data-find-desk`.
 
-Not done: paging beyond 200, per-column sorting, and remembering a page's last search.
+**Added the same day** (5zorro: "expand find pages to allow those expansions"):
+
+- **Sort by any column** — click a heading; again to flip. Server-side (`order_by`), so the order
+  covers every match, not only the rows loaded. Only the page's own column fields (plus `name`,
+  `creation`) get through `findSortFor`, since the value becomes an SQL ORDER BY.
+- **Show 200 more** — the next page from where the list stops (`limit_start`), appended in the
+  same order. Bills passed 200 on the sandbox the same evening, so this is exercised live.
+- **The last search is remembered** per page — boxes, status and sort — in
+  `userData/find-doc-searches.json` via main (`find-doc-load-search` / `find-doc-save-search`).
+  The page's own localStorage was tried first and lost the value across a restart. A value handed
+  over by a Find button wins and starts the page from it alone; Pay / Receive stays with the
+  app-wide remembered direction. **Clear search** puts the page back to every document, newest first.
 
 ### Dogfood checklist (A1)
 
