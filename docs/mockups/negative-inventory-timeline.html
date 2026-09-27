@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Negative inventory — what the timeline does to cost</title>
+<style>
+  :root {
+    --ink: #1f2d3d;
+    --muted: #64748b;
+    --line: #f1f5f9;
+    --edge: #d6dee6;
+    --in: #009e73;
+    --out: #b45309;
+    --bad: #b91c1c;
+    --guess: #7c3aed;
+    --paper: #fff;
+  }
+  html, body { margin: 0; background: #eef2f5; color: var(--ink); font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 22px 28px 16px; background: var(--paper); border-bottom: 1px solid var(--edge); }
+  h1 { margin: 0 0 6px; font-size: 17px; }
+  header p { margin: 0 0 8px; font-size: 13px; color: var(--muted); max-width: 86ch; line-height: 1.6; }
+  header b { color: var(--ink); font-weight: 600; }
+  .stamp { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+           padding: 3px 9px; border-radius: 999px; background: #e0e7ff; color: #3730a3; margin-bottom: 8px; }
+  main { padding: 24px 28px 70px; }
+  section { background: var(--paper); border: 1px solid var(--edge); border-radius: 10px; margin-bottom: 22px; overflow: hidden; }
+  .sec-head { padding: 12px 16px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .sec-name { font-size: 13px; font-weight: 700; }
+  .sec-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 2px 8px; border-radius: 999px; }
+  .tag-ok { background: #e6f5f0; color: #00795c; }
+  .tag-warn { background: #fef3c7; color: #92400e; }
+  .tag-note { background: #e0e7ff; color: #3730a3; }
+  .why { font-size: 12px; color: var(--muted); line-height: 1.65; padding: 12px 16px 0; max-width: 92ch; }
+  .why b { color: var(--ink); font-weight: 600; }
+  .body { padding: 14px 16px 18px; }
+
+  /* ---- timeline ---- */
+  .tl { position: relative; margin: 6px 0 18px; padding: 26px 8px 8px; }
+  .tl-axis { position: absolute; left: 8px; right: 8px; top: 40px; height: 2px; background: var(--edge); }
+  .tl-row { display: flex; justify-content: space-between; position: relative; }
+  .ev { width: 150px; text-align: center; position: relative; padding-top: 30px; }
+  .ev::before {
+    content: ""; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    width: 13px; height: 13px; border-radius: 50%; background: var(--paper); border: 3px solid var(--in);
+  }
+  .ev.out::before { border-color: var(--out); }
+  .ev.out.guessed::before { border-color: var(--guess); }
+  .ev-day { position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+            font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+  .ev-doc { font-size: 12px; font-weight: 600; }
+  .ev-qty { font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .ev-qty.in { color: var(--in); }
+  .ev-qty.out { color: var(--out); }
+  .ev-note { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+
+  /* ---- ledger table ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+       color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--edge); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+         background: #f6f8fa; padding: 1px 5px; border-radius: 4px; }
+  .neg { color: var(--bad); font-weight: 600; }
+  .guessed { color: var(--guess); font-weight: 600; }
+  .pill { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 999px;
+          background: #f3e8ff; color: #6b21a8; margin-left: 5px; white-space: nowrap; }
+  .pill.fix { background: #e6f5f0; color: #00795c; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } .ev { width: 120px; } }
+  .card { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  .card-head { padding: 8px 12px; font-size: 11px; font-weight: 700; background: #f8fafc;
+               border-bottom: 1px solid var(--edge); }
+  .card-head .sub { font-weight: 400; color: var(--muted); }
+
+  .says { margin: 0; padding: 0; list-style: none; }
+  .says li { padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; margin-bottom: 8px;
+             font-size: 12px; line-height: 1.6; background: #fcfdfe; }
+  .says li b { display: block; margin-bottom: 2px; }
+  .says .src { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  footer { padding: 0 28px 50px; font-size: 11.5px; color: var(--muted); line-height: 1.7; max-width: 92ch; }
+  footer b { color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <span class="stamp">Static mockup · not a screenshot · nothing below is built</span>
+  <h1>Negative inventory — what shipping before you receive does to cost</h1>
+  <p>
+    Sometimes the warehouse is ahead of the paperwork: goods arrive and leave before anyone types
+    the receipt, so a shipment is entered while the system still reads <b>0 on hand</b>. ERPNext will
+    allow that once <code>allow_negative_stock</code> is on — the question this page is trying to make
+    visual is <b>what it costs you to allow it</b>, and <b>when</b> that cost appears.
+  </p>
+  <p>
+    Short version: the shipment still books a cost, but at a <span class="guessed">guessed rate</span>,
+    and when the receipt finally lands ERPNext <b>reaches back and rewrites it</b>. A document's booked
+    cost changes after submit, without anybody touching the document. Discovery notes: <b>OI-178</b>
+    (this page) and <b>OI-177</b> (the cost-layer panel that would show it).
+  </p>
+</header>
+
+<main>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">A · In order — the paperwork keeps up</span>
+    <span class="sec-tag tag-ok">baseline</span>
+  </div>
+  <div class="why">
+    The reference case, and the one the sample data seeds (buy 2 @ 50, buy 1 @ 75, sell 2, FIFO).
+    Every outgoing unit is drawn from a layer that already exists, so the cost of the shipment is a
+    <b>fact read off the ledger</b> rather than an estimate. Nothing here ever gets restated.
+  </div>
+  <div class="body">
+    <div class="tl">
+      <div class="tl-axis"></div>
+      <div class="tl-row">
+        <div class="ev">
+          <span class="ev-day">Mon 1</span>
+          <div class="ev-doc">Item Receipt</div>
+          <div class="ev-qty in">+2 @ 50.00</div>
+          <div class="ev-note">first layer opens</div>
+        </div>
+        <div class="ev">
+          <span class="ev-day">Fri 5</span>
+          <div class="ev-doc">Item Receipt</div>
+          <div class="ev-qty in">+1 @ 75.00</div>
+          <div class="ev-note">second layer opens</div>
+        </div>
+        <div class="ev out">
+          <span class="ev-day">Tue 9</span>
+          <div class="ev-doc">Delivery Note</div>
+          <div class="ev-qty out">−2</div>
+          <div class="ev-note">drawn from the 50.00 layer</div>
+        </div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th><th>Document</th><th class="num">Qty</th><th class="num">On hand</th>
+          <th>Layers after <code>stock_queue</code></th><th class="num">Cost booked</th><th>Rate came from</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Item Receipt</td><td class="num">+2</td><td class="num">2</td>
+            <td><code>[[2, 50]]</code></td><td class="num">—</td><td>the receipt line</td></tr>
+        <tr><td>5</td><td>Item Receipt</td><td class="num">+1</td><td class="num">3</td>
+            <td><code>[[2, 50], [1, 75]]</code></td><td class="num">—</td><td>the receipt line</td></tr>
+        <tr><td>9</td><td>Delivery Note</td><td class="num">−2</td><td class="num">1</td>
+            <td><code>[[1, 75]]</code></td><td class="num">100.00</td><td>the 50.00 layer it consumed</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">B · Out of order — you shipped it before you received it</span>
+    <span class="sec-tag tag-warn">what OI-178 is about</span>
+  </div>
+  <div class="why">
+    Same week, same goods, same money — the <b>only</b> difference is that the shipment was typed
+    first. Watch the day&nbsp;1 row: there is no layer to draw from, so ERPNext books the cost at a
+    <span class="guessed">fallback rate</span> and records a <span class="neg">negative layer</span>.
+    Then on day&nbsp;5, the receipt arrives <b>in the past relative to a movement that already
+    happened</b>, and ERPNext reposts.
+  </div>
+  <div class="body">
+    <div class="tl">
+      <div class="tl-axis"></div>
+      <div class="tl-row">
+        <div class="ev out guessed">
+          <span class="ev-day">Mon 1</span>
+          <div class="ev-doc">Delivery Note</div>
+          <div class="ev-qty out">−2</div>
+          <div class="ev-note guessed">nothing on hand — rate is a guess</div>
+        </div>
+        <div class="ev">
+          <span class="ev-day">Fri 5</span>
+          <div class="ev-doc">Item Receipt</div>
+          <div class="ev-qty in">+3 @ 50.00</div>
+          <div class="ev-note">absorbs the negative, triggers a repost</div>
+        </div>
+        <div class="ev">
+          <span class="ev-day">Tue 9</span>
+          <div class="ev-doc">Item Receipt</div>
+          <div class="ev-qty in">+1 @ 75.00</div>
+          <div class="ev-note">ordinary layer</div>
+        </div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th><th>Document</th><th class="num">Qty</th><th class="num">On hand</th>
+          <th>Layers after <code>stock_queue</code></th><th class="num">Cost booked</th><th>Rate came from</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td><td>Delivery Note</td><td class="num">−2</td><td class="num neg">−2</td>
+          <td><code class="neg">[[-2, 60.00]]</code></td>
+          <td class="num guessed">120.00</td>
+          <td class="guessed">nothing to consume — the item master's stale 60.00<span class="pill">guess</span></td>
+        </tr>
+        <tr>
+          <td>5</td><td>Item Receipt</td><td class="num">+3</td><td class="num">1</td>
+          <td><code>[[1, 50]]</code></td><td class="num">—</td><td>the receipt line</td>
+        </tr>
+        <tr>
+          <td>5<span class="pill fix">repost</span></td>
+          <td><b>day 1 is rewritten</b></td><td class="num">—</td><td class="num">—</td>
+          <td><code>[[-2, 50]]</code> → resolved</td>
+          <td class="num"><b>100.00</b></td>
+          <td>the 50.00 that turned out to be real — <b>20.00 of cost moves month to month</b></td>
+        </tr>
+        <tr>
+          <td>9</td><td>Item Receipt</td><td class="num">+1</td><td class="num">2</td>
+          <td><code>[[1, 50], [1, 75]]</code></td><td class="num">—</td><td>the receipt line</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">C · The same shipment, read twice</span>
+    <span class="sec-tag tag-warn">the part that surprises people</span>
+  </div>
+  <div class="why">
+    Open the day&nbsp;1 Delivery Note on day&nbsp;2 and again on day&nbsp;6 and it reports a different
+    cost, with no edit, no amendment and no new version. If day&nbsp;1 and day&nbsp;5 fall either side
+    of a month end, the correction lands in a period you have already closed.
+  </div>
+  <div class="body">
+    <div class="split">
+      <div class="card">
+        <div class="card-head">Read on day 2 <span class="sub">— before the receipt exists</span></div>
+        <table>
+          <tbody>
+            <tr><td>Shipped</td><td class="num">2</td></tr>
+            <tr><td>Cost of goods sold</td><td class="num guessed">120.00</td></tr>
+            <tr><td>Rate used</td><td class="num guessed">60.00 / unit</td></tr>
+            <tr><td>Where it came from</td><td><code>Item.valuation_rate</code></td></tr>
+            <tr><td>Confidence</td><td class="guessed">placeholder</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-head">Read on day 6 <span class="sub">— after the repost</span></div>
+        <table>
+          <tbody>
+            <tr><td>Shipped</td><td class="num">2</td></tr>
+            <tr><td>Cost of goods sold</td><td class="num"><b>100.00</b></td></tr>
+            <tr><td>Rate used</td><td class="num">50.00 / unit</td></tr>
+            <tr><td>Where it came from</td><td>the Item Receipt of day 5</td></tr>
+            <tr><td>Confidence</td><td style="color:var(--in);font-weight:600">settled</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">D · What the shell would say, and when</span>
+    <span class="sec-tag tag-note">proposal</span>
+  </div>
+  <div class="why">
+    Consistent with invariant 7 and with how void-and-amend already handles blockers: <b>name the
+    consequence, never enforce it</b>. The warehouse is right and the paperwork is late — refusing
+    the shipment would be the system contradicting a fact. So nothing here blocks; it labels.
+  </div>
+  <div class="body">
+    <ul class="says">
+      <li>
+        <b>At the moment of shipping</b>
+        “This ships 2 you have not received yet. Its cost is a placeholder of 60.00 a unit and will be
+        restated when the receipt is entered.”
+        <span class="src">On the Delivery Note, before submit. Not a block — a label.</span>
+      </li>
+      <li>
+        <b>On the cost-layer panel (OI-177), while it is still negative</b>
+        A <span class="neg">−2</span> row shown as owed-to-the-ledger rather than as stock, with its
+        rate marked <span class="guessed">guess</span> so nobody totals it as if it were cost.
+        <span class="src">The panel reads <code>stock_queue</code>; it must not present a negative bin as a layer.</span>
+      </li>
+      <li>
+        <b>After the repost</b>
+        “Cost restated 120.00 → 100.00 when Item Receipt PR-00042 was entered on day 5.”
+        <span class="src">The one line an auditor actually needs, and the one ERPNext does not currently surface anywhere near the document.</span>
+      </li>
+      <li>
+        <b>If no rate can be found at all</b>
+        The fallback walk ends at zero, and the shipment books <b>no cost whatsoever</b> — quietly.
+        That is the case worth a louder warning than the others.
+        <span class="src">A brand-new SKU shipped before its first receipt has no valuation rate, no standard rate and no buying price.</span>
+      </li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    <b>Where the behaviour comes from</b> (ERPNext v16.32.1, read from source, not guessed):
+    the fallback walk is <code>get_fallback_rate</code> in <code>stock_ledger.py</code> — last valuation
+    rate, then <code>Item.valuation_rate</code>, then <code>standard_rate</code>, then a buying Item
+    Price. The negative layer is <code>valuation.py</code>’s <code>remove_stock</code> (“stock finished,
+    qty still remains to be withdrawn — negative stock, keep in as a negative bin”). The setting is
+    <code>Stock Settings.allow_negative_stock</code>, with a per-item override reached through
+    <code>is_negative_stock_allowed(item_code=…)</code>, so this can be opened for the few SKUs that
+    need it instead of site-wide. ERPNext warns about the restatement itself and links its own
+    <i>stock adjustment COGS with negative stock</i> page.
+  </p>
+  <p>
+    <b>What is invented here:</b> the 60.00 stale master rate, the document numbers, the day
+    spacing, and every word in section D. The mechanism is real; the numbers are chosen to make the
+    20.00 restatement easy to see. The exact bin arithmetic <i>at the instant the balance crosses
+    zero</i> has not been verified against this instance — section B steps from −2 to +1 to stay
+    clear of it.
+  </p>
+</footer>
+</body>
+</html>
