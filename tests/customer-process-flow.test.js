@@ -10,23 +10,23 @@ describe("CUSTOMER_FLOW_LANES (Home Customers swimlane)", () => {
     assert.deepEqual([...customerFlowTileIds()].sort(), [...ids].sort());
   });
 
-  it("Estimate sits above Sales Order and leads into it (skippable), then Invoice, then Payment", () => {
+  it("mirrors Vendors: Estimate → Sales Order → Invoice stacked over Payment (fans out)", () => {
     const daily = CUSTOMER_FLOW_LANES.find((l) => l.id === "daily");
     assert.equal(daily.sequential, true);
-    const [first, second, third] = daily.steps;
-    assert.deepEqual(first.tileIds, ["estimate-new", "so-new"]);
-    assert.equal(first.join, "then");
-    assert.deepEqual(first.badges, ["1", "2"]);
-    assert.match(first.caption, /optional/);
-    assert.deepEqual(second.tileIds, ["invoice-new"]);
-    assert.deepEqual(third.tileIds, ["receive-pay"]);
+    const [estimate, order, tail] = daily.steps;
+    assert.deepEqual(estimate.tileIds, ["estimate-new"]);
+    assert.match(estimate.caption, /optional/);
+    assert.deepEqual(order.tileIds, ["so-new"]);
+    assert.deepEqual(tail.tileIds, ["invoice-new", "receive-pay"]);
+    assert.equal(tail.join, "then");
+    assert.deepEqual(tail.badges, ["3", "4"]);
   });
 
-  it("one lane: Customer Center follows a divider, and there is nothing to bridge", () => {
-    assert.equal(CUSTOMER_FLOW_LANES.length, 1);
-    const last = CUSTOMER_FLOW_LANES[0].steps.at(-1);
-    assert.deepEqual(last.tileIds, ["customers"]);
-    assert.equal(last.detached, true);
+  it("Customer Center sits in its own As-needed lane, not in the daily chain", () => {
+    const daily = CUSTOMER_FLOW_LANES.find((l) => l.id === "daily");
+    const weekly = CUSTOMER_FLOW_LANES.find((l) => l.id === "weekly");
+    assert.ok(!daily.steps.some((st) => st.tileIds.includes("customers")));
+    assert.deepEqual(weekly.steps.map((st) => st.tileIds), [["customers"]]);
     assert.equal(CUSTOMER_FLOW_BRIDGES.length, 0);
   });
 });

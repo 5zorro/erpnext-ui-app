@@ -331,7 +331,15 @@
                   badge.className = "step-badge";
                   badge.textContent = step.step;
                   el.appendChild(badge);
-                  return el;
+                  if (!step.caption) return el;
+                  // A lone tile with a note under it (Customers' "optional" Estimate).
+                  const wrap = document.createElement("div");
+                  wrap.className = "source-stack";
+                  const cap = document.createElement("span");
+                  cap.className = "stack-caption";
+                  cap.textContent = step.caption;
+                  wrap.append(el, cap);
+                  return wrap;
                 })();
           if (stepEl) track.appendChild(stepEl);
           if (i < lane.steps.length - 1) {
