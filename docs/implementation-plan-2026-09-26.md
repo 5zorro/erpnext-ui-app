@@ -426,5 +426,5 @@ Not done: paging beyond 200, per-column sorting, and remembering a page's last s
 
 | Family | Residual | State |
 |---|---|---|
-| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | open — 5zorro to decide whether IR should keep a typed date |
+| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1 |

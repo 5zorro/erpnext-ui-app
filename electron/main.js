@@ -6833,7 +6833,12 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
       supplier: next,
     };
   }
-  const raw = await bridgeCall("setHeader", field, next);
+  // The Bill's Invoice date is also its posting date (5zorro 2026-09-26) — see the bridge's
+  // `postingDateFollows`. Before this, a Bill typed with last month's date posted today.
+  const raw =
+    field === "bill_date"
+      ? await bridgeCall("setHeader", field, next, { postingDateFollows: true })
+      : await bridgeCall("setHeader", field, next);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
     if (raw.paymentTermsSettle) {

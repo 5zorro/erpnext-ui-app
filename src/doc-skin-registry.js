@@ -213,6 +213,8 @@ export const DOC_SKIN_PROFILES = {
       addressPicker: false,
       sourceTerms: true,
       termsField: false,
+      // A typed receipt date sticks (5zorro 2026-09-26) — it was reset to today on save.
+      keepTypedPostingDate: true,
     },
     sourceKinds: ["po"],
   },
