@@ -413,6 +413,35 @@ All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
    it; an open Doc Purchase Order (or Bill) is hatched when you return to it. **Off** clears both.
    The choice survives a restart.
 
+**The paper for all of this is in the dogfood pack** (5zorro 2026-09-26: "add them as paper… so
+that i hit them when i go through the source"). He dogfoods by typing real-looking paper under
+`npm run start:chaos` — that is the one test that finds shell↔Electron↔ERPNext gotchas, so it is
+never replaced by automation. Catalogue `src/sample-data/dogfood-ap-sources.js` (tracked);
+`npm run dogfood:ap-sources -- --pdf` writes `ops/sample-data/dogfood-sources/generated/`
+(gitignored, 27 papers + README index). Each paper can carry `checks` (tick boxes printed at the
+foot — the click-through checks above ride on the paper where that screen is already open) and
+`knownGaps` (red on the banner: do that part in Vanilla).
+
+| Paper | Covers |
+|---|---|
+| DF-01 | hatch toggle; Find Bill… → Find Bills; the peek; Open this Bill |
+| DF-06 | Find Payments… from Pay Bills and from the check page (F4) |
+| DF-16 | Find page sort, Show 200 more, remembered search across a restart, Clear search |
+| DF-18 → DF-21 | the A/R flow end to end on one customer (Northwind): Estimate → Sales Order (CPO-88120) → partial Invoice ($885, tax cleared) → a check that short-pays it by $25 and names only their PO number |
+| DF-22 / DF-23 | a Bill and a packing list typed weeks after their date — the posting date follows the typed date |
+
+### A/R skin gaps (known, marked on the paper, not built)
+
+Found while writing DF-18…21 — each is a candidate for the next A/R stage, and each paper says to
+do that part in Vanilla until it exists:
+
+- **Customer ▾ cannot create a customer** (Vendor's picker can) — new customers go through Customer Center.
+- **No customer part number column** on Estimate lines (ERPNext has `customer_item_code`).
+- **No box for the customer's RFQ number** on the Estimate.
+- **Bill to / Ship to are read-only** on the A/R skins — no address picker (the A/P skins have one).
+- **The Invoice cannot pull lines from a Sales Order** — no source picker like the Bill's Select PO; today it is Vanilla's Create › Sales Invoice, then the Document-skin tab.
+- (By design, not a gap: no void-and-amend and no Simplified seed on A/R yet.)
+
 ## Dogfood checklist (F1 + F2)
 
 1. Doc Bill → **Find Bill…** → the Find Bills mockup, cursor in *Vendor's invoice no.* Recent shows
@@ -438,4 +467,5 @@ All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
 | Family | Residual | State |
 |---|---|---|
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
-| A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1 |
+| A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
+| A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
