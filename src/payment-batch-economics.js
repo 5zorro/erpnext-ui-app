@@ -9,7 +9,8 @@
  * any batching decision.
  */
 
-import { effectivePayByDate } from "./bank-business-days.js";
+import { effectivePayByDate, nextPayableOnOrAfter } from "./bank-business-days.js";
+import { isIsoDate } from "./check-run-schedule.js";
 import { formatUsdAmount } from "./money.js";
 
 /** @param {string} isoDate "YYYY-MM-DD" */
@@ -63,6 +64,19 @@ function floatCost(amount, apr, days) {
  *                             //   recomputed so the audit trail (B5) can show the input, not just
  *                             //   the arithmetic — a $0.40 ACH saving and a $25 wire saving are
  *                             //   indistinguishable once collapsed into `feesSaved`
+ *   payByOf?: Record<string, string>, // installmentKey → the bank-calendar date this member was
+ *                             //   formed from, BEFORE any clamp. Recorded for the same reason
+ *                             //   `perPaymentFee` is (the plan's rule: read off the group, "never
+ *                             //   re-derived"): the audit used to walk the calendar a second time
+ *                             //   to recover these, which is a walk structurally able to disagree
+ *                             //   with the one that formed the group — and it disagrees the moment
+ *                             //   anything scopes the calendar differently, e.g. P1's method
+ *                             //   override. One walk, not two; see `explainGroupMembership`
+ *   clampedTo?: string,       // the overdue-clamp floor in force for this group's partition
+ *                             //   (P2a / OI-172), present whenever the caller supplied `today`,
+ *                             //   whether or not it bound. A member is clamped iff its own
+ *                             //   `payByOf` entry is earlier than this — both recorded facts,
+ *                             //   so no consumer has to infer the clamp from a date comparison
  * }} PaymentBatchGroup
  */
 
@@ -74,6 +88,7 @@ function floatCost(amount, apr, days) {
  *   feeForMethod?: (method: string) => number,
  *   runBreaks?: string[],
  *   delayDay?: (iso: string, method: string) => string,
+ *   today?: string,
  * }} args `runBreaks` (C8) are dates no batch may cross — `checkRunSplits` from
  *   `check-run-schedule.js`. A bill payable on or after a boundary is never combined with one
  *   payable before it; within each stretch the grouping is still the exact cheapest one. Omitted or
@@ -85,24 +100,55 @@ function floatCost(amount, apr, days) {
  *   a postal delay day is not a bank one. 🔴 It must be passed here whenever it is passed to the
  *   audit: the grouping and the explanation walk the same dates, and an audit that can disagree
  *   with the engine it audits is worse than none.
- * @returns {{ groups: PaymentBatchGroup[] }}
+ *   `today` (P2a, OI-172) is the **overdue clamp**: a payment cannot be backdated, so a proposal
+ *   whose bank-calendar date has already passed moves forward to the first payable day from today —
+ *   `nextPayableOnOrAfter`, scoped by the bill's own rail, because today being a postal delay day
+ *   stops a cheque and not an ACH. 🔴 It walks *forward through the same calendar* rather than
+ *   taking today raw: the engine must not propose a day the ratified calendar panel says is closed.
+ *   Each group records the pre-clamp dates it was formed from (`payByOf`) and the floor that was in
+ *   force (`clampedTo`), so nothing downstream re-derives either. Omitted, nothing changes — no bill
+ *   is ever clamped. Discount capture is untouched: it is compared against the bill's real
+ *   bank-calendar due date, never the clamp, since a discount missed in the past stays missed.
+ * @returns {{ groups: PaymentBatchGroup[], unschedulable: OutstandingBillRow[] }} `unschedulable`
+ *   holds the rows that carry no payable obligation — no usable due date, or nothing owed (an
+ *   unallocated payment sits at a *negative* outstanding). They are never batched and never
+ *   silently dropped.
  */
 export function paymentBatchEconomics(args) {
   const { bills, perPaymentFee, apr, feeForMethod } = args || {};
+  const today = isIsoDate(args && args.today) ? args.today : "";
   const byMethodPricing = typeof feeForMethod === "function";
   const payByFor = payByResolver(args && args.delayDay);
+  const clampFor = clampResolver(args && args.delayDay, today);
   const runBreaks = normalizeRunBreaks(args && args.runBreaks);
   const list = Array.isArray(bills) ? bills : [];
 
   /** @type {PaymentBatchGroup[]} */
   const groups = [];
   const candidates = [];
+  /** @type {OutstandingBillRow[]} */
+  const unschedulable = [];
 
   // Pass 1: discount capture always wins its own comparison first, independent of any group the
   // bill could otherwise join (OI-161: "do not let batching logic bury it").
   for (const bill of list) {
-    const effectiveDueDate = payByFor(bill.dueDate, bill);
-    const captured = tryDiscountCapture(bill, effectiveDueDate, apr, payByFor);
+    // 🔴 Not every row the Accounts Payable report returns is a payable obligation, and one that
+    // is not cannot be scheduled: an **unallocated payment** arrives with a negative outstanding
+    // and no due date at all, and the bank-calendar walk throws on an empty date. That crashed the
+    // entire dashboard — render() died mid-loop, so the board drew *nothing*, with no error on
+    // screen and nothing in the console (found 2026-09-26; 5zorro: "the drawer … seems to be so
+    // high as to cover up all suggested payment grouping (or there are no unpaid bills)").
+    //
+    // Unallocated payments are not exotic here — P1's amend detaches them by design
+    // (`unlink_payment_on_cancellation_of_invoice`), so every void-and-amend of a paid bill leaves
+    // one. They are handed back as `unschedulable` rather than dropped: it is real money, and a
+    // caller that silently loses a vendor credit is worse than one that crashes.
+    if (!isIsoDate(bill.dueDate) || !(Number(bill.outstanding) > 0)) {
+      unschedulable.push(bill);
+      continue;
+    }
+    const bankDueDate = payByFor(bill.dueDate, bill);
+    const captured = tryDiscountCapture(bill, bankDueDate, apr, payByFor);
     if (captured) {
       // A discount capture never reaches the method partitioning below (it is decided first, by
       // design), so it has to be tagged here or it reports itself as having no method at all.
@@ -116,7 +162,12 @@ export function paymentBatchEconomics(args) {
       );
       continue;
     }
-    candidates.push({ ...bill, effectiveDueDate });
+    // P2a / OI-172: the proposal can't be backdated, so an already-passed date walks forward to the
+    // first day the payment can actually go out. `bankDueDate` is kept on the candidate and recorded
+    // on the group, so the audit reads it instead of walking the calendar a second time to guess it.
+    const clampTo = clampFor(bill);
+    const effectiveDueDate = clampTo && bankDueDate < clampTo ? clampTo : bankDueDate;
+    candidates.push({ ...bill, effectiveDueDate, bankDueDate, clampTo });
   }
 
   // Pass 2: partition by METHOD, then by supplier, then find the cheapest grouping of each
@@ -158,7 +209,7 @@ export function paymentBatchEconomics(args) {
     }
   }
 
-  return { groups: assignGroupIds(groups) };
+  return { groups: assignGroupIds(groups), unschedulable };
 }
 
 /**
@@ -188,6 +239,28 @@ function methodKeyOf(bill) {
 function payByResolver(delayDay) {
   if (typeof delayDay !== "function") return (iso) => effectivePayByDate(iso);
   return (iso, bill) => effectivePayByDate(iso, { delayDay: (d) => delayDay(d, methodKeyOf(bill)) });
+}
+
+/**
+ * The overdue clamp floor for a bill: the first day from `today` on which its own rail can actually
+ * pay (P2a / OI-172). `""` when the caller gave no `today`, which is how the clamp stays opt-in.
+ *
+ * Rail-scoped for the same reason `payByResolver` is — a postal delay day stops a cheque and not an
+ * ACH — so two bills sitting on different rails can legitimately clamp to different days. Within a
+ * partition they never do: the partition key *is* the rail.
+ *
+ * 🔴 **For P1:** this and `payByResolver` are the two places the clamp/pay-by dates consult a bill's
+ * method, and both reach it through `methodKeyOf`. Making that one function override-aware is what
+ * keeps the override from changing the date in one of them and not the other.
+ *
+ * @param {((iso: string, method: string) => string)|undefined|null} delayDay
+ * @param {string} today "" to disable
+ * @returns {(bill: OutstandingBillRow) => string}
+ */
+function clampResolver(delayDay, today) {
+  if (!today) return () => "";
+  if (typeof delayDay !== "function") return () => nextPayableOnOrAfter(today);
+  return (bill) => nextPayableOnOrAfter(today, { delayDay: (d) => delayDay(d, methodKeyOf(bill)) });
 }
 
 /**
@@ -264,6 +337,10 @@ function tryDiscountCapture(bill, effectiveDueDate, apr, payByFor) {
     netBenefit: net,
     rationale: `Discount capture: pay by ${discountPayOn} to save ${usd(bill.discountAmount)} (float cost ${usd(cost)}) = ${usd(net)} net`,
     reason: "discount-capture",
+    // The deadline this group was formed from is the *discount* window, not the due date — the one
+    // place `payByOf` holds something other than a pay-by-due-date walk, and exactly why the audit
+    // reading it beats the audit re-deciding which of the two deadlines to walk.
+    payByOf: { [bill.installmentKey]: discountPayOn },
   };
 }
 
@@ -402,6 +479,7 @@ function cheapestPartition(bills, fee, apr, context = {}) {
         netBenefit: 0,
         rationale: payAloneRationale(members[0], previous, n, fee, apr, context),
         reason: "pay-alone",
+        ...recordedDates(members),
       };
     }
 
@@ -423,8 +501,26 @@ function cheapestPartition(bills, fee, apr, context = {}) {
           ? `${members.length} bills already payable on ${payOn}: one payment saves ${usd(feesSaved)} in fees at no float cost`
           : `${members.length} bills batched: ${usd(feesSaved)} fee saved vs ${usd(cost)} float cost = ${usd(netBenefit)} net`,
       reason: "batch",
+      ...recordedDates(members),
     };
   });
+}
+
+/**
+ * The dates a group was formed from, recorded on it. Same rule as `perPaymentFee`: an input the
+ * audit needs is read off the group, never re-derived — see `PaymentBatchGroup.payByOf`.
+ *
+ * @param {Array<OutstandingBillRow & { bankDueDate?: string, clampTo?: string }>} members
+ * @returns {{ payByOf: Record<string, string>, clampedTo?: string }}
+ */
+function recordedDates(members) {
+  /** @type {Record<string, string>} */
+  const payByOf = {};
+  for (const b of members) {
+    if (isIsoDate(b.bankDueDate)) payByOf[b.installmentKey] = b.bankDueDate;
+  }
+  const clampedTo = members.length && isIsoDate(members[0].clampTo) ? members[0].clampTo : "";
+  return clampedTo ? { payByOf, clampedTo } : { payByOf };
 }
 
 /**
@@ -466,8 +562,16 @@ function payAloneRationale(bill, previous, partitionSize, fee, apr, context = {}
  *   kind: "sets-date"|"same-day"|"joined-early"|"pay-alone"|"discount-capture",
  *   installmentKey: string,
  *   payOn: string,             // the group's date — where this bill is actually paid
- *   ownPayOn: string,          // where the bank calendar alone would have put it ("" if unknowable)
+ *   ownPayOn: string,          // where the bank calendar alone would have put it ("" if unknowable).
+ *                              //   Read off the group's `payByOf`, not walked again here
+ *   dueDate: string,           // the stored obligation, as ERPNext holds it ("" if absent)
  *   daysEarly: number,         // payOn -> ownPayOn, 0 when the group did not move it
+ *   daysLate: number,          // dueDate -> payOn: days past the *obligation*, which is what ERP
+ *                              //   and the vendor both mean by late. Measured, never a claim about
+ *                              //   what caused it — see `clamped`
+ *   clamped: boolean,          // the overdue clamp (P2a) is what put `payOn` where it is. Derived
+ *                              //   from the group's own recorded `clampedTo` + `payByOf`, so it is
+ *                              //   never true merely because two independent walks disagreed
  *   amount: number,
  *   apr: number|null,
  *   fee: number|null,          // the one payment this bill's joining avoids
@@ -527,14 +631,36 @@ export function explainGroupMembership(group, bill, opts = {}) {
         : null;
   const amount = Number.isFinite(bill.outstanding) ? Number(bill.outstanding) : 0;
 
-  let ownPayOn = "";
-  try {
-    const payByFor = payByResolver(opts && opts.delayDay);
-    ownPayOn = payByFor(g.reason === "discount-capture" ? bill.discountDate : bill.dueDate, bill);
-  } catch {
-    ownPayOn = "";
+  // 🔴 Read off the group, never re-derived — the same rule the fee above follows, for the same
+  // reason. This used to walk the calendar a second time from `bill.dueDate`, which meant the audit
+  // agreed with the engine only as long as the caller remembered to hand it an identical
+  // `delayDay`, and would disagree outright the moment anything scoped the calendar differently
+  // (P1's method override changes which rail's delay days apply, so it would have).
+  // `opts.delayDay` survives only as the fallback path for a group built by something other than
+  // `paymentBatchEconomics` — the same allowance the `warn` branch below keeps.
+  const recorded = g.payByOf && g.payByOf[bill.installmentKey];
+  let ownPayOn = isIsoDate(recorded) ? recorded : "";
+  if (!ownPayOn) {
+    try {
+      const payByFor = payByResolver(opts && opts.delayDay);
+      ownPayOn = payByFor(g.reason === "discount-capture" ? bill.discountDate : bill.dueDate, bill);
+    } catch {
+      ownPayOn = "";
+    }
   }
   const daysEarly = ownPayOn ? Math.max(0, daysBetween(g.payOn, ownPayOn)) : 0;
+
+  // Lateness is measured against the **stored due date**, not against the pay-by date derived from
+  // it. `payment-date-derivation.js`'s rule: the stored `due_date` is the obligation ("what the
+  // vendor is owed") and the pay-by date is a proposal computed from it — usually *earlier*, since
+  // the calendar walks back over weekends. Measuring from the proposal would report a bill due
+  // Sunday as two days later than ERP's own overdue count says, and `bill-paid.js` already derives
+  // that state from ERP, so the two surfaces would disagree about the same bill.
+  const dueDate = isIsoDate(bill.dueDate) ? bill.dueDate : "";
+  const daysLate = dueDate ? Math.max(0, daysBetween(dueDate, g.payOn)) : 0;
+  // Both operands are facts the group recorded, so this states what the clamp *did*, rather than
+  // inferring a cause from two dates that happen to differ.
+  const clamped = Boolean(isIsoDate(g.clampedTo) && ownPayOn && ownPayOn < g.clampedTo);
 
   /** @type {GroupMembership["kind"]} */
   let kind;
@@ -552,7 +678,10 @@ export function explainGroupMembership(group, bill, opts = {}) {
     installmentKey: bill.installmentKey,
     payOn: g.payOn,
     ownPayOn,
+    dueDate,
     daysEarly,
+    daysLate,
+    clamped,
     amount,
     apr,
     fee,
@@ -583,10 +712,28 @@ export function describeGroupMembership(m, opts = {}) {
   if (!m) return null;
   const others = m.groupSize - 1;
   const feeName = [opts.methodLabel || m.method, "payment fee"].filter(Boolean).join(" ");
-  const note =
+  let note =
     m.kind === "sets-date" || m.kind === "same-day" || m.kind === "joined-early"
       ? `Whole payment: ${m.groupSize} bills, ${usd(m.groupFeesSaved)} fees saved − ${usd(m.groupFloatCost)} float cost = ${usd(m.groupNet)} net.`
       : "";
+  // P2a / OI-172: the clamp moves the proposal, never the obligation. Said wherever it applies, not
+  // just in the batching kinds above — a clamped bill can just as easily be paid alone.
+  //
+  // 🔴 Two branches, because they are two different claims. `clamped` is recorded by the engine, so
+  // the first may state *why* the date moved. The second only knows the payment lands after the due
+  // date; asserting the clamp there would be inventing a cause from a date comparison, which is how
+  // a method override that legitimately shifts a date would have produced a confident false
+  // sentence about a bill that was never late.
+  const lateDays = `${m.daysLate} day${m.daysLate === 1 ? "" : "s"}`;
+  if (m.clamped) {
+    const overdue =
+      `${lateDays} past its ${m.dueDate} due date — paid on ${m.payOn}, ` +
+      `the soonest the payment can go out, because a payment cannot be backdated.`;
+    note = note ? `${overdue} ${note}` : overdue;
+  } else if (m.daysLate > 0) {
+    const late = `Paid ${lateDays} after its ${m.dueDate} due date.`;
+    note = note ? `${late} ${note}` : late;
+  }
 
   if (m.kind === "pay-alone") {
     return { step: { rule: "pay-alone", label: "Paid alone", date: m.payOn, deltaDays: 0, detail: m.rationale }, note };

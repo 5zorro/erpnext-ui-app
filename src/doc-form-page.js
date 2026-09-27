@@ -1,26 +1,18 @@
 /**
- * Doc-form page controller (PO / Item Receipt) — imported by electron/doc-form.html.
+ * Doc-form page controller (PO / Item Receipt, and the A/R layouts: Estimate, Sales Order,
+ * Invoice, Receive Payment) — imported by electron/doc-form.html.
+ *
+ * What differs per layout is asked of the registry (`docFormMapFor`, the UI payload's
+ * `features` / `partyField` / `linesTable`), not branched on `profileId` here.
  */
 
 import {
-  readPoHeader,
-  readPoItemRows,
-  sumPoLineQty,
-  sumPoLineAmount,
-  formatPoLineTotal,
-  isDraftPoDoc,
   PO_MULTIPLE_DATES_LABEL,
   poDateExpectedHeaderDisplay,
   PO_CUSTOMER_DROPSHIP,
 } from "./po-map.js";
-import {
-  readReceiptHeader,
-  readReceiptItemRows,
-  sumReceiptLineQty,
-  sumReceiptLineAmount,
-  formatReceiptLineTotal,
-  isDraftReceiptDoc,
-} from "./receipt-map.js";
+import { docFormMapFor } from "./doc-skin-registry.js";
+import { salesProgressCells } from "./sales-doc-map.js";
 import { billMoneyStack } from "./bill-map.js";
 import {
   readBillTaxRowsForSort,
@@ -96,6 +88,8 @@ import {
   focusTargetAfterDocSourceModal,
   splitHeaderColumns,
 } from "./doc-action-flow.js";
+import { offeredDocActions } from "./doc-actions.js";
+import { runVoidAndAmend } from "./void-amend-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
 import { showSourceModal } from "./source-modal-ui.js";
 import {
@@ -235,6 +229,29 @@ function publishCalcHistory(payload) {
   });
 }
 
+/**
+ * The number this profile's clerk actually tracks by — which is *not* the ERPNext ID, and is the
+ * whole reason OI-170 exists. Amending renames `ACC-PINV-…-00012` to `…-00012-1`; the PO's logbook
+ * number and the receipt's packing-list reference survive untouched, so the confirm says so while
+ * both are on screen.
+ *
+ * @param {object|null|undefined} doc
+ */
+function docTrackingRef(doc) {
+  if (!doc || !ui) return "";
+  const field = ui.profileId === "po" ? "title" : ui.profileId === "receipt" ? "lr_no" : "";
+  if (!field) return "";
+  const v = /** @type {Record<string, unknown>} */ (doc)[field];
+  return v == null ? "" : String(v).trim();
+}
+
+function docTrackingRefLabel() {
+  if (!ui) return "";
+  if (ui.profileId === "po") return "The PO# (logbook)";
+  if (ui.profileId === "receipt") return "The packing list / BOL reference";
+  return "";
+}
+
 /** @type {ReturnType<typeof buildDocFormEl> | null} */
 let el = null;
 
@@ -279,6 +296,7 @@ function buildDocFormEl() {
     lineTabs: document.querySelector('[data-testid="doc-line-tabs"]'),
     linesSection: document.querySelector('[data-testid="doc-lines-section"]'),
     linesSectionTitle: document.getElementById("doc-lines-title"),
+    progress: document.getElementById("doc-progress"),
     tabItems: document.getElementById("tab-items"),
     tabExpenses: document.getElementById("tab-expenses"),
     panelItems: document.getElementById("panel-items"),
@@ -295,6 +313,7 @@ function buildDocFormEl() {
     sourceTermsFields: document.getElementById("source-terms-fields"),
     hint: document.getElementById("doc-hint"),
     selectSource: document.getElementById("btn-select-source"),
+    voidAmend: document.getElementById("btn-void-amend"),
     caps: document.getElementById("btn-caps"),
     headerLeft: document.getElementById("header-left"),
     headerRight: document.getElementById("header-right"),
@@ -339,24 +358,22 @@ function mapHelpers() {
       isDraft: () => true,
     };
   }
-  if (ui.profileId === "po") {
-    return {
-      readHeader: readPoHeader,
-      readItemRows: readPoItemRows,
-      sumQty: sumPoLineQty,
-      sumAmt: sumPoLineAmount,
-      formatTotal: formatPoLineTotal,
-      isDraft: isDraftPoDoc,
-    };
-  }
-  return {
-    readHeader: readReceiptHeader,
-    readItemRows: readReceiptItemRows,
-    sumQty: sumReceiptLineQty,
-    sumAmt: sumReceiptLineAmount,
-    formatTotal: formatReceiptLineTotal,
-    isDraft: isDraftReceiptDoc,
-  };
+  return docFormMapFor(ui.profileId) || docFormMapFor("receipt");
+}
+
+/** The child table the line grid shows — `items`, or a payment's `references`. */
+function linesTable() {
+  return (ui && ui.linesTable) || "items";
+}
+
+/** Can the clerk add and remove lines? Not on a payment: ERPNext lists the open invoices. */
+function linesAreAddable() {
+  return !!(ui && ui.features.addLine !== false && linesTable() === "items");
+}
+
+/** Line columns typed as money (Payment, Billed…) — parsed like Rate, shown as dollars. */
+function isMoneyCol(field) {
+  return !!(ui && ui.itemCols.some((c) => c.field === field && c.money));
 }
 
 function gateLabels() {
@@ -542,7 +559,12 @@ function slugLabel(label) {
     .replace(/^-|-$/g, "");
 }
 
+/** The party box — Vendor on A/P layouts, Customer on A/R ones (`ui.partyField`). */
 function supplierInput() {
+  if (ui && ui.partyField) {
+    const meta = ui.headerFields.find((m) => m.field === ui.partyField);
+    if (meta && headerInputs[meta.label]) return headerInputs[meta.label];
+  }
   return headerInputs["Vendor"] || headerInputs["Vendor Name"] || null;
 }
 
@@ -953,7 +975,7 @@ function showToast(text) {
  * @param {object|null|undefined} doc
  */
 async function ensureAtLeastOneItemRow(doc) {
-  if (!api || !editable() || painting) return;
+  if (!api || !editable() || painting || !linesAreAddable()) return;
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
   if (items.length > 0) return;
   const res = await api.addItem();
@@ -1178,7 +1200,7 @@ function paintItemsHead() {
         const arrow = sortHeaderArrow(itemSortSpecs, h.sortKey);
         const tip =
           h.sortKey === "lineNo"
-            ? "Sort by Purchase Order line number · Ctrl+click to add another column"
+            ? `Sort by ${docTitle()} line number · Ctrl+click to add another column`
             : st.active
               ? `Sort by ${h.label} (${st.asc ? "asc" : "desc"}) · Ctrl+click to add another column`
               : `Sort by ${h.label} · Ctrl+click to add a secondary sort`;
@@ -1286,6 +1308,22 @@ function paintMoneyStack(doc) {
   }
 }
 
+/**
+ * The Sales Order's progress strip (delivered / billed / status) — read-only facts ERPNext keeps.
+ * @param {object|null|undefined} doc
+ */
+function paintProgress(doc) {
+  if (!el.progress) return;
+  const cells = ui && ui.features.progress ? salesProgressCells(ui.progress, doc) : [];
+  el.progress.hidden = !cells.length;
+  el.progress.innerHTML = cells
+    .map(
+      (c) =>
+        `<span class="doc-progress-cell" data-testid="doc-progress-${escapeHtml(c.field)}"><span class="doc-progress-label">${escapeHtml(c.label)}</span> <b>${escapeHtml(c.value)}</b></span>`,
+    )
+    .join("");
+}
+
 function paintTaxesHead() {
   if (!el.taxesHead || !ui || !ui.features.taxes) return;
   el.taxesHead.innerHTML =
@@ -1317,7 +1355,9 @@ function paintTaxes(doc) {
   if (!el.taxesBody || !ui || !ui.features.taxes) return;
   paintTaxesHead();
   const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
-  const canEdit = editable();
+  // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
+  // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
+  const canEdit = editable() && !ui.features.taxesReadOnly;
   if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
   if (!rows.length) {
     el.taxesBody.innerHTML =
@@ -1449,23 +1489,26 @@ function paintItems(doc) {
           if (col.displayOnly || col.field == null) {
             const isLine = col.sortKey === "lineNo" || col.field === "__line_no";
             const isAmount = /^amount$/i.test(col.label || "");
-            const html = isAmount || /rec'd|received/i.test(col.label || "")
+            const html = isAmount || col.money || /rec'd|received/i.test(col.label || "")
               ? formatUsdAmountHtml(val)
               : "";
             if (isLine) {
-              return `<td class="num line-meta"><span class="ro" title="Purchase Order line number">${escapeHtml(val) || "—"}</span></td>`;
+              return `<td class="num line-meta"><span class="ro" title="${escapeHtml(docTitle())} line number">${escapeHtml(val) || "—"}</span></td>`;
+            }
+            if (col.type === "date") {
+              return `<td><span class="ro">${escapeHtml(formatDocDateDisplay(val) || val || "")}</span></td>`;
             }
             if (isAmount && canEdit) {
               return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Rate)" data-testid="doc-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
             }
             return `<td class="num"><span class="ro money-amt" data-testid="doc-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
           }
-          if (col.field === "rate") {
+          if (col.field === "rate" || col.money) {
             const shown = val === "" || val == null ? "" : formatGroupedNumber(val);
             if (!canEdit) {
               return `<td class="num"><span class="ro money-cost">${escapeHtml(shown)}</span></td>`;
             }
-            return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-rate" /></td>`;
+            return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
           }
           if (col.type === "checkbox") {
             const checked = val === 1 || val === true || val === "1";
@@ -1490,7 +1533,7 @@ function paintItems(doc) {
           return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
         })
         .join("");
-      const del = canEdit
+      const del = canEdit && linesAreAddable()
         ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" tabindex="-1" data-testid="doc-del-${ri}">×</button></td>`
         : `<td></td>`;
       return `<tr data-rowidx="${ri}">${cells}${del}</tr>`;
@@ -1522,7 +1565,7 @@ function paintItems(doc) {
       if (inp.type === "checkbox" || inp.dataset.check === "1") {
         return inp.checked ? 1 : 0;
       }
-      if (field === "rate") {
+      if (field === "rate" || isMoneyCol(field)) {
         const n = parseMoney(inp.value);
         next = n == null ? "" : String(n);
       }
@@ -2038,6 +2081,7 @@ function buildHeaderFields(fields) {
           });
         } else {
           input.dataset.field = meta.field;
+          input.dataset.kind = "date";
         }
         field.appendChild(input);
         const hint = document.createElement("span");
@@ -2091,7 +2135,9 @@ function buildHeaderFields(fields) {
     const hint = document.createElement("span");
     hint.className = "addr-hint";
     hint.style.gridColumn = "1 / -1";
-    hint.textContent = ui.features.addressPicker
+    hint.textContent = ui.addressHint
+      ? ui.addressHint
+      : ui.features.addressPicker
       ? ui.profileId === "po"
         ? "Click Ship from / Ship to to pick addresses. Drop-ship customer is set inside Ship to."
         : "Click an address to pick when enabled on this profile."
@@ -2145,6 +2191,7 @@ function ensureHeaderLinkPickers() {
         const res = await api.setHeader(meta.field, v);
         if (res && res.ok && !res.skipped) noteUserEdit();
         await refresh();
+        if (res && res.warning) setStatus(res.warning, "warn");
       });
     }
   }
@@ -2316,6 +2363,8 @@ function paintedHeaderValue(field) {
   if (field === ERP_FREEFORM_TERMS_FIELD) return lastDoc[ERP_FREEFORM_TERMS_FIELD] ?? "";
   if (field === "supplier") return lastDoc.supplier_name || lastDoc.supplier || "";
   if (field === "customer") return lastDoc.customer_name || lastDoc.customer || "";
+  if (field === "party_name") return lastDoc.customer_name || lastDoc.party_name || "";
+  if (field === "party") return lastDoc.party_name || lastDoc.party || "";
   return lastDoc[field] != null ? lastDoc[field] : "";
 }
 
@@ -2388,6 +2437,21 @@ function paint(doc, snapScratch, opts = {}) {
   }
 
   const canEdit = editable();
+  // P1 stage 2 / OI-171: the registry decides, so this skin carries no opinion about when the
+  // action applies — and the PO and Item Receipt rows arrived without a line of logic here.
+  // `alreadyAmended` is deliberately not consulted: it costs an ERP round trip, and a repaint
+  // happens far more often than a click. The click reads it with the rest of the confirm's facts.
+  if (el.voidAmend) {
+    const [amendAction] = offeredDocActions(ui.doctypeKey, {
+      docstatus: doc.docstatus,
+      dirty: userEdited,
+    });
+    el.voidAmend.hidden = !amendAction;
+    if (amendAction) {
+      el.voidAmend.textContent = amendAction.label;
+      el.voidAmend.title = amendAction.hint;
+    }
+  }
   for (const meta of ui.headerFields) {
     const inp = headerInputs[meta.label];
     if (!inp) continue;
@@ -2403,14 +2467,15 @@ function paint(doc, snapScratch, opts = {}) {
   if (el.termsText) el.termsText.readOnly = !canEdit;
   syncDocAddressPickers(canEdit);
 
-  el.addLine.disabled = !canEdit;
-  if (el.importItems) el.importItems.disabled = !canEdit;
+  el.addLine.disabled = !canEdit || !linesAreAddable();
+  if (el.importItems) el.importItems.disabled = !canEdit || !linesAreAddable();
   if (el.clearQty) el.clearQty.disabled = !canEdit;
   if (el.attach) el.attach.disabled = !canEdit;
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
   paintTaxes(doc);
+  paintProgress(doc);
   ensureHeaderLinkPickers();
 
   void paintSourceTerms(doc);
@@ -2485,7 +2550,10 @@ async function onHeaderBlur(input) {
   const field = input.getAttribute("data-field");
   if (!field) return;
 
-  if (input.dataset.field && (field.includes("date") || field === "transaction_date" || field === "posting_date")) {
+  if (
+    input.dataset.field &&
+    (input.dataset.kind === "date" || field.includes("date") || field === "transaction_date" || field === "posting_date")
+  ) {
     const raw = filterDateInputValue(input.value).trim();
     if (!raw) {
       input.value = formatDocDateDisplay(paintedHeaderValue(field)) || "";
@@ -2540,6 +2608,7 @@ async function onHeaderBlur(input) {
   if (res && res.skipped) return;
   if (res && res.ok) noteUserEdit();
   await refresh();
+  if (res && res.warning) setStatus(res.warning, "warn");
   restoreFocusAnchor(focusAnchor);
 }
 
@@ -2731,6 +2800,12 @@ function applyUiConfig(config) {
     }
   }
   if (el.taxesBlock) el.taxesBlock.hidden = !ui.features.taxes;
+  if (el.taxesAdd) el.taxesAdd.hidden = !!ui.features.taxesReadOnly;
+  if (el.addLine) el.addLine.hidden = !linesAreAddable();
+  if (el.importItems) el.importItems.hidden = !linesAreAddable();
+  if (el.linesSectionTitle) {
+    el.linesSectionTitle.textContent = linesTable() === "references" ? "Open invoices" : "Items";
+  }
   const showNotes = !!(ui.features.memo || ui.features.termsField || ui.features.sourceTerms);
   if (el.notesSection) el.notesSection.hidden = !showNotes;
   if (el.memoBlock) el.memoBlock.hidden = !showNotes;
@@ -2779,6 +2854,25 @@ function wireStaticControls() {
   }
   const btnVanilla = el.vanilla;
   if (btnVanilla) btnVanilla.onclick = () => api && api.openVanilla();
+  if (el.voidAmend) {
+    // Everything careful about this sequence lives in `void-amend-flow.js`; what belongs here is
+    // only what this page knows. The vendor's own number differs by profile — a PO is tracked by
+    // its logbook number, an Item Receipt by the packing list / BOL it arrived with — so the
+    // label is named rather than assumed.
+    el.voidAmend.onclick = async () => {
+      await runVoidAndAmend({
+        doctype: (ui && ui.doctypeKey) || "",
+        name: lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "",
+        docstatus: lastDoc && lastDoc.docstatus,
+        dirty: userEdited,
+        supplierRef: docTrackingRef(lastDoc),
+        supplierRefLabel: docTrackingRefLabel(),
+        api,
+        confirm: (title, body) => window.confirm(`${title}\n\n${body}`),
+        setStatus,
+      });
+    };
+  }
   if (el.find) el.find.onclick = () => requestToolbarAction("find");
   if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
   if (el.print) el.print.onclick = () => requestToolbarAction("print");

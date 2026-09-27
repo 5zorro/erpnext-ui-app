@@ -150,7 +150,8 @@ export function isBridgeDay(isoDate) {
  * @typedef {{
  *   from: string,          // the date we were asked about
  *   date: string,          // the payable date we landed on
- *   skipped: SkippedDay[], // every day walked past, in the order they were walked (latest first)
+ *   skipped: SkippedDay[], // every day walked past, in the order they were walked — latest first
+ *                          //   walking back (pay-by), earliest first walking forward (the clamp)
  *   exhausted: boolean,    // true when the 30-day guard ran out — never seen in practice
  * }} PayByDateWalk
  */
@@ -163,10 +164,11 @@ export function isBridgeDay(isoDate) {
  * unanswerable because the loop below threw away every day it walked past and returned a bare
  * string. It now records them.
  *
- * 🔴 **This is the implementation; `effectivePayByDate` is a thin wrapper over it.** The two must
- * never be separate walks — an audit trail that can disagree with the engine it audits is worse
- * than no audit trail, because it is believed. Same rule `payment-term-name-health.js` follows
- * against the grammar it diagnoses.
+ * 🔴 **`effectivePayByDate` is a thin wrapper over this, and this over `walkToPayableDay`.** None of
+ * them may become separate walks — an audit trail that can disagree with the engine it audits is
+ * worse than no audit trail, because it is believed. Same rule `payment-term-name-health.js` follows
+ * against the grammar it diagnoses, and the reason {@link explainNextPayableDate} shares the loop
+ * rather than carrying its own copy of the tests.
  *
  * A day can be skipped for more than one reason at once (a Saturday that is also an observed
  * holiday), so `reasons` is a list and not a single label. They are recorded in a fixed order —
@@ -193,6 +195,53 @@ export function isBridgeDay(isoDate) {
  * @returns {PayByDateWalk}
  */
 export function explainPayByDate(isoDate, opts = {}) {
+  return walkToPayableDay(isoDate, opts, -1);
+}
+
+/**
+ * The mirror image: the first payable day **on or after** `isoDate`, with the same walk kept.
+ *
+ * 🔴 **Why a second direction exists at all**, when this module's whole stated default is "earlier,
+ * always" (*being early is recoverable, being late is not*): for an **overdue** bill early is no
+ * longer reachable. A payment proposed for a date that has already passed cannot be made, so the
+ * only truthful direction left is forward, to the first day the payment can actually go out. That
+ * is the P2a / OI-172 clamp, and it is the only caller — the obligation date itself is still always
+ * walked backward by {@link explainPayByDate}.
+ *
+ * 🔴 **One walk, not two** — same rule as `effectivePayByDate`: both directions share
+ * `walkToPayableDay`, so a day this module calls unpayable is unpayable whichever way it is
+ * approached. A forward walk with its own copy of the weekend/holiday/delay tests could disagree
+ * with the backward one, and then the clamp would propose a day the calendar panel says is closed.
+ *
+ * @param {string} isoDate
+ * @param {{ includeBridge?: boolean, delayDay?: (iso: string) => string }} [opts] includeBridge default true
+ * @returns {PayByDateWalk}
+ */
+export function explainNextPayableDate(isoDate, opts = {}) {
+  return walkToPayableDay(isoDate, opts, 1);
+}
+
+/**
+ * First payable day on or after `isoDate`. Already-payable dates are returned unchanged.
+ * @param {string} isoDate
+ * @param {{ includeBridge?: boolean, delayDay?: (iso: string) => string }} [opts]
+ * @returns {string} ISO date
+ */
+export function nextPayableOnOrAfter(isoDate, opts = {}) {
+  return explainNextPayableDate(isoDate, opts).date;
+}
+
+/**
+ * The shared walk. `stepDays` is -1 (pay-by: the last payable day on or before) or +1 (the clamp:
+ * the first payable day on or after). Everything else — which days count as unpayable, and how the
+ * reasons are ordered and recorded — is deliberately identical in both directions.
+ *
+ * @param {string} isoDate
+ * @param {{ includeBridge?: boolean, delayDay?: (iso: string) => string }} opts
+ * @param {-1|1} stepDays
+ * @returns {PayByDateWalk}
+ */
+function walkToPayableDay(isoDate, opts, stepDays) {
   const includeBridge = opts.includeBridge !== false;
   const delayDay = typeof opts.delayDay === "function" ? opts.delayDay : null;
   const from = formatYmd(parseIso(isoDate));
@@ -219,7 +268,7 @@ export function explainPayByDate(isoDate, opts = {}) {
     }
     if (!reasons.length) return { from, date: iso, skipped, exhausted: false };
     skipped.push(note ? { date: iso, reasons, note } : { date: iso, reasons });
-    d = addDaysUtc(d, -1);
+    d = addDaysUtc(d, stepDays);
   }
   return { from, date: formatYmd(d), skipped, exhausted: true };
 }

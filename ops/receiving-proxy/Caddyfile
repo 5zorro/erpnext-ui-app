@@ -1,0 +1,74 @@
+# Receiving scanner front door. Plan 2026-09-21 P2; setup steps in docs/receiving-phone-setup.md.
+#
+# One address for both the scanner pages and ERPNext, so the ordinary ERPNext login works and no
+# cross-origin access has to be switched on. ERPNext is not modified and does not know this exists.
+#
+# OWN NETWORK ONLY — never forward a router port to this, for the whole pilot.
+{
+	# Certificates come from Caddy's own local authority; nothing is requested from the internet.
+	local_certs
+	skip_install_trust
+	# Phones reach this by IP address, and a browser sends no site name in the secure handshake
+	# for a bare IP — so without this Caddy cannot pick a certificate and every connection fails.
+	default_sni {$RECEIVING_HOST}
+	auto_https disable_redirects
+}
+
+https://{$RECEIVING_HOST}:8443 {
+	tls internal
+
+	# The scanner's own files. Static only: nothing here runs code on the server, directory
+	# listing is off unless asked for (it is not), and paths cannot climb out of /srv.
+	@receiving path /receiving /receiving/*
+	handle @receiving {
+		redir /receiving /receiving/ 308
+		# /receiving/lib/ is src/receiving — the same pure modules the tests run, served as-is.
+		# Only .js files from it; anything else there is a 404.
+		@lib path /receiving/lib/*
+		@libScript path /receiving/lib/*.js
+		handle @libScript {
+			root * /srv-lib
+			file_server
+		}
+		handle @lib {
+			respond 404
+		}
+		handle {
+			root * /srv
+			file_server
+		}
+		header {
+			# The page shares ERPNext's signed-in session, so it may load nothing from anywhere
+			# else and nothing may frame it. Inline script is refused too: pages build their DOM
+			# from data with textContent, never by pasting server text into HTML.
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+			Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "no-referrer"
+			# Always ask whether a file changed; the service worker keeps the offline copy.
+			Cache-Control "no-cache"
+		}
+	}
+
+	# Everything else is ERPNext, passed through untouched.
+	handle {
+		reverse_proxy frontend:8080
+	}
+}
+
+# Plain HTTP, for one job: handing a new phone the certificate it has to trust before it can open
+# the address above at all. It serves that file and a pointer to the instructions, nothing else —
+# in particular, not ERPNext.
+http://:8081 {
+	handle /receiving-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type "application/x-x509-ca-cert"
+		header Content-Disposition "attachment; filename=\"receiving-ca.crt\""
+		file_server
+	}
+	handle {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "Receiving scanner setup. Step 1: download /receiving-ca.crt and trust it (see the setup card). Step 2: open https://{$RECEIVING_HOST}:8443/receiving/install.html" 200
+	}
+}

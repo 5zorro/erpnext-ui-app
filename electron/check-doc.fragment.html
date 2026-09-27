@@ -23,8 +23,13 @@
     </div>
     <div class="check-doc-row check-doc-meta-row">
       <div class="check-doc-field">
-        <span class="check-doc-label">Date</span>
-        <span class="check-doc-value" data-testid="check-doc-date"></span>
+        <label class="check-doc-label" for="check-doc-date">Date</label>
+        <!-- Editable in proposal/blank mode, like a physical check's own date line -- ERPNext's
+             `posting_date` carries no restriction against a past date (P2a / OI-172: backdating
+             is real ERPNext usage, just never the *default*). Disabled in edit/view: an existing
+             document's date is not part of this pass's write scope (see mountCheckDocEdit). -->
+        <input type="date" id="check-doc-date" class="check-doc-input check-doc-date-input"
+          data-testid="check-doc-date" />
       </div>
       <div class="check-doc-field" data-testid="check-doc-no-field" hidden>
         <span class="check-doc-label">Check no.</span>
@@ -81,5 +86,12 @@
       <button type="button" class="check-doc-submit" id="check-doc-save" data-testid="check-doc-save" hidden>Save changes</button>
       <button type="button" class="check-doc-submit" id="check-doc-create" data-testid="check-doc-create" hidden>Create draft payment</button>
     </div>
+  </div>
+  <!-- P1 stage 2 / OI-171. A submitted Payment Entry hides the whole write block (its inputs
+       belong to a document ERP will not accept edits to), so the one thing still offered on it
+       needs a row of its own. Hidden until the registry says the action applies. -->
+  <div class="check-doc-view-actions" data-testid="check-doc-view-actions" hidden>
+    <span class="check-doc-write-status" data-testid="check-doc-amend-status"></span>
+    <button type="button" class="check-doc-submit" id="check-doc-void-amend" data-testid="check-doc-void-amend" hidden>Edit (void and amend)</button>
   </div>
 </div>

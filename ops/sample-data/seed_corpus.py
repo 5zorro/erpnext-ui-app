@@ -27,6 +27,17 @@ from erpnext.accounts.party import get_due_date_from_template
 TAG_FIELD_HINT = "ui-app-sample"  # substring used in title/remarks
 
 
+# Fixtures that could not be created. Collected rather than raised: one payment that will not post
+# should not cost a clerk the other 200 documents — but a silent skip would leave them dogfooding
+# against data that is quietly missing, so the run prints these at the end and in the summary.
+_WARNINGS: list[str] = []
+
+
+def _warn(message: str) -> None:
+    _WARNINGS.append(message)
+    print(f"warn: {message}")
+
+
 def _tag_title(tag: str, key: str) -> str:
     return f"{tag}:{key}"
 
@@ -64,6 +75,7 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
     with open(plan_path, encoding="utf-8") as fh:
         plan = json.load(fh)
 
+    _WARNINGS.clear()
     company = _resolve_company()
     _assert_sandbox(company)
 
@@ -85,34 +97,88 @@ def run(plan_path: str | None = None, reset: int | bool = 0, as_of: str | None =
     party_map = _ensure_masters(plan["parties"], company, warehouse, tag, tax_ctx, terms_map)
     name_map: dict[str, str] = {}  # plan key -> ERP name
 
-    # Apply in dependency order
+    # Apply in dependency order.
+    # 🔴 `sales_invoice` moved **after** `delivery_note` (2026-09-26): the traced chain invoices a
+    # shipment (DN → SI), so the note has to exist first. Nothing else reads across that boundary —
+    # every other SI sources a Sales Order, which still comes earlier.
     order = [
         "quotation",
         "sales_order",
-        "sales_invoice",
         "purchase_order",
         "purchase_receipt",
         "purchase_invoice",
+        "delivery_note",
+        "sales_invoice",
+        "payment_entry",
     ]
     created: dict[str, list[str]] = {k: [] for k in order}
 
     by_kind: dict[str, list[dict]] = {k: [] for k in order}
+    # 🔴 `applyLast` rows are held back until every other kind is in. The negative-inventory
+    # fixtures need their Delivery Note on file BEFORE their Item Receipt, whatever the dates say —
+    # insert the receipt first and there is stock on hand, so neither the "no repost" nor the
+    # "backdated repost" behaviour happens and the fixture proves nothing.
+    deferred: list[tuple[str, dict]] = []
+    # 🔴 A `chronoGroup` row is applied in ONE date-ordered pass across every kind, not kind by
+    # kind. The reselling year needs this: applying all receipts before any shipment leaves each
+    # shipment backdated against the newest receipt on file, which is exactly what queues a
+    # `Repost Item Valuation`. A two-month run left 59 of them queued before this existed. The plan
+    # already emits these in the right order, so this pass only has to preserve it.
+    chrono: list[dict] = []
     for doc in plan["docs"]:
-        by_kind[doc["kind"]].append(doc)
+        if doc.get("applyLast"):
+            deferred.append((doc["kind"], doc))
+        elif doc.get("chronoGroup"):
+            chrono.append(doc)
+        else:
+            by_kind[doc["kind"]].append(doc)
+
+    def _apply(kind: str, spec: dict) -> None:
+        posting = spec.get("postingDate") or _date_for_offset(as_of, spec["dayOffset"])
+        erp_name = _create_one(
+            kind, spec, plan, party_map, name_map, company, warehouse, tag, posting, as_of
+        )
+        name_map[spec["key"]] = erp_name
+        created[kind].append(erp_name)
+        frappe.db.commit()
 
     for kind in order:
         for spec in by_kind[kind]:
-            posting = spec.get("postingDate") or _date_for_offset(as_of, spec["dayOffset"])
-            erp_name = _create_one(
-                kind, spec, plan, party_map, name_map, company, warehouse, tag, posting, as_of
-            )
-            name_map[spec["key"]] = erp_name
-            created[kind].append(erp_name)
-            frappe.db.commit()
+            _apply(kind, spec)
+    for spec in chrono:
+        _apply(spec["kind"], spec)
+    for kind, spec in deferred:
+        _apply(kind, spec)
 
     summary = {k: len(v) for k, v in created.items()}
-    print(json.dumps({"ok": True, "company": company, "created": summary, "tag": tag}, indent=2))
-    return {"ok": True, "created": created, "summary": summary, "company": company}
+    _print_costing_expectations(plan)
+    print(
+        json.dumps(
+            {"ok": True, "company": company, "created": summary, "tag": tag, "warnings": _WARNINGS},
+            indent=2,
+        )
+    )
+    return {
+        "ok": True,
+        "created": created,
+        "summary": summary,
+        "company": company,
+        "warnings": list(_WARNINGS),
+    }
+
+
+def _print_costing_expectations(plan: dict) -> None:
+    """OI-177: print what each costing SKU should now be worth, so a seed run states its own
+    pass condition instead of leaving it to be re-derived from the ledger."""
+    rows = [it for it in (plan.get("parties") or {}).get("items") or [] if it.get("expect")]
+    if not rows:
+        return
+    print("\ncosting fixture (buy 2 @ 50, buy 1 @ 75, sell 2) — 1 unit on hand, value differs:")
+    for it in rows:
+        exp = it["expect"]
+        layers = exp.get("layers")
+        shown = json.dumps(layers) if layers else "none (Moving Average keeps no queue)"
+        print(f"  {it['code']:<26} {it.get('valuationMethod'):<16} value {exp['onHandValue']:>7}  layers {shown}")
 
 
 def _resolve_company() -> str:
@@ -584,9 +650,35 @@ def _ensure_masters(
                     "description": f"[{tag}] {it['name']}",
                 }
             )
+            if it.get("valuationMethod"):
+                doc.valuation_method = it["valuationMethod"]
+            if it.get("allowNegativeStock"):
+                # Per item rather than site-wide: `Stock Settings.allow_negative_stock` is 5zorro's
+                # call (and is the real answer for "all items default to allow negative"), and a
+                # corpus this size should not lose a seed run to one date landing out of order.
+                doc.allow_negative_stock = 1
             doc.insert(ignore_permissions=True)
-            # Opening stock optional — invoices use update_stock=0; PR will value from item master
-            _ensure_bin_qty(code, warehouse, 500, rate=flt(it.get("rate") or 10))
+            # OI-177: opening qty is 500 by default so every receipt and invoice values, but the
+            # costing and traced-chain SKUs ask for 0 — 500 units of prior stock would bury the two
+            # receipts whose layers are the whole point. `openingQty: 0` means "seed no stock".
+            opening = it.get("openingQty")
+            opening_qty = 500 if opening is None else flt(opening)
+            if opening_qty > 0:
+                _ensure_bin_qty(code, warehouse, opening_qty, rate=flt(it.get("rate") or 10))
+        else:
+            doc = frappe.get_doc("Item", code)
+        # Idempotent: valuation_method is the fixture, so a re-seed must not leave an older value
+        # behind (it decides whether stock_queue gets layers at all).
+        want_method = it.get("valuationMethod")
+        dirty = False
+        if want_method and (doc.get("valuation_method") or "") != want_method:
+            doc.valuation_method = want_method
+            dirty = True
+        if it.get("allowNegativeStock") and not cint(doc.get("allow_negative_stock")):
+            doc.allow_negative_stock = 1
+            dirty = True
+        if dirty:
+            doc.save(ignore_permissions=True)
         out["items"][it["key"]] = code
 
     for p in parties.get("projects") or []:
@@ -677,9 +769,9 @@ def _item_rows(spec: dict, party_map: dict, name_map: dict, warehouse: str) -> l
         }
         so_ref = line.get("salesOrderRef") or spec.get("salesOrderLink")
         if so_ref:
-            so_key = f"SO-{so_ref['index']:02d}" if isinstance(so_ref.get("index"), int) else None
-            # plan keys use pad2 via JS; rebuild
-            so_key = f"SO-{str(so_ref['index']).zfill(2)}"
+            # A ref names its Sales Order either by plan `key` (the traced chain, whose keys are
+            # words not indices) or by rotation `index` (the generic every-4th-PO link).
+            so_key = so_ref.get("key") or f"SO-{str(so_ref['index']).zfill(2)}"
             so_name = name_map.get(so_key)
             if so_name:
                 row["sales_order"] = so_name
@@ -705,6 +797,11 @@ def _create_one(
         print(f"skip existing {dt} {existing} ({key})")
         return existing
 
+    if kind == "payment_entry":
+        # A payment is not built from item rows and has no "source" in the mapper sense — it
+        # allocates against invoices that already exist, so it takes its own path entirely.
+        return _create_payment_entry(spec, name_map, company, tag, posting)
+
     source = spec.get("source")
     if source:
         src_key = source.get("key") or _plan_key(source["kind"], source["index"])
@@ -716,9 +813,12 @@ def _create_one(
         doc = _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, posting, as_of)
 
     _apply_tag_fields(doc, tag, key)
+    _stamp_posting_time(doc, spec)
     _apply_doc_taxes(doc, kind, spec, party_map)
     if kind == "purchase_invoice":
         _normalize_pi_dates(doc, posting, spec)
+    if kind == "sales_invoice":
+        _apply_si_schedule(doc, spec)
     doc.flags.ignore_permissions = True
     doc.insert()
     if cint(spec.get("asDraft")):
@@ -835,6 +935,8 @@ def _plan_key(kind: str, index: int) -> str:
         "purchase_order": "PO",
         "purchase_receipt": "PR",
         "purchase_invoice": "PI",
+        "delivery_note": "DN",
+        "payment_entry": "PE",
     }[kind]
     return f"{abbrev}-{str(index).zfill(2)}"
 
@@ -847,6 +949,8 @@ def _doctype(kind: str) -> str:
         "purchase_order": "Purchase Order",
         "purchase_receipt": "Purchase Receipt",
         "purchase_invoice": "Purchase Invoice",
+        "delivery_note": "Delivery Note",
+        "payment_entry": "Payment Entry",
     }[kind]
 
 
@@ -868,6 +972,17 @@ def _map_from_source(
         from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
         doc = make_sales_invoice(source_name)
+        doc.update_stock = 0
+    elif kind == "delivery_note" and source_kind == "sales_order":
+        from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+
+        doc = make_delivery_note(source_name)
+    elif kind == "sales_invoice" and source_kind == "delivery_note":
+        from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
+
+        doc = make_sales_invoice(source_name)
+        # The note already moved the stock. An invoice that moved it again would double-issue and
+        # leave the costing fixture reading two shipments for one sale (OI-177).
         doc.update_stock = 0
     elif kind == "purchase_receipt" and source_kind == "purchase_order":
         from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
@@ -971,6 +1086,17 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
                 "items": [{k: v for k, v in row.items() if k != "sales_order"} for row in items],
             }
         )
+    elif kind == "delivery_note":
+        doc = frappe.get_doc(
+            {
+                "doctype": "Delivery Note",
+                "customer": party_map["customers"][spec["partyKey"]],
+                "company": company,
+                "posting_date": posting,
+                "set_posting_time": 1,
+                "items": [{k: v for k, v in row.items() if k != "sales_order"} for row in items],
+            }
+        )
     elif kind == "purchase_order":
         supplier_name = party_map["suppliers"][spec["partyKey"]]
         payload = {
@@ -1040,6 +1166,22 @@ def _new_from_nothing(kind, spec, party_map, name_map, company, warehouse, tag, 
     return doc
 
 
+def _stamp_posting_time(doc, spec: dict) -> None:
+    """Honour an explicit `postingTime` from the plan.
+
+    🔴 Without one, a seeded document takes the wall-clock time of its insert, and
+    `future_sle_exists` matches SLEs at `posting_datetime >= this one` — so two documents sharing a
+    posting date and a wall-clock second each queue a `Repost Item Valuation` for the other. A
+    correctly ordered run still left 363 queued before the plan started stamping times.
+    """
+    t = spec.get("postingTime")
+    if not t or not hasattr(doc, "posting_time"):
+        return
+    doc.posting_time = t
+    if hasattr(doc, "set_posting_time"):
+        doc.set_posting_time = 1
+
+
 def _stamp_dates(doc, kind: str, posting: str) -> None:
     if kind in {"quotation", "sales_order", "purchase_order"}:
         doc.transaction_date = posting
@@ -1054,7 +1196,7 @@ def _stamp_dates(doc, kind: str, posting: str) -> None:
         doc.schedule_date = add_days(posting, 7)
         for row in doc.items:
             row.schedule_date = add_days(posting, 7)
-    if kind in {"sales_invoice", "purchase_invoice", "purchase_receipt"}:
+    if kind in {"sales_invoice", "purchase_invoice", "purchase_receipt", "delivery_note"}:
         doc.posting_date = posting
         doc.set_posting_time = 1
     if kind == "sales_invoice":
@@ -1100,7 +1242,7 @@ def _try_advance_against_po(po_doc, spec: dict, tag: str, posting: str) -> str |
     try:
         return _create_advance_against_po(po_doc, spec, tag, posting)
     except Exception as exc:  # pragma: no cover - ERPNext version variance
-        print(f"warn: advance PE for {spec.get('key')} failed ({exc}); create PE Pay manually in dogfood")
+        _warn(f"advance PE for {spec.get('key')} failed ({exc}); create PE Pay manually in dogfood")
         return None
 
 
@@ -1135,14 +1277,121 @@ def _create_advance_against_po(po_doc, spec: dict, tag: str, posting: str) -> st
     return pe.name
 
 
+def _apply_si_schedule(doc, spec: dict) -> None:
+    """Installment fixture: explicit `payment_schedule` rows on a Sales Invoice.
+
+    ERPNext will only maintain these rows if they obey its two hard rules — they must sum to the
+    grand total, and no two may share a due date. The plan builds them that way (12 x 250 against a
+    3,000 invoice, 30 days apart); this only writes them through.
+    """
+    schedule = spec.get("paymentSchedule")
+    if not schedule or not hasattr(doc, "payment_schedule"):
+        return
+    doc.set("payment_schedule", [])
+    for row in schedule:
+        doc.append(
+            "payment_schedule",
+            {
+                "due_date": row["dueDate"],
+                "invoice_portion": 0,
+                "payment_amount": row["amount"],
+                "outstanding": row["amount"],
+            },
+        )
+    doc.due_date = schedule[-1]["dueDate"]
+
+
+def _create_payment_entry(spec: dict, name_map: dict, company: str, tag: str, posting: str) -> str:
+    """Traced chain + money-in stress fixtures: a payment allocated across one or more invoices.
+
+    Two deliberate shapes:
+
+    - an allocation with **no** `amount` settles whatever that invoice actually owes. Naming a
+      number in the plan would make the fixture disagree with its own bill the first time a tax or
+      rounding rule moved, and the fixture would then be testing the plan rather than ERPNext.
+    - `amount` on the spec is the *paid* total, which may deliberately exceed what it allocates.
+      ERPNext parks the difference as `unallocated_amount` (SI-OVER / PE-OVER) — the same
+      negative-outstanding, no-due-date row that once emptied the Pay Outstanding board.
+
+    Best-effort, like the OI-153 advance: a payment that will not post is recorded as a warning
+    rather than killing a seed run, because nothing downstream links to one.
+    """
+    key = spec["key"]
+    direction = spec.get("direction") or "Pay"
+    ref_dt = "Purchase Invoice" if direction == "Pay" else "Sales Invoice"
+    allocations = spec.get("allocations") or []
+    if not allocations:
+        _warn(f"payment {key}: no allocations in plan")
+        return ""
+
+    targets = []
+    for alloc in allocations:
+        ref_name = name_map.get(alloc["key"])
+        if not ref_name:
+            _warn(f"payment {key}: target {alloc['key']} was never created")
+            return ""
+        targets.append((alloc, ref_name))
+
+    try:
+        from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+        pe = get_payment_entry(ref_dt, targets[0][1])
+        pe.company = company
+        pe.posting_date = posting
+        pe.set_posting_time = 1
+        if spec.get("postingTime"):
+            pe.posting_time = spec["postingTime"]
+        if spec.get("modeOfPayment"):
+            pe.mode_of_payment = spec["modeOfPayment"]
+        # Every seeded mode is a Bank type, and ERPNext requires a reference number for those.
+        pe.reference_no = key
+        pe.reference_date = posting
+
+        pe.set("references", [])
+        allocated = 0.0
+        for alloc, ref_name in targets:
+            outstanding = flt(frappe.db.get_value(ref_dt, ref_name, "outstanding_amount"))
+            grand_total = flt(frappe.db.get_value(ref_dt, ref_name, "grand_total"))
+            amount = flt(alloc["amount"]) if alloc.get("amount") is not None else outstanding
+            pe.append(
+                "references",
+                {
+                    "reference_doctype": ref_dt,
+                    "reference_name": ref_name,
+                    "total_amount": grand_total,
+                    "outstanding_amount": outstanding,
+                    "allocated_amount": amount,
+                },
+            )
+            allocated += amount
+
+        paid = flt(spec.get("amount")) or allocated
+        pe.paid_amount = paid
+        pe.received_amount = paid
+        _apply_tag_fields(pe, tag, key)
+        pe.flags.ignore_permissions = True
+        pe.insert()
+        pe.submit()
+        unallocated = flt(getattr(pe, "unallocated_amount", 0))
+        note = f" unallocated={unallocated}" if unallocated else ""
+        print(f"created Payment Entry {pe.name} ({key}) {direction} {paid} over {len(targets)} ref(s){note}")
+        return pe.name
+    except Exception as exc:  # pragma: no cover - ERPNext version variance
+        _warn(f"payment {key} failed ({exc}); create it by hand in dogfood")
+        return ""
+
+
 def _reset_tagged(tag: str) -> int:
     """Cancel+delete sample docs tagged via title/remarks (children before parents)."""
+    # Children before parents: a payment references an invoice, an invoice references a note or a
+    # receipt, and those reference an order.
     doctypes = [
         "Payment Entry",
         "Purchase Invoice",
         "Purchase Receipt",
         "Purchase Order",
         "Sales Invoice",
+        "Delivery Note",
         "Sales Order",
         "Quotation",
     ]

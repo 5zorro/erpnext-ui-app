@@ -53,22 +53,6 @@ export function rememberLens(prefs, doctype, lens) {
 }
 
 /**
- * Where Home "Enter …" / open-entry should land given last preference.
- * @param {string} doctypeKey e.g. purchase-invoice
- * @param {Record<string, string>} [prefs]
- * @param {{ newRoute?: string }} [opts]
- * @returns {{ lens: LensId, surface: "doc-form"|"erp-form", route: string }}
- */
-export function resolveEntryOpen(doctypeKey, prefs = {}, opts = {}) {
-  const key = normalizeDoctypeKey(doctypeKey) || "purchase-invoice";
-  const lens = preferredLens(key, prefs);
-  const route = opts.newRoute || `/app/${key}/new`;
-  if (lens === "doc") return { lens, surface: "doc-form", route };
-  // vanilla + simplified share erp-form until a simplified shell exists
-  return { lens, surface: "erp-form", route };
-}
-
-/**
  * Whether a Desk form route should open Doc skin given prefs.
  * Lists (no record) stay Vanilla. Forms (incl. new-*) follow preferredLens.
  * @param {string|null|undefined} doctype

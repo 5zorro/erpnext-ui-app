@@ -21,9 +21,9 @@ describe("surface width tokens", () => {
     assert.ok(Number(dashboard[1]) > Number(document_[1]));
   });
 
-  it("Home's tile grid and dev strip both use the dashboard cap", () => {
+  it("Home's header, tile grid and dev strip all use the dashboard cap", () => {
     const uses = homeHtml.match(/max-width:\s*var\(--surface-dashboard-max/g) || [];
-    assert.equal(uses.length, 2, "both .wrap and .dev-strip must follow the same cap");
+    assert.equal(uses.length, 3, ".home-head, .wrap and .dev-strip must follow the same cap");
   });
 
   it("Home fits a maximized 1080p window — the cap may not shrink back", () => {

@@ -46,7 +46,8 @@ describe("shell-local Doc surfaces claim an ERP route", () => {
     // Without this, the row Recent now shows would reopen in Vanilla — the same
     // "remembered Doc lens silently downgraded" bug, one door further along.
     assert.match(bodyOf("openHistoryRoute"), /if \(openShellDocSurface\(path\)\) return;/);
-    assert.match(main, /if \(openShellDocSurface\(r\)\) return;/);
+    // openRoutePreferred reaches the same surfaces through the destination answer (plan 2026-09-26 F2).
+    assert.match(bodyOf("openRoutePreferred"), /if \(openResolvedTarget\(t, opts\)\) return;/);
   });
 });
 

@@ -317,6 +317,23 @@ export function planPaymentTermsCreate(input, opts = {}) {
     template: {
       doctype: "Payment Terms Template",
       template_name: templateName,
+      // 🔴 Multi-installment templates allocate per term, and that is not a preference — it is what
+      // keeps the schedule rows true. With this off, `PaymentEntry.update_payment_schedule` bails
+      // on its first line (`if not ref.payment_term: continue`), so a payment reduces the invoice's
+      // own `outstanding_amount` and leaves every schedule row's `paid_amount`/`outstanding`
+      // untouched for ever. Verified 2026-09-22 on a fully paid single-row bill whose row still
+      // read `outstanding 201.00`.
+      //
+      // Harmless there, because a single-installment bill is read from the invoice-level
+      // outstanding. **Not** harmless once a bill has several rows: `explodeInstallments` decides
+      // what is still owed from each row's own `outstanding`, so a part-paid installment would keep
+      // being proposed and the vendor's total would be overstated. Switching allocation on makes
+      // ERPNext maintain the rows, which is the fix at the source rather than the shell second-
+      // guessing which installments are really outstanding.
+      //
+      // Left off for a single installment: nothing there needs it, and turning it on would change
+      // how every ordinary one-row bill is paid in Vanilla for no gain.
+      ...(single ? {} : { allocate_payment_based_on_payment_terms: 1 }),
       // Same rule as the single-row case: the detail row carries its own explicit copy of every
       // field, because `get_payment_terms` reads the detail and its `fetch_from` is client-side.
       terms: plans.map((plan, n) => ({ payment_term: plan.name, ...plan.fields, invoice_portion: portions[n] })),

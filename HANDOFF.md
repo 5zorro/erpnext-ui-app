@@ -10,6 +10,8 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
+   `implementation-plan-2026-09-26.md` (navigation audit + Find pages as Doc skins, OI-056) —
+   **active**; its Part B is the audit of the nav code and history, Part D the architecture.
    `implementation-plan-2026-09-16.md` (Pay Outstanding corrections, the delay calendar panel,
    the terms-name builder) — **the active plan**.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
@@ -98,11 +100,13 @@ flowchart LR
 6. **One window** (5zorro 2026-09-05) — the whole app stays in the single main window (chrome +
    history rail + a `surfaceMode`-switched `WebContentsView`), never a popup, unless the user
    deliberately spawns a second *all-purpose* window (not a feature-specific one). A tile/action
-   that wants its own "page" gets a new `surfaceMode` value + persistent view (see `place()` /
-   `showHome()` / `showPayOutstanding()` in `main.js` for the pattern), not a `new BrowserWindow`.
-   Doc skins themselves stay scoped to the **transaction-entry forms** — Purchase Order, Item
-   Receipt, Bill, Payment Entry, Sales Order, Sales Invoice, Quotation, Journal Entry — not spread
-   across list views, reports, or other Vanilla surfaces.
+   that wants its own "page" gets a new `surfaceMode` value + persistent view — a row in
+   `src/shell-surfaces.js`, which `place()`, the toolbar's Doc-lens test and the route guard all
+   read (see `showFindDoc()` in `main.js` for the pattern) — not a `new BrowserWindow`.
+   Doc skins themselves stay scoped to the **transaction-entry forms and each form's own Find
+   page** — Purchase Order, Item Receipt, Bill, Payment Entry, Sales Order, Sales Invoice,
+   Quotation (Estimate), Journal Entry — not spread across reports, workspaces, masters, or other
+   lists (5zorro 2026-09-26: a Find page is the list half of an entry form, not a list skin).
 
 7. **A Doc skin is still a form** (5zorro 2026-09-08) — *"it is supposed to still be a form, but
    it is supposed to be easier for humans who handle documents… I don't want to force the lens of
@@ -113,6 +117,70 @@ flowchart LR
    itself computes. Read-only is a fact the skin reflects, not a lever it pulls for feel. Recorded
    because the opposite instinct is easy to have twice — it was specced into the Doc Pay skin
    tranche's Payment Entry step and had to be reversed before build (plan since closed).
+
+### Editing a submitted document (OI-171, built 2026-09-22…26)
+
+ERPNext cannot edit a submitted document, so *edit* means **void and amend**: cancel it, then insert
+an editable copy that points back at the original. The shell does exactly what `form.js::amend_doc`
+does — `frappe.client.cancel`, `frappe.model.copy_doc(doc, 1)`, insert — and never reimplements
+`copy_doc`'s field rules.
+
+Four things about it are worth knowing before touching the code:
+
+1. **The registry is the extension point.** A doctype offers the action by being a row in
+   `doc-actions.js`, plus a row saying what cancelling it *costs*. Those costs are all different —
+   a Bill's payments are detached, a PO is refused while receipts stand against it, an Item Receipt
+   puts stock back off the shelf, a Payment Entry puts the bills it paid back to outstanding — so a
+   single "are you sure" would be wrong about three of the four.
+2. **Blockers are named, never enforced.** `check_no_back_links_exist` (`document.py:1578`) runs
+   *after* `on_cancel` and rolls the transaction back, so a refusal changes nothing and cannot
+   strand a document. Letting ERP be the one that says no is both safe and correct; our list of
+   what links to what is only an approximation of a rule we do not own.
+3. **The half-done state is the dangerous one.** Cancel can succeed and the insert still fail,
+   leaving a cancelled document with no replacement. Every result distinguishes that case and names
+   the document, because "it failed" would get the bill re-entered and it would then exist twice.
+4. **The amendment's name is not `<name>-1` in general.** `_set_amended_name` (`naming.py:549`)
+   increments a trailing counter, so amending `…-1` gives `…-2`; and under
+   `Document Naming Settings.default_amend_naming = "Default Naming"` no prediction is possible at
+   all. `predictAmendedName` mirrors both and returns `""` rather than guessing.
+
+**What it leaves behind, and what closes it:** cancelling detaches the bill's payments on a site
+where `unlink_payment_on_cancellation_of_invoice` is on, and ERPNext keeps **no record** of which
+bill a payment paid — the reference row is deleted, `against_voucher` is blanked on the ledgers, and
+the change bypasses the ORM so it is not in the version history either. So the pairing can only be
+inferred. `payment-relink.js` infers it from the one fact ERPNext's own allocator ignores
+(`amended_from`), posts the near-certain ones without asking, and leaves a Frappe assignment on the
+payment so an allocation nobody typed explains itself. Re-linking is an *update-after-submit*, not a
+second amend; the undo is `Unreconcile Payment`.
+
+### ERP site settings this shell reads (never assumes)
+
+🔴 **Clean Core forbids editing vendor code; it does not forbid configuring ERPNext.** A value in
+Accounts Settings or Document Naming Settings is site *data*, written through ERPNext's own form —
+it is the surface ERPNext provides precisely so that nobody patches. What the shell must not do is
+*assume* one of these values, because every one of them changes what an honest confirm should say.
+So each is read live, and each has a defined behaviour at either value.
+
+Everything below is at its **stock default** on the sandbox as of 2026-09-26, so nothing here is a
+local deviation — but a second deployment may differ, which is the reason for the table.
+
+| Setting | Stock | What it changes | What the shell does at the other value |
+|---|---|---|---|
+| `Accounts Settings.unlink_payment_on_cancellation_of_invoice` | `1` | On: cancelling an invoice **detaches** its payments (they stay submitted, unallocated). Off: ERPNext **refuses** the cancel until the payments are cancelled | The void-and-amend confirm says "will be detached" or "ERPNext will refuse to cancel" — opposite sentences, so it is read rather than guessed (`voidAndAmendFacts`) |
+| `Accounts Settings.auto_reconcile_payments` | `0` | A **gate**, not an automation: it only enables the *Process Payment Reconciliation* tool, whose cron (`auto_reconciliation_job_trigger`, 15 min) processes PPR documents somebody already queued. Turning it on reconciles nothing by itself | The unapplied-credit advice says whether a loose payment may clear on its own. 🔴 It also allocates **oldest invoice first** (`allocate_entries` over a `posting_date` sort), which is wrong for an amended bill — see below |
+| `Accounts Settings.automatically_fetch_payment_terms` | `0` | With the template's `allocate_payment_based_on_payment_terms`, lets `set_payment_schedule` refetch a bill's whole schedule from its order | The batch method change **reads the mode back** after amending rather than trusting the patch stuck (`accounts_controller.py:2658` is the path that would undo it) |
+| `Document Naming Settings.default_amend_naming` | `Amend Counter` | Whether an amendment is `<name>-1` / `<name>-2`, or takes a fresh series name | `predictAmendedName` returns `""` under "Default Naming" and the confirm simply does not name the new ID, rather than promising one |
+| `Payment Terms Template.allocate_payment_based_on_payment_terms` | per template | Whether payments maintain `paid_amount`/`outstanding` on schedule **rows** | Multi-installment templates the shell creates set it; pre-existing ones may not (`payment-term-plan.js`) |
+
+**Why `auto_reconcile_payments` stays off** (5zorro 2026-09-26, after reading the source): it would
+not have solved the case that prompted the question, and when it does run it gets that case wrong.
+Cancelling an invoice destroys every trace of which bill a payment paid — the Payment Entry
+Reference row is deleted, `against_voucher` is blanked on the ledgers, and the change is written
+through the query builder so it is not even in the document's version history. ERPNext's allocator
+therefore falls back to oldest-invoice-first, which on a supplier with more than one open bill puts
+the loose money against the wrong one and leaves the amended bill outstanding — a wrong ledger
+*and* still exposed to paying twice. The shell proposes the pairing instead (`payment-relink.js`),
+using the one fact the allocator ignores: an amendment carries `amended_from`.
 
 ### Extension points (where new work plugs in)
 
@@ -127,9 +195,17 @@ flowchart LR
 | Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
 | Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
-| Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`) | `home.html` Doc Workflow Home (museum-style tiles) |
+| **What a skin can *do* to a document** | `doc-actions.js` (the registry: which actions a doctype has, whether each applies now, and what cancelling one costs), `void-amend-flow.js` (the single-document sequence, shared by four skins) | Edit (void and amend) on the Bill / PO / Item Receipt chrome (`btn-void-amend`) and on the Payment Entry check face (`check-doc-void-amend`) |
+| Changing a vendor's payment method after the fact | `mode-change-plan.js` (collapses an installment selection into one amend per *invoice*, and says what the batch will cost) | **Method…** panel on each Pay Outstanding vendor card |
+| Payments an amendment detached | `payment-relink.js` (proposes which bill a loose payment belongs to, from `amended_from` + an exact amount match; decides what may post unasked) | The vendor card's *unapplied* chip and *auto-linked · review* badge |
+| Launcher / workflow Home | `home-tiles.js` (`HOME_GROUPS`); `vendor-process-flow.js` / `customer-process-flow.js` arrange the Vendors / Customers groups as swimlanes | `home.html` Doc Workflow Home (museum-style tiles) |
+| Desk hatch — A/R vs A/P at a glance (OI-125) | `doc-wash.js` (`mergeDocWashPrefs`, `washPatternSyncScript`); `doc-wash.css` `--hatch-desk` | One global setting, the toggle on Home; `main.js` stores it in `userData/doc-wash-prefs.json` and pushes it into every shell page. A page's localStorage is only a mirror |
+| Where a route opens | `nav-destination.js` (`resolveOpenTarget`, `lensPrefKey`) | Every door in `main.js` asks `openTargetFor()` and hands the answer to `openResolvedTarget()` — Home tiles, Recent/Drafts/Submitted, both lens tabs, Find, the hijack (plan 2026-09-26 F2) |
+| Shell pages | `shell-surfaces.js` (`SHELL_SURFACES`) | One row per `surfaceMode`: its view, whether it is the Doc lens, whether it owns its address |
+| Find pages (OI-056) | `find-skin-registry.js` (`FIND_SKINS`); `find-skin-query.js` (the page's searches as a Frappe list query — Vanilla's `creation desc` order, part-of-value matching, party id *or* name) | `find-doc.html`, `surfaceMode: "find-doc"`, `showFindDoc()`; rows and the peek are read over HTTP by main (`find-doc-list` / `find-doc-peek`, `/api/resource`, never the ERP page). A doctype gets a Find page by gaining a registry row |
 | Dogfood DevTools | — (IPC only) | Toolbar **ERP console** → `openDevTools` on ERP (or chrome/home/hist) |
-| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style) |
+| Doc terms | `doc-terms.js` | Bill / Home labels (QB-style: Bill, Vendor, Item Receipt, Estimate, Invoice). Vanilla keeps ERPNext's words |
+| A/R Doc skins (plan 2026-09-26 A1) | `estimate-map.js`, `sales-order-map.js`, `sales-invoice-map.js`, `receive-payment-map.js` (layouts as data), read by `sales-doc-map.js`; `doc-skin-registry.js` `DOC_FORM_MAPS` / `docFormMapFor` is what the page and `main.js` ask instead of `profileId === "po"` | More `doc-form.html` layouts. Receive Payment is `layoutOnly` (it shares Payment Entry with Pay Bills): reached by layout key, never by `profileByDoctypeKey` — see *Two registries* |
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
 | Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
@@ -179,7 +255,25 @@ incident snapshots — `docs/gotchas.md` G9.
 a Doc skin*; `doc-skin-registry.js` (`DOC_SKIN_PROFILES`) only knows the doc-form.html layouts.
 Nav paths must ask the former (`resolveDocSkinTarget`) and use the latter only to dispatch a
 doc-form shell — asking the subset is how a remembered Doc lens gets silently downgraded to
-Vanilla (G9).
+Vanilla (G9). Dispatch goes by the target's **layout key** first (`docFormProfileForTarget` in
+`main.js`), because one doctype can have two Doc pages: Payment Entry is Pay Bills *and* the A/R
+Receive Payment form, and `profileByDoctypeKey("payment-entry")` deliberately answers null.
+
+**One question, one answer** (plan 2026-09-26). "Which page does this address open on?" is
+`nav-destination.js` `resolveOpenTarget`, for forms and lists alike. A door that re-derives it
+from `profileByDoctypeKey` or `surfaceMode === "doc"` is the G9/G10 bug waiting for the next kind
+of skin. Three rules ride with it:
+
+- **A list remembers its own lens** (`purchase-invoice:list`), apart from its form, default Doc.
+  Choosing Vanilla on Find Bills never changes how Bills open.
+- **Lists are never hijacked.** A Vanilla list stays Vanilla however the clerk got there; the Find
+  page opens only from a Find button, the Doc tab, or a Recent row. Vanilla stays the escape hatch.
+- **A hidden page does not narrate.** While a shell page is on screen, address changes reported by
+  the hidden ERP view must not move `currentRoute` or Recent (`ownsRoute` in `shell-surfaces.js`:
+  Find, Pay Bills, a payment — not the Doc form, whose hidden ERP form *is* its document).
+
+Filters travel in the address — `/app/<doctype>?field=value` is applied by Frappe's own list
+(`router.js` `set_route_options_from_url`), so nothing needs typing into its page.
 
 **Persistence contract** (`userData/nav-state.json`): Drafts, Calculator history, Submitted
 docs and the rail's collapsed state survive restart (calc and submitted rows restored from
@@ -197,7 +291,10 @@ under the same rule, after the toolbar re-derived it and lit the wrong one, G10)
 | Bill record | Vanilla · Simplified · Doc |
 | PO record | Vanilla · Simplified · Doc |
 | IR (Purchase Receipt) record | Vanilla · Simplified · Doc |
-| Desk, dashboards, lists, masters | Vanilla only |
+| Estimate (Quotation), Sales Order, Invoice (Sales Invoice) record | Vanilla · Doc |
+| New payment, direction Receive | Vanilla · Doc (the Receive Payment form; Pay → the Pay Bills dashboard) |
+| List with a Find page (Bills, POs, Item Receipts, Payments, Estimates, Sales Orders, Sales Invoices — incl. Report/Kanban views) | Vanilla · Doc |
+| Desk, dashboards, other lists, masters | Vanilla only |
 
 (2026-09-05: Simplified's seed now covers all three anchored doc-skin doctypes, not just
 Bill — see `simplified-seed-profiles.js`. Any future doctype with a Doc skin but no seed

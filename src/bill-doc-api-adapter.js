@@ -41,6 +41,13 @@ export function billApiFromErpDoc(api) {
     fetchSourceTerms: (refs) => api.fetchSourceTerms(refs || []),
     mergeSource: (kindOrItems, name) => api.mergeSource(kindOrItems, name),
     createCreditMemo: (sourceBillName) => api.createCreditMemo(sourceBillName || ""),
+    // P1 / OI-171. 🔴 This adapter is an explicit allow-list, not a spread of the preload — a
+    // method added to `erpDoc` and not added here is simply absent on the page, with no error
+    // anywhere. That is what broke the first void-and-amend dogfood (2026-09-22).
+    voidAmendFacts: (doctype, name) =>
+      api.voidAmendFacts ? api.voidAmendFacts(doctype || "", name || "") : Promise.resolve({ ok: false, reason: "Void and amend is not wired in this build." }),
+    voidAndAmend: (doctype, name) =>
+      api.voidAndAmend ? api.voidAndAmend(doctype || "", name || "") : Promise.resolve({ ok: false, cancelled: false, reason: "Void and amend is not wired in this build." }),
     listSalesOrdersForPicker: (payload) => api.listSalesOrdersForPicker(payload || {}),
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>
@@ -62,6 +69,13 @@ export function billApiFromErpDoc(api) {
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
     softPeekRoute: (route) => api.softPeekRoute(route || ""),
     logNav: (event, detail) =>
+      api.logNav ? api.logNav(event, detail) : undefined,
+    // The page calls this one `navDebug` and the preload calls it `logNav`. Translating names is
+    // this adapter's job, and until 2026-09-22 it did not translate this one — so the page's
+    // `typeof api.navDebug === "function"` guard was always false and the line it wanted in
+    // nav-debug.log was never written. A guarded call that is never wired is a dead diagnostic,
+    // which is worse than a missing one: it reads as covered.
+    navDebug: (event, detail) =>
       api.logNav ? api.logNav(event, detail) : undefined,
   };
 }

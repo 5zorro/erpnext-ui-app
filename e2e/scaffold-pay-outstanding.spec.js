@@ -10,18 +10,39 @@ import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 
 /**
  * Packet 4b step 5 retired the standalone "Pay Outstanding" Home tile -- Payment Entry is the
- * real anchor now. Reach the same dashboard the way a clerk does today: "Pay Bills" tile → blank
- * Vanilla Payment Entry → toolbar Doc tab (isNew: true routes to pay-outstanding.html per
- * lens-context.js resolveDocSkinTarget).
+ * real anchor now. Reach the same dashboard the way a clerk does today: click "Pay Bills".
+ *
+ * 🔴 Rot found 2026-09-21 (e2e/GOTCHAS.md #10): this used to always land on a blank Vanilla
+ * Payment Entry first, needing an extra toolbar Doc-tab click. `openPaymentEntryTile`
+ * (electron/main.js) changed under this test 2026-09-08 (the nav incident its own comment names)
+ * -- Payment Entry now follows the remembered lens like every other Doc-skinned doctype, so
+ * lens=doc jumps straight to `pay-outstanding` and the `/app/payment-entry/new` URL this helper
+ * waited for never appears. Every test through this helper was silently timing out at that poll,
+ * not at a missing element, since that date. Handle both lenses rather than assume one.
  * @param {import('@playwright/test').ElectronApplication} app
  */
 async function openPayOutstandingViaPaymentEntry(app) {
   await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+
+  const landedDirect = await expect
+    .poll(async () => e2eGet(app, "surfaceMode"), { timeout: 8_000 })
+    .toBe("pay-outstanding")
+    .then(() => true)
+    .catch(() => false);
+  if (landedDirect) return;
+
+  // lens=vanilla: the old two-step path still applies. If the doc-lens path above ever breaks, the
+  // failure lands here instead, so say which branch we are in — a bare "expected payment-entry/new"
+  // is the message that hid this helper's last three months of rot.
+  const surface = await e2eGet(app, "surfaceMode");
+  const lensNote = `did not land on pay-outstanding directly (surfaceMode=${surface}); trying the lens=vanilla path`;
   await expect
-    .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+    .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000, message: lensNote })
     .toMatch(/payment-entry\/new/);
   await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
-  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("pay-outstanding");
+  await expect
+    .poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000, message: lensNote })
+    .toBe("pay-outstanding");
 }
 
 test.describe("scaffold: pay outstanding", () => {
@@ -140,6 +161,108 @@ test.describe("scaffold: pay outstanding", () => {
     // Home button (always-visible chrome toolbar) returns to Home from this surface too.
     await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="btn-home"]').click(); true`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("home");
+  });
+
+  test("P2a / OI-172: the check drawer's date renders as an editable, backdate-able input", async () => {
+    test.setTimeout(90_000);
+    try {
+      app = await launchShell();
+    } catch (err) {
+      test.skip(true, `launch skip-OK: ${err?.message || err}`);
+      return;
+    }
+    await waitForE2eApi(app);
+
+    const erpUrl = await e2eCall(app, "getErpUrl");
+    if (/\/login\b/.test(erpUrl)) {
+      const pwd = process.env.E2E_ERP_PASSWORD || "admin";
+      await e2eCall(
+        app,
+        "execInView",
+        "erp",
+        `fetch("/api/method/login", {
+           method: "POST",
+           headers: { "Content-Type": "application/x-www-form-urlencoded" },
+           body: "usr=Administrator&pwd=" + encodeURIComponent(${JSON.stringify(pwd)}),
+           credentials: "include",
+         }).then((r) => r.json())`,
+      );
+      await e2eCall(app, "openErp", "/desk");
+      const loggedIn = await expect
+        .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
+        .toMatch(/\/desk\b/)
+        .then(() => true)
+        .catch(() => false);
+      if (!loggedIn) {
+        test.skip(true, "sandbox login skip-OK: E2E_ERP_PASSWORD doesn't match this environment");
+        return;
+      }
+    }
+
+    await openPayOutstandingViaPaymentEntry(app);
+    await expect
+      .poll(
+        async () =>
+          e2eCall(app, "execInView", "payOutstanding", `document.querySelectorAll('[data-testid="group-node"]').length`),
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+
+    // "Create payment" on the first group node opens the drawer as an unsaved proposal.
+    await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `document.querySelector('[data-testid="group-create-payment"]').click(); true`,
+    );
+
+    // Read the date off the node that was clicked, so this asserts the drawer shows *that group's*
+    // proposed date -- an ISO-shaped string alone would pass just as happily on the wrong date.
+    const before = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `(() => {
+         const d = document.getElementById("check-doc-date");
+         const node = document.querySelector('[data-testid="group-node"]');
+         const label = node && node.querySelector('[data-testid="group-create-payment"]');
+         return {
+           field: d ? { tag: d.tagName, type: d.type, disabled: d.disabled, value: d.value } : null,
+           // aria-label is "Create payment — <payOn>, <amount>"
+           nodeLabel: label ? label.getAttribute("aria-label") || "" : "",
+         };
+       })()`,
+    );
+    expect(before.field).not.toBeNull();
+    expect(before.field.tag).toBe("INPUT");
+    expect(before.field.type).toBe("date");
+    expect(before.field.disabled).toBe(false);
+    expect(before.field.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(before.nodeLabel).toContain(before.field.value);
+
+    // P2a: the proposed date is never in the past -- the clamp walks it to the soonest payable day.
+    // Local date, the same way the page's own `todayIso()` builds it: a UTC one can be a day off
+    // either side of midnight and would make this flake rather than fail for a real reason.
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(before.field.value >= todayIso).toBe(true);
+
+    // ERPNext places no restriction on Payment Entry's posting_date (verified against
+    // payment_entry.json + payment_entry.py 2026-09-21) -- the clerk can back-date the proposal.
+    // No submit click here: this test only reads and edits the field, never writes to ERP.
+    const backdated = "2020-01-15";
+    const after = await e2eCall(
+      app,
+      "execInView",
+      "payOutstanding",
+      `(() => {
+         const d = document.getElementById("check-doc-date");
+         d.value = ${JSON.stringify(backdated)};
+         d.dispatchEvent(new Event("input", { bubbles: true }));
+         return d.value;
+       })()`,
+    );
+    expect(after).toBe(backdated);
   });
 
   test("Packet 4b step 3: a dirty check drawer gates Home navigation with Stay/Discard", async () => {
@@ -345,17 +468,23 @@ test.describe("scaffold: pay outstanding", () => {
         .poll(async () => e2eCall(app, "getErpUrl"), { timeout: 15_000 })
         .toMatch(new RegExp(found.receive.name));
       await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
-      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 10_000 }).toBe("payment-doc");
-      const notPayVisible = await expect
+      // A/R stage A1 (plan 2026-09-26): a Receive payment is not shown as an AP check — the check
+      // page reads its type and forwards it to the Receive Payment Doc form, same document.
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("doc");
+      expect(await e2eCall(app, "getActiveDocSkin")).toBe("receive-payment");
+      await expect
         .poll(
           async () =>
-            e2eCall(app, "execInView", "paymentDoc", `document.getElementById("not-pay").hidden`),
-          { timeout: 10_000 },
+            e2eCall(
+              app,
+              "execInView",
+              "docForm",
+              `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`,
+            ),
+          { timeout: 30_000 },
         )
-        .toBe(false)
-        .then(() => true)
-        .catch(() => false);
-      expect(notPayVisible).toBe(true);
+        .toBe(found.receive.name);
+      expect(await e2eCall(app, "currentRoute")).toBe(`/app/payment-entry/${found.receive.name}`);
     }
   });
 });

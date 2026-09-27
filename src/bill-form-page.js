@@ -231,6 +231,8 @@ import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
+import { offeredDocActions } from "../src/doc-actions.js";
+import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import {
   isTaxTableNavField,
   neighborTaxCell,
@@ -555,6 +557,7 @@ export async function bootBillFormPage(api) {
     find: document.getElementById("btn-find"),
     newBill: document.getElementById("btn-new"),
     creditMemo: document.getElementById("btn-credit-memo"),
+    voidAmend: document.getElementById("btn-void-amend"),
     creditMemoToggleSection: document.getElementById("credit-memo-toggle"),
     isReturn: document.getElementById("f-is-return"),
     creditLinksBlock: document.getElementById("credit-links-block"),
@@ -4392,6 +4395,23 @@ export async function bootBillFormPage(api) {
     if (el.creditMemo) {
       el.creditMemo.hidden = Number(doc.docstatus) !== 1 || isCreditMemoBill(doc);
     }
+    // P1 / OI-171: the registry decides, so this skin does not carry its own opinion about when
+    // an action applies. `alreadyAmended` is deliberately not consulted here — it costs an ERP
+    // round trip, and a repaint happens far more often than a click. The click reads it along with
+    // the rest of the facts it needs for the confirm, and refuses there if ERP says no.
+    if (el.voidAmend) {
+      const [action] = offeredDocActions("purchase-invoice", {
+        docstatus: doc.docstatus,
+        dirty: userEdited,
+      });
+      el.voidAmend.hidden = !action;
+      if (action) {
+        // A cancelled Bill has nothing left to void, and the registry relabels for that — a button
+        // still reading "void and amend" over a cancelled document describes the wrong half.
+        el.voidAmend.textContent = action.label;
+        el.voidAmend.title = action.hint;
+      }
+    }
     void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
@@ -5050,6 +5070,24 @@ export async function bootBillFormPage(api) {
           "err",
         );
       }
+    };
+  }
+  if (el.voidAmend) {
+    // P1 stage 2: the sequence itself lives in `void-amend-flow.js`, shared with the PO / Item
+    // Receipt skin and the Payment Entry one. What stays here is only what this page knows —
+    // which document is on screen, whether it has unsaved edits, and the vendor's own number.
+    el.voidAmend.onclick = async () => {
+      await runVoidAndAmend({
+        doctype: "purchase-invoice",
+        name: lastDoc && lastDoc.name ? String(lastDoc.name).trim() : "",
+        docstatus: lastDoc && lastDoc.docstatus,
+        dirty: userEdited,
+        supplierRef: lastDoc && lastDoc.bill_no ? String(lastDoc.bill_no) : "",
+        supplierRefLabel: "The vendor's own number",
+        api,
+        confirm: (title, body) => window.confirm(`${title}\n\n${body}`),
+        setStatus,
+      });
     };
   }
   if (el.informalLinkBill) {

@@ -21,6 +21,16 @@
     rgba(255, 255, 255, 0.48) 6px,
     rgba(255, 255, 255, 0.48) 8px
   );
+  /* Desk hatch (OI-125 pattern pref). Drawn in the page's own role accent, not white: white
+     lines over these pale washes were invisible, so A/R and A/P looked identical (5zorro
+     2026-09-26). --role-accent is set per role below, per tile on Home, and by find-doc.html. */
+  --hatch-desk: repeating-linear-gradient(
+    -32deg,
+    transparent 0,
+    transparent 7px,
+    color-mix(in srgb, var(--role-accent, #64748b) 20%, transparent) 7px,
+    color-mix(in srgb, var(--role-accent, #64748b) 20%, transparent) 9px
+  );
   --stripe-return: repeating-linear-gradient(
     90deg,
     transparent 0,
@@ -53,6 +63,12 @@ html[data-doc-role] body {
   background-color: var(--doc-page-canvas);
   background-image: none;
 }
+
+html[data-doc-role="request"] { --role-accent: var(--accent-request); }
+html[data-doc-role="order"] { --role-accent: var(--accent-order); }
+html[data-doc-role="fulfill"] { --role-accent: var(--accent-fulfill); }
+html[data-doc-role="invoice"] { --role-accent: var(--accent-invoice); }
+html[data-doc-role="payment"] { --role-accent: var(--accent-payment); }
 
 /* Layer 2 — main chrome groups use doc-skin role wash */
 html[data-doc-role="request"] .tb-group,
@@ -104,7 +120,7 @@ html[data-pattern="both"][data-doc-desk="ap"] .tb-group,
 html[data-pattern="both"][data-doc-desk="ap"] .card,
 html[data-pattern="both"][data-doc-desk="ar"] .tb-group,
 html[data-pattern="both"][data-doc-desk="ar"] .card {
-  background-image: var(--hatch-lighten);
+  background-image: var(--hatch-desk);
 }
 
 /*
@@ -126,7 +142,7 @@ html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ap"] .tb-gro
 html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ap"] .card,
 html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ar"] .tb-group,
 html[data-doc-variant="return"][data-pattern="both"][data-doc-desk="ar"] .card {
-  background-image: var(--stripe-return), var(--hatch-lighten);
+  background-image: var(--stripe-return), var(--hatch-desk);
 }
 
 body > .wrap,

@@ -13,10 +13,24 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
     ipcRenderer.invoke("create-batch-payment-entry", bills, intent),
   createBlankPaymentEntry: (intent) => ipcRenderer.invoke("create-blank-payment-entry", intent),
   openPaymentDoc: (name) => ipcRenderer.send("open-payment-doc", name),
+  // F4 (plan 2026-09-26): the payments' own Find page, through main's unsaved-changes gate.
+  openFindPayments: (opts) => ipcRenderer.send("open-find-payments", opts || {}),
   createPaymentTerm: (input) => ipcRenderer.invoke("create-payment-term", input),
   getDelayCalendar: () => ipcRenderer.invoke("get-delay-calendar"),
   setDelayCalendar: (csv) => ipcRenderer.invoke("set-delay-calendar", csv || ""),
   exportDelayCalendar: (csv) => ipcRenderer.invoke("export-delay-calendar", csv || ""),
   importDelayCalendar: () => ipcRenderer.invoke("import-delay-calendar"),
   getPaymentDefaults: (supplier) => ipcRenderer.invoke("get-payment-defaults", supplier || ""),
+  // P1 stage 3 / OI-169: the just-in-time method change. Read first (which of these bills already
+  // has a payment against it, and what this site does about that), then run the plan bill by bill.
+  modeChangeFacts: (invoices) =>
+    ipcRenderer.invoke("mode-change-facts", Array.isArray(invoices) ? invoices : []),
+  runModeChange: (work) => ipcRenderer.invoke("run-mode-change", Array.isArray(work) ? work : []),
+  // OI-171 after-effects: what this vendor has loose, and one re-link posted through ERPNext's own
+  // Payment Reconciliation.
+  paymentRelinkFacts: (supplier) => ipcRenderer.invoke("payment-relink-facts", supplier || ""),
+  relinkPayment: (req) => ipcRenderer.invoke("payment-relink", req || {}),
+  autoRelink: (supplier) => ipcRenderer.invoke("auto-relink", supplier || ""),
+  relinkReviews: () => ipcRenderer.invoke("relink-reviews"),
+  closeRelinkReview: (payment) => ipcRenderer.invoke("relink-review-close", payment || ""),
 });

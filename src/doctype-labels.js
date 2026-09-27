@@ -11,8 +11,14 @@ export const DOCTYPE_LABELS = {
   "purchase-order:list": "Find Purchase Orders",
   "purchase-receipt": "Item Receipt",
   "purchase-receipt:list": "Find Item Receipts",
+  // The plural rule below would say "Find Payment Entrys"; one page covers paid and received.
+  "payment-entry:list": "Find Payments",
+  quotation: "Estimate",
+  "quotation:list": "Find Estimates",
   "sales-order": "Sales Order",
-  "sales-invoice": "Sales Invoice",
+  // The Doc skins' A/R word, as Bill is the A/P one. Vanilla keeps "Sales Invoice".
+  "sales-invoice": "Invoice",
+  "sales-invoice:list": "Find Invoices",
   item: "Item",
   supplier: "Vendor",
   customer: "Customer",

@@ -114,6 +114,30 @@ export function linkPickerKeyAction(key, state) {
 }
 
 /**
+ * What to search for when the clerk **opens** the dropdown, as opposed to typing in it.
+ *
+ * 🔴 Opening a picker on a field that already holds a value used to search for that value, so the
+ * only option offered was the one already selected — the field could never be changed from its own
+ * dropdown. 5zorro found it on a Bill's payment terms (2026-09-22): *"the dropdown picker only
+ * found the current terms, there were no other terms available"*, with eight other templates
+ * sitting in the ERP. It applies to every Link field that already has a value, which on a submitted
+ * or amended document is most of them.
+ *
+ * The chevron means "show me the choices", so a committed value is not a filter: it searches for
+ * everything. Text the clerk has typed since the last commit *is* a filter and is kept, so typing
+ * `NET` and then clicking the chevron still narrows to `NET`.
+ *
+ * @param {string|null|undefined} value what is in the input now
+ * @param {string|null|undefined} committed the value last picked/committed, if any
+ * @returns {string} the query to search with
+ */
+export function linkPickerOpenQuery(value, committed) {
+  const v = value == null ? "" : String(value);
+  const c = committed == null ? "" : String(committed);
+  return v === c ? "" : v;
+}
+
+/**
  * After a line-cell commit (Link pick or qty/rate/etc.), where should focus go?
  * Paint rebuilds the row; without this, focus jumps to the table start.
  * @param {string} field

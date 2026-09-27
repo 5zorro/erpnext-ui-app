@@ -83,13 +83,30 @@ export function valuesMeaningfullyEqual(before, after, opts = {}) {
  * @returns {"text" | "number" | "date"}
  */
 export function dirtyCompareKindForField(field) {
-  if (field === "qty" || field === "rate" || field === "tax_amount" || field === "__amount_due" || field === "paid_amount") {
+  if (
+    field === "qty" ||
+    field === "rate" ||
+    field === "tax_amount" ||
+    field === "__amount_due" ||
+    field === "paid_amount" ||
+    field === "allocated_amount"
+  ) {
     return "number";
   }
   if (field === "is_paid" || field === "is_return") {
     return "number";
   }
-  if (field === "posting_date" || field === "bill_date" || field === "due_date" || field === "transaction_date" || field === "schedule_date") {
+  if (
+    field === "posting_date" ||
+    field === "bill_date" ||
+    field === "due_date" ||
+    field === "transaction_date" ||
+    field === "schedule_date" ||
+    // A/R (stage A1)
+    field === "delivery_date" ||
+    field === "valid_till" ||
+    field === "reference_date"
+  ) {
     return "date";
   }
   return "text";
