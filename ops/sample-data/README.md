@@ -227,6 +227,14 @@ Every resale SKU sets `Item.allow_negative_stock`, per item rather than site-wid
 Settings.allow_negative_stock` is 5zorro's call and is the real answer to "all items default to allow
 negative", and a 2,700-document seed should not fail over one date landing out of order.
 
+### Two hand-made experiment SKUs that the seed does NOT create
+
+`SAMPLE-SKU-NEG-FWD` and `SAMPLE-SKU-NEG-BACK` exist on the sandbox from the 2026-09-26 experiment
+that established the negative-inventory behaviour (ship 2 against a master rate of 60, then receive
+3 @ 50, once dated after the shipment and once backdated before it). They are **not in any plan**, so
+a `--reset` will not remove them and a re-seed will not recreate them. Left in place deliberately as
+readable worked examples; the `RS-NEG-*` fixtures above are the seeded, reproducible version.
+
 ### Insert order is load-bearing
 
 `buildResellingCorpus` returns documents **sorted oldest-first within each kind**, and

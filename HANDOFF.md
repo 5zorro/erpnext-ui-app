@@ -73,8 +73,8 @@ flowchart LR
 | Path | Role |
 |------|------|
 | `src/*.js` | SSoT for each concern’s **logic** (health, history, route-info, nav-guard, config, money, …) |
-| `src/sample-data/` | Pure sample corpus plan + sandbox guard (OI-055 / S−1) |
-| `ops/sample-data/` | Sandbox-only bench seed runner (`npm run seed:sample`) |
+| `src/sample-data/` | Pure sample corpus plans + sandbox guard. **Two populations:** `corpus-plan.js` (60-day rotation, ~216 docs) and `reselling-corpus.js` (360-day reselling year, ~2,726 docs, 25 vendors × 25 customers). 🔴 Read `ops/sample-data/README.md` before changing either — the insert order and posting times are load-bearing, not tidiness |
+| `ops/sample-data/` | Sandbox-only bench seed runner (`npm run seed:sample`, ~15 min) + **the sample-data contract** (`README.md`): the traced buy-to-sell chain, the monthly cost tiers a FIFO layer is read by, the two ageing rules, and the negative-inventory fixtures |
 | `ops/input-count/` | Bill scrape dogfood report (`npm run report:input-count`) |
 | `ops/erp-host/` | Optional ERP host scripts: `ensure-erp-up.sh` (docker + ping; no UI); example autofix wrapper |
 | `docs/gotchas.md` | Runtime/architecture gotchas from dogfood (bill enrich, ERP IPC, nav) |
