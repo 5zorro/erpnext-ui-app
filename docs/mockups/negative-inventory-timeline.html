@@ -96,10 +96,17 @@
     visual is <b>what it costs you to allow it</b>, and <b>when</b> that cost appears.
   </p>
   <p>
-    Short version: the shipment still books a cost, but at a <span class="guessed">guessed rate</span>,
-    and when the receipt finally lands ERPNext <b>reaches back and rewrites it</b>. A document's booked
-    cost changes after submit, without anybody touching the document. Discovery notes: <b>OI-178</b>
-    (this page) and <b>OI-177</b> (the cost-layer panel that would show it).
+    Short version: the shipment still books a cost, but at a <span class="guessed">guessed rate</span> —
+    and whether that guess ever gets corrected depends on <b>one thing only</b>: the posting date you
+    give the receipt. Date it when the goods arrived and ERPNext restates the shipment itself. Date it
+    when you typed it and the error is quietly moved into a different month instead. Sections B and C
+    are the same documents with that one field changed.
+  </p>
+  <p>
+    Discovery notes: <b>OI-178</b> (this page) and <b>OI-177</b> (the cost-layer panel that would show
+    it). ✅ <b>Every number in sections A–D was read back off this sandbox on 2026-09-26</b>, not
+    reasoned about — an earlier draft of this page got section B wrong in exactly the way the
+    experiment disproved.
   </p>
 </header>
 
@@ -162,68 +169,61 @@
 <!-- ============================================================ -->
 <section>
   <div class="sec-head">
-    <span class="sec-name">B · Out of order — you shipped it before you received it</span>
-    <span class="sec-tag tag-warn">what OI-178 is about</span>
+    <span class="sec-name">B · Out of order, receipt dated <u>later</u> — the common accident</span>
+    <span class="sec-tag tag-warn">verified on this sandbox</span>
   </div>
   <div class="why">
-    Same week, same goods, same money — the <b>only</b> difference is that the shipment was typed
-    first. Watch the day&nbsp;1 row: there is no layer to draw from, so ERPNext books the cost at a
-    <span class="guessed">fallback rate</span> and records a <span class="neg">negative layer</span>.
-    Then on day&nbsp;5, the receipt arrives <b>in the past relative to a movement that already
-    happened</b>, and ERPNext reposts.
+    Same week, same goods, same money. The shipment is typed first, and the receipt is entered
+    <b>with the date you typed it</b> — 15 days later. Watch what does <b>not</b> happen: the day&nbsp;1
+    shipment is <b>never revisited</b>. It keeps its guessed 60.00 a unit forever. The 20.00 of
+    difference does not vanish — it lands on the <b>receipt</b>, in the receipt's period.
   </div>
   <div class="body">
     <div class="tl">
       <div class="tl-axis"></div>
       <div class="tl-row">
         <div class="ev out guessed">
-          <span class="ev-day">Mon 1</span>
+          <span class="ev-day">Aug 1</span>
           <div class="ev-doc">Delivery Note</div>
           <div class="ev-qty out">−2</div>
           <div class="ev-note guessed">nothing on hand — rate is a guess</div>
         </div>
         <div class="ev">
-          <span class="ev-day">Fri 5</span>
+          <span class="ev-day">Aug 16</span>
           <div class="ev-doc">Item Receipt</div>
           <div class="ev-qty in">+3 @ 50.00</div>
-          <div class="ev-note">absorbs the negative, triggers a repost</div>
-        </div>
-        <div class="ev">
-          <span class="ev-day">Tue 9</span>
-          <div class="ev-doc">Item Receipt</div>
-          <div class="ev-qty in">+1 @ 75.00</div>
-          <div class="ev-note">ordinary layer</div>
+          <div class="ev-note">absorbs the negative <b>and the error</b></div>
         </div>
       </div>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Day</th><th>Document</th><th class="num">Qty</th><th class="num">On hand</th>
-          <th>Layers after <code>stock_queue</code></th><th class="num">Cost booked</th><th>Rate came from</th>
+          <th>Date</th><th>Document</th><th class="num">Qty</th><th class="num">On hand</th>
+          <th>Layers (<code>stock_queue</code>)</th><th class="num">Rate</th>
+          <th class="num">Value moved</th><th>Reading</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>1</td><td>Delivery Note</td><td class="num">−2</td><td class="num neg">−2</td>
-          <td><code class="neg">[[-2, 60.00]]</code></td>
-          <td class="num guessed">120.00</td>
-          <td class="guessed">nothing to consume — the item master's stale 60.00<span class="pill">guess</span></td>
+          <td>Aug 1</td><td>Delivery Note</td><td class="num">−2</td><td class="num neg">−2</td>
+          <td><code class="neg">[[-2.0, 60.0]]</code></td>
+          <td class="num guessed">60.00</td><td class="num guessed">−120.00</td>
+          <td class="guessed">no layer to consume — the item master's stale 60.00<span class="pill">guess</span></td>
         </tr>
         <tr>
-          <td>5</td><td>Item Receipt</td><td class="num">+3</td><td class="num">1</td>
-          <td><code>[[1, 50]]</code></td><td class="num">—</td><td>the receipt line</td>
+          <td>Aug 16</td><td>Item Receipt</td><td class="num">+3</td><td class="num">1</td>
+          <td><code>[[1.0, 50.0]]</code></td>
+          <td class="num">50.00</td><td class="num"><b>+170.00</b></td>
+          <td>bought 150.00 of goods, moved <b>170.00</b> of value — the extra
+              <b>20.00 is the correction</b>, booked here</td>
         </tr>
         <tr>
-          <td>5<span class="pill fix">repost</span></td>
-          <td><b>day 1 is rewritten</b></td><td class="num">—</td><td class="num">—</td>
-          <td><code>[[-2, 50]]</code> → resolved</td>
-          <td class="num"><b>100.00</b></td>
-          <td>the 50.00 that turned out to be real — <b>20.00 of cost moves month to month</b></td>
-        </tr>
-        <tr>
-          <td>9</td><td>Item Receipt</td><td class="num">+1</td><td class="num">2</td>
-          <td><code>[[1, 50], [1, 75]]</code></td><td class="num">—</td><td>the receipt line</td>
+          <td colspan="8" style="background:#fffbeb">
+            <b>Net result:</b> the queue heals (1 unit at the right 50.00), the balance sheet ends
+            correct — but the <b>cost of the sale is overstated by 20.00 in August&nbsp;1's period and
+            understated in August&nbsp;16's</b>, permanently. No repost was created. Nothing warned.
+          </td>
         </tr>
       </tbody>
     </table>
@@ -233,37 +233,102 @@
 <!-- ============================================================ -->
 <section>
   <div class="sec-head">
-    <span class="sec-name">C · The same shipment, read twice</span>
-    <span class="sec-tag tag-warn">the part that surprises people</span>
+    <span class="sec-name">C · Out of order, receipt <u>backdated</u> to when the goods really arrived</span>
+    <span class="sec-tag tag-ok">this one self-corrects</span>
   </div>
   <div class="why">
-    Open the day&nbsp;1 Delivery Note on day&nbsp;2 and again on day&nbsp;6 and it reports a different
-    cost, with no edit, no amendment and no new version. If day&nbsp;1 and day&nbsp;5 fall either side
-    of a month end, the correction lands in a period you have already closed.
+    Identical documents. The <b>only</b> difference is the receipt's posting date — dated July&nbsp;22,
+    when the pallet actually showed up, rather than the day someone got round to typing it. Because
+    that is <b>earlier</b> than a movement already on file, ERPNext raises a <b>Repost Item
+    Valuation</b>, and the shipment's cost is genuinely rewritten.
+  </div>
+  <div class="body">
+    <div class="tl">
+      <div class="tl-axis"></div>
+      <div class="tl-row">
+        <div class="ev">
+          <span class="ev-day">Jul 22 <i>(typed last)</i></span>
+          <div class="ev-doc">Item Receipt</div>
+          <div class="ev-qty in">+3 @ 50.00</div>
+          <div class="ev-note">backdated → triggers a repost</div>
+        </div>
+        <div class="ev out">
+          <span class="ev-day">Aug 1 <i>(typed first)</i></span>
+          <div class="ev-doc">Delivery Note</div>
+          <div class="ev-qty out">−2</div>
+          <div class="ev-note">recalculated from 60.00 → <b>50.00</b></div>
+        </div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Date</th><th>Document</th><th class="num">Qty</th><th class="num">On hand</th>
+            <th>Layers (<code>stock_queue</code>)</th><th class="num">Rate</th>
+            <th class="num">Value moved</th><th>Reading</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Jul 22</td><td>Item Receipt</td><td class="num">+3</td><td class="num">3</td>
+          <td><code>[[3.0, 50.0]]</code></td><td class="num">50.00</td><td class="num">+150.00</td>
+          <td>an ordinary receipt — no adjustment absorbed</td>
+        </tr>
+        <tr>
+          <td>Aug 1</td><td>Delivery Note</td><td class="num">−2</td><td class="num">1</td>
+          <td><code>[[1.0, 50.0]]</code></td>
+          <td class="num"><b>50.00</b><span class="pill fix">was 60.00</span></td>
+          <td class="num"><b>−100.00</b><span class="pill fix">was −120.00</span></td>
+          <td>drawn from a layer that now exists before it</td>
+        </tr>
+        <tr>
+          <td colspan="8" style="background:#f0fdf4">
+            <b>Net result:</b> the sale is costed correctly, in its own period, as if the paperwork had
+            never been late. <b>Backdating the receipt to the date the goods arrived is the fix</b> —
+            and it is free.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="why" style="padding-left:0">
+      🔴 <b>The repost is asynchronous.</b> The Repost Item Valuation lands <code>Queued</code> and a
+      background worker runs it. For a moment after submitting the receipt, the shipment still reads
+      60.00 — so a costing panel that reads straight after a save can show a figure that is about to
+      change. It has to say so rather than present it as settled.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">D · The difference between B and C, in one line</span>
+    <span class="sec-tag tag-note">the operational lever</span>
+  </div>
+  <div class="why">
+    It is <b>not</b> the order you type things in. It is the <b>posting date you give the receipt</b>.
   </div>
   <div class="body">
     <div class="split">
       <div class="card">
-        <div class="card-head">Read on day 2 <span class="sub">— before the receipt exists</span></div>
+        <div class="card-head">Receipt dated when you typed it <span class="sub">— section B</span></div>
         <table>
           <tbody>
-            <tr><td>Shipped</td><td class="num">2</td></tr>
-            <tr><td>Cost of goods sold</td><td class="num guessed">120.00</td></tr>
-            <tr><td>Rate used</td><td class="num guessed">60.00 / unit</td></tr>
-            <tr><td>Where it came from</td><td><code>Item.valuation_rate</code></td></tr>
-            <tr><td>Confidence</td><td class="guessed">placeholder</td></tr>
+            <tr><td>Repost raised</td><td><b class="neg">no</b></td></tr>
+            <tr><td>Cost of the Aug 1 sale</td><td class="num guessed">120.00 — forever</td></tr>
+            <tr><td>Where the 20.00 goes</td><td>onto the receipt, in a later period</td></tr>
+            <tr><td>Balance sheet</td><td>correct</td></tr>
+            <tr><td>Margin on that sale</td><td class="neg">wrong, and stays wrong</td></tr>
           </tbody>
         </table>
       </div>
       <div class="card">
-        <div class="card-head">Read on day 6 <span class="sub">— after the repost</span></div>
+        <div class="card-head">Receipt dated when goods arrived <span class="sub">— section C</span></div>
         <table>
           <tbody>
-            <tr><td>Shipped</td><td class="num">2</td></tr>
-            <tr><td>Cost of goods sold</td><td class="num"><b>100.00</b></td></tr>
-            <tr><td>Rate used</td><td class="num">50.00 / unit</td></tr>
-            <tr><td>Where it came from</td><td>the Item Receipt of day 5</td></tr>
-            <tr><td>Confidence</td><td style="color:var(--in);font-weight:600">settled</td></tr>
+            <tr><td>Repost raised</td><td><b style="color:var(--in)">yes</b> (async)</td></tr>
+            <tr><td>Cost of the Aug 1 sale</td><td class="num">restated to 100.00</td></tr>
+            <tr><td>Where the 20.00 goes</td><td>nowhere — it never existed</td></tr>
+            <tr><td>Balance sheet</td><td>correct</td></tr>
+            <tr><td>Margin on that sale</td><td style="color:var(--in)">right</td></tr>
           </tbody>
         </table>
       </div>
@@ -274,7 +339,46 @@
 <!-- ============================================================ -->
 <section>
   <div class="sec-head">
-    <span class="sec-name">D · What the shell would say, and when</span>
+    <span class="sec-name">E · Reviewing it periodically</span>
+    <span class="sec-tag tag-note">what vanilla already gives you</span>
+  </div>
+  <div class="why">
+    There is <b>no “negative inventory review” report</b> in ERPNext. There are four existing reports
+    that between them cover the job, and the gap is that none of them is framed as
+    <i>here is what is negative and here is how to clear it</i>.
+  </div>
+  <div class="body">
+    <table>
+      <thead><tr><th>Report</th><th>What it answers</th><th>Gap for a monthly review</th></tr></thead>
+      <tbody>
+        <tr><td><b>Stock Balance</b></td>
+            <td>Balance qty and value per item/warehouse — negatives show as negative rows</td>
+            <td>No “negatives only” filter; you sort and eyeball</td></tr>
+        <tr><td><b>Stock Ledger</b></td>
+            <td>The movement history behind one item, with running balance</td>
+            <td>Per item. Fine once you know <i>which</i> item</td></tr>
+        <tr><td><b>FIFO Queue vs Qty After Transaction</b></td>
+            <td>Where the layer queue disagrees with the recorded balance</td>
+            <td>Diagnostic, not a to-do list; names rows, not causes</td></tr>
+        <tr><td><b>Stock Ledger Invariant Check</b></td>
+            <td>Whether the ledger's own arithmetic still holds</td>
+            <td>The strongest audit of the four, and the least readable</td></tr>
+      </tbody>
+    </table>
+    <p class="why" style="padding-left:0">
+      A monthly review is really three questions, and the reports answer them in this order:
+      <b>what is negative right now</b> (Stock Balance) → <b>which shipment went out before its
+      receipt</b> (Stock Ledger on that item) → <b>backdate the receipt to the date the goods
+      arrived</b>, which per section C makes ERPNext restate the cost itself. That third step is the
+      clearing action, and it is the part no report tells you to take.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-name">F · What the shell would say, and when</span>
     <span class="sec-tag tag-note">proposal</span>
   </div>
   <div class="why">
@@ -286,26 +390,29 @@
     <ul class="says">
       <li>
         <b>At the moment of shipping</b>
-        “This ships 2 you have not received yet. Its cost is a placeholder of 60.00 a unit and will be
-        restated when the receipt is entered.”
+        “This ships 2 you have not received yet. Its cost is a placeholder of 60.00 a unit, taken from
+        the item record because there is no receipt to read.”
         <span class="src">On the Delivery Note, before submit. Not a block — a label.</span>
       </li>
       <li>
-        <b>On the cost-layer panel (OI-177), while it is still negative</b>
-        A <span class="neg">−2</span> row shown as owed-to-the-ledger rather than as stock, with its
-        rate marked <span class="guessed">guess</span> so nobody totals it as if it were cost.
-        <span class="src">The panel reads <code>stock_queue</code>; it must not present a negative bin as a layer.</span>
+        <b>When the receipt is finally entered — the one that actually matters</b>
+        “2 of this went out on Aug 1 before anything was received. Date this receipt <b>Jul 22</b>,
+        when the goods arrived, and that shipment's cost is corrected automatically. Date it today and
+        20.00 of cost stays in the wrong month.”
+        <span class="src">This is the only prompt on the page that changes the books for the better, because backdating is the whole fix and nothing currently suggests it.</span>
       </li>
       <li>
-        <b>After the repost</b>
-        “Cost restated 120.00 → 100.00 when Item Receipt PR-00042 was entered on day 5.”
-        <span class="src">The one line an auditor actually needs, and the one ERPNext does not currently surface anywhere near the document.</span>
+        <b>On the cost-layer panel (OI-177), while the balance is still negative</b>
+        A <span class="neg">−2</span> row shown as owed-to-the-ledger rather than as stock, its rate
+        marked <span class="guessed">guess</span> so nobody totals it as cost, and “a repost may still
+        change this” whenever an unfinished Repost Item Valuation exists for the item.
+        <span class="src">The panel reads <code>stock_queue</code>; a negative bin is not a layer and must not be drawn as one.</span>
       </li>
       <li>
         <b>If no rate can be found at all</b>
-        The fallback walk ends at zero, and the shipment books <b>no cost whatsoever</b> — quietly.
-        That is the case worth a louder warning than the others.
-        <span class="src">A brand-new SKU shipped before its first receipt has no valuation rate, no standard rate and no buying price.</span>
+        The fallback walk ends at zero and the shipment books <b>no cost whatsoever</b>, quietly.
+        A brand-new SKU shipped before its first receipt has no valuation rate, no standard rate and
+        no buying price — that case deserves a louder warning than the others.
       </li>
     </ul>
   </div>
@@ -326,11 +433,27 @@
     <i>stock adjustment COGS with negative stock</i> page.
   </p>
   <p>
-    <b>What is invented here:</b> the 60.00 stale master rate, the document numbers, the day
-    spacing, and every word in section D. The mechanism is real; the numbers are chosen to make the
-    20.00 restatement easy to see. The exact bin arithmetic <i>at the instant the balance crosses
-    zero</i> has not been verified against this instance — section B steps from −2 to +1 to stay
-    clear of it.
+    <b>How far back does a repost go, and is there a cutoff?</b> Out of the box, <b>none</b> — a
+    backdated entry reposts every later movement for that item and warehouse however far back it
+    reaches, and a purchase dated <i>after</i> the sale raises no repost at all, however soon it
+    follows. Three settings exist to impose a limit, all unset on this instance:
+    <code>Stock Settings.stock_frozen_upto</code> (a hard date), <code>stock_frozen_upto_days</code>
+    (a rolling window) — both bypassable only by <code>stock_auth_role</code> — and
+    <code>role_allowed_to_create_edit_back_dated_transactions</code>, which restricts who may post
+    earlier than an item's last movement at all.
+  </p>
+  <p>
+    <b>Which rate fills the negative?</b> The rate of the <i>last layer it consumed</i>, or the item
+    master fallback when there was no layer at all — never a future receipt's rate.
+    <code>remove_stock</code> appends <code>[-qty, outgoing_rate or fifo_bin[RATE]]</code>. So a later
+    cheaper purchase does <b>not</b> retroactively set the guess; only a repost changes it, and only
+    a backdated entry raises one.
+  </p>
+  <p>
+    <b>What is invented here:</b> the 60.00 stale master rate, the document numbers, and every word
+    in section F. The mechanism and all the arithmetic are real — the rates are chosen so the 20.00
+    is easy to follow. Section E's report list is complete for <code>erpnext/stock/report</code> at
+    this tag.
   </p>
 </footer>
 </body>
