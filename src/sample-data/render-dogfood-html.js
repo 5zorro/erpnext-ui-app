@@ -75,6 +75,7 @@ ${skinCss(skin)}
     <div class="scenario">${esc(doc.scenario)}</div>
     <div class="hint">${esc(doc.dogfoodHint)}</div>
     ${doc.expect ? `<div class="expect"><b>Watch for:</b> ${esc(doc.expect)}</div>` : ""}
+    ${gapsBlock(doc.knownGaps)}
   </header>
 
   <main>
@@ -107,15 +108,39 @@ ${skinCss(skin)}
     <div class="totals">
       <div class="tot-row"><span>Subtotal</span><span>${fmtMoney(sub)}</span></div>
       ${taxRow}
-      <div class="tot-row grand"><span>Total</span><span>${fmtMoney(grand)}</span></div>
+      <div class="tot-row grand"><span>${doc.kind === "customer_remittance" ? "Check amount" : "Total"}</span><span>${fmtMoney(grand)}</span></div>
     </div>
 
     ${notes ? `<ul class="notes">${notes}</ul>` : ""}
     <p class="scenario"><b>Watch for:</b> ${esc(doc.expect || doc.scenario)}</p>
+    ${checksBlock(doc.checks)}
   </main>
   <footer>Synthetic ${esc(counterparty.toLowerCase())} paper for erpnext-ui-app dogfood — not a real document.</footer>
 </body>
 </html>`;
+}
+
+/**
+ * What the Doc skin cannot do yet — printed on the banner, before any typing, so that part is
+ * done in Vanilla instead of discovered the hard way.
+ * @param {string[]|undefined} gaps
+ */
+function gapsBlock(gaps) {
+  if (!Array.isArray(gaps) || !gaps.length) return "";
+  return `<div class="gaps"><b>Known gap today — do this part in Vanilla:</b><ul>${gaps
+    .map((g) => `<li>${esc(g)}</li>`)
+    .join("")}</ul></div>`;
+}
+
+/**
+ * Ticks to do right after entering the paper, as boxes to mark on the printout.
+ * @param {string[]|undefined} checks
+ */
+function checksBlock(checks) {
+  if (!Array.isArray(checks) || !checks.length) return "";
+  return `<section class="checks"><h2>Then check</h2><ul>${checks
+    .map((c) => `<li><span class="box">☐</span> ${esc(c)}</li>`)
+    .join("")}</ul></section>`;
 }
 
 /**
@@ -139,6 +164,7 @@ function kindTitle(kind) {
   if (kind === "customer_rfq") return "Request for Quote";
   if (kind === "customer_po") return "Customer Purchase Order";
   if (kind === "billing_instruction") return "Shipping Notice / Billing Instruction";
+  if (kind === "customer_remittance") return "Remittance Advice";
   return "Invoice";
 }
 
@@ -170,6 +196,13 @@ function skinCss(skin) {
     .banner .scenario { color: #f8fafc; font-weight: 600; margin-top: 3px; }
     .banner .hint { color: #94a3b8; margin-top: 4px; }
     .banner .expect { color: #fcd34d; margin-top: 4px; }
+    .banner .gaps { color: #fecaca; margin-top: 6px; border-left: 3px solid #f87171; padding-left: 8px; }
+    .banner .gaps ul { margin: 2px 0 0; padding-left: 18px; }
+    .checks { margin-top: 18px; padding: 10px 14px; border: 1px solid #94a3b8; border-radius: 6px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; break-inside: avoid; }
+    .checks h2 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #334155; }
+    .checks ul { list-style: none; margin: 0; padding: 0; }
+    .checks li { margin: 4px 0; padding-left: 24px; position: relative; }
+    .checks .box { position: absolute; left: 0; top: -1px; font-size: 15px; }
     .dogfood { font-weight: 700; letter-spacing: 0.04em; }
     main { padding: 16px 20px 32px; }
     .top { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 16px; }

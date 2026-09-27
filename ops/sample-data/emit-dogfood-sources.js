@@ -66,12 +66,16 @@ const rowsFor = (flow) =>
     .filter((r) => r.flow === flow)
     .map((r) => {
       const html = written.find((w) => w.id === r.id)?.html;
-      return `| ${r.id} | ${esc(r.target)} | ${esc(r.oi) || "—"} | ${esc(r.scenario)} | ${esc(r.expect) || "—"} | [pdf](./${html?.replace(/\.html$/, ".pdf")}) · [html](./${html}) |`;
+      const doc = DOGFOOD_SOURCES.find((d) => d.id === r.id) || {};
+      const checks = (doc.checks || []).length;
+      const gaps = (doc.knownGaps || []).length;
+      const extra = [checks ? `${checks} to check` : "", gaps ? `⚠ ${gaps} known gap${gaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "—";
+      return `| ${r.id} | ${esc(r.target)} | ${esc(r.oi) || "—"} | ${esc(r.scenario)} | ${esc(r.expect) || "—"} | ${extra} | [pdf](./${html?.replace(/\.html$/, ".pdf")}) · [html](./${html}) |`;
     })
     .join("\n");
 
 const header =
-  "| ID | Typed into | Museum | Edge case | Watch for | Files |\n|----|----|----|----|----|----|";
+  "| ID | Typed into | Museum | Edge case | Watch for | Then | Files |\n|----|----|----|----|----|----|----|";
 
 // 🔴 Named, not hidden. "Watch for" is what turns a scenario into something a dogfood run can
 // pass or fail; a row without one only says what paper to type, not what it proves. The count is
@@ -93,7 +97,10 @@ the *surface*. Nothing here is posted to ERP by this script.
 this file is regenerated from it, so the two cannot drift.
 
 Each PDF's dark banner carries the same four facts as the table: which side of the business, the
-ERPNext doctype it is typed into, the edge case, and what to watch for.
+ERPNext doctype it is typed into, the edge case, and what to watch for. A red **Known gap** block
+on the banner says what the Doc skin cannot do yet (do that part in Vanilla), and a **Then check**
+box at the foot lists the ticks to do right after entering it — the click-through checks (Find
+pages, the hatch toggle, Home) sit on the paper where you are already on that screen.
 
 ${gapNote}
 ## AP — money out (${index.filter((r) => r.flow === "ap").length})
