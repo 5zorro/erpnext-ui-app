@@ -15,6 +15,12 @@ export const DOC_TERM_PAIRS = [
   ["Supplier Name", "Vendor Name"],
   ["Suppliers", "Vendors"],
   ["Supplier", "Vendor"],
+  // ERPNext says Quotation; the Doc lens says Estimate (5zorro 2026-09-26). Vanilla keeps its word.
+  ["Quotations", "Estimates"],
+  ["Quotation", "Estimate"],
+  // A/R invoice: the Doc skins say "Invoice", as "Bill" is its A/P twin (plan 2026-09-26, stage A1).
+  ["Sales Invoices", "Invoices"],
+  ["Sales Invoice", "Invoice"],
 ];
 
 /**

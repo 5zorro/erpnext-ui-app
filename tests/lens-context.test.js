@@ -98,10 +98,16 @@ describe("Payment Entry routing (Packet 4b step 5)", () => {
     assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
   });
 
-  it("isNew + Receive direction: no tab, no target -- AR isn't built", () => {
+  it("isNew + Receive direction: the Receive Payment doc-form layout (stage A1)", () => {
     const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry/new", paymentDirection: "Receive" };
-    assert.equal(hasDocSkin(ctx), false);
-    assert.equal(resolveDocSkinTarget(ctx), null);
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), {
+      kind: "doc-form",
+      doctype: "payment-entry",
+      record: "new",
+      route: "/app/payment-entry/new",
+      layoutKey: "receive-payment",
+    });
   });
 
   it("an existing record resolves to the check document regardless of paymentDirection", () => {
@@ -130,10 +136,15 @@ describe("Payment Entry routing (Packet 4b step 5)", () => {
     assert.deepEqual(resolveDocSkinTarget(ctx), { kind: "pay-outstanding" });
   });
 
-  it("a payment-entry list (no record) has no Doc tab", () => {
+  it("a payment-entry list (no record) opens Find Payments, not a payment (2026-09-26)", () => {
+    // Was "no Doc tab" until the Find pages: a list is still never a single payment.
     const ctx = { showingHome: false, lens: "doc", route: "/app/payment-entry" };
-    assert.equal(hasDocSkin(ctx), false);
-    assert.equal(resolveDocSkinTarget(ctx), null);
+    assert.equal(hasDocSkin(ctx), true);
+    assert.deepEqual(resolveDocSkinTarget(ctx), {
+      kind: "find-doc",
+      doctype: "payment-entry",
+      route: "/app/payment-entry",
+    });
   });
 });
 

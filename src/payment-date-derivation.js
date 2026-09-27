@@ -31,12 +31,12 @@
  * placeholder. When the numbers arrive this is where the step goes — see `PaymentDateStep.rule`.
  */
 
-import { explainPayByDate } from "./bank-business-days.js";
+import { explainPayByDate, explainNextPayableDate } from "./bank-business-days.js";
 
 /**
  * @typedef {import("./outstanding-bills.js").OutstandingBillRow} OutstandingBillRow
  *
- * @typedef {"due-date"|"term-override"|"weekend"|"holiday"|"bridge"|"on-time"} PaymentDateRule
+ * @typedef {"due-date"|"term-override"|"weekend"|"holiday"|"bridge"|"delay"|"overdue"|"on-time"} PaymentDateRule
  *
  * @typedef {{
  *   rule: PaymentDateRule,
@@ -50,8 +50,15 @@ import { explainPayByDate } from "./bank-business-days.js";
  * @typedef {{
  *   dueDate: string,                  // the stored obligation, as ERPNext holds it
  *   payOn: string,                    // the proposed date, identical to effectivePayByDate(dueDate)
- *   totalDeltaDays: number,           // payOn - dueDate, always <= 0 (the calendar only walks back)
- *   onTime: boolean,                  // true when nothing moved the date at all
+ *                                     //   — unless the overdue clamp fired, which is the one rule
+ *                                     //   that can move it *later*; see `overdueClamped`
+ *   totalDeltaDays: number,           // payOn - dueDate. <= 0 for every calendar rule (they only
+ *                                     //   walk back); > 0 only when `overdueClamped`
+ *   onTime: boolean,                  // true when nothing moved the date at all. An overdue bill is
+ *                                     //   never on time, even when its due date was a payable day
+ *   overdueClamped: boolean,          // the proposal was moved forward because the obligation has
+ *                                     //   already passed (P2a / OI-172). Recorded, never inferred
+ *                                     //   from comparing dates — see the note on `opts.today`
  *   steps: PaymentDateStep[],         // never empty — see `on-time`
  *   countsByRule: Record<string, number>, // {weekend: 2, holiday: 1} — B1's one-line short form
  *   termImpliedDueDate?: string,      // what the term's own numbers imply, when computable
@@ -82,12 +89,19 @@ const RULE_LABEL = Object.freeze({
  * the step it produces carries the user's own reason so the audit says "Nor'easter, carrier
  * stopped" rather than a rule name.
  *
- * @param {{ includeBridge?: boolean, billDate?: string, obligation?: "due-date"|"discount-window", delayDay?: (iso: string) => string }} [opts]
+ * @param {{ includeBridge?: boolean, billDate?: string, obligation?: "due-date"|"discount-window", delayDay?: (iso: string) => string, today?: string }} [opts]
  *   `billDate` is the supplier's own invoice date when the caller has it — ERPNext derives the due
  *   date from `bill_date or posting_date` (`party.py::get_due_date`), so passing it makes the term
  *   comparison exact instead of merely indicative. `obligation: "discount-window"` says the date in
  *   `dueDate` is a discount deadline rather than the due date, which changes the opening step and
  *   suppresses the term comparison.
+ *
+ *   🔴 `today` is the **overdue clamp** (P2a / OI-172), and it is the only rule in this module that
+ *   moves a date *later*. Once the calendar's answer is in the past the proposal cannot be made on
+ *   it, so the walk continues forward to the first payable day from today — and it does so **as
+ *   steps in this same list**, because the alternative was the bug 5zorro caught on 2026-09-12: a
+ *   walk that ended on one date while the payment beside it showed another, with nothing connecting
+ *   them. Omit `today` and no clamp exists; the walk is byte-identical to before.
  * @returns {PaymentDateDerivation}
  */
 export function derivePaymentDate(bill, opts = {}) {
@@ -100,6 +114,7 @@ export function derivePaymentDate(bill, opts = {}) {
       payOn: "",
       totalDeltaDays: 0,
       onTime: false,
+      overdueClamped: false,
       overridesTerm: false,
       countsByRule: {},
       obligation: opts.obligation === "discount-window" ? "discount-window" : "due-date",
@@ -144,7 +159,50 @@ export function derivePaymentDate(bill, opts = {}) {
     });
   }
 
-  if (!walk.skipped.length) {
+  // P2a / OI-172. The calendar has had its say; if its answer is already in the past, the proposal
+  // has to move forward to a day the payment can actually go out, and say so here rather than
+  // leaving the caller to notice that the last step and the date on screen disagree.
+  const today = isoOrNull(opts.today);
+  let payOn = walk.date;
+  const overdueClamped = Boolean(today) && payOn < today;
+  if (overdueClamped) {
+    const lateBy = daysBetween(payOn, today);
+    steps.push({
+      rule: "overdue",
+      label: "Already overdue",
+      date: today,
+      deltaDays: lateBy,
+      severity: "warn",
+      detail:
+        `${payOn} has already passed, so the payment cannot be made on it. ${lateBy} day` +
+        `${lateBy === 1 ? "" : "s"} late against the ${dueDate} ${deadlineNoun(opts)}; ` +
+        `the proposal moves to today at the earliest, because a payment cannot be backdated.`,
+    });
+    payOn = today;
+
+    // Today itself can be a Saturday, a federal holiday, or a day off the user's own ratified
+    // calendar — in which case "today at the earliest" is not yet an answer. Same tests as the
+    // backward walk (one implementation, `walkToPayableDay`), one step per day walked past.
+    const forward = explainNextPayableDate(today, {
+      includeBridge: opts.includeBridge !== false,
+      ...(typeof opts.delayDay === "function" ? { delayDay: opts.delayDay } : {}),
+    });
+    for (const skip of forward.skipped) {
+      const rule = skip.reasons[0];
+      payOn = addDaysIso(payOn, 1);
+      steps.push({
+        rule,
+        label: RULE_LABEL[rule] || rule,
+        date: payOn,
+        deltaDays: 1,
+        detail: skipDetail(skip),
+      });
+    }
+  }
+
+  // "Exactly on time" is about the obligation, so an overdue bill never earns it however clean its
+  // own calendar walk was — the clamp step above is the honest answer in that case.
+  if (!walk.skipped.length && !overdueClamped) {
     steps.push({
       rule: "on-time",
       label: "Exactly on time",
@@ -156,9 +214,10 @@ export function derivePaymentDate(bill, opts = {}) {
 
   const out = {
     dueDate,
-    payOn: walk.date,
-    totalDeltaDays: daysBetween(dueDate, walk.date),
-    onTime: walk.skipped.length === 0,
+    payOn,
+    totalDeltaDays: daysBetween(dueDate, payOn),
+    onTime: walk.skipped.length === 0 && !overdueClamped,
+    overdueClamped,
     overridesTerm,
     obligation: opts.obligation === "discount-window" ? "discount-window" : "due-date",
     countsByRule,
@@ -181,6 +240,16 @@ export function summarizePaymentDate(derivation) {
   const d = derivation || {};
   if (!d.dueDate) return "No due date recorded.";
   const noun = d.obligation === "discount-window" ? "discount deadline" : "due date";
+  // An overdue bill gets its own sentence: the calendar's "N days earlier" arithmetic describes a
+  // date that has already gone, and reporting it as the answer would bury the only fact that
+  // matters here — that the obligation has passed and the proposal is now the soonest payable day.
+  if (d.overdueClamped) {
+    const late = d.totalDeltaDays;
+    return (
+      `${late} day${late === 1 ? "" : "s"} past the ${d.dueDate} ${noun} — ` +
+      `payable on ${d.payOn}, the soonest the payment can go out.`
+    );
+  }
   if (d.onTime) return `Payable exactly on the ${d.dueDate} ${noun}.`;
 
   const parts = Object.entries(d.countsByRule || {}).map(

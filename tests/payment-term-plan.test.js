@@ -243,6 +243,22 @@ describe("payment-term-plan: installments (P4e)", () => {
     for (const row of plan.template.terms) assert.equal(row.mode_of_payment, "ACH");
   });
 
+  // 🔴 Without this, PaymentEntry.update_payment_schedule returns on its first line
+  // (`if not ref.payment_term: continue`), so a payment never touches the schedule rows: the
+  // invoice's own outstanding falls while every row still claims its full amount. Confirmed on a
+  // fully paid bill whose row still read `outstanding 201.00` (2026-09-22). Harmless on one row,
+  // but `explodeInstallments` reads each row's own `outstanding` to decide what is still owed, so
+  // on several rows a part-paid installment would keep being proposed.
+  it("allocates per term, so ERPNext keeps the installment rows true as they are paid", () => {
+    assert.equal(planPaymentTermsCreate(thirds).template.allocate_payment_based_on_payment_terms, 1);
+  });
+
+  it("leaves a single installment alone — nothing there reads a row's own outstanding", () => {
+    const one = planPaymentTermsCreate({ method: "ACH", installments: [{ contractDays: 30, portion: 100 }] });
+    assert.equal(one.ok, true);
+    assert.equal("allocate_payment_based_on_payment_terms" in one.template, false);
+  });
+
   // validate_invoice_portion: "Combined invoice portion must equal 100%", raise_exception=1.
   it("refuses portions that do not total exactly 100, and says what they total", () => {
     const plan = planPaymentTermsCreate({

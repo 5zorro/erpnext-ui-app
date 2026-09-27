@@ -26,7 +26,10 @@ export function routeInfo(routeOrUrl, erpBase) {
   let i = segments.indexOf("desk");
   if (i < 0) i = segments.indexOf("app");
   const doctype = i >= 0 && segments[i + 1] ? segments[i + 1] : "";
-  const record = i >= 0 && segments[i + 2] ? segments[i + 2] : "";
+  let record = i >= 0 && segments[i + 2] ? segments[i + 2] : "";
+  // `/<doctype>/view/<kind>` is a list (Report / Kanban / Calendar view), not a record named
+  // "view" — same test Frappe's router applies (`route[1] === "view" && route[2]`).
+  if (record === "view" && segments[i + 3]) record = "";
   return { path: path.split(/[?#]/)[0], doctype, record };
 }
 

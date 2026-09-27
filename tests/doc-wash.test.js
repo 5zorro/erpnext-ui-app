@@ -144,7 +144,7 @@ describe("doc-wash (OI-125)", () => {
       docWashCss,
       /html\[data-doc-variant="return"\]\[data-pattern="both"\]\[data-doc-desk="ap"\] \.card/,
     );
-    assert.match(docWashCss, /background-image: var\(--stripe-return\), var\(--hatch-lighten\);/);
+    assert.match(docWashCss, /background-image: var\(--stripe-return\), var\(--hatch-desk\);/);
   });
 
   it("setWashSourceAttr writes or clears dataset", () => {
@@ -153,5 +153,45 @@ describe("doc-wash (OI-125)", () => {
     assert.equal(el.dataset.washSource, "order");
     setWashSourceAttr(el, null);
     assert.equal(el.dataset.washSource, undefined);
+  });
+});
+
+describe("desk hatch — one global setting (5zorro 2026-09-26)", () => {
+  it("merges a stored setting, falling back to the A/R default", async () => {
+    const { mergeDocWashPrefs, PATTERN_PREF_LABELS } = await import("../src/doc-wash.js");
+    assert.deepEqual(mergeDocWashPrefs({ pattern: "both" }), { pattern: "both" });
+    assert.deepEqual(mergeDocWashPrefs({ pattern: "stripes" }), { pattern: "ar" });
+    assert.deepEqual(mergeDocWashPrefs(null), { pattern: "ar" });
+    assert.deepEqual(Object.keys(PATTERN_PREF_LABELS), ["ar", "ap", "both", "none"]);
+  });
+
+  it("the sync script mirrors, applies and announces the normalized value", async () => {
+    const { washPatternSyncScript, PATTERN_PREF_STORAGE_KEY } = await import("../src/doc-wash.js");
+    const js = washPatternSyncScript("AP");
+    assert.match(js, new RegExp(`localStorage\\.setItem\\("${PATTERN_PREF_STORAGE_KEY}", "ap"\\)`));
+    assert.match(js, /dataset\.pattern = "ap"/);
+    assert.match(js, /new CustomEvent\("doc-wash-pattern"/);
+    // Runs: a fake page sees the attribute and the event.
+    const seen = [];
+    const root = { dataset: {} };
+    const store = {};
+    new Function("document", "localStorage", "window", "CustomEvent", `return ${js};`)(
+      { documentElement: root },
+      { setItem: (k, v) => (store[k] = v) },
+      { dispatchEvent: (e) => seen.push(e.detail) },
+      class { constructor(_t, o) { this.detail = o.detail; } },
+    );
+    assert.equal(root.dataset.pattern, "ap");
+    assert.equal(store[PATTERN_PREF_STORAGE_KEY], "ap");
+    assert.deepEqual(seen, ["ap"]);
+  });
+
+  it("the desk hatch is drawn in the role accent, not white (white was invisible)", () => {
+    assert.match(docWashCss, /--hatch-desk:[^;]*var\(--role-accent/);
+    assert.match(docWashCss, /html\[data-doc-role="order"\] \{ --role-accent: var\(--accent-order\); \}/);
+    assert.match(
+      docWashCss,
+      /html\[data-pattern="ar"\]\[data-doc-desk="ar"\] \.card,[^{]*\{\s*background-image: var\(--hatch-desk\);/,
+    );
   });
 });

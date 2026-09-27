@@ -15,6 +15,7 @@ import {
   nextLinkHighlightIndex,
   resolveLinkPickIndex,
   linkPickerKeyAction,
+  linkPickerOpenQuery,
   scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
 import { logFocus } from "./focus-debug-client.js";
@@ -232,7 +233,8 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     }
     if (act === "search") {
       ev.preventDefault();
-      await runSearch(input.value || "");
+      // ArrowDown on a closed dropdown is the same "show me the choices" gesture as the chevron.
+      await runSearch(linkPickerOpenQuery(input.value, input.dataset.linkCommitted));
       return;
     }
     if (act === "none") return;
@@ -258,7 +260,9 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   });
   btn.addEventListener("click", (ev) => {
     ev.preventDefault();
-    runSearch(input.value || "");
+    // Not `input.value`: a committed value is not a filter, or the field's own dropdown offers
+    // only the value it already has. See linkPickerOpenQuery.
+    runSearch(linkPickerOpenQuery(input.value, input.dataset.linkCommitted));
   });
   document.addEventListener("click", (ev) => {
     if (!wrap.contains(/** @type {Node} */ (ev.target))) dd.hidden = true;

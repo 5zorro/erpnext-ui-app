@@ -1,0 +1,42 @@
+# Receiving scanner front door — see docs/receiving-phone-setup.md.
+#
+#   RECEIVING_HOST=192.168.x.y docker compose -f ops/receiving-proxy/compose.yml up -d
+#
+# RECEIVING_HOST is this computer's address on the Wi-Fi the phones use; the certificate is issued
+# for it, so phones must use exactly that address. It can also go in ops/receiving-proxy/.env
+# (gitignored; see .env.example).
+#
+# Joins the ERPNext containers' network to reach the `frontend` web server directly. Nothing in
+# frappe_docker is changed.
+
+name: receiving-proxy
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      RECEIVING_HOST: ${RECEIVING_HOST:?set RECEIVING_HOST to this computer's Wi-Fi address}
+    ports:
+      - "8443:8443"
+      - "8081:8081"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../pwa/receiving:/srv/receiving:ro
+      # The pure logic the pages use, served as-is — no build step, no copy to drift.
+      - ../../src/receiving:/srv-lib/receiving/lib:ro
+      # Caddy's local certificate authority. Keep this volume: deleting it mints a new authority,
+      # and every phone would have to trust the new one.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frappe
+
+networks:
+  frappe:
+    external: true
+    name: frappe_docker_frappe_network
+
+volumes:
+  caddy_data:
+  caddy_config:

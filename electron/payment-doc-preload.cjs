@@ -9,5 +9,16 @@ contextBridge.exposeInMainWorld("erpPaymentDoc", {
     ipcRenderer.invoke("pay-outstanding-search-link", doctype, txt || "", filters || null),
   savePaymentEntry: (name, patch) => ipcRenderer.invoke("save-payment-entry", name, patch),
   setDirty: (dirty) => ipcRenderer.send("set-payment-doc-dirty", !!dirty),
+  // P1 stage 2 / OI-171. Same two channels as the doc-form skins: the facts are read first so the
+  // confirm can name what cancelling this payment puts back to outstanding, and the clerk can
+  // still back out after reading them.
+  voidAmendFacts: (doctype, name) =>
+    ipcRenderer.invoke("doc-void-amend-facts", doctype || "", name || ""),
+  voidAndAmend: (doctype, name) =>
+    ipcRenderer.invoke("doc-void-and-amend", doctype || "", name || ""),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
+  // A/R stage A1: a Receive payment is shown by the Receive Payment Doc form, not the check.
+  openReceivePayment: (name) => ipcRenderer.send("payment-doc-open-receive", name || ""),
+  // F4 (plan 2026-09-26): the payments' own Find page, through main's unsaved-changes gate.
+  openFindPayments: (opts) => ipcRenderer.send("open-find-payments", opts || {}),
 });

@@ -18,7 +18,10 @@ export const DRAFT_SOFT_CAP = 100;
  * @returns {string[]}
  */
 export function draftableDoctypeKeys(profiles = DOC_SKIN_PROFILES) {
+  // A layout-only profile (Receive Payment) shares its doctype with the payment pages, which
+  // have no shelf; the doctype is not draftable just because one of its layouts is.
   return Object.values(profiles)
+    .filter((p) => !p.layoutOnly)
     .map((p) => p.doctypeKey)
     .filter(Boolean)
     .sort();
@@ -93,6 +96,13 @@ export function draftShelfLabel(doctypeKey, doc) {
     const po = firstPurchaseOrderFromItems(doc);
     if (po) parts.push(po.startsWith("PO") ? po : `PO ${po}`);
     const date = formatDraftDate(doc && doc.posting_date);
+    if (date) parts.push(date);
+  } else if (key === "quotation" || key === "sales-order" || key === "sales-invoice") {
+    // A/R (stage A1): the customer is what a clerk scans a draft list for.
+    if (name && !/^new/i.test(name)) parts.push(name);
+    const who = doc && String(doc.customer_name || doc.customer || doc.party_name || "").trim();
+    if (who) parts.push(who);
+    const date = formatDraftDate(doc && (doc.posting_date || doc.transaction_date));
     if (date) parts.push(date);
   } else if (name) {
     parts.push(name);

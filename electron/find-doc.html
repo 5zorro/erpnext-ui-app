@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Find</title>
+  <link rel="stylesheet" href="doc-wash.css" />
+  <style>
+    /* Find page (OI-056, implementation-plan-2026-09-26 stage F1). Laid out like the Pay Bills
+       dashboard — party cards down the page, a drawer that rises from the bottom — with the one
+       difference 5zorro named: this drawer is for *reading*. Opening a document for work lands
+       on its real form, editable as usual (HANDOFF invariant 7). */
+    :root { --role-wash: var(--wash-invoice); --role-accent: var(--accent-invoice); }
+    html, body {
+      margin: 0; height: 100%; background: var(--doc-page-canvas, #eef2f5); color: #1f2d3d;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    body { display: flex; flex-direction: column; }
+    header {
+      display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
+      height: 52px; box-sizing: border-box; padding: 0 20px;
+      background: var(--role-wash); border-bottom: 1px solid #d6dee6;
+      box-shadow: inset 4px 0 0 var(--role-accent);
+    }
+    /* Own attribute, not data-doc-desk: doc-wash.css paints the desk stamp behind every .card
+       on a data-doc-desk page, and here .card is a result group — the stamp covered its columns. */
+    html[data-pattern="ar"][data-find-desk="ar"] header,
+    html[data-pattern="ap"][data-find-desk="ap"] header,
+    html[data-pattern="both"][data-find-desk] header { background-image: var(--hatch-desk); }
+    .stamp { width: 22px; height: 22px; opacity: .7; }
+    h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
+    .hdr-actions { margin-left: auto; display: flex; gap: 8px; }
+    .btn {
+      border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
+    .btn:hover { background: #f1f5f9; }
+    .btn.primary { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .btn.primary:hover { background: #1f2d3d; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .search {
+      flex: 0 0 auto; background: #fff; border-bottom: 1px solid #d6dee6;
+      padding: 12px 20px 10px;
+    }
+    .search-inner, .results-inner, .peek-inner {
+      max-width: var(--surface-dashboard-max, 1560px); margin: 0 auto;
+    }
+    .boxes { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+    .box { display: flex; flex-direction: column; gap: 3px; flex: 0 1 300px; }
+    .box span { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; font-weight: 600; }
+    .box input {
+      padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px;
+      background: #f8fafc;
+    }
+    .box input:focus { outline: none; border-color: var(--role-accent); background: #fff; box-shadow: 0 0 0 3px var(--role-wash); }
+    .box small { font-size: 11px; color: #94a3b8; }
+    .direction { display: flex; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; align-self: flex-end; margin-bottom: 18px; }
+    .direction button { border: 0; background: #f8fafc; padding: 8px 12px; font-size: 12px; color: #475569; cursor: pointer; }
+    .direction button.active { background: #2c3e50; color: #fff; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+    .chips-label { font-size: 11px; color: #64748b; margin-right: 4px; }
+    .chip {
+      border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 999px;
+      padding: 3px 10px; font-size: 11px; cursor: pointer;
+    }
+    .chip.active { background: var(--role-accent); border-color: var(--role-accent); color: #fff; }
+
+    .results { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px 24px; }
+    .summary { font-size: 12px; color: #64748b; margin: 0 0 10px; }
+    .card {
+      background: #fff; border: 1px solid #d6dee6; border-radius: 8px; margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .card-head {
+      display: flex; align-items: baseline; gap: 12px; padding: 8px 14px;
+      background: var(--role-wash); border-bottom: 1px solid #e6ecf2;
+    }
+    .card-head h2 { font-size: 13px; margin: 0; color: #1f2d3d; }
+    .card-head .meta { font-size: 11px; color: #64748b; }
+    .card-head .meta b { color: #1f2d3d; font-variant-numeric: tabular-nums; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th {
+      text-align: left; font-weight: 600; color: #5b6b7b; font-size: 10px; text-transform: uppercase;
+      letter-spacing: .4px; padding: 6px 14px; border-bottom: 1px solid #e6ecf2;
+    }
+    td { padding: 7px 14px; border-bottom: 1px solid #f0f4f8; }
+    tr.row { cursor: pointer; }
+    tr.row:hover td { background: #f8fafc; }
+    tr.row.selected td { background: var(--role-wash); }
+    tr.row:focus { outline: 2px solid var(--role-accent); outline-offset: -2px; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.name { color: #64748b; font-size: 11px; }
+    .status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: #eef2f5; color: #475569; }
+    .status.good { background: #dcfce7; color: #166534; }
+    .status.late { background: #fee2e2; color: #991b1b; }
+    .status.open { background: #fef3c7; color: #92400e; }
+    .status.draft { background: #f1f5f9; color: #64748b; font-style: italic; }
+    .empty { text-align: center; color: #94a3b8; font-size: 13px; padding: 40px 0; }
+    /* Column headings sort the whole list on the server (click again to flip). */
+    th[data-sort] { cursor: pointer; user-select: none; }
+    th[data-sort]:hover { color: #1f2d3d; }
+    th.sorted { color: #1f2d3d; }
+    .summary-row { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; }
+    .summary-row .summary { margin: 0; }
+    .linkish { border: 0; background: none; padding: 0; font-size: 12px; color: var(--role-accent); cursor: pointer; text-decoration: underline; }
+    .more-row { text-align: center; padding: 6px 0 12px; }
+
+    /* The peek drawer — read-only preview, rises from the bottom, Esc closes. */
+    .peek {
+      flex: 0 0 auto; max-height: 46vh; overflow-y: auto; background: #fff;
+      border-top: 2px solid var(--role-accent); box-shadow: 0 -6px 18px rgba(15, 23, 42, .08);
+    }
+    .peek[hidden] { display: none; }
+    .peek-head {
+      position: sticky; top: 0; display: flex; align-items: center; gap: 10px;
+      padding: 8px 20px; background: #fff; border-bottom: 1px solid #e6ecf2;
+    }
+    .peek-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; font-weight: 600; }
+    .peek-title { font-size: 13px; font-weight: 600; }
+    .peek-head .spacer { flex: 1; }
+    .peek-body { padding: 14px 20px 18px; }
+    .paper {
+      max-width: var(--surface-document-max, 1100px); margin: 0 auto; background: var(--role-wash);
+      border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px;
+    }
+    .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 18px; margin-bottom: 12px; }
+    .fact span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
+    .fact b { font-size: 13px; font-weight: 500; }
+    .paper table { background: #fff; border-radius: 4px; }
+    .paper tfoot td { font-weight: 600; border-bottom: 0; }
+    .peek-note { font-size: 11px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="stamp" id="stamp" alt="" />
+    <h1 id="title" data-testid="find-doc-title">Find</h1>
+    <div class="hdr-actions">
+      <button type="button" class="btn" id="btn-new" data-testid="find-doc-new">New</button>
+      <button type="button" class="btn primary" id="btn-vanilla" data-testid="find-doc-vanilla"
+        title="Open ERPNext's own list with these searches already applied as filters">Search in Vanilla list →</button>
+    </div>
+  </header>
+
+  <section class="search">
+    <div class="search-inner">
+      <div class="boxes" id="boxes"></div>
+      <div class="chips" id="chips"></div>
+    </div>
+  </section>
+
+  <section class="results" id="results-scroll">
+    <div class="results-inner">
+      <div class="summary-row">
+        <p class="summary" id="summary"></p>
+        <button type="button" class="linkish" id="btn-clear" data-testid="find-doc-clear" hidden
+          title="Empty the boxes, back to every status and the newest-first order">Clear search</button>
+      </div>
+      <div id="results"></div>
+      <div class="more-row" id="more-row" hidden>
+        <button type="button" class="btn" id="btn-more" data-testid="find-doc-more">Show more</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="peek" id="peek" hidden aria-label="Read-only preview">
+    <div class="peek-head">
+      <span class="peek-tag">Peek · read-only</span>
+      <span class="peek-title" id="peek-title"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="peek-open" data-testid="find-doc-peek-open">Open</button>
+      <button type="button" class="btn" id="peek-close" title="Esc">Close</button>
+    </div>
+    <div class="peek-body"><div class="peek-inner" id="peek-body"></div></div>
+  </aside>
+
+  <script type="module">
+    import {
+      findSkinFor,
+      findSkinTitle,
+      findSkinEntryLabel,
+      findPartyLabel,
+      focusFor,
+      findVanillaListRoute,
+    } from "../src/find-skin-registry.js";
+    import {
+      groupRowsByParty,
+      findPeekLines,
+      findSortFor,
+      findNextSort,
+      findSavedSearch,
+      FIND_LIST_LIMIT,
+    } from "../src/find-skin-query.js";
+
+    const api = window.erpFindDoc || null;
+    const q = new URLSearchParams(location.search);
+    const doctypeKey = q.get("doctype") || "purchase-invoice";
+    const skin = findSkinFor(doctypeKey);
+    let prefill = {};
+    try { prefill = JSON.parse(q.get("prefill") || "{}") || {}; } catch { prefill = {}; }
+    const state = {
+      direction: q.get("direction") === "Receive" ? "Receive" : "Pay",
+      status: "",
+      values: {},
+      selected: "",
+      rows: [],
+      more: false,
+      loading: false,
+      error: "",
+      sort: findSortFor(doctypeKey, null),
+    };
+
+    // The last search, per Find page (5zorro 2026-09-26), kept by main in userData — the page's
+    // own localStorage was not reliably on disk when the app closed.
+    async function loadSaved() {
+      const raw = api && api.loadSearch ? await api.loadSearch(doctypeKey).catch(() => null) : null;
+      return findSavedSearch(doctypeKey, raw);
+    }
+    function saveSearch() {
+      if (api && api.saveSearch) {
+        api.saveSearch(doctypeKey, { values: state.values, status: state.status, direction: state.direction, sort: state.sort });
+      }
+    }
+    const searchIsDefault = () =>
+      !state.status &&
+      !Object.values(state.values).some((v) => String(v || "").trim()) &&
+      state.sort.field === "creation" &&
+      state.sort.dir === "desc";
+    // Only the newest answer paints: typing fires a query per pause, and a slow early one must
+    // not overwrite a later one.
+    let querySeq = 0;
+    let queryTimer = 0;
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const money = (n) => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const date = (s) => {
+      if (!s) return "";
+      const d = new Date(`${s}T00:00:00Z`);
+      return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    };
+    const statusClass = (s) =>
+      /Overdue|Lost|Cancelled/.test(s) ? "late"
+        : /^Paid$|Completed|Ordered$|Submitted/.test(s) ? "good"
+          : /Draft/.test(s) ? "draft" : "open";
+    const cell = (col, row) => {
+      const v = row[col.field];
+      if (col.kind === "money") return `<td class="num">${esc(money(v))}</td>`;
+      if (col.kind === "percent") return `<td class="num">${esc(Math.round(Number(v) || 0))}%</td>`;
+      if (col.kind === "date") return `<td>${esc(date(v))}</td>`;
+      if (col.kind === "status") return `<td><span class="status ${statusClass(v)}">${esc(v)}</span></td>`;
+      return `<td>${esc(v)}</td>`;
+    };
+    const desk = () => (skin.directional ? (state.direction === "Receive" ? "ar" : "ap") : skin.desk);
+    const moneyCol = () => skin.columns.find((c) => c.kind === "money");
+    const openCol = () => skin.columns.filter((c) => c.kind === "money")[1] || null;
+
+    function paintHeader() {
+      const root = document.documentElement.style;
+      root.setProperty("--role-wash", `var(--wash-${skin.washRole})`);
+      root.setProperty("--role-accent", `var(--accent-${skin.washRole})`);
+      const title = findSkinTitle(doctypeKey);
+      $("title").textContent = title;
+      document.title = title;
+      $("stamp").src = desk() === "ar" ? "assets/selling-stamp.svg" : "assets/buying-stamp.svg";
+      // Desk hatch (OI-125): the header wears the same global pattern as the Doc skins.
+      document.documentElement.dataset.findDesk = desk();
+      const entry = skin.directional
+        ? state.direction === "Receive" ? "Receive Payment" : "Pay Bills"
+        : `New ${findSkinEntryLabel(doctypeKey)}`;
+      $("btn-new").textContent = entry;
+    }
+
+    function paintSearch() {
+      const boxes = $("boxes");
+      boxes.innerHTML = "";
+      if (skin.directional) {
+        const sw = document.createElement("div");
+        sw.className = "direction";
+        for (const [dir, label] of [["Pay", "Paid to vendors"], ["Receive", "Received from customers"]]) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = label;
+          b.className = state.direction === dir ? "active" : "";
+          b.onclick = () => { state.direction = dir; state.selected = ""; paintAll(); runQuery(); };
+          sw.appendChild(b);
+        }
+        boxes.appendChild(sw);
+      }
+      for (const s of skin.searches) {
+        const label = document.createElement("label");
+        label.className = "box";
+        const isParty = s.id === "party";
+        const text = isParty ? findPartyLabel(skin, state.direction) : s.label;
+        const hint = isParty && skin.directional
+          ? `Every payment ${state.direction === "Receive" ? "from one customer" : "to one vendor"}`
+          : s.hint;
+        label.innerHTML = `<span>${esc(text)}</span><input data-field="${esc(s.field)}" data-id="${esc(s.id)}" autocomplete="off" /><small>${esc(hint)}</small>`;
+        const input = label.querySelector("input");
+        input.value = state.values[s.field] || "";
+        input.addEventListener("input", () => { state.values[s.field] = input.value; queueQuery(); });
+        boxes.appendChild(label);
+      }
+      const chips = $("chips");
+      chips.innerHTML = `<span class="chips-label">Status</span>`;
+      for (const st of ["", ...skin.statuses]) {
+        const c = document.createElement("button");
+        c.type = "button";
+        c.className = `chip${state.status === st ? " active" : ""}`;
+        c.textContent = st || "Any";
+        c.onclick = () => { state.status = st; paintSearch(); runQuery(); };
+        chips.appendChild(c);
+      }
+    }
+
+    function queueQuery() {
+      clearTimeout(queryTimer);
+      queryTimer = setTimeout(runQuery, 250);
+    }
+
+    /**
+     * Ask ERPNext (over HTTP, via main) for the rows these searches match. `append` fetches the
+     * next page after the rows already shown, in the same order.
+     */
+    async function runQuery(opts = {}) {
+      clearTimeout(queryTimer);
+      const append = !!opts.append;
+      const seq = ++querySeq;
+      state.loading = true;
+      if (!append) saveSearch();
+      paintSummary();
+      const res = api && api.list
+        ? await api
+            .list(doctypeKey, {
+              values: state.values,
+              status: state.status,
+              direction: state.direction,
+              sort: state.sort,
+              start: append ? state.rows.length : 0,
+            })
+            .catch((e) => ({ ok: false, reason: String(e) }))
+        : { ok: false, reason: "Shell bridge unavailable." };
+      if (seq !== querySeq) return;
+      state.loading = false;
+      state.error = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
+      const got = res && res.ok ? res.rows : [];
+      state.rows = append && !state.error ? [...state.rows, ...got] : got;
+      state.more = !!(res && res.more);
+      paintResults();
+    }
+
+    function paintSummary() {
+      const el = $("summary");
+      if (state.loading) { el.textContent = "Searching…"; return; }
+      const rows = state.rows;
+      if (!rows.length) { el.textContent = ""; return; }
+      const groups = groupRowsByParty(rows);
+      const party = findPartyLabel(skin, state.direction).toLowerCase();
+      const sortCol = skin.columns.find((c) => c.field === state.sort.field);
+      const order =
+        state.sort.field === "creation"
+          ? state.sort.dir === "desc" ? "newest first" : "oldest first"
+          : `by ${sortCol ? sortCol.label.toLowerCase() : "number"} (${state.sort.dir === "asc" ? "low → high" : "high → low"})`;
+      const count = state.more ? `First ${rows.length}` : `${rows.length}`;
+      el.textContent = `${count} ${rows.length === 1 ? "document" : "documents"} across ${groups.length} ${party}${groups.length === 1 ? "" : "s"}, ${order}${state.more ? " — more below" : ""} · click one to peek`;
+    }
+
+    function paintResults() {
+      const rows = state.rows;
+      const groups = groupRowsByParty(rows);
+      paintSummary();
+      const host = $("results");
+      $("btn-clear").hidden = searchIsDefault();
+      $("more-row").hidden = !(state.more && !state.error);
+      $("btn-more").textContent = `Show ${FIND_LIST_LIMIT} more`;
+      if (state.error) {
+        host.innerHTML = `<div class="empty" data-testid="find-doc-error">Could not read the list from ERPNext: ${esc(state.error)}</div>`;
+        return;
+      }
+      if (!rows.length) {
+        host.innerHTML = `<div class="empty">Nothing matches. Try fewer letters, or a different status.</div>`;
+        return;
+      }
+      const mc = moneyCol();
+      const oc = openCol();
+      host.innerHTML = groups.map((g) => {
+        const total = g.rows.reduce((a, r) => a + Number(r[mc.field] || 0), 0);
+        const open = oc ? g.rows.reduce((a, r) => a + Number(r[oc.field] || 0), 0) : null;
+        const head = `<div class="card-head"><h2>${esc(g.party)}</h2>
+          <span class="meta">${g.rows.length} · <b>${esc(money(total))}</b>${open != null ? ` · ${esc(oc.label.toLowerCase())} <b>${esc(money(open))}</b>` : ""}</span></div>`;
+        const arrow = (field) => (state.sort.field === field ? (state.sort.dir === "asc" ? " ▲" : " ▼") : "");
+        const th = (field, label, num) =>
+          `<th data-sort="${esc(field)}" class="${num ? "num" : ""}${state.sort.field === field ? " sorted" : ""}" title="Sort every match by ${esc(label.toLowerCase())}">${esc(label)}${arrow(field)}</th>`;
+        const ths = th("name", "No.", false) + skin.columns
+          .filter((c) => c.field !== "name")
+          .map((c) => th(c.field, c.label, c.kind === "money" || c.kind === "percent"))
+          .join("");
+        const trs = g.rows.map((r) => `<tr class="row${state.selected === r.name ? " selected" : ""}" tabindex="0" data-name="${esc(r.name)}">
+            <td class="name">${esc(r.name)}</td>${skin.columns.filter((c) => c.field !== "name").map((c) => cell(c, r)).join("")}</tr>`).join("");
+        return `<div class="card">${head}<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`;
+      }).join("");
+      host.querySelectorAll("th[data-sort]").forEach((thEl) => {
+        thEl.addEventListener("click", () => {
+          state.sort = findNextSort(doctypeKey, state.sort, thEl.dataset.sort);
+          state.selected = "";
+          $("peek").hidden = true;
+          runQuery();
+        });
+      });
+      host.querySelectorAll("tr.row").forEach((tr) => {
+        const pick = () => peek(rows.find((r) => r.name === tr.dataset.name));
+        tr.addEventListener("click", pick);
+        tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      });
+    }
+
+    async function peek(row) {
+      if (!row) return;
+      state.selected = row.name;
+      document.querySelectorAll("tr.row").forEach((tr) => tr.classList.toggle("selected", tr.dataset.name === row.name));
+      const noun = skin.directional ? "Payment" : findSkinEntryLabel(doctypeKey);
+      $("peek-title").textContent = `${noun} ${row.name} · ${row.party}`;
+      $("peek-open").textContent = `Open this ${noun}`;
+      $("peek-open").onclick = () => api && api.openPreferred(`/app/${doctypeKey}/${encodeURIComponent(row.name)}`);
+      const facts = [[findPartyLabel(skin, state.direction), row.party], ...skin.columns.map((c) => {
+        const v = row[c.field];
+        const shown = c.kind === "money" ? money(v) : c.kind === "percent" ? `${Math.round(Number(v) || 0)}%` : c.kind === "date" ? date(v) : v;
+        return [c.label, shown];
+      })];
+      const factsHtml = `<div class="facts">${facts.map(([k, v]) => `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>`;
+      $("peek-body").innerHTML = `<div class="paper">${factsHtml}<p class="peek-note">Reading lines…</p></div>`;
+      $("peek").hidden = false;
+      // Lines come from the full document — the list only carries the header fields.
+      const res = api && api.peek ? await api.peek(doctypeKey, row.name).catch((e) => ({ ok: false, reason: String(e) })) : null;
+      if (state.selected !== row.name) return;
+      if (!res || !res.ok) {
+        $("peek-body").innerHTML = `<div class="paper">${factsHtml}<p class="peek-note">Could not read the lines: ${esc((res && res.reason) || "no shell bridge")}</p></div>`;
+        return;
+      }
+      const mc = moneyCol();
+      const { heads, lines } = findPeekLines(doctypeKey, res.doc);
+      const body = lines.length
+        ? lines.map((l) => `<tr><td>${esc(l.label)}</td><td class="num">${esc(l.qty)}</td><td class="num">${esc(money(l.amount))}</td></tr>`).join("")
+        : `<tr><td colspan="3" class="peek-note">No lines.</td></tr>`;
+      $("peek-body").innerHTML = `<div class="paper">${factsHtml}
+        <table><thead><tr><th>${esc(heads[0])}</th><th class="num">${esc(heads[1])}</th><th class="num">${esc(heads[2])}</th></tr></thead>
+        <tbody data-testid="find-doc-peek-lines">${body}</tbody>
+        <tfoot><tr><td>Total</td><td></td><td class="num">${esc(money(row[mc.field]))}</td></tr></tfoot></table></div>`;
+    }
+
+    function closePeek() {
+      $("peek").hidden = true;
+      state.selected = "";
+      document.querySelectorAll("tr.row.selected").forEach((tr) => tr.classList.remove("selected"));
+    }
+
+    function paintAll() {
+      paintHeader();
+      paintSearch();
+      paintResults();
+      if (!state.selected) $("peek").hidden = true;
+    }
+
+    if (!skin) {
+      document.body.innerHTML = `<p class="empty">No Find page for “${esc(doctypeKey)}”.</p>`;
+    } else {
+      // A Find button hands over what it knows (a vendor, a ref no.) — that wins, and the page
+      // starts from it alone. Otherwise the page picks up where the clerk left it.
+      const handed = skin.searches.some((s) => String(prefill[s.field] ?? "").trim());
+      if (handed) {
+        for (const s of skin.searches) {
+          const v = String(prefill[s.field] ?? "").trim();
+          if (v) state.values[s.field] = v;
+        }
+      } else {
+        const saved = await loadSaved();
+        state.values = { ...saved.values };
+        state.status = saved.status;
+        state.sort = saved.sort;
+        // Pay / Receive is not restored here: main hands over the app-wide remembered direction
+        // (payment-direction-prefs.js), which the Home tiles set too.
+      }
+      paintAll();
+      runQuery();
+      $("btn-more").onclick = () => runQuery({ append: true });
+      $("btn-clear").onclick = () => {
+        state.values = {};
+        state.status = "";
+        state.sort = findSortFor(doctypeKey, null);
+        state.selected = "";
+        paintAll();
+        runQuery();
+      };
+      const focusId = focusFor(skin, { via: q.get("via") === "find-button" ? "find-button" : "browse", prefill });
+      const box = document.querySelector(`.box input[data-id="${focusId}"]`);
+      if (box) { box.focus(); box.select(); }
+
+      $("peek-close").onclick = closePeek;
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("peek").hidden) closePeek(); });
+      $("btn-vanilla").onclick = () => {
+        const route = findVanillaListRoute(doctypeKey, {
+          values: state.values,
+          status: state.status,
+          direction: skin.directional ? state.direction : undefined,
+        });
+        if (api) api.openVanillaList(doctypeKey, route);
+      };
+      $("btn-new").onclick = () => {
+        if (!api) return;
+        if (skin.directional) api.openPaymentEntry(state.direction);
+        else api.openPreferred(`/app/${doctypeKey}/new`);
+      };
+    }
+  </script>
+</body>
+</html>

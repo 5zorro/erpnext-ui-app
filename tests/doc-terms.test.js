@@ -29,3 +29,11 @@ describe("erpTerm", () => {
     assert.equal(erpTerm("Vendor Credit"), "Debit Note");
   });
 });
+
+describe("Quotation → Estimate (5zorro 2026-09-26)", () => {
+  it("relabels both ways, plural first", () => {
+    assert.equal(relabelTerm("Quotations"), "Estimates");
+    assert.equal(relabelTerm("New Quotation"), "New Estimate");
+    assert.equal(erpTerm("Estimate"), "Quotation");
+  });
+});

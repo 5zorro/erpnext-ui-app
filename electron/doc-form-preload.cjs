@@ -67,6 +67,14 @@ contextBridge.exposeInMainWorld("erpDoc", {
   fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
   createCreditMemo: (sourceBillName) =>
     ipcRenderer.invoke("bill-create-credit-memo", sourceBillName || ""),
+  // P1 / OI-171. Two channels on purpose: the facts are read first so the confirm can name what it
+  // is about to do, and the clerk can still back out after reading them.
+  // The doctype travels with the call: this preload serves the Bill, PO and Item Receipt skins,
+  // and each one means a different set of consequences to read before the confirm.
+  voidAmendFacts: (doctype, name) =>
+    ipcRenderer.invoke("doc-void-amend-facts", doctype || "", name || ""),
+  voidAndAmend: (doctype, name) =>
+    ipcRenderer.invoke("doc-void-and-amend", doctype || "", name || ""),
   retryLoad: () => invokeSkin("bill-retry-load", "doc-retry-load"),
   openVanilla: async () =>
     ipcRenderer.send((await billActive()) ? "bill-open-vanilla" : "doc-open-vanilla"),

@@ -317,6 +317,49 @@
     }
     .vendor-head .name { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
     .vendor-head .total { font-size: 12px; color: #cbd5e1; }
+    /* P1 stage 3 — the method change, on the vendor it belongs to. Deliberately quiet: it cancels
+       documents, so it must not read as the obvious next click on a board about paying them. */
+    .vendor-head .vendor-method-btn {
+      margin-left: 10px; font-size: 11px; padding: 3px 9px;
+      background: #475569; color: #e2e8f0; border: 1px solid #64748b; border-radius: 5px;
+      cursor: pointer;
+    }
+    .vendor-head .vendor-method-btn:hover { background: #64748b; }
+    .vendor-head .vendor-method-btn.active { background: #0f172a; border-color: #0f172a; }
+    .run-chip.credit { background: #7c3aed; color: #fff; }
+    .method-panel {
+      padding: 12px 14px; background: #f1f5f9; border-bottom: 1px solid #cbd5e1;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .method-panel[hidden] { display: none; }
+    .method-panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .method-panel-head label { font-size: 12px; color: #334155; display: flex; align-items: center; gap: 6px; }
+    .method-panel-head select { font-size: 12px; padding: 3px 6px; }
+    .method-panel-rows {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 220px; overflow-y: auto;
+    }
+    .method-panel-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #0f172a; cursor: pointer;
+    }
+    .method-panel-status { font-size: 12px; color: #475569; min-height: 16px; }
+    .method-panel-status.err { color: #b91c1c; font-weight: 600; }
+    .method-panel-status.warn { color: #b45309; }
+    .method-panel-outcome { margin: 0; padding-left: 18px; font-size: 12px; color: #334155; }
+    .method-panel-outcome[hidden] { display: none; }
+    .relink-panel { background: #faf5ff; border-bottom: 1px solid #d8b4fe; }
+    .relink-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 6px 0; border-bottom: 1px solid #ede9fe;
+    }
+    .relink-row:last-of-type { border-bottom: none; }
+    .relink-what { flex: 1; min-width: 240px; font-size: 12px; color: #0f172a; }
+    .relink-why { color: #6b21a8; font-size: 11px; margin-top: 2px; }
+    .relink-foot { display: flex; justify-content: flex-end; margin-top: 6px; }
+    .vendor-head .run-chip.credit,
+    .vendor-head .run-chip.review { border: none; cursor: pointer; font: inherit; }
+    .run-chip.review { background: #0e7490; color: #fff; }
     .flow-grid {
       /* The invoice column is sized to hold a whole ERPNext naming-series name (ACC-PINV-2026-
          00904) *plus* its peek button. At 150px it had 94px for a 137px name, so every invoice
@@ -607,6 +650,8 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
+      <button type="button" class="sort-btn" id="find-payments" data-testid="pay-outstanding-find"
+        title="Find a payment already made — every check and transfer, by vendor or check no.">Find Payments…</button>
       <button type="button" id="prefs-toggle" aria-expanded="false"></button>
     </div>
   </header>
@@ -898,6 +943,12 @@
     } from "../src/pay-flow-sort.js";
     import { resolveFlowFocus, noFlowFocus, togglePinnedFocus } from "../src/pay-flow-focus.js";
     import { flowNodePlan } from "../src/flow-node-density.js";
+    import {
+      planModeChange,
+      describeModeChange,
+      summarizeModeChange,
+    } from "../src/mode-change-plan.js";
+    import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
     import { uiIconHtml } from "../src/ui-icons.js";
     import { formatUsdAmount, formatUsdAmountHtml, moneyTextHtml } from "../src/money.js";
     import {
@@ -995,6 +1046,19 @@
      * like the $ format to match that of the bill doc skin entry page"*). Assign with innerHTML;
      * `formatUsdAmountHtml` escapes. Sentences that carry amounts inline go through `moneyTextHtml`.
      */
+    /**
+     * Bill names and Mode of Payment values come from ERP, so they are data, not markup. Escaped
+     * rather than trusted, even though today's ERPNext would not put a `<` in either.
+     * @param {unknown} v
+     */
+    function escapeHtml(v) {
+      return String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
     function moneyHtml(n) {
       return formatUsdAmountHtml(Number(n) || 0);
     }
@@ -1377,6 +1441,10 @@
       }
     };
 
+    // F4 (plan 2026-09-26): this is the Pay side, so Find Payments opens on "Paid to vendors".
+    document.getElementById("find-payments").onclick = () => {
+      if (api && api.openFindPayments) api.openFindPayments({ via: "browse", direction: "Pay" });
+    };
     const sortDateBtn = document.getElementById("sort-date");
     const sortInvoiceBtn = document.getElementById("sort-invoice");
     function setSortMode(mode) {
@@ -1664,9 +1732,15 @@
       // bound to this bill's own method here rather than passed through method-blind.
       const probe = delayProbe();
       const delay = probe ? { delayDay: (iso) => probe(iso, bill.modeOfPayment || "") } : {};
+      // P2a / OI-172: the same `today` the engine was given, so this walk ends on the date the node
+      // beside it shows. Without it the table stopped on an already-passed date while the node said
+      // today — the exact disconnect 5zorro caught on 2026-09-12, one rule further down the walk.
+      // A discount capture is excluded: its deadline is the discount window, and a window that has
+      // already closed is not clamped forward, it is simply missed (see `tryDiscountCapture`).
+      const clamp = isDiscount ? {} : { today: todayIso() };
       return derivePaymentDate(
         isDiscount ? { ...bill, dueDate: bill.discountDate || bill.dueDate } : bill,
-        isDiscount ? { obligation: "discount-window", ...delay } : delay,
+        isDiscount ? { obligation: "discount-window", ...delay } : { ...delay, ...clamp },
       );
     }
 
@@ -1766,7 +1840,13 @@
       if (!members.length) return null;
 
       const derivations = members.map((bill) => ({ bill, d: derivationForBill(bill, group) }));
-      const anchor = derivations.find((x) => x.d.payOn === group.payOn) || derivations[0];
+      // The anchor is the member whose own derivation lands on the group's date -- that derivation
+      // is the one that explains it. The fallback exists for a group whose date no member derives
+      // (which should not happen now that the clamp is a step in the same walk), and it must not
+      // pass silently: printing `${group.payOn}: <summary of some other date's walk>` is a sentence
+      // that reads as an explanation while explaining a different date.
+      const matched = derivations.find((x) => x.d.payOn === group.payOn);
+      const anchor = matched || derivations[0];
 
       const wrap = document.createElement("div");
       wrap.className = "deriv";
@@ -1775,7 +1855,9 @@
       const short = document.createElement("div");
       short.className = "deriv-note";
       short.dataset.testid = "derivation-summary";
-      short.textContent = `${group.payOn}: ${summarizePaymentDate(anchor.d)}`;
+      short.textContent = matched
+        ? `${group.payOn}: ${summarizePaymentDate(anchor.d)}`
+        : `${group.payOn}: no member's own derivation lands on this date — ${summarizePaymentDate(anchor.d)} describes ${anchor.d.payOn}.`;
       wrap.appendChild(short);
 
       const hint = document.createElement("div");
@@ -2185,7 +2267,423 @@
      * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills
      * @param {"date"|"invoice"} mode
      */
-    function renderVendorCard(supplier, bills, groups, run) {
+    /**
+     * P1 stage 3 / OI-169 — "change how we pay this vendor", from the board the clerk is already
+     * standing on.
+     *
+     * 5zorro 2026-09-16: *"all payment methods are generally the same for a single vendor, so if it
+     * is weird, then there is a reason."* So every row starts ticked: the method is a vendor fact,
+     * and a single installment opting out is the exception, not the setup.
+     *
+     * 🔴 **The row count and the amend count are different numbers, and the panel says both.** Five
+     * installments on one bill are one cancel — `planModeChange` collapses rows to invoices, and
+     * that collapse is the whole reason this is worth having rather than five trips to the Bill
+     * skin.
+     *
+     * @param {string} supplier
+     * @param {import("../src/outstanding-bills.js").OutstandingBillRow[]} bills this vendor's rows
+     */
+    /**
+     * What the shell re-linked on its own, and the one optional click that closes it.
+     *
+     * 🔴 **"Seems okay" is not an approval — the posting already happened.** It closes the
+     * question, nothing more. That distinction is why the button does not say "Approve": there is
+     * no pending state to approve, only a review somebody has or has not done. If it is *not* okay,
+     * ERPNext undoes it with the UnReconcile button on the payment itself — no amend, no new ID.
+     *
+     * @param {string} supplier
+     * @param {string[]} payments Payment Entry names with an open review
+     * @param {HTMLElement} panel
+     */
+    function paintRelinkReviews(supplier, payments, panel) {
+      panel.innerHTML = "";
+      panel.appendChild(
+        textDiv(
+          "method-panel-status",
+          `Re-linked automatically after an amendment detached ${payments.length === 1 ? "a payment" : "these payments"}. ` +
+            "The books are already correct — this is only asking you to check. Each payment also " +
+            "carries a permanent comment recording that the shell, not a person, made the link.",
+        ),
+      );
+
+      for (const pe of payments) {
+        const entry = relinkReviews.get(pe) || { note: "" };
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-review-row";
+        row.appendChild(
+          htmlDiv(
+            "relink-what",
+            `<strong>${escapeHtml(pe)}</strong><div class="relink-why">${escapeHtml(entry.note)}</div>`,
+          ),
+        );
+
+        const okay = document.createElement("button");
+        okay.type = "button";
+        okay.className = "btn-primary";
+        okay.dataset.testid = "relink-review-ok";
+        // 🔴 "Reviewed", not "Seems okay" and not "Approve": the allocation already posted, so this
+        // records that somebody looked. Who *made* it is a separate, permanent record — a Comment
+        // on the payment — which is what a reviewer needs after this flag is gone (5zorro
+        // 2026-09-26: "a reviewer could see created by a human vs created by autolink").
+        okay.textContent = "Reviewed";
+        okay.title =
+          "Closes this request to look. The payment keeps a permanent comment saying it was " +
+          "auto-linked, so how it came about stays visible afterwards.";
+        okay.onclick = async () => {
+          okay.disabled = true;
+          const res = await api
+            .closeRelinkReview(pe)
+            .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+          if (!res || !res.ok) {
+            okay.disabled = false;
+            const st = row.querySelector(".method-panel-status");
+            if (st) {
+              st.textContent = (res && res.reason) || "Could not close the review.";
+              st.className = "method-panel-status err";
+            }
+            return;
+          }
+          relinkReviews.delete(pe);
+          render();
+        };
+        row.appendChild(okay);
+
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "btn-secondary";
+        open.dataset.testid = "relink-review-open";
+        open.textContent = "Open payment";
+        open.title =
+          "Opens the Payment Entry in Vanilla. Its timeline carries the provenance comment, and " +
+          "its UnReconcile button undoes the allocation.";
+        open.onclick = () => {
+          if (api && api.openErp) api.openErp(`/app/payment-entry/${encodeURIComponent(pe)}`);
+        };
+        row.appendChild(open);
+        row.appendChild(textDiv("method-panel-status", ""));
+        panel.appendChild(row);
+      }
+    }
+
+    /**
+     * Where a vendor's loose payments probably belong (OI-171, after P1's amend).
+     *
+     * 🔴 **Proposed, not posted.** ERPNext destroys the record of which bill a payment paid when
+     * the invoice is cancelled, so this is an inference — a good one (an amendment whose
+     * outstanding matches the loose amount to the cent), but an inference. The pairing is shown
+     * with its reason and its confidence, and a click posts it through ERPNext's own Payment
+     * Reconciliation. Nothing allocates itself.
+     *
+     * The escape hatch is always offered: Payment Reconciliation in Vanilla, already filtered to
+     * this vendor, for when the clerk would rather choose.
+     *
+     * @param {string} supplier
+     * @param {HTMLElement} panel
+     */
+    async function loadRelinkPanel(supplier, panel) {
+      panel.innerHTML = `<div class="method-panel-status">Reading ${escapeHtml(supplier)}'s unapplied payments…</div>`;
+      if (!api || !api.paymentRelinkFacts) {
+        panel.innerHTML = `<div class="method-panel-status err">Re-linking is not wired into this build.</div>`;
+        return;
+      }
+      const facts = await api
+        .paymentRelinkFacts(supplier)
+        .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+      if (!facts || !facts.ok) {
+        panel.innerHTML = `<div class="method-panel-status err">${escapeHtml((facts && facts.reason) || "Could not read unapplied payments.")}</div>`;
+        return;
+      }
+
+      const { proposals, unmatched } = proposeRelinks({
+        payments: (facts.payments || []).map((p) => ({
+          name: p.reference_name,
+          unallocated: p.amount,
+          supplier,
+        })),
+        invoices: (facts.invoices || []).map((i) => ({
+          name: i.invoice_number,
+          outstanding: i.outstanding_amount,
+          amendedFrom: (facts.amendedFrom || {})[i.invoice_number] || "",
+          supplier,
+        })),
+      });
+
+      panel.innerHTML = "";
+      const openVanilla = () => {
+        if (api && api.openErp) api.openErp("/app/payment-reconciliation");
+      };
+
+      if (!proposals.length && !unmatched.length) {
+        panel.appendChild(
+          textDiv("method-panel-status", `Nothing unapplied for ${supplier} right now.`),
+        );
+        return;
+      }
+
+      for (const p of proposals) {
+        const told = describeRelink(p);
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-proposal";
+        const what = document.createElement("div");
+        what.className = "relink-what";
+        what.innerHTML =
+          `<strong>${escapeHtml(p.payment)}</strong> → <strong>${escapeHtml(p.invoice)}</strong> ` +
+          `· ${moneyHtml(p.amount)}<div class="relink-why">${escapeHtml(p.why)}</div>`;
+        row.appendChild(what);
+
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = p.confidence === "high" ? "btn-primary" : "btn-secondary";
+        go.dataset.testid = "relink-go";
+        go.textContent = told.button;
+        go.onclick = async () => {
+          const body = told.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
+          if (!window.confirm(`${told.title}\n\n${body}`)) return;
+          go.disabled = true;
+          const status = row.querySelector(".method-panel-status");
+          if (status) status.textContent = `Re-linking ${p.payment}…`;
+          const res = await api
+            .relinkPayment({
+              supplier,
+              payment: p.payment,
+              invoice: p.invoice,
+              amount: p.amount,
+              auto: false,
+              why: p.why,
+            })
+            .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+          go.disabled = false;
+          if (!res || !res.ok) {
+            if (status) {
+              status.textContent = (res && res.reason) || "ERPNext refused the re-link.";
+              status.className = "method-panel-status err";
+            }
+            return;
+          }
+          // The bill is paid now, so it leaves the board — re-read rather than patch in place.
+          await reloadBills();
+        };
+        row.appendChild(go);
+        row.appendChild(textDiv("method-panel-status", ""));
+        panel.appendChild(row);
+      }
+
+      for (const u of unmatched) {
+        const row = document.createElement("div");
+        row.className = "relink-row";
+        row.dataset.testid = "relink-unmatched";
+        row.appendChild(
+          htmlDiv(
+            "relink-what",
+            `<strong>${escapeHtml(u.payment)}</strong> · ${moneyHtml(u.amount)} loose` +
+              `<div class="relink-why">${escapeHtml(u.why)}${
+                u.candidates.length ? ` Candidates: ${escapeHtml(u.candidates.join(", "))}.` : ""
+              }</div>`,
+          ),
+        );
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "btn-secondary";
+        open.dataset.testid = "relink-open-vanilla";
+        open.textContent = "Choose in Vanilla";
+        open.onclick = openVanilla;
+        row.appendChild(open);
+        panel.appendChild(row);
+      }
+
+      // 🔴 Said whichever way the site is configured, because it changes what happens if the clerk
+      // walks away: with auto-reconcile on, ERPNext may allocate this itself — oldest bill first,
+      // which is exactly the wrong answer for an amended one.
+      if (facts.autoReconcile) {
+        panel.appendChild(
+          textDiv(
+            "method-panel-status warn",
+            "Auto-reconciliation is enabled on this site. If a Process Payment Reconciliation is queued for this vendor, ERPNext may allocate these oldest-bill-first before you do.",
+          ),
+        );
+      }
+
+      const foot = document.createElement("div");
+      foot.className = "relink-foot";
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "btn-secondary";
+      link.dataset.testid = "relink-open-vanilla-all";
+      link.textContent = "Open Payment Reconciliation in Vanilla";
+      link.onclick = openVanilla;
+      foot.appendChild(link);
+      panel.appendChild(foot);
+    }
+
+    /** @param {string} cls @param {string} text */
+    function textDiv(cls, text) {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      return d;
+    }
+
+    /** @param {string} cls @param {string} html */
+    function htmlDiv(cls, html) {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.innerHTML = html;
+      return d;
+    }
+
+    function methodPanelEl(supplier, bills) {
+      const panel = document.createElement("div");
+      panel.className = "method-panel";
+      panel.dataset.testid = "method-panel";
+      panel.hidden = true;
+
+      const head = document.createElement("div");
+      head.className = "method-panel-head";
+      const label = document.createElement("label");
+      label.textContent = "Change to ";
+      const select = document.createElement("select");
+      select.dataset.testid = "method-panel-mode";
+      for (const m of KNOWN_PAYMENT_METHODS) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = paymentMethodLabel(m, { long: true });
+        select.appendChild(opt);
+      }
+      label.appendChild(select);
+      head.appendChild(label);
+
+      const toggleAll = document.createElement("button");
+      toggleAll.type = "button";
+      toggleAll.className = "btn-secondary";
+      toggleAll.dataset.testid = "method-panel-toggle-all";
+      toggleAll.textContent = "None";
+      head.appendChild(toggleAll);
+
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "btn-primary";
+      apply.dataset.testid = "method-panel-apply";
+      apply.textContent = "Apply";
+      head.appendChild(apply);
+      panel.appendChild(head);
+
+      const list = document.createElement("div");
+      list.className = "method-panel-rows";
+      /** @type {HTMLInputElement[]} */
+      const boxes = [];
+      for (const b of bills) {
+        const row = document.createElement("label");
+        row.className = "method-panel-row";
+        row.dataset.testid = "method-panel-row";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = true;
+        box.dataset.key = b.installmentKey;
+        boxes.push(box);
+        const text = document.createElement("span");
+        // The bill's own ID, its due date and what it is on today — the three things a clerk needs
+        // to decide whether this row is the weird one.
+        text.innerHTML =
+          `<strong>${escapeHtml(b.invoice)}</strong> · due ${escapeHtml(b.dueDate || "—")} · ` +
+          `${moneyHtml(b.outstanding)} · ${escapeHtml(b.modeOfPayment || "no method set")}`;
+        row.appendChild(box);
+        row.appendChild(text);
+        list.appendChild(row);
+      }
+      panel.appendChild(list);
+
+      const status = document.createElement("div");
+      status.className = "method-panel-status";
+      status.dataset.testid = "method-panel-status";
+      panel.appendChild(status);
+
+      const outcome = document.createElement("ul");
+      outcome.className = "method-panel-outcome";
+      outcome.dataset.testid = "method-panel-outcome";
+      outcome.hidden = true;
+      panel.appendChild(outcome);
+
+      const setStatus = (text, cls) => {
+        status.textContent = text || "";
+        status.className = `method-panel-status${cls ? ` ${cls}` : ""}`;
+      };
+
+      toggleAll.onclick = () => {
+        const turningOff = boxes.some((b) => b.checked);
+        for (const b of boxes) b.checked = !turningOff;
+        toggleAll.textContent = turningOff ? "All" : "None";
+      };
+
+      apply.onclick = async () => {
+        outcome.hidden = true;
+        outcome.innerHTML = "";
+        const selectedKeys = boxes.filter((b) => b.checked).map((b) => b.dataset.key);
+        const targetMode = select.value;
+        let plan = planModeChange({ rows: bills, targetMode, selectedKeys });
+        if (plan.blocked) return setStatus(plan.blocked, "warn");
+        if (!api || !api.runModeChange || !api.modeChangeFacts) {
+          // A wiring gap, not a stale build — see void-amend-flow.js for why the distinction
+          // matters enough to say out loud.
+          return setStatus("Changing the method is not wired into this build.", "err");
+        }
+
+        // Read before asking, exactly as the single-document flow does: which of these bills has a
+        // payment against it is invisible on this board, and it is the thing that bites.
+        setStatus("Checking what these bills already have against them…");
+        const facts = await api
+          .modeChangeFacts(plan.work.map((w) => w.invoice))
+          .catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+        if (!facts || !facts.ok) return setStatus((facts && facts.reason) || "Could not check these bills.", "err");
+        plan = planModeChange({
+          rows: bills,
+          targetMode,
+          selectedKeys,
+          paymentsByInvoice: facts.paymentsByInvoice,
+          amendmentsByInvoice: facts.amendmentsByInvoice,
+        });
+
+        const warning = describeModeChange(plan, {
+          supplier,
+          unlinksPaymentsOnCancel: facts.unlinksPaymentsOnCancel,
+          amendCounter: facts.amendCounter,
+        });
+        setStatus("");
+        const body = warning.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
+        if (!window.confirm(`${warning.title}\n\n${body}`)) return;
+
+        apply.disabled = true;
+        setStatus(`Changing ${plan.amendCount} bill${plan.amendCount === 1 ? "" : "s"} to ${targetMode}…`);
+        let res;
+        try {
+          res = await api.runModeChange(plan.work.map((w) => ({ invoice: w.invoice, patch: w.patch })));
+        } catch (err) {
+          apply.disabled = false;
+          return setStatus(
+            `Lost contact partway through: ${String(err && err.message ? err.message : err)}. ` +
+              "Check these bills in ERPNext before retrying — some may already be cancelled.",
+            "err",
+          );
+        }
+        apply.disabled = false;
+        const told = summarizeModeChange((res && res.results) || []);
+        setStatus(told.headline, told.ok ? "" : "err");
+        outcome.hidden = !told.lines.length;
+        for (const line of told.lines) {
+          const li = document.createElement("li");
+          li.textContent = line;
+          outcome.appendChild(li);
+        }
+        // The rows on screen now name documents that were renamed or cancelled, so re-read rather
+        // than patching the board in place.
+        await reloadBills();
+      };
+
+      return panel;
+    }
+
+    function renderVendorCard(supplier, bills, groups, run, unschedulable = []) {
       const card = document.createElement("div");
       card.className = "vendor-card";
       card.dataset.testid = "vendor-card";
@@ -2215,8 +2713,68 @@
         chip.title = `${offCycle} payment${offCycle === 1 ? "" : "s"} for ${supplier} cannot wait for the ${run.runDate} check run`;
         total.prepend(chip);
       }
+      const credit = unschedulable.reduce((sum, b) => sum + (Number(b.outstanding) < 0 ? -Number(b.outstanding) : 0), 0);
+      if (credit > 0) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "run-chip credit";
+        chip.dataset.testid = "vendor-unapplied-credit";
+        chip.textContent = `${formatUsdAmount(credit)} unapplied`;
+        chip.title =
+          `${supplier} has ${formatUsdAmount(credit)} in payments that are not applied to any bill. ` +
+          "Cancelling a paid bill detaches its payment, so a void-and-amend leaves one of these. " +
+          "Click to see where it probably belongs.";
+        chip.onclick = () => {
+          relinkPanel.hidden = !relinkPanel.hidden;
+          if (!relinkPanel.hidden) void loadRelinkPanel(supplier, relinkPanel);
+        };
+        total.prepend(chip);
+      }
+      // 🔴 What the shell did on its own, said on the vendor it did it to. An allocation nobody
+      // typed is only acceptable if it is impossible to miss — and this is the click that was
+      // moved from *before* the posting to after it, where it is optional.
+      const mine = [...relinkReviews.entries()]
+        .filter(([, r]) => r.party === supplier)
+        .map(([pe]) => pe);
+      if (mine.length) {
+        const badge = document.createElement("button");
+        badge.type = "button";
+        badge.className = "run-chip review";
+        badge.dataset.testid = "vendor-relink-review";
+        badge.textContent = `${mine.length} auto-linked · review`;
+        badge.title =
+          "The shell re-linked a payment that an amendment had detached, and is asking you to check it. " +
+          "Nothing is wrong if this looks right — the books are already correct.";
+        badge.onclick = () => {
+          relinkPanel.hidden = !relinkPanel.hidden;
+          if (!relinkPanel.hidden) paintRelinkReviews(supplier, mine, relinkPanel);
+        };
+        total.prepend(badge);
+      }
       head.appendChild(total);
+      // P1 stage 3: the method change lives on the vendor, because that is the scope 5zorro asked
+      // for — "all of vendor x's payments" — with a per-row opt-out inside the panel.
+      const methodBtn = document.createElement("button");
+      methodBtn.type = "button";
+      methodBtn.className = "btn-secondary vendor-method-btn";
+      methodBtn.dataset.testid = "vendor-change-method";
+      methodBtn.textContent = "Method…";
+      methodBtn.title = `Change the Mode of Payment on ${supplier}'s outstanding bills. ERPNext cannot edit a submitted bill, so each one is cancelled and replaced by an amended copy.`;
+      head.appendChild(methodBtn);
       card.appendChild(head);
+
+      const relinkPanel = document.createElement("div");
+      relinkPanel.className = "method-panel relink-panel";
+      relinkPanel.dataset.testid = "relink-panel";
+      relinkPanel.hidden = true;
+      card.appendChild(relinkPanel);
+
+      const methodPanel = methodPanelEl(supplier, sortBillsForSchedule(bills, scheduleSortMode));
+      methodBtn.onclick = () => {
+        methodPanel.hidden = !methodPanel.hidden;
+        methodBtn.classList.toggle("active", !methodPanel.hidden);
+      };
+      card.appendChild(methodPanel);
 
       const grid = document.createElement("div");
       grid.className = "flow-grid";
@@ -2497,16 +3055,29 @@
       const shownGroups = [];
       for (const supplier of suppliers) {
         const bills = bySupplier.get(supplier);
-        const { groups } = paymentBatchEconomics({
+        const { groups, unschedulable } = paymentBatchEconomics({
           bills,
           perPaymentFee: feeForMethod(null), // fallback for bills with no mode_of_payment recorded
           apr: prefs.apr,
           feeForMethod,
           runBreaks, // C8: no batch crosses the check run
+          today: todayIso(), // P2a / OI-172: an overdue proposal can't be backdated, only the past can
           ...delayOpt(), // P3d: the ratified calendar, once there is one
         });
         shownGroups.push(...groups);
-        vendorsEl.appendChild(renderVendorCard(supplier, bills, groups, run));
+        // 🔴 The engine hands back what it could not schedule, and this is where it becomes
+        // visible. An unallocated payment (negative outstanding, no due date) is real money sitting
+        // against the vendor — and P1's amend *creates* them, since cancelling a paid bill detaches
+        // its payment. Dropping them quietly would hide a credit the clerk is owed.
+        vendorsEl.appendChild(
+          renderVendorCard(
+            supplier,
+            bills.filter((b) => !unschedulable.includes(b)),
+            groups,
+            run,
+            unschedulable,
+          ),
+        );
       }
       paintRunStrip(run, summarizeCheckRun(shownGroups, run));
     }
@@ -3040,6 +3611,56 @@
       if (parsed.errors.length) showDelayMsgs(parsed.errors, "err");
     }
 
+    /**
+     * Re-read the board from ERP. P1 stage 3 needs this: after a batch method change the bills it
+     * touched have new ERPNext IDs, so leaving the old rows on screen would show documents that no
+     * longer exist under those names.
+     */
+    /** Payment Entry name -> { note, party }, for auto-links nobody has confirmed yet. */
+    let relinkReviews = new Map();
+
+    /**
+     * P1 after-effects, run once per load: post the near-certain re-links and flag each for review.
+     *
+     * 🔴 **Posted, then reviewed — not the other way round** (5zorro 2026-09-26). An unallocated
+     * payment *is* an open end in the accounting, so holding the books wrong until somebody clicks
+     * is worse than making them right and asking somebody to check. The click moved from before
+     * the posting to after it, and became optional.
+     *
+     * Only the near-certain ones qualify (exact amount, single candidate, same vendor, and the
+     * payment demonstrably older than the amendment). Everything else still waits for a click.
+     */
+    async function runAutoRelinks(suppliers) {
+      if (!api || !api.autoRelink) return false;
+      let posted = 0;
+      for (const supplier of suppliers) {
+        const res = await api.autoRelink(supplier).catch(() => null);
+        posted += ((res && res.posted) || []).length;
+      }
+      return posted > 0;
+    }
+
+    /** Which auto-links are still unreviewed, read from ERP's own assignments. */
+    async function loadRelinkReviews() {
+      relinkReviews = new Map();
+      if (!api || !api.relinkReviews) return;
+      const res = await api.relinkReviews().catch(() => null);
+      for (const r of (res && res.reviews) || []) {
+        if (r && r.reference_name) {
+          relinkReviews.set(r.reference_name, { note: r.description || "", party: r.party || "" });
+        }
+      }
+    }
+
+    async function reloadBills() {
+      if (!api || !api.getOutstandingBills) return;
+      const res = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
+      allBills = (res && res.ok && res.bills) || [];
+      if (!res || !res.ok) showError((res && res.reason) || "Could not reload outstanding bills.");
+      await loadRelinkReviews();
+      render();
+    }
+
     async function init() {
       buildMethodFeeInputs();
       buildTermModalOptions();
@@ -3055,6 +3676,23 @@
       const result = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
       allBills = (result && result.ok && result.bills) || [];
       if (!result || !result.ok) showError((result && result.reason) || "Could not load outstanding bills.");
+
+      // Vendors carrying a credit are the only ones worth a re-link pass, and there are usually
+      // none — so this costs nothing on an ordinary load.
+      const withCredit = [
+        ...new Set(
+          allBills
+            .filter((b) => !/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || "")) || !(Number(b.outstanding) > 0))
+            .map((b) => b.supplier)
+            .filter(Boolean),
+        ),
+      ];
+      if (withCredit.length && (await runAutoRelinks(withCredit))) {
+        // Something was posted, so the board is describing bills that are now paid.
+        const again = await api.getOutstandingBills().catch(() => null);
+        if (again && again.ok) allBills = again.bills || [];
+      }
+      await loadRelinkReviews();
       render();
     }
 
