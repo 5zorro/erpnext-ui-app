@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bowtie trace — statement, bowtie and Gantt over one set of links</title>
+<!--
+  Mockup, 2026-09-28 (museum OI-041 / OI-065). Static: every number below is data in this file.
+  The document chain follows the seeded "Bowtie Trace" customer/vendor from the sandbox as it stood
+  that day (Estimate -> Sales Order -> PO -> receipt -> bill -> payment, and SO -> invoice ->
+  payment received); dates, amounts and the extra documents are invented so the lags, the fan-in,
+  the "other payables" box and the item mismatch all have something to show.
+
+  Sankey rules carried over from the Pay Outstanding flow (HANDOFF "Pay Outstanding flow",
+  docs/gotchas.md G8), because each one was paid for with a bug there:
+    - the arithmetic owns the geometry: card x/y come from column/row maths, never measurement,
+      and every card is border-box so its drawn height is its computed height;
+    - a card fits its content to its box (overflow hidden), the box never grows to fit content;
+    - strands meet a card as a bundle centred on it, each as thick as its amount -- never spread
+      to fill the card (that erased the convergence);
+    - a column must be wide enough to show a whole document number (208px there).
+-->
+<style>
+  :root {
+    --ink: #1f2d3d; --muted: #64748b; --faint: #94a3b8; --line: #f1f5f9; --edge: #d6dee6;
+    --paper: #fff; --canvas: #eef2f5; --warn: #b45309; --warn-bg: #fef3c7;
+    --w-request: #eef6fb; --w-order: #e8f4fc; --w-fulfill: #fff4e0; --w-invoice: #f6eaf2; --w-payment: #e6f5f0;
+    --a-request: #0072B2; --a-order: #56B4E9; --a-fulfill: #E69F00; --a-invoice: #CC79A7; --a-payment: #009E73;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--canvas); color: var(--ink);
+               font-family: system-ui, "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+  header { padding: 18px 24px 0; background: var(--paper); border-bottom: 1px solid var(--edge); }
+  h1 { margin: 0 0 4px; font-size: 17px; }
+  header p { margin: 0 0 10px; color: var(--muted); max-width: 100ch; line-height: 1.55; }
+  .stamp { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+           padding: 3px 9px; border-radius: 999px; background: #e0e7ff; color: #3730a3; margin-bottom: 8px; }
+  nav.tabs { display: flex; gap: 2px; margin-top: 6px; }
+  nav.tabs button { border: 1px solid transparent; border-bottom: none; background: none; padding: 8px 14px;
+                    font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; border-radius: 8px 8px 0 0; }
+  nav.tabs button[aria-selected="true"] { background: var(--canvas); border-color: var(--edge); color: var(--ink);
+                                         margin-bottom: -1px; }
+  main { padding: 18px 24px 60px; }
+  .panel[hidden] { display: none; }
+  .sheet { background: var(--paper); border: 1px solid var(--edge); border-radius: 10px; margin-bottom: 18px; }
+  .sheet-head { padding: 10px 14px; border-bottom: 1px solid var(--edge); display: flex; gap: 12px;
+                align-items: center; flex-wrap: wrap; }
+  .sheet-head .title { font-weight: 700; }
+  .sheet-head .sub { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  .why { color: var(--muted); font-size: 12px; line-height: 1.6; padding: 10px 14px; max-width: 100ch; }
+  .why b { color: var(--ink); }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; background: #f6f8fa;
+         padding: 1px 5px; border-radius: 4px; }
+  button.ico { border: 1px solid var(--edge); background: var(--paper); border-radius: 6px; cursor: pointer;
+               font-size: 12px; line-height: 1; padding: 3px 6px; color: var(--ink); }
+  button.ico:hover { background: #f1f5f9; }
+  .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 7px; overflow: hidden; }
+  .seg button { border: none; background: var(--paper); padding: 5px 10px; font: inherit; font-size: 12px;
+                cursor: pointer; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: #1f2d3d; color: #fff; }
+  .field { display: inline-flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+  .field .val { border: 1px solid var(--edge); border-radius: 6px; padding: 5px 9px; color: var(--ink);
+                font-size: 13px; background: #fbfcfd; min-width: 220px; }
+
+  /* ---------- statement ---------- */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
+       font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.muted, .muted { color: var(--faint); }
+  .role-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px;
+              vertical-align: -1px; }
+  /* The ageing edge: one heavy rule on the first row past the threshold, not a band of shading. */
+  tr.cross td { border-top: 3px solid var(--ink); }
+  .age-tag { display: inline-block; margin-left: 8px; font-size: 10px; font-weight: 700; letter-spacing: .3px;
+             padding: 1px 6px; border-radius: 4px; background: var(--ink); color: #fff; }
+  tfoot td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--edge); }
+  .acts { display: inline-flex; gap: 4px; }
+
+  /* ---------- bowtie ---------- */
+  .focusbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px;
+              border-bottom: 1px solid var(--edge); }
+  .focusbar .lbl { font-weight: 700; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px;
+          border: 2px solid var(--ink); background: var(--paper); font-weight: 600; font-size: 12px; }
+  .chip button { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .dropzone { border: 1.5px dashed var(--faint); color: var(--faint); border-radius: 999px; padding: 4px 12px;
+              font-size: 12px; }
+  .dropzone.over { border-color: var(--ink); color: var(--ink); background: #f8fafc; }
+  .colheads { position: relative; height: 22px; }
+  .colheads div { position: absolute; top: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+                  color: var(--muted); font-weight: 700; }
+  .scroller { overflow-x: auto; padding: 6px 14px 18px; }
+  .stage { position: relative; }
+  .stage > svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .rib { fill: none; stroke-linecap: butt; transition: stroke-opacity .12s; }
+  .rib-hit { fill: none; stroke: transparent; cursor: help; }
+  .rib-label { font-size: 10px; font-variant-numeric: tabular-nums; fill: var(--muted);
+               paint-order: stroke; stroke: var(--canvas); stroke-width: 3px; }
+  .node { position: absolute; border: 1px solid var(--edge); border-left-width: 4px; border-radius: 8px;
+          padding: 5px 8px 6px 9px; overflow: hidden; background: var(--paper); }
+  .node.focus { box-shadow: 0 0 0 2px var(--ink); }
+  .node.pseudo { border-style: dashed; border-left-width: 1px; background: #fbfcfd; color: var(--muted); }
+  .n-head { display: flex; align-items: center; gap: 4px; height: 20px; }
+  .n-type { font-size: 10px; text-transform: uppercase; letter-spacing: .2px; font-weight: 700; flex: 1;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .n-head .ico { padding: 2px 5px; font-size: 11px; }
+  .n-id { font-weight: 700; font-size: 13px; white-space: nowrap; height: 19px; line-height: 19px; }
+  .n-id .ours { font-weight: 400; color: var(--faint); font-size: 10px; margin-left: 4px; }
+  .n-dates, .n-user { font-size: 11px; color: var(--muted); white-space: nowrap; height: 16px; line-height: 16px; }
+  .n-dates b { color: var(--ink); font-weight: 600; }
+  .n-more { font-size: 10px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px;
+            background: var(--paper); white-space: nowrap; }
+  .n-lines { margin-top: 6px; border-top: 1px solid var(--edge); font-size: 11px; }
+  .n-lines table td, .n-lines table th { padding: 0 3px; height: 18px; border: none; font-size: 10.5px; }
+  .n-lines table th { font-size: 9px; height: 20px; }
+  .n-lines tr.foot td { color: var(--muted); font-style: italic; }
+  .flag { border: 1px solid #f59e0b; background: var(--warn-bg); color: var(--warn); border-radius: 5px;
+          font-size: 10px; font-weight: 700; padding: 1px 5px; cursor: pointer; line-height: 14px; }
+  .rib-flag { position: absolute; transform: translate(-50%, -50%); z-index: 3; }
+  .pop { position: absolute; z-index: 20; max-width: 330px; background: var(--paper); border: 1px solid #f59e0b;
+         border-radius: 8px; padding: 9px 11px; font-size: 12px; line-height: 1.5;
+         box-shadow: 0 6px 20px rgba(15, 23, 42, .15); }
+  .pop b { color: var(--warn); }
+
+  /* ---------- gantt ---------- */
+  .gantt-wrap { overflow-x: auto; padding: 8px 14px 16px; }
+  .g-label { font-size: 12px; fill: var(--ink); }
+  .g-sub { font-size: 10px; fill: var(--muted); }
+  .g-tick { font-size: 10px; fill: var(--muted); }
+  .g-lag { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .g-row:hover .g-hover { fill: #f8fafc; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 0 14px 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* ---------- peek + tooltip ---------- */
+  .peek { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; background: var(--paper);
+          border-left: 1px solid var(--edge); box-shadow: -8px 0 28px rgba(15, 23, 42, .12); z-index: 40;
+          padding: 16px 18px; overflow-y: auto; }
+  .peek[hidden] { display: none; }
+  .peek h2 { font-size: 15px; margin: 2px 0 8px; }
+  .peek dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; margin: 0 0 12px; font-size: 12px; }
+  .peek dt { color: var(--muted); }
+  .peek dd { margin: 0; }
+  .tip { position: fixed; z-index: 50; pointer-events: none; background: #1f2d3d; color: #fff; font-size: 12px;
+         padding: 7px 9px; border-radius: 6px; line-height: 1.45; max-width: 320px; }
+  .tip[hidden] { display: none; }
+  .notes li { margin-bottom: 7px; line-height: 1.55; }
+  .notes { padding: 4px 18px 10px 32px; margin: 0; max-width: 100ch; }
+</style>
+</head>
+<body>
+<header>
+  <span class="stamp">Mockup · 2026-09-28 · static data · OI-041</span>
+  <h1>Bowtie trace</h1>
+  <p>One set of links between documents, three ways to look at it. <b>Statement</b> is a Find page in
+    vendor-statement mode. <b>Bowtie</b> puts one or more documents in focus and flows everything they came
+    from to the left and everything they led to on the right. <b>Gantt</b> is the same documents on a
+    calendar, shading the gap between the date on the paper and the day it was posted.</p>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="statement">Statement</button>
+    <button role="tab" data-tab="bowtie">⋈ Bowtie</button>
+    <button role="tab" data-tab="gantt">▤ Gantt</button>
+    <button role="tab" data-tab="notes">Notes &amp; open questions</button>
+  </nav>
+</header>
+
+<main>
+  <section class="panel" id="p-statement">
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="title">Find Bills</span>
+        <span class="field">Vendor<span class="val" id="st-vendor"></span></span>
+        <span class="field">As of<span class="val" style="min-width:110px" id="st-asof"></span></span>
+        <span class="spacer"></span>
+        <span class="seg"><button aria-pressed="false">List</button><button aria-pressed="true">Statement</button></span>
+      </div>
+      <div class="why"><b>Statement mode</b> answers "does my side match the vendor's statement?" First, everything
+        that has not been matched yet. Then 90 days of activity, newest first, aged by the <b>vendor's own date</b>
+        (a bill by its vendor invoice date, a payment by the check date). A heavy rule marks the first row past
+        30 days and the first past 60. ⋈ opens the bowtie with that row in focus, ▤ the Gantt, the eye a peek.</div>
+    </div>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">Open — not matched yet</span>
+        <span class="sub">orders not fully received or billed · receipts with no bill</span></div>
+      <table id="st-open"></table>
+    </div>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">Last 90 days</span>
+        <span class="sub">by the vendor's date · heavy rule = crossing into 30+ and 60+ days</span></div>
+      <table id="st-recent"></table>
+    </div>
+  </section>
+
+  <section class="panel" id="p-bowtie" hidden>
+    <div class="sheet">
+      <div class="focusbar" id="focusbar"></div>
+      <div class="scroller"><div class="colheads" id="colheads"></div><div class="stage" id="stage"></div></div>
+      <div class="why">Click ◎ to put a card in focus by itself. <b>Shift-click</b> ◎, or drag a card onto the bar
+        above, to add a second one. With two in focus the ribbons <b>between</b> them stay dark and the rest fade.
+        A ribbon is as wide as the money on the child's lines that came from the parent. Payment amounts
+        belonging to bills that aren't in focus collect in one <b>Other payables</b> box; put the payment in
+        focus to see those bills.</div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-gantt" hidden>
+    <div class="sheet">
+      <div class="focusbar" id="focusbar-g"></div>
+      <div class="legend">
+        <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="#fff" stroke="#1f2d3d" stroke-width="2"/></svg> date on the paper</span>
+        <span><svg width="12" height="12"><path d="M6 1 L11 6 L6 11 L1 6Z" fill="#1f2d3d"/></svg> posted</span>
+        <span><svg width="26" height="10"><rect x="0" y="1" width="26" height="8" rx="3" fill="#f6eaf2" stroke="#CC79A7"/></svg> the lag, in the document's wash</span>
+        <span><svg width="26" height="10"><path d="M1 5 H25" stroke="#94a3b8" stroke-dasharray="3 3"/></svg> hand-off: one document posted → the next one's date</span>
+      </div>
+      <div class="gantt-wrap"><svg id="gantt"></svg></div>
+      <div class="why">Same documents as the bowtie, same focus. Rows follow the bowtie's order (left column
+        first). Weekends are shaded. The dotted hand-offs show where time went between documents (8 days from
+        order to receipt here); the washed bars show where time went inside one (a receipt keyed in two days late).</div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-notes" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">What this mockup assumes (5zorro's answers, 2026-09-28)</span></div>
+      <ul class="notes">
+        <li><b>Landed cost.</b> Every bill has at least one item line, and the bill's charges (freight etc.) are
+          spread over its lines by each line's share of the item total. Shown under a bill in focus. This is
+          <i>not</i> ERPNext's Landed Cost Voucher, which has not been used or dogfooded here.</li>
+        <li><b>Who submitted.</b> Shown as the document's <b>creator</b> (right about 9 times in 10). To come back
+          to: read the actual submitter from the change history and show both when they differ.</li>
+        <li><b>Ageing</b> is by the vendor's invoice date: the vendor's invoice is the legal document.</li>
+        <li><b>Ribbon width</b> is amount.</li>
+        <li><b>Payments covering several bills:</b> the part that isn't this bill's flows in from one blank
+          <b>Other payables</b> box, and the payment walks to those bills only when it's in focus itself.</li>
+        <li><b>Item mismatch</b> (added while building): a line that names the document it came from, when that
+          document has no such item, gets a ⚠ on its ribbon and on the card. Clicking it opens the detail. Clean
+          rows show nothing. The same check would catch a line asking for more than its source had.</li>
+      </ul>
+    </div>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">Two dates on every card: which ones</span></div>
+      <ul class="notes">
+        <li><b>Doc</b> = the date on the paper. Bill: the vendor's invoice date. Payment: the check date. Receipt:
+          the day the goods arrived. PO, Sales Order, Estimate, Invoice: the document's date.</li>
+        <li><b>Posted</b> = the date it reached the books. Bill and payment: ERPNext's posting date. Receipt:
+          the day it was keyed in. Order-type documents have no posting date, so the day they were submitted.</li>
+        <li>🔴 Open question: is that what "date posted / date of transaction" meant? For a receipt, ERPNext's
+          posting date <i>is</i> the arrival date, so its "posted" would have to come from the created stamp.</li>
+      </ul>
+    </div>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">Other open questions</span></div>
+      <ul class="notes">
+        <li><b>Two in focus, but no path between them</b> (a bill and the customer's payment, say): shown as the
+          two lineages side by side, with the Sales Order where they meet. Is that right, or should the bowtie
+          say "these two are not connected"?</li>
+        <li><b>Hidden branches.</b> A Sales Order in the bowtie of a bill also led to a customer invoice. That
+          branch is left out and counted in a small "+1 not in focus" note on the card. Or should it show as a stub?</li>
+        <li><b>Credits and returns</b> (the vendor credit on the statement) aren't linked into the bowtie yet.
+          A return points at the bill it reverses, so it would flow out to the right of that bill.</li>
+        <li><b>Drag to add focus</b> is drag-onto-the-bar here. Box-select across cards could come later.</li>
+      </ul>
+    </div>
+    <div class="sheet">
+      <div class="sheet-head"><span class="title">What the sample data needs before this can be built for real</span></div>
+      <ul class="notes">
+        <li>Bills that draw from <b>two or more POs/receipts</b>: the sandbox had none, so nothing fanned in.</li>
+        <li>Bills with <b>NIC lines</b> and <b>charges</b> mixed with sourced lines, so landed cost has something to spread.</li>
+        <li><b>Lag</b> between the paper date and the posting date (the seed posts most on the same day, so the
+          Gantt would draw dots and no bars).</li>
+        <li>A PO line linked to a Sales Order that <b>doesn't carry that item</b>, and one asking for more
+          than the order had, so the mismatch check has a positive case.</li>
+        <li>A few documents <b>created by one user and submitted by another</b>, for the submitter follow-up.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<aside class="peek" id="peek" hidden></aside>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+"use strict";
+const AS_OF = "2026-09-28";
+const VENDOR = "SAMPLE Vendor Bowtie Trace";
+const CUSTOMER = "SAMPLE Customer Bowtie Trace";
+
+/* Column = the document's place in the process; role = its doc-wash (src/doc-wash.js). */
+const TYPES = {
+  est:  { label: "Estimate", role: "request", col: 0, ar: true },
+  so:   { label: "Sales Order", role: "order", col: 1, ar: true },
+  po:   { label: "Purchase Order", role: "order", col: 2 },
+  pr:   { label: "Item Receipt", role: "fulfill", col: 3 },
+  bill: { label: "Bill", role: "invoice", col: 4 },
+  cm:   { label: "Vendor Credit", role: "invoice", col: 4 },
+  si:   { label: "Invoice", role: "invoice", col: 4, ar: true },
+  pay:  { label: "Bill Payment", role: "payment", col: 5 },
+  rcv:  { label: "Payment received", role: "payment", col: 5, ar: true },
+};
+const COL_TITLES = ["Estimate", "Sales Order", "Purchase Order", "Item Receipt", "Bill · Invoice", "Payment"];
+const WASH = { request: "#eef6fb", order: "#e8f4fc", fulfill: "#fff4e0", invoice: "#f6eaf2", payment: "#e6f5f0" };
+const ACCENT = { request: "#0072B2", order: "#56B4E9", fulfill: "#E69F00", invoice: "#CC79A7", payment: "#009E73" };
+
+/*
+ * Documents. `lines[].from` is the item-level link ERPNext stores (Bill line -> purchase_receipt /
+ * purchase_order, PO line -> sales_order, SO line -> prevdoc_docname); null = entered with no source
+ * (NIC). `refs` are a payment's Payment Entry Reference rows. ref = the other side's number.
+ */
+const DOCS = [
+  { id: "SAL-QTN-2026-00608", t: "est", party: CUSTOMER, ref: null, doc: "2026-08-02", posted: "2026-08-02", user: "clerk-ar",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 150 }, { item: "SKU-BOWTIE-B", qty: 2, rate: 200 }] },
+  { id: "SAL-ORD-2026-00543", t: "so", party: CUSTOMER, ref: "Cust PO 7781", doc: "2026-08-06", posted: "2026-08-07", user: "clerk-ar",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 150, from: "SAL-QTN-2026-00608" },
+            { item: "SKU-BOWTIE-B", qty: 2, rate: 200, from: "SAL-QTN-2026-00608" }] },
+  { id: "PUR-ORD-2026-00404", t: "po", party: VENDOR, ref: null, doc: "2026-08-10", posted: "2026-08-10", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 100, from: "SAL-ORD-2026-00543" }] },
+  { id: "PUR-ORD-2026-00405", t: "po", party: VENDOR, ref: null, doc: "2026-08-11", posted: "2026-08-11", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-B", qty: 2, rate: 120, from: "SAL-ORD-2026-00543" },
+            { item: "SKU-BOWTIE-C", qty: 1, rate: 45, from: "SAL-ORD-2026-00543" }] },
+  { id: "MAT-PRE-2026-00211", t: "pr", party: VENDOR, ref: "PS-5521", doc: "2026-08-18", posted: "2026-08-19", user: "receiving",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 100, from: "PUR-ORD-2026-00404" }] },
+  { id: "MAT-PRE-2026-00212", t: "pr", party: VENDOR, ref: "PS-5534", doc: "2026-08-19", posted: "2026-08-21", user: "receiving",
+    lines: [{ item: "SKU-BOWTIE-B", qty: 2, rate: 120, from: "PUR-ORD-2026-00405" },
+            { item: "SKU-BOWTIE-C", qty: 1, rate: 45, from: "PUR-ORD-2026-00405" }] },
+  { id: "ACC-PINV-2026-00268", t: "bill", party: VENDOR, ref: "BT-24490", doc: "2026-08-20", posted: "2026-08-22", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 100, from: "MAT-PRE-2026-00211" },
+            { item: "SKU-BOWTIE-B", qty: 2, rate: 120, from: "MAT-PRE-2026-00212" },
+            { item: "SKU-BOWTIE-C", qty: 1, rate: 45, from: "MAT-PRE-2026-00212" },
+            { item: "PALLET-WRAP", qty: 1, rate: 20, from: null }],
+    charges: [{ desc: "Freight", amount: 33 }] },
+  { id: "ACC-PAY-2026-00004", t: "pay", party: VENDOR, ref: "Check 10452", doc: "2026-08-27", posted: "2026-08-28", user: "clerk-ap",
+    refs: [{ bill: "ACC-PINV-2026-00268", amount: 738 }, { bill: "ACC-PINV-2026-00255", amount: 2100 },
+           { bill: "ACC-PINV-2026-00261", amount: 2162 }] },
+  { id: "ACC-SINV-2026-00525", t: "si", party: CUSTOMER, ref: null, doc: "2026-09-01", posted: "2026-09-02", user: "clerk-ar",
+    lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 150, from: "SAL-ORD-2026-00543" },
+            { item: "SKU-BOWTIE-B", qty: 2, rate: 200, from: "SAL-ORD-2026-00543" }] },
+  { id: "ACC-PAY-2026-00005", t: "rcv", party: CUSTOMER, ref: "Check 3318", doc: "2026-09-12", posted: "2026-09-15", user: "clerk-ar",
+    refs: [{ bill: "ACC-SINV-2026-00525", amount: 1000 }] },
+
+  // The rest of the vendor's 90 days, for the statement. Their sources are outside this mockup's
+  // data, so their lines carry no `from` at all (nothing drawn) rather than null (NIC).
+  { id: "ACC-PINV-2026-00233", t: "bill", party: VENDOR, ref: "BT-24351", doc: "2026-07-03", posted: "2026-07-06", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 9, rate: 100 }] },
+  { id: "ACC-PINV-2026-00241", t: "bill", party: VENDOR, ref: "BT-24380", doc: "2026-07-10", posted: "2026-07-11", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-B", qty: 28, rate: 119.2857 }] },
+  { id: "ACC-PAY-2026-00001", t: "pay", party: VENDOR, ref: "Check 10390", doc: "2026-07-24", posted: "2026-07-24", user: "clerk-ap",
+    refs: [{ bill: "ACC-PINV-2026-00233", amount: 900 }, { bill: "ACC-PINV-2026-00241", amount: 3340 }] },
+  { id: "ACC-PINV-2026-00255", t: "bill", party: VENDOR, ref: "BT-24417", doc: "2026-08-05", posted: "2026-08-06", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 21, rate: 100 }] },
+  { id: "ACC-PINV-2026-00261", t: "bill", party: VENDOR, ref: "BT-24452", doc: "2026-08-12", posted: "2026-08-14", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-B", qty: 18, rate: 120.1111 }] },
+  { id: "ACC-PINV-2026-00273", t: "cm", party: VENDOR, ref: "BT-CM-091", doc: "2026-09-02", posted: "2026-09-03", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-C", qty: -1, rate: 60 }], open: -60 },
+  { id: "ACC-PINV-2026-00276", t: "bill", party: VENDOR, ref: "BT-24533", doc: "2026-09-05", posted: "2026-09-08", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 14, rate: 105.7143 }], open: 1480 },
+  { id: "PUR-ORD-2026-00409", t: "po", party: VENDOR, ref: null, doc: "2026-09-08", posted: "2026-09-08", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-D", qty: 10, rate: 100 }], openNote: "4 of 10 not received", open: 400 },
+  { id: "MAT-PRE-2026-00214", t: "pr", party: VENDOR, ref: "PS-5602", doc: "2026-09-13", posted: "2026-09-13", user: "receiving",
+    lines: [{ item: "SKU-BOWTIE-D", qty: 6, rate: 100, from: "PUR-ORD-2026-00409" }] },
+  { id: "ACC-PINV-2026-00284", t: "bill", party: VENDOR, ref: "BT-24571", doc: "2026-09-15", posted: "2026-09-16", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE-D", qty: 6, rate: 100, from: "MAT-PRE-2026-00214" }, { item: "RUSH-FEE", qty: 1, rate: 220, from: null }],
+    open: 820 },
+  { id: "PUR-ORD-2026-00412", t: "po", party: VENDOR, ref: null, doc: "2026-09-20", posted: "2026-09-20", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 8, rate: 95 }], openNote: "nothing received", open: 760 },
+  { id: "MAT-PRE-2026-00219", t: "pr", party: VENDOR, ref: "PS-5640", doc: "2026-09-22", posted: "2026-09-22", user: "receiving",
+    lines: [{ item: "SKU-BOWTIE-B", qty: 2, rate: 155, from: null }], openNote: "received, no bill yet", open: 310 },
+  { id: "ACC-PINV-2026-00290", t: "bill", party: VENDOR, ref: "BT-24602", doc: "2026-09-24", posted: "2026-09-25", user: "clerk-ap",
+    lines: [{ item: "SKU-BOWTIE", qty: 10, rate: 115 }], open: 1150 },
+];
+const BY_ID = new Map(DOCS.map((d) => [d.id, d]));
+
+/* ---------------- helpers ---------------- */
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const r2 = (n) => Math.round(n * 100) / 100;
+const money = (n) => (n < 0 ? "−" : "") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayNum = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
+const fmtD = (iso) => `${MON[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`;
+const fmtDay = (n) => { const d = new Date(n * 86400000); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const lineAmt = (ln) => r2(ln.qty * ln.rate);
+function docTotal(d) {
+  if (d.refs) return r2(d.refs.reduce((t, r) => t + r.amount, 0));
+  return r2((d.lines || []).reduce((t, l) => t + lineAmt(l), 0) + (d.charges || []).reduce((t, c) => t + c.amount, 0));
+}
+// The shell's own peek icon (src/ui-icons.js "eye") -- the shell uses no emoji, which need a font.
+const EYE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const docRole = (d) => (d.pseudo ? null : TYPES[d.t].role);
+
+/* Bill charges spread by each line's share of the item total; rounding remainder to the largest line. */
+function landed(d) {
+  const lines = d.lines || [];
+  const base = lines.reduce((t, l) => t + lineAmt(l), 0);
+  const chg = (d.charges || []).reduce((t, c) => t + c.amount, 0);
+  const out = lines.map((l) => ({ ...l, amount: lineAmt(l), alloc: base ? r2((lineAmt(l) * chg) / base) : 0 }));
+  const drift = r2(chg - out.reduce((t, l) => t + l.alloc, 0));
+  if (drift && out.length) out.reduce((a, b) => (b.amount > a.amount ? b : a)).alloc = r2(out.reduce((a, b) => (b.amount > a.amount ? b : a)).alloc + drift);
+  return out.map((l) => ({ ...l, unit: l.qty ? r2((l.amount + l.alloc) / l.qty) : 0 }));
+}
+
+/* ---------------- the link graph (one source for all three views) ---------------- */
+const PSEUDO = new Map(); // nic:<id>, chg:<id>
+const EDGES = [];         // { from, to, amount, lines: [], flags: [] }
+(function buildGraph() {
+  const byKey = new Map();
+  const add = (from, to, amount, line) => {
+    const k = from + ">" + to;
+    if (!byKey.has(k)) { const e = { from, to, amount: 0, lines: [], flags: [] }; byKey.set(k, e); EDGES.push(e); }
+    const e = byKey.get(k);
+    e.amount = r2(e.amount + amount);
+    if (line) e.lines.push(line);
+  };
+  for (const d of DOCS) {
+    for (const ln of d.lines || []) {
+      if (ln.from === undefined) continue; // a first document: nothing upstream to draw
+      let src = ln.from;
+      if (src === null) {
+        src = "nic:" + d.id;
+        PSEUDO.set(src, { id: src, pseudo: "nic", target: d.id });
+      }
+      add(src, d.id, lineAmt(ln), ln);
+    }
+    for (const c of d.charges || []) {
+      const src = "chg:" + d.id;
+      PSEUDO.set(src, { id: src, pseudo: "chg", target: d.id, charges: d.charges });
+      add(src, d.id, c.amount, null);
+    }
+    for (const r of d.refs || []) add(r.bill, d.id, r.amount, null);
+  }
+  // Item mismatch: a line that names its parent, where the parent has no such item, or less of it.
+  for (const d of DOCS) {
+    for (const ln of d.lines || []) {
+      const p = ln.from && BY_ID.get(ln.from);
+      if (!p) continue;
+      const e = byKey.get(p.id + ">" + d.id);
+      const pl = (p.lines || []).filter((x) => x.item === ln.item);
+      if (!pl.length) {
+        e.flags.push(`<b>${esc(ln.item)}</b> (${ln.qty} × ${money(ln.rate)}) on ${esc(d.id)} says it came from ` +
+          `${esc(p.id)}, but that ${TYPES[p.t].label} has no ${esc(ln.item)} line. Either the item was added ` +
+          `here without being added there, or the line is linked to the wrong ${TYPES[p.t].label}.`);
+        continue;
+      }
+      // Counted per kind of child: the buy side (POs) and the sell side (invoices) each draw on a
+      // Sales Order separately, so adding them together would flag every order that was fulfilled.
+      const want = DOCS.filter((c) => c.t === d.t)
+        .flatMap((c) => (c.lines || []).filter((x) => x.from === p.id && x.item === ln.item))
+        .reduce((t, x) => t + x.qty, 0);
+      const have = pl.reduce((t, x) => t + x.qty, 0);
+      if (want > have && !e.flags.some((f) => f.includes(ln.item))) {
+        e.flags.push(`<b>${esc(ln.item)}</b>: documents drawn from ${esc(p.id)} ask for ${want}, and it only has ${have}.`);
+      }
+    }
+  }
+})();
+const node = (id) => BY_ID.get(id) || PSEUDO.get(id) || OTHER.get(id);
+const inEdges = (id) => EDGES.filter((e) => e.to === id);
+const outEdges = (id) => EDGES.filter((e) => e.from === id);
+function walk(id, next) {
+  const seen = new Set(); const stack = [id];
+  while (stack.length) { const x = stack.pop(); for (const y of next(x)) if (!seen.has(y)) { seen.add(y); stack.push(y); } }
+  return seen;
+}
+const ancestors = (id) => walk(id, (x) => inEdges(x).map((e) => e.from));
+const descendants = (id) => walk(id, (x) => outEdges(x).map((e) => e.to));
+
+/* ---------------- state ---------------- */
+const state = { tab: "bowtie", focus: ["ACC-PINV-2026-00268"], idMode: "theirs" };
+let OTHER = new Map();
+
+/* The visible slice for the current focus: each focus, everything it came from, everything it led to. */
+function slice() {
+  const vis = new Set();
+  for (const f of state.focus) { vis.add(f); ancestors(f).forEach((x) => vis.add(x)); descendants(f).forEach((x) => vis.add(x)); }
+  // NIC lines and a bill's own charges are part of the document, not a branch: always shown.
+  for (const e of EDGES) if (vis.has(e.to) && PSEUDO.has(e.from)) vis.add(e.from);
+  const edges = EDGES.filter((e) => vis.has(e.from) && vis.has(e.to));
+  OTHER = new Map();
+  const hiddenOut = new Map();
+  for (const id of vis) {
+    if (!BY_ID.has(id)) continue;
+    const hidIn = inEdges(id).filter((e) => !vis.has(e.from));
+    if (hidIn.length) {
+      const d = BY_ID.get(id);
+      const pay = d.t === "pay" || d.t === "rcv";
+      const o = { id: "other:" + id, pseudo: "other", target: id, count: hidIn.length,
+                  amount: r2(hidIn.reduce((t, e) => t + e.amount, 0)),
+                  label: pay ? (d.t === "rcv" ? "Other receivables" : "Other payables") : "Other sources" };
+      OTHER.set(o.id, o);
+      edges.push({ from: o.id, to: id, amount: o.amount, lines: [], flags: [], other: true });
+    }
+    const hidOut = outEdges(id).filter((e) => !vis.has(e.to));
+    if (hidOut.length) hiddenOut.set(id, hidOut.length);
+  }
+  const ids = [...vis, ...OTHER.keys()];
+  // Ribbons between two foci stay dark; with one focus, everything does.
+  const onPath = new Set();
+  if (state.focus.length > 1) {
+    for (const a of state.focus) for (const b of state.focus) {
+      if (a === b) continue;
+      const between = new Set([...descendants(a)].filter((x) => ancestors(b).has(x)));
+      between.add(a); between.add(b);
+      for (const e of edges) if (between.has(e.from) && between.has(e.to)) onPath.add(e);
+    }
+  }
+  return { ids, edges, hiddenOut, onPath };
+}
+
+function colOf(n) {
+  if (!n.pseudo) return TYPES[n.t].col;
+  return TYPES[BY_ID.get(n.target).t].col - 1;
+}
+
+/* ---------------- bowtie layout: arithmetic only ---------------- */
+const CARD_W = 208, CARD_H = 84, PSEUDO_H = 58, GAP_Y = 20, RIB_W = 88, LINE_H = 18, LINES_HEAD = 28;
+function nodeH(n) {
+  if (n.pseudo) return PSEUDO_H;
+  if (!state.focus.includes(n.id) || !(n.lines || n.refs)) return CARD_H;
+  const rows = (n.lines || n.refs).length + (n.charges ? 1 : 0);
+  return CARD_H + LINES_HEAD + rows * LINE_H;
+}
+
+function layout(sl) {
+  const cols = [...new Set(sl.ids.map((id) => colOf(node(id))))].sort((a, b) => a - b);
+  const colX = new Map(cols.map((c, i) => [c, i * (CARD_W + RIB_W)]));
+  const pos = new Map(); // id -> { x, y, h }
+  const parentsOf = (id) => sl.edges.filter((e) => e.to === id).map((e) => e.from);
+  const childrenOf = (id) => sl.edges.filter((e) => e.from === id).map((e) => e.to);
+  const center = (id) => pos.get(id).y + pos.get(id).h / 2;
+  const sortKey = (n) => (n.pseudo ? "9" : TYPES[n.t].ar ? "1" : "0") + (n.doc || "");
+  const pack = (items) => {
+    items.sort((a, b) => a.want - b.want || a.key.localeCompare(b.key));
+    let y = 0;
+    for (const it of items) {
+      const top = Math.max(y, Number.isFinite(it.want) ? it.want - it.h / 2 : y);
+      pos.set(it.id, { x: colX.get(it.col), y: top, h: it.h });
+      y = top + it.h + GAP_Y;
+    }
+  };
+  const byCol = (c) => sl.ids.filter((id) => colOf(node(id)) === c);
+  // Pass 1, left to right: a card sits level with the middle of the cards that feed it.
+  for (const c of cols) {
+    pack(byCol(c).map((id) => {
+      const ps = parentsOf(id).filter((p) => pos.has(p));
+      const n = node(id);
+      return { id, col: c, h: nodeH(n), key: sortKey(n),
+               want: ps.length ? ps.reduce((t, p) => t + center(p), 0) / ps.length : Infinity };
+    }));
+  }
+  // Pass 2, right to left: cards with nothing upstream (NIC, charges, Other…) sit level with what they feed.
+  for (const c of [...cols].reverse()) {
+    pack(byCol(c).map((id) => {
+      const n = node(id);
+      const ps = parentsOf(id), ks = childrenOf(id).filter((k) => pos.has(k));
+      const want = !ps.length && ks.length ? ks.reduce((t, k) => t + center(k), 0) / ks.length : center(id);
+      return { id, col: c, h: nodeH(n), key: sortKey(n), want };
+    }));
+  }
+  const height = Math.max(...[...pos.values()].map((p) => p.y + p.h)) + 8;
+  const width = (cols.length - 1) * (CARD_W + RIB_W) + CARD_W;
+  return { pos, cols, colX, height, width };
+}
+
+/* ---------------- bowtie render ---------------- */
+function idFor(d) {
+  if (state.idMode === "theirs" && d.ref) return { main: d.ref, ours: d.id };
+  return { main: d.id, ours: null };
+}
+
+function cardHtml(n, sl) {
+  if (n.pseudo === "nic") {
+    const t = BY_ID.get(n.target);
+    const amt = inEdges(n.target).filter((e) => e.from === n.id).reduce((a, e) => a + e.amount, 0);
+    return `<div class="n-head"><span class="n-type">NIC · not in computer</span></div>
+      <div class="n-dates">Entered on the ${esc(TYPES[t.t].label.toLowerCase())} with no source</div>
+      <div class="n-dates"><b>${money(amt)}</b></div>`;
+  }
+  if (n.pseudo === "chg") {
+    return `<div class="n-head"><span class="n-type">Charges on the bill itself</span></div>
+      ${n.charges.map((c) => `<div class="n-dates">${esc(c.desc)} <b>${money(c.amount)}</b></div>`).join("")}
+      <div class="n-dates">spread over its lines ↓</div>`;
+  }
+  if (n.pseudo === "other") {
+    return `<div class="n-head"><span class="n-type">${esc(n.label)}</span></div>
+      <div class="n-dates"><b>${money(n.amount)}</b> · ${n.count} not in focus</div>
+      <div class="n-dates">focus the ${esc(TYPES[BY_ID.get(n.target).t].label.toLowerCase())} to walk them</div>`;
+  }
+  const T = TYPES[n.t];
+  const id = idFor(n);
+  const inFocus = state.focus.includes(n.id);
+  const flags = sl.edges.filter((e) => e.to === n.id).flatMap((e) => e.flags);
+  let body = `<div class="n-head"><span class="n-type" style="color:${ACCENT[T.role]}">${esc(T.label)}${T.ar ? " · A/R" : ""}</span>
+      ${flags.length ? `<button class="flag" data-flag="${esc(n.id)}" title="${flags.length} line mismatch — click for detail">⚠</button>` : ""}
+      ${sl.hiddenOut.get(n.id) ? `<span class="n-more" title="Led to ${sl.hiddenOut.get(n.id)} more document(s) outside this focus">+${sl.hiddenOut.get(n.id)} ↦</span>` : ""}
+      <button class="ico" data-act="focus" data-id="${esc(n.id)}" title="Put in focus (Shift-click: add to focus)">◎</button>
+      <button class="ico" data-act="peek" data-id="${esc(n.id)}" title="Peek">${EYE}</button></div>
+    <div class="n-id" title="${esc(n.id)}">${esc(id.main)}</div>
+    <div class="n-dates">Doc <b>${fmtD(n.doc)}</b> · Posted <b>${fmtD(n.posted)}</b></div>
+    <div class="n-user">${esc(n.user)} <span class="muted">(created)</span> · ${money(docTotal(n))}</div>`;
+  if (inFocus && n.t === "bill") {
+    const L = landed(n);
+    body += `<div class="n-lines"><table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Line</th>
+      <th class="num">+Chg</th><th class="num">Landed/u</th></tr></thead><tbody>
+      ${L.map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(l.amount)}</td>
+        <td class="num">${money(l.alloc)}</td><td class="num"><b>${money(l.unit)}</b></td></tr>`).join("")}
+      ${n.charges ? `<tr class="foot"><td colspan="5">${n.charges.map((c) => esc(c.desc) + " " + money(c.amount)).join(", ")} by line $ share</td></tr>` : ""}
+      </tbody></table></div>`;
+  } else if (inFocus && n.lines) {
+    body += `<div class="n-lines"><table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>
+      ${n.lines.map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(lineAmt(l))}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  } else if (inFocus && n.refs) {
+    body += `<div class="n-lines"><table><thead><tr><th>Applied to</th><th class="num">Amount</th></tr></thead><tbody>
+      ${n.refs.map((r) => { const b = BY_ID.get(r.bill); return `<tr><td>${esc(idFor(b).main)}</td><td class="num">${money(r.amount)}</td></tr>`; }).join("")}
+      </tbody></table></div>`;
+  }
+  return body;
+}
+
+function ribbonPath(x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2;
+  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+}
+
+function renderFocusBar(el) {
+  el.innerHTML = `<span class="lbl">In focus</span>
+    ${state.focus.map((id) => { const d = BY_ID.get(id); return `<span class="chip" style="border-color:${ACCENT[TYPES[d.t].role]}">${esc(TYPES[d.t].label)} · ${esc(idFor(d).main)}
+      <button data-act="unfocus" data-id="${esc(id)}" title="Take out of focus">×</button></span>`; }).join("")}
+    <span class="dropzone" data-drop>drag a card here to add it</span>
+    <span class="spacer"></span>
+    <span class="field" style="flex-direction:row;align-items:center;gap:8px">Show IDs as
+      <span class="seg"><button data-idmode="theirs" aria-pressed="${state.idMode === "theirs"}">Their number</button><button data-idmode="ours" aria-pressed="${state.idMode === "ours"}">Our number</button></span></span>`;
+}
+
+function renderBowtie() {
+  renderFocusBar($("#focusbar"));
+  const sl = slice();
+  const L = layout(sl);
+  const stage = $("#stage");
+  stage.style.width = L.width + "px";
+  stage.style.height = L.height + "px";
+  $("#colheads").style.width = L.width + "px";
+  $("#colheads").innerHTML = L.cols.map((c) => `<div style="left:${L.colX.get(c)}px">${COL_TITLES[c] || ""}</div>`).join("");
+
+  // Ribbon thickness: one scale for the view, capped so the busiest card's bundle fits inside it.
+  const through = sl.ids.map((id) => Math.max(sl.edges.filter((e) => e.to === id).reduce((t, e) => t + e.amount, 0),
+                                               sl.edges.filter((e) => e.from === id).reduce((t, e) => t + e.amount, 0)));
+  const maxEdge = Math.max(...sl.edges.map((e) => e.amount), 1);
+  const scale = Math.min(30 / maxEdge, (CARD_H - 16) / Math.max(...through, 1));
+  const thick = (e) => Math.max(3, e.amount * scale);
+
+  // Bundles centred on each card: outbound sorted by where they go, inbound by where they come from.
+  const cy = (id) => L.pos.get(id).y + Math.min(L.pos.get(id).h, CARD_H) / 2;
+  const slot = new Map();
+  for (const id of sl.ids) {
+    const outs = sl.edges.filter((e) => e.from === id).sort((a, b) => cy(a.to) - cy(b.to));
+    let y = cy(id) - outs.reduce((t, e) => t + thick(e), 0) / 2;
+    for (const e of outs) { slot.set(e, { ...(slot.get(e) || {}), y1: y + thick(e) / 2 }); y += thick(e); }
+    const ins = sl.edges.filter((e) => e.to === id).sort((a, b) => cy(a.from) - cy(b.from));
+    y = cy(id) - ins.reduce((t, e) => t + thick(e), 0) / 2;
+    for (const e of ins) { slot.set(e, { ...(slot.get(e) || {}), y2: y + thick(e) / 2 }); y += thick(e); }
+  }
+
+  let svg = `<svg width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}">`;
+  let flagsHtml = "";
+  sl.edges.forEach((e, i) => {
+    const a = L.pos.get(e.from), b = L.pos.get(e.to), s = slot.get(e);
+    const x1 = a.x + CARD_W, x2 = b.x;
+    const src = node(e.from);
+    const color = src.pseudo ? "#94a3b8" : ACCENT[docRole(src)];
+    const op = state.focus.length > 1 ? (sl.onPath.has(e) ? 0.6 : 0.13) : 0.42;
+    const d = ribbonPath(x1, s.y1, x2, s.y2);
+    svg += `<path class="rib" data-i="${i}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" stroke="${color}"
+      stroke-width="${thick(e)}" stroke-opacity="${op}" data-op="${op}"/>`;
+    svg += `<path class="rib-hit" data-i="${i}" d="${d}" stroke-width="${Math.max(12, thick(e))}"/>`;
+    const oneGap = Math.abs(x2 - x1 - RIB_W) < 1;
+    if (oneGap) svg += `<text class="rib-label" x="${(x1 + x2) / 2}" y="${(s.y1 + s.y2) / 2 - thick(e) / 2 - 3}" text-anchor="middle">${money(e.amount)}</text>`;
+    if (e.flags.length) flagsHtml += `<button class="flag rib-flag" data-edge="${i}" style="left:${x2 - 16}px;top:${s.y2}px" title="Line mismatch on this link">⚠</button>`;
+  });
+  svg += "</svg>";
+
+  let cards = "";
+  for (const id of sl.ids) {
+    const n = node(id), p = L.pos.get(id);
+    const role = docRole(n);
+    const style = `left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${p.h}px;` +
+      (role ? `background:${WASH[role]};border-left-color:${ACCENT[role]};` : "");
+    cards += `<div class="node${state.focus.includes(id) ? " focus" : ""}${n.pseudo ? " pseudo" : ""}" data-node="${esc(id)}"
+      ${n.pseudo ? "" : 'draggable="true"'} style="${style}">${cardHtml(n, sl)}</div>`;
+  }
+  stage.innerHTML = svg + cards + flagsHtml;
+  stage._edges = sl.edges;
+}
+
+/* ---------------- Gantt ---------------- */
+function renderGantt() {
+  renderFocusBar($("#focusbar-g"));
+  const sl = slice();
+  const L = layout(sl);
+  const rows = sl.ids.filter((id) => BY_ID.has(id))
+    .sort((a, b) => L.pos.get(a).x - L.pos.get(b).x || L.pos.get(a).y - L.pos.get(b).y)
+    .map((id) => BY_ID.get(id));
+  const LABEL_W = 250, ROW = 34, TOP = 34;
+  const d0 = Math.min(...rows.map((r) => dayNum(r.doc))) - 2;
+  const d1 = Math.max(...rows.map((r) => dayNum(r.posted))) + 4;
+  const avail = ($(".gantt-wrap").clientWidth || 1200) - 30 - LABEL_W;
+  const DAY = Math.max(17, Math.floor(avail / (d1 - d0 + 1)));
+  const X = (iso) => LABEL_W + (dayNum(iso) - d0) * DAY + DAY / 2;
+  const W = LABEL_W + (d1 - d0 + 1) * DAY, H = TOP + rows.length * ROW + 10;
+  const rowY = new Map(rows.map((r, i) => [r.id, TOP + i * ROW + ROW / 2]));
+  let s = "";
+  for (let d = d0; d <= d1; d++) {
+    const dow = new Date(d * 86400000).getUTCDay();
+    const x = LABEL_W + (d - d0) * DAY;
+    if (dow === 0 || dow === 6) s += `<rect x="${x}" y="${TOP - 6}" width="${DAY}" height="${H - TOP}" fill="#f4f6f8"/>`;
+    if (dow === 1) s += `<line x1="${x}" x2="${x}" y1="${TOP - 6}" y2="${H}" stroke="#e2e8f0"/><text class="g-tick" x="${x + 2}" y="${TOP - 12}">${fmtDay(d)}</text>`;
+  }
+  const todayX = X(AS_OF);
+  if (dayNum(AS_OF) <= d1) s += `<line x1="${todayX}" x2="${todayX}" y1="${TOP - 6}" y2="${H}" stroke="#1f2d3d" stroke-dasharray="2 3"/>`;
+  // Hand-offs first, so bars draw over them.
+  for (const e of sl.edges) {
+    if (!rowY.has(e.from) || !rowY.has(e.to)) continue;
+    const a = BY_ID.get(e.from), b = BY_ID.get(e.to);
+    s += `<path d="M ${X(a.posted)} ${rowY.get(a.id)} H ${X(b.doc)} V ${rowY.get(b.id)}" fill="none" stroke="#94a3b8" stroke-dasharray="3 3"/>`;
+  }
+  rows.forEach((r, i) => {
+    const y = rowY.get(r.id), role = TYPES[r.t].role;
+    const xa = X(r.doc), xb = X(r.posted), lag = dayNum(r.posted) - dayNum(r.doc);
+    const flagged = inEdges(r.id).some((e) => e.flags.length);
+    s += `<g class="g-row" data-row="${esc(r.id)}">
+      <rect class="g-hover" x="0" y="${y - ROW / 2}" width="${W}" height="${ROW}" fill="transparent"/>
+      <text class="g-label" x="8" y="${y - 1}" font-weight="${state.focus.includes(r.id) ? 700 : 400}">${esc(idFor(r).main)}${flagged ? " ⚠" : ""}</text>
+      <text class="g-sub" x="8" y="${y + 11}">${esc(TYPES[r.t].label)} · ${esc(r.user)}</text>
+      ${lag > 0 ? `<rect x="${xa}" y="${y - 6}" width="${xb - xa}" height="12" rx="4" fill="${WASH[role]}" stroke="${ACCENT[role]}"/>` : ""}
+      <circle cx="${xa}" cy="${y}" r="4.5" fill="#fff" stroke="#1f2d3d" stroke-width="2"/>
+      <path d="M ${xb} ${y - 5.5} L ${xb + 5.5} ${y} L ${xb} ${y + 5.5} L ${xb - 5.5} ${y} Z" fill="#1f2d3d"/>
+      <text class="g-lag" x="${Math.max(xa, xb) + 9}" y="${y - 7}">${lag > 0 ? `+${lag} d` : "same day"}</text>
+    </g>`;
+  });
+  const g = $("#gantt");
+  g.setAttribute("width", W); g.setAttribute("height", H); g.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  g.innerHTML = s;
+}
+
+/* ---------------- statement ---------------- */
+function renderStatement() {
+  $("#st-vendor").textContent = VENDOR;
+  $("#st-asof").textContent = fmtD(AS_OF) + ", 2026";
+  const mine = DOCS.filter((d) => d.party === VENDOR);
+  const acts = (d) => `<span class="acts"><button class="ico" data-act="bowtie" data-id="${esc(d.id)}" title="Bowtie">⋈</button>
+    <button class="ico" data-act="gantt" data-id="${esc(d.id)}" title="Gantt">▤</button>
+    <button class="ico" data-act="peek" data-id="${esc(d.id)}" title="Peek">${EYE}</button></span>`;
+  const dot = (d) => `<span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>`;
+
+  const open = mine.filter((d) => d.openNote).sort((a, b) => a.doc.localeCompare(b.doc));
+  $("#st-open").innerHTML = `<thead><tr><th>Date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>What's open</th>
+    <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>
+    ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td class="${d.ref ? "" : "muted"}">${esc(d.ref || "—")}</td>
+      <td>${esc(d.id)}</td><td>${esc(d.openNote)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td><td>${acts(d)}</td></tr>`).join("")}
+    </tbody>`;
+
+  const asOf = dayNum(AS_OF);
+  const band = (d) => { const age = asOf - dayNum(d.doc); return age <= 30 ? 0 : age <= 60 ? 1 : 2; };
+  const recent = mine.filter((d) => (d.t === "bill" || d.t === "cm" || d.t === "pay") && asOf - dayNum(d.doc) <= 90)
+    .sort((a, b) => b.doc.localeCompare(a.doc));
+  let prev = 0, openTotal = 0;
+  const rowsHtml = recent.map((d) => {
+    const b = band(d);
+    const cross = b !== prev; prev = b;
+    const isPay = d.t === "pay";
+    const amt = isPay ? -docTotal(d) : docTotal(d);
+    const openAmt = d.open || 0;
+    openTotal += openAmt;
+    const status = isPay ? `applied to ${d.refs.length} bills` : openAmt ? (openAmt < 0 ? "unapplied credit" : "open") :
+      "paid · " + (DOCS.find((p) => p.refs && p.refs.some((r) => r.bill === d.id)) || {}).ref;
+    return `<tr class="${cross ? "cross" : ""}"><td>${fmtD(d.doc)}${cross ? `<span class="age-tag">${b === 1 ? "30+ days" : "60+ days"}</span>` : ""}</td>
+      <td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td><td class="${openAmt ? "" : "muted"}">${esc(status)}</td>
+      <td class="num">${money(amt)}</td><td class="num">${openAmt ? money(openAmt) : ""}</td><td>${acts(d)}</td></tr>`;
+  }).join("");
+  $("#st-recent").innerHTML = `<thead><tr><th>Vendor's date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>Status</th>
+    <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>
+    <tfoot><tr><td colspan="6">Open on the bills and credits above — what the vendor's statement should show</td>
+    <td class="num">${money(openTotal)}</td><td></td></tr></tfoot>`;
+}
+
+/* ---------------- peek ---------------- */
+function openPeek(id) {
+  const d = BY_ID.get(id);
+  const T = TYPES[d.t];
+  const up = inEdges(id).map((e) => node(e.from)), down = outEdges(id).map((e) => node(e.to));
+  const name = (n) => (n.pseudo === "nic" ? "NIC (no source)" : n.pseudo === "chg" ? "Charges on this bill" : `${TYPES[n.t].label} ${n.id}`);
+  const lines = d.t === "bill" ? landed(d) : null;
+  $("#peek").innerHTML = `<button class="ico" style="float:right" data-act="close-peek">×</button>
+    <div style="color:${ACCENT[T.role]};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px">${esc(T.label)} · submitted · peek</div>
+    <h2>${esc(d.id)}</h2>
+    <dl><dt>${T.ar ? "Customer" : "Vendor"}</dt><dd>${esc(d.party)}</dd>
+      <dt>Their number</dt><dd>${esc(d.ref || "—")}</dd>
+      <dt>Doc date</dt><dd>${fmtD(d.doc)}</dd><dt>Posted</dt><dd>${fmtD(d.posted)}</dd>
+      <dt>Created by</dt><dd>${esc(d.user)} <span class="muted">— submitter assumed the same</span></dd>
+      <dt>Total</dt><dd><b>${money(docTotal(d))}</b></dd></dl>
+    ${d.lines ? `<table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th>${lines ? '<th class="num">Landed/u</th>' : ""}</tr></thead><tbody>
+      ${(lines || d.lines).map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(lineAmt(l))}</td>${lines ? `<td class="num">${money(l.unit)}</td>` : ""}</tr>`).join("")}</tbody></table>` : ""}
+    ${d.refs ? `<table><thead><tr><th>Applied to</th><th class="num">Amount</th></tr></thead><tbody>${d.refs.map((r) => `<tr><td>${esc(r.bill)}</td><td class="num">${money(r.amount)}</td></tr>`).join("")}</tbody></table>` : ""}
+    <p style="font-size:12px;color:#64748b;margin-top:14px"><b>Came from:</b> ${up.length ? up.map(name).map(esc).join(", ") : "nothing"}<br>
+      <b>Led to:</b> ${down.length ? down.map(name).map(esc).join(", ") : "nothing yet"}</p>
+    <p style="font-size:12px;color:#94a3b8">In the shell this is the existing peek drawer; "Open" would go through the one nav door.</p>`;
+  $("#peek").hidden = false;
+}
+
+/* ---------------- wiring ---------------- */
+function render() {
+  document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
+  for (const t of ["statement", "bowtie", "gantt", "notes"]) $("#p-" + t).hidden = state.tab !== t;
+  closePop();
+  if (state.tab === "statement") renderStatement();
+  if (state.tab === "bowtie") renderBowtie();
+  if (state.tab === "gantt") renderGantt();
+}
+function setFocus(id, add) {
+  if (add) { if (!state.focus.includes(id)) state.focus.push(id); }
+  else state.focus = [id];
+  render();
+}
+
+let pop = null;
+function closePop() { if (pop) { pop.remove(); pop = null; } }
+function showPop(anchor, html) {
+  closePop();
+  const stage = $("#stage");
+  const a = anchor.getBoundingClientRect(), s = stage.getBoundingClientRect();
+  pop = document.createElement("div");
+  pop.className = "pop";
+  pop.innerHTML = html;
+  pop.style.left = Math.max(0, a.left - s.left - 150) + "px";
+  pop.style.top = a.bottom - s.top + 6 + "px";
+  stage.appendChild(pop);
+}
+
+const tip = $("#tip");
+function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; }
+
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("button");
+  if (!t) { if (!ev.target.closest(".pop")) closePop(); return; }
+  if (t.dataset.tab) { state.tab = t.dataset.tab; render(); return; }
+  if (t.dataset.idmode) { state.idMode = t.dataset.idmode; render(); return; }
+  const id = t.dataset.id;
+  switch (t.dataset.act) {
+    case "focus": setFocus(id, ev.shiftKey); return;
+    case "unfocus": if (state.focus.length > 1) { state.focus = state.focus.filter((x) => x !== id); render(); } return;
+    case "peek": openPeek(id); return;
+    case "close-peek": $("#peek").hidden = true; return;
+    case "bowtie": state.tab = "bowtie"; setFocus(id, false); return;
+    case "gantt": state.tab = "gantt"; setFocus(id, false); return;
+  }
+  const edges = $("#stage")._edges || [];
+  if (t.dataset.edge != null) { showPop(t, edges[+t.dataset.edge].flags.join("<br><br>")); return; }
+  if (t.dataset.flag) { showPop(t, edges.filter((e) => e.to === t.dataset.flag).flatMap((e) => e.flags).join("<br><br>")); }
+});
+
+// Hovering a card lights its ribbons; hovering a ribbon says what it carries.
+const stageEl = $("#stage");
+stageEl.addEventListener("mouseover", (ev) => {
+  const card = ev.target.closest(".node");
+  if (card) {
+    const id = card.dataset.node;
+    stageEl.querySelectorAll(".rib").forEach((p) => {
+      p.style.strokeOpacity = p.dataset.from === id || p.dataset.to === id ? 0.8 : Math.min(+p.dataset.op, 0.13);
+    });
+  }
+  const hit = ev.target.closest(".rib-hit");
+  if (hit) {
+    const e = stageEl._edges[+hit.dataset.i];
+    const f = node(e.from), to = node(e.to);
+    const nm = (n) => (n.pseudo ? (n.label || (n.pseudo === "nic" ? "NIC" : "Charges")) : idFor(n).main);
+    const ls = e.lines.map((l) => `${l.qty} × ${esc(l.item)} @ ${money(l.rate)}`).join("<br>");
+    showTip(ev, `<b>${esc(nm(f))} → ${esc(nm(to))}</b><br>${money(e.amount)}${ls ? "<br>" + ls : ""}${e.flags.length ? "<br>⚠ line mismatch — click the marker" : ""}`);
+  }
+});
+stageEl.addEventListener("mousemove", (ev) => { if (!tip.hidden) { tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; } });
+stageEl.addEventListener("mouseout", (ev) => {
+  if (ev.target.closest(".node")) stageEl.querySelectorAll(".rib").forEach((p) => { p.style.strokeOpacity = p.dataset.op; });
+  if (ev.target.closest(".rib-hit")) tip.hidden = true;
+});
+$("#gantt").addEventListener("mousemove", (ev) => {
+  const g = ev.target.closest(".g-row");
+  if (!g) { tip.hidden = true; return; }
+  const d = BY_ID.get(g.dataset.row), lag = dayNum(d.posted) - dayNum(d.doc);
+  showTip(ev, `<b>${esc(TYPES[d.t].label)} ${esc(d.id)}</b>${d.ref ? " · " + esc(d.ref) : ""}<br>Doc ${fmtD(d.doc)} · Posted ${fmtD(d.posted)} (${lag ? "+" + lag + " days" : "same day"})<br>${esc(d.user)} · ${money(docTotal(d))}`);
+});
+$("#gantt").addEventListener("mouseleave", () => { tip.hidden = true; });
+
+// Drag a card onto the focus bar to add it to focus.
+document.addEventListener("dragstart", (ev) => { const c = ev.target.closest(".node[draggable]"); if (c) ev.dataTransfer.setData("text/plain", c.dataset.node); });
+document.addEventListener("dragover", (ev) => { const z = ev.target.closest("[data-drop]"); if (z) { ev.preventDefault(); z.classList.add("over"); } });
+document.addEventListener("dragleave", (ev) => { const z = ev.target.closest("[data-drop]"); if (z) z.classList.remove("over"); });
+document.addEventListener("drop", (ev) => {
+  const z = ev.target.closest("[data-drop]");
+  if (!z) return;
+  ev.preventDefault();
+  const id = ev.dataTransfer.getData("text/plain");
+  if (BY_ID.has(id)) setFocus(id, true);
+});
+
+render();
+</script>
+</body>
+</html>
