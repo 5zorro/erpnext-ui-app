@@ -5,7 +5,15 @@ import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, clipboard 
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { pingHealth } from "../src/health.js";
+import { loginRouteFor, pingHealth, probeLogin } from "../src/health.js";
+import {
+  PRUNE_BATCH_MAX,
+  existenceQueryPath,
+  missingFromResponse,
+  pruneVanished,
+  recordsToVerify,
+  vanishedKey,
+} from "../src/nav-prune.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
 import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
@@ -333,6 +341,8 @@ let healthTimer = null;
 let routePollTimer = null;
 /** @type {"ok"|"bad"|"unknown"} */
 let lastHealth = "unknown";
+/** The ERP view's login, as the server sees it (health.js probeLogin) — not the cookie. */
+let lastLogin = { state: "unknown", user: null };
 /** @type {import("../src/history.js").HistoryEntry[]} */
 let history = [];
 /** @type {Record<string, string>} */
@@ -931,6 +941,88 @@ function syncE2eApi() {
   if (win && !win.isDestroyed()) {
     win.setTitle(`erpnext-ui-app [health=${lastHealth}]`);
   }
+}
+
+function sendLoginState() {
+  if (chrome && !chrome.webContents.isDestroyed()) {
+    chrome.webContents.send("login-state", lastLogin);
+  }
+}
+
+/**
+ * Ask the server whether the ERP view is logged in, and tell the toolbar. Only while the DB is
+ * reachable: when it is down, a Log in button would send the clerk after the wrong problem.
+ * @param {string} [why]
+ */
+async function tickLogin(why = "tick") {
+  const r =
+    lastHealth === "ok"
+      ? await probeLogin({ erpBase: ERP_BASE, fetchImpl: erpSessionFetchImpl() })
+      : { state: "unknown", user: null, code: null, expired: false };
+  if (r.state !== lastLogin.state || r.user !== lastLogin.user) {
+    navDebug(
+      "login-state",
+      `${lastLogin.state} -> ${r.state} user=${r.user || "-"} code=${r.code ?? "-"} expired=${r.expired ? 1 : 0} via=${why}`,
+    );
+  }
+  const becameIn = r.state === "in" && lastLogin.state !== "in";
+  lastLogin = { state: r.state, user: r.user };
+  sendLoginState();
+  // Every fresh login (and the first tick after launch) re-checks the rail against ERP: a
+  // reinstalled site, or a draft deleted elsewhere, otherwise stays in Recent forever.
+  if (becameIn) pruneVanishedNavEntries(why).catch((e) => navDebug("nav-prune", `failed: ${e && e.message}`));
+}
+
+/**
+ * Ask ERP which Recent / Drafts / Submitted documents still exist and drop the rest.
+ * nav-prune.js decides; only a clear 200 answer drops a row (a 403 on a doctype keeps it).
+ * @param {string} why
+ */
+async function pruneVanishedNavEntries(why) {
+  const fetchImpl = erpSessionFetchImpl();
+  if (!fetchImpl) return;
+  const byDoctype = recordsToVerify([history, shelvedDrafts, submittedDocs], ERP_BASE);
+  const vanished = new Set();
+  let asked = 0;
+  let unclear = 0;
+  for (const [doctypeKey, names] of byDoctype) {
+    for (let i = 0; i < names.length; i += PRUNE_BATCH_MAX) {
+      const batch = names.slice(i, i + PRUNE_BATCH_MAX);
+      asked += batch.length;
+      let status = null;
+      let body = null;
+      try {
+        const res = await fetchImpl(`${ERP_BASE}${existenceQueryPath(doctypeKey, batch)}`, { method: "GET" });
+        status = res.status;
+        body = await res.json().catch(() => null);
+      } catch {
+        /* unclear: keep */
+      }
+      const missing = missingFromResponse(batch, status, body);
+      if (!missing) {
+        unclear += batch.length;
+        continue;
+      }
+      for (const n of missing) vanished.add(vanishedKey(doctypeKey, n));
+    }
+  }
+  if (!vanished.size) {
+    navDebug("nav-prune", `via=${why} asked=${asked} unclear=${unclear} dropped=0`);
+    return;
+  }
+  const h = pruneVanished(history, vanished, ERP_BASE);
+  const d = pruneVanished(shelvedDrafts, vanished, ERP_BASE);
+  const sd = pruneVanished(submittedDocs, vanished, ERP_BASE);
+  history = h.kept;
+  shelvedDrafts = d.kept;
+  submittedDocs = sd.kept;
+  navDebug(
+    "nav-prune",
+    `via=${why} asked=${asked} unclear=${unclear} dropped recent=${h.dropped.length} drafts=${d.dropped.length} submitted=${sd.dropped.length}: ` +
+      [...vanished].map((k) => k.replace("\u0000", "/")).join(", "),
+  );
+  saveNavState();
+  sendHistory();
 }
 
 function sendHealth(status) {
@@ -6248,6 +6340,7 @@ async function tickHealth() {
     latencyMs: result.latencyMs,
   });
   sendHealth(result.status);
+  tickLogin().catch(() => {});
 }
 
 function diagnoseSnapshot() {
@@ -6401,6 +6494,8 @@ function createWindow() {
   });
   erp.webContents.on("did-navigate", (_e, url) => {
     trackNav(url, { fromBrowser: true });
+    // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
+    tickLogin("navigate").catch(() => {});
     ensureErpFormBridge().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
   });
@@ -9544,6 +9639,13 @@ ipcMain.handle("soft-peek-route", async (_e, route) => {
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
   }
+});
+ipcMain.on("open-login", () => {
+  // Back to the Vanilla page the clerk was on after logging in; a shell page has no ERP twin.
+  const from = currentErpPathname();
+  const { path, search } = loginRouteFor(from);
+  navDebug("open-login", `surface=${surfaceMode} erp=${from || "-"} login=${lastLogin.state} -> ${path}?${search}`);
+  showErp(path, { forceLoad: true, search });
 });
 ipcMain.on("open-vanilla-skin", () => {
   // Strip the skin now rather than trusting the reload below to erase it.
