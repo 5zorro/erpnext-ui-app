@@ -1033,8 +1033,16 @@ function renderBowtie() {
       ${n.pseudo ? "" : 'draggable="true"'} style="${style}${role ? `--acc:${ACCENT[role]};` : ""}">${cardHtml(sl, id)}</div>`;
   }
   stage.innerHTML = svg + cards + flagsHtml;
-  stage.style.height = L.height + channelUsed + 14 + "px";
-  stage.querySelector("svg").setAttribute("height", L.height + channelUsed + 14);
+  // The drawing grows for any channels under the cards. Its coordinate box (viewBox) must grow with
+  // it: with only the height changed, the browser centred the old box in the new space and painted
+  // every ribbon 7-12px below its row (5zorro 2026-09-29, from a screenshot -- the path numbers were
+  // right, the painted pixels were not).
+  const H = L.height + channelUsed + 14;
+  stage.style.height = H + "px";
+  const svgEl = stage.querySelector("svg");
+  svgEl.setAttribute("height", H);
+  svgEl.setAttribute("viewBox", `0 0 ${L.width} ${H}`);
+  svgEl.setAttribute("preserveAspectRatio", "xMinYMin meet");
   stage._sl = sl;
   checkGeometry(L);
 }
@@ -1056,8 +1064,8 @@ function checkGeometry(L) {
   stage.dataset.drift = worst.toFixed(2);
   if (worst > 0.5) console.warn(`bowtie geometry: row ${where} is ${worst.toFixed(2)}px off its ribbon anchor`);
 
-  // And every ribbon's two ends, read back from the path it actually drew, against the centre of the
-  // row (or card) it belongs to, measured in the DOM. No exemptions: an exemption is how the payment's
+  // And every ribbon's two ends, as painted, against the centre of the row (or card) it belongs to,
+  // measured in the DOM. No exemptions: an exemption is how the payment's
   // strands sat 1.5px off their rows while this reported 0.00.
   const sl = stage._sl;
   const mid = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 - top; };
@@ -1068,11 +1076,13 @@ function checkGeometry(L) {
   };
   let endWorst = 0, endWhere = "";
   const note = (off, where) => { if (off > endWorst) { endWorst = off; endWhere = where; } };
+  // Where each end is actually painted on screen -- not the numbers written into the path, which
+  // were right while the painted ribbon sat 12px low.
+  const painted = (el, atEnd) => el.getPointAtLength(atEnd ? el.getTotalLength() : 0).matrixTransform(el.getScreenCTM()).y - top;
   stage.querySelectorAll("path.rib-hit").forEach((el) => {
     const r = sl.ribs[+el.dataset.i];
-    const n = el.getAttribute("d").match(/-?\d+(?:\.\d+)?/g).map(Number);
-    note(Math.abs(n[1] - centre(r.from, r.fromRow)), `start of ${r.from} → ${r.to}`);
-    note(Math.abs(n[n.length - 1] - centre(r.to, r.toRow)), `end of ${r.from} → ${r.to}`);
+    note(Math.abs(painted(el, false) - centre(r.from, r.fromRow)), `start of ${r.from} → ${r.to}`);
+    note(Math.abs(painted(el, true) - centre(r.to, r.toRow)), `end of ${r.from} → ${r.to}`);
   });
   stage.dataset.endDrift = endWorst.toFixed(2);
   if (endWorst > 0.5) console.warn(`bowtie geometry: ${endWhere} is ${endWorst.toFixed(2)}px off centre`);
