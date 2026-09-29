@@ -101,8 +101,12 @@
   .rib-label { font-size: 10px; font-variant-numeric: tabular-nums; fill: var(--muted);
                paint-order: stroke; stroke: var(--canvas); stroke-width: 3px; }
   .node { position: absolute; border: 1px solid var(--edge); border-left-width: 4px; border-radius: 8px;
-          padding: 5px 8px 6px 9px; overflow: hidden; background: var(--paper); }
+          padding: 5px 8px 6px 11px; overflow: hidden; background: var(--paper); }
   .node.focus { box-shadow: 0 0 0 2px var(--ink); }
+  /* The A/R desk hatch (doc-wash.css --hatch-desk), but only in a strip with no text on it:
+     over text it made the card harder to read (5zorro 2026-09-29). */
+  .node.ar::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 7px; pointer-events: none;
+    background: repeating-linear-gradient(-32deg, transparent 0 3px, color-mix(in srgb, var(--acc) 45%, transparent) 3px 5px); }
   .node.pseudo { border-style: dashed; border-left-width: 1px; background: #fbfcfd; color: var(--muted); }
   .n-head { display: flex; align-items: center; gap: 4px; height: 20px; }
   .n-type { font-size: 10px; text-transform: uppercase; letter-spacing: .2px; font-weight: 700; flex: 1;
@@ -116,7 +120,7 @@
             background: var(--paper); white-space: nowrap; }
   /* The item table is positioned, not flowed: its row centres are what the ribbons are drawn to,
      so its top and row pitch are constants shared with the script (TABLE_TOP, TH_H, ROW_H). */
-  .n-lines { position: absolute; left: 6px; right: 5px; top: 80px; }
+  .n-lines { position: absolute; left: 8px; right: 5px; top: 80px; }
   .n-lines table { table-layout: fixed; border-collapse: collapse; }
   .n-lines th, .n-lines td { padding: 0 3px; height: 16px; line-height: 16px; border: none; font-size: 10.5px;
                              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -812,7 +816,7 @@ function cardHtml(sl, id) {
     <div class="n-user">${esc(n.user)} <span class="muted">(created)</span>${n.t === "cm" ? ` · against ${esc(idFor(BY_ID.get(n.lines[0].from)))}` : ""}</div>`;
   const four = n.t === "bill" || n.t === "si";
   const cols = n.refs ? '<col style="width:66%"><col>' : four ? '<col style="width:36%"><col style="width:9%"><col style="width:28%"><col>' : '<col style="width:58%"><col style="width:12%"><col>';
-  const extra = n.t === "bill" ? "<th class=num title='(line + its share of the charges) ÷ qty'>Landed/u</th>"
+  const extra = n.t === "bill" ? "<th class=num title='line + its share of the charges (hover a value for per unit)'>Landed</th>"
     : n.t === "si" ? "<th class=num title='price − landed cost of what was bought for this line'>Margin</th>" : "";
   const head = n.refs ? "<th>Applied to</th><th class=num>Amount</th>" : `<th>Item</th><th class=num>Qty</th><th class=num>Amount</th>${extra}`;
   const tr = rows.map((r, k) => {
@@ -821,7 +825,7 @@ function cardHtml(sl, id) {
     if (r.kind === "other") return `<tr ${key} class=sum><td>${esc(r.count)} other bill${r.count > 1 ? "s" : ""}</td><td class=num>${money(r.amount)}</td></tr>`;
     if (r.kind === "charges") return `<tr ${key} class=sum><td colspan=2>+ charges</td><td class=num>${money(r.amount)}</td>${four ? "<td></td>" : ""}</tr>`;
     if (r.kind === "total") return `<tr ${key} class=tot><td colspan=2>Total</td><td class=num>${money(r.amount)}</td>${four ? "<td></td>" : ""}</tr>`;
-    const tail = n.t === "bill" ? `<td class=num><b>${money(r.unit)}</b></td>`
+    const tail = n.t === "bill" ? `<td class=num title="${esc(money(r.unit))} per unit"><b>${money(r2(r.amount + r.alloc))}</b></td>`
       : n.t === "si" ? `<td class=num style="color:#00795c"><b>${r.margin ? money(r.margin.margin) : "—"}</b></td>` : "";
     const tip = `${r.item} · ${r.qty} × ${money(r.rate)}${n.t === "bill" ? ` + ${money(r.alloc)} charges` : ""}${n.t === "si" && r.margin ? ` · landed cost ${money(r.margin.cost)}` : ""}`;
     return `<tr ${key}${r.flag ? " class=flagged" : ""} title="${esc(tip)}">
@@ -898,10 +902,10 @@ function renderBowtie() {
     let d, mx, my;
     if (r._k === "left") {
       // The SO -> PO branch: leaves the Sales Order's left side, climbs in the gap, enters the PO's left side.
-      const gx = Math.min(a.x, b.x) - 12 - branchUsed; branchUsed += thick(r) + 3;
-      const R = Math.min(14, Math.abs(s.y1 - s.y2) / 2), dir = s.y2 < s.y1 ? -1 : 1;
-      d = `M ${a.x} ${s.y1} C ${gx} ${s.y1}, ${gx} ${s.y1}, ${gx} ${s.y1 + dir * R} L ${gx} ${s.y2 - dir * R} C ${gx} ${s.y2}, ${gx} ${s.y2}, ${b.x} ${s.y2}`;
-      mx = gx; my = (s.y1 + s.y2) / 2;
+      // One smooth bow out into the gap and back, rather than a bracket with straight verticals.
+      const D = Math.min(RIB_W + GUTTER - 8, 40 + Math.abs(s.y1 - s.y2) / 6) + branchUsed; branchUsed += thick(r) + 2;
+      d = `M ${a.x} ${s.y1} C ${a.x - D} ${s.y1}, ${b.x - D} ${s.y2}, ${b.x} ${s.y2}`;
+      mx = Math.min(a.x, b.x) - D * 0.75; my = (s.y1 + s.y2) / 2;
     } else {
       const x1 = a.x + CARD_W, x2 = b.x;
       d = ribbonPath(x1, s.y1, x2, s.y2);
@@ -933,8 +937,9 @@ function renderBowtie() {
     const role = docRole(n);
     const style = `left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${p.h}px;` +
       (role ? `background:${WASH[role]};border-left-color:${ACCENT[role]};` : "");
-    cards += `<div class="node${state.focus.includes(id) ? " focus" : ""}${n.pseudo ? " pseudo" : ""}" data-node="${esc(id)}"
-      ${n.pseudo ? "" : 'draggable="true"'} style="${style}">${cardHtml(sl, id)}</div>`;
+    const ar = !n.pseudo && TYPES[n.t].ar;
+    cards += `<div class="node${state.focus.includes(id) ? " focus" : ""}${n.pseudo ? " pseudo" : ""}${ar ? " ar" : ""}" data-node="${esc(id)}"
+      ${n.pseudo ? "" : 'draggable="true"'} style="${style}${role ? `--acc:${ACCENT[role]};` : ""}">${cardHtml(sl, id)}</div>`;
   }
   stage.innerHTML = svg + cards + flagsHtml;
   stage.style.height = L.height + channelUsed + 14 + "px";
@@ -1129,8 +1134,8 @@ function openPeek(id) {
       <dt>Doc date</dt><dd>${fmtD(d.doc)}</dd><dt>Posted</dt><dd>${fmtD(d.posted)}</dd>
       <dt>Created by</dt><dd>${esc(d.user)} <span class="muted">— submitter assumed the same</span></dd>
       <dt>Total</dt><dd><b>${money(docTotal(d))}</b></dd></dl>
-    ${d.lines ? `<table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th>${lines ? '<th class="num">Landed/u</th>' : ""}</tr></thead><tbody>
-      ${(lines || d.lines).map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(lineAmt(l))}</td>${lines ? `<td class="num">${money(l.unit)}</td>` : ""}</tr>`).join("")}</tbody></table>` : ""}
+    ${d.lines ? `<table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th>${lines ? '<th class="num">Landed</th><th class="num">per unit</th>' : ""}</tr></thead><tbody>
+      ${(lines || d.lines).map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(lineAmt(l))}</td>${lines ? `<td class="num">${money(r2(l.amount + l.alloc))}</td><td class="num">${money(l.unit)}</td>` : ""}</tr>`).join("")}</tbody></table>` : ""}
     ${d.refs ? `<table><thead><tr><th>Applied to</th><th class="num">Amount</th></tr></thead><tbody>${d.refs.map((r) => `<tr><td>${esc(r.bill)}</td><td class="num">${money(r.amount)}</td></tr>`).join("")}</tbody></table>` : ""}
     <p style="font-size:12px;color:#64748b;margin-top:14px"><b>Came from:</b> ${up.length ? up.map(name).map(esc).join(", ") : "nothing"}<br>
       <b>Led to:</b> ${down.length ? down.map(name).map(esc).join(", ") : "nothing yet"}</p>
@@ -1211,13 +1216,14 @@ stageEl.addEventListener("mouseover", (ev) => {
     const r = sl.ribs[+hit.dataset.i];
     const nm = (id) => { const n = nodeOf(sl, id); return n.pseudo ? (n.label || (n.pseudo === "nic" ? "NIC" : "Charges")) : idFor(n); };
     const ls = (r.lines || []).map((l) => `${l.qty} × ${esc(l.item)} @ ${money(l.rate)}`).join("<br>");
+    traceRow(rk(r.to, r.toRow));
     showTip(ev, `<b>${esc(nm(r.from))} → ${esc(nm(r.to))}</b><br>${money(r.amount)}${r.note ? " · " + r.note : ""}${ls ? "<br>" + ls : ""}${r.flag ? "<br>⚠ line mismatch — click the marker" : ""}`);
   }
 });
 stageEl.addEventListener("mousemove", (ev) => { if (!tip.hidden) { tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; } });
 stageEl.addEventListener("mouseout", (ev) => {
   if (ev.target.closest("tr[data-rk]")) untrace();
-  if (ev.target.closest(".rib-hit")) tip.hidden = true;
+  if (ev.target.closest(".rib-hit")) { tip.hidden = true; untrace(); }
 });
 $("#gantt").addEventListener("mousemove", (ev) => {
   const g = ev.target.closest(".g-row");
