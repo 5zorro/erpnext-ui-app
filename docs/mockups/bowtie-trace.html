@@ -113,10 +113,18 @@
   .n-dates b { color: var(--ink); font-weight: 600; }
   .n-more { font-size: 10px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px;
             background: var(--paper); white-space: nowrap; }
-  .n-lines { margin-top: 6px; border-top: 1px solid var(--edge); font-size: 11px; }
-  .n-lines table td, .n-lines table th { padding: 0 3px; height: 18px; border: none; font-size: 10.5px; }
-  .n-lines table th { font-size: 9px; height: 20px; }
-  .n-lines tr.foot td { color: var(--muted); font-style: italic; }
+  /* The item table is positioned, not flowed: its row centres are what the ribbons are drawn to,
+     so its top and row pitch are constants shared with the script (TABLE_TOP, TH_H, ROW_H). */
+  .n-lines { position: absolute; left: 6px; right: 5px; top: 80px; }
+  .n-lines table { table-layout: fixed; border-collapse: collapse; }
+  .n-lines th, .n-lines td { padding: 0 3px; height: 16px; line-height: 16px; border: none; font-size: 10.5px;
+                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .n-lines th { font-size: 9px; color: var(--muted); border-bottom: 1px solid var(--edge); line-height: 15px; }
+  .n-lines tr[data-rk] { cursor: crosshair; }
+  .n-lines tr.lit td { background: rgba(31, 45, 61, .08); }
+  .n-lines tr.sum td { color: var(--muted); font-style: italic; }
+  .n-lines tr.tot td { font-weight: 700; }
+  .n-lines tr.flagged td:first-child { color: var(--warn); font-weight: 700; }
   .flag { border: 1px solid #f59e0b; background: var(--warn-bg); color: var(--warn); border-radius: 5px;
           font-size: 10px; font-weight: 700; padding: 1px 5px; cursor: pointer; line-height: 14px; }
   .rib-flag { position: absolute; transform: translate(-50%, -50%); z-index: 3; }
@@ -147,6 +155,14 @@
   .tip { position: fixed; z-index: 50; pointer-events: none; background: #1f2d3d; color: #fff; font-size: 12px;
          padding: 7px 9px; border-radius: 6px; line-height: 1.45; max-width: 320px; }
   .tip[hidden] { display: none; }
+  /* Quick filters: the Find page's own chip row, one chip per kind of document (multi-select). */
+  .qf { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 10px 14px 0; }
+  .qf .qf-lbl { font-size: 11px; color: var(--muted); margin-right: 4px; }
+  .qf button { border: 1px solid var(--edge); background: var(--paper); border-radius: 999px; padding: 4px 11px;
+               font: inherit; font-size: 12px; cursor: pointer; color: var(--ink); display: inline-flex; gap: 6px;
+               align-items: center; }
+  .qf button[aria-pressed="true"] { background: #1f2d3d; border-color: #1f2d3d; color: #fff; }
+  .qf .sep { width: 1px; height: 18px; background: var(--edge); margin: 0 4px; }
   .notes li { margin-bottom: 7px; line-height: 1.55; }
   .notes { padding: 4px 18px 10px 32px; margin: 0; max-width: 100ch; }
 </style>
@@ -171,23 +187,21 @@
   <section class="panel" id="p-statement">
     <div class="sheet">
       <div class="sheet-head">
-        <span class="title">Find Bills</span>
+        <span class="title" id="st-title">Find Bills</span>
         <span class="field">Vendor<span class="val" id="st-vendor"></span></span>
         <span class="field">As of<span class="val" style="min-width:110px" id="st-asof"></span></span>
         <span class="spacer"></span>
-        <span class="seg"><button aria-pressed="false">List</button><button aria-pressed="true">Statement</button></span>
+        <button class="ico" data-act="statement-preset" title="What the Home screen's Vendor statement link would open">⌂ Vendor statement</button>
       </div>
-      <div class="why"><b>Statement mode</b> answers "does my side match the vendor's statement?" First, everything
-        that has not been matched yet. Then 90 days of activity, newest first, aged by the <b>vendor's own date</b>
-        (a bill by its vendor invoice date, a payment by the check date). A heavy rule marks the first row past
-        30 days and the first past 60. ⋈ opens the bowtie with that row in focus, ▤ the Gantt, the eye a peek.</div>
+      <div class="qf" id="st-quick"></div>
+      <div class="why" id="st-why"></div>
     </div>
-    <div class="sheet">
+    <div class="sheet" id="st-open-sheet">
       <div class="sheet-head"><span class="title">Open — not matched yet</span>
         <span class="sub">orders not fully received or billed · receipts with no bill</span></div>
       <table id="st-open"></table>
     </div>
-    <div class="sheet">
+    <div class="sheet" id="st-recent-sheet">
       <div class="sheet-head"><span class="title">Last 90 days</span>
         <span class="sub">by the vendor's date · heavy rule = crossing into 30+ and 60+ days</span></div>
       <table id="st-recent"></table>
@@ -198,7 +212,9 @@
     <div class="sheet">
       <div class="focusbar" id="focusbar"></div>
       <div class="scroller"><div class="colheads" id="colheads"></div><div class="stage" id="stage"></div></div>
-      <div class="why">Click ◎ to put a card in focus by itself. <b>Shift-click</b> ◎, or drag a card onto the bar
+      <div class="why"><b>Hover an item row</b> to trace that item through every document it passed through;
+        ribbons land on item rows, not on the card. A bill's charges fan out to its lines by $ share (that is the
+        landed cost), and a payment draws on the bill's <b>Total</b> row. Click ◎ to put a card in focus by itself. <b>Shift-click</b> ◎, or drag a card onto the bar
         above, to add a second one. With two in focus the ribbons <b>between</b> them stay dark and the rest fade.
         A ribbon is as wide as the money on the child's lines that came from the parent. Payment amounts
         belonging to bills that aren't in focus collect in one <b>Other payables</b> box; put the payment in
@@ -212,13 +228,14 @@
       <div class="legend">
         <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="#fff" stroke="#1f2d3d" stroke-width="2"/></svg> date on the paper</span>
         <span><svg width="12" height="12"><path d="M6 1 L11 6 L6 11 L1 6Z" fill="#1f2d3d"/></svg> posted</span>
-        <span><svg width="26" height="10"><rect x="0" y="1" width="26" height="8" rx="3" fill="#f6eaf2" stroke="#CC79A7"/></svg> the lag, in the document's wash</span>
+        <span><svg width="40" height="12"><rect x="0" y="1" width="22" height="10" rx="3" fill="#f6eaf2"/><rect x="18" y="1.5" width="20" height="9" rx="4.5" fill="#f6eaf2" stroke="#CC79A7" stroke-width="1.5"/></svg> wash up to the paper date, border on to the posted date (the lag)</span>
         <span><svg width="26" height="10"><path d="M1 5 H25" stroke="#94a3b8" stroke-dasharray="3 3"/></svg> hand-off: one document posted → the next one's date</span>
       </div>
       <div class="gantt-wrap"><svg id="gantt"></svg></div>
       <div class="why">Same documents as the bowtie, same focus. Rows follow the bowtie's order (left column
         first). Weekends are shaded. The dotted hand-offs show where time went between documents (8 days from
-        order to receipt here); the washed bars show where time went inside one (a receipt keyed in two days late).</div>
+        order to receipt here); the bordered stretch shows where time went inside one (a receipt keyed in two days late). Every row carries its
+        document's wash up to the date on the paper, so a same-day document is still a coloured row.</div>
     </div>
   </section>
 
@@ -235,6 +252,15 @@
         <li><b>Ribbon width</b> is amount.</li>
         <li><b>Payments covering several bills:</b> the part that isn't this bill's flows in from one blank
           <b>Other payables</b> box, and the payment walks to those bills only when it's in focus itself.</li>
+        <li><b>Item tables on every card, ribbons row to row</b> (5zorro, same day): so one item can be traced through
+          every document. Hover a row to light its path. In the build a row links to its parent <i>row</i> by the ids
+          ERPNext already stores on each line (<code>po_detail</code>, <code>pr_detail</code>, <code>sales_order_item</code>,
+          <code>so_detail</code>); the mockup matches by item code only because its data has no row ids.</li>
+        <li><b>Quick filters on the Find page</b> (same day): Find Bills opens with <b>Bills</b> on; Vendor credits,
+          Payments, Open POs and Open receipts are one click each. With all of them on the page is the vendor
+          statement, and the Home screen would link straight to that.</li>
+        <li><b>Gantt colour</b> (same day): every row carries its wash from the start of the calendar to the paper
+          date, then a border on to the posted date, so a same-day document is not a bare dot.</li>
         <li><b>Item mismatch</b> (added while building): a line that names the document it came from, when that
           document has no such item, gets a ⚠ on its ribbon and on the card. Clicking it opens the detail. Clean
           rows show nothing. The same check would catch a line asking for more than its source had.</li>
@@ -261,6 +287,10 @@
           branch is left out and counted in a small "+1 not in focus" note on the card. Or should it show as a stub?</li>
         <li><b>Credits and returns</b> (the vendor credit on the statement) aren't linked into the bowtie yet.
           A return points at the bill it reverses, so it would flow out to the right of that bill.</li>
+        <li><b>Payments on the item trace:</b> a payment draws on a bill's <b>Total</b> row, so tracing an item row stops
+          at the bill. Should the trace carry on to the payment (the item's share of it)?</li>
+        <li><b>Ribbons that skip columns</b> (Sales Order → customer Invoice) run in a channel under the cards they skip,
+          so they don't look like they come from the PO or receipt in between.</li>
         <li><b>Drag to add focus</b> is drag-onto-the-bar here. Box-select across cards could come later.</li>
       </ul>
     </div>
@@ -397,65 +427,46 @@ function landed(d) {
   const chg = (d.charges || []).reduce((t, c) => t + c.amount, 0);
   const out = lines.map((l) => ({ ...l, amount: lineAmt(l), alloc: base ? r2((lineAmt(l) * chg) / base) : 0 }));
   const drift = r2(chg - out.reduce((t, l) => t + l.alloc, 0));
-  if (drift && out.length) out.reduce((a, b) => (b.amount > a.amount ? b : a)).alloc = r2(out.reduce((a, b) => (b.amount > a.amount ? b : a)).alloc + drift);
+  if (drift && out.length) {
+    const big = out.reduce((a, b) => (b.amount > a.amount ? b : a));
+    big.alloc = r2(big.alloc + drift);
+  }
   return out.map((l) => ({ ...l, unit: l.qty ? r2((l.amount + l.alloc) / l.qty) : 0 }));
 }
 
 /* ---------------- the link graph (one source for all three views) ---------------- */
-const PSEUDO = new Map(); // nic:<id>, chg:<id>
-const EDGES = [];         // { from, to, amount, lines: [], flags: [] }
+// Document level: who came from whom. Used to decide what is in view (ancestors / descendants).
+const EDGES = [];
 (function buildGraph() {
-  const byKey = new Map();
-  const add = (from, to, amount, line) => {
-    const k = from + ">" + to;
-    if (!byKey.has(k)) { const e = { from, to, amount: 0, lines: [], flags: [] }; byKey.set(k, e); EDGES.push(e); }
-    const e = byKey.get(k);
-    e.amount = r2(e.amount + amount);
-    if (line) e.lines.push(line);
-  };
+  const seen = new Set();
+  const add = (from, to) => { const k = from + ">" + to; if (!seen.has(k)) { seen.add(k); EDGES.push({ from, to }); } };
   for (const d of DOCS) {
-    for (const ln of d.lines || []) {
-      if (ln.from === undefined) continue; // a first document: nothing upstream to draw
-      let src = ln.from;
-      if (src === null) {
-        src = "nic:" + d.id;
-        PSEUDO.set(src, { id: src, pseudo: "nic", target: d.id });
-      }
-      add(src, d.id, lineAmt(ln), ln);
-    }
-    for (const c of d.charges || []) {
-      const src = "chg:" + d.id;
-      PSEUDO.set(src, { id: src, pseudo: "chg", target: d.id, charges: d.charges });
-      add(src, d.id, c.amount, null);
-    }
-    for (const r of d.refs || []) add(r.bill, d.id, r.amount, null);
+    for (const ln of d.lines || []) if (ln.from) add(ln.from, d.id);
+    for (const r of d.refs || []) add(r.bill, d.id);
   }
-  // Item mismatch: a line that names its parent, where the parent has no such item, or less of it.
+  // Item mismatch, per line: it names a parent that has no such item, or less of it than asked.
+  // Counted per kind of child: the buy side (POs) and the sell side (invoices) each draw on a
+  // Sales Order separately, so adding them together would flag every order that was fulfilled.
   for (const d of DOCS) {
     for (const ln of d.lines || []) {
       const p = ln.from && BY_ID.get(ln.from);
       if (!p) continue;
-      const e = byKey.get(p.id + ">" + d.id);
       const pl = (p.lines || []).filter((x) => x.item === ln.item);
       if (!pl.length) {
-        e.flags.push(`<b>${esc(ln.item)}</b> (${ln.qty} × ${money(ln.rate)}) on ${esc(d.id)} says it came from ` +
+        ln.flag = `<b>${esc(ln.item)}</b> (${ln.qty} × ${money(ln.rate)}) on ${esc(d.id)} says it came from ` +
           `${esc(p.id)}, but that ${TYPES[p.t].label} has no ${esc(ln.item)} line. Either the item was added ` +
-          `here without being added there, or the line is linked to the wrong ${TYPES[p.t].label}.`);
+          `here without being added there, or the line is linked to the wrong ${TYPES[p.t].label}. ` +
+          `Its ribbon starts at the ${TYPES[p.t].label}'s number, not at an item row, because there is no row to start from.`;
         continue;
       }
-      // Counted per kind of child: the buy side (POs) and the sell side (invoices) each draw on a
-      // Sales Order separately, so adding them together would flag every order that was fulfilled.
       const want = DOCS.filter((c) => c.t === d.t)
         .flatMap((c) => (c.lines || []).filter((x) => x.from === p.id && x.item === ln.item))
         .reduce((t, x) => t + x.qty, 0);
       const have = pl.reduce((t, x) => t + x.qty, 0);
-      if (want > have && !e.flags.some((f) => f.includes(ln.item))) {
-        e.flags.push(`<b>${esc(ln.item)}</b>: documents drawn from ${esc(p.id)} ask for ${want}, and it only has ${have}.`);
-      }
+      if (want > have) ln.flag = `<b>${esc(ln.item)}</b>: documents drawn from ${esc(p.id)} ask for ${want}, and it only has ${have}.`;
     }
   }
 })();
-const node = (id) => BY_ID.get(id) || PSEUDO.get(id) || OTHER.get(id);
 const inEdges = (id) => EDGES.filter((e) => e.to === id);
 const outEdges = (id) => EDGES.filter((e) => e.from === id);
 function walk(id, next) {
@@ -467,34 +478,83 @@ const ancestors = (id) => walk(id, (x) => inEdges(x).map((e) => e.from));
 const descendants = (id) => walk(id, (x) => outEdges(x).map((e) => e.to));
 
 /* ---------------- state ---------------- */
-const state = { tab: "bowtie", focus: ["ACC-PINV-2026-00268"], idMode: "theirs" };
-let OTHER = new Map();
+const state = { tab: "bowtie", focus: ["ACC-PINV-2026-00268"], idMode: "theirs",
+                quick: new Set(["bill"]), fromHome: false };
 
-/* The visible slice for the current focus: each focus, everything it came from, everything it led to. */
+/*
+ * The item table on a card. Each row is somewhere a ribbon can land: an item line, a bill's
+ * charges, its total (what a payment draws on), or one of a payment's "applied to" rows.
+ */
+function cardRows(n, vis) {
+  if (n.refs) {
+    const rows = [];
+    let other = 0, otherN = 0;
+    for (const r of n.refs) {
+      if (vis.has(r.bill)) rows.push({ kind: "ref", bill: r.bill, amount: r.amount });
+      else { other = r2(other + r.amount); otherN++; }
+    }
+    if (otherN) rows.push({ kind: "other", amount: other, count: otherN });
+    return rows;
+  }
+  const L = n.t === "bill" ? landed(n) : (n.lines || []).map((l) => ({ ...l, amount: lineAmt(l) }));
+  const rows = L.map((l, i) => ({ kind: "line", i, ...l, flag: (n.lines[i] || {}).flag }));
+  if (n.charges) rows.push({ kind: "charges", amount: n.charges.reduce((t, c) => t + c.amount, 0) });
+  if (n.t === "bill" || n.t === "si" || n.t === "cm") rows.push({ kind: "total", amount: docTotal(n) });
+  return rows;
+}
+
+/*
+ * The visible slice for the current focus: each focus, everything it came from, everything it
+ * led to -- plus, row by row, the ribbons between the item tables.
+ */
 function slice() {
   const vis = new Set();
   for (const f of state.focus) { vis.add(f); ancestors(f).forEach((x) => vis.add(x)); descendants(f).forEach((x) => vis.add(x)); }
-  // NIC lines and a bill's own charges are part of the document, not a branch: always shown.
-  for (const e of EDGES) if (vis.has(e.to) && PSEUDO.has(e.from)) vis.add(e.from);
-  const edges = EDGES.filter((e) => vis.has(e.from) && vis.has(e.to));
-  OTHER = new Map();
+  const pseudo = new Map();
+  const rows = new Map(); // id -> rows
+  for (const id of vis) rows.set(id, cardRows(BY_ID.get(id), vis));
+  const ribs = []; // { from, fromRow, to, toRow, amount, lines, flag }
+  const rowIndex = (id, pred) => rows.get(id).findIndex(pred);
   const hiddenOut = new Map();
   for (const id of vis) {
-    if (!BY_ID.has(id)) continue;
-    const hidIn = inEdges(id).filter((e) => !vis.has(e.from));
-    if (hidIn.length) {
-      const d = BY_ID.get(id);
-      const pay = d.t === "pay" || d.t === "rcv";
-      const o = { id: "other:" + id, pseudo: "other", target: id, count: hidIn.length,
-                  amount: r2(hidIn.reduce((t, e) => t + e.amount, 0)),
-                  label: pay ? (d.t === "rcv" ? "Other receivables" : "Other payables") : "Other sources" };
-      OTHER.set(o.id, o);
-      edges.push({ from: o.id, to: id, amount: o.amount, lines: [], flags: [], other: true });
+    const d = BY_ID.get(id);
+    (d.lines || []).forEach((ln, i) => {
+      if (ln.from === undefined) return;
+      const amount = lineAmt(ln);
+      if (ln.from === null) {
+        const pid = "nic:" + id;
+        if (!pseudo.has(pid)) pseudo.set(pid, { id: pid, pseudo: "nic", target: id, amount: 0 });
+        pseudo.get(pid).amount = r2(pseudo.get(pid).amount + amount);
+        ribs.push({ from: pid, fromRow: null, to: id, toRow: i, amount, lines: [ln] });
+      } else if (vis.has(ln.from)) {
+        const j = rowIndex(ln.from, (r) => r.kind === "line" && r.item === ln.item);
+        ribs.push({ from: ln.from, fromRow: j >= 0 ? j : "head", to: id, toRow: i, amount, lines: [ln], flag: ln.flag });
+      } else {
+        const pid = "other:" + id;
+        if (!pseudo.has(pid)) pseudo.set(pid, { id: pid, pseudo: "other", target: id, label: "Other sources", amount: 0, count: 0 });
+        const o = pseudo.get(pid); o.amount = r2(o.amount + amount); o.count++;
+        ribs.push({ from: pid, fromRow: null, to: id, toRow: i, amount, lines: [ln] });
+      }
+    });
+    if (d.charges) {
+      const pid = "chg:" + id;
+      pseudo.set(pid, { id: pid, pseudo: "chg", target: id, charges: d.charges });
+      landed(d).forEach((l, i) => { if (l.alloc) ribs.push({ from: pid, fromRow: null, to: id, toRow: i, amount: l.alloc, note: "charges share" }); });
     }
-    const hidOut = outEdges(id).filter((e) => !vis.has(e.to));
-    if (hidOut.length) hiddenOut.set(id, hidOut.length);
+    rows.get(id).forEach((r, k) => {
+      if (r.kind === "ref") {
+        ribs.push({ from: r.bill, fromRow: rowIndex(r.bill, (x) => x.kind === "total"), to: id, toRow: k, amount: r.amount });
+      } else if (r.kind === "other") {
+        const pid = "other:" + id;
+        pseudo.set(pid, { id: pid, pseudo: "other", target: id, amount: r.amount, count: r.count,
+                          label: d.t === "rcv" ? "Other receivables" : "Other payables" });
+        ribs.push({ from: pid, fromRow: null, to: id, toRow: k, amount: r.amount });
+      }
+    });
+    const hid = outEdges(id).filter((e) => !vis.has(e.to)).length;
+    if (hid) hiddenOut.set(id, hid);
   }
-  const ids = [...vis, ...OTHER.keys()];
+  const ids = [...vis, ...pseudo.keys()];
   // Ribbons between two foci stay dark; with one focus, everything does.
   const onPath = new Set();
   if (state.focus.length > 1) {
@@ -502,85 +562,91 @@ function slice() {
       if (a === b) continue;
       const between = new Set([...descendants(a)].filter((x) => ancestors(b).has(x)));
       between.add(a); between.add(b);
-      for (const e of edges) if (between.has(e.from) && between.has(e.to)) onPath.add(e);
+      ribs.forEach((r) => { if (between.has(r.from) && between.has(r.to)) onPath.add(r); });
     }
   }
-  return { ids, edges, hiddenOut, onPath };
+  return { vis, ids, pseudo, rows, ribs, hiddenOut, onPath };
 }
 
+/* ---------------- bowtie layout: arithmetic only ---------------- */
+const CARD_W = 232, PSEUDO_H = 58, GAP_Y = 18, RIB_W = 72; // 232: a bill's four columns and a whole ID
+const ID_Y = 34;       // centre of the document-number line, from the card's top
+const TABLE_TOP = 80;  // matches .n-lines { top: 80px }
+const TH_H = 16, ROW_H = 16;
+const nodeOf = (sl, id) => BY_ID.get(id) || sl.pseudo.get(id);
+function nodeH(sl, id) {
+  if (sl.pseudo.has(id)) return PSEUDO_H;
+  return TABLE_TOP + TH_H + sl.rows.get(id).length * ROW_H + 7;
+}
 function colOf(n) {
   if (!n.pseudo) return TYPES[n.t].col;
   return TYPES[BY_ID.get(n.target).t].col - 1;
 }
 
-/* ---------------- bowtie layout: arithmetic only ---------------- */
-const CARD_W = 208, CARD_H = 84, PSEUDO_H = 58, GAP_Y = 20, RIB_W = 88, LINE_H = 18, LINES_HEAD = 28;
-function nodeH(n) {
-  if (n.pseudo) return PSEUDO_H;
-  if (!state.focus.includes(n.id) || !(n.lines || n.refs)) return CARD_H;
-  const rows = (n.lines || n.refs).length + (n.charges ? 1 : 0);
-  return CARD_H + LINES_HEAD + rows * LINE_H;
-}
-
 function layout(sl) {
-  const cols = [...new Set(sl.ids.map((id) => colOf(node(id))))].sort((a, b) => a - b);
+  const cols = [...new Set(sl.ids.map((id) => colOf(nodeOf(sl, id))))].sort((a, b) => a - b);
   const colX = new Map(cols.map((c, i) => [c, i * (CARD_W + RIB_W)]));
-  const pos = new Map(); // id -> { x, y, h }
-  const parentsOf = (id) => sl.edges.filter((e) => e.to === id).map((e) => e.from);
-  const childrenOf = (id) => sl.edges.filter((e) => e.from === id).map((e) => e.to);
-  const center = (id) => pos.get(id).y + pos.get(id).h / 2;
+  const pos = new Map();
+  const parentsOf = (id) => [...new Set(sl.ribs.filter((r) => r.to === id).map((r) => r.from))];
+  const childrenOf = (id) => [...new Set(sl.ribs.filter((r) => r.from === id).map((r) => r.to))];
+  const center = (id) => pos.get(id).y + Math.min(pos.get(id).h, 120) / 2;
   const sortKey = (n) => (n.pseudo ? "9" : TYPES[n.t].ar ? "1" : "0") + (n.doc || "");
   const pack = (items) => {
     items.sort((a, b) => a.want - b.want || a.key.localeCompare(b.key));
     let y = 0;
     for (const it of items) {
-      const top = Math.max(y, Number.isFinite(it.want) ? it.want - it.h / 2 : y);
+      const top = Math.max(y, Number.isFinite(it.want) ? it.want - Math.min(it.h, 120) / 2 : y);
       pos.set(it.id, { x: colX.get(it.col), y: top, h: it.h });
       y = top + it.h + GAP_Y;
     }
   };
-  const byCol = (c) => sl.ids.filter((id) => colOf(node(id)) === c);
-  // Pass 1, left to right: a card sits level with the middle of the cards that feed it.
+  const byCol = (c) => sl.ids.filter((id) => colOf(nodeOf(sl, id)) === c);
+  // Pass 1, left to right: a card sits level with the cards that feed it.
   for (const c of cols) {
     pack(byCol(c).map((id) => {
       const ps = parentsOf(id).filter((p) => pos.has(p));
-      const n = node(id);
-      return { id, col: c, h: nodeH(n), key: sortKey(n),
+      return { id, col: c, h: nodeH(sl, id), key: sortKey(nodeOf(sl, id)),
                want: ps.length ? ps.reduce((t, p) => t + center(p), 0) / ps.length : Infinity };
     }));
   }
   // Pass 2, right to left: cards with nothing upstream (NIC, charges, Other…) sit level with what they feed.
   for (const c of [...cols].reverse()) {
     pack(byCol(c).map((id) => {
-      const n = node(id);
       const ps = parentsOf(id), ks = childrenOf(id).filter((k) => pos.has(k));
       const want = !ps.length && ks.length ? ks.reduce((t, k) => t + center(k), 0) / ks.length : center(id);
-      return { id, col: c, h: nodeH(n), key: sortKey(n), want };
+      return { id, col: c, h: nodeH(sl, id), key: sortKey(nodeOf(sl, id)), want };
     }));
   }
   const height = Math.max(...[...pos.values()].map((p) => p.y + p.h)) + 8;
   const width = (cols.length - 1) * (CARD_W + RIB_W) + CARD_W;
-  return { pos, cols, colX, height, width };
+  // Where a ribbon meets a card: an item row's centre, the number line, or a pseudo card's middle.
+  const anchorY = (id, row) => {
+    const p = pos.get(id);
+    if (sl.pseudo.has(id) || row === null || row === undefined || row < 0) return p.y + p.h / 2;
+    if (row === "head") return p.y + ID_Y;
+    return p.y + TABLE_TOP + TH_H + row * ROW_H + ROW_H / 2;
+  };
+  return { pos, cols, colX, height, width, anchorY };
 }
 
 /* ---------------- bowtie render ---------------- */
 function idFor(d) {
-  if (state.idMode === "theirs" && d.ref) return { main: d.ref, ours: d.id };
-  return { main: d.id, ours: null };
+  if (state.idMode === "theirs" && d.ref) return d.ref;
+  return d.id;
 }
+const rk = (id, row) => `${id}#${row}`;
 
-function cardHtml(n, sl) {
+function cardHtml(sl, id) {
+  const n = nodeOf(sl, id);
   if (n.pseudo === "nic") {
-    const t = BY_ID.get(n.target);
-    const amt = inEdges(n.target).filter((e) => e.from === n.id).reduce((a, e) => a + e.amount, 0);
     return `<div class="n-head"><span class="n-type">NIC · not in computer</span></div>
-      <div class="n-dates">Entered on the ${esc(TYPES[t.t].label.toLowerCase())} with no source</div>
-      <div class="n-dates"><b>${money(amt)}</b></div>`;
+      <div class="n-dates">No source: typed on the ${esc(TYPES[BY_ID.get(n.target).t].label.toLowerCase())}</div>
+      <div class="n-dates"><b>${money(n.amount)}</b></div>`;
   }
   if (n.pseudo === "chg") {
     return `<div class="n-head"><span class="n-type">Charges on the bill itself</span></div>
       ${n.charges.map((c) => `<div class="n-dates">${esc(c.desc)} <b>${money(c.amount)}</b></div>`).join("")}
-      <div class="n-dates">spread over its lines ↓</div>`;
+      <div class="n-dates">spread over its lines by $ share</div>`;
   }
   if (n.pseudo === "other") {
     return `<div class="n-head"><span class="n-type">${esc(n.label)}</span></div>
@@ -588,34 +654,31 @@ function cardHtml(n, sl) {
       <div class="n-dates">focus the ${esc(TYPES[BY_ID.get(n.target).t].label.toLowerCase())} to walk them</div>`;
   }
   const T = TYPES[n.t];
-  const id = idFor(n);
-  const inFocus = state.focus.includes(n.id);
-  const flags = sl.edges.filter((e) => e.to === n.id).flatMap((e) => e.flags);
+  const rows = sl.rows.get(id);
+  const nFlags = rows.filter((r) => r.flag).length;
+  const more = sl.hiddenOut.get(id);
   let body = `<div class="n-head"><span class="n-type" style="color:${ACCENT[T.role]}">${esc(T.label)}${T.ar ? " · A/R" : ""}</span>
-      ${flags.length ? `<button class="flag" data-flag="${esc(n.id)}" title="${flags.length} line mismatch — click for detail">⚠</button>` : ""}
-      ${sl.hiddenOut.get(n.id) ? `<span class="n-more" title="Led to ${sl.hiddenOut.get(n.id)} more document(s) outside this focus">+${sl.hiddenOut.get(n.id)} ↦</span>` : ""}
-      <button class="ico" data-act="focus" data-id="${esc(n.id)}" title="Put in focus (Shift-click: add to focus)">◎</button>
-      <button class="ico" data-act="peek" data-id="${esc(n.id)}" title="Peek">${EYE}</button></div>
-    <div class="n-id" title="${esc(n.id)}">${esc(id.main)}</div>
+      ${nFlags ? `<button class="flag" data-flag="${esc(id)}" title="${nFlags} line mismatch — click for detail">⚠</button>` : ""}
+      ${more ? `<span class="n-more" title="Led to ${more} more document(s) outside this focus">+${more} ↦</span>` : ""}
+      <button class="ico" data-act="focus" data-id="${esc(id)}" title="Put in focus (Shift-click: add to focus)">◎</button>
+      <button class="ico" data-act="peek" data-id="${esc(id)}" title="Peek">${EYE}</button></div>
+    <div class="n-id" title="${esc(n.id)}">${esc(idFor(n))}</div>
     <div class="n-dates">Doc <b>${fmtD(n.doc)}</b> · Posted <b>${fmtD(n.posted)}</b></div>
-    <div class="n-user">${esc(n.user)} <span class="muted">(created)</span> · ${money(docTotal(n))}</div>`;
-  if (inFocus && n.t === "bill") {
-    const L = landed(n);
-    body += `<div class="n-lines"><table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Line</th>
-      <th class="num">+Chg</th><th class="num">Landed/u</th></tr></thead><tbody>
-      ${L.map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(l.amount)}</td>
-        <td class="num">${money(l.alloc)}</td><td class="num"><b>${money(l.unit)}</b></td></tr>`).join("")}
-      ${n.charges ? `<tr class="foot"><td colspan="5">${n.charges.map((c) => esc(c.desc) + " " + money(c.amount)).join(", ")} by line $ share</td></tr>` : ""}
-      </tbody></table></div>`;
-  } else if (inFocus && n.lines) {
-    body += `<div class="n-lines"><table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>
-      ${n.lines.map((l) => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="num">${money(lineAmt(l))}</td></tr>`).join("")}
-      </tbody></table></div>`;
-  } else if (inFocus && n.refs) {
-    body += `<div class="n-lines"><table><thead><tr><th>Applied to</th><th class="num">Amount</th></tr></thead><tbody>
-      ${n.refs.map((r) => { const b = BY_ID.get(r.bill); return `<tr><td>${esc(idFor(b).main)}</td><td class="num">${money(r.amount)}</td></tr>`; }).join("")}
-      </tbody></table></div>`;
-  }
+    <div class="n-user">${esc(n.user)} <span class="muted">(created)</span></div>`;
+  const bill = n.t === "bill";
+  const cols = n.refs ? '<col style="width:66%"><col>' : bill ? '<col style="width:38%"><col style="width:9%"><col style="width:26%"><col>' : '<col style="width:58%"><col style="width:12%"><col>';
+  const head = n.refs ? "<th>Applied to</th><th class=num>Amount</th>"
+    : `<th>Item</th><th class=num>Qty</th><th class=num>Amount</th>${bill ? "<th class=num title='(line + its share of the charges) ÷ qty'>Landed/u</th>" : ""}`;
+  const tr = rows.map((r, k) => {
+    const key = `data-rk="${esc(rk(id, k))}"`;
+    if (r.kind === "ref") return `<tr ${key}><td>${esc(idFor(BY_ID.get(r.bill)))}</td><td class=num>${money(r.amount)}</td></tr>`;
+    if (r.kind === "other") return `<tr ${key} class=sum><td>${esc(r.count)} other bill${r.count > 1 ? "s" : ""}</td><td class=num>${money(r.amount)}</td></tr>`;
+    if (r.kind === "charges") return `<tr ${key} class=sum><td colspan=2>+ charges</td><td class=num>${money(r.amount)}</td>${bill ? "<td></td>" : ""}</tr>`;
+    if (r.kind === "total") return `<tr ${key} class=tot><td colspan=2>Total</td><td class=num>${money(r.amount)}</td>${bill ? "<td></td>" : ""}</tr>`;
+    return `<tr ${key}${r.flag ? " class=flagged" : ""} title="${esc(r.item)} · ${r.qty} × ${money(r.rate)}${bill ? ` + ${money(r.alloc)} charges` : ""}">
+      <td>${r.flag ? "⚠ " : ""}${esc(r.item)}</td><td class=num>${r.qty}</td><td class=num>${money(r.amount)}</td>${bill ? `<td class=num><b>${money(r.unit)}</b></td>` : ""}</tr>`;
+  }).join("");
+  body += `<div class="n-lines"><table style="width:100%"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${tr}</tbody></table></div>`;
   return body;
 }
 
@@ -626,7 +689,7 @@ function ribbonPath(x1, y1, x2, y2) {
 
 function renderFocusBar(el) {
   el.innerHTML = `<span class="lbl">In focus</span>
-    ${state.focus.map((id) => { const d = BY_ID.get(id); return `<span class="chip" style="border-color:${ACCENT[TYPES[d.t].role]}">${esc(TYPES[d.t].label)} · ${esc(idFor(d).main)}
+    ${state.focus.map((id) => { const d = BY_ID.get(id); return `<span class="chip" style="border-color:${ACCENT[TYPES[d.t].role]}">${esc(TYPES[d.t].label)} · ${esc(idFor(d))}
       <button data-act="unfocus" data-id="${esc(id)}" title="Take out of focus">×</button></span>`; }).join("")}
     <span class="dropzone" data-drop>drag a card here to add it</span>
     <span class="spacer"></span>
@@ -634,6 +697,7 @@ function renderFocusBar(el) {
       <span class="seg"><button data-idmode="theirs" aria-pressed="${state.idMode === "theirs"}">Their number</button><button data-idmode="ours" aria-pressed="${state.idMode === "ours"}">Our number</button></span></span>`;
 }
 
+let RIB_ADJ = new Map(); // row key -> [{ other row key, rib index }]
 function renderBowtie() {
   renderFocusBar($("#focusbar"));
   const sl = slice();
@@ -644,54 +708,99 @@ function renderBowtie() {
   $("#colheads").style.width = L.width + "px";
   $("#colheads").innerHTML = L.cols.map((c) => `<div style="left:${L.colX.get(c)}px">${COL_TITLES[c] || ""}</div>`).join("");
 
-  // Ribbon thickness: one scale for the view, capped so the busiest card's bundle fits inside it.
-  const through = sl.ids.map((id) => Math.max(sl.edges.filter((e) => e.to === id).reduce((t, e) => t + e.amount, 0),
-                                               sl.edges.filter((e) => e.from === id).reduce((t, e) => t + e.amount, 0)));
-  const maxEdge = Math.max(...sl.edges.map((e) => e.amount), 1);
-  const scale = Math.min(30 / maxEdge, (CARD_H - 16) / Math.max(...through, 1));
-  const thick = (e) => Math.max(3, e.amount * scale);
-
-  // Bundles centred on each card: outbound sorted by where they go, inbound by where they come from.
-  const cy = (id) => L.pos.get(id).y + Math.min(L.pos.get(id).h, CARD_H) / 2;
+  // One thickness scale for the view, capped so the widest strand still fits its row.
+  // "Other payables" is left out of the scale: one 4,262 strand would otherwise flatten the item flows.
+  const scaled = sl.ribs.filter((r) => nodeOf(sl, r.from).pseudo !== "other");
+  const maxAmt = Math.max(...scaled.map((r) => r.amount), 1);
+  const thick = (r) => Math.max(2, Math.min(1, r.amount / maxAmt) * (ROW_H - 3));
+  // Strands leaving (or reaching) the same row stack as a bundle centred on that row.
   const slot = new Map();
-  for (const id of sl.ids) {
-    const outs = sl.edges.filter((e) => e.from === id).sort((a, b) => cy(a.to) - cy(b.to));
-    let y = cy(id) - outs.reduce((t, e) => t + thick(e), 0) / 2;
-    for (const e of outs) { slot.set(e, { ...(slot.get(e) || {}), y1: y + thick(e) / 2 }); y += thick(e); }
-    const ins = sl.edges.filter((e) => e.to === id).sort((a, b) => cy(a.from) - cy(b.from));
-    y = cy(id) - ins.reduce((t, e) => t + thick(e), 0) / 2;
-    for (const e of ins) { slot.set(e, { ...(slot.get(e) || {}), y2: y + thick(e) / 2 }); y += thick(e); }
-  }
+  const stackSide = (keyOf, otherY, setKey) => {
+    const groups = new Map();
+    sl.ribs.forEach((r) => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+    for (const [, list] of groups) {
+      list.sort((a, b) => otherY(a) - otherY(b));
+      const total = list.reduce((t, r) => t + thick(r), 0);
+      let y = list[0]._c - total / 2;
+      for (const r of list) { slot.set(r, { ...(slot.get(r) || {}), [setKey]: y + thick(r) / 2 }); y += thick(r); }
+    }
+  };
+  sl.ribs.forEach((r) => { r._y1 = L.anchorY(r.from, r.fromRow); r._y2 = L.anchorY(r.to, r.toRow); });
+  sl.ribs.forEach((r) => { r._c = r._y1; });
+  stackSide((r) => rk(r.from, sl.pseudo.has(r.from) ? "p" : r.fromRow), (r) => r._y2, "y1");
+  sl.ribs.forEach((r) => { r._c = r._y2; });
+  stackSide((r) => rk(r.to, r.toRow), (r) => r._y1, "y2");
 
+  RIB_ADJ = new Map();
+  const link = (a, b, i) => { if (!RIB_ADJ.has(a)) RIB_ADJ.set(a, []); RIB_ADJ.get(a).push({ to: b, i }); };
   let svg = `<svg width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}">`;
   let flagsHtml = "";
-  sl.edges.forEach((e, i) => {
-    const a = L.pos.get(e.from), b = L.pos.get(e.to), s = slot.get(e);
+  // A ribbon that skips columns (Sales Order -> customer Invoice) must not run behind the cards in
+  // between, where it reads as if they fed it. It drops into a channel under those cards instead.
+  let channelUsed = 0;
+  sl.ribs.forEach((r, i) => {
+    const a = L.pos.get(r.from), b = L.pos.get(r.to), s = slot.get(r);
     const x1 = a.x + CARD_W, x2 = b.x;
-    const src = node(e.from);
+    const src = nodeOf(sl, r.from);
     const color = src.pseudo ? "#94a3b8" : ACCENT[docRole(src)];
-    const op = state.focus.length > 1 ? (sl.onPath.has(e) ? 0.6 : 0.13) : 0.42;
-    const d = ribbonPath(x1, s.y1, x2, s.y2);
-    svg += `<path class="rib" data-i="${i}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" stroke="${color}"
-      stroke-width="${thick(e)}" stroke-opacity="${op}" data-op="${op}"/>`;
-    svg += `<path class="rib-hit" data-i="${i}" d="${d}" stroke-width="${Math.max(12, thick(e))}"/>`;
-    const oneGap = Math.abs(x2 - x1 - RIB_W) < 1;
-    if (oneGap) svg += `<text class="rib-label" x="${(x1 + x2) / 2}" y="${(s.y1 + s.y2) / 2 - thick(e) / 2 - 3}" text-anchor="middle">${money(e.amount)}</text>`;
-    if (e.flags.length) flagsHtml += `<button class="flag rib-flag" data-edge="${i}" style="left:${x2 - 16}px;top:${s.y2}px" title="Line mismatch on this link">⚠</button>`;
+    const op = state.focus.length > 1 ? (sl.onPath.has(r) ? 0.6 : 0.13) : 0.45;
+    let d = ribbonPath(x1, s.y1, x2, s.y2);
+    if (x2 - x1 > RIB_W + 1) {
+      const between = [...L.pos.values()].filter((p) => p.x >= x1 && p.x + CARD_W <= x2);
+      const cy = Math.max(...between.map((p) => p.y + p.h)) + 14 + channelUsed + thick(r) / 2;
+      channelUsed += thick(r) + 2;
+      const k = RIB_W / 2;
+      d = `M ${x1} ${s.y1} C ${x1 + k} ${s.y1}, ${x1 + k} ${cy}, ${x1 + RIB_W} ${cy} L ${x2 - RIB_W} ${cy} C ${x2 - k} ${cy}, ${x2 - k} ${s.y2}, ${x2} ${s.y2}`;
+    }
+    svg += `<path class="rib" data-i="${i}" d="${d}" stroke="${color}" stroke-width="${thick(r)}" stroke-opacity="${op}" data-op="${op}"/>`;
+    svg += `<path class="rib-hit" data-i="${i}" d="${d}" stroke-width="${Math.max(8, thick(r))}"/>`;
+    if (r.flag) flagsHtml += `<button class="flag rib-flag" data-rib="${i}" style="left:${(x1 + x2) / 2}px;top:${(s.y1 + s.y2) / 2}px" title="Line mismatch on this link">⚠</button>`;
+    const ka = rk(r.from, sl.pseudo.has(r.from) ? "p" : r.fromRow), kb = rk(r.to, r.toRow);
+    link(ka, kb, i); link(kb, ka, i);
   });
   svg += "</svg>";
 
   let cards = "";
   for (const id of sl.ids) {
-    const n = node(id), p = L.pos.get(id);
+    const n = nodeOf(sl, id), p = L.pos.get(id);
     const role = docRole(n);
     const style = `left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${p.h}px;` +
       (role ? `background:${WASH[role]};border-left-color:${ACCENT[role]};` : "");
     cards += `<div class="node${state.focus.includes(id) ? " focus" : ""}${n.pseudo ? " pseudo" : ""}" data-node="${esc(id)}"
-      ${n.pseudo ? "" : 'draggable="true"'} style="${style}">${cardHtml(n, sl)}</div>`;
+      ${n.pseudo ? "" : 'draggable="true"'} style="${style}">${cardHtml(sl, id)}</div>`;
   }
   stage.innerHTML = svg + cards + flagsHtml;
-  stage._edges = sl.edges;
+  if (channelUsed) stage.style.height = Math.max(L.height, stage.scrollHeight) + channelUsed + 20 + "px";
+  stage._sl = sl;
+}
+
+/* Hovering an item row lights that item's whole path, through every document it touches. */
+function traceRow(key) {
+  const rowsLit = new Set([key]);
+  const ribsLit = new Set();
+  // Walk left and right separately: an item row's path runs through its parents to the left and
+  // its children to the right, never back through a sibling (another line on the same parent row).
+  const side = (start, dir) => {
+    const stack = [start];
+    while (stack.length) {
+      const k = stack.pop();
+      for (const { to, i } of RIB_ADJ.get(k) || []) {
+        const r = $("#stage")._sl.ribs[i];
+        const goingRight = rk(r.from, $("#stage")._sl.pseudo.has(r.from) ? "p" : r.fromRow) === k;
+        if ((dir > 0) !== goingRight || ribsLit.has(i)) continue;
+        ribsLit.add(i); rowsLit.add(to); stack.push(to);
+      }
+    }
+  };
+  side(key, 1); side(key, -1);
+  document.querySelectorAll("#stage .rib").forEach((p) => {
+    p.style.strokeOpacity = ribsLit.has(+p.dataset.i) ? 0.85 : 0.08;
+  });
+  document.querySelectorAll("#stage tr[data-rk]").forEach((tr) => tr.classList.toggle("lit", rowsLit.has(tr.dataset.rk)));
+}
+function untrace() {
+  document.querySelectorAll("#stage .rib").forEach((p) => { p.style.strokeOpacity = p.dataset.op; });
+  document.querySelectorAll("#stage tr.lit").forEach((tr) => tr.classList.remove("lit"));
 }
 
 /* ---------------- Gantt ---------------- */
@@ -699,7 +808,7 @@ function renderGantt() {
   renderFocusBar($("#focusbar-g"));
   const sl = slice();
   const L = layout(sl);
-  const rows = sl.ids.filter((id) => BY_ID.has(id))
+  const rows = [...sl.vis]
     .sort((a, b) => L.pos.get(a).x - L.pos.get(b).x || L.pos.get(a).y - L.pos.get(b).y)
     .map((id) => BY_ID.get(id));
   const LABEL_W = 250, ROW = 34, TOP = 34;
@@ -717,26 +826,35 @@ function renderGantt() {
     if (dow === 0 || dow === 6) s += `<rect x="${x}" y="${TOP - 6}" width="${DAY}" height="${H - TOP}" fill="#f4f6f8"/>`;
     if (dow === 1) s += `<line x1="${x}" x2="${x}" y1="${TOP - 6}" y2="${H}" stroke="#e2e8f0"/><text class="g-tick" x="${x + 2}" y="${TOP - 12}">${fmtDay(d)}</text>`;
   }
-  const todayX = X(AS_OF);
-  if (dayNum(AS_OF) <= d1) s += `<line x1="${todayX}" x2="${todayX}" y1="${TOP - 6}" y2="${H}" stroke="#1f2d3d" stroke-dasharray="2 3"/>`;
-  // Hand-offs first, so bars draw over them.
-  for (const e of sl.edges) {
+  if (dayNum(AS_OF) <= d1) s += `<line x1="${X(AS_OF)}" x2="${X(AS_OF)}" y1="${TOP - 6}" y2="${H}" stroke="#1f2d3d" stroke-dasharray="2 3"/>`;
+  // Each row carries its document's wash from the start of the calendar up to the date on the
+  // paper, then a border in the document's colour on to the day it was posted -- so a same-day
+  // document is still a coloured row, and the bordered stretch is the lag.
+  const BAND = 20;
+  rows.forEach((r) => {
+    const y = rowY.get(r.id), role = TYPES[r.t].role;
+    const xa = X(r.doc), xb = Math.max(X(r.posted), xa);
+    s += `<rect x="${LABEL_W}" y="${y - BAND / 2}" width="${xa - LABEL_W}" height="${BAND}" rx="4" fill="${WASH[role]}"/>`;
+    s += `<rect x="${xa - 7}" y="${y - BAND / 2 + 1}" width="${xb - xa + 14}" height="${BAND - 2}" rx="8" fill="${WASH[role]}" stroke="${ACCENT[role]}" stroke-width="1.5"/>`;
+  });
+  // Hand-offs over the washes, under the markers.
+  for (const e of EDGES) {
     if (!rowY.has(e.from) || !rowY.has(e.to)) continue;
     const a = BY_ID.get(e.from), b = BY_ID.get(e.to);
     s += `<path d="M ${X(a.posted)} ${rowY.get(a.id)} H ${X(b.doc)} V ${rowY.get(b.id)}" fill="none" stroke="#94a3b8" stroke-dasharray="3 3"/>`;
   }
-  rows.forEach((r, i) => {
-    const y = rowY.get(r.id), role = TYPES[r.t].role;
+  rows.forEach((r) => {
+    const y = rowY.get(r.id);
     const xa = X(r.doc), xb = X(r.posted), lag = dayNum(r.posted) - dayNum(r.doc);
-    const flagged = inEdges(r.id).some((e) => e.flags.length);
+    const flagged = (r.lines || []).some((l) => l.flag);
     s += `<g class="g-row" data-row="${esc(r.id)}">
-      <rect class="g-hover" x="0" y="${y - ROW / 2}" width="${W}" height="${ROW}" fill="transparent"/>
-      <text class="g-label" x="8" y="${y - 1}" font-weight="${state.focus.includes(r.id) ? 700 : 400}">${esc(idFor(r).main)}${flagged ? " ⚠" : ""}</text>
+      <rect class="g-hover" x="0" y="${y - ROW / 2}" width="${LABEL_W - 4}" height="${ROW}" fill="transparent"/>
+      <rect x="0" y="${y - ROW / 2}" width="${W}" height="${ROW}" fill="transparent"/>
+      <text class="g-label" x="8" y="${y - 1}" font-weight="${state.focus.includes(r.id) ? 700 : 400}">${esc(idFor(r))}${flagged ? " ⚠" : ""}</text>
       <text class="g-sub" x="8" y="${y + 11}">${esc(TYPES[r.t].label)} · ${esc(r.user)}</text>
-      ${lag > 0 ? `<rect x="${xa}" y="${y - 6}" width="${xb - xa}" height="12" rx="4" fill="${WASH[role]}" stroke="${ACCENT[role]}"/>` : ""}
       <circle cx="${xa}" cy="${y}" r="4.5" fill="#fff" stroke="#1f2d3d" stroke-width="2"/>
       <path d="M ${xb} ${y - 5.5} L ${xb + 5.5} ${y} L ${xb} ${y + 5.5} L ${xb - 5.5} ${y} Z" fill="#1f2d3d"/>
-      <text class="g-lag" x="${Math.max(xa, xb) + 9}" y="${y - 7}">${lag > 0 ? `+${lag} d` : "same day"}</text>
+      <text class="g-lag" x="${Math.max(xa, xb) + 12}" y="${y + 4}">${lag > 0 ? `+${lag} d` : "same day"}</text>
     </g>`;
   });
   const g = $("#gantt");
@@ -744,17 +862,40 @@ function renderGantt() {
   g.innerHTML = s;
 }
 
-/* ---------------- statement ---------------- */
+/* ---------------- statement: a Find page with quick filters ---------------- */
+// One chip per kind of document, as on the Find pages' own chip row. Find Bills opens with
+// Bills on; the Home screen's "Vendor statement" link would open it with all of them on.
+const QUICK = [
+  { id: "bill", label: "Bills", role: "invoice", match: (d) => d.t === "bill" },
+  { id: "cm", label: "Vendor credits", role: "invoice", match: (d) => d.t === "cm" },
+  { id: "pay", label: "Payments", role: "payment", match: (d) => d.t === "pay" },
+  { id: "po", label: "Open POs", role: "order", open: true, match: (d) => d.t === "po" && d.openNote },
+  { id: "pr", label: "Open receipts", role: "fulfill", open: true, match: (d) => d.t === "pr" && d.openNote },
+];
 function renderStatement() {
   $("#st-vendor").textContent = VENDOR;
   $("#st-asof").textContent = fmtD(AS_OF) + ", 2026";
+  const q = state.quick;
+  const all = QUICK.every((k) => q.has(k.id));
+  $("#st-title").textContent = all ? "Vendor statement" : q.size === 1 && q.has("bill") ? "Find Bills" : "Find";
+  $("#st-quick").innerHTML = `<span class="qf-lbl">Show</span>` +
+    QUICK.map((k) => `<button data-quick="${k.id}" aria-pressed="${q.has(k.id)}"><span class="role-dot" style="background:${ACCENT[k.role]};margin:0"></span>${k.label}</button>`).join("") +
+    `<span class="sep"></span><button data-quick="*" aria-pressed="${all}" title="Every chip on — the Home screen's Vendor statement link">All — vendor statement</button>`;
+  $("#st-why").innerHTML = (state.fromHome ? "<b>Opened from Home → Vendor statement:</b> every quick filter on. " : "") +
+    `Each chip adds one kind of document to the same list; <b>Bills</b> is the default because this is Find Bills. ` +
+    `With every chip on, the page <i>is</i> the vendor statement: first everything not matched yet, then 90 days ` +
+    `newest first, aged by the <b>vendor's own date</b> (a bill by its invoice date, a payment by its check date), with a heavy ` +
+    `rule on the first row past 30 days and the first past 60. ⋈ opens the bowtie with that row in focus, ▤ the Gantt, the eye a peek.`;
+
   const mine = DOCS.filter((d) => d.party === VENDOR);
+  const on = QUICK.filter((k) => q.has(k.id));
   const acts = (d) => `<span class="acts"><button class="ico" data-act="bowtie" data-id="${esc(d.id)}" title="Bowtie">⋈</button>
     <button class="ico" data-act="gantt" data-id="${esc(d.id)}" title="Gantt">▤</button>
     <button class="ico" data-act="peek" data-id="${esc(d.id)}" title="Peek">${EYE}</button></span>`;
   const dot = (d) => `<span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>`;
 
-  const open = mine.filter((d) => d.openNote).sort((a, b) => a.doc.localeCompare(b.doc));
+  const open = mine.filter((d) => on.some((k) => k.open && k.match(d))).sort((a, b) => a.doc.localeCompare(b.doc));
+  $("#st-open-sheet").hidden = !open.length;
   $("#st-open").innerHTML = `<thead><tr><th>Date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>What's open</th>
     <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>
     ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td class="${d.ref ? "" : "muted"}">${esc(d.ref || "—")}</td>
@@ -763,8 +904,9 @@ function renderStatement() {
 
   const asOf = dayNum(AS_OF);
   const band = (d) => { const age = asOf - dayNum(d.doc); return age <= 30 ? 0 : age <= 60 ? 1 : 2; };
-  const recent = mine.filter((d) => (d.t === "bill" || d.t === "cm" || d.t === "pay") && asOf - dayNum(d.doc) <= 90)
+  const recent = mine.filter((d) => on.some((k) => !k.open && k.match(d)) && asOf - dayNum(d.doc) <= 90)
     .sort((a, b) => b.doc.localeCompare(a.doc));
+  $("#st-recent-sheet").hidden = !recent.length;
   let prev = 0, openTotal = 0;
   const rowsHtml = recent.map((d) => {
     const b = band(d);
@@ -781,7 +923,7 @@ function renderStatement() {
   }).join("");
   $("#st-recent").innerHTML = `<thead><tr><th>Vendor's date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>Status</th>
     <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>
-    <tfoot><tr><td colspan="6">Open on the bills and credits above — what the vendor's statement should show</td>
+    <tfoot><tr><td colspan="6">Open on the rows above${all ? " — what the vendor's statement should show" : ""}</td>
     <td class="num">${money(openTotal)}</td><td></td></tr></tfoot>`;
 }
 
@@ -789,8 +931,9 @@ function renderStatement() {
 function openPeek(id) {
   const d = BY_ID.get(id);
   const T = TYPES[d.t];
-  const up = inEdges(id).map((e) => node(e.from)), down = outEdges(id).map((e) => node(e.to));
-  const name = (n) => (n.pseudo === "nic" ? "NIC (no source)" : n.pseudo === "chg" ? "Charges on this bill" : `${TYPES[n.t].label} ${n.id}`);
+  const up = inEdges(id).map((e) => BY_ID.get(e.from)), down = outEdges(id).map((e) => BY_ID.get(e.to));
+  if ((d.lines || []).some((l) => l.from === null)) up.push({ nic: true });
+  const name = (n) => (n.nic ? "NIC (no source)" : `${TYPES[n.t].label} ${n.id}`);
   const lines = d.t === "bill" ? landed(d) : null;
   $("#peek").innerHTML = `<button class="ico" style="float:right" data-act="close-peek">×</button>
     <div style="color:${ACCENT[T.role]};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px">${esc(T.label)} · submitted · peek</div>
@@ -846,6 +989,15 @@ document.addEventListener("click", (ev) => {
   if (!t) { if (!ev.target.closest(".pop")) closePop(); return; }
   if (t.dataset.tab) { state.tab = t.dataset.tab; render(); return; }
   if (t.dataset.idmode) { state.idMode = t.dataset.idmode; render(); return; }
+  if (t.dataset.quick) {
+    const k = t.dataset.quick;
+    if (k === "*") state.quick = QUICK.every((x) => state.quick.has(x.id)) ? new Set(["bill"]) : new Set(QUICK.map((x) => x.id));
+    else if (state.quick.has(k)) { if (state.quick.size > 1) state.quick.delete(k); }
+    else state.quick.add(k);
+    state.fromHome = false;
+    render();
+    return;
+  }
   const id = t.dataset.id;
   switch (t.dataset.act) {
     case "focus": setFocus(id, ev.shiftKey); return;
@@ -854,34 +1006,31 @@ document.addEventListener("click", (ev) => {
     case "close-peek": $("#peek").hidden = true; return;
     case "bowtie": state.tab = "bowtie"; setFocus(id, false); return;
     case "gantt": state.tab = "gantt"; setFocus(id, false); return;
+    case "statement-preset": state.quick = new Set(QUICK.map((x) => x.id)); state.fromHome = true; render(); return;
   }
-  const edges = $("#stage")._edges || [];
-  if (t.dataset.edge != null) { showPop(t, edges[+t.dataset.edge].flags.join("<br><br>")); return; }
-  if (t.dataset.flag) { showPop(t, edges.filter((e) => e.to === t.dataset.flag).flatMap((e) => e.flags).join("<br><br>")); }
+  const sl = $("#stage")._sl;
+  if (!sl) return;
+  if (t.dataset.rib != null) { showPop(t, sl.ribs[+t.dataset.rib].flag); return; }
+  if (t.dataset.flag) showPop(t, sl.rows.get(t.dataset.flag).filter((r) => r.flag).map((r) => r.flag).join("<br><br>"));
 });
 
-// Hovering a card lights its ribbons; hovering a ribbon says what it carries.
+// Hover an item row: trace it. Hover a card: light its ribbons. Hover a ribbon: say what it carries.
 const stageEl = $("#stage");
 stageEl.addEventListener("mouseover", (ev) => {
-  const card = ev.target.closest(".node");
-  if (card) {
-    const id = card.dataset.node;
-    stageEl.querySelectorAll(".rib").forEach((p) => {
-      p.style.strokeOpacity = p.dataset.from === id || p.dataset.to === id ? 0.8 : Math.min(+p.dataset.op, 0.13);
-    });
-  }
+  const row = ev.target.closest("tr[data-rk]");
+  if (row) { traceRow(row.dataset.rk); return; }
   const hit = ev.target.closest(".rib-hit");
   if (hit) {
-    const e = stageEl._edges[+hit.dataset.i];
-    const f = node(e.from), to = node(e.to);
-    const nm = (n) => (n.pseudo ? (n.label || (n.pseudo === "nic" ? "NIC" : "Charges")) : idFor(n).main);
-    const ls = e.lines.map((l) => `${l.qty} × ${esc(l.item)} @ ${money(l.rate)}`).join("<br>");
-    showTip(ev, `<b>${esc(nm(f))} → ${esc(nm(to))}</b><br>${money(e.amount)}${ls ? "<br>" + ls : ""}${e.flags.length ? "<br>⚠ line mismatch — click the marker" : ""}`);
+    const sl = stageEl._sl;
+    const r = sl.ribs[+hit.dataset.i];
+    const nm = (id) => { const n = nodeOf(sl, id); return n.pseudo ? (n.label || (n.pseudo === "nic" ? "NIC" : "Charges")) : idFor(n); };
+    const ls = (r.lines || []).map((l) => `${l.qty} × ${esc(l.item)} @ ${money(l.rate)}`).join("<br>");
+    showTip(ev, `<b>${esc(nm(r.from))} → ${esc(nm(r.to))}</b><br>${money(r.amount)}${r.note ? " · " + r.note : ""}${ls ? "<br>" + ls : ""}${r.flag ? "<br>⚠ line mismatch — click the marker" : ""}`);
   }
 });
 stageEl.addEventListener("mousemove", (ev) => { if (!tip.hidden) { tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; } });
 stageEl.addEventListener("mouseout", (ev) => {
-  if (ev.target.closest(".node")) stageEl.querySelectorAll(".rib").forEach((p) => { p.style.strokeOpacity = p.dataset.op; });
+  if (ev.target.closest("tr[data-rk]")) untrace();
   if (ev.target.closest(".rib-hit")) tip.hidden = true;
 });
 $("#gantt").addEventListener("mousemove", (ev) => {
