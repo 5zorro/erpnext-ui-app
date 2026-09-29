@@ -944,6 +944,10 @@ function renderBowtie() {
   stackSide((r) => rk(r.to, r.toRow) + r._k, (r) => r._y1, "y2");
 
   let svg = `<svg width="${L.width}" height="${L.height}" viewBox="0 0 ${L.width} ${L.height}">`;
+  // The A/R desk hatch, for the inside of ribbons that come from an A/R document. White stripes
+  // over the ribbon's own colour, the same -32deg as doc-wash.css --hatch-desk.
+  svg += `<defs><pattern id="rib-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(-32)">
+    <rect width="2.2" height="6" fill="#fff" fill-opacity=".85"/></pattern></defs>`;
   // Lane labels and the divider between Buy and Sell.
   if (L.laneTops.buy != null) svg += `<text class="lane-lbl" x="2" y="${L.laneTops.buy - 10}">BUY · A/P</text>`;
   if (L.laneTops.sell != null) {
@@ -984,6 +988,11 @@ function renderBowtie() {
       }
     }
     svg += `<path class="rib" data-i="${i}" d="${d}" stroke="${color}" stroke-width="${thick(r)}" stroke-opacity="${op}" data-op="${op}"/>`;
+    // From an A/R document: hatch inside, drawn 1px narrower on each side so the ribbon's edge stays
+    // one continuous solid line and it still reads as a single flow (5zorro 2026-09-29).
+    if (!src.pseudo && TYPES[src.t].ar && thick(r) >= 4) {
+      svg += `<path class="rib" data-i="${i}" d="${d}" stroke="url(#rib-hatch)" stroke-width="${thick(r) - 2}" stroke-opacity="${op}" data-op="${op}"/>`;
+    }
     svg += `<path class="rib-hit" data-i="${i}" d="${d}" stroke-width="${Math.max(8, thick(r))}"/>`;
     if (r.flag) flagsHtml += `<button class="flag rib-flag" data-rib="${i}" style="left:${mx}px;top:${my}px" title="Line mismatch on this link">⚠</button>`;
   });
