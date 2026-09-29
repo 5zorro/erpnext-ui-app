@@ -119,17 +119,22 @@
   .n-more { font-size: 10px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px;
             background: var(--paper); white-space: nowrap; }
   /* The item table is positioned, not flowed: its row centres are what the ribbons are drawn to,
-     so its top and row pitch are constants shared with the script (TABLE_TOP, TH_H, ROW_H). */
-  .n-lines { position: absolute; left: 8px; right: 5px; top: 80px; }
-  .n-lines table { table-layout: fixed; border-collapse: collapse; }
-  .n-lines th, .n-lines td { padding: 0 3px; height: 16px; line-height: 16px; border: none; font-size: 10.5px;
-                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .n-lines th { font-size: 9px; color: var(--muted); border-bottom: 1px solid var(--edge); line-height: 15px; }
-  .n-lines tr[data-rk] { cursor: crosshair; }
-  .n-lines tr.lit td { background: rgba(31, 45, 61, .08); }
-  .n-lines tr.sum td { color: var(--muted); font-style: italic; }
-  .n-lines tr.tot td { font-weight: 700; }
-  .n-lines tr.flagged td:first-child { color: var(--warn); font-weight: 700; }
+     so its top and row pitch are constants shared with the script (TABLE_TOP, TH_H, ROW_H).
+     Rows are fixed-height grid strips, not <tr>s: a table cell's height is only a minimum, so a
+     taller font or a ⚠ glyph stretched a row and every ribbon below it slid (5zorro 2026-09-29).
+     A strip clips instead of growing, so the promise holds on any machine. */
+  .n-lines { position: absolute; left: 8px; right: 5px; top: 80px; font-size: 10.5px; }
+  .n-tr { display: grid; grid-template-columns: var(--cols); height: 16px; line-height: 16px; overflow: hidden; }
+  .n-tr > span { padding: 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .n-tr > .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .n-tr > .span2 { grid-column: span 2; }
+  .n-tr.th { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 600;
+             line-height: 15px; border-bottom: 1px solid var(--edge); }
+  .n-tr[data-rk] { cursor: crosshair; }
+  .n-tr.lit { background: rgba(31, 45, 61, .08); }
+  .n-tr.sum { color: var(--muted); font-style: italic; }
+  .n-tr.tot { font-weight: 700; }
+  .n-tr.flagged > span:first-child { color: var(--warn); font-weight: 700; }
   .flag { border: 1px solid #f59e0b; background: var(--warn-bg); color: var(--warn); border-radius: 5px;
           font-size: 10px; font-weight: 700; padding: 1px 5px; cursor: pointer; line-height: 14px; }
   .rib-flag { position: absolute; transform: translate(-50%, -50%); z-index: 3; }
@@ -169,6 +174,38 @@
   .qf button[aria-pressed="true"] { background: #1f2d3d; border-color: #1f2d3d; color: #fff; }
   .qf .sep { width: 1px; height: 18px; background: var(--edge); margin: 0 4px; }
   .notes li { margin-bottom: 7px; line-height: 1.55; }
+  /* ---------- lifecycle ---------- */
+  .lc-wrap { overflow-x: auto; padding: 4px 14px 12px; }
+  #p-lifecycle .sheet { position: relative; }
+  table.lc { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; }
+  .lc th { text-align: right; vertical-align: bottom; padding: 6px 8px; background: #f8fafc; font-size: 10px; }
+  .lc th small { display: block; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--faint); }
+  .lc th.lc-item, .lc td.lc-item { text-align: left; position: sticky; left: 0; background: var(--paper); z-index: 1;
+                                   min-width: 150px; font-weight: 600; }
+  .lc th.lc-item { background: #f8fafc; }
+  .lc td { border-bottom: 1px solid var(--line); }
+  .lc-c { text-align: right; position: relative; padding: 5px 8px 5px 18px; cursor: pointer; min-width: 92px;
+          font-variant-numeric: tabular-nums; }
+  .lc-c:hover { background: #f8fafc; }
+  .lc-c.empty { color: var(--faint); cursor: default; }
+  .lc-c .q { font-weight: 600; font-size: 13px; }
+  .lc-c .a { font-size: 11px; color: var(--muted); }
+  .lc-c.warn { background: #fffbeb; }
+  .lc-c.open { background: #f8fafc; }
+  .lc .neg { color: #b91c1c; }
+  .lc .pos { color: #00795c; }
+  .mk { font-size: 11px; font-weight: 700; }
+  .lc-c .mk { position: absolute; left: 5px; top: 5px; }
+  .mk.warn { color: var(--warn); }
+  .mk.open { color: #0072B2; }
+  .mk.info { color: var(--muted); }
+  .lc tr.flagged td.lc-item { color: var(--warn); }
+  .lc-group td { background: #eef2f5; padding: 8px 10px; font-size: 12px; border-top: 8px solid var(--paper); }
+  .lc-group td { position: static; }
+  .lc-warnsum { margin-left: 10px; color: var(--warn); font-weight: 700; }
+  .lc-oksum { margin-left: 10px; color: #00795c; font-weight: 700; }
+  .lc-tot td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--edge); }
+  .lc-tot td.lc-c { cursor: default; }
   .notes { padding: 4px 18px 10px 32px; margin: 0; max-width: 100ch; }
 </style>
 </head>
@@ -184,6 +221,7 @@
     <button role="tab" data-tab="statement">Statement</button>
     <button role="tab" data-tab="bowtie">⋈ Bowtie</button>
     <button role="tab" data-tab="gantt">▤ Gantt</button>
+    <button role="tab" data-tab="lifecycle">☰ Lifecycle</button>
     <button role="tab" data-tab="notes">Notes &amp; open questions</button>
   </nav>
 </header>
@@ -241,6 +279,25 @@
         first). Weekends are shaded. The dotted hand-offs show where time went between documents (8 days from
         order to receipt here); the bordered stretch shows where time went inside one (a receipt keyed in two days late). Every row carries its
         document's wash up to the date on the paper, so a same-day document is still a coloured row.</div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-lifecycle" hidden>
+    <div class="sheet">
+      <div class="focusbar" id="focusbar-l"></div>
+      <div class="legend" style="padding-top:10px">
+        <span><span class="mk warn">⚠</span> should not happen — look at it</span>
+        <span><span class="mk open">◌</span> still open — waiting on the next step</span>
+        <span><span class="mk info">ⓘ</span> worth knowing</span>
+        <span>– nothing at this stage</span>
+      </div>
+      <div class="lc-wrap" id="lc-wrap"><table class="lc" id="lc-table"></table></div>
+      <div class="why"><b>One row per item, one column per stage</b> — the same links as the bowtie, read as a table, for
+        every Sales Order in focus. Each cell is how many (or, for payments, how much of the bill) reached that stage and
+        what it cost; click it for the documents behind it. A gap is marked on the cell where it shows up. Margin is what
+        the customer was invoiced minus the landed cost of that many, net of anything credited back. In the build each column
+        is one entry in a list of links (which field joins which document), so a new link type — Material Request, drop
+        ship, an advance — fills a column or adds one, and never needs a new drawing rule.</div>
     </div>
   </section>
 
@@ -690,13 +747,14 @@ function slice() {
 const CARD_W = 232, PSEUDO_H = 66, GAP_Y = 18, RIB_W = 72; // 232: a bill's four columns and a whole ID
 const GUTTER = 34;     // left of the leftmost column, for the SO -> PO branch
 const LANE_TOP = 22, LANE_GAP = 50;
+const CARD_BORDER = 1; // .node's top border: positioned children start below it
 const ID_Y = 34;       // centre of the document-number line, from the card's top
 const TABLE_TOP = 80;  // matches .n-lines { top: 80px }
 const TH_H = 16, ROW_H = 16;
 const nodeOf = (sl, id) => BY_ID.get(id) || sl.pseudo.get(id);
 function nodeH(sl, id) {
   if (sl.pseudo.has(id)) return PSEUDO_H;
-  return TABLE_TOP + TH_H + sl.rows.get(id).length * ROW_H + 7;
+  return CARD_BORDER + TABLE_TOP + TH_H + sl.rows.get(id).length * ROW_H + 7;
 }
 function laneOf(n) {
   if (n.pseudo) return n.pseudo === "margin" ? "sell" : laneOf(BY_ID.get(n.target));
@@ -764,8 +822,8 @@ function layout(sl) {
   const anchorY = (id, row) => {
     const p = pos.get(id);
     if (sl.pseudo.has(id) || row === null || row === undefined || row < 0) return p.y + p.h / 2;
-    if (row === "head") return p.y + ID_Y;
-    return p.y + TABLE_TOP + TH_H + row * ROW_H + ROW_H / 2;
+    if (row === "head") return p.y + CARD_BORDER + ID_Y;
+    return p.y + CARD_BORDER + TABLE_TOP + TH_H + row * ROW_H + ROW_H / 2;
   };
   const titles = { 0: "Payment", 1: "Bill · Invoice", 2: fulfil ? "Receipt" : "Order", [ORDER]: "Order", [ORDER + 1]: "Estimate · Request" };
   const heads = [...new Set(sl.ids.map((id) => colOf(nodeOf(sl, id))))].map((c) => ({ x: xOf(c), label: titles[c] || "" }));
@@ -815,23 +873,23 @@ function cardHtml(sl, id) {
     <div class="n-dates">Doc <b>${fmtD(n.doc)}</b> · Posted <b>${fmtD(n.posted)}</b></div>
     <div class="n-user">${esc(n.user)} <span class="muted">(created)</span>${n.t === "cm" ? ` · against ${esc(idFor(BY_ID.get(n.lines[0].from)))}` : ""}</div>`;
   const four = n.t === "bill" || n.t === "si";
-  const cols = n.refs ? '<col style="width:66%"><col>' : four ? '<col style="width:36%"><col style="width:9%"><col style="width:28%"><col>' : '<col style="width:58%"><col style="width:12%"><col>';
-  const extra = n.t === "bill" ? "<th class=num title='line + its share of the charges (hover a value for per unit)'>Landed</th>"
-    : n.t === "si" ? "<th class=num title='price − landed cost of what was bought for this line'>Margin</th>" : "";
-  const head = n.refs ? "<th>Applied to</th><th class=num>Amount</th>" : `<th>Item</th><th class=num>Qty</th><th class=num>Amount</th>${extra}`;
+  const cols = n.refs ? "2fr 1fr" : four ? "36fr 9fr 28fr 27fr" : "58fr 12fr 30fr";
+  const extra = n.t === "bill" ? "<span class=num title='line + its share of the charges (hover a value for per unit)'>Landed</span>"
+    : n.t === "si" ? "<span class=num title='price − landed cost of what was bought for this line'>Margin</span>" : "";
+  const head = n.refs ? "<span>Applied to</span><span class=num>Amount</span>" : `<span>Item</span><span class=num>Qty</span><span class=num>Amount</span>${extra}`;
   const tr = rows.map((r, k) => {
     const key = `data-rk="${esc(rk(id, k))}"`;
-    if (r.kind === "ref") return `<tr ${key}><td>${esc(idFor(BY_ID.get(r.bill)))}</td><td class=num>${money(r.amount)}</td></tr>`;
-    if (r.kind === "other") return `<tr ${key} class=sum><td>${esc(r.count)} other bill${r.count > 1 ? "s" : ""}</td><td class=num>${money(r.amount)}</td></tr>`;
-    if (r.kind === "charges") return `<tr ${key} class=sum><td colspan=2>+ charges</td><td class=num>${money(r.amount)}</td>${four ? "<td></td>" : ""}</tr>`;
-    if (r.kind === "total") return `<tr ${key} class=tot><td colspan=2>Total</td><td class=num>${money(r.amount)}</td>${four ? "<td></td>" : ""}</tr>`;
-    const tail = n.t === "bill" ? `<td class=num title="${esc(money(r.unit))} per unit"><b>${money(r2(r.amount + r.alloc))}</b></td>`
-      : n.t === "si" ? `<td class=num style="color:#00795c"><b>${r.margin ? money(r.margin.margin) : "—"}</b></td>` : "";
+    if (r.kind === "ref") return `<div class="n-tr" ${key}><span>${esc(idFor(BY_ID.get(r.bill)))}</span><span class=num>${money(r.amount)}</span></div>`;
+    if (r.kind === "other") return `<div class="n-tr sum" ${key}><span>${esc(r.count)} other bill${r.count > 1 ? "s" : ""}</span><span class=num>${money(r.amount)}</span></div>`;
+    if (r.kind === "charges") return `<div class="n-tr sum" ${key}><span class=span2>+ charges</span><span class=num>${money(r.amount)}</span></div>`;
+    if (r.kind === "total") return `<div class="n-tr tot" ${key}><span class=span2>Total</span><span class=num>${money(r.amount)}</span></div>`;
+    const tail = n.t === "bill" ? `<span class=num title="${esc(money(r.unit))} per unit"><b>${money(r2(r.amount + r.alloc))}</b></span>`
+      : n.t === "si" ? `<span class=num style="color:#00795c"><b>${r.margin ? money(r.margin.margin) : "—"}</b></span>` : "";
     const tip = `${r.item} · ${r.qty} × ${money(r.rate)}${n.t === "bill" ? ` + ${money(r.alloc)} charges` : ""}${n.t === "si" && r.margin ? ` · landed cost ${money(r.margin.cost)}` : ""}`;
-    return `<tr ${key}${r.flag ? " class=flagged" : ""} title="${esc(tip)}">
-      <td>${r.flag ? "⚠ " : ""}${esc(r.item)}</td><td class=num>${r.qty}</td><td class=num>${money(r.amount)}</td>${tail}</tr>`;
+    return `<div class="n-tr${r.flag ? " flagged" : ""}" ${key} title="${esc(tip)}">
+      <span>${r.flag ? "⚠ " : ""}${esc(r.item)}</span><span class=num>${r.qty}</span><span class=num>${money(r.amount)}</span>${tail}</div>`;
   }).join("");
-  body += `<div class="n-lines"><table style="width:100%"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${tr}</tbody></table></div>`;
+  body += `<div class="n-lines" style="--cols:${cols}"><div class="n-tr th">${head}</div>${tr}</div>`;
   return body;
 }
 
@@ -945,6 +1003,25 @@ function renderBowtie() {
   stage.style.height = L.height + channelUsed + 14 + "px";
   stage.querySelector("svg").setAttribute("height", L.height + channelUsed + 14);
   stage._sl = sl;
+  checkGeometry(L);
+}
+
+/*
+ * The promise, checked: after drawing, measure every item row and compare its centre with the
+ * y the ribbons were drawn to. docs/gotchas.md G8 -- numbers and the picture must agree -- so a
+ * drift of more than half a pixel is reported rather than trusted.
+ */
+function checkGeometry(L) {
+  const stage = $("#stage"), top = stage.getBoundingClientRect().top;
+  let worst = 0, where = "";
+  stage.querySelectorAll("[data-rk]").forEach((el) => {
+    const k = el.dataset.rk, id = k.slice(0, k.lastIndexOf("#")), row = +k.slice(k.lastIndexOf("#") + 1);
+    const r = el.getBoundingClientRect();
+    const drift = Math.abs(r.top + r.height / 2 - top - L.anchorY(id, row));
+    if (drift > worst) { worst = drift; where = k; }
+  });
+  stage.dataset.drift = worst.toFixed(2);
+  if (worst > 0.5) console.warn(`bowtie geometry: row ${where} is ${worst.toFixed(2)}px off its ribbon anchor`);
 }
 
 /*
@@ -986,11 +1063,11 @@ function traceRow(start) {
     }
   }
   document.querySelectorAll("#stage .rib").forEach((p) => { p.style.strokeOpacity = ribsLit.has(+p.dataset.i) ? 0.85 : 0.06; });
-  document.querySelectorAll("#stage tr[data-rk]").forEach((tr) => tr.classList.toggle("lit", lit.has(tr.dataset.rk)));
+  document.querySelectorAll("#stage [data-rk]").forEach((tr) => tr.classList.toggle("lit", lit.has(tr.dataset.rk)));
 }
 function untrace() {
   document.querySelectorAll("#stage .rib").forEach((p) => { p.style.strokeOpacity = p.dataset.op; });
-  document.querySelectorAll("#stage tr.lit").forEach((tr) => tr.classList.remove("lit"));
+  document.querySelectorAll("#stage .lit").forEach((tr) => tr.classList.remove("lit"));
 }
 
 /* ---------------- Gantt ---------------- */
@@ -1051,6 +1128,202 @@ function renderGantt() {
   const g = $("#gantt");
   g.setAttribute("width", W); g.setAttribute("height", H); g.setAttribute("viewBox", `0 0 ${W} ${H}`);
   g.innerHTML = s;
+}
+
+/* ---------------- lifecycle: one row per item, one column per stage ---------------- */
+/*
+ * The audit view (5zorro 2026-09-29: "a 'this is the flow of items' kind of audit tool"). Same
+ * links as the bowtie, read as a table: for each Sales Order in view, every item that any of its
+ * documents touched, and how much of it reached each stage. A blank where a number should be is
+ * the finding, so each gap is marked on its cell -- ⚠ something that should not happen, ◌ still
+ * open, ⓘ worth knowing -- and clicking a cell lists the documents behind it.
+ *
+ * In the build each stage is one entry in a link list (which field joins which document), so a
+ * new link type -- Material Request, drop ship, an advance -- fills a column or adds one; it never
+ * needs a new drawing rule.
+ */
+const STAGES = [
+  { id: "quoted", label: "Quoted", sub: "Estimate", role: "request" },
+  { id: "ordered", label: "Ordered", sub: "Sales Order", role: "order" },
+  { id: "bought", label: "Bought", sub: "PO", role: "order" },
+  { id: "received", label: "Received", sub: "Item Receipt", role: "fulfill" },
+  { id: "billed", label: "Billed", sub: "landed cost", role: "invoice" },
+  { id: "credited", label: "Credited", sub: "vendor credit", role: "invoice" },
+  { id: "paidAp", label: "Paid", sub: "A/P", role: "payment" },
+  { id: "invoiced", label: "Invoiced", sub: "to customer", role: "invoice" },
+  { id: "paidAr", label: "Collected", sub: "A/R", role: "payment" },
+];
+
+function paidShare(docId) {
+  const d = BY_ID.get(docId);
+  const pays = DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === docId));
+  const paid = pays.reduce((t, p) => t + p.refs.filter((r) => r.bill === docId).reduce((a, r) => a + r.amount, 0), 0);
+  return { frac: docTotal(d) ? Math.min(1, paid / docTotal(d)) : 0, pays: pays.map((p) => p.id) };
+}
+
+function buildGroup({ so = null, pos = [], bills = null }) {
+  const poIds = pos.map((p) => p.id);
+  const prs = DOCS.filter((d) => d.t === "pr" && d.lines.some((l) => poIds.includes(l.from)));
+  const prIds = prs.map((d) => d.id);
+  const billDocs = bills || DOCS.filter((d) => d.t === "bill" && d.lines.some((l) => poIds.includes(l.from) || prIds.includes(l.from)));
+  const billIds = billDocs.map((b) => b.id);
+  const cms = DOCS.filter((d) => d.t === "cm" && d.lines.some((l) => billIds.includes(l.from)));
+  const sis = so ? DOCS.filter((d) => d.t === "si" && d.lines.some((l) => l.from === so.id)) : [];
+  const qtns = so ? [...new Set(so.lines.map((l) => l.from).filter(Boolean))].map((id) => BY_ID.get(id)).filter(Boolean) : [];
+  const rows = new Map();
+  const cell = (item, st) => {
+    if (!rows.has(item)) rows.set(item, { item, cells: {}, nic: false });
+    const r = rows.get(item);
+    if (!r.cells[st]) r.cells[st] = { qty: 0, amt: 0, docs: new Set(), marks: [] };
+    return r.cells[st];
+  };
+  const add = (st, docId, item, qty, amt) => { const c = cell(item, st); c.qty += qty; c.amt = r2(c.amt + amt); c.docs.add(docId); };
+  qtns.forEach((q) => q.lines.forEach((l) => add("quoted", q.id, l.item, l.qty, lineAmt(l))));
+  if (so) so.lines.forEach((l) => add("ordered", so.id, l.item, l.qty, lineAmt(l)));
+  pos.forEach((p) => p.lines.forEach((l) => add("bought", p.id, l.item, l.qty, lineAmt(l))));
+  prs.forEach((p) => p.lines.filter((l) => poIds.includes(l.from)).forEach((l) => add("received", p.id, l.item, l.qty, lineAmt(l))));
+  for (const b of billDocs) {
+    const share = paidShare(b.id);
+    landed(b).forEach((l) => {
+      const mine = bills || poIds.includes(l.from) || prIds.includes(l.from) || l.from === null;
+      if (!mine) return;
+      const cost = r2(l.amount + l.alloc);
+      add("billed", b.id, l.item, l.qty, cost);
+      if (l.from === null) rows.get(l.item).nic = true;
+      const pc = cell(l.item, "paidAp");
+      pc.amt = r2(pc.amt + cost * share.frac); pc.qty = null; share.pays.forEach((id) => pc.docs.add(id));
+      pc.due = r2((pc.due || 0) + cost);
+    });
+  }
+  cms.forEach((c) => c.lines.forEach((l) => add("credited", c.id, l.item, l.qty, lineAmt(l))));
+  for (const si of sis) {
+    const share = paidShare(si.id);
+    si.lines.filter((l) => l.from === so.id).forEach((l) => {
+      add("invoiced", si.id, l.item, l.qty, lineAmt(l));
+      const pc = cell(l.item, "paidAr");
+      pc.amt = r2(pc.amt + lineAmt(l) * share.frac); pc.qty = null; share.pays.forEach((id) => pc.docs.add(id));
+      pc.due = r2((pc.due || 0) + lineAmt(l));
+    });
+  }
+
+  // The gaps. Each is marked on the cell where it shows up, never as a prompt.
+  const q = (r, st) => (r.cells[st] ? r.cells[st].qty || 0 : 0);
+  const a = (r, st) => (r.cells[st] ? r.cells[st].amt || 0 : 0);
+  const mark = (r, st, kind, text) => { cell(r.item, st).marks.push({ kind, text }); };
+  for (const r of rows.values()) {
+    if (so && q(r, "bought") && !q(r, "ordered")) mark(r, "bought", "warn", `Bought for ${so.ref || so.id}, but that Sales Order has no ${r.item} line.`);
+    else if (so && q(r, "bought") > q(r, "ordered")) mark(r, "bought", "warn", `Bought ${q(r, "bought")}, the Sales Order asked for ${q(r, "ordered")}.`);
+    if (q(r, "bought") > q(r, "received")) mark(r, "received", "open", `${q(r, "bought") - q(r, "received")} not received yet.`);
+    const sourcedBilled = r.nic ? 0 : q(r, "billed");
+    if (!r.nic && q(r, "received") > sourcedBilled) mark(r, "billed", "open", `${q(r, "received") - sourcedBilled} received, not billed yet.`);
+    if (r.nic) mark(r, "billed", "info", "Typed on the bill with no source (NIC) — no PO or receipt behind it.");
+    if (q(r, "credited")) mark(r, "credited", "info", `${-q(r, "credited")} credited back by the vendor.`);
+    const pc = r.cells.paidAp;
+    if (pc && pc.due - pc.amt > 0.005) mark(r, "paidAp", "open", `${money(pc.due - pc.amt)} of the bill not paid yet.`);
+    if (so && q(r, "ordered") > q(r, "invoiced")) mark(r, "invoiced", "open", `${q(r, "ordered") - q(r, "invoiced")} ordered, not invoiced yet.`);
+    const rc = r.cells.paidAr;
+    if (rc && rc.due - rc.amt > 0.005) mark(r, "paidAr", "open", `${money(rc.due - rc.amt)} not collected yet.`);
+    // Margin: what the customer was invoiced minus the landed cost of that many, net of credits.
+    const billedQ = q(r, "billed"), invQ = q(r, "invoiced");
+    const netCost = r2(a(r, "billed") + a(r, "credited"));
+    if (!so) {
+      // No Sales Order: bought for stock, so there is no sale to measure against yet -- not a loss.
+      r.margin = null; r.marginNote = { kind: "info", text: "Bought for stock (no Sales Order) — its margin shows when it sells." };
+    } else if (invQ && billedQ) {
+      r.margin = r2(a(r, "invoiced") - (a(r, "billed") * Math.min(1, invQ / billedQ)));
+    } else if (invQ) {
+      r.margin = null; r.marginNote = { kind: "warn", text: "Invoiced, but no cost traced to it." };
+    } else if (billedQ) {
+      r.margin = -netCost;
+      r.marginNote = q(r, "credited")
+        ? { kind: "warn", text: `Returned, but ${money(netCost)} of its landed cost (its share of the freight) was not credited.` }
+        : { kind: "warn", text: `Cost with no sale: billed on this job, never invoiced to the customer.${r.nic ? " Overhead, or should it be on the invoice?" : ""}` };
+    }
+    r.warn = Object.values(r.cells).some((c) => c.marks.some((m) => m.kind === "warn")) || (r.marginNote && r.marginNote.kind === "warn");
+  }
+  const docs = [so && so.id, ...poIds, ...prIds, ...billIds, ...cms.map((c) => c.id), ...sis.map((s) => s.id), ...qtns.map((x) => x.id)].filter(Boolean);
+  const title = so ? `Sales Order ${idFor(so)}` : pos.length ? `Purchase Order ${idFor(pos[0])} · no Sales Order` : `Bill ${idFor(billDocs[0])} · no order`;
+  const party = so ? so.party : (pos[0] || billDocs[0]).party;
+  const order = [...(so ? so.lines.map((l) => l.item) : []), ...rows.keys()];
+  return { title, party, rows: [...new Set(order)].map((k) => rows.get(k)), docs };
+}
+
+function lifecycleGroups(vis) {
+  const groups = [];
+  const has = (id) => groups.some((g) => g.docs.includes(id));
+  for (const id of vis) {
+    const so = BY_ID.get(id);
+    if (so.t !== "so") continue;
+    groups.push(buildGroup({ so, pos: DOCS.filter((d) => d.t === "po" && (d.lines || []).some((l) => l.from === so.id)) }));
+  }
+  for (const id of vis) if (BY_ID.get(id).t === "po" && !has(id)) groups.push(buildGroup({ pos: [BY_ID.get(id)] }));
+  for (const id of vis) if (BY_ID.get(id).t === "bill" && !has(id)) groups.push(buildGroup({ bills: [BY_ID.get(id)] }));
+  return groups;
+}
+
+const MARK = { warn: "⚠", open: "◌", info: "ⓘ" };
+let LC = [];
+function renderLifecycle() {
+  renderFocusBar($("#focusbar-l"));
+  const sl = slice();
+  LC = lifecycleGroups(sl.vis);
+  const head = `<thead><tr><th class="lc-item">Item</th>${STAGES.map((s) => `<th style="border-top:3px solid ${ACCENT[s.role]}">${s.label}<small>${s.sub}</small></th>`).join("")}<th style="border-top:3px solid #00795c">Margin<small>invoiced − cost</small></th></tr></thead>`;
+  const body = LC.map((g, gi) => {
+    const tot = (st) => r2(g.rows.reduce((t, r) => t + (r.cells[st] ? r.cells[st].amt : 0), 0));
+    const mTot = r2(g.rows.reduce((t, r) => t + (r.margin || 0), 0));
+    const warnN = g.rows.filter((r) => r.warn).length;
+    const rowsHtml = g.rows.map((r, ri) => {
+      const cells = STAGES.map((s) => {
+        const c = r.cells[s.id];
+        if (!c || (!c.docs.size && !c.marks.length)) return `<td class="lc-c empty">–</td>`;
+        const marks = c.marks.map((m) => m.kind);
+        const top = marks.includes("warn") ? "warn" : marks.includes("open") ? "open" : marks.includes("info") ? "info" : "";
+        const qty = c.qty === null ? (c.due ? `${Math.round((c.amt / c.due) * 100)}%` : "") : c.qty;
+        return `<td class="lc-c ${top}" data-lc="${gi}:${ri}:${s.id}" title="${esc(c.marks.map((m) => m.text).join(" "))}">
+          ${top ? `<span class="mk ${top}">${MARK[top]}</span>` : ""}<div class="q">${qty}</div><div class="a">${c.docs.size ? money(c.amt) : ""}</div></td>`;
+      }).join("");
+      const mn = r.marginNote;
+      const margin = r.margin == null && !mn ? `<td class="lc-c empty">–</td>`
+        : `<td class="lc-c ${mn ? mn.kind : ""} lc-m" title="${esc(mn ? mn.text : "")}" data-lc="${gi}:${ri}:margin">${mn ? `<span class="mk ${mn.kind}">${MARK[mn.kind]}</span>` : ""}
+           <div class="q ${r.margin < 0 ? "neg" : "pos"}">${r.margin == null ? (mn && mn.kind === "info" ? "stock" : "?") : money(r.margin)}</div><div class="a">${r.margin != null && r.cells.invoiced ? Math.round((r.margin / r.cells.invoiced.amt) * 100) + "%" : r.margin != null ? "no sale" : ""}</div></td>`;
+      return `<tr class="${r.warn ? "flagged" : ""}"><td class="lc-item">${r.warn ? '<span class="mk warn">⚠</span> ' : ""}${esc(r.item)}${r.nic ? ' <span class="muted">NIC</span>' : ""}</td>${cells}${margin}</tr>`;
+    }).join("");
+    return `<tbody><tr class="lc-group"><td colspan="${STAGES.length + 2}"><b>${esc(g.title)}</b> · ${esc(g.party)}
+        ${warnN ? `<span class="lc-warnsum">⚠ ${warnN} item${warnN > 1 ? "s" : ""} to look at</span>` : `<span class="lc-oksum">all matched</span>`}</td></tr>
+      ${rowsHtml}
+      <tr class="lc-tot"><td class="lc-item">Total</td>${STAGES.map((s) => `<td class="lc-c">${tot(s.id) ? money(tot(s.id)) : "–"}</td>`).join("")}
+        <td class="lc-c"><b class="${mTot < 0 ? "neg" : "pos"}">${money(mTot)}</b></td></tr></tbody>`;
+  }).join("");
+  $("#lc-table").innerHTML = LC.length ? head + body : `<tbody><tr><td class="why">Nothing in focus has an order or a bill to follow.</td></tr></tbody>`;
+}
+
+function showLcPop(td) {
+  closePop();
+  const [gi, ri, st] = td.dataset.lc.split(":");
+  const r = LC[+gi].rows[+ri];
+  const wrap = $("#p-lifecycle .sheet");
+  let html;
+  if (st === "margin") {
+    html = `<b style="color:#1f2d3d">Margin · ${esc(r.item)}</b><br>${r.marginNote ? esc(r.marginNote.text) + "<br>" : ""}` +
+      `Invoiced ${money(r.cells.invoiced ? r.cells.invoiced.amt : 0)} − landed cost ${money(r.cells.billed ? r.cells.billed.amt : 0)}` +
+      `${r.cells.credited ? ` + credited ${money(-r.cells.credited.amt)}` : ""}`;
+  } else {
+    const c = r.cells[st], S = STAGES.find((s) => s.id === st);
+    html = `<b style="color:#1f2d3d">${esc(S.label)} · ${esc(r.item)}</b>` +
+      c.marks.map((m) => `<div style="margin-top:4px">${MARK[m.kind]} ${esc(m.text)}</div>`).join("") +
+      `<div style="margin-top:6px">${[...c.docs].map((id) => { const d = BY_ID.get(id); return `<div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+        <span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>${esc(TYPES[d.t].label)} ${esc(idFor(d))}
+        <button class="ico" data-act="peek" data-id="${esc(id)}" title="Peek">${EYE}</button>
+        <button class="ico" data-act="bowtie" data-id="${esc(id)}" title="Bowtie">⋈</button></div>`; }).join("")}</div>`;
+  }
+  const a = td.getBoundingClientRect(), s = wrap.getBoundingClientRect();
+  pop = document.createElement("div");
+  pop.className = "pop";
+  pop.style.borderColor = "#94a3b8";
+  pop.innerHTML = html;
+  pop.style.left = Math.min(Math.max(0, a.left - s.left - 60), s.width - 340) + "px";
+  pop.style.top = a.bottom - s.top + 4 + "px";
+  wrap.appendChild(pop);
 }
 
 /* ---------------- statement: a Find page with quick filters ---------------- */
@@ -1146,11 +1419,12 @@ function openPeek(id) {
 /* ---------------- wiring ---------------- */
 function render() {
   document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
-  for (const t of ["statement", "bowtie", "gantt", "notes"]) $("#p-" + t).hidden = state.tab !== t;
+  for (const t of ["statement", "bowtie", "gantt", "lifecycle", "notes"]) $("#p-" + t).hidden = state.tab !== t;
   closePop();
   if (state.tab === "statement") renderStatement();
   if (state.tab === "bowtie") renderBowtie();
   if (state.tab === "gantt") renderGantt();
+  if (state.tab === "lifecycle") renderLifecycle();
 }
 function setFocus(id, add) {
   if (add) { if (!state.focus.includes(id)) state.focus.push(id); }
@@ -1177,6 +1451,8 @@ function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; tip.style
 
 document.addEventListener("click", (ev) => {
   const t = ev.target.closest("button");
+  const lc = !t && ev.target.closest("td[data-lc]");
+  if (lc) { showLcPop(lc); return; }
   if (!t) { if (!ev.target.closest(".pop")) closePop(); return; }
   if (t.dataset.tab) { state.tab = t.dataset.tab; render(); return; }
   if (t.dataset.idmode) { state.idMode = t.dataset.idmode; render(); return; }
@@ -1208,7 +1484,7 @@ document.addEventListener("click", (ev) => {
 // Hover an item row: trace it. Hover a card: light its ribbons. Hover a ribbon: say what it carries.
 const stageEl = $("#stage");
 stageEl.addEventListener("mouseover", (ev) => {
-  const row = ev.target.closest("tr[data-rk]");
+  const row = ev.target.closest("[data-rk]");
   if (row) { traceRow(row.dataset.rk); return; }
   const hit = ev.target.closest(".rib-hit");
   if (hit) {
@@ -1222,7 +1498,7 @@ stageEl.addEventListener("mouseover", (ev) => {
 });
 stageEl.addEventListener("mousemove", (ev) => { if (!tip.hidden) { tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; } });
 stageEl.addEventListener("mouseout", (ev) => {
-  if (ev.target.closest("tr[data-rk]")) untrace();
+  if (ev.target.closest("[data-rk]")) untrace();
   if (ev.target.closest(".rib-hit")) { tip.hidden = true; untrace(); }
 });
 $("#gantt").addEventListener("mousemove", (ev) => {
