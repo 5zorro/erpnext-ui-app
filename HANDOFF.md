@@ -187,7 +187,7 @@ using the one fact the allocator ignores: an amendment carries `amended_from`.
 | Capability | Pure module(s) | Electron surface |
 |------------|----------------|------------------|
 | DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
-| Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` rail (peek tree under parent Doc, OI-128 A; collapsible) |
+| Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` rail (peeks fold under their parent's row as a dropdown, OI-128 A; collapsible) |
 | Submitted this session | `submitted-docs.js` | One rail row + running count → `submitted-dropdown.html` panel; the way back after submit-and-move-on (Drafts is `docstatus 0` only, Recent keeps one row per doctype). OI-162 — shipped 2026-09-05 |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |
 | Nav intent guard | `erp-nav-intent.js` | Arm/clear around an intentional ERP nav so a late event from the page we left cannot rewrite `currentRoute` (G6) |
@@ -237,6 +237,15 @@ on museum **OI-040**.
 | Second live client (browser tab) | singleton `dirtyState`; unmanaged `window.open` | **Open** — parked on OI-040; incident snapshots count guest windows |
 | Browser Back | Esc dismisses peek; Recent is a deduped resume | **Confirmed** — do not mash Back into Recent |
 | "Where am I?" (toolbar lens chip) | `toolbarLensId()` from the **live** ERP path | **Repaired 2026-09-05** — believed route could lag the page (G6) |
+
+**Who is a peek parent (2026-09-30, plan 2026-09-26 N1).** Peeks are driven by the ERP page's
+own report of each Frappe route change (`erp-route-hop.js`: the form left, whether it had unsaved
+changes, `frappe._from_link`), never by the shell's remembered previous route. A parent is the
+form Frappe names as the caller (a Link field's *Create a new …*), else a form left with unsaved
+changes — any doctype. A Doc skin's own peek buttons keep the Doc document as parent. Depth is
+one; a hop onto the parent or a child is a return and changes nothing. Recent folds children
+under the parent's row; a child picked there opens as a peek of that parent, and Esc steps back
+in place — never by reloading, which would drop an unsaved draft. Rules: `peek-stack.js`.
 
 **`currentRoute` is a claim, not a fact.** It is set optimistically at nav time and
 reconciled from browser events, so anything user-visible that reads it (lens chip,
@@ -419,7 +428,7 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `config.test.js` | `ERP_BASE` from env | `scaffold-url-api` (`erpBase`) |
 | `route-info.test.js` | Parse desk/app routes | Indirect via `scaffold-pure-wiring` (`trackNav` → history entries) |
 | `history.test.js` | Dedupe, cap, `splitHistory` | `scaffold-pure-wiring` (`trackNav` / `getHistory`); split UI still best-effort in hist view |
-| `peek-stack.test.js` | Nested peeks under parent Doc; collapse vs Esc-keep; flyout tree decorate | Flyout tree is visual; collapse wired in `main.js` |
+| `peek-stack.test.js` | Who is a parent (caller / unsaved); return-is-a-return; Esc incl. reopen; Recent dropdown grouping | The dropdown itself is visual; `e2e/scaffold-peek-parent.spec.js` drives it live |
 | `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
 | `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
 | `chrome-state.test.js` | Toolbar lens chip (live path beats stale route); rail width | `scaffold-chrome` (lens buttons; `showingHome` polled, never read bare) |

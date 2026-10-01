@@ -37,10 +37,14 @@ import {
   beginPeekParent,
   collapsePeekStack,
   isActivePeekStack,
+  isPeekChildRoute,
   pushPeekChild,
   resolveSoftPeekEscAction,
+  resolveSoftPeekParent,
   shouldCollapsePeekStack,
+  syncPeekLinks,
 } from "../src/peek-stack.js";
+import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.js";
 import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
@@ -452,6 +456,9 @@ let billLoadPhase = BILL_LOAD_IDLE;
  * @type {import("../src/peek-stack.js").PeekStack|null}
  */
 let peekStack = null;
+/** Child → parent links so Recent keeps each peek folded under its parent (N1). */
+/** @type {import("../src/peek-stack.js").PeekLinks} */
+let peekLinks = {};
 /** True once the Simplified payload has been injected into the live ERP page. */
 let simplifiedSkinInstalled = false;
 /** Recent/Drafts rail collapsed to a grab strip (persisted; 4K-quarter windows). */
@@ -888,6 +895,9 @@ function syncE2eApi() {
     getErpUrl: () =>
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
     getHistory: () => history.map((h) => ({ ...h })),
+    getPeekStack: () => (peekStack ? JSON.parse(JSON.stringify(peekStack)) : null),
+    getRecentRows: () =>
+      JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
     getShelved: () => shelvedDrafts.map((d) => ({ ...d })),
     appVersion: APP_VERSION,
     isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
@@ -1148,7 +1158,7 @@ function sendHistory() {
   calcHistory = pruneCalcHistory(calcHistory);
   if (hist && !hist.webContents.isDestroyed()) {
     hist.webContents.send("history", {
-      items: applyPeekTreeToHistory(history, peekStack, ERP_BASE),
+      items: applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks),
       shelved: shelvedDrafts,
       calcHistory,
       collapsed: histCollapsed,
@@ -1169,40 +1179,87 @@ function collapsePeekStackIfLeaving(nextRoute, reason) {
   collapsePeekStackHard(reason);
 }
 
-function notePeekParentAndChild(childRoute) {
+/**
+ * The shell is opening a peek (a Doc skin's peek button, a Recent setup row): pick its parent
+ * by the one rule (`resolveSoftPeekParent`) and record it.
+ * @param {string} childRoute
+ * @param {boolean} [currentUnsaved] the Vanilla form on screen has unsaved changes
+ */
+function notePeekParentAndChild(childRoute, currentUnsaved = false) {
   const opts = { erpBase: ERP_BASE, history };
-  /** @type {string|null} */
-  let parentRoute = null;
-  // Live Vanilla form (Payment Entry, etc.) wins over a stale parked Bill when already on ERP.
-  if (surfaceMode === "erp" && isSoftPeekRoute(currentRoute || "", ERP_BASE)) {
-    const cur = classifyHistoryOpen(currentRoute || "", ERP_BASE);
-    if (
-      cur.record &&
-      !routesReferToSameDoc(currentRoute || "", childRoute, ERP_BASE)
-    ) {
-      parentRoute = currentRoute || "";
-    }
+  // A list is somewhere you went: never start a parent-only stack for one (it would keep the
+  // Vanilla → Doc hijack switched off, see openDocSkin's self-heal).
+  if (!isPeekChildRoute(childRoute, ERP_BASE)) {
+    navDebug("peek-none", `${childRoute} (not a record)`);
+    return;
   }
-  if (!parentRoute && parkedDocSurface && parkedDocSurface.route) {
-    parentRoute = parkedDocSurface.route;
+  const parentRoute = resolveSoftPeekParent({
+    stack: peekStack,
+    currentRoute: currentRoute || "",
+    surfaceMode,
+    parkedRoute: (parkedDocSurface && parkedDocSurface.route) || "",
+    currentUnsaved,
+    erpBase: ERP_BASE,
+  });
+  if (!parentRoute) {
+    navDebug("peek-none", `${currentRoute || ""} → ${childRoute} (no parent: clean form)`);
+    return;
   }
-  if (!parentRoute) return;
   peekStack = beginPeekParent(peekStack, parentRoute, opts);
   peekStack = pushPeekChild(peekStack, childRoute, opts);
+  peekLinks = syncPeekLinks(peekLinks, peekStack, childRoute, ERP_BASE);
   navDebug("peek-child", `${peekStack && peekStack.parent ? peekStack.parent.route : ""} → ${childRoute}`);
 }
 
-function notePeekFromErpNav(path, fromPath) {
+/**
+ * One in-SPA Desk hop, reported by the page itself (`erp-route-hop.js`, plan 2026-09-26 N1):
+ * where it landed, the form it left, whether that form had unsaved changes, Frappe's caller.
+ * @param {import("../src/erp-route-hop.js").RouteHop} hop
+ */
+function onErpRouteHop(hop) {
+  const to = normalizeAppRoute(hop.to, ERP_BASE).path || "";
+  if (!to) return;
+  // A page that claims its own address is on screen: the ERP view behind it is not the clerk's.
+  if (surfaceOwnsRoute(surfaceMode)) {
+    navDebug("route-hop-hidden", `${hop.prev || "-"} → ${to}`);
+    return;
+  }
   const had = isActivePeekStack(peekStack);
-  peekStack = applyErpHopToPeekStack(peekStack, fromPath, path, {
+  const beforeParent = had ? peekStack.parent.route : "";
+  peekStack = applyErpHopToPeekStack(peekStack, hop.prev, to, {
     erpBase: ERP_BASE,
     history,
+    prevUnsaved: hop.prevUnsaved,
+    fromLinkParent: hop.fromLinkParent,
+    fromLinkTarget: hop.fromLinkTarget,
+    anchorRoute: (parkedDocSurface && parkedDocSurface.route) || "",
   });
-  if (isActivePeekStack(peekStack) && peekStack.children.length) {
-    if (!had) navDebug("peek-erp-hop", `${fromPath || ""} → ${path}`);
+  peekLinks = syncPeekLinks(peekLinks, peekStack, to, ERP_BASE);
+  const live = isActivePeekStack(peekStack);
+  navDebug(
+    "route-hop",
+    `${hop.prev || "-"}${hop.prevUnsaved ? " (unsaved)" : ""} → ${to}` +
+      `${hop.fromLinkParent ? ` caller=${hop.fromLinkParent}` : ""}` +
+      ` peek=${live ? peekStack.parent.route : "none"}`,
+  );
+  if (live && peekStack.parent.route !== beforeParent) {
+    navDebug("peek-erp-hop", `${peekStack.parent.route} → ${to}`);
+  }
+  if (live && peekStack.children.length) {
     armSoftPeekEscHook(true).catch(() => {});
-  } else if (had && !isActivePeekStack(peekStack)) {
+  } else if (had && !live) {
     armSoftPeekEscHook(false).catch(() => {});
+  }
+  sendHistory();
+}
+
+/** Install the page-side hop reporter (idempotent per page load). */
+async function ensureErpRouteHopReporter() {
+  if (!erp || erp.webContents.isDestroyed()) return false;
+  try {
+    return !!(await erp.webContents.executeJavaScript(buildRouteHopReporterJs()));
+  } catch {
+    return false;
   }
 }
 
@@ -1939,8 +1996,14 @@ async function softPeekErp(route) {
   } catch {
     /* park whatever dirtyState we already have */
   }
+  let currentUnsaved = false;
+  if (surfaceMode === "erp") {
+    currentUnsaved = !!(await erpEval(
+      `(function(){try{return !!(window.cur_frm&&cur_frm.doc&&cur_frm.doc.__unsaved);}catch(e){return false;}})()`,
+    ));
+  }
   parkDocSurfaceIfNeeded();
-  notePeekParentAndChild(path);
+  notePeekParentAndChild(path, currentUnsaved);
   showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false });
   armSoftPeekEscHook(true).catch(() => {});
   sendHistory();
@@ -1963,6 +2026,15 @@ function dismissSoftPeekFromEsc() {
   if (decision.action === "return-parent") {
     navDebug("soft-peek-esc", decision.route || "parent");
     returnToPeekParent();
+    return;
+  }
+  if (decision.action === "reopen-parent" && decision.route) {
+    // The parent was opened from a Recent dropdown and is not loaded behind the peek:
+    // open it the way any other door would, in the clerk's lens.
+    navDebug("soft-peek-esc", `reopen ${decision.route}`);
+    collapsePeekStackHard("esc-reopen");
+    armSoftPeekEscHook(false).catch(() => {});
+    reopenPeekParent(decision.route).catch(() => {});
     return;
   }
   if (decision.action === "resume-park" && decision.route) {
@@ -2004,6 +2076,71 @@ function returnToPeekParent() {
     showErp(route, { inSpa: true, skipDirtyGate: true, abandonUnsaved: true, forceLoad: false });
   });
   return true;
+}
+
+/**
+ * Esc back to a parent that was not loaded behind the peek (opened from a Recent dropdown).
+ * Step back in place first — a full reload would drop an unsaved draft still in Frappe's
+ * memory — then show it in the clerk's lens; a Doc skin then reads it where it is
+ * (`opensInPlace`).
+ * @param {string} route
+ */
+async function reopenPeekParent(route) {
+  const path = normalizeAppRoute(route, ERP_BASE).path || route;
+  const soft = erpIsWarm() ? await erpSoftSetRoute(path) : { ok: false, reason: "erp not warm" };
+  if (!soft || !soft.ok) {
+    navDebug("peek-reopen-fallback", (soft && soft.reason) || "set_route failed");
+    openRoutePreferred(path);
+    return;
+  }
+  trackNav(erpUrl(ERP_BASE, path), { fromBrowser: false });
+  const t = openTargetFor(path);
+  if (t.surface !== "erp" && openResolvedTarget(t)) return;
+  showErp(path, { inSpa: true, skipDirtyGate: true });
+}
+
+/**
+ * A child row in a Recent dropdown (plan 2026-09-26 N1): open it as a peek of that parent, so
+ * Esc goes back to the parent. If the parent is on screen or its session is live, this is an
+ * ordinary peek. Otherwise the parent is not loaded behind the peek, so it is marked `reopen` and
+ * Esc opens it the way any other door would.
+ * @param {string} childRoute
+ * @param {string} parentRoute
+ */
+async function openPeekChild(childRoute, parentRoute) {
+  const child = normalizeAppRoute(childRoute, ERP_BASE).path || "";
+  const parent = normalizeAppRoute(parentRoute, ERP_BASE).path || "";
+  if (!child || !parent) return;
+  const opts = { erpBase: ERP_BASE, history };
+  const liveUnderParent =
+    isActivePeekStack(peekStack) && routesReferToSameDoc(peekStack.parent.route, parent, ERP_BASE);
+  const parentOnScreen =
+    surfaceMode === "doc" && routesReferToSameDoc(currentRoute || "", parent, ERP_BASE);
+  navDebug(
+    "peek-child-open",
+    `${parent} → ${child} ${liveUnderParent ? "(live)" : parentOnScreen ? "(parent on screen)" : "(reopen)"}`,
+  );
+  if (parentOnScreen) {
+    await softPeekErp(child);
+    return;
+  }
+  if (liveUnderParent) {
+    peekStack = pushPeekChild(peekStack, child, opts);
+    peekLinks = syncPeekLinks(peekLinks, peekStack, child, ERP_BASE);
+    showErp(child, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+    armSoftPeekEscHook(true).catch(() => {});
+    sendHistory();
+    return;
+  }
+  gateDirtyThen(() => {
+    peekStack = pushPeekChild(beginPeekParent(null, parent, { ...opts, reopen: true }), child, opts);
+    peekLinks = syncPeekLinks(peekLinks, peekStack, child, ERP_BASE);
+    showErp(child, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+    // What was on screen was left through the shell's own check; it is not this peek's parent.
+    parkedDocSurface = null;
+    armSoftPeekEscHook(true).catch(() => {});
+    sendHistory();
+  });
 }
 
 /**
@@ -2337,7 +2474,6 @@ function trackNav(url, opts = {}) {
     return;
   }
   const n = normalizeAppRoute(url, ERP_BASE);
-  const prev = currentRoute;
   const next = n.path || currentRoute;
   const changed = next !== currentRoute;
   currentRoute = next;
@@ -2346,7 +2482,8 @@ function trackNav(url, opts = {}) {
     labels: DOCTYPE_LABELS,
     companyAbbr: sessionCompanyAbbr,
   });
-  notePeekFromErpNav(next, prev);
+  // Peeks come from the page's own hop report (onErpRouteHop), not from `prev` here — the
+  // shell's idea of the previous route is what invented a fake peek (nav incident 03:52).
   sendHistory();
   maybeRefreshCompanyAbbr();
   if (shouldClearErpNavIntent(erpNavIntentPath, url, opts, ERP_BASE)) {
@@ -6698,6 +6835,7 @@ function createWindow() {
     // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
     tickLogin("navigate").catch(() => {});
     ensureErpFormBridge().catch(() => {});
+    ensureErpRouteHopReporter().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
   });
   erp.webContents.on("did-navigate-in-page", (_e, url, isMainFrame) => {
@@ -6709,6 +6847,7 @@ function createWindow() {
   });
   erp.webContents.on("did-finish-load", () => {
     ensureErpFormBridge().catch(() => {});
+    ensureErpRouteHopReporter().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
     if (surfaceMode === "erp") scheduleErpKeyboardFocus();
   });
@@ -9835,6 +9974,15 @@ ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());
 ipcMain.on("soft-peek-esc", () => dismissSoftPeekFromEsc());
+ipcMain.on("erp-route-hop", (e, raw) => {
+  if (!erp || erp.webContents.isDestroyed() || e.sender !== erp.webContents) return;
+  const hop = sanitizeRouteHop(raw);
+  if (hop) onErpRouteHop(hop);
+});
+ipcMain.on("open-peek-child", (_e, childRoute, parentRoute) => {
+  if (typeof childRoute !== "string" || typeof parentRoute !== "string") return;
+  openPeekChild(childRoute, parentRoute).catch(() => {});
+});
 ipcMain.handle("soft-peek-route", async (_e, route) => {
   const r = typeof route === "string" && route.trim() ? route.trim() : "";
   if (!r) return { ok: false, reason: "Empty peek route." };
