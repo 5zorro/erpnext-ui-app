@@ -480,7 +480,7 @@ Not a code bug: the blank site's company address is not linked to the company, s
 Billing address to fill. Not proven yet: payment terms clearing the Invoice date (re-run after
 N3/N4; the skipped-write path left no breadcrumb).
 
-**Fixes (built 2026-09-30, N2–N4; N1 is waiting on a design talk, below):**
+**Fixes (built 2026-09-30):**
 
 - **N2.** The ERP view handles `will-prevent-unload`. A pure rule (`src/erp-unload-guard.js`)
   decides: when the shell's own unsaved-changes check passed in the last few seconds (Doc skin
@@ -506,12 +506,32 @@ N3/N4; the skipped-write path left no breadcrumb).
 (4/4 against the blank sandbox). The full suite's 7 other failures fail the same way on the code
 before this change: they assert sample data the reinstalled sandbox does not have.
 
-**N1, open — 5zorro 2026-09-30:** "a return to the parent is a return" is agreed; the remaining
-question is *who* is a parent. Not a hard-coded Bill/PO/IR list: Frappe records the calling form
-itself when a Link field's *Create a new …* opens a full form (`frappe._from_link.set_route_args`,
-`controls/link.js`), and routes back to it on save (`update_calling_link`, `save.js`). Proposal and
-the Recent "dropdown" idea are with 5zorro (museum OI-128).
+**N1 — 5zorro 2026-09-30, decided and built same day.** Who is a parent, and what Recent shows.
 
+- **The page reports its own hops.** A listener on Frappe's router `change` event (it fires after
+  Frappe records the route, `router.js` `route()`) sends the shell, for each hop: where it landed, the
+  form it came from (`frappe.route_history`), whether that form had unsaved changes (`__unsaved` in
+  `locals`), and `frappe._from_link`. Peek bookkeeping is driven by that, no longer by the shell's own
+  `currentRoute` — the guess that invented the "Bill → Supplier" peek of nav incident 03:52.
+  Pure part: `src/erp-route-hop.js` (`describeRouteHop`, serialized into the page like
+  `shouldEscDismissSoftPeek`); preload `erpUiShell.noteRouteHop` → IPC `erp-route-hop`.
+- **Parent rule (5zorro: "sounds good"):** the form Frappe itself names as the caller — a Link
+  field's *Create a new …* sets `_from_link.set_route_args` — when the hop really is that (the
+  previous form is the caller and the landing is a new record of the link's doctype; `_from_link` is
+  only cleared on save, so a leftover one must not count). Otherwise the form left **with unsaved
+  changes** (Frappe's own `__unsaved`, which a new draft has from birth — the unsaved Vanilla Bill of
+  the incident is a parent). Any doctype; no Bill/PO/IR list. A child is a setup/master *record*
+  (`isSoftPeekRoute` + a record), as before. Depth stays one: a hop from a child to another record
+  is a sibling, except that a child left with unsaved changes (or named by `_from_link`) becomes the
+  new parent — unless a Doc skin is parked under the session, which stays the anchor so Esc can
+  always get back to it. The Doc skin's own peek buttons keep the Doc document as parent.
+- **A return is a return:** a hop onto the current parent, or onto one of its children, leaves the
+  stack alone (the Esc ping-pong).
+- **Recent:** children fold under their parent's row as a dropdown (open while that session is live,
+  closed after). A child row opens the child as a peek of that parent; Esc returns to the parent —
+  in place when the parent is still loaded, otherwise by reopening it in the clerk's preferred lens
+  (`reopen` on the parent ref; Esc action `reopen-parent`). A child later opened on its own (not
+  under that parent) goes back to being a plain row. Children no longer take Recent slots.
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -519,7 +539,7 @@ the Recent "dropdown" idea are with 5zorro (museum OI-128).
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
 | A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
-| 09-30 N1 | Peek stack: Esc swaps parent and child | open — design question with 5zorro (who is a parent) |
+| 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
