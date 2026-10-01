@@ -462,6 +462,46 @@ do that part in Vanilla until it exists:
    Vanilla list with Ref No. and vendor already filtered, cursor in Ref No.
 10. (F2) While on Pay Bills or a payment, nothing you do there adds stray rows to Recent.
 
+## Dogfood round 2026-09-30 — four nav/focus bugs that chained together
+
+Found from the nav incidents and focus incidents filed while starting DF-01 on the blank sandbox
+(chaos mode on, but none of these need chaos). One sequence: Vanilla Bill → make a vendor, its
+address and a payment terms template from it → Esc → New Bill → Item Receipt Doc → Doc tab back
+to the Bill.
+
+| # | Family | What broke | Cause |
+|---|---|---|---|
+| N1 | Peek stack | Esc bounced between Supplier and Address forever | Returning to the parent is read as a *new* hop from the child, and the hop rule for payment pages re-parents the stack, so parent and child swap on every Esc (`applyErpHopToPeekStack`). Also: an unsaved new Vanilla Bill never became the parent, so the tree started at the vendor |
+| N2 | Blocked unload | New Bill stayed on the Supplier page for 15 s, then the shell recorded a fake "Bill → Supplier" peek | A Frappe form with unsaved changes adds a `beforeunload` listener (`form.js` `dirty()`); Electron then **silently cancels** any page load unless `will-prevent-unload` is handled, and nothing handled it. When the shell's wait timed out it accepted the old page as a new arrival |
+| N3 | Wrong page code | After Item Receipt → Doc tab, the Bill ran on the PO/IR page code: single-pick source window, focus fell to the toolbar after it, no vendor address refresh | `doc-form.html` picks Bill vs PO/IR code once per load; `showDocForm` reloads it when the kind changes, `resumeParkedDoc` did not |
+| N4 | Stale resume | The Bill showed a vendor that wasn't on the real draft; the first edit wiped it | The park held the generic `/app/purchase-invoice/new`, so resuming it made a **fresh** draft while the skin painted the old saved copy. The "route-hold" fallback also parked a stale copy while the clerk was on Vanilla |
+
+Not a code bug: the blank site's company address is not linked to the company, so ERPNext has no
+Billing address to fill. Not proven yet: payment terms clearing the Invoice date (re-run after
+N3/N4; the skipped-write path left no breadcrumb).
+
+**Fixes (built 2026-09-30, N2–N4; N1 is waiting on a design talk, below):**
+
+- **N2.** The ERP view handles `will-prevent-unload`. A pure rule (`src/erp-unload-guard.js`)
+  decides: when the shell's own unsaved-changes check passed in the last few seconds (Doc skin
+  clean, or the clerk answered the shell's prompt), the load goes through; otherwise the clerk is
+  asked, like a browser would ask — *Stay* or *Leave and discard*. Staying puts the shell back on
+  the Vanilla page it never left, cancels the pending load, and the open that asked for it stops.
+  When a navigation wait times out, the shell re-reads where the ERP view really is instead of
+  treating it as a hop.
+- **N3.** Resume reloads the doc-form page when the page code changes (same rule as
+  `showDocForm`, now one pure function in `src/doc-shell-kind.js`).
+- **N4.** A park on a generic `/new` address is resumed by the draft's own name
+  (`new-purchase-invoice-…`), which Frappe still holds in memory; resume then re-reads the live
+  form instead of painting the saved copy, and logs `doc-rebind-mismatch` if the draft is gone.
+  The "route-hold" fallback no longer parks while the clerk is on Vanilla.
+
+**N1, open — 5zorro 2026-09-30:** "a return to the parent is a return" is agreed; the remaining
+question is *who* is a parent. Not a hard-coded Bill/PO/IR list: Frappe records the calling form
+itself when a Link field's *Create a new …* opens a full form (`frappe._from_link.set_route_args`,
+`controls/link.js`), and routes back to it on save (`update_calling_link`, `save.js`). Proposal and
+the Recent "dropdown" idea are with 5zorro (museum OI-128).
+
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -469,3 +509,7 @@ do that part in Vanilla until it exists:
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
 | A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
+| 09-30 N1 | Peek stack: Esc swaps parent and child | open — design question with 5zorro (who is a parent) |
+| 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
+| 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
+| 09-30 N4 | Resume shows a stale copy of a fresh draft | built 2026-09-30 — 5zorro to dogfood |
