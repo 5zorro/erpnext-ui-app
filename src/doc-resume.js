@@ -61,3 +61,49 @@ export function shouldHoldBillPark(s) {
   if (st.surfaceMode === "erp") return false;
   return st.routeDoctype === "purchase-invoice" && !!st.hasDirtyDoc;
 }
+
+/**
+ * Vanilla → Doc on the document the ERP view is already showing: read that form instead of
+ * reloading it. A reload drops an unsaved draft from Frappe's memory — the clerk's Vanilla
+ * typing — and, with the will-prevent-unload guard, asks them to discard it. Same record only:
+ * a generic `/new` target means "a fresh blank draft", never the draft that happens to be open.
+ *
+ * @param {string} liveRoute where the ERP view is (URL or path)
+ * @param {string} targetRoute where the Doc skin is opening
+ * @param {string} [erpBase]
+ */
+export function opensInPlace(liveRoute, targetRoute, erpBase) {
+  if (!liveRoute || !targetRoute) return false;
+  if (isGenericNewDocRoute(targetRoute, erpBase)) return false;
+  const live = normalizeAppRoute(liveRoute, erpBase);
+  const target = normalizeAppRoute(targetRoute, erpBase);
+  if (!live.doctype || live.doctype !== target.doctype) return false;
+  if (!live.record || !target.record) return false;
+  const dec = (r) => {
+    try {
+      return decodeURIComponent(r);
+    } catch {
+      return r;
+    }
+  };
+  return dec(live.record) === dec(target.record);
+}
+
+/**
+ * Did the clerk leave work on a form the Doc skin just picked up in place? Frappe calls every
+ * new draft unsaved from birth (`__unsaved`), so `is_dirty()` alone would make an untouched
+ * blank form ask "save or discard?" on the way out. A new draft counts once it holds something
+ * a clerk typed and would miss: a party, or a line with an item.
+ *
+ * @param {Record<string, any>|null|undefined} doc
+ * @param {{ isDirty?: boolean, isNew?: boolean, partyField?: string }} s
+ */
+export function carriesClerkEdits(doc, s) {
+  const st = s || {};
+  if (!doc || !st.isDirty) return false;
+  if (!st.isNew) return true;
+  const fields = st.partyField ? [st.partyField] : ["supplier", "customer", "party"];
+  if (fields.some((f) => doc[f] != null && String(doc[f]).trim() !== "")) return true;
+  const lines = Array.isArray(doc.items) ? doc.items : [];
+  return lines.some((row) => row && row.item_code);
+}

@@ -495,6 +495,16 @@ N3/N4; the skipped-write path left no breadcrumb).
   (`new-purchase-invoice-…`), which Frappe still holds in memory; resume then re-reads the live
   form instead of painting the saved copy, and logs `doc-rebind-mismatch` if the draft is gone.
   The "route-hold" fallback no longer parks while the clerk is on Vanilla.
+- **N4, second half (found while proving N2):** Vanilla → Doc on the draft Vanilla is showing used to
+  reload it — which, once N2 asks before a reload, would have asked the clerk to discard their own
+  typing. Now the Doc skin reads that form in place (`opensInPlace`), and typing that came along
+  counts as the clerk's for the Doc gate (`carriesClerkEdits`: a saved document that is dirty, or a
+  new draft holding a party or an item line — Frappe calls every new draft unsaved from birth).
+  First slice of museum OI-180; Doc → Vanilla does not carry yet.
+
+**Layer-3:** `e2e/scaffold-unload-resume.spec.js` — Stay, Leave, Esc-resume, Vanilla → Doc carry
+(4/4 against the blank sandbox). The full suite's 7 other failures fail the same way on the code
+before this change: they assert sample data the reinstalled sandbox does not have.
 
 **N1, open — 5zorro 2026-09-30:** "a return to the parent is a return" is agreed; the remaining
 question is *who* is a parent. Not a hard-coded Bill/PO/IR list: Frappe records the calling form
@@ -512,4 +522,4 @@ the Recent "dropdown" idea are with 5zorro (museum OI-128).
 | 09-30 N1 | Peek stack: Esc swaps parent and child | open — design question with 5zorro (who is a parent) |
 | 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
-| 09-30 N4 | Resume shows a stale copy of a fresh draft | built 2026-09-30 — 5zorro to dogfood |
+| 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
