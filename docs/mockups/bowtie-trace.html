@@ -175,6 +175,22 @@
   .qf .sep { width: 1px; height: 18px; background: var(--edge); margin: 0 4px; }
   .notes li { margin-bottom: 7px; line-height: 1.55; }
   /* ---------- lifecycle ---------- */
+  .lc-block { margin: 4px 14px 18px; }
+  .lc-ghead { background: #eef2f5; padding: 8px 10px; font-size: 12px; border-radius: 6px; margin-bottom: 2px; }
+  .lc-scroll { overflow-x: auto; }
+  svg.lc-arcs { display: block; overflow: visible; }
+  .lc th.lc-doc { text-transform: none; letter-spacing: 0; min-width: 86px; }
+  .lc th.lc-doc .lc-dt { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+  .lc th.lc-doc .lc-id { display: block; font-size: 11px; color: var(--ink); white-space: nowrap; }
+  .lc th.lc-doc .lc-date { display: block; font-weight: 400; color: var(--muted); }
+  #st-recent-sheet { position: relative; }
+  svg.st-flow { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+  td.flow, th.flow { width: 46px; padding: 0; }
+  tr.indent td.ty { padding-left: 26px; }
+  tr.st-sub td { color: var(--muted); }
+  tr.st-pay td { font-weight: 600; }
+  tr.st-divider td { background: #f8fafc; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+  tr.st-pending td { font-weight: 400; color: var(--muted); border-top: none; }
   .lc-wrap { overflow-x: auto; padding: 4px 14px 12px; }
   #p-lifecycle .sheet { position: relative; }
   table.lc { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; }
@@ -240,13 +256,13 @@
       <div class="why" id="st-why"></div>
     </div>
     <div class="sheet" id="st-open-sheet">
-      <div class="sheet-head"><span class="title">Open — not matched yet</span>
-        <span class="sub">orders not fully received or billed · receipts with no bill</span></div>
+      <div class="sheet-head"><span class="title">Open orders</span>
+        <span class="sub">ordered from this vendor, not received or billed yet</span></div>
       <table id="st-open"></table>
     </div>
     <div class="sheet" id="st-recent-sheet">
       <div class="sheet-head"><span class="title">Last 90 days</span>
-        <span class="sub">by the vendor's date · heavy rule = crossing into 30+ and 60+ days</span></div>
+        <span class="sub" id="st-recent-sub"></span></div>
       <table id="st-recent"></table>
     </div>
   </section>
@@ -289,10 +305,14 @@
         <span><span class="mk warn">⚠</span> should not happen — look at it</span>
         <span><span class="mk open">◌</span> still open — waiting on the next step</span>
         <span><span class="mk info">ⓘ</span> worth knowing</span>
-        <span>– nothing at this stage</span>
+        <span>· nothing on this document</span>
+        <span class="spacer"></span><span class="field" style="flex-direction:row;align-items:center;gap:8px" id="lc-mode"></span>
       </div>
-      <div class="lc-wrap" id="lc-wrap"><table class="lc" id="lc-table"></table></div>
-      <div class="why"><b>One row per item, one column per stage</b> — the same links as the bowtie, read as a table, for
+      <div class="lc-wrap" id="lc-wrap"></div>
+      <div class="why"><b>In date order</b> (the default): one column per document, in the order they happened — the
+        date on the paper, or the posting date when there is none. The arcs above the header are the links between them;
+        one that runs backwards (dashed, ⚠) is a document dated before the one it came from. <b>By stage</b> folds the
+        same numbers into one column per step. Either way: one row per item, the same links as the bowtie, for
         every Sales Order in focus. Each cell is how many (or, for payments, how much of the bill) reached that stage and
         what it cost; click it for the documents behind it. A gap is marked on the cell where it shows up. Margin is what
         the customer was invoiced minus the landed cost of that many, net of anything credited back. In the build each column
@@ -348,6 +368,14 @@
           Applied-to row. After every draw
           the page reads each ribbon's ends back from the path it drew and measures them against the rows on screen;
           anything over half a pixel is reported in the browser console.</li>
+        <li><b>Lifecycle in date order</b> (5zorro 2026-09-29: "the order of how things happened feels lost"): one column
+          per document, ordered by the date on the paper (else the posting date), ties by the one that came first, then
+          by number. Arcs over the header show the links; a backwards one (a document dated before what it came from) is
+          dashed with a ⚠. "By stage" stays as a toggle.</li>
+        <li><b>Statement: receipts not billed sit with the bills</b>, indented — a bill on its way, not yet on the
+          vendor's statement — and only open POs stay apart. <b>Focus: Bills / Payments</b>: in Bills, payments are not
+          rows (the Status column says what paid each bill); in Payments, each payment lists the bills it paid, with a
+          ribbon from each bill row to its payment row, ends checked on the painted rows.</li>
         <li><b>Stock on the same bill</b> (Material Request → PO line → receipt line → bill line) follows its own lines:
           it rides on the customer's PO, receipt and bill, but never joins that Sales Order's story, its margin, or its
           warnings. The Lifecycle tab gives it its own "stock" group.</li>
@@ -470,7 +498,8 @@ const DOCS = [
   { id: "MAT-PRE-2026-00211", t: "pr", party: VENDOR, ref: "PS-5521", doc: "2026-08-18", posted: "2026-08-19", user: "receiving",
     lines: [{ item: "SKU-BOWTIE", qty: 4, rate: 100, from: "PUR-ORD-2026-00404" },
             { item: "SKU-BOWTIE-D", qty: 5, rate: 30, from: "PUR-ORD-2026-00404" }] },
-  { id: "MAT-PRE-2026-00212", t: "pr", party: VENDOR, ref: "PS-5534", doc: "2026-08-19", posted: "2026-08-21", user: "receiving",
+  // Arrived the day after the vendor dated the bill (invoiced on the ship date): an out-of-order link.
+  { id: "MAT-PRE-2026-00212", t: "pr", party: VENDOR, ref: "PS-5534", doc: "2026-08-21", posted: "2026-08-23", user: "receiving",
     lines: [{ item: "SKU-BOWTIE-B", qty: 2, rate: 120, from: "PUR-ORD-2026-00405" },
             { item: "SKU-BOWTIE-C", qty: 1, rate: 45, from: "PUR-ORD-2026-00405" }] },
   { id: "ACC-PINV-2026-00268", t: "bill", party: VENDOR, ref: "BT-24490", doc: "2026-08-20", posted: "2026-08-22", user: "clerk-ap",
@@ -601,7 +630,7 @@ const descendants = (id) => walk(id, (x) => outEdges(x).map((e) => e.to));
 
 /* ---------------- state ---------------- */
 const state = { tab: "bowtie", focus: ["ACC-PINV-2026-00268", "ACC-PAY-2026-00005"], idMode: "theirs",
-                quick: new Set(["bill"]), fromHome: false };
+                quick: new Set(["bill"]), fromHome: false, lcMode: "date", stFocus: "bills" };
 
 /*
  * The item table on a card. Each row is somewhere a ribbon can land: an item line, a bill's
@@ -1221,9 +1250,10 @@ const STAGES = [
 
 function paidShare(docId) {
   const d = BY_ID.get(docId);
-  const pays = DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === docId));
-  const paid = pays.reduce((t, p) => t + p.refs.filter((r) => r.bill === docId).reduce((a, r) => a + r.amount, 0), 0);
-  return { frac: docTotal(d) ? Math.min(1, paid / docTotal(d)) : 0, pays: pays.map((p) => p.id) };
+  const tot = docTotal(d);
+  const pays = DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === docId))
+    .map((p) => ({ id: p.id, frac: tot ? p.refs.filter((r) => r.bill === docId).reduce((a, r) => a + r.amount, 0) / tot : 0 }));
+  return { frac: Math.min(1, pays.reduce((t, x) => t + x.frac, 0)), pays };
 }
 
 function buildGroup(root, claimedNic) {
@@ -1232,12 +1262,19 @@ function buildGroup(root, claimedNic) {
   const reached = reachFrom(root, (l) => root.t === "so" || root.t === "mr" || !l.from);
   const rows = new Map();
   const cell = (item, st) => {
-    if (!rows.has(item)) rows.set(item, { item, cells: {}, nic: false });
+    if (!rows.has(item)) rows.set(item, { item, cells: {}, nic: false, byDoc: {}, notes: [] });
     const r = rows.get(item);
     if (!r.cells[st]) r.cells[st] = { qty: 0, amt: 0, docs: new Set(), marks: [] };
     return r.cells[st];
   };
-  const add = (st, docId, item, qty, amt) => { const c = cell(item, st); c.qty += qty; c.amt = r2(c.amt + amt); c.docs.add(docId); };
+  // Each amount lands twice: in its stage (the "by stage" view) and on its document (the date-order view).
+  const byDoc = (item, docId, qty, amt, pct) => {
+    const r = rows.get(item);
+    const b = r.byDoc[docId] || (r.byDoc[docId] = { qty: 0, amt: 0, pct: null, marks: [] });
+    if (qty === null) { b.qty = null; b.pct = (b.pct || 0) + pct; } else b.qty += qty;
+    b.amt = r2(b.amt + amt);
+  };
+  const add = (st, docId, item, qty, amt) => { const c = cell(item, st); c.qty += qty; c.amt = r2(c.amt + amt); c.docs.add(docId); byDoc(item, docId, qty, amt); };
   const STAGE_OF = { mr: "requested", so: "ordered", po: "bought", pr: "received", cm: "credited" };
   if (so) {
     // Upstream too: the Estimate lines this order came from.
@@ -1257,7 +1294,8 @@ function buildGroup(root, claimedNic) {
         add("billed", id, l.item, l.qty, cost);
         if (nic) rows.get(l.item).nic = true;
         const pc = cell(l.item, "paidAp");
-        pc.amt = r2(pc.amt + cost * share.frac); pc.qty = null; share.pays.forEach((x) => pc.docs.add(x));
+        pc.amt = r2(pc.amt + cost * share.frac); pc.qty = null;
+        share.pays.forEach((x) => { pc.docs.add(x.id); byDoc(l.item, x.id, null, cost * x.frac, x.frac * 100); });
         pc.due = r2((pc.due || 0) + cost);
       });
     }
@@ -1267,7 +1305,8 @@ function buildGroup(root, claimedNic) {
         if (!idx.has(i)) return;
         add("invoiced", id, l.item, l.qty, lineAmt(l));
         const pc = cell(l.item, "paidAr");
-        pc.amt = r2(pc.amt + lineAmt(l) * share.frac); pc.qty = null; share.pays.forEach((x) => pc.docs.add(x));
+        pc.amt = r2(pc.amt + lineAmt(l) * share.frac); pc.qty = null;
+        share.pays.forEach((x) => { pc.docs.add(x.id); byDoc(l.item, x.id, null, lineAmt(l) * x.frac, x.frac * 100); });
         pc.due = r2((pc.due || 0) + lineAmt(l));
       });
     }
@@ -1310,12 +1349,23 @@ function buildGroup(root, claimedNic) {
     }
     r.warn = Object.values(r.cells).some((c) => c.marks.some((m) => m.kind === "warn")) || (r.marginNote && r.marginNote.kind === "warn");
   }
+  // A stage's marks show on the documents behind it; a mark with no document ("not received yet")
+  // belongs to the item itself.
+  for (const r of rows.values()) for (const c of Object.values(r.cells)) for (const m of c.marks) {
+    if (c.docs.size) c.docs.forEach((id) => r.byDoc[id] && r.byDoc[id].marks.push(m)); else r.notes.push(m);
+  }
+  // Date order: the date on the paper (else the posting date); on a tie, a document before what
+  // came from it, then by number.
+  const cols = [...new Set([...rows.values()].flatMap((r) => Object.keys(r.byDoc)))].sort((x, y) => {
+    const a = BY_ID.get(x), b = BY_ID.get(y);
+    return dateOf(a).localeCompare(dateOf(b)) || (ancestors(y).has(x) ? -1 : ancestors(x).has(y) ? 1 : 0) || x.localeCompare(y);
+  });
   const docs = [...reached.keys()];
   const title = so ? `Sales Order ${idFor(so)}` : mr ? `Material Request ${idFor(mr)} · stock`
     : root.t === "po" ? `Purchase Order ${idFor(root)} · no Sales Order` : `Bill ${idFor(root)} · no order`;
   const party = so ? so.party : mr ? "raised by " + mr.user : root.party;
   const order = [...(root.lines || []).map((l) => l.item), ...rows.keys()];
-  return { title, party, rows: [...new Set(order)].filter((k) => rows.has(k)).map((k) => rows.get(k)), docs };
+  return { title, party, cols, rows: [...new Set(order)].filter((k) => rows.has(k)).map((k) => rows.get(k)), docs };
 }
 
 function lifecycleGroups(vis) {
@@ -1330,60 +1380,142 @@ function lifecycleGroups(vis) {
 }
 
 const MARK = { warn: "⚠", open: "◌", info: "ⓘ" };
+const topMark = (marks) => { const k = marks.map((m) => m.kind); return k.includes("warn") ? "warn" : k.includes("open") ? "open" : k.includes("info") ? "info" : ""; };
+/* The date a document happened: the date on the paper, or its posting date when it has none. */
+const dateOf = (d) => d.doc || d.posted;
 let LC = [];
+
+function marginCellHtml(r, gi, ri) {
+  const mn = r.marginNote;
+  if (r.margin == null && !mn) return `<td class="lc-c empty">–</td>`;
+  return `<td class="lc-c ${mn ? mn.kind : ""} lc-m" title="${esc(mn ? mn.text : "")}" data-lc="${gi}:${ri}:margin">${mn ? `<span class="mk ${mn.kind}">${MARK[mn.kind]}</span>` : ""}
+    <div class="q ${r.margin < 0 ? "neg" : "pos"}">${r.margin == null ? (mn && mn.kind === "info" ? "stock" : "?") : money(r.margin)}</div>
+    <div class="a">${r.margin != null && r.cells.invoiced ? Math.round((r.margin / r.cells.invoiced.amt) * 100) + "%" : r.margin != null ? "no sale" : ""}</div></td>`;
+}
+function groupHead(g) {
+  const warnN = g.rows.filter((r) => r.warn).length;
+  return `<div class="lc-ghead"><b>${esc(g.title)}</b> · ${esc(g.party)}
+    ${warnN ? `<span class="lc-warnsum">⚠ ${warnN} item${warnN > 1 ? "s" : ""} to look at</span>` : `<span class="lc-oksum">all matched</span>`}</div>`;
+}
+function itemCell(r) {
+  const notes = r.notes.length ? ` <span class="mk ${topMark(r.notes)}" title="${esc(r.notes.map((m) => m.text).join(" "))}">${MARK[topMark(r.notes)]}</span>` : "";
+  return `<td class="lc-item">${r.warn ? '<span class="mk warn">⚠</span> ' : ""}${esc(r.item)}${r.nic ? ' <span class="muted">NIC</span>' : ""}${notes}</td>`;
+}
+function marginTotal(g) {
+  const has = g.rows.some((r) => r.margin != null);
+  const t = r2(g.rows.reduce((s, r) => s + (r.margin || 0), 0));
+  return has ? `<b class="${t < 0 ? "neg" : "pos"}">${money(t)}</b>` : "–";
+}
+
+/* Columns in the order things happened (5zorro 2026-09-29: "the order of how things happened feels lost"). */
+function dateTable(g, gi) {
+  const head = `<thead><tr><th class="lc-item">Item</th>${g.cols.map((id) => {
+    const d = BY_ID.get(id), T = TYPES[d.t];
+    return `<th class="lc-doc" data-col="${esc(id)}" style="border-top:3px solid ${ACCENT[T.role]}"><span class="lc-dt">${esc(T.label)}</span>
+      <span class="lc-id" title="${esc(d.id)}">${esc(idFor(d))}</span><span class="lc-date">${fmtD(dateOf(d))}</span></th>`;
+  }).join("")}<th style="border-top:3px solid #00795c">Margin<small>invoiced − cost</small></th></tr></thead>`;
+  const body = g.rows.map((r, ri) => `<tr class="${r.warn ? "flagged" : ""}">${itemCell(r)}${g.cols.map((id) => {
+    const b = r.byDoc[id];
+    if (!b) return `<td class="lc-c empty">·</td>`;
+    const top = topMark(b.marks);
+    return `<td class="lc-c ${top}" data-lc="${gi}:${ri}:doc:${esc(id)}" title="${esc(b.marks.map((m) => m.text).join(" "))}">
+      ${top ? `<span class="mk ${top}">${MARK[top]}</span>` : ""}<div class="q">${b.qty === null ? Math.round(b.pct) + "%" : b.qty}</div><div class="a">${money(b.amt)}</div></td>`;
+  }).join("")}${marginCellHtml(r, gi, ri)}</tr>`).join("");
+  const tot = `<tr class="lc-tot"><td class="lc-item">Total</td>${g.cols.map((id) => {
+    const t = r2(g.rows.reduce((s, r) => s + (r.byDoc[id] ? r.byDoc[id].amt : 0), 0));
+    return `<td class="lc-c">${money(t)}</td>`;
+  }).join("")}<td class="lc-c">${marginTotal(g)}</td></tr>`;
+  return `<div class="lc-block" id="lc-block-${gi}">${groupHead(g)}<div class="lc-scroll"><svg class="lc-arcs"></svg>
+    <table class="lc">${head}<tbody>${body}${tot}</tbody></table></div></div>`;
+}
+
+/* The same data by stage: the quickest "is everything matched?" read. */
+function stageTable(g, gi) {
+  const head = `<thead><tr><th class="lc-item">Item</th>${STAGES.map((s) => `<th style="border-top:3px solid ${ACCENT[s.role]}">${s.label}<small>${s.sub}</small></th>`).join("")}<th style="border-top:3px solid #00795c">Margin<small>invoiced − cost</small></th></tr></thead>`;
+  const body = g.rows.map((r, ri) => `<tr class="${r.warn ? "flagged" : ""}">${itemCell(r)}${STAGES.map((s) => {
+    const c = r.cells[s.id];
+    if (!c || (!c.docs.size && !c.marks.length)) return `<td class="lc-c empty">–</td>`;
+    const top = topMark(c.marks);
+    const qty = c.qty === null ? (c.due ? `${Math.round((c.amt / c.due) * 100)}%` : "") : c.qty;
+    return `<td class="lc-c ${top}" data-lc="${gi}:${ri}:stage:${s.id}" title="${esc(c.marks.map((m) => m.text).join(" "))}">
+      ${top ? `<span class="mk ${top}">${MARK[top]}</span>` : ""}<div class="q">${qty}</div><div class="a">${c.docs.size ? money(c.amt) : ""}</div></td>`;
+  }).join("")}${marginCellHtml(r, gi, ri)}</tr>`).join("");
+  const tot = `<tr class="lc-tot"><td class="lc-item">Total</td>${STAGES.map((s) => {
+    const t = r2(g.rows.reduce((a, r) => a + (r.cells[s.id] ? r.cells[s.id].amt : 0), 0));
+    return `<td class="lc-c">${t ? money(t) : "–"}</td>`;
+  }).join("")}<td class="lc-c">${marginTotal(g)}</td></tr>`;
+  return `<div class="lc-block" id="lc-block-${gi}">${groupHead(g)}<div class="lc-scroll"><table class="lc">${head}<tbody>${body}${tot}</tbody></table></div></div>`;
+}
+
+/*
+ * The arcs over the date-order header: one per link, from the column it came from to the column it
+ * went to, measured from the painted header cells. A link that runs backwards -- the later document
+ * dated before the one it came from -- is drawn dashed in the warning colour with a ⚠ at its top.
+ */
+const LC_ARC_H = 58;
+function drawLcArcs(g, gi) {
+  const block = $(`#lc-block-${gi}`);
+  const svg = block.querySelector("svg.lc-arcs"), table = block.querySelector("table");
+  const W = table.offsetWidth, H = LC_ARC_H;
+  svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const base = svg.getBoundingClientRect();
+  const cx = (id) => { const r = block.querySelector(`th[data-col="${CSS.escape(id)}"]`).getBoundingClientRect(); return r.left + r.width / 2 - base.left; };
+  const idx = (id) => g.cols.indexOf(id);
+  const edges = EDGES.filter((e) => idx(e.from) >= 0 && idx(e.to) >= 0);
+  let s = `<defs><marker id="lc-arrow-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0 0 L6 3 L0 6 z" fill="#64748b"/></marker>
+    <marker id="lc-arrow-w-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0 0 L6 3 L0 6 z" fill="#b45309"/></marker></defs>`;
+  for (const e of edges) {
+    const a = BY_ID.get(e.from), b = BY_ID.get(e.to);
+    const back = dateOf(b) < dateOf(a);
+    // Leave a column just left of its centre, arrive just right of it: in and out never share a point.
+    const x1 = cx(e.from) - 3, x2 = cx(e.to) + 3;
+    const h = Math.min(H - 10, 10 + Math.abs(x2 - x1) * 0.13);
+    const d = `M ${x1} ${H} C ${x1} ${H - h * 1.33}, ${x2} ${H - h * 1.33}, ${x2} ${H}`;
+    const say = back
+      ? `${TYPES[b.t].label} ${idFor(b)} (${fmtD(dateOf(b))}) is dated before ${TYPES[a.t].label} ${idFor(a)} (${fmtD(dateOf(a))}), which it came from.`
+      : `${TYPES[a.t].label} ${idFor(a)} → ${TYPES[b.t].label} ${idFor(b)}`;
+    s += `<path d="${d}" fill="none" stroke="${back ? "#b45309" : ACCENT[TYPES[a.t].role]}" stroke-width="${back ? 2 : 1.6}"
+      ${back ? 'stroke-dasharray="4 3"' : 'stroke-opacity=".75"'} marker-end="url(#lc-arrow${back ? "-w" : ""}-${gi})"><title>${esc(say)}</title></path>`;
+    if (back) s += `<text x="${(x1 + x2) / 2}" y="${H - h - 2}" text-anchor="middle" font-size="11" fill="#b45309"><title>${esc(say)}</title>⚠</text>`;
+  }
+  svg.innerHTML = s;
+}
+
 function renderLifecycle() {
   renderFocusBar($("#focusbar-l"));
+  $("#lc-mode").innerHTML = `Columns <span class="seg"><button data-lcmode="date" aria-pressed="${state.lcMode !== "stage"}">In date order</button><button data-lcmode="stage" aria-pressed="${state.lcMode === "stage"}">By stage</button></span>`;
   const sl = slice();
   LC = lifecycleGroups(sl.vis);
-  const head = `<thead><tr><th class="lc-item">Item</th>${STAGES.map((s) => `<th style="border-top:3px solid ${ACCENT[s.role]}">${s.label}<small>${s.sub}</small></th>`).join("")}<th style="border-top:3px solid #00795c">Margin<small>invoiced − cost</small></th></tr></thead>`;
-  const body = LC.map((g, gi) => {
-    const tot = (st) => r2(g.rows.reduce((t, r) => t + (r.cells[st] ? r.cells[st].amt : 0), 0));
-    const hasMargin = g.rows.some((r) => r.margin != null);
-    const mTot = r2(g.rows.reduce((t, r) => t + (r.margin || 0), 0));
-    const warnN = g.rows.filter((r) => r.warn).length;
-    const rowsHtml = g.rows.map((r, ri) => {
-      const cells = STAGES.map((s) => {
-        const c = r.cells[s.id];
-        if (!c || (!c.docs.size && !c.marks.length)) return `<td class="lc-c empty">–</td>`;
-        const marks = c.marks.map((m) => m.kind);
-        const top = marks.includes("warn") ? "warn" : marks.includes("open") ? "open" : marks.includes("info") ? "info" : "";
-        const qty = c.qty === null ? (c.due ? `${Math.round((c.amt / c.due) * 100)}%` : "") : c.qty;
-        return `<td class="lc-c ${top}" data-lc="${gi}:${ri}:${s.id}" title="${esc(c.marks.map((m) => m.text).join(" "))}">
-          ${top ? `<span class="mk ${top}">${MARK[top]}</span>` : ""}<div class="q">${qty}</div><div class="a">${c.docs.size ? money(c.amt) : ""}</div></td>`;
-      }).join("");
-      const mn = r.marginNote;
-      const margin = r.margin == null && !mn ? `<td class="lc-c empty">–</td>`
-        : `<td class="lc-c ${mn ? mn.kind : ""} lc-m" title="${esc(mn ? mn.text : "")}" data-lc="${gi}:${ri}:margin">${mn ? `<span class="mk ${mn.kind}">${MARK[mn.kind]}</span>` : ""}
-           <div class="q ${r.margin < 0 ? "neg" : "pos"}">${r.margin == null ? (mn && mn.kind === "info" ? "stock" : "?") : money(r.margin)}</div><div class="a">${r.margin != null && r.cells.invoiced ? Math.round((r.margin / r.cells.invoiced.amt) * 100) + "%" : r.margin != null ? "no sale" : ""}</div></td>`;
-      return `<tr class="${r.warn ? "flagged" : ""}"><td class="lc-item">${r.warn ? '<span class="mk warn">⚠</span> ' : ""}${esc(r.item)}${r.nic ? ' <span class="muted">NIC</span>' : ""}</td>${cells}${margin}</tr>`;
-    }).join("");
-    return `<tbody><tr class="lc-group"><td colspan="${STAGES.length + 2}"><b>${esc(g.title)}</b> · ${esc(g.party)}
-        ${warnN ? `<span class="lc-warnsum">⚠ ${warnN} item${warnN > 1 ? "s" : ""} to look at</span>` : `<span class="lc-oksum">all matched</span>`}</td></tr>
-      ${rowsHtml}
-      <tr class="lc-tot"><td class="lc-item">Total</td>${STAGES.map((s) => `<td class="lc-c">${tot(s.id) ? money(tot(s.id)) : "–"}</td>`).join("")}
-        <td class="lc-c">${hasMargin ? `<b class="${mTot < 0 ? "neg" : "pos"}">${money(mTot)}</b>` : "–"}</td></tr></tbody>`;
-  }).join("");
-  $("#lc-table").innerHTML = LC.length ? head + body : `<tbody><tr><td class="why">Nothing in focus has an order or a bill to follow.</td></tr></tbody>`;
+  const wrap = $("#lc-wrap");
+  if (!LC.length) { wrap.innerHTML = `<div class="why">Nothing in focus has an order or a bill to follow.</div>`; return; }
+  wrap.innerHTML = LC.map((g, gi) => (state.lcMode === "stage" ? stageTable(g, gi) : dateTable(g, gi))).join("");
+  if (state.lcMode !== "stage") LC.forEach((g, gi) => drawLcArcs(g, gi));
 }
 
 function showLcPop(td) {
   closePop();
-  const [gi, ri, st] = td.dataset.lc.split(":");
-  const r = LC[+gi].rows[+ri];
+  const parts = td.dataset.lc.split(":");
+  const r = LC[+parts[0]].rows[+parts[1]];
   const wrap = $("#p-lifecycle .sheet");
+  const docLine = (id) => { const d = BY_ID.get(id); return `<div style="display:flex;gap:6px;align-items:center;margin-top:3px">
+    <span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>${esc(TYPES[d.t].label)} ${esc(idFor(d))} · ${fmtD(dateOf(d))}
+    <button class="ico" data-act="peek" data-id="${esc(id)}" title="Peek">${EYE}</button>
+    <button class="ico" data-act="bowtie" data-id="${esc(id)}" title="Bowtie">⋈</button></div>`; };
   let html;
-  if (st === "margin") {
+  if (parts[2] === "margin") {
     html = `<b style="color:#1f2d3d">Margin · ${esc(r.item)}</b><br>${r.marginNote ? esc(r.marginNote.text) + "<br>" : ""}` +
       `Invoiced ${money(r.cells.invoiced ? r.cells.invoiced.amt : 0)} − landed cost ${money(r.cells.billed ? r.cells.billed.amt : 0)}` +
       `${r.cells.credited ? ` + credited ${money(-r.cells.credited.amt)}` : ""}`;
+  } else if (parts[2] === "doc") {
+    const id = parts.slice(3).join(":"), b = r.byDoc[id];
+    html = `<b style="color:#1f2d3d">${esc(r.item)}</b>` + b.marks.map((m) => `<div style="margin-top:4px">${MARK[m.kind]} ${esc(m.text)}</div>`).join("") +
+      `<div style="margin-top:6px">${docLine(id)}</div>`;
   } else {
-    const c = r.cells[st], S = STAGES.find((s) => s.id === st);
-    html = `<b style="color:#1f2d3d">${esc(S.label)} · ${esc(r.item)}</b>` +
-      c.marks.map((m) => `<div style="margin-top:4px">${MARK[m.kind]} ${esc(m.text)}</div>`).join("") +
-      `<div style="margin-top:6px">${[...c.docs].map((id) => { const d = BY_ID.get(id); return `<div style="display:flex;gap:6px;align-items:center;margin-top:3px">
-        <span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>${esc(TYPES[d.t].label)} ${esc(idFor(d))}
-        <button class="ico" data-act="peek" data-id="${esc(id)}" title="Peek">${EYE}</button>
-        <button class="ico" data-act="bowtie" data-id="${esc(id)}" title="Bowtie">⋈</button></div>`; }).join("")}</div>`;
+    const c = r.cells[parts[3]], S = STAGES.find((x) => x.id === parts[3]);
+    html = `<b style="color:#1f2d3d">${esc(S.label)} · ${esc(r.item)}</b>` + c.marks.map((m) => `<div style="margin-top:4px">${MARK[m.kind]} ${esc(m.text)}</div>`).join("") +
+      `<div style="margin-top:6px">${[...c.docs].map(docLine).join("")}</div>`;
   }
   const a = td.getBoundingClientRect(), s = wrap.getBoundingClientRect();
   pop = document.createElement("div");
@@ -1396,68 +1528,147 @@ function showLcPop(td) {
 }
 
 /* ---------------- statement: a Find page with quick filters ---------------- */
-// One chip per kind of document, as on the Find pages' own chip row. Find Bills opens with
-// Bills on; the Home screen's "Vendor statement" link would open it with all of them on.
+// One chip per kind of document, as on the Find pages' own chip row. Find Bills opens with Bills
+// on; the Home screen's "Vendor statement" link opens it with all of them on.
 const QUICK = [
-  { id: "bill", label: "Bills", role: "invoice", match: (d) => d.t === "bill" },
-  { id: "cm", label: "Vendor credits", role: "invoice", match: (d) => d.t === "cm" },
-  { id: "pay", label: "Payments", role: "payment", match: (d) => d.t === "pay" },
-  { id: "po", label: "Open POs", role: "order", open: true, match: (d) => d.t === "po" && d.openNote },
-  { id: "pr", label: "Open receipts", role: "fulfill", open: true, match: (d) => d.t === "pr" && d.openNote },
+  { id: "bill", label: "Bills", role: "invoice" },
+  { id: "cm", label: "Vendor credits", role: "invoice" },
+  { id: "pr", label: "Receipts not billed", role: "fulfill" },
+  { id: "po", label: "Open POs", role: "order" },
 ];
+const isPaidBy = (billId) => DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === billId));
+
 function renderStatement() {
   $("#st-vendor").textContent = VENDOR;
   $("#st-asof").textContent = fmtD(AS_OF) + ", 2026";
-  const q = state.quick;
+  const q = state.quick, byPay = state.stFocus === "payments";
   const all = QUICK.every((k) => q.has(k.id));
   $("#st-title").textContent = all ? "Vendor statement" : q.size === 1 && q.has("bill") ? "Find Bills" : "Find";
   $("#st-quick").innerHTML = `<span class="qf-lbl">Show</span>` +
     QUICK.map((k) => `<button data-quick="${k.id}" aria-pressed="${q.has(k.id)}"><span class="role-dot" style="background:${ACCENT[k.role]};margin:0"></span>${k.label}</button>`).join("") +
-    `<span class="sep"></span><button data-quick="*" aria-pressed="${all}" title="Every chip on — the Home screen's Vendor statement link">All — vendor statement</button>`;
+    `<span class="sep"></span><button data-quick="*" aria-pressed="${all}" title="Every chip on — the Home screen's Vendor statement link">All — vendor statement</button>
+     <span class="spacer"></span><span class="qf-lbl">Focus</span>
+     <span class="seg"><button data-stfocus="bills" aria-pressed="${!byPay}">Bills</button><button data-stfocus="payments" aria-pressed="${byPay}">Payments</button></span>`;
   $("#st-why").innerHTML = (state.fromHome ? "<b>Opened from Home → Vendor statement:</b> every quick filter on. " : "") +
-    `Each chip adds one kind of document to the same list; <b>Bills</b> is the default because this is Find Bills. ` +
-    `With every chip on, the page <i>is</i> the vendor statement: first everything not matched yet, then 90 days ` +
-    `newest first, aged by the <b>vendor's own date</b> (a bill by its invoice date, a payment by its check date), with a heavy ` +
-    `rule on the first row past 30 days and the first past 60. ⋈ opens the bowtie with that row in focus, ▤ the Gantt, the eye a peek.`;
+    (byPay
+      ? `<b>Payment focus:</b> each payment, newest first, with the bills it paid underneath; the ribbons tie each bill to its payment. Aged by the check date. Bills not paid yet are at the bottom.`
+      : `<b>Bill focus:</b> matching bills to the vendor's statement. Payments are not rows here — the Status column says what paid each bill. ` +
+        `Aged by the <b>vendor's own date</b>, with a heavy rule on the first row past 30 days and the first past 60. A receipt not billed yet sits in the list, indented: ` +
+        `it is a bill on its way, not on the vendor's statement until they invoice it.`) +
+    ` ⋈ opens the bowtie, ▤ the Gantt, the eye a peek.`;
 
   const mine = DOCS.filter((d) => d.party === VENDOR);
-  const on = QUICK.filter((k) => q.has(k.id));
+  const asOf = dayNum(AS_OF);
   const acts = (d) => `<span class="acts"><button class="ico" data-act="bowtie" data-id="${esc(d.id)}" title="Bowtie">⋈</button>
     <button class="ico" data-act="gantt" data-id="${esc(d.id)}" title="Gantt">▤</button>
     <button class="ico" data-act="peek" data-id="${esc(d.id)}" title="Peek">${EYE}</button></span>`;
   const dot = (d) => `<span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>`;
+  const band = (d) => { const age = asOf - dayNum(d.doc); return age <= 30 ? 0 : age <= 60 ? 1 : 2; };
+  const ageTag = (b) => `<span class="age-tag">${b === 1 ? "30+ days" : "60+ days"}</span>`;
 
-  const open = mine.filter((d) => on.some((k) => k.open && k.match(d))).sort((a, b) => a.doc.localeCompare(b.doc));
+  // Open orders: the one thing still kept apart -- nothing has arrived or been billed on them yet.
+  const open = q.has("po") ? mine.filter((d) => d.t === "po" && d.openNote).sort((a, b) => a.doc.localeCompare(b.doc)) : [];
   $("#st-open-sheet").hidden = !open.length;
   $("#st-open").innerHTML = `<thead><tr><th>Date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>What's open</th>
     <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>
-    ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td class="${d.ref ? "" : "muted"}">${esc(d.ref || "—")}</td>
+    ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td class="muted">${esc(d.ref || "—")}</td>
       <td>${esc(d.id)}</td><td>${esc(d.openNote)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td><td>${acts(d)}</td></tr>`).join("")}
     </tbody>`;
 
-  const asOf = dayNum(AS_OF);
-  const band = (d) => { const age = asOf - dayNum(d.doc); return age <= 30 ? 0 : age <= 60 ? 1 : 2; };
-  const recent = mine.filter((d) => on.some((k) => !k.open && k.match(d)) && asOf - dayNum(d.doc) <= 90)
-    .sort((a, b) => b.doc.localeCompare(a.doc));
-  $("#st-recent-sheet").hidden = !recent.length;
-  let prev = 0, openTotal = 0;
-  const rowsHtml = recent.map((d) => {
-    const b = band(d);
-    const cross = b !== prev; prev = b;
-    const isPay = d.t === "pay";
-    const amt = isPay ? -docTotal(d) : docTotal(d);
-    const openAmt = d.open || 0;
-    openTotal += openAmt;
-    const status = isPay ? `applied to ${d.refs.length} bills` : openAmt ? (openAmt < 0 ? "unapplied credit" : "open") :
-      "paid · " + (DOCS.find((p) => p.refs && p.refs.some((r) => r.bill === d.id)) || {}).ref;
-    return `<tr class="${cross ? "cross" : ""}"><td>${fmtD(d.doc)}${cross ? `<span class="age-tag">${b === 1 ? "30+ days" : "60+ days"}</span>` : ""}</td>
-      <td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td><td class="${openAmt ? "" : "muted"}">${esc(status)}</td>
-      <td class="num">${money(amt)}</td><td class="num">${openAmt ? money(openAmt) : ""}</td><td>${acts(d)}</td></tr>`;
-  }).join("");
-  $("#st-recent").innerHTML = `<thead><tr><th>Vendor's date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>Status</th>
-    <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>
-    <tfoot><tr><td colspan="6">Open on the rows above${all ? " — what the vendor's statement should show" : ""}</td>
-    <td class="num">${money(openTotal)}</td><td></td></tr></tfoot>`;
+  const sheet = $("#st-recent-sheet");
+  $("#st-recent-sub").textContent = byPay ? "by the check date · each payment with the bills it paid · heavy rule = crossing into 30+ and 60+ days"
+    : "by the vendor's date · heavy rule = crossing into 30+ and 60+ days";
+  sheet.querySelectorAll("svg.st-flow").forEach((x) => x.remove());
+  let prev = 0, openTotal = 0, pending = 0, html = "";
+  const row = (d, cls, cells) => `<tr class="${cls}" data-doc="${esc(d.id)}">${byPay ? `<td class="flow"></td>` : ""}${cells}<td>${acts(d)}</td></tr>`;
+
+  if (!byPay) {
+    const list = mine.filter((d) => asOf - dayNum(d.doc) <= 90 &&
+      ((d.t === "bill" && q.has("bill")) || (d.t === "cm" && q.has("cm")) || (d.t === "pr" && d.openNote && q.has("pr"))))
+      .sort((a, b) => b.doc.localeCompare(a.doc) || a.id.localeCompare(b.id));
+    for (const d of list) {
+      const b = band(d), cross = b !== prev; prev = b;
+      const lead = `<td>${fmtD(d.doc)}${cross ? ageTag(b) : ""}</td>`;
+      if (d.t === "pr") {
+        pending += d.open;
+        html += row(d, `indent${cross ? " cross" : ""}`, `${lead}<td class="ty">${dot(d)}↳ Item Receipt</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td>
+          <td class="muted">received — bill expected</td><td class="num muted">${money(docTotal(d))}</td><td class="num"></td>`);
+        continue;
+      }
+      const openAmt = d.open || 0;
+      openTotal += openAmt;
+      const pays = isPaidBy(d.id);
+      const status = openAmt ? (openAmt < 0 ? "unapplied credit" : "open") : "paid · " + pays.map((p) => p.ref).join(", ");
+      html += row(d, cross ? "cross" : "", `${lead}<td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td>
+        <td class="${openAmt ? "" : "muted"}">${esc(status)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${openAmt ? money(openAmt) : ""}</td>`);
+    }
+  } else {
+    const pays = mine.filter((d) => d.t === "pay" && asOf - dayNum(d.doc) <= 90).sort((a, b) => b.doc.localeCompare(a.doc));
+    for (const p of pays) {
+      const b = band(p), cross = b !== prev; prev = b;
+      html += row(p, `st-pay${cross ? " cross" : ""}`, `<td>${fmtD(p.doc)}${cross ? ageTag(b) : ""}</td><td>${dot(p)}${TYPES[p.t].label}</td>
+        <td>${esc(p.ref)}</td><td>${esc(p.id)}</td><td>applied to ${p.refs.length} bills</td><td class="num">${money(-docTotal(p))}</td><td class="num"></td>`);
+      for (const r of [...p.refs].sort((x, y) => BY_ID.get(x.bill).doc.localeCompare(BY_ID.get(y.bill).doc))) {
+        const bill = BY_ID.get(r.bill);
+        html += row(bill, "indent st-sub", `<td class="muted">${fmtD(bill.doc)}</td><td class="ty">${dot(bill)}↳ Bill</td><td>${esc(bill.ref)}</td><td>${esc(bill.id)}</td>
+          <td class="muted">${money(r.amount)} of ${money(docTotal(bill))}</td><td class="num">${money(r.amount)}</td><td class="num"></td>`).replace(`data-doc="${esc(bill.id)}"`, `data-doc="${esc(bill.id)}" data-pay="${esc(p.id)}" data-amt="${r.amount}"`);
+      }
+    }
+    const unpaid = mine.filter((d) => (d.t === "bill" || d.t === "cm") && d.open).sort((a, b) => b.doc.localeCompare(a.doc));
+    if (unpaid.length) {
+      html += `<tr class="st-divider"><td class="flow"></td><td colspan="8">Not paid yet</td></tr>`;
+      for (const d of unpaid) {
+        openTotal += d.open;
+        html += row(d, "", `<td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref)}</td><td>${esc(d.id)}</td>
+          <td>${d.open < 0 ? "unapplied credit" : "open"}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td>`);
+      }
+    }
+  }
+  sheet.hidden = !html;
+  const flowTh = byPay ? `<th class="flow"></th>` : "";
+  $("#st-recent").innerHTML = `<thead><tr>${flowTh}<th>${byPay ? "Date" : "Vendor's date"}</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>Status</th>
+    <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${html}</tbody>
+    <tfoot><tr>${byPay ? "<td></td>" : ""}<td colspan="6">Open on the bills and credits above${all ? " — what the vendor's statement should show" : ""}</td>
+    <td class="num">${money(openTotal)}</td><td></td></tr>
+    ${pending ? `<tr class="st-pending">${byPay ? "<td></td>" : ""}<td colspan="6">Received, not billed yet — not on the vendor's statement until they invoice it</td><td class="num">${money(pending)}</td><td></td></tr>` : ""}</tfoot>`;
+  if (byPay) drawStatementFlow(sheet);
+}
+
+/*
+ * Payment focus: a ribbon in the left gutter from each bill row to the payment it was paid by, as
+ * wide as the amount applied. Both ends sit on the centre of their rows, measured from the painted
+ * rows -- the same promise as the bowtie.
+ */
+function drawStatementFlow(sheet) {
+  const W = sheet.clientWidth, H = sheet.clientHeight;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "st-flow"); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  // Measure from the drawing itself, not the sheet: the sheet's 1px border put every end 1px off.
+  sheet.appendChild(svg);
+  const box = svg.getBoundingClientRect();
+  const subs = [...sheet.querySelectorAll("tr[data-pay]")];
+  const max = Math.max(...subs.map((tr) => +tr.dataset.amt), 1);
+  const mid = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 - box.top; };
+  let s = "";
+  for (const tr of subs) {
+    const pay = sheet.querySelector(`tr.st-pay[data-doc="${CSS.escape(tr.dataset.pay)}"]`);
+    const gutter = tr.querySelector("td.flow").getBoundingClientRect();
+    const xr = gutter.right - box.left - 2, xl = gutter.left - box.left + 8;
+    const y1 = mid(tr), y2 = mid(pay), w = 2 + (10 * +tr.dataset.amt) / max;
+    s += `<path d="M ${xr} ${y1} C ${xl} ${y1}, ${xl} ${y2}, ${xr} ${y2}" fill="none" stroke="${ACCENT.invoice}" stroke-width="${w}" stroke-opacity=".55"
+      data-from="${esc(tr.dataset.doc)}" data-to="${esc(tr.dataset.pay)}"/>`;
+  }
+  svg.innerHTML = s;
+  // Check the ends on the painted rows (lesson from the bowtie: measure the picture, not the numbers).
+  let worst = 0;
+  svg.querySelectorAll("path").forEach((p) => {
+    const a = p.getPointAtLength(0).matrixTransform(p.getScreenCTM()).y, b = p.getPointAtLength(p.getTotalLength()).matrixTransform(p.getScreenCTM()).y;
+    const r1 = sheet.querySelector(`tr[data-pay="${CSS.escape(p.dataset.to)}"][data-doc="${CSS.escape(p.dataset.from)}"]`).getBoundingClientRect();
+    const r2_ = sheet.querySelector(`tr.st-pay[data-doc="${CSS.escape(p.dataset.to)}"]`).getBoundingClientRect();
+    worst = Math.max(worst, Math.abs(a - (r1.top + r1.height / 2)), Math.abs(b - (r2_.top + r2_.height / 2)));
+  });
+  sheet.dataset.endDrift = worst.toFixed(2);
+  if (worst > 0.5) console.warn(`statement flow: a ribbon end is ${worst.toFixed(2)}px off its row`);
 }
 
 /* ---------------- peek ---------------- */
@@ -1525,6 +1736,8 @@ document.addEventListener("click", (ev) => {
   if (!t) { if (!ev.target.closest(".pop")) closePop(); return; }
   if (t.dataset.tab) { state.tab = t.dataset.tab; render(); return; }
   if (t.dataset.idmode) { state.idMode = t.dataset.idmode; render(); return; }
+  if (t.dataset.lcmode) { state.lcMode = t.dataset.lcmode; render(); return; }
+  if (t.dataset.stfocus) { state.stFocus = t.dataset.stfocus; render(); return; }
   if (t.dataset.quick) {
     const k = t.dataset.quick;
     if (k === "*") state.quick = QUICK.every((x) => state.quick.has(x.id)) ? new Set(["bill"]) : new Set(QUICK.map((x) => x.id));
@@ -1589,6 +1802,10 @@ document.addEventListener("drop", (ev) => {
   const id = ev.dataTransfer.getData("text/plain");
   if (BY_ID.has(id)) setFocus(id, true);
 });
+
+// Arcs and gutter ribbons are drawn from painted positions, so redraw when the layout changes.
+let resizeTimer = null;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.tab === "lifecycle" || state.tab === "statement") render(); }, 120); });
 
 render();
 </script>
