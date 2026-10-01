@@ -301,7 +301,13 @@ import {
   TAB_BAR_HEIGHT,
 } from "../src/config.js";
 import { needsDocShellReload } from "../src/doc-shell-kind.js";
-import { resolveResumeRoute, resumeDocMatches, shouldHoldBillPark } from "../src/doc-resume.js";
+import {
+  carriesClerkEdits,
+  opensInPlace,
+  resolveResumeRoute,
+  resumeDocMatches,
+  shouldHoldBillPark,
+} from "../src/doc-resume.js";
 import {
   decideErpUnload,
   erpUnloadDialogSpec,
@@ -3084,6 +3090,8 @@ function onErpWillPreventUnload(event) {
     event.preventDefault();
     return;
   }
+  // Logged before the box opens: a box nobody answers would otherwise leave no trace.
+  navDebug("erp-unload", "ask — Frappe beforeunload, no recent shell check");
   let response = 0;
   try {
     const pageLabel = erpUnloadPageLabel(
@@ -4609,9 +4617,16 @@ async function showDocForm(skinId, route, opts = {}) {
     });
 
     const target = erpUrl(ERP_BASE, currentRoute);
-    const loaded = openingFreshNew
-      ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
-      : await loadErpUrl(target);
+    // Vanilla → Doc on the form Vanilla is showing: read it where it is. Reloading would drop
+    // an unsaved draft the clerk typed in Vanilla (5zorro 2026-09-30: type in Vanilla, switch
+    // to Doc, everything comes along).
+    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
+    if (inPlace) navDebug("doc-open-in-place", currentRoute);
+    const loaded = inPlace
+      ? true
+      : openingFreshNew
+        ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
+        : await loadErpUrl(target);
     if (!loaded) {
       // The clerk kept unsaved Vanilla edits; onErpUnloadRefused already put them back on screen.
       navDebug("doc-open-stopped", `${skinId} — clerk stayed on unsaved edits`);
@@ -4686,6 +4701,19 @@ async function showDocForm(skinId, route, opts = {}) {
         },
         true,
       );
+      // Edits typed in Vanilla came along in place: they are the clerk's, so the Doc skin's
+      // unsaved-changes check must know about them.
+      const carriedEdits =
+        inPlace &&
+        carriesClerkEdits(snap.doc, {
+          isDirty: !!snap.isDirty,
+          isNew: !!snap.isNew,
+          partyField: profile.partyField,
+        });
+      if (carriedEdits) {
+        dirtyState = markUserEdited(dirtyState);
+        navDebug("doc-open-carried-edits", String(snap.doc && snap.doc.name));
+      }
       if (skinId === "bill") {
         amountDueCommitted = amountDueScratch;
       } else if (skinId === "po" && snap.doc) {
@@ -4712,7 +4740,7 @@ async function showDocForm(skinId, route, opts = {}) {
           linkedPos: snap.linkedPos || [],
           poLineMeta: snap.poLineMeta || {},
           lineAllocations: snap.lineAllocations || {},
-          userEdited: false,
+          userEdited: carriedEdits,
           isNew: !!snap.isNew,
           focusVendor: true,
         });
@@ -4721,7 +4749,7 @@ async function showDocForm(skinId, route, opts = {}) {
           ok: true,
           doc: snap.doc,
           scratch: { dateExpected: dateExpectedScratch },
-          userEdited: false,
+          userEdited: carriedEdits,
           isNew: !!snap.isNew,
           focusVendor: true,
         });

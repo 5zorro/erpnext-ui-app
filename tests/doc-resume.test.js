@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { docShellKind, needsDocShellReload } from "../src/doc-shell-kind.js";
-import { resolveResumeRoute, resumeDocMatches, shouldHoldBillPark } from "../src/doc-resume.js";
+import {
+  carriesClerkEdits,
+  opensInPlace,
+  resolveResumeRoute,
+  resumeDocMatches,
+  shouldHoldBillPark,
+} from "../src/doc-resume.js";
 
 describe("doc-shell-kind", () => {
   it("the Bill has its own page code; everything else shares one", () => {
@@ -121,6 +127,58 @@ describe("shouldHoldBillPark", () => {
     );
     assert.equal(
       shouldHoldBillPark({ surfaceMode: "home", routeDoctype: "purchase-invoice", hasDirtyDoc: false }),
+      false,
+    );
+  });
+});
+
+describe("opensInPlace", () => {
+  const draft = "/app/purchase-invoice/new-purchase-invoice-abc";
+
+  it("Vanilla → Doc on the draft Vanilla is showing reads it, no reload", () => {
+    assert.equal(opensInPlace(`http://localhost:8080/desk/purchase-invoice/new-purchase-invoice-abc`, draft, "http://localhost:8080"), true);
+    assert.equal(opensInPlace("/app/supplier/ACME%20CO", "/app/supplier/ACME CO"), true);
+  });
+
+  it("a fresh New Bill is never answered with the draft that happens to be open", () => {
+    assert.equal(opensInPlace(draft, "/app/purchase-invoice/new"), false);
+  });
+
+  it("another record, another doctype, or a list is a real navigation", () => {
+    assert.equal(opensInPlace(draft, "/app/purchase-invoice/new-purchase-invoice-xyz"), false);
+    assert.equal(opensInPlace("/app/purchase-order/new-purchase-order-abc", "/app/purchase-invoice/new-purchase-order-abc"), false);
+    assert.equal(opensInPlace("/app/purchase-invoice", draft), false);
+    assert.equal(opensInPlace("", draft), false);
+  });
+});
+
+describe("carriesClerkEdits", () => {
+  it("a new draft with a vendor typed in Vanilla carries the clerk's work", () => {
+    assert.equal(carriesClerkEdits({ supplier: "ACME" }, { isDirty: true, isNew: true }), true);
+  });
+
+  it("or with a line that has an item", () => {
+    assert.equal(
+      carriesClerkEdits({ supplier: "", items: [{ item_code: "SKU-1" }] }, { isDirty: true, isNew: true }),
+      true,
+    );
+  });
+
+  it("an untouched blank draft does not — Frappe calls every new draft unsaved", () => {
+    assert.equal(
+      carriesClerkEdits({ supplier: "", company: "X", items: [{ item_code: "" }] }, { isDirty: true, isNew: true }),
+      false,
+    );
+  });
+
+  it("a saved document edited in Vanilla does; a clean one does not", () => {
+    assert.equal(carriesClerkEdits({ supplier: "ACME" }, { isDirty: true, isNew: false }), true);
+    assert.equal(carriesClerkEdits({ supplier: "ACME" }, { isDirty: false, isNew: false }), false);
+  });
+
+  it("uses the skin's own party field when it names one", () => {
+    assert.equal(
+      carriesClerkEdits({ party: "", customer: "C1" }, { isDirty: true, isNew: true, partyField: "party" }),
       false,
     );
   });

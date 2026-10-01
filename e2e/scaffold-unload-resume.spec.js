@@ -164,4 +164,39 @@ test.describe("scaffold: unsaved Vanilla page + resume (dogfood 2026-09-30)", ()
       )
       .toEqual({ name: before.name, supplier });
   });
+
+  test("Vanilla → Doc on the same draft carries it over: no reload, no discard question", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    ignorePageDialogs(app);
+    await e2eCall(app, "openErp", "/app/purchase-invoice/new");
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Purchase Invoice")`), { timeout: 40_000 })
+      .toBe(true);
+    const supplier = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Supplier", { limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    test.skip(!supplier, "sandbox has no Supplier");
+    const name = await inErp(
+      app,
+      `(async () => { await cur_frm.set_value("supplier", ${JSON.stringify(supplier)}); return cur_frm.doc.name; })()`,
+    );
+    // The clerk's own pause before clicking the tab: the shell has caught up with the draft's name.
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 10_000 }).toContain(name);
+    await stubUnloadBox(app, 0);
+
+    await app.evaluate(({ ipcMain }) => ipcMain.emit("open-doc-skin", {}));
+
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(
+        async () =>
+          inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return s && s.ok && s.doc ? { name: s.doc.name, supplier: s.doc.supplier } : null; })()`),
+        { timeout: 30_000 },
+      )
+      .toEqual({ name, supplier });
+    expect(await app.evaluate(() => globalThis.__unloadAsked)).toBe(0);
+  });
 });
