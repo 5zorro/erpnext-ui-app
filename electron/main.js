@@ -300,6 +300,14 @@ import {
   HEALTH_PING_MS,
   TAB_BAR_HEIGHT,
 } from "../src/config.js";
+import { needsDocShellReload } from "../src/doc-shell-kind.js";
+import { resolveResumeRoute, resumeDocMatches, shouldHoldBillPark } from "../src/doc-resume.js";
+import {
+  decideErpUnload,
+  erpUnloadDialogSpec,
+  erpUnloadPageLabel,
+  isLeaveChoice,
+} from "../src/erp-unload-guard.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -599,11 +607,6 @@ function activeDocProfile() {
 function activeFormView() {
   if (surfaceMode === "doc") return docForm;
   return null;
-}
-
-/** @param {DocFormSkinId|string|null|undefined} skinId */
-function docShellKind(skinId) {
-  return skinId === "bill" ? "bill" : "doc-form";
 }
 
 function reloadDocFormShell() {
@@ -1874,8 +1877,16 @@ function parkDocSurfaceIfNeeded() {
     return;
   }
   // Recent flyout IPC can log surfaceMode=home while currentRoute is still the Bill (OI-112 strike 2).
+  // Never on Vanilla: there the Vanilla form is what the clerk sees, and dirtyState.doc may be a
+  // copy from an earlier Doc session (focus incident 2026-10-01T03:55 — a stale vendor).
   const info = routeInfo(currentRoute || "", ERP_BASE);
-  if (info.doctype === "purchase-invoice" && dirtyState.doc) {
+  if (
+    shouldHoldBillPark({
+      surfaceMode,
+      routeDoctype: info.doctype,
+      hasDirtyDoc: !!dirtyState.doc,
+    })
+  ) {
     parkedDocSurface = { mode: "doc", skinId: "bill", route: currentRoute || "" };
     navDebug("doc-park", `bill (route-hold) ${parkedDocSurface.route}`);
   }
@@ -1901,7 +1912,9 @@ async function ensureErpMatchesShellRoute(appPath) {
     trackNav(erpUrl(ERP_BASE, path), { fromBrowser: false });
     return { ok: true, synced: true };
   }
-  await erpForceReopenRoute(path);
+  if (!(await erpForceReopenRoute(path))) {
+    return { ok: false, reason: "A page with unsaved changes was kept open." };
+  }
   return { ok: true, synced: true };
 }
 
@@ -2040,20 +2053,41 @@ async function resumeParkedDoc(route) {
   if (!routesReferToSameDoc(parkedDocSurface.route, route, ERP_BASE)) return false;
   const park = parkedDocSurface;
   parkedDocSurface = null;
-  navDebug("doc-rebind", `${park.mode} ${park.route}`);
-  currentRoute = park.route;
+  const profile = park.skinId ? DOC_SKIN_PROFILES[park.skinId] : null;
+  const expectedName =
+    dirtyState.doc && dirtyState.doc.name != null ? String(dirtyState.doc.name) : "";
+  // A generic `/new` park reopens the draft by its own name — asking Frappe for `/new` again
+  // makes a fresh blank draft under the skin's old copy (focus incident 2026-10-01T03:55).
+  const resumeRoute = resolveResumeRoute(
+    park.route,
+    dirtyState.doc,
+    (profile && profile.doctype) || "",
+    ERP_BASE,
+  );
+  navDebug(
+    "doc-rebind",
+    `${park.mode} ${park.route}${resumeRoute !== park.route ? ` → ${resumeRoute}` : ""}`,
+  );
+  currentRoute = resumeRoute;
   armSoftPeekEscHook(false).catch(() => {});
-  if (erpIsWarm() && (park.route || "").startsWith("/app/")) {
-    const soft = await erpSoftSetRoute(park.route);
+  if (erpIsWarm() && (resumeRoute || "").startsWith("/app/")) {
+    const soft = await erpSoftSetRoute(resumeRoute);
     if (!soft || !soft.ok) {
       navDebug("doc-rebind-erp", (soft && soft.reason) || "set_route failed");
-      await erpForceReopenRoute(park.route);
+      // Stayed on unsaved edits: handled — do not let the caller try another door.
+      if (!(await erpForceReopenRoute(resumeRoute))) return true;
     }
   }
   if (park.mode === "doc" && park.skinId) {
-    const profile = DOC_SKIN_PROFILES[park.skinId];
+    const priorSkin = activeDocSkin;
     surfaceMode = "doc";
     activeDocSkin = park.skinId;
+    // The page may be running the other controller (Item Receipt → Doc tab → Bill); without
+    // a reload the Bill is painted by PO/IR code (focus incidents 2026-10-01T03:55 / 04:01).
+    if (needsDocShellReload(priorSkin, park.skinId)) {
+      navDebug("doc-rebind-reload", `${priorSkin} → ${park.skinId}`);
+      await reloadDocFormShell();
+    }
     place();
     try {
       if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
@@ -2061,26 +2095,53 @@ async function resumeParkedDoc(route) {
     } catch {
       /* ignore */
     }
+    // Paint what Vanilla holds, not the shell's copy: invariant 7, the skin reflects ERP.
+    const live = await snapshotDocForm();
+    let userEdited = !!dirtyState.userEdited;
+    if (live && live.ok && live.doc) {
+      const liveName = live.doc.name != null ? String(live.doc.name) : "";
+      let same = resumeDocMatches(expectedName, liveName);
+      if (!same) {
+        const newNames = await erpEval(
+          `(function(){try{return (frappe.model&&frappe.model.new_names)||{};}catch(e){return {};}})()`,
+        );
+        same = resumeDocMatches(expectedName, liveName, newNames || {});
+      }
+      if (!same) {
+        // The draft is gone from Vanilla (a full page load drops unsaved drafts). Show the truth
+        // and do not gate a blank form as if the clerk's edits were on it.
+        navDebug("doc-rebind-mismatch", `${expectedName} → ${liveName}`);
+        userEdited = false;
+        dirtyState = { ...dirtyState, userEdited: false };
+      }
+    } else {
+      navDebug("doc-rebind-read-failed", (live && live.reason) || "no snapshot");
+    }
+    const doc = live && live.ok && live.doc ? live.doc : dirtyState.doc;
     if (profile) {
-      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, dirtyState.doc);
+      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, doc);
     }
     if (park.skinId === "bill") {
       pushDocFormSnapshot({
         ok: true,
-        doc: dirtyState.doc,
+        doc,
         amountDue: amountDueScratch,
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
+        linkedPos: (live && live.linkedPos) || [],
+        linkedReceipts: (live && live.linkedReceipts) || [],
+        poLineMeta: (live && live.poLineMeta) || {},
+        lineAllocations: (live && live.lineAllocations) || {},
+        userEdited,
+        isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
         softPeekReturn: true,
       });
     } else {
       pushDocFormSnapshot({
         ok: true,
-        doc: dirtyState.doc,
+        doc,
         scratch: { dateExpected: dateExpectedScratch },
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
+        userEdited,
+        isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
       });
     }
@@ -2184,6 +2245,18 @@ function beginErpNavIntent(path) {
     if (erpNavIntentPath === p) {
       navDebug("nav-intent-timeout", p);
       erpNavIntentPath = null;
+      // The page never arrived. On Vanilla, take where the ERP view really is as "here";
+      // otherwise the next route poll reads it as a hop *from* the page we never reached and
+      // invents a peek (nav incident 2026-10-01T03:52: "Bill → Supplier").
+      const live = currentErpPathname();
+      if (surfaceMode === "erp" && live && erpLivePathDiffers(currentRoute, live, ERP_BASE)) {
+        const n = normalizeAppRoute(live, ERP_BASE);
+        if (n.path) {
+          navDebug("nav-intent-resync", `${currentRoute} → ${n.path}`);
+          currentRoute = n.path;
+          sendUiState();
+        }
+      }
     }
     erpNavIntentTimer = null;
   }, 15000);
@@ -2986,9 +3059,87 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
   };
 }
 
-/** @type {{ finish: () => void } | null} */
+/** @type {{ finish: () => void, refuse?: () => void } | null} */
 let erpLoadWaiter = null;
 
+/** When the shell's own unsaved-changes check last passed (ms) — see erp-unload-guard.js. */
+let erpUnloadClearedAt = 0;
+
+/** @param {string} reason */
+function markErpUnloadCleared(reason) {
+  erpUnloadClearedAt = Date.now();
+  navDebug("erp-unload-cleared", reason);
+}
+
+/**
+ * Frappe's `beforeunload` asked to keep a Vanilla page. Electron cancels the load unless we
+ * say otherwise, and asks nobody — so either the shell's own check already covered it, or the
+ * clerk is asked the way a browser would ask (nav incident 2026-10-01T03:52).
+ * @param {Electron.Event} event
+ */
+function onErpWillPreventUnload(event) {
+  const decision = decideErpUnload({ clearedAt: erpUnloadClearedAt, now: Date.now() });
+  if (decision === "allow") {
+    navDebug("erp-unload", "allow — shell check passed");
+    event.preventDefault();
+    return;
+  }
+  let response = 0;
+  try {
+    const pageLabel = erpUnloadPageLabel(
+      normalizeAppRoute(currentErpPathname(), ERP_BASE),
+      DOCTYPE_LABELS,
+    );
+    response =
+      win && !win.isDestroyed()
+        ? dialog.showMessageBoxSync(win, erpUnloadDialogSpec({ pageLabel }))
+        : 0;
+  } catch {
+    response = 0;
+  }
+  if (isLeaveChoice(response)) {
+    navDebug("erp-unload", "leave — clerk discarded Vanilla edits");
+    markErpUnloadCleared("clerk-leave");
+    event.preventDefault();
+    return;
+  }
+  navDebug("erp-unload", "stay — clerk kept Vanilla edits");
+  onErpUnloadRefused();
+}
+
+/**
+ * The load did not happen: the ERP view is still on the page with the clerk's edits. Show it,
+ * and put the shell's idea of "where we are" back on it so nothing later records a hop that
+ * never happened (the fake "Bill → Supplier" peek of the same incident).
+ */
+function onErpUnloadRefused() {
+  const waiter = erpLoadWaiter;
+  // A load the page started itself (Frappe's own redirect, a reload): the shell never moved,
+  // so there is nothing to put back.
+  if (!waiter) return;
+  if (waiter.refuse) waiter.refuse();
+  clearErpNavIntent("unload-refused");
+  const live = currentErpPathname();
+  const n = live ? normalizeAppRoute(live, ERP_BASE) : null;
+  surfaceMode = "erp";
+  if (n && n.path) currentRoute = n.path;
+  place();
+  sendUiState();
+  sendHistory();
+  syncE2eApi();
+  try {
+    if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * @param {string} url
+ * @returns {Promise<boolean>} false when the load did not happen — no ERP view, or the clerk
+ *   chose to stay on a Vanilla page with unsaved changes (`will-prevent-unload`). A timeout
+ *   still resolves true, as before.
+ */
 function loadErpUrl(url) {
   return new Promise((resolve) => {
     if (!erp || erp.webContents.isDestroyed()) {
@@ -3001,14 +3152,15 @@ function loadErpUrl(url) {
       erpLoadWaiter = null;
     }
     let settled = false;
-    const finish = () => {
+    const settle = (loaded) => {
       if (settled) return;
       settled = true;
       if (erpLoadWaiter && erpLoadWaiter.finish === finish) erpLoadWaiter = null;
       erp.webContents.removeListener("did-finish-load", finish);
-      resolve(true);
+      resolve(loaded);
     };
-    erpLoadWaiter = { finish };
+    const finish = () => settle(true);
+    erpLoadWaiter = { finish, refuse: () => settle(false) };
     erp.webContents.once("did-finish-load", finish);
     erp.webContents.loadURL(url);
     setTimeout(finish, 10000);
@@ -3602,6 +3754,13 @@ async function gateDirtyThen(doNav) {
     doNav();
     return;
   }
+  // From here the shell's own check owns the Doc skin's edits; once it lets the clerk go,
+  // Frappe's beforeunload on the same form is a second question about the same edits.
+  const continueNav = doNav;
+  doNav = () => {
+    markErpUnloadCleared("doc-gate");
+    continueNav();
+  };
   // Fast path: do not await heavy snapshot when already clean (hang = dead Recents nav).
   if (!dirtyState.userEdited) {
     navDebug("gate-skip", "clean");
@@ -3949,8 +4108,11 @@ function openPaymentEntryTile(direction) {
  * @param {string} appPath normalized /app/… path
  * @returns {Promise<void>}
  */
+/**
+ * @returns {Promise<boolean>} false when the clerk chose to stay on unsaved Vanilla edits
+ */
 async function erpForceReopenRoute(appPath, opts = {}) {
-  if (!erp || erp.webContents.isDestroyed()) return;
+  if (!erp || erp.webContents.isDestroyed()) return false;
   const path = normalizeAppRoute(appPath, ERP_BASE).path || appPath;
   const search =
     typeof opts.search === "string" && opts.search ? `?${opts.search.replace(/^\?/, "")}` : "";
@@ -3963,15 +4125,16 @@ async function erpForceReopenRoute(appPath, opts = {}) {
       // fromBrowser:false — we asked for this route, the page has not confirmed it yet.
       // Clearing the intent here disarms the guard against the page we are leaving.
       trackNav(target, { fromBrowser: false });
-      return;
+      return true;
     }
     navDebug("same-route-bounce", `${(soft && soft.reason) || "no-set_route"} → ${path}`);
   } else {
     navDebug("force-reopen-load", path);
   }
-  await loadErpUrl(erpUrl(ERP_BASE, "/app"));
-  await loadErpUrl(target);
+  if (!(await loadErpUrl(erpUrl(ERP_BASE, "/app")))) return false;
+  if (!(await loadErpUrl(target))) return false;
   trackNav(target, { fromBrowser: false });
+  return true;
 }
 
 function showErp(route = "/desk", opts = {}) {
@@ -4064,7 +4227,8 @@ function showErp(route = "/desk", opts = {}) {
           return;
         }
         navDebug("soft-peek-fallback", (r && r.reason) || "set_route failed");
-        void loadErpUrl(target).then(() => {
+        void loadErpUrl(target).then((loaded) => {
+          if (!loaded) return;
           trackNav(target, { fromBrowser: false });
           afterNav();
         });
@@ -4083,12 +4247,17 @@ function showErp(route = "/desk", opts = {}) {
       }) &&
       (info.path || path).startsWith("/app/")
     ) {
-      erpForceReopenRoute(info.path || path, { forceLoad: true, search: opts.search }).then(afterNav);
+      erpForceReopenRoute(info.path || path, { forceLoad: true, search: opts.search }).then(
+        (loaded) => {
+          if (loaded) afterNav();
+        },
+      );
       return;
     }
 
     if (opts.forceLoad || path !== "/desk" || !alreadyAtDeskRoot) {
-      void loadErpUrl(target).then(() => {
+      void loadErpUrl(target).then((loaded) => {
+        if (!loaded) return;
         trackNav(target, { fromBrowser: false });
         afterNav();
       });
@@ -4384,7 +4553,7 @@ async function showDocForm(skinId, route, opts = {}) {
     parkedDocSurface = null;
     surfaceMode = "doc";
     activeDocSkin = skinId;
-    if (priorSkin && docShellKind(priorSkin) !== docShellKind(skinId)) {
+    if (needsDocShellReload(priorSkin, skinId)) {
       await reloadDocFormShell();
     }
     const n = normalizeAppRoute(r, ERP_BASE);
@@ -4440,10 +4609,13 @@ async function showDocForm(skinId, route, opts = {}) {
     });
 
     const target = erpUrl(ERP_BASE, currentRoute);
-    if (openingFreshNew) {
-      await erpForceReopenRoute(currentRoute, { forceLoad: true });
-    } else {
-      await loadErpUrl(target);
+    const loaded = openingFreshNew
+      ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
+      : await loadErpUrl(target);
+    if (!loaded) {
+      // The clerk kept unsaved Vanilla edits; onErpUnloadRefused already put them back on screen.
+      navDebug("doc-open-stopped", `${skinId} — clerk stayed on unsaved edits`);
+      return;
     }
     if (skinId === "bill" && billLoadToken !== billLoadGen) {
       navDebug("bill-load-stale", `after loadURL token=${billLoadToken}`);
@@ -6492,6 +6664,7 @@ function createWindow() {
   erp.webContents.on("will-navigate", (e, url) => {
     if (!isAllowedErpUrl(ERP_BASE, url)) e.preventDefault();
   });
+  erp.webContents.on("will-prevent-unload", onErpWillPreventUnload);
   erp.webContents.on("did-navigate", (_e, url) => {
     trackNav(url, { fromBrowser: true });
     // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
@@ -8740,7 +8913,9 @@ ipcMain.handle("bill-print", async () => {
 
   if (!alreadyOnBill) {
     const target = erpUrl(ERP_BASE, route);
-    await loadErpUrl(target);
+    if (!(await loadErpUrl(target))) {
+      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
+    }
   }
 
   const snap = await raceTimeout(
@@ -9380,7 +9555,9 @@ ipcMain.handle("doc-print", async () => {
 
   if (!alreadyOnDoc) {
     const target = erpUrl(ERP_BASE, route);
-    await loadErpUrl(target);
+    if (!(await loadErpUrl(target))) {
+      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
+    }
   }
 
   const snap = await raceTimeout(
