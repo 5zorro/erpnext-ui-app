@@ -179,13 +179,33 @@
   .lc-ghead { background: #eef2f5; padding: 8px 10px; font-size: 12px; border-radius: 6px; margin-bottom: 2px; }
   .lc-scroll { overflow-x: auto; }
   svg.lc-arcs { display: block; overflow: visible; }
+  svg.lc-arcs .arc-on { stroke-width: 3.2px; stroke-opacity: 1; }
+  svg.lc-arcs .arc-off { opacity: .12; }
+  .lc th[data-col] { cursor: pointer; }
+  .lc th[data-col]:hover { background: #eef2f5; }
+  .lc th.col-sel, .lc th.col-sel:hover { background: #1f2d3d; }
+  .lc th.col-sel span { color: #fff !important; }
+  .lc th.col-linked { background: #e2e8f0; }
   .lc th.lc-doc { text-transform: none; letter-spacing: 0; min-width: 86px; }
   .lc th.lc-doc .lc-dt { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
   .lc th.lc-doc .lc-id { display: block; font-size: 11px; color: var(--ink); white-space: nowrap; }
   .lc th.lc-doc .lc-date { display: block; font-weight: 400; color: var(--muted); }
   #st-recent-sheet { position: relative; }
-  svg.st-flow { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
-  td.flow, th.flow { width: 46px; padding: 0; }
+  tr.pf-check td { border-top: 1px solid var(--edge); background: #fbfcfd; }
+  tr.pf-check.planned td { background: #f6faf8; }
+  tr.pf-bill td { color: var(--muted); padding-top: 4px; padding-bottom: 4px; }
+  tr.pf-bill td.ty { color: var(--ink); }
+  tr.pf-today td { background: #1f2d3d; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 4px 10px; }
+  .chip-st { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip-st.ok { background: #e6f5f0; color: #00795c; }
+  .chip-st.mail { background: #e0f2fe; color: #0b5c8a; font-weight: 600; }
+  .chip-st.planned { background: #f1f5f9; color: var(--muted); }
+  .pbar { display: inline-flex; width: 130px; height: 9px; border: 1px solid #cbd5e1; border-radius: 3px; overflow: hidden;
+          vertical-align: middle; background: var(--paper); }
+  .pbar i { display: block; height: 100%; }
+  .pbar .seg-this { background: #009E73; }
+  .pbar .seg-other { background: #cbd5e1; }
+  .pbar .seg-planned { background: repeating-linear-gradient(-32deg, #e6f5f0 0 3px, #8fd3bf 3px 5px); }
   tr.indent td.ty { padding-left: 26px; }
   tr.st-sub td { color: var(--muted); }
   tr.st-pay td { font-weight: 600; }
@@ -261,7 +281,7 @@
       <table id="st-open"></table>
     </div>
     <div class="sheet" id="st-recent-sheet">
-      <div class="sheet-head"><span class="title">Last 90 days</span>
+      <div class="sheet-head"><span class="title" id="st-recent-title">Last 90 days</span>
         <span class="sub" id="st-recent-sub"></span></div>
       <table id="st-recent"></table>
     </div>
@@ -374,8 +394,11 @@
           dashed with a ⚠. "By stage" stays as a toggle.</li>
         <li><b>Statement: receipts not billed sit with the bills</b>, indented — a bill on its way, not yet on the
           vendor's statement — and only open POs stay apart. <b>Focus: Bills / Payments</b>: in Bills, payments are not
-          rows (the Status column says what paid each bill); in Payments, each payment lists the bills it paid, with a
-          ribbon from each bill row to its payment row, ends checked on the painted rows.</li>
+          rows (the Status column says what paid each bill). Payments answers the vendor asking "what's outstanding, and
+          is it in the mail?": one timeline, newest first — planned check runs (open bills grouped by the run that pays
+          them, the Pay Outstanding rule), today, then checks written — with check number, date, amount, whether it has
+          cleared the bank (the payment's clearance date), and under each check the part of each bill it paid.
+          No. is one column that follows the Their / Our toggle.</li>
         <li><b>Stock on the same bill</b> (Material Request → PO line → receipt line → bill line) follows its own lines:
           it rides on the customer's PO, receipt and bill, but never joins that Sales Order's story, its margin, or its
           warnings. The Lifecycle tab gives it its own "stock" group.</li>
@@ -509,7 +532,9 @@ const DOCS = [
             { item: "SKU-BOWTIE-C", qty: 1, rate: 45, from: "MAT-PRE-2026-00212" },
             { item: "PALLET-WRAP", qty: 1, rate: 20, from: null }],
     charges: [{ desc: "Freight", amount: 33 }] },
-  { id: "ACC-PAY-2026-00004", t: "pay", party: VENDOR, ref: "Check 10452", doc: "2026-08-27", posted: "2026-08-28", user: "clerk-ap",
+  // `cleared` = the Payment Entry's clearance_date, set when the bank statement is reconciled. A check
+  // without one has not reached the bank yet.
+  { id: "ACC-PAY-2026-00004", t: "pay", party: VENDOR, ref: "Check 10452", doc: "2026-08-27", posted: "2026-08-28", user: "clerk-ap", cleared: "2026-09-03",
     refs: [{ bill: "ACC-PINV-2026-00268", amount: 888 }, { bill: "ACC-PINV-2026-00255", amount: 2100 },
            { bill: "ACC-PINV-2026-00261", amount: 2012 }] },
   { id: "ACC-SINV-2026-00525", t: "si", party: CUSTOMER, ref: null, doc: "2026-09-01", posted: "2026-09-02", user: "clerk-ar",
@@ -524,7 +549,7 @@ const DOCS = [
     lines: [{ item: "SKU-BOWTIE", qty: 9, rate: 100 }] },
   { id: "ACC-PINV-2026-00241", t: "bill", party: VENDOR, ref: "BT-24380", doc: "2026-07-10", posted: "2026-07-11", user: "clerk-ap",
     lines: [{ item: "SKU-BOWTIE-B", qty: 28, rate: 119.2857 }] },
-  { id: "ACC-PAY-2026-00001", t: "pay", party: VENDOR, ref: "Check 10390", doc: "2026-07-24", posted: "2026-07-24", user: "clerk-ap",
+  { id: "ACC-PAY-2026-00001", t: "pay", party: VENDOR, ref: "Check 10390", doc: "2026-07-24", posted: "2026-07-24", user: "clerk-ap", cleared: "2026-07-30",
     refs: [{ bill: "ACC-PINV-2026-00233", amount: 900 }, { bill: "ACC-PINV-2026-00241", amount: 3340 }] },
   { id: "ACC-PINV-2026-00255", t: "bill", party: VENDOR, ref: "BT-24417", doc: "2026-08-05", posted: "2026-08-06", user: "clerk-ap",
     lines: [{ item: "SKU-BOWTIE", qty: 21, rate: 100 }] },
@@ -536,7 +561,10 @@ const DOCS = [
   { id: "ACC-PINV-2026-00273", t: "cm", party: VENDOR, ref: "BT-CM-091", doc: "2026-09-02", posted: "2026-09-03", user: "clerk-ap",
     lines: [{ item: "SKU-BOWTIE-C", qty: -1, rate: 45, from: "ACC-PINV-2026-00268" }], open: -45 },
   { id: "ACC-PINV-2026-00276", t: "bill", party: VENDOR, ref: "BT-24533", doc: "2026-09-05", posted: "2026-09-08", user: "clerk-ap",
-    lines: [{ item: "SKU-BOWTIE", qty: 14, rate: 105.7143 }], open: 1480 },
+    lines: [{ item: "SKU-BOWTIE", qty: 14, rate: 105.7143 }], open: 980 },
+  // Part of BT-24533, mailed two days ago and not cleared yet: the vendor's "is it in the mail?"
+  { id: "ACC-PAY-2026-00007", t: "pay", party: VENDOR, ref: "Check 10511", doc: "2026-09-26", posted: "2026-09-26", user: "clerk-ap",
+    refs: [{ bill: "ACC-PINV-2026-00276", amount: 500 }] },
   { id: "PUR-ORD-2026-00409", t: "po", party: VENDOR, ref: null, doc: "2026-09-08", posted: "2026-09-08", user: "clerk-ap",
     lines: [{ item: "SKU-BOWTIE-D", qty: 10, rate: 100 }], openNote: "4 of 10 not received", open: 400 },
   { id: "MAT-PRE-2026-00214", t: "pr", party: VENDOR, ref: "PS-5602", doc: "2026-09-13", posted: "2026-09-13", user: "receiving",
@@ -629,7 +657,7 @@ const ancestors = (id) => walk(id, (x) => inEdges(x).map((e) => e.from));
 const descendants = (id) => walk(id, (x) => outEdges(x).map((e) => e.to));
 
 /* ---------------- state ---------------- */
-const state = { tab: "bowtie", focus: ["ACC-PINV-2026-00268", "ACC-PAY-2026-00005"], idMode: "theirs",
+const state = { lcSel: null, tab: "bowtie", focus: ["ACC-PINV-2026-00268", "ACC-PAY-2026-00005"], idMode: "theirs",
                 quick: new Set(["bill"]), fromHome: false, lcMode: "date", stFocus: "bills" };
 
 /*
@@ -1462,9 +1490,9 @@ function drawLcArcs(g, gi) {
   const cx = (id) => { const r = block.querySelector(`th[data-col="${CSS.escape(id)}"]`).getBoundingClientRect(); return r.left + r.width / 2 - base.left; };
   const idx = (id) => g.cols.indexOf(id);
   const edges = EDGES.filter((e) => idx(e.from) >= 0 && idx(e.to) >= 0);
-  let s = `<defs><marker id="lc-arrow-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+  let s = `<defs><marker id="lc-arrow-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
     <path d="M0 0 L6 3 L0 6 z" fill="#64748b"/></marker>
-    <marker id="lc-arrow-w-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <marker id="lc-arrow-w-${gi}" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
     <path d="M0 0 L6 3 L0 6 z" fill="#b45309"/></marker></defs>`;
   for (const e of edges) {
     const a = BY_ID.get(e.from), b = BY_ID.get(e.to);
@@ -1476,9 +1504,9 @@ function drawLcArcs(g, gi) {
     const say = back
       ? `${TYPES[b.t].label} ${idFor(b)} (${fmtD(dateOf(b))}) is dated before ${TYPES[a.t].label} ${idFor(a)} (${fmtD(dateOf(a))}), which it came from.`
       : `${TYPES[a.t].label} ${idFor(a)} → ${TYPES[b.t].label} ${idFor(b)}`;
-    s += `<path d="${d}" fill="none" stroke="${back ? "#b45309" : ACCENT[TYPES[a.t].role]}" stroke-width="${back ? 2 : 1.6}"
+    s += `<path data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" fill="none" stroke="${back ? "#b45309" : ACCENT[TYPES[a.t].role]}" stroke-width="${back ? 2 : 1.6}"
       ${back ? 'stroke-dasharray="4 3"' : 'stroke-opacity=".75"'} marker-end="url(#lc-arrow${back ? "-w" : ""}-${gi})"><title>${esc(say)}</title></path>`;
-    if (back) s += `<text x="${(x1 + x2) / 2}" y="${H - h - 2}" text-anchor="middle" font-size="11" fill="#b45309"><title>${esc(say)}</title>⚠</text>`;
+    if (back) s += `<text data-from="${esc(e.from)}" data-to="${esc(e.to)}" x="${(x1 + x2) / 2}" y="${H - h - 2}" text-anchor="middle" font-size="11" fill="#b45309"><title>${esc(say)}</title>⚠</text>`;
   }
   svg.innerHTML = s;
 }
@@ -1492,6 +1520,26 @@ function renderLifecycle() {
   if (!LC.length) { wrap.innerHTML = `<div class="why">Nothing in focus has an order or a bill to follow.</div>`; return; }
   wrap.innerHTML = LC.map((g, gi) => (state.lcMode === "stage" ? stageTable(g, gi) : dateTable(g, gi))).join("");
   if (state.lcMode !== "stage") LC.forEach((g, gi) => drawLcArcs(g, gi));
+  applyLcSel();
+}
+
+/* Click a column header: it and its links light up, the documents at their other ends are marked,
+   everything else fades. Click it again (or another) to change. */
+function applyLcSel() {
+  const sel = state.lcSel;
+  document.querySelectorAll("#lc-wrap .lc-block").forEach((block) => {
+    const linked = new Set();
+    block.querySelectorAll("svg.lc-arcs [data-from]").forEach((el) => {
+      const on = !!sel && (el.dataset.from === sel || el.dataset.to === sel);
+      if (on) { linked.add(el.dataset.from); linked.add(el.dataset.to); }
+      el.classList.toggle("arc-on", on);
+      el.classList.toggle("arc-off", !!sel && !on);
+    });
+    block.querySelectorAll("th[data-col]").forEach((th) => {
+      th.classList.toggle("col-sel", th.dataset.col === sel);
+      th.classList.toggle("col-linked", !!sel && th.dataset.col !== sel && linked.has(th.dataset.col));
+    });
+  });
 }
 
 function showLcPop(td) {
@@ -1536,6 +1584,19 @@ const QUICK = [
   { id: "pr", label: "Receipts not billed", role: "fulfill" },
   { id: "po", label: "Open POs", role: "order" },
 ];
+// The check-run setting, as the Pay Outstanding dashboard holds it (src/check-run-schedule.js):
+// fortnightly runs from the next one. A run pays everything that would be late if it waited for the
+// run after it; terms are Net 30 here.
+const RUN_FIRST = "2026-10-02", RUN_EVERY = 14;
+const addDays = (iso, n) => new Date((dayNum(iso) + n) * 86400000).toISOString().slice(0, 10);
+const dueOf = (d) => d.due || addDays(d.doc, 30);
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const fmtDW = (iso) => `${DOW[new Date(dayNum(iso) * 86400000).getUTCDay()]} ${fmtD(iso)}`;
+function planRun(payBy) {
+  let run = RUN_FIRST;
+  while (dayNum(payBy) >= dayNum(run) + RUN_EVERY) run = addDays(run, RUN_EVERY);
+  return run;
+}
 const isPaidBy = (billId) => DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === billId));
 
 function renderStatement() {
@@ -1543,15 +1604,22 @@ function renderStatement() {
   $("#st-asof").textContent = fmtD(AS_OF) + ", 2026";
   const q = state.quick, byPay = state.stFocus === "payments";
   const all = QUICK.every((k) => q.has(k.id));
-  $("#st-title").textContent = all ? "Vendor statement" : q.size === 1 && q.has("bill") ? "Find Bills" : "Find";
-  $("#st-quick").innerHTML = `<span class="qf-lbl">Show</span>` +
+  $("#st-title").textContent = byPay ? "Vendor payments" : all ? "Vendor statement" : q.size === 1 && q.has("bill") ? "Find Bills" : "Find";
+  $("#st-quick").innerHTML = (byPay ? `<span class="qf-lbl">Every open bill and every check to this vendor, newest first</span>` :
+    `<span class="qf-lbl">Show</span>` +
     QUICK.map((k) => `<button data-quick="${k.id}" aria-pressed="${q.has(k.id)}"><span class="role-dot" style="background:${ACCENT[k.role]};margin:0"></span>${k.label}</button>`).join("") +
-    `<span class="sep"></span><button data-quick="*" aria-pressed="${all}" title="Every chip on — the Home screen's Vendor statement link">All — vendor statement</button>
-     <span class="spacer"></span><span class="qf-lbl">Focus</span>
+    `<span class="sep"></span><button data-quick="*" aria-pressed="${all}" title="Every chip on — the Home screen's Vendor statement link">All — vendor statement</button>`) +
+    `<span class="spacer"></span>
+     <span class="qf-lbl">No. shows</span><span class="seg"><button data-idmode="theirs" aria-pressed="${state.idMode === "theirs"}">Their number</button><button data-idmode="ours" aria-pressed="${state.idMode === "ours"}">Our number</button></span>
+     <span class="qf-lbl" style="margin-left:10px">Focus</span>
      <span class="seg"><button data-stfocus="bills" aria-pressed="${!byPay}">Bills</button><button data-stfocus="payments" aria-pressed="${byPay}">Payments</button></span>`;
-  $("#st-why").innerHTML = (state.fromHome ? "<b>Opened from Home → Vendor statement:</b> every quick filter on. " : "") +
+  $("#st-why").innerHTML = (state.fromHome && !byPay ? "<b>Opened from Home → Vendor statement:</b> every quick filter on. " : "") +
     (byPay
-      ? `<b>Payment focus:</b> each payment, newest first, with the bills it paid underneath; the ribbons tie each bill to its payment. Aged by the check date. Bills not paid yet are at the bottom.`
+      ? `<b>Payment focus</b> answers the vendor who asks "what's outstanding, and is it in the mail?" — check number, date and amount. ` +
+        `One timeline, newest at the top: the <b>planned check runs</b> (bills still open, grouped by the run that pays them — the Pay ` +
+        `Outstanding rule: a run pays everything that would be late if it waited for the next one), then <b>today</b>, then the checks ` +
+        `already written. A written check with no clearance date has not reached the bank: <b>not cleared — in the mail?</b> Under each ` +
+        `check, the part of each bill it paid; the bar shows that part against the whole bill.`
       : `<b>Bill focus:</b> matching bills to the vendor's statement. Payments are not rows here — the Status column says what paid each bill. ` +
         `Aged by the <b>vendor's own date</b>, with a heavy rule on the first row past 30 days and the first past 60. A receipt not billed yet sits in the list, indented: ` +
         `it is a bill on its way, not on the vendor's statement until they invoice it.`) +
@@ -1563,26 +1631,27 @@ function renderStatement() {
     <button class="ico" data-act="gantt" data-id="${esc(d.id)}" title="Gantt">▤</button>
     <button class="ico" data-act="peek" data-id="${esc(d.id)}" title="Peek">${EYE}</button></span>`;
   const dot = (d) => `<span class="role-dot" style="background:${ACCENT[TYPES[d.t].role]}"></span>`;
+  // One number column, following the Their / Our toggle; a document with no number from the other
+  // side (a PO) shows ours, greyed, so the column never goes blank.
+  const no = (d) => state.idMode === "theirs" && !d.ref ? `<span class="muted" title="No number from the vendor — ours shown">${esc(d.id)}</span>` : esc(idFor(d));
   const band = (d) => { const age = asOf - dayNum(d.doc); return age <= 30 ? 0 : age <= 60 ? 1 : 2; };
   const ageTag = (b) => `<span class="age-tag">${b === 1 ? "30+ days" : "60+ days"}</span>`;
 
-  // Open orders: the one thing still kept apart -- nothing has arrived or been billed on them yet.
-  const open = q.has("po") ? mine.filter((d) => d.t === "po" && d.openNote).sort((a, b) => a.doc.localeCompare(b.doc)) : [];
+  const open = !byPay && q.has("po") ? mine.filter((d) => d.t === "po" && d.openNote).sort((a, b) => a.doc.localeCompare(b.doc)) : [];
   $("#st-open-sheet").hidden = !open.length;
-  $("#st-open").innerHTML = `<thead><tr><th>Date</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>What's open</th>
+  $("#st-open").innerHTML = `<thead><tr><th>Date</th><th>Type</th><th>No.</th><th>What's open</th>
     <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>
-    ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td class="muted">${esc(d.ref || "—")}</td>
-      <td>${esc(d.id)}</td><td>${esc(d.openNote)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td><td>${acts(d)}</td></tr>`).join("")}
+    ${open.map((d) => `<tr><td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td>${no(d)}</td>
+      <td>${esc(d.openNote)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td><td>${acts(d)}</td></tr>`).join("")}
     </tbody>`;
 
   const sheet = $("#st-recent-sheet");
-  $("#st-recent-sub").textContent = byPay ? "by the check date · each payment with the bills it paid · heavy rule = crossing into 30+ and 60+ days"
-    : "by the vendor's date · heavy rule = crossing into 30+ and 60+ days";
-  sheet.querySelectorAll("svg.st-flow").forEach((x) => x.remove());
-  let prev = 0, openTotal = 0, pending = 0, html = "";
-  const row = (d, cls, cells) => `<tr class="${cls}" data-doc="${esc(d.id)}">${byPay ? `<td class="flow"></td>` : ""}${cells}<td>${acts(d)}</td></tr>`;
+  $("#st-recent-title").textContent = byPay ? "Checks" : "Last 90 days";
+  $("#st-recent-sub").textContent = byPay ? "planned checks, today, then checks written — newest first" : "by the vendor's date · heavy rule = crossing into 30+ and 60+ days";
+  let html = "", foot = "";
 
   if (!byPay) {
+    let prev = 0, openTotal = 0, pending = 0;
     const list = mine.filter((d) => asOf - dayNum(d.doc) <= 90 &&
       ((d.t === "bill" && q.has("bill")) || (d.t === "cm" && q.has("cm")) || (d.t === "pr" && d.openNote && q.has("pr"))))
       .sort((a, b) => b.doc.localeCompare(a.doc) || a.id.localeCompare(b.id));
@@ -1591,84 +1660,78 @@ function renderStatement() {
       const lead = `<td>${fmtD(d.doc)}${cross ? ageTag(b) : ""}</td>`;
       if (d.t === "pr") {
         pending += d.open;
-        html += row(d, `indent${cross ? " cross" : ""}`, `${lead}<td class="ty">${dot(d)}↳ Item Receipt</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td>
-          <td class="muted">received — bill expected</td><td class="num muted">${money(docTotal(d))}</td><td class="num"></td>`);
+        html += `<tr class="indent${cross ? " cross" : ""}">${lead}<td class="ty">${dot(d)}↳ Item Receipt</td><td>${no(d)}</td>
+          <td class="muted">received — bill expected</td><td class="num muted">${money(docTotal(d))}</td><td class="num"></td><td>${acts(d)}</td></tr>`;
         continue;
       }
       const openAmt = d.open || 0;
       openTotal += openAmt;
       const pays = isPaidBy(d.id);
-      const status = openAmt ? (openAmt < 0 ? "unapplied credit" : "open") : "paid · " + pays.map((p) => p.ref).join(", ");
-      html += row(d, cross ? "cross" : "", `${lead}<td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref || "—")}</td><td>${esc(d.id)}</td>
-        <td class="${openAmt ? "" : "muted"}">${esc(status)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${openAmt ? money(openAmt) : ""}</td>`);
+      const status = openAmt < 0 ? "unapplied credit" : !pays.length ? "open" : openAmt ? "part paid · " + pays.map((p) => p.ref).join(", ") : "paid · " + pays.map((p) => p.ref).join(", ");
+      html += `<tr class="${cross ? "cross" : ""}">${lead}<td>${dot(d)}${TYPES[d.t].label}</td><td>${no(d)}</td>
+        <td class="${openAmt ? "" : "muted"}">${esc(status)}</td><td class="num">${money(docTotal(d))}</td><td class="num">${openAmt ? money(openAmt) : ""}</td><td>${acts(d)}</td></tr>`;
     }
-  } else {
-    const pays = mine.filter((d) => d.t === "pay" && asOf - dayNum(d.doc) <= 90).sort((a, b) => b.doc.localeCompare(a.doc));
-    for (const p of pays) {
-      const b = band(p), cross = b !== prev; prev = b;
-      html += row(p, `st-pay${cross ? " cross" : ""}`, `<td>${fmtD(p.doc)}${cross ? ageTag(b) : ""}</td><td>${dot(p)}${TYPES[p.t].label}</td>
-        <td>${esc(p.ref)}</td><td>${esc(p.id)}</td><td>applied to ${p.refs.length} bills</td><td class="num">${money(-docTotal(p))}</td><td class="num"></td>`);
-      for (const r of [...p.refs].sort((x, y) => BY_ID.get(x.bill).doc.localeCompare(BY_ID.get(y.bill).doc))) {
-        const bill = BY_ID.get(r.bill);
-        html += row(bill, "indent st-sub", `<td class="muted">${fmtD(bill.doc)}</td><td class="ty">${dot(bill)}↳ Bill</td><td>${esc(bill.ref)}</td><td>${esc(bill.id)}</td>
-          <td class="muted">${money(r.amount)} of ${money(docTotal(bill))}</td><td class="num">${money(r.amount)}</td><td class="num"></td>`).replace(`data-doc="${esc(bill.id)}"`, `data-doc="${esc(bill.id)}" data-pay="${esc(p.id)}" data-amt="${r.amount}"`);
-      }
-    }
-    const unpaid = mine.filter((d) => (d.t === "bill" || d.t === "cm") && d.open).sort((a, b) => b.doc.localeCompare(a.doc));
-    if (unpaid.length) {
-      html += `<tr class="st-divider"><td class="flow"></td><td colspan="8">Not paid yet</td></tr>`;
-      for (const d of unpaid) {
-        openTotal += d.open;
-        html += row(d, "", `<td>${fmtD(d.doc)}</td><td>${dot(d)}${TYPES[d.t].label}</td><td>${esc(d.ref)}</td><td>${esc(d.id)}</td>
-          <td>${d.open < 0 ? "unapplied credit" : "open"}</td><td class="num">${money(docTotal(d))}</td><td class="num">${money(d.open)}</td>`);
-      }
-    }
+    $("#st-recent").innerHTML = `<thead><tr><th>Vendor's date</th><th>Type</th><th>No.</th><th>Status</th>
+      <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${html}</tbody>
+      <tfoot><tr><td colspan="5">Open on the bills and credits above${all ? " — what the vendor's statement should show" : ""}</td>
+      <td class="num">${money(openTotal)}</td><td></td></tr>
+      ${pending ? `<tr class="st-pending"><td colspan="5">Received, not billed yet — not on the vendor's statement until they invoice it</td><td class="num">${money(pending)}</td><td></td></tr>` : ""}</tfoot>`;
+    sheet.hidden = !html;
+    return;
   }
-  sheet.hidden = !html;
-  const flowTh = byPay ? `<th class="flow"></th>` : "";
-  $("#st-recent").innerHTML = `<thead><tr>${flowTh}<th>${byPay ? "Date" : "Vendor's date"}</th><th>Type</th><th>Their no.</th><th>Our no.</th><th>Status</th>
-    <th class="num">Amount</th><th class="num">Open</th><th></th></tr></thead><tbody>${html}</tbody>
-    <tfoot><tr>${byPay ? "<td></td>" : ""}<td colspan="6">Open on the bills and credits above${all ? " — what the vendor's statement should show" : ""}</td>
-    <td class="num">${money(openTotal)}</td><td></td></tr>
-    ${pending ? `<tr class="st-pending">${byPay ? "<td></td>" : ""}<td colspan="6">Received, not billed yet — not on the vendor's statement until they invoice it</td><td class="num">${money(pending)}</td><td></td></tr>` : ""}</tfoot>`;
-  if (byPay) drawStatementFlow(sheet);
-}
 
-/*
- * Payment focus: a ribbon in the left gutter from each bill row to the payment it was paid by, as
- * wide as the amount applied. Both ends sit on the centre of their rows, measured from the painted
- * rows -- the same promise as the bowtie.
- */
-function drawStatementFlow(sheet) {
-  const W = sheet.clientWidth, H = sheet.clientHeight;
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "st-flow"); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  // Measure from the drawing itself, not the sheet: the sheet's 1px border put every end 1px off.
-  sheet.appendChild(svg);
-  const box = svg.getBoundingClientRect();
-  const subs = [...sheet.querySelectorAll("tr[data-pay]")];
-  const max = Math.max(...subs.map((tr) => +tr.dataset.amt), 1);
-  const mid = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 - box.top; };
-  let s = "";
-  for (const tr of subs) {
-    const pay = sheet.querySelector(`tr.st-pay[data-doc="${CSS.escape(tr.dataset.pay)}"]`);
-    const gutter = tr.querySelector("td.flow").getBoundingClientRect();
-    const xr = gutter.right - box.left - 2, xl = gutter.left - box.left + 8;
-    const y1 = mid(tr), y2 = mid(pay), w = 2 + (10 * +tr.dataset.amt) / max;
-    s += `<path d="M ${xr} ${y1} C ${xl} ${y1}, ${xl} ${y2}, ${xr} ${y2}" fill="none" stroke="${ACCENT.invoice}" stroke-width="${w}" stroke-opacity=".55"
-      data-from="${esc(tr.dataset.doc)}" data-to="${esc(tr.dataset.pay)}"/>`;
+  // ---- Payment focus: one timeline, newest first ----
+  const paysOf = (billId) => DOCS.filter((p) => p.refs && p.refs.some((r) => r.bill === billId))
+    .map((p) => ({ p, amount: p.refs.filter((r) => r.bill === billId).reduce((t, r) => t + r.amount, 0) }))
+    .sort((a, b) => a.p.doc.localeCompare(b.p.doc));
+  // The bar: the whole bill, with every check that paid part of it in date order; `hi` is the one
+  // this row is about, `planned` the part a planned run will pay.
+  const bar = (bill, hi, planned) => {
+    const tot = Math.abs(docTotal(bill)) || 1;
+    const segs = paysOf(bill.id).map(({ p, amount }) => `<i class="${p.id === hi ? "seg-this" : "seg-other"}" style="width:${(amount / tot) * 100}%" title="${esc(p.ref)} · ${money(amount)}"></i>`);
+    if (planned) segs.push(`<i class="seg-planned" style="width:${(Math.abs(planned) / tot) * 100}%" title="planned · ${money(planned)}"></i>`);
+    return `<span class="pbar">${segs.join("")}</span>`;
+  };
+  const billRow = (bill, cls, thisAmt, hi, planned, after) => `<tr class="pf-bill ${cls}"><td></td>
+    <td class="ty">${dot(bill)}↳ ${no(bill)}</td><td class="muted">${TYPES[bill.t].label} · ${fmtD(bill.doc)}${bill.t === "bill" ? ` · due ${fmtD(dueOf(bill))}` : ""}</td>
+    <td class="num">${money(docTotal(bill))}</td><td>${bar(bill, hi, planned)}</td><td class="num">${money(thisAmt)}</td>
+    <td class="num ${after ? "" : "muted"}">${after ? money(after) : "—"}</td><td>${acts(bill)}</td></tr>`;
+
+  // Planned runs: every bill still open, placed on the run that pays it; open credits come off the first run.
+  const openBills = mine.filter((d) => d.t === "bill" && d.open > 0);
+  const credits = mine.filter((d) => d.t === "cm" && d.open < 0);
+  const runs = new Map();
+  for (const bill of openBills) { const r = planRun(dueOf(bill)); if (!runs.has(r)) runs.set(r, []); runs.get(r).push(bill); }
+  const firstRun = [...runs.keys()].sort()[0];
+  if (firstRun) credits.forEach((c) => runs.get(firstRun).push(c));
+  for (const run of [...runs.keys()].sort().reverse()) {
+    const items = runs.get(run).sort((a, b) => (a.t === "cm") - (b.t === "cm") || dueOf(a).localeCompare(dueOf(b)));
+    const total = r2(items.reduce((t, d) => t + d.open, 0));
+    html += `<tr class="pf-check planned"><td><b>${fmtDW(run)}</b></td><td><b>planned check</b></td>
+      <td><span class="chip-st planned">planned — not written yet</span></td><td></td><td></td><td class="num"><b>${money(total)}</b></td><td></td><td></td></tr>`;
+    for (const d of items) html += billRow(d, "planned", d.open, null, d.open, 0);
   }
-  svg.innerHTML = s;
-  // Check the ends on the painted rows (lesson from the bowtie: measure the picture, not the numbers).
-  let worst = 0;
-  svg.querySelectorAll("path").forEach((p) => {
-    const a = p.getPointAtLength(0).matrixTransform(p.getScreenCTM()).y, b = p.getPointAtLength(p.getTotalLength()).matrixTransform(p.getScreenCTM()).y;
-    const r1 = sheet.querySelector(`tr[data-pay="${CSS.escape(p.dataset.to)}"][data-doc="${CSS.escape(p.dataset.from)}"]`).getBoundingClientRect();
-    const r2_ = sheet.querySelector(`tr.st-pay[data-doc="${CSS.escape(p.dataset.to)}"]`).getBoundingClientRect();
-    worst = Math.max(worst, Math.abs(a - (r1.top + r1.height / 2)), Math.abs(b - (r2_.top + r2_.height / 2)));
-  });
-  sheet.dataset.endDrift = worst.toFixed(2);
-  if (worst > 0.5) console.warn(`statement flow: a ribbon end is ${worst.toFixed(2)}px off its row`);
+  html += `<tr class="pf-today"><td colspan="8">Today · ${fmtDW(AS_OF)}</td></tr>`;
+  // Checks written, newest first.
+  for (const p of mine.filter((d) => d.t === "pay").sort((a, b) => b.doc.localeCompare(a.doc))) {
+    const st = p.cleared ? `<span class="chip-st ok">cleared ${fmtD(p.cleared)}</span>`
+      : `<span class="chip-st mail" title="No clearance date on this payment yet: the bank has not seen it.">◌ not cleared — in the mail?</span>`;
+    html += `<tr class="pf-check"><td><b>${fmtDW(p.doc)}</b></td><td><b>${no(p)}</b></td><td>${st}</td><td></td><td></td>
+      <td class="num"><b>${money(docTotal(p))}</b></td><td></td><td>${acts(p)}</td></tr>`;
+    for (const r of [...p.refs].sort((x, y) => BY_ID.get(x.bill).doc.localeCompare(BY_ID.get(y.bill).doc))) {
+      const bill = BY_ID.get(r.bill);
+      html += billRow(bill, "", r.amount, p.id, null, bill.open > 0 ? bill.open : 0);
+    }
+  }
+  const outstanding = r2(openBills.reduce((t, d) => t + d.open, 0) + credits.reduce((t, d) => t + d.open, 0));
+  const inMail = mine.filter((d) => d.t === "pay" && !d.cleared);
+  foot = `<tr><td colspan="5">Outstanding now — on the planned checks above</td><td class="num">${money(outstanding)}</td><td colspan="2"></td></tr>
+    ${inMail.length ? `<tr class="st-pending"><td colspan="5">Written, not cleared yet — ${inMail.map((p) => `${esc(p.ref)} (${fmtD(p.doc)})`).join(", ")}</td>
+      <td class="num">${money(inMail.reduce((t, p) => t + docTotal(p), 0))}</td><td colspan="2"></td></tr>` : ""}`;
+  $("#st-recent").innerHTML = `<thead><tr><th>Check date</th><th>No.</th><th>Status</th><th class="num">Bill amount</th>
+    <th>Part of the bill</th><th class="num">This check</th><th class="num">Still open</th><th></th></tr></thead>
+    <tbody>${html}</tbody><tfoot>${foot}</tfoot>`;
+  sheet.hidden = false;
 }
 
 /* ---------------- peek ---------------- */
@@ -1731,6 +1794,8 @@ function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; tip.style
 
 document.addEventListener("click", (ev) => {
   const t = ev.target.closest("button");
+  const colHead = !t && ev.target.closest("th[data-col]");
+  if (colHead) { state.lcSel = state.lcSel === colHead.dataset.col ? null : colHead.dataset.col; applyLcSel(); return; }
   const lc = !t && ev.target.closest("td[data-lc]");
   if (lc) { showLcPop(lc); return; }
   if (!t) { if (!ev.target.closest(".pop")) closePop(); return; }
