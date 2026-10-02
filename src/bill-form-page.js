@@ -1876,7 +1876,7 @@ export async function bootBillFormPage(api) {
         if (!table) return;
         mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
         mountDensityControl({ table, button: document.getElementById("btn-density") });
-        autoSizeItemColumns(table, { tableKey: "bill-items" });
+        autoSizeItemColumns(table, { tableKey: "bill-items", growSection: table.closest(".bill-section") });
       } catch {
         /* column sizing is presentation; never let it break a repaint */
       }
@@ -1888,7 +1888,7 @@ export async function bootBillFormPage(api) {
           el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
         if (!table) return;
         mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
-        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false });
+        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false, growSection: table.closest(".bill-section") });
       } catch {
         /* ignore */
       }

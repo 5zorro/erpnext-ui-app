@@ -1172,7 +1172,7 @@ function sizeItemColumns() {
     const tableKey = itemsTableKey();
     mountColResize(table, { tableKey, onChange: sizeItemColumns });
     mountDensityControl({ table, button: document.getElementById("btn-density") });
-    autoSizeItemColumns(table, { tableKey });
+    autoSizeItemColumns(table, { tableKey, growSection: table.closest(".bill-section") });
   } catch {
     /* column sizing is presentation; never let it break a repaint */
   }
@@ -1185,7 +1185,7 @@ function sizeTaxColumns() {
     if (!table) return;
     const tableKey = taxesTableKey();
     mountColResize(table, { tableKey, onChange: sizeTaxColumns });
-    autoSizeItemColumns(table, { tableKey, sticky: false });
+    autoSizeItemColumns(table, { tableKey, sticky: false, growSection: table.closest(".bill-section") });
   } catch {
     /* ignore */
   }

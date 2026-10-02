@@ -587,8 +587,17 @@ the payment board.
 - Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
 
 ### Waiting on 5zorro
-- **T — line tables take room only when they need it.** Replaces the Sep-6 full-bleed (`7ab1c2f`).
-  Definition proposed 2026-10-01, not yet agreed.
+### T — line tables take room only when they need it (built 2026-10-01; replaces `7ab1c2f`'s full bleed)
+Agreed definition (5zorro 2026-10-01): the table sits on the card. Each column's width is its widest
+value (or header), capped; Description is the one column that wraps and takes what is left, so it
+never *asks* for room (counted at most 320px). When those widths plus any dragged ones exceed the
+card, the section grows **to the right only**, as far as needed and no further than the window
+(16px gutter); past that the table scrolls inside itself, never the page. Blank → never grows.
+Cross-reference columns (Source line, Customer, Sales Order, Project) spill only when there is no
+room — revisit if dogfood says otherwise. Wrapping columns get taller rows automatically; their
+floors (Description 180px, Item 90px, text columns 70px) stop a sentence becoming one word per line.
+Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); DOM:
+`growSectionToNeed` (`item-col-resize.js`), re-run on window resize. Verified live at 1700 and 1250.
 - **Invoice series from the Sales Order** (5zorro 2026-10-01: an invoice named `<SO>-01`, `-02`).
   Frappe's naming series can include a document field (`naming.py parse_naming_series`, a
   `{fieldname}` part) and counts per prefix, so `.{field}.-.##` gives `<value>-01`, `-02`. A Sales
@@ -620,6 +629,6 @@ the payment board.
 | DF-01 D | Draft payments on the Pay Outstanding board | built 2026-10-01 — the read runs live; Submit / Delete not yet clicked (5zorro's dogfood: make a draft from the Bill's *Add payment*) |
 | DF-01 E | Supplier No / Our No toggle (OI-170) | built 2026-10-01 — driven live on ACC-PINV-2026-00001 (Bill). PO / IR / A/R skins share the code but were not opened; the separate Payment document page and the Find pages do not have it yet |
 | DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
-| DF-01 T | Line tables take room only when they need it | agreed 2026-10-01 — building |
+| DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

@@ -16,6 +16,8 @@ import {
   defaultTableStorage,
   distributeColWidths,
   draggedColWidthPx,
+  lineTableWidthPx,
+  naturalTableWidthPx,
   readColWidthPrefs,
   readDensity,
   writeColWidthPref,
@@ -179,6 +181,7 @@ function measureDemands(table, heads) {
  *   storage?: object|null,
  *   availablePx?: number|null,
  *   sticky?: boolean,
+ *   growSection?: HTMLElement|null,
  * }} opts
  * @returns {Record<string, number>} applied widths
  */
@@ -216,6 +219,7 @@ export function autoSizeItemColumns(table, opts) {
   if (available == null) {
     const host = table.parentElement;
     available = host ? host.clientWidth : null;
+    if (host && opts.growSection) available = growSectionToNeed(opts.growSection, host, cols, overrides);
   }
 
   const widths = distributeColWidths(cols, available, overrides);
@@ -229,6 +233,37 @@ export function autoSizeItemColumns(table, opts) {
   // the taxes grid opts out rather than carrying inert sticky state.
   if (!opts || opts.sticky !== false) applyStickyOffsets(table, heads, widths);
   return widths;
+}
+
+/** Space kept between a grown line section and the window's right edge. */
+const GROW_RIGHT_GUTTER_PX = 16;
+
+/**
+ * 5zorro 2026-10-01 (replaces the Sep-6 full bleed): the section sits on the card until its content
+ * needs more, then grows to the right only, as far as the content needs and no further than the
+ * window. Measured at the card's width every time, so it shrinks back when the content does.
+ * @param {HTMLElement} section
+ * @param {HTMLElement} host the table's scroll container
+ * @param {import("./item-table-layout.js").ColDemand[]} cols
+ * @param {Record<string, number>} overrides
+ * @returns {number|null} width available to the columns
+ */
+function growSectionToNeed(section, host, cols, overrides) {
+  section.style.removeProperty("width");
+  section.style.removeProperty("margin-right");
+  const paperPx = host.clientWidth;
+  // A hidden tab panel measures 0 — leave the section on the card.
+  if (!(paperPx > 0)) return paperPx || null;
+  const chromePx = section.offsetWidth - paperPx;
+  const viewport = document.documentElement.clientWidth;
+  const roomPx = viewport - section.getBoundingClientRect().left - GROW_RIGHT_GUTTER_PX - chromePx;
+  const width = lineTableWidthPx({ needPx: naturalTableWidthPx(cols, overrides), paperPx, roomPx });
+  const extra = Math.round(width - paperPx);
+  if (extra > 0) {
+    section.style.width = `${section.offsetWidth + extra}px`;
+    section.style.marginRight = `-${extra}px`;
+  }
+  return width;
 }
 
 /** Never freeze more than this much of the viewport away. */
@@ -278,6 +313,24 @@ function applyStickyOffsets(table, heads, widths) {
  */
 export function mountColResize(table, opts) {
   if (!table || !opts || !opts.tableKey) return;
+  // The grown width depends on the window (growSectionToNeed), so re-lay the table on resize. The
+  // callback is replaced on every mount: pages rebuild their closures on repaint.
+  table.__onRelayout = opts.onChange || null;
+  if (!table.__relayoutBound && typeof window !== "undefined") {
+    table.__relayoutBound = true;
+    let timer = null;
+    window.addEventListener(
+      "resize",
+      () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          if (table.isConnected && typeof table.__onRelayout === "function") table.__onRelayout();
+        }, 120);
+      },
+      { passive: true },
+    );
+  }
   const heads = headerCells(table);
   if (heads.length === 0) return;
   const storage = opts.storage !== undefined ? opts.storage : defaultTableStorage();

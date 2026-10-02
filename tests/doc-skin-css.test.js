@@ -90,21 +90,21 @@ describe("doc-fields.css shared field/layout CSS (Packet 4b step 1, 2026-09-05)"
 });
 
 describe("Packet T — line-grid readability CSS (2026-09-06)", () => {
-  it("A1: line + tax sections bleed to the viewport, scrollbar-safe", () => {
-    // The document column (.wrap, max-width 1100px) still governs header /
-    // addresses / totals / notes; only the two line grids break out.
-    assert.match(docFieldsCss, /\.bill-section-lines,\s*\n\.bill-section-taxes \{/);
-    assert.match(docFieldsCss, /width: calc\(100vw - var\(--doc-bleed-gutter\)\);/);
-    assert.match(
-      docFieldsCss,
-      /margin-inline: calc\(50% - 50vw \+ \(var\(--doc-bleed-gutter\) \/ 2\)\);/,
-    );
+  // Revised 5zorro 2026-10-01: "a blank items table … stretches to the corners of the screen. It
+  // looks bad and it doesn't stretch to serve a purpose." The sections sit on the card; JS grows them
+  // to the right only when their content needs it (item-col-resize.js growSectionToNeed).
+  it("A1: line + tax sections no longer bleed to the viewport in CSS", () => {
+    assert.match(docFieldsCss, /\.bill-section-lines,\s*\n\.bill-section-taxes \{\s*\n\s*box-sizing: border-box;\s*\n\}/);
+    assert.doesNotMatch(docFieldsCss, /width:\s*calc\(100vw/);
+    assert.doesNotMatch(docFieldsCss, /--doc-bleed-gutter/);
   });
 
-  it("A1: the gutter variable has a 0px fallback so CSS alone stays correct", () => {
-    // If the JS wiring never runs (or throws), the bleed must still be sane --
-    // 0px just means it reaches the scrollbar edge instead of stopping short.
-    assert.match(docFieldsCss, /--doc-bleed-gutter:\s*0px;/);
+  it("A1: every line grid is sized with growSection, so it can still grow when it must", () => {
+    for (const [name, page] of [["bill", billFormPage], ["doc-form", docFormPage]]) {
+      const calls = page.match(/autoSizeItemColumns\(table, \{[^}]*\}\)/g) || [];
+      assert.equal(calls.length, 2, `${name}: items + taxes`);
+      for (const c of calls) assert.match(c, /growSection: table\.closest\("\.bill-section"\)/, `${name}: ${c}`);
+    }
   });
 
   it("A1: does not disturb the padding .line-tabs' negative pull depends on", () => {

@@ -45,7 +45,7 @@
      A dashboard is a workspace: it should spend the screen it is given, because width it
      refuses to use it spends on height instead, and the page then scrolls on a screen with
      room to spare. A document is a page: its column stays narrow on purpose, and the line
-     grids that outgrow it break out full-bleed instead (doc-fields.css --doc-bleed-gutter).
+     grids grow to the right only when their content outgrows it (item-col-resize.js growSectionToNeed).
      Targets today are 1920 wide by 1080-2160 tall; these are caps, not layouts, so a smaller
      or larger screen is a value change here rather than a per-page hunt. */
   --surface-dashboard-max: 1560px;
