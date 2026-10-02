@@ -99,6 +99,7 @@ import {
 } from "../src/payment-relink.js";
 import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
+import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -373,6 +374,8 @@ let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
 /** OI-170: which number leads — theirs or ours. One app-wide setting (DF-01 E). */
 let docNumberPrefs = mergeNumberPrefs(null);
+/** DF-01 R: ask "receive with this bill?" at Save on the Doc Bill. */
+let billReceivePrefs = mergeReceiveAskPrefs(null);
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -660,6 +663,9 @@ function paymentDirectionPrefsPath() {
 function docNumberPrefsPath() {
   return path.join(app.getPath("userData"), "doc-number-prefs.json");
 }
+function billReceivePrefsPath() {
+  return path.join(app.getPath("userData"), "bill-receive-prefs.json");
+}
 /**
  * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
  * spreadsheets but only store as a csv?"*). The stored file is therefore the same artefact the
@@ -727,6 +733,11 @@ function loadPrefs() {
     docNumberPrefs = mergeNumberPrefs(JSON.parse(fs.readFileSync(docNumberPrefsPath(), "utf8")));
   } catch {
     docNumberPrefs = mergeNumberPrefs(null);
+  }
+  try {
+    billReceivePrefs = mergeReceiveAskPrefs(JSON.parse(fs.readFileSync(billReceivePrefsPath(), "utf8")));
+  } catch {
+    billReceivePrefs = mergeReceiveAskPrefs(null);
   }
 }
 
@@ -7253,7 +7264,7 @@ ipcMain.handle("bill-retry-load", async () => {
 function headerValueUnchanged(field, next) {
   const kind = dirtyCompareKindForField(field);
   const doc = dirtyState.doc;
-  if (field === "is_paid" || field === "is_return") {
+  if (field === "is_paid" || field === "is_return" || field === "update_stock") {
     const prev = doc ? doc[field] : 0;
     const a = prev === true || prev === 1 || prev === "1" ? 1 : 0;
     const b = next === true || next === 1 || next === "1" ? 1 : 0;
@@ -7278,7 +7289,7 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
   }
   const kind = dirtyCompareKindForField(field);
   let next;
-  if (field === "is_paid" || field === "is_return") {
+  if (field === "is_paid" || field === "is_return" || field === "update_stock") {
     next = value === true || value === 1 || value === "1" ? "1" : "0";
   } else if (kind === "number") {
     next = value == null ? "" : String(value);
@@ -10338,6 +10349,52 @@ async function actOnDraftPayment(action, name) {
 ipcMain.handle("get-draft-payments", async () => fetchDraftPayments());
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
+
+/**
+ * DF-01 R. What the Bill needs to decide whether to ask "receive with this bill?": which of its
+ * item codes are stock items, the default warehouse to receive into, whether perpetual inventory
+ * is on (it decides whether the SRBNB swap happens), and the ask-at-save setting.
+ */
+ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
+  const list = [...new Set((Array.isArray(codes) ? codes : []).map((c) => String(c || "").trim()).filter(Boolean))];
+  const raw = await erpEval(`(async () => {
+    try {
+      var codes = ${JSON.stringify(list)};
+      var stock = [];
+      if (codes.length) {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Item", filters: [["name", "in", codes], ["is_stock_item", "=", 1]],
+          fields: ["name"], limit_page_length: 0 } });
+        stock = ((r && r.message) || []).map(function (x) { return x.name; });
+      }
+      var wh = await frappe.call({ method: "frappe.client.get_single_value",
+        args: { doctype: "Stock Settings", field: "default_warehouse" } });
+      var perpetual = true;
+      var co = ${JSON.stringify(String(company || ""))};
+      if (co) {
+        var c = await frappe.call({ method: "frappe.client.get_value",
+          args: { doctype: "Company", filters: { name: co }, fieldname: "enable_perpetual_inventory" } });
+        perpetual = !!(c && c.message && Number(c.message.enable_perpetual_inventory));
+      }
+      return { ok: true, stockCodes: stock, defaultWarehouse: (wh && wh.message) || "", perpetual: perpetual };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read stock facts." };
+  return { ...base, askAtSave: billReceivePrefs.askAtSave };
+});
+
+ipcMain.handle("set-bill-receive-ask", async (_e, on) => {
+  billReceivePrefs = mergeReceiveAskPrefs({ askAtSave: on !== false });
+  try {
+    fs.writeFileSync(billReceivePrefsPath(), JSON.stringify(billReceivePrefs));
+  } catch {
+    /* ignore */
+  }
+  navDebug("bill-receive-ask", billReceivePrefs.askAtSave ? "on" : "off");
+  return billReceivePrefs.askAtSave;
+});
 /**
  * Set it, save it, and tell every open shell page — a toggle on the Bill must not leave the
  * payment board (already loaded) leading with the other number.

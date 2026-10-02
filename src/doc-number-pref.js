@@ -28,8 +28,18 @@ export const THEIR_NUMBER = Object.freeze({
   // The Item Receipt skin tracks by its packing list / BOL ref (receipt-map.js), not the supplier
   // delivery note.
   "purchase-receipt": Object.freeze({ field: "lr_no", label: "Packing list / BOL" }),
-  "sales-order": Object.freeze({ field: "po_no", label: "Customer PO" }),
-  "sales-invoice": Object.freeze({ field: "po_no", label: "Customer PO" }),
+  // A/R (5zorro 2026-10-01): the Sales Order is the approval, as the PO is on the buying side, so an
+  // invoice leads with the order it bills — which also survives the invoice being amended. A Sales
+  // Order (and an Estimate) is its own reference and shows ours only. The customer's PO stays in
+  // its own field and on the Find pages; it is not this toggle's number.
+  "sales-invoice": Object.freeze({
+    field: "items[].sales_order",
+    label: "Sales Order",
+    read: (doc) =>
+      [...new Set((Array.isArray(doc.items) ? doc.items : []).map((r) => String((r && r.sales_order) || "").trim()))]
+        .filter(Boolean)
+        .join(", "),
+  }),
   "payment-entry": Object.freeze({ field: "reference_no", label: "Check / Ref No" }),
 });
 
@@ -99,7 +109,7 @@ function order(ourName, theirValue, theirMeta, lead) {
 export function docNumbers(doctypeKey, doc, lead) {
   const d = doc || {};
   const meta = theirNumberFor(doctypeKey);
-  const their = meta ? String(d[meta.field] ?? "").trim() : "";
+  const their = !meta ? "" : meta.read ? meta.read(d) : String(d[meta.field] ?? "").trim();
   return order(String(d.name ?? "").trim(), their, meta, lead);
 }
 

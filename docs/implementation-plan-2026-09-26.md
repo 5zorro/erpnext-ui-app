@@ -579,15 +579,33 @@ the payment board.
   already returns `bill_no`, so there is no extra read.
 - "Their number" per doctype (`src/doc-number-pref.js` `THEIR_NUMBER`, now also what the void-and-amend
   confirm quotes): Bill `bill_no`, PO `title` (logbook), Item Receipt `lr_no` (packing list / BOL —
-  what that skin already tracked by), Sales Order / Invoice `po_no`, Payment `reference_no`;
-  Estimate has none and shows the ERP ID.
+  what that skin already tracked by), Payment `reference_no`.
+- **A/R (5zorro 2026-10-01, tentative until A/R is dogfooded):** the Sales Order is the approval, as
+  the PO is when buying, so a Sales Invoice leads with the Sales Order(s) it bills, its own number
+  beside it. A Sales Order and an Estimate show their own number only. The customer's PO (`po_no`)
+  stays in its field and on the Find pages — DF-19 / DF-21 test whether that is enough.
 - Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
 
 ### Waiting on 5zorro
 - **T — line tables take room only when they need it.** Replaces the Sep-6 full-bleed (`7ab1c2f`).
   Definition proposed 2026-10-01, not yet agreed.
-- **R — receive with the bill.** Either default `update_stock` on (Customize Form, a site setting) or
-  a just-in-time choice at Save. Not started.
+- **Invoice series from the Sales Order** (5zorro 2026-10-01: an invoice named `<SO>-01`, `-02`).
+  Frappe's naming series can include a document field (`naming.py parse_naming_series`, a
+  `{fieldname}` part) and counts per prefix, so `.{field}.-.##` gives `<value>-01`, `-02`. A Sales
+  Invoice has no header Sales Order field (it is per line), so it needs a Custom Field the shell fills —
+  site customization, no code. Not started; worth it once A/R is dogfooded.
+
+### R — receive with the bill (built 2026-10-01)
+- Vanilla offers **default on** only: Customize Form › Purchase Invoice › Update Stock › Default = 1
+  (a Property Setter). There is no "ask at save" in Vanilla.
+- **Doc Bill:** at Save / Submit, when a draft has stock lines with no receipt (not drop ship, not a
+  credit memo or opening entry) and Update Stock is off, a dialog: *Receive with this bill* (sets
+  `update_stock`, and `set_warehouse` from Stock Settings' default through the form so ERPNext fills
+  the lines), *Bill only*, *Cancel*, a *Don't ask at save* box, and a link to the Customize Form
+  default. Switched off, a save that leaves stock un-received says so in a toast that turns the
+  question back on. Pure part: `src/bill-receive-ask.js`; setting in `bill-receive-prefs.json`.
+- **Simplified:** ERPNext's own *Expense Head Changed* dialog gets a note — tick Update Stock before
+  submitting, or default it in Customize Form (`assume-applier-payload.js`, version 12).
 
 ## Dogfood residuals
 
@@ -601,5 +619,7 @@ the payment board.
 | 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
 | DF-01 D | Draft payments on the Pay Outstanding board | built 2026-10-01 — the read runs live; Submit / Delete not yet clicked (5zorro's dogfood: make a draft from the Bill's *Add payment*) |
 | DF-01 E | Supplier No / Our No toggle (OI-170) | built 2026-10-01 — driven live on ACC-PINV-2026-00001 (Bill). PO / IR / A/R skins share the code but were not opened; the separate Payment document page and the Find pages do not have it yet |
-| DF-01 T / R | Table room; receive with the bill | waiting on 5zorro |
+| DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
+| DF-01 T | Line tables take room only when they need it | agreed 2026-10-01 — building |
+| DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

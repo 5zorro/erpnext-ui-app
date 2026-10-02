@@ -146,6 +146,12 @@ import {
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
+import {
+  UPDATE_STOCK_DEFAULT_ROUTE,
+  receiveAskDecision,
+  receiveAskCopy,
+  receiveAskOffNote,
+} from "../src/bill-receive-ask.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
 import {
   fieldsSettlingFor,
@@ -4674,6 +4680,124 @@ export async function bootBillFormPage(api) {
     });
   }
   
+  /** DF-01 R — bills answered "bill only" this session, under every name each has had. */
+  const receiveAnswered = new Set();
+
+  /**
+   * "Receive these items with this bill?" — a choice before an irreversible step (Update Stock is
+   * not allow_on_submit), so a dialog rather than a row marker.
+   * @returns {Promise<{ action: "receive"|"bill-only"|"cancel", dontAsk: boolean }>}
+   */
+  function showReceiveAskModal(copyInput) {
+    return new Promise((resolve) => {
+      const c = receiveAskCopy(copyInput);
+      const back = document.createElement("div");
+      back.className = "addr-modal-backdrop";
+      back.dataset.testid = "bill-receive-ask";
+      back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="receive-ask-title">
+        <h2 id="receive-ask-title">${escapeHtml(c.title)}</h2>
+        <p class="addr-modal-hint">${escapeHtml(c.body)}</p>
+        <label class="addr-modal-hint"><input type="checkbox" data-dont-ask data-testid="bill-receive-dont-ask" /> ${escapeHtml(c.dontAsk)}</label>
+        <div class="addr-modal-actions">
+          <button type="button" data-act="cancel">${escapeHtml(c.cancel)}</button>
+          <button type="button" data-act="bill-only" data-testid="bill-receive-bill-only">${escapeHtml(c.billOnly)}</button>
+          <button type="button" class="primary" data-act="receive" data-testid="bill-receive-yes">${escapeHtml(c.receive)}</button>
+        </div>
+        <div class="addr-modal-foot">
+          <button type="button" data-act="default" data-testid="bill-receive-default"
+            title="Customize Form › Purchase Invoice › Update Stock › Default = 1. Changes every new bill, in Vanilla too.">${escapeHtml(c.defaultLink)}</button>
+        </div>
+      </div>`;
+      const done = (action) => {
+        document.removeEventListener("keydown", onKey, true);
+        const dontAsk = !!back.querySelector("[data-dont-ask]")?.checked;
+        back.remove();
+        resolve({ action, dontAsk });
+      };
+      const onKey = (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        done("cancel");
+      };
+      back.addEventListener("click", (ev) => {
+        const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+        if (!b) return;
+        const act = b.getAttribute("data-act");
+        if (act === "default") {
+          done("cancel");
+          if (api && api.softPeekRoute) void api.softPeekRoute(UPDATE_STOCK_DEFAULT_ROUTE);
+          setStatus("Customize Form › Purchase Invoice: set Update Stock's Default to 1, Update — Esc returns to Bill (not saved yet).");
+          return;
+        }
+        done(/** @type {any} */ (act));
+      });
+      document.body.appendChild(back);
+      document.addEventListener("keydown", onKey, true);
+      try {
+        back.querySelector('[data-act="receive"]').focus();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  /**
+   * Before a save: ask, and apply "receive" through ERPNext's own fields. A failed facts read never
+   * blocks the save — the question is a help, not a gate.
+   * @returns {Promise<{ proceed: boolean, offLines: number }>}
+   */
+  async function resolveReceiveBeforeSave() {
+    const go = { proceed: true, offLines: 0 };
+    if (!api || !api.billReceiveFacts || !lastDoc || !editable()) return go;
+    const codes = (Array.isArray(lastDoc.items) ? lastDoc.items : []).map((r) => r && r.item_code).filter(Boolean);
+    if (!codes.length) return go;
+    let facts = null;
+    try {
+      facts = await api.billReceiveFacts(codes, lastDoc.company || "");
+    } catch {
+      return go;
+    }
+    if (!facts || !facts.ok) return go;
+    const decision = receiveAskDecision({
+      doc: lastDoc,
+      stockCodes: facts.stockCodes || [],
+      askAtSave: facts.askAtSave !== false,
+      answered: receiveAnswered,
+    });
+    if (!decision.ask) return { proceed: true, offLines: decision.why === "ask at save is off" ? decision.lines.length : 0 };
+    const needsWarehouse = decision.lines.some((r) => !r.warehouse) && !lastDoc.set_warehouse;
+    const choice = await showReceiveAskModal({
+      lineCount: decision.lines.length,
+      warehouse: needsWarehouse ? facts.defaultWarehouse || "" : "",
+      perpetual: facts.perpetual !== false,
+    });
+    if (choice.dontAsk && api.setBillReceiveAsk) await api.setBillReceiveAsk(false).catch(() => {});
+    if (choice.action === "cancel") {
+      setStatus("Save cancelled — nothing saved.");
+      return { proceed: false, offLines: 0 };
+    }
+    if (choice.action === "bill-only") {
+      receiveAnswered.add(String(lastDoc.name || ""));
+      return go;
+    }
+    setStatus("Turning on Update Stock (receive with this bill)…");
+    const r1 = await api.setHeader("update_stock", 1);
+    if (!(r1 && r1.ok)) {
+      setStatus((r1 && r1.reason) || "Could not turn on Update Stock.", "err");
+      return { proceed: false, offLines: 0 };
+    }
+    let doc = r1.doc || lastDoc;
+    if (needsWarehouse && facts.defaultWarehouse) {
+      // Through the form, so ERPNext's own set_warehouse trigger fills every line's warehouse.
+      const r2 = await api.setHeader("set_warehouse", facts.defaultWarehouse);
+      if (r2 && r2.ok && r2.doc) doc = r2.doc;
+    }
+    noteUserEdit();
+    paint(doc, amountDue);
+    return go;
+  }
+
   async function doSave(submit) {
     if (!api) return { ok: false, reason: "Bill API unavailable." };
     if (saveInFlight) return { ok: false, reason: "Save already in progress." };
@@ -4714,6 +4838,9 @@ export async function bootBillFormPage(api) {
         announceSaveBlocker(capBlockers[0], capBlockers);
         return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
+      const receive = await resolveReceiveBeforeSave();
+      if (!receive.proceed) return { ok: false, reason: "Save cancelled." };
+      const nameBeforeSave = String((lastDoc && lastDoc.name) || "");
       const choice = submit ? "submit" : "save";
       setStatus(commitGateProgressLabel(choice));
       let r = await api.save({ submit: !!submit });
@@ -4723,6 +4850,14 @@ export async function bootBillFormPage(api) {
         paint(r.doc, amountDue);
       }
       if (r && r.ok) {
+        // A new draft is renamed on its first save; keep "bill only" answered under the new name.
+        if (receiveAnswered.has(nameBeforeSave) && r.doc && r.doc.name) receiveAnswered.add(String(r.doc.name));
+        if (receive.offLines > 0) {
+          showBlockingToast(`${receiveAskOffNote(receive.offLines)} Click to ask at save again.`, () => {
+            if (api.setBillReceiveAsk) void api.setBillReceiveAsk(true);
+            setStatus("‘Receive with this bill?’ will be asked at save again.");
+          }, 12000);
+        }
         userEdited = false;
         metaBlockers = [];
         accountCompanyBlockers = [];

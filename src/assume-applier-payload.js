@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES } from "./simplified-seed-profiles.js";
 
-const VERSION = 11;
+const VERSION = 12;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -885,6 +885,35 @@ export function buildSimplifiedPayload() {
     installFloatingButton();
   }, 100);
 
+  /* ---- DF-01 R: say what to do after ERPNext's "Expense Head Changed" ----
+     ERPNext raises it on a bill whose stock lines have no receipt (purchase_invoice.py
+     set_expense_account). By then a submitted bill can no longer receive the goods; the note says
+     how to next time, and where the site-wide default lives. Watches for the dialog, adds one
+     paragraph, never touches the form. */
+  var expenseHeadObserver = null;
+  function noteExpenseHeadDialogs() {
+    var titles = document.querySelectorAll(".modal.show .modal-title");
+    Array.prototype.forEach.call(titles, function(t) {
+      if (String(t.textContent || "").trim() !== "Expense Head Changed") return;
+      var modal = t.closest(".modal");
+      var body = modal && modal.querySelector(".modal-body");
+      if (!body || body.querySelector(".ss-receive-note")) return;
+      var p = document.createElement("div");
+      p.className = "ss-receive-note";
+      p.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:12px;color:#475569;";
+      p.innerHTML =
+        "Want the bill itself to receive the goods? Before submitting, tick <b>Update Stock</b> on the bill " +
+        "(it cannot be changed after submit). To make that the default for every new bill: " +
+        '<a href="/app/customize-form?doc_type=Purchase%20Invoice">Customize Form › Purchase Invoice</a>, ' +
+        "field Update Stock, Default = 1.";
+      body.appendChild(p);
+    });
+  }
+  try {
+    expenseHeadObserver = new MutationObserver(function() { if (!destroyed) noteExpenseHeadDialogs(); });
+    expenseHeadObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  } catch(e) {}
+
   /* ---- Teardown ----
      Switching to Vanilla used to rely entirely on the page reloading to erase this
      skin. When that reload was skipped or raced (nav incidents 2026-09-03/04), the
@@ -895,6 +924,7 @@ export function buildSimplifiedPayload() {
      surviving a reload that does not happen. */
   function destroy() {
     destroyed = true;
+    if (expenseHeadObserver) { try { expenseHeadObserver.disconnect(); } catch(e) {} expenseHeadObserver = null; }
     var frm = window.cur_frm;
 
     if (onWindowScroll) { try { window.removeEventListener("scroll", onWindowScroll); } catch(e) {} }
