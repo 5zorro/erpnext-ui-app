@@ -5,7 +5,15 @@ import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, clipboard 
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { pingHealth } from "../src/health.js";
+import { loginRouteFor, pingHealth, probeLogin } from "../src/health.js";
+import {
+  PRUNE_BATCH_MAX,
+  existenceQueryPath,
+  missingFromResponse,
+  pruneVanished,
+  recordsToVerify,
+  vanishedKey,
+} from "../src/nav-prune.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
 import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
 import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
@@ -29,10 +37,14 @@ import {
   beginPeekParent,
   collapsePeekStack,
   isActivePeekStack,
+  isPeekChildRoute,
   pushPeekChild,
   resolveSoftPeekEscAction,
+  resolveSoftPeekParent,
   shouldCollapsePeekStack,
+  syncPeekLinks,
 } from "../src/peek-stack.js";
+import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.js";
 import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
@@ -85,6 +97,9 @@ import {
   relinkReviewNote,
   relinkProvenanceNote,
 } from "../src/payment-relink.js";
+import { normalizeDraftPayments } from "../src/payment-drafts.js";
+import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
+import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -292,6 +307,20 @@ import {
   HEALTH_PING_MS,
   TAB_BAR_HEIGHT,
 } from "../src/config.js";
+import { needsDocShellReload } from "../src/doc-shell-kind.js";
+import {
+  carriesClerkEdits,
+  opensInPlace,
+  resolveResumeRoute,
+  resumeDocMatches,
+  shouldHoldBillPark,
+} from "../src/doc-resume.js";
+import {
+  decideErpUnload,
+  erpUnloadDialogSpec,
+  erpUnloadPageLabel,
+  isLeaveChoice,
+} from "../src/erp-unload-guard.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -333,6 +362,8 @@ let healthTimer = null;
 let routePollTimer = null;
 /** @type {"ok"|"bad"|"unknown"} */
 let lastHealth = "unknown";
+/** The ERP view's login, as the server sees it (health.js probeLogin) — not the cookie. */
+let lastLogin = { state: "unknown", user: null };
 /** @type {import("../src/history.js").HistoryEntry[]} */
 let history = [];
 /** @type {Record<string, string>} */
@@ -341,6 +372,10 @@ let lensPrefs = {};
 let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
+/** OI-170: which number leads — theirs or ours. One app-wide setting (DF-01 E). */
+let docNumberPrefs = mergeNumberPrefs(null);
+/** DF-01 R: ask "receive with this bill?" at Save on the Doc Bill. */
+let billReceivePrefs = mergeReceiveAskPrefs(null);
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -428,6 +463,9 @@ let billLoadPhase = BILL_LOAD_IDLE;
  * @type {import("../src/peek-stack.js").PeekStack|null}
  */
 let peekStack = null;
+/** Child → parent links so Recent keeps each peek folded under its parent (N1). */
+/** @type {import("../src/peek-stack.js").PeekLinks} */
+let peekLinks = {};
 /** True once the Simplified payload has been injected into the live ERP page. */
 let simplifiedSkinInstalled = false;
 /** Recent/Drafts rail collapsed to a grab strip (persisted; 4K-quarter windows). */
@@ -591,11 +629,6 @@ function activeFormView() {
   return null;
 }
 
-/** @param {DocFormSkinId|string|null|undefined} skinId */
-function docShellKind(skinId) {
-  return skinId === "bill" ? "bill" : "doc-form";
-}
-
 function reloadDocFormShell() {
   return new Promise((resolve) => {
     if (!docForm || docForm.webContents.isDestroyed()) {
@@ -626,6 +659,12 @@ function docWashPrefsPath() {
 }
 function paymentDirectionPrefsPath() {
   return path.join(app.getPath("userData"), "payment-direction-prefs.json");
+}
+function docNumberPrefsPath() {
+  return path.join(app.getPath("userData"), "doc-number-prefs.json");
+}
+function billReceivePrefsPath() {
+  return path.join(app.getPath("userData"), "bill-receive-prefs.json");
 }
 /**
  * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
@@ -689,6 +728,16 @@ function loadPrefs() {
     docWashPrefs = mergeDocWashPrefs(JSON.parse(fs.readFileSync(docWashPrefsPath(), "utf8")));
   } catch {
     docWashPrefs = mergeDocWashPrefs(null);
+  }
+  try {
+    docNumberPrefs = mergeNumberPrefs(JSON.parse(fs.readFileSync(docNumberPrefsPath(), "utf8")));
+  } catch {
+    docNumberPrefs = mergeNumberPrefs(null);
+  }
+  try {
+    billReceivePrefs = mergeReceiveAskPrefs(JSON.parse(fs.readFileSync(billReceivePrefsPath(), "utf8")));
+  } catch {
+    billReceivePrefs = mergeReceiveAskPrefs(null);
   }
 }
 
@@ -869,6 +918,9 @@ function syncE2eApi() {
     getErpUrl: () =>
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
     getHistory: () => history.map((h) => ({ ...h })),
+    getPeekStack: () => (peekStack ? JSON.parse(JSON.stringify(peekStack)) : null),
+    getRecentRows: () =>
+      JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
     getShelved: () => shelvedDrafts.map((d) => ({ ...d })),
     appVersion: APP_VERSION,
     isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
@@ -931,6 +983,88 @@ function syncE2eApi() {
   if (win && !win.isDestroyed()) {
     win.setTitle(`erpnext-ui-app [health=${lastHealth}]`);
   }
+}
+
+function sendLoginState() {
+  if (chrome && !chrome.webContents.isDestroyed()) {
+    chrome.webContents.send("login-state", lastLogin);
+  }
+}
+
+/**
+ * Ask the server whether the ERP view is logged in, and tell the toolbar. Only while the DB is
+ * reachable: when it is down, a Log in button would send the clerk after the wrong problem.
+ * @param {string} [why]
+ */
+async function tickLogin(why = "tick") {
+  const r =
+    lastHealth === "ok"
+      ? await probeLogin({ erpBase: ERP_BASE, fetchImpl: erpSessionFetchImpl() })
+      : { state: "unknown", user: null, code: null, expired: false };
+  if (r.state !== lastLogin.state || r.user !== lastLogin.user) {
+    navDebug(
+      "login-state",
+      `${lastLogin.state} -> ${r.state} user=${r.user || "-"} code=${r.code ?? "-"} expired=${r.expired ? 1 : 0} via=${why}`,
+    );
+  }
+  const becameIn = r.state === "in" && lastLogin.state !== "in";
+  lastLogin = { state: r.state, user: r.user };
+  sendLoginState();
+  // Every fresh login (and the first tick after launch) re-checks the rail against ERP: a
+  // reinstalled site, or a draft deleted elsewhere, otherwise stays in Recent forever.
+  if (becameIn) pruneVanishedNavEntries(why).catch((e) => navDebug("nav-prune", `failed: ${e && e.message}`));
+}
+
+/**
+ * Ask ERP which Recent / Drafts / Submitted documents still exist and drop the rest.
+ * nav-prune.js decides; only a clear 200 answer drops a row (a 403 on a doctype keeps it).
+ * @param {string} why
+ */
+async function pruneVanishedNavEntries(why) {
+  const fetchImpl = erpSessionFetchImpl();
+  if (!fetchImpl) return;
+  const byDoctype = recordsToVerify([history, shelvedDrafts, submittedDocs], ERP_BASE);
+  const vanished = new Set();
+  let asked = 0;
+  let unclear = 0;
+  for (const [doctypeKey, names] of byDoctype) {
+    for (let i = 0; i < names.length; i += PRUNE_BATCH_MAX) {
+      const batch = names.slice(i, i + PRUNE_BATCH_MAX);
+      asked += batch.length;
+      let status = null;
+      let body = null;
+      try {
+        const res = await fetchImpl(`${ERP_BASE}${existenceQueryPath(doctypeKey, batch)}`, { method: "GET" });
+        status = res.status;
+        body = await res.json().catch(() => null);
+      } catch {
+        /* unclear: keep */
+      }
+      const missing = missingFromResponse(batch, status, body);
+      if (!missing) {
+        unclear += batch.length;
+        continue;
+      }
+      for (const n of missing) vanished.add(vanishedKey(doctypeKey, n));
+    }
+  }
+  if (!vanished.size) {
+    navDebug("nav-prune", `via=${why} asked=${asked} unclear=${unclear} dropped=0`);
+    return;
+  }
+  const h = pruneVanished(history, vanished, ERP_BASE);
+  const d = pruneVanished(shelvedDrafts, vanished, ERP_BASE);
+  const sd = pruneVanished(submittedDocs, vanished, ERP_BASE);
+  history = h.kept;
+  shelvedDrafts = d.kept;
+  submittedDocs = sd.kept;
+  navDebug(
+    "nav-prune",
+    `via=${why} asked=${asked} unclear=${unclear} dropped recent=${h.dropped.length} drafts=${d.dropped.length} submitted=${sd.dropped.length}: ` +
+      [...vanished].map((k) => k.replace("\u0000", "/")).join(", "),
+  );
+  saveNavState();
+  sendHistory();
 }
 
 function sendHealth(status) {
@@ -1047,7 +1181,7 @@ function sendHistory() {
   calcHistory = pruneCalcHistory(calcHistory);
   if (hist && !hist.webContents.isDestroyed()) {
     hist.webContents.send("history", {
-      items: applyPeekTreeToHistory(history, peekStack, ERP_BASE),
+      items: applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks),
       shelved: shelvedDrafts,
       calcHistory,
       collapsed: histCollapsed,
@@ -1068,40 +1202,87 @@ function collapsePeekStackIfLeaving(nextRoute, reason) {
   collapsePeekStackHard(reason);
 }
 
-function notePeekParentAndChild(childRoute) {
+/**
+ * The shell is opening a peek (a Doc skin's peek button, a Recent setup row): pick its parent
+ * by the one rule (`resolveSoftPeekParent`) and record it.
+ * @param {string} childRoute
+ * @param {boolean} [currentUnsaved] the Vanilla form on screen has unsaved changes
+ */
+function notePeekParentAndChild(childRoute, currentUnsaved = false) {
   const opts = { erpBase: ERP_BASE, history };
-  /** @type {string|null} */
-  let parentRoute = null;
-  // Live Vanilla form (Payment Entry, etc.) wins over a stale parked Bill when already on ERP.
-  if (surfaceMode === "erp" && isSoftPeekRoute(currentRoute || "", ERP_BASE)) {
-    const cur = classifyHistoryOpen(currentRoute || "", ERP_BASE);
-    if (
-      cur.record &&
-      !routesReferToSameDoc(currentRoute || "", childRoute, ERP_BASE)
-    ) {
-      parentRoute = currentRoute || "";
-    }
+  // A list is somewhere you went: never start a parent-only stack for one (it would keep the
+  // Vanilla → Doc hijack switched off, see openDocSkin's self-heal).
+  if (!isPeekChildRoute(childRoute, ERP_BASE)) {
+    navDebug("peek-none", `${childRoute} (not a record)`);
+    return;
   }
-  if (!parentRoute && parkedDocSurface && parkedDocSurface.route) {
-    parentRoute = parkedDocSurface.route;
+  const parentRoute = resolveSoftPeekParent({
+    stack: peekStack,
+    currentRoute: currentRoute || "",
+    surfaceMode,
+    parkedRoute: (parkedDocSurface && parkedDocSurface.route) || "",
+    currentUnsaved,
+    erpBase: ERP_BASE,
+  });
+  if (!parentRoute) {
+    navDebug("peek-none", `${currentRoute || ""} → ${childRoute} (no parent: clean form)`);
+    return;
   }
-  if (!parentRoute) return;
   peekStack = beginPeekParent(peekStack, parentRoute, opts);
   peekStack = pushPeekChild(peekStack, childRoute, opts);
+  peekLinks = syncPeekLinks(peekLinks, peekStack, childRoute, ERP_BASE);
   navDebug("peek-child", `${peekStack && peekStack.parent ? peekStack.parent.route : ""} → ${childRoute}`);
 }
 
-function notePeekFromErpNav(path, fromPath) {
+/**
+ * One in-SPA Desk hop, reported by the page itself (`erp-route-hop.js`, plan 2026-09-26 N1):
+ * where it landed, the form it left, whether that form had unsaved changes, Frappe's caller.
+ * @param {import("../src/erp-route-hop.js").RouteHop} hop
+ */
+function onErpRouteHop(hop) {
+  const to = normalizeAppRoute(hop.to, ERP_BASE).path || "";
+  if (!to) return;
+  // A page that claims its own address is on screen: the ERP view behind it is not the clerk's.
+  if (surfaceOwnsRoute(surfaceMode)) {
+    navDebug("route-hop-hidden", `${hop.prev || "-"} → ${to}`);
+    return;
+  }
   const had = isActivePeekStack(peekStack);
-  peekStack = applyErpHopToPeekStack(peekStack, fromPath, path, {
+  const beforeParent = had ? peekStack.parent.route : "";
+  peekStack = applyErpHopToPeekStack(peekStack, hop.prev, to, {
     erpBase: ERP_BASE,
     history,
+    prevUnsaved: hop.prevUnsaved,
+    fromLinkParent: hop.fromLinkParent,
+    fromLinkTarget: hop.fromLinkTarget,
+    anchorRoute: (parkedDocSurface && parkedDocSurface.route) || "",
   });
-  if (isActivePeekStack(peekStack) && peekStack.children.length) {
-    if (!had) navDebug("peek-erp-hop", `${fromPath || ""} → ${path}`);
+  peekLinks = syncPeekLinks(peekLinks, peekStack, to, ERP_BASE);
+  const live = isActivePeekStack(peekStack);
+  navDebug(
+    "route-hop",
+    `${hop.prev || "-"}${hop.prevUnsaved ? " (unsaved)" : ""} → ${to}` +
+      `${hop.fromLinkParent ? ` caller=${hop.fromLinkParent}` : ""}` +
+      ` peek=${live ? peekStack.parent.route : "none"}`,
+  );
+  if (live && peekStack.parent.route !== beforeParent) {
+    navDebug("peek-erp-hop", `${peekStack.parent.route} → ${to}`);
+  }
+  if (live && peekStack.children.length) {
     armSoftPeekEscHook(true).catch(() => {});
-  } else if (had && !isActivePeekStack(peekStack)) {
+  } else if (had && !live) {
     armSoftPeekEscHook(false).catch(() => {});
+  }
+  sendHistory();
+}
+
+/** Install the page-side hop reporter (idempotent per page load). */
+async function ensureErpRouteHopReporter() {
+  if (!erp || erp.webContents.isDestroyed()) return false;
+  try {
+    return !!(await erp.webContents.executeJavaScript(buildRouteHopReporterJs()));
+  } catch {
+    return false;
   }
 }
 
@@ -1782,8 +1963,16 @@ function parkDocSurfaceIfNeeded() {
     return;
   }
   // Recent flyout IPC can log surfaceMode=home while currentRoute is still the Bill (OI-112 strike 2).
+  // Never on Vanilla: there the Vanilla form is what the clerk sees, and dirtyState.doc may be a
+  // copy from an earlier Doc session (focus incident 2026-10-01T03:55 — a stale vendor).
   const info = routeInfo(currentRoute || "", ERP_BASE);
-  if (info.doctype === "purchase-invoice" && dirtyState.doc) {
+  if (
+    shouldHoldBillPark({
+      surfaceMode,
+      routeDoctype: info.doctype,
+      hasDirtyDoc: !!dirtyState.doc,
+    })
+  ) {
     parkedDocSurface = { mode: "doc", skinId: "bill", route: currentRoute || "" };
     navDebug("doc-park", `bill (route-hold) ${parkedDocSurface.route}`);
   }
@@ -1809,7 +1998,9 @@ async function ensureErpMatchesShellRoute(appPath) {
     trackNav(erpUrl(ERP_BASE, path), { fromBrowser: false });
     return { ok: true, synced: true };
   }
-  await erpForceReopenRoute(path);
+  if (!(await erpForceReopenRoute(path))) {
+    return { ok: false, reason: "A page with unsaved changes was kept open." };
+  }
   return { ok: true, synced: true };
 }
 
@@ -1819,7 +2010,10 @@ async function ensureErpMatchesShellRoute(appPath) {
  */
 async function softPeekErp(route) {
   const path = normalizeAppRoute(route, ERP_BASE).path || route;
-  navDebug("soft-peek", path);
+  // A query (e.g. `/app/item/new?item_code=…`) prefills the new form: it rides to Frappe as
+  // route_options on the in-SPA hop, or as the address's search on a full load.
+  const search = String(route || "").split("#")[0].split("?")[1] || "";
+  navDebug("soft-peek", search ? `${path}?${search}` : path);
   try {
     if (surfaceMode === "doc") await snapshotDocForm();
     else if (routeInfo(currentRoute || "", ERP_BASE).doctype === "purchase-invoice") {
@@ -1828,9 +2022,15 @@ async function softPeekErp(route) {
   } catch {
     /* park whatever dirtyState we already have */
   }
+  let currentUnsaved = false;
+  if (surfaceMode === "erp") {
+    currentUnsaved = !!(await erpEval(
+      `(function(){try{return !!(window.cur_frm&&cur_frm.doc&&cur_frm.doc.__unsaved);}catch(e){return false;}})()`,
+    ));
+  }
   parkDocSurfaceIfNeeded();
-  notePeekParentAndChild(path);
-  showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+  notePeekParentAndChild(path, currentUnsaved);
+  showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false, search });
   armSoftPeekEscHook(true).catch(() => {});
   sendHistory();
 }
@@ -1852,6 +2052,15 @@ function dismissSoftPeekFromEsc() {
   if (decision.action === "return-parent") {
     navDebug("soft-peek-esc", decision.route || "parent");
     returnToPeekParent();
+    return;
+  }
+  if (decision.action === "reopen-parent" && decision.route) {
+    // The parent was opened from a Recent dropdown and is not loaded behind the peek:
+    // open it the way any other door would, in the clerk's lens.
+    navDebug("soft-peek-esc", `reopen ${decision.route}`);
+    collapsePeekStackHard("esc-reopen");
+    armSoftPeekEscHook(false).catch(() => {});
+    reopenPeekParent(decision.route).catch(() => {});
     return;
   }
   if (decision.action === "resume-park" && decision.route) {
@@ -1893,6 +2102,71 @@ function returnToPeekParent() {
     showErp(route, { inSpa: true, skipDirtyGate: true, abandonUnsaved: true, forceLoad: false });
   });
   return true;
+}
+
+/**
+ * Esc back to a parent that was not loaded behind the peek (opened from a Recent dropdown).
+ * Step back in place first — a full reload would drop an unsaved draft still in Frappe's
+ * memory — then show it in the clerk's lens; a Doc skin then reads it where it is
+ * (`opensInPlace`).
+ * @param {string} route
+ */
+async function reopenPeekParent(route) {
+  const path = normalizeAppRoute(route, ERP_BASE).path || route;
+  const soft = erpIsWarm() ? await erpSoftSetRoute(path) : { ok: false, reason: "erp not warm" };
+  if (!soft || !soft.ok) {
+    navDebug("peek-reopen-fallback", (soft && soft.reason) || "set_route failed");
+    openRoutePreferred(path);
+    return;
+  }
+  trackNav(erpUrl(ERP_BASE, path), { fromBrowser: false });
+  const t = openTargetFor(path);
+  if (t.surface !== "erp" && openResolvedTarget(t)) return;
+  showErp(path, { inSpa: true, skipDirtyGate: true });
+}
+
+/**
+ * A child row in a Recent dropdown (plan 2026-09-26 N1): open it as a peek of that parent, so
+ * Esc goes back to the parent. If the parent is on screen or its session is live, this is an
+ * ordinary peek. Otherwise the parent is not loaded behind the peek, so it is marked `reopen` and
+ * Esc opens it the way any other door would.
+ * @param {string} childRoute
+ * @param {string} parentRoute
+ */
+async function openPeekChild(childRoute, parentRoute) {
+  const child = normalizeAppRoute(childRoute, ERP_BASE).path || "";
+  const parent = normalizeAppRoute(parentRoute, ERP_BASE).path || "";
+  if (!child || !parent) return;
+  const opts = { erpBase: ERP_BASE, history };
+  const liveUnderParent =
+    isActivePeekStack(peekStack) && routesReferToSameDoc(peekStack.parent.route, parent, ERP_BASE);
+  const parentOnScreen =
+    surfaceMode === "doc" && routesReferToSameDoc(currentRoute || "", parent, ERP_BASE);
+  navDebug(
+    "peek-child-open",
+    `${parent} → ${child} ${liveUnderParent ? "(live)" : parentOnScreen ? "(parent on screen)" : "(reopen)"}`,
+  );
+  if (parentOnScreen) {
+    await softPeekErp(child);
+    return;
+  }
+  if (liveUnderParent) {
+    peekStack = pushPeekChild(peekStack, child, opts);
+    peekLinks = syncPeekLinks(peekLinks, peekStack, child, ERP_BASE);
+    showErp(child, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+    armSoftPeekEscHook(true).catch(() => {});
+    sendHistory();
+    return;
+  }
+  gateDirtyThen(() => {
+    peekStack = pushPeekChild(beginPeekParent(null, parent, { ...opts, reopen: true }), child, opts);
+    peekLinks = syncPeekLinks(peekLinks, peekStack, child, ERP_BASE);
+    showErp(child, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+    // What was on screen was left through the shell's own check; it is not this peek's parent.
+    parkedDocSurface = null;
+    armSoftPeekEscHook(true).catch(() => {});
+    sendHistory();
+  });
 }
 
 /**
@@ -1948,20 +2222,41 @@ async function resumeParkedDoc(route) {
   if (!routesReferToSameDoc(parkedDocSurface.route, route, ERP_BASE)) return false;
   const park = parkedDocSurface;
   parkedDocSurface = null;
-  navDebug("doc-rebind", `${park.mode} ${park.route}`);
-  currentRoute = park.route;
+  const profile = park.skinId ? DOC_SKIN_PROFILES[park.skinId] : null;
+  const expectedName =
+    dirtyState.doc && dirtyState.doc.name != null ? String(dirtyState.doc.name) : "";
+  // A generic `/new` park reopens the draft by its own name — asking Frappe for `/new` again
+  // makes a fresh blank draft under the skin's old copy (focus incident 2026-10-01T03:55).
+  const resumeRoute = resolveResumeRoute(
+    park.route,
+    dirtyState.doc,
+    (profile && profile.doctype) || "",
+    ERP_BASE,
+  );
+  navDebug(
+    "doc-rebind",
+    `${park.mode} ${park.route}${resumeRoute !== park.route ? ` → ${resumeRoute}` : ""}`,
+  );
+  currentRoute = resumeRoute;
   armSoftPeekEscHook(false).catch(() => {});
-  if (erpIsWarm() && (park.route || "").startsWith("/app/")) {
-    const soft = await erpSoftSetRoute(park.route);
+  if (erpIsWarm() && (resumeRoute || "").startsWith("/app/")) {
+    const soft = await erpSoftSetRoute(resumeRoute);
     if (!soft || !soft.ok) {
       navDebug("doc-rebind-erp", (soft && soft.reason) || "set_route failed");
-      await erpForceReopenRoute(park.route);
+      // Stayed on unsaved edits: handled — do not let the caller try another door.
+      if (!(await erpForceReopenRoute(resumeRoute))) return true;
     }
   }
   if (park.mode === "doc" && park.skinId) {
-    const profile = DOC_SKIN_PROFILES[park.skinId];
+    const priorSkin = activeDocSkin;
     surfaceMode = "doc";
     activeDocSkin = park.skinId;
+    // The page may be running the other controller (Item Receipt → Doc tab → Bill); without
+    // a reload the Bill is painted by PO/IR code (focus incidents 2026-10-01T03:55 / 04:01).
+    if (needsDocShellReload(priorSkin, park.skinId)) {
+      navDebug("doc-rebind-reload", `${priorSkin} → ${park.skinId}`);
+      await reloadDocFormShell();
+    }
     place();
     try {
       if (docForm && !docForm.webContents.isDestroyed()) docForm.webContents.focus();
@@ -1969,26 +2264,53 @@ async function resumeParkedDoc(route) {
     } catch {
       /* ignore */
     }
+    // Paint what Vanilla holds, not the shell's copy: invariant 7, the skin reflects ERP.
+    const live = await snapshotDocForm();
+    let userEdited = !!dirtyState.userEdited;
+    if (live && live.ok && live.doc) {
+      const liveName = live.doc.name != null ? String(live.doc.name) : "";
+      let same = resumeDocMatches(expectedName, liveName);
+      if (!same) {
+        const newNames = await erpEval(
+          `(function(){try{return (frappe.model&&frappe.model.new_names)||{};}catch(e){return {};}})()`,
+        );
+        same = resumeDocMatches(expectedName, liveName, newNames || {});
+      }
+      if (!same) {
+        // The draft is gone from Vanilla (a full page load drops unsaved drafts). Show the truth
+        // and do not gate a blank form as if the clerk's edits were on it.
+        navDebug("doc-rebind-mismatch", `${expectedName} → ${liveName}`);
+        userEdited = false;
+        dirtyState = { ...dirtyState, userEdited: false };
+      }
+    } else {
+      navDebug("doc-rebind-read-failed", (live && live.reason) || "no snapshot");
+    }
+    const doc = live && live.ok && live.doc ? live.doc : dirtyState.doc;
     if (profile) {
-      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, dirtyState.doc);
+      bumpFormHistoryFromDoc(currentRoute, profile.doctypeKey, doc);
     }
     if (park.skinId === "bill") {
       pushDocFormSnapshot({
         ok: true,
-        doc: dirtyState.doc,
+        doc,
         amountDue: amountDueScratch,
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
+        linkedPos: (live && live.linkedPos) || [],
+        linkedReceipts: (live && live.linkedReceipts) || [],
+        poLineMeta: (live && live.poLineMeta) || {},
+        lineAllocations: (live && live.lineAllocations) || {},
+        userEdited,
+        isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
         softPeekReturn: true,
       });
     } else {
       pushDocFormSnapshot({
         ok: true,
-        doc: dirtyState.doc,
+        doc,
         scratch: { dateExpected: dateExpectedScratch },
-        userEdited: !!dirtyState.userEdited,
-        isNew: !!dirtyState.isNew,
+        userEdited,
+        isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
       });
     }
@@ -2013,6 +2335,13 @@ async function erpSoftSetRoute(appPath, opts = {}) {
   const parts = appRouteParts(appPath, ERP_BASE);
   if (!parts.length) return { ok: false, reason: "no-parts" };
   const abandonUnsaved = !!opts.abandonUnsaved;
+  // frappe.set_route cannot take a query string, but the router merges an existing
+  // frappe.route_options into the next route (router.js set_route_options_from_url), and
+  // get_new_doc copies them onto a new document — the same thing the address's ?search does.
+  const routeOptions =
+    typeof opts.search === "string" && opts.search
+      ? Object.fromEntries(new URLSearchParams(opts.search.replace(/^\?/, "")))
+      : null;
   try {
     const result = await erp.webContents.executeJavaScript(
       `(async () => {
@@ -2030,6 +2359,7 @@ async function erpSoftSetRoute(appPath, opts = {}) {
               : ""
           }
           const parts = ${JSON.stringify(parts)};
+          ${routeOptions ? `frappe.route_options = Object.assign(frappe.route_options || {}, ${JSON.stringify(routeOptions)});` : ""}
           await frappe.set_route(...parts);
           return { ok: true };
         } catch (e) {
@@ -2092,6 +2422,18 @@ function beginErpNavIntent(path) {
     if (erpNavIntentPath === p) {
       navDebug("nav-intent-timeout", p);
       erpNavIntentPath = null;
+      // The page never arrived. On Vanilla, take where the ERP view really is as "here";
+      // otherwise the next route poll reads it as a hop *from* the page we never reached and
+      // invents a peek (nav incident 2026-10-01T03:52: "Bill → Supplier").
+      const live = currentErpPathname();
+      if (surfaceMode === "erp" && live && erpLivePathDiffers(currentRoute, live, ERP_BASE)) {
+        const n = normalizeAppRoute(live, ERP_BASE);
+        if (n.path) {
+          navDebug("nav-intent-resync", `${currentRoute} → ${n.path}`);
+          currentRoute = n.path;
+          sendUiState();
+        }
+      }
     }
     erpNavIntentTimer = null;
   }, 15000);
@@ -2166,7 +2508,6 @@ function trackNav(url, opts = {}) {
     return;
   }
   const n = normalizeAppRoute(url, ERP_BASE);
-  const prev = currentRoute;
   const next = n.path || currentRoute;
   const changed = next !== currentRoute;
   currentRoute = next;
@@ -2175,7 +2516,8 @@ function trackNav(url, opts = {}) {
     labels: DOCTYPE_LABELS,
     companyAbbr: sessionCompanyAbbr,
   });
-  notePeekFromErpNav(next, prev);
+  // Peeks come from the page's own hop report (onErpRouteHop), not from `prev` here — the
+  // shell's idea of the previous route is what invented a fake peek (nav incident 03:52).
   sendHistory();
   maybeRefreshCompanyAbbr();
   if (shouldClearErpNavIntent(erpNavIntentPath, url, opts, ERP_BASE)) {
@@ -2894,9 +3236,89 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
   };
 }
 
-/** @type {{ finish: () => void } | null} */
+/** @type {{ finish: () => void, refuse?: () => void } | null} */
 let erpLoadWaiter = null;
 
+/** When the shell's own unsaved-changes check last passed (ms) — see erp-unload-guard.js. */
+let erpUnloadClearedAt = 0;
+
+/** @param {string} reason */
+function markErpUnloadCleared(reason) {
+  erpUnloadClearedAt = Date.now();
+  navDebug("erp-unload-cleared", reason);
+}
+
+/**
+ * Frappe's `beforeunload` asked to keep a Vanilla page. Electron cancels the load unless we
+ * say otherwise, and asks nobody — so either the shell's own check already covered it, or the
+ * clerk is asked the way a browser would ask (nav incident 2026-10-01T03:52).
+ * @param {Electron.Event} event
+ */
+function onErpWillPreventUnload(event) {
+  const decision = decideErpUnload({ clearedAt: erpUnloadClearedAt, now: Date.now() });
+  if (decision === "allow") {
+    navDebug("erp-unload", "allow — shell check passed");
+    event.preventDefault();
+    return;
+  }
+  // Logged before the box opens: a box nobody answers would otherwise leave no trace.
+  navDebug("erp-unload", "ask — Frappe beforeunload, no recent shell check");
+  let response = 0;
+  try {
+    const pageLabel = erpUnloadPageLabel(
+      normalizeAppRoute(currentErpPathname(), ERP_BASE),
+      DOCTYPE_LABELS,
+    );
+    response =
+      win && !win.isDestroyed()
+        ? dialog.showMessageBoxSync(win, erpUnloadDialogSpec({ pageLabel }))
+        : 0;
+  } catch {
+    response = 0;
+  }
+  if (isLeaveChoice(response)) {
+    navDebug("erp-unload", "leave — clerk discarded Vanilla edits");
+    markErpUnloadCleared("clerk-leave");
+    event.preventDefault();
+    return;
+  }
+  navDebug("erp-unload", "stay — clerk kept Vanilla edits");
+  onErpUnloadRefused();
+}
+
+/**
+ * The load did not happen: the ERP view is still on the page with the clerk's edits. Show it,
+ * and put the shell's idea of "where we are" back on it so nothing later records a hop that
+ * never happened (the fake "Bill → Supplier" peek of the same incident).
+ */
+function onErpUnloadRefused() {
+  const waiter = erpLoadWaiter;
+  // A load the page started itself (Frappe's own redirect, a reload): the shell never moved,
+  // so there is nothing to put back.
+  if (!waiter) return;
+  if (waiter.refuse) waiter.refuse();
+  clearErpNavIntent("unload-refused");
+  const live = currentErpPathname();
+  const n = live ? normalizeAppRoute(live, ERP_BASE) : null;
+  surfaceMode = "erp";
+  if (n && n.path) currentRoute = n.path;
+  place();
+  sendUiState();
+  sendHistory();
+  syncE2eApi();
+  try {
+    if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * @param {string} url
+ * @returns {Promise<boolean>} false when the load did not happen — no ERP view, or the clerk
+ *   chose to stay on a Vanilla page with unsaved changes (`will-prevent-unload`). A timeout
+ *   still resolves true, as before.
+ */
 function loadErpUrl(url) {
   return new Promise((resolve) => {
     if (!erp || erp.webContents.isDestroyed()) {
@@ -2909,14 +3331,15 @@ function loadErpUrl(url) {
       erpLoadWaiter = null;
     }
     let settled = false;
-    const finish = () => {
+    const settle = (loaded) => {
       if (settled) return;
       settled = true;
       if (erpLoadWaiter && erpLoadWaiter.finish === finish) erpLoadWaiter = null;
       erp.webContents.removeListener("did-finish-load", finish);
-      resolve(true);
+      resolve(loaded);
     };
-    erpLoadWaiter = { finish };
+    const finish = () => settle(true);
+    erpLoadWaiter = { finish, refuse: () => settle(false) };
     erp.webContents.once("did-finish-load", finish);
     erp.webContents.loadURL(url);
     setTimeout(finish, 10000);
@@ -3510,6 +3933,13 @@ async function gateDirtyThen(doNav) {
     doNav();
     return;
   }
+  // From here the shell's own check owns the Doc skin's edits; once it lets the clerk go,
+  // Frappe's beforeunload on the same form is a second question about the same edits.
+  const continueNav = doNav;
+  doNav = () => {
+    markErpUnloadCleared("doc-gate");
+    continueNav();
+  };
   // Fast path: do not await heavy snapshot when already clean (hang = dead Recents nav).
   if (!dirtyState.userEdited) {
     navDebug("gate-skip", "clean");
@@ -3857,8 +4287,11 @@ function openPaymentEntryTile(direction) {
  * @param {string} appPath normalized /app/… path
  * @returns {Promise<void>}
  */
+/**
+ * @returns {Promise<boolean>} false when the clerk chose to stay on unsaved Vanilla edits
+ */
 async function erpForceReopenRoute(appPath, opts = {}) {
-  if (!erp || erp.webContents.isDestroyed()) return;
+  if (!erp || erp.webContents.isDestroyed()) return false;
   const path = normalizeAppRoute(appPath, ERP_BASE).path || appPath;
   const search =
     typeof opts.search === "string" && opts.search ? `?${opts.search.replace(/^\?/, "")}` : "";
@@ -3871,15 +4304,16 @@ async function erpForceReopenRoute(appPath, opts = {}) {
       // fromBrowser:false — we asked for this route, the page has not confirmed it yet.
       // Clearing the intent here disarms the guard against the page we are leaving.
       trackNav(target, { fromBrowser: false });
-      return;
+      return true;
     }
     navDebug("same-route-bounce", `${(soft && soft.reason) || "no-set_route"} → ${path}`);
   } else {
     navDebug("force-reopen-load", path);
   }
-  await loadErpUrl(erpUrl(ERP_BASE, "/app"));
-  await loadErpUrl(target);
+  if (!(await loadErpUrl(erpUrl(ERP_BASE, "/app")))) return false;
+  if (!(await loadErpUrl(target))) return false;
   trackNav(target, { fromBrowser: false });
+  return true;
 }
 
 function showErp(route = "/desk", opts = {}) {
@@ -3965,14 +4399,18 @@ function showErp(route = "/desk", opts = {}) {
     };
 
     if (trySoft) {
-      erpSoftSetRoute(info.path || path, { abandonUnsaved: !!opts.abandonUnsaved }).then((r) => {
+      erpSoftSetRoute(info.path || path, {
+        abandonUnsaved: !!opts.abandonUnsaved,
+        search: opts.search,
+      }).then((r) => {
         if (r && r.ok) {
           trackNav(target, { fromBrowser: false });
           afterNav();
           return;
         }
         navDebug("soft-peek-fallback", (r && r.reason) || "set_route failed");
-        void loadErpUrl(target).then(() => {
+        void loadErpUrl(target).then((loaded) => {
+          if (!loaded) return;
           trackNav(target, { fromBrowser: false });
           afterNav();
         });
@@ -3991,12 +4429,17 @@ function showErp(route = "/desk", opts = {}) {
       }) &&
       (info.path || path).startsWith("/app/")
     ) {
-      erpForceReopenRoute(info.path || path, { forceLoad: true, search: opts.search }).then(afterNav);
+      erpForceReopenRoute(info.path || path, { forceLoad: true, search: opts.search }).then(
+        (loaded) => {
+          if (loaded) afterNav();
+        },
+      );
       return;
     }
 
     if (opts.forceLoad || path !== "/desk" || !alreadyAtDeskRoot) {
-      void loadErpUrl(target).then(() => {
+      void loadErpUrl(target).then((loaded) => {
+        if (!loaded) return;
         trackNav(target, { fromBrowser: false });
         afterNav();
       });
@@ -4292,7 +4735,7 @@ async function showDocForm(skinId, route, opts = {}) {
     parkedDocSurface = null;
     surfaceMode = "doc";
     activeDocSkin = skinId;
-    if (priorSkin && docShellKind(priorSkin) !== docShellKind(skinId)) {
+    if (needsDocShellReload(priorSkin, skinId)) {
       await reloadDocFormShell();
     }
     const n = normalizeAppRoute(r, ERP_BASE);
@@ -4348,10 +4791,20 @@ async function showDocForm(skinId, route, opts = {}) {
     });
 
     const target = erpUrl(ERP_BASE, currentRoute);
-    if (openingFreshNew) {
-      await erpForceReopenRoute(currentRoute, { forceLoad: true });
-    } else {
-      await loadErpUrl(target);
+    // Vanilla → Doc on the form Vanilla is showing: read it where it is. Reloading would drop
+    // an unsaved draft the clerk typed in Vanilla (5zorro 2026-09-30: type in Vanilla, switch
+    // to Doc, everything comes along).
+    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
+    if (inPlace) navDebug("doc-open-in-place", currentRoute);
+    const loaded = inPlace
+      ? true
+      : openingFreshNew
+        ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
+        : await loadErpUrl(target);
+    if (!loaded) {
+      // The clerk kept unsaved Vanilla edits; onErpUnloadRefused already put them back on screen.
+      navDebug("doc-open-stopped", `${skinId} — clerk stayed on unsaved edits`);
+      return;
     }
     if (skinId === "bill" && billLoadToken !== billLoadGen) {
       navDebug("bill-load-stale", `after loadURL token=${billLoadToken}`);
@@ -4422,6 +4875,19 @@ async function showDocForm(skinId, route, opts = {}) {
         },
         true,
       );
+      // Edits typed in Vanilla came along in place: they are the clerk's, so the Doc skin's
+      // unsaved-changes check must know about them.
+      const carriedEdits =
+        inPlace &&
+        carriesClerkEdits(snap.doc, {
+          isDirty: !!snap.isDirty,
+          isNew: !!snap.isNew,
+          partyField: profile.partyField,
+        });
+      if (carriedEdits) {
+        dirtyState = markUserEdited(dirtyState);
+        navDebug("doc-open-carried-edits", String(snap.doc && snap.doc.name));
+      }
       if (skinId === "bill") {
         amountDueCommitted = amountDueScratch;
       } else if (skinId === "po" && snap.doc) {
@@ -4448,7 +4914,7 @@ async function showDocForm(skinId, route, opts = {}) {
           linkedPos: snap.linkedPos || [],
           poLineMeta: snap.poLineMeta || {},
           lineAllocations: snap.lineAllocations || {},
-          userEdited: false,
+          userEdited: carriedEdits,
           isNew: !!snap.isNew,
           focusVendor: true,
         });
@@ -4457,7 +4923,7 @@ async function showDocForm(skinId, route, opts = {}) {
           ok: true,
           doc: snap.doc,
           scratch: { dateExpected: dateExpectedScratch },
-          userEdited: false,
+          userEdited: carriedEdits,
           isNew: !!snap.isNew,
           focusVendor: true,
         });
@@ -6248,6 +6714,7 @@ async function tickHealth() {
     latencyMs: result.latencyMs,
   });
   sendHealth(result.status);
+  tickLogin().catch(() => {});
 }
 
 function diagnoseSnapshot() {
@@ -6399,9 +6866,13 @@ function createWindow() {
   erp.webContents.on("will-navigate", (e, url) => {
     if (!isAllowedErpUrl(ERP_BASE, url)) e.preventDefault();
   });
+  erp.webContents.on("will-prevent-unload", onErpWillPreventUnload);
   erp.webContents.on("did-navigate", (_e, url) => {
     trackNav(url, { fromBrowser: true });
+    // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
+    tickLogin("navigate").catch(() => {});
     ensureErpFormBridge().catch(() => {});
+    ensureErpRouteHopReporter().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
   });
   erp.webContents.on("did-navigate-in-page", (_e, url, isMainFrame) => {
@@ -6413,6 +6884,7 @@ function createWindow() {
   });
   erp.webContents.on("did-finish-load", () => {
     ensureErpFormBridge().catch(() => {});
+    ensureErpRouteHopReporter().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
     if (surfaceMode === "erp") scheduleErpKeyboardFocus();
   });
@@ -6792,7 +7264,7 @@ ipcMain.handle("bill-retry-load", async () => {
 function headerValueUnchanged(field, next) {
   const kind = dirtyCompareKindForField(field);
   const doc = dirtyState.doc;
-  if (field === "is_paid" || field === "is_return") {
+  if (field === "is_paid" || field === "is_return" || field === "update_stock") {
     const prev = doc ? doc[field] : 0;
     const a = prev === true || prev === 1 || prev === "1" ? 1 : 0;
     const b = next === true || next === 1 || next === "1" ? 1 : 0;
@@ -6817,7 +7289,7 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
   }
   const kind = dirtyCompareKindForField(field);
   let next;
-  if (field === "is_paid" || field === "is_return") {
+  if (field === "is_paid" || field === "is_return" || field === "update_stock") {
     next = value === true || value === 1 || value === "1" ? "1" : "0";
   } else if (kind === "number") {
     next = value == null ? "" : String(value);
@@ -8645,7 +9117,9 @@ ipcMain.handle("bill-print", async () => {
 
   if (!alreadyOnBill) {
     const target = erpUrl(ERP_BASE, route);
-    await loadErpUrl(target);
+    if (!(await loadErpUrl(target))) {
+      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
+    }
   }
 
   const snap = await raceTimeout(
@@ -9285,7 +9759,9 @@ ipcMain.handle("doc-print", async () => {
 
   if (!alreadyOnDoc) {
     const target = erpUrl(ERP_BASE, route);
-    await loadErpUrl(target);
+    if (!(await loadErpUrl(target))) {
+      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
+    }
   }
 
   const snap = await raceTimeout(
@@ -9535,6 +10011,15 @@ ipcMain.on("go-home", () => showHome());
 ipcMain.on("show-launcher", () => showHome());
 ipcMain.on("open-doc-skin", () => openDocSkin());
 ipcMain.on("soft-peek-esc", () => dismissSoftPeekFromEsc());
+ipcMain.on("erp-route-hop", (e, raw) => {
+  if (!erp || erp.webContents.isDestroyed() || e.sender !== erp.webContents) return;
+  const hop = sanitizeRouteHop(raw);
+  if (hop) onErpRouteHop(hop);
+});
+ipcMain.on("open-peek-child", (_e, childRoute, parentRoute) => {
+  if (typeof childRoute !== "string" || typeof parentRoute !== "string") return;
+  openPeekChild(childRoute, parentRoute).catch(() => {});
+});
 ipcMain.handle("soft-peek-route", async (_e, route) => {
   const r = typeof route === "string" && route.trim() ? route.trim() : "";
   if (!r) return { ok: false, reason: "Empty peek route." };
@@ -9544,6 +10029,13 @@ ipcMain.handle("soft-peek-route", async (_e, route) => {
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
   }
+});
+ipcMain.on("open-login", () => {
+  // Back to the Vanilla page the clerk was on after logging in; a shell page has no ERP twin.
+  const from = currentErpPathname();
+  const { path, search } = loginRouteFor(from);
+  navDebug("open-login", `surface=${surfaceMode} erp=${from || "-"} login=${lastLogin.state} -> ${path}?${search}`);
+  showErp(path, { forceLoad: true, search });
 });
 ipcMain.on("open-vanilla-skin", () => {
   // Strip the skin now rather than trusting the reload below to erase it.
@@ -9765,6 +10257,165 @@ ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
 });
 ipcMain.handle("get-payment-entry", async (_e, name) => fetchPaymentEntry(name));
 ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
+
+/**
+ * Draft supplier payments for the board's Draft payments panel (plan 2026-09-26, DF-01 D). A draft
+ * posts nothing, so the AP report cannot see it; without this the board offers its bills twice.
+ */
+async function fetchDraftPayments() {
+  const raw = await erpEval(`(async () => {
+    try {
+      var list = await frappe.call({
+        method: "frappe.client.get_list",
+        args: {
+          doctype: "Payment Entry",
+          filters: { docstatus: 0, payment_type: "Pay", party_type: "Supplier" },
+          fields: ["name"],
+          order_by: "posting_date asc",
+          limit_page_length: 100,
+        },
+      });
+      var names = ((list && list.message) || []).map(function (r) { return r.name; });
+      var docs = await Promise.all(names.map(async function (name) {
+        try {
+          var r = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
+          return (r && r.message) || null;
+        } catch (eDoc) {
+          return null;
+        }
+      }));
+      return { ok: true, docs: docs.filter(Boolean) };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), docs: [] };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return { ok: false, reason: (raw && raw.reason) || "Could not load draft payments.", drafts: [] };
+  }
+  return { ok: true, drafts: normalizeDraftPayments(raw.docs) };
+}
+
+/**
+ * Submit or delete one draft Payment Entry. Re-reads the document first and refuses anything that
+ * is no longer a draft, so a stale board cannot act on a payment someone already moved on.
+ * @param {"submit"|"delete"} action
+ * @param {string} name
+ */
+async function actOnDraftPayment(action, name) {
+  const pe = normalizeEditableText(name);
+  if (!pe) return { ok: false, reason: "No payment named." };
+  if (action !== "submit" && action !== "delete") return { ok: false, reason: "Unknown action." };
+  navDebug(`draft-payment-${action}`, `${pe} start`);
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var got = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
+      var doc = got && got.message;
+      if (!doc) return { ok: false, reason: "Payment Entry not found — it may already be gone.", step: "read" };
+      if (Number(doc.docstatus) !== 0) {
+        return { ok: false, reason: doc.name + " is no longer a draft (docstatus " + doc.docstatus + ").", step: "read" };
+      }
+      if (${JSON.stringify(action)} === "delete") {
+        try {
+          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
+        } catch (eDel) {
+          return { ok: false, reason: reasonFrom(eDel), step: "delete" };
+        }
+        return { ok: true, name: doc.name, deleted: true };
+      }
+      var sub;
+      try {
+        sub = await frappe.call({ method: "frappe.client.submit", args: { doc: doc } });
+      } catch (eSub) {
+        return { ok: false, reason: reasonFrom(eSub), step: "submit" };
+      }
+      if (sub && sub.exc) return { ok: false, reason: reasonFrom(sub), step: "submit" };
+      var done = (sub && sub.message) || {};
+      return { ok: true, name: done.name || doc.name, docstatus: done.docstatus };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  const res =
+    raw && typeof raw === "object"
+      ? raw.ok
+        ? raw
+        : { ok: false, reason: formatClientErrorReason(raw.reason || raw, `Could not ${action} ${pe}.`), step: raw.step }
+      : { ok: false, reason: `Could not ${action} ${pe}.` };
+  navDebug(`draft-payment-${action}`, `${pe} ${res.ok ? "ok" : `failed (${res.step || "?"}): ${res.reason}`}`);
+  return res;
+}
+
+ipcMain.handle("get-draft-payments", async () => fetchDraftPayments());
+
+ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
+
+/**
+ * DF-01 R. What the Bill needs to decide whether to ask "receive with this bill?": which of its
+ * item codes are stock items, the default warehouse to receive into, whether perpetual inventory
+ * is on (it decides whether the SRBNB swap happens), and the ask-at-save setting.
+ */
+ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
+  const list = [...new Set((Array.isArray(codes) ? codes : []).map((c) => String(c || "").trim()).filter(Boolean))];
+  const raw = await erpEval(`(async () => {
+    try {
+      var codes = ${JSON.stringify(list)};
+      var stock = [];
+      if (codes.length) {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Item", filters: [["name", "in", codes], ["is_stock_item", "=", 1]],
+          fields: ["name"], limit_page_length: 0 } });
+        stock = ((r && r.message) || []).map(function (x) { return x.name; });
+      }
+      var wh = await frappe.call({ method: "frappe.client.get_single_value",
+        args: { doctype: "Stock Settings", field: "default_warehouse" } });
+      var perpetual = true;
+      var co = ${JSON.stringify(String(company || ""))};
+      if (co) {
+        var c = await frappe.call({ method: "frappe.client.get_value",
+          args: { doctype: "Company", filters: { name: co }, fieldname: "enable_perpetual_inventory" } });
+        perpetual = !!(c && c.message && Number(c.message.enable_perpetual_inventory));
+      }
+      return { ok: true, stockCodes: stock, defaultWarehouse: (wh && wh.message) || "", perpetual: perpetual };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read stock facts." };
+  return { ...base, askAtSave: billReceivePrefs.askAtSave };
+});
+
+ipcMain.handle("set-bill-receive-ask", async (_e, on) => {
+  billReceivePrefs = mergeReceiveAskPrefs({ askAtSave: on !== false });
+  try {
+    fs.writeFileSync(billReceivePrefsPath(), JSON.stringify(billReceivePrefs));
+  } catch {
+    /* ignore */
+  }
+  navDebug("bill-receive-ask", billReceivePrefs.askAtSave ? "on" : "off");
+  return billReceivePrefs.askAtSave;
+});
+/**
+ * Set it, save it, and tell every open shell page — a toggle on the Bill must not leave the
+ * payment board (already loaded) leading with the other number.
+ */
+ipcMain.handle("set-doc-number-lead", async (_e, lead) => {
+  docNumberPrefs = { lead: normalizeNumberLead(lead) };
+  try {
+    fs.writeFileSync(docNumberPrefsPath(), JSON.stringify(docNumberPrefs));
+  } catch {
+    /* ignore */
+  }
+  const js = `window.dispatchEvent(new CustomEvent("doc-number-lead", { detail: ${JSON.stringify(docNumberPrefs.lead)} }))`;
+  for (const v of [docForm, payOutstanding, paymentDoc]) {
+    if (v && !v.webContents.isDestroyed() && (v.webContents.getURL() || "").startsWith("file:")) {
+      v.webContents.executeJavaScript(js).catch(() => {});
+    }
+  }
+  return docNumberPrefs.lead;
+});
+ipcMain.handle("submit-draft-payment", async (_e, name) => actOnDraftPayment("submit", name));
+ipcMain.handle("delete-draft-payment", async (_e, name) => actOnDraftPayment("delete", name));
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
 ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
   const check = validatePaymentBatchPrefs(prefs);

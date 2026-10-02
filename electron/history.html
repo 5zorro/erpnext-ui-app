@@ -55,6 +55,13 @@
       font-size: 11px; font-weight: 400;
     }
     li button:hover .hist-tree-guide { color: #9fb3c8; }
+    /* Peeks opened from a document fold under its row (plan 2026-09-26 N1). */
+    li button.hist-peek-toggle {
+      flex: 0 0 auto; width: auto; min-width: 34px; padding: 0 6px;
+      font-size: 11px; color: #9fb3c8; text-align: center;
+    }
+    li button.hist-peek-toggle:hover { background: #334155; color: #fff; }
+    li.hist-peek-kids > ul { padding: 0 0 2px 0; }
     .empty { padding: 14px 12px; font-size: 12px; color: #6b8299; line-height: 1.4; }
     .older-toggle {
       display: block; width: calc(100% - 12px); margin: 4px 6px 0; text-align: left;
@@ -172,17 +179,12 @@
         if (opts.draft) b.classList.add("draft-label");
 
         const primary = h.label || h.dt || h.name || "";
-        if (!opts.draft && h.treeDepth === 1) {
-          b.classList.add("hist-peek-child");
-          b.dataset.testid = "hist-peek-child";
-          const guide = document.createElement("span");
-          guide.className = "hist-tree-guide";
-          guide.setAttribute("aria-hidden", "true");
-          guide.textContent = "L→ ";
-          b.appendChild(guide);
-          const parentName = h.treeParentLabel || "document";
-          b.setAttribute("aria-label", `${primary}, peek under ${parentName}`);
-        } else if (h.treeRole === "parent") {
+        const kids = !opts.draft && Array.isArray(h.peekChildren) ? h.peekChildren : [];
+        if (kids.length) {
+          li.className = "hist-row";
+          b.classList.add("hist-nav");
+        }
+        if (h.treeRole === "parent") {
           b.classList.add("hist-peek-parent");
           b.dataset.testid = "hist-peek-parent";
         }
@@ -233,7 +235,68 @@
         }
 
         ul.appendChild(li);
+        if (kids.length) appendPeekChildren(ul, li, h, kids);
       });
+    }
+
+    /** Parent route → open/closed, when the clerk toggled it; otherwise open while live. */
+    const peekOpen = new Map();
+    let lastPayload = null;
+
+    function appendPeekChildren(ul, li, parent, kids) {
+      const open = peekOpen.has(parent.route) ? peekOpen.get(parent.route) : !!parent.peekLive;
+      const tog = document.createElement("button");
+      tog.type = "button";
+      tog.className = "hist-peek-toggle";
+      tog.dataset.testid = "hist-peek-toggle";
+      tog.textContent = `${open ? "▾" : "▸"} ${kids.length}`;
+      tog.title = open ? "Hide what you peeked at from here" : "Show what you peeked at from here";
+      tog.setAttribute("aria-expanded", open ? "true" : "false");
+      tog.setAttribute("aria-label", `${kids.length} peek${kids.length === 1 ? "" : "s"} under ${parent.label || "document"}`);
+      tog.onclick = (ev) => {
+        ev.stopPropagation();
+        peekOpen.set(parent.route, !open);
+        if (lastPayload) render(lastPayload);
+      };
+      li.appendChild(tog);
+      if (!open) return;
+
+      const holder = document.createElement("li");
+      holder.className = "hist-peek-kids";
+      const inner = document.createElement("ul");
+      kids.forEach((c) => {
+        const cli = document.createElement("li");
+        const cb = document.createElement("button");
+        cb.type = "button";
+        cb.className = "hist-peek-child";
+        cb.dataset.testid = "hist-peek-child";
+        cb.title = c.route || "";
+        if (c.kind === "setup") cb.classList.add("hist-setup");
+        const guide = document.createElement("span");
+        guide.className = "hist-tree-guide";
+        guide.setAttribute("aria-hidden", "true");
+        guide.textContent = "L→ ";
+        cb.appendChild(guide);
+        const primary = c.label || c.dt || "";
+        cb.appendChild(document.createTextNode(primary));
+        const detail = c.detail != null ? String(c.detail).trim() : "";
+        if (detail) {
+          const span = document.createElement("span");
+          span.className = "hist-detail" + (c.detailMuted ? " muted" : "");
+          span.textContent = detail;
+          cb.appendChild(span);
+        }
+        cb.setAttribute("aria-label", `${primary}, peek under ${parent.label || "document"} — Esc returns there`);
+        cb.onclick = () => {
+          if (api && api.navDebug) api.navDebug("hist-peek-click", `${parent.route} → ${c.route}`);
+          if (api && api.openPeekChild) api.openPeekChild(c.route, parent.route);
+          else if (api) api.openErp(c.route);
+        };
+        cli.appendChild(cb);
+        inner.appendChild(cli);
+      });
+      holder.appendChild(inner);
+      ul.appendChild(holder);
     }
 
     function setOlderOpen(open) {
@@ -280,6 +343,7 @@
     };
 
     function render(payload) {
+      lastPayload = payload;
       const rows = Array.isArray(payload)
         ? payload
         : Array.isArray(payload && payload.items)

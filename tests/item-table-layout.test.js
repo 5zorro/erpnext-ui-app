@@ -19,6 +19,9 @@ import {
   scrollbarGutterPx,
   writeColWidthPref,
   writeDensity,
+  naturalTableWidthPx,
+  lineTableWidthPx,
+  FLEX_NEED_CAP_PX,
 } from "../src/item-table-layout.js";
 
 /** Minimal in-memory storage double (same shape doc-wash.js injects). */
@@ -375,5 +378,37 @@ describe("distributeColWidths (Packet T C — content-driven widths)", () => {
       2,
     );
     for (const [k, px] of Object.entries(w)) assert.ok(px >= 1, `${k} was ${px}`);
+  });
+});
+
+// 5zorro 2026-10-01: the line table takes room only when its content needs it.
+describe("line table width — card width until the content needs more", () => {
+  const cols = [
+    { key: "lineNo", fixedPx: 38 },
+    { key: "item_code", demandPx: 150, minPx: 90, maxPx: 420 },
+    { key: "description", demandPx: 900, minPx: 180, maxPx: 900, flex: true },
+    { key: "qty", fixedPx: 58 },
+    { key: "customer", demandPx: 40, minPx: 70, maxPx: 260 },
+  ];
+
+  it("a long description wraps rather than asking for room", () => {
+    assert.equal(naturalTableWidthPx(cols), 38 + 150 + FLEX_NEED_CAP_PX + 58 + 70);
+  });
+
+  it("a dragged width counts as need", () => {
+    assert.equal(naturalTableWidthPx(cols, { customer: 200 }) - naturalTableWidthPx(cols), 130);
+  });
+
+  it("a blank table never grows past the card", () => {
+    assert.equal(lineTableWidthPx({ needPx: 600, paperPx: 1030, roomPx: 1600 }), 1030);
+  });
+
+  it("grows only as far as the content needs, and never past the window", () => {
+    assert.equal(lineTableWidthPx({ needPx: 1200, paperPx: 1030, roomPx: 1600 }), 1200);
+    assert.equal(lineTableWidthPx({ needPx: 2000, paperPx: 1030, roomPx: 1600 }), 1600);
+  });
+
+  it("never narrower than the card, even when the window gives no room", () => {
+    assert.equal(lineTableWidthPx({ needPx: 2000, paperPx: 1030, roomPx: 900 }), 1030);
   });
 });

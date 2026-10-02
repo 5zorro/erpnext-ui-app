@@ -9,6 +9,8 @@ import {
   isCreateSupplierLinkAction,
   isCreatePaymentTermsLinkAction,
   isCreateProjectLinkAction,
+  isCreateItemLinkAction,
+  itemCreateRoute,
 } from "./link-search.js";
 import {
   initialLinkHighlightIndex,
@@ -27,6 +29,7 @@ import { uiIconHtml } from "./ui-icons.js";
  *   openVendorAdd?: () => void,
  *   openPaymentTermsAdd?: () => void,
  *   openProjectAdd?: () => void,
+ *   softPeekRoute?: (route: string) => Promise<{ ok?: boolean, reason?: string }>,
  * }} LinkPickerApi
  */
 
@@ -107,10 +110,12 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     if (
       isCreateSupplierLinkAction(v) ||
       isCreatePaymentTermsLinkAction(v) ||
-      isCreateProjectLinkAction(v)
+      isCreateProjectLinkAction(v) ||
+      isCreateItemLinkAction(v)
     ) {
       dd.hidden = true;
       hi = -1;
+      const typed = input.value;
       const restore =
         input.dataset.linkCommitted != null
           ? input.dataset.linkCommitted
@@ -131,6 +136,16 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
           api.openPaymentTermsAdd();
         } else {
           setStatus("Payment Terms add API missing — restart the shell.", "err");
+        }
+        return;
+      }
+      if (isCreateItemLinkAction(v)) {
+        if (api && api.softPeekRoute) {
+          setStatus("Opening a new Item in Vanilla (Esc returns here)…");
+          const res = await api.softPeekRoute(itemCreateRoute(typed));
+          if (res && res.ok === false) setStatus(res.reason || "Could not open a new Item.", "err");
+        } else {
+          setStatus("Item add API missing — restart the shell.", "err");
         }
         return;
       }

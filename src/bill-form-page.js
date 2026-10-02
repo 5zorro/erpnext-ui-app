@@ -102,6 +102,7 @@ import {
   billAddressRoleMeta,
   addressPickerOpenDecision,
 } from "../src/bill-address.js";
+import { COMPANY_ADDRESS_LIST_ROUTE } from "../src/doc-address.js";
 import {
   showAddressPickerModal,
   wireAddressPickerFields,
@@ -144,6 +145,13 @@ import {
   shouldLeaveItemTableBackward,
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
+import { wireDocNumberLead } from "../src/doc-number-ui.js";
+import {
+  UPDATE_STOCK_DEFAULT_ROUTE,
+  receiveAskDecision,
+  receiveAskCopy,
+  receiveAskOffNote,
+} from "../src/bill-receive-ask.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
 import {
   fieldsSettlingFor,
@@ -253,6 +261,8 @@ export async function bootBillFormPage(api) {
   let docCapsOn = true;
   /** @type {{ syncCapsButton: () => void }|null} */
   let docCapsUi = null;
+  /** @type {{ paint: () => void } | null} */
+  let docNumberUi = null;
   /** Suppress change while Tab keydown commits the item cell. */
   let itemTabGuard = false;
   /** Suppress blur while Tab/arrow moves between tax cells. */
@@ -1866,7 +1876,7 @@ export async function bootBillFormPage(api) {
         if (!table) return;
         mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
         mountDensityControl({ table, button: document.getElementById("btn-density") });
-        autoSizeItemColumns(table, { tableKey: "bill-items" });
+        autoSizeItemColumns(table, { tableKey: "bill-items", growSection: table.closest(".bill-section") });
       } catch {
         /* column sizing is presentation; never let it break a repaint */
       }
@@ -1878,7 +1888,7 @@ export async function bootBillFormPage(api) {
           el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
         if (!table) return;
         mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
-        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false });
+        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false, growSection: table.closest(".bill-section") });
       } catch {
         /* ignore */
       }
@@ -2523,6 +2533,15 @@ export async function bootBillFormPage(api) {
       onEditVendor: () => {
         void discardBillDraftAndEditVendorAddresses();
       },
+      onManageCompanyAddresses: async () => {
+        if (!api || !api.softPeekRoute) {
+          setStatus("Peek API missing — restart the shell.", "err");
+          return;
+        }
+        const r = await api.softPeekRoute(COMPANY_ADDRESS_LIST_ROUTE);
+        if (r && r.ok === false) setStatus(r.reason || "Could not open addresses.", "err");
+        else setStatus("Company addresses — tick Preferred Shipping Address; Esc returns to Bill.");
+      },
     });
   }
   
@@ -2677,7 +2696,7 @@ export async function bootBillFormPage(api) {
       el.appliedPaymentsBody.innerHTML = rows
         .map(
           (r) => `<tr>
-            <td>${escapeHtml(r.paymentEntry)}</td>
+            <td>${escapeHtml(r.paymentEntry)}${appliedPaymentPeekHtml(r.paymentEntry)}</td>
             <td>${escapeHtml(r.postingDate)}</td>
             <td>${escapeHtml(r.modeOfPayment)}</td>
             <td class="num">${formatUsdAmountHtml(r.allocatedAmount) || escapeHtml(String(r.allocatedAmount))}</td>
@@ -2688,6 +2707,15 @@ export async function bootBillFormPage(api) {
     }
   }
   
+  /** Eye button after a payment's name — soft-peeks it in Vanilla (Esc returns to the Bill). */
+  function appliedPaymentPeekHtml(name) {
+    const route = linkedSourcePeekRoute("payment-entry", name);
+    if (!route) return "";
+    return ` <button type="button" class="applied-payment-peek" tabindex="-1" data-peek-route="${escapeHtml(route)}"
+      data-testid="bill-applied-payment-peek" title="Peek this payment (Esc returns to Bill)"
+      aria-label="Peek payment ${escapeHtml(name)}">${uiIconHtml("eye")}</button>`;
+  }
+
   function freezeTaxDeletesForAllocModal(frozen) {
     allocateChargeModalOpen = !!frozen;
     if (!el.taxesBody) return;
@@ -4435,6 +4463,7 @@ export async function bootBillFormPage(api) {
     ensureHeaderLinkPickers();
     const name = doc.name || "(new)";
     setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
+    if (docNumberUi) docNumberUi.paint();
     paintDirtyPill();
     paintChip();
     void ensureAtLeastOneItemRow(doc);
@@ -4651,6 +4680,124 @@ export async function bootBillFormPage(api) {
     });
   }
   
+  /** DF-01 R — bills answered "bill only" this session, under every name each has had. */
+  const receiveAnswered = new Set();
+
+  /**
+   * "Receive these items with this bill?" — a choice before an irreversible step (Update Stock is
+   * not allow_on_submit), so a dialog rather than a row marker.
+   * @returns {Promise<{ action: "receive"|"bill-only"|"cancel", dontAsk: boolean }>}
+   */
+  function showReceiveAskModal(copyInput) {
+    return new Promise((resolve) => {
+      const c = receiveAskCopy(copyInput);
+      const back = document.createElement("div");
+      back.className = "addr-modal-backdrop";
+      back.dataset.testid = "bill-receive-ask";
+      back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="receive-ask-title">
+        <h2 id="receive-ask-title">${escapeHtml(c.title)}</h2>
+        <p class="addr-modal-hint">${escapeHtml(c.body)}</p>
+        <label class="addr-modal-hint"><input type="checkbox" data-dont-ask data-testid="bill-receive-dont-ask" /> ${escapeHtml(c.dontAsk)}</label>
+        <div class="addr-modal-actions">
+          <button type="button" data-act="cancel">${escapeHtml(c.cancel)}</button>
+          <button type="button" data-act="bill-only" data-testid="bill-receive-bill-only">${escapeHtml(c.billOnly)}</button>
+          <button type="button" class="primary" data-act="receive" data-testid="bill-receive-yes">${escapeHtml(c.receive)}</button>
+        </div>
+        <div class="addr-modal-foot">
+          <button type="button" data-act="default" data-testid="bill-receive-default"
+            title="Customize Form › Purchase Invoice › Update Stock › Default = 1. Changes every new bill, in Vanilla too.">${escapeHtml(c.defaultLink)}</button>
+        </div>
+      </div>`;
+      const done = (action) => {
+        document.removeEventListener("keydown", onKey, true);
+        const dontAsk = !!back.querySelector("[data-dont-ask]")?.checked;
+        back.remove();
+        resolve({ action, dontAsk });
+      };
+      const onKey = (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        done("cancel");
+      };
+      back.addEventListener("click", (ev) => {
+        const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+        if (!b) return;
+        const act = b.getAttribute("data-act");
+        if (act === "default") {
+          done("cancel");
+          if (api && api.softPeekRoute) void api.softPeekRoute(UPDATE_STOCK_DEFAULT_ROUTE);
+          setStatus("Customize Form › Purchase Invoice: set Update Stock's Default to 1, Update — Esc returns to Bill (not saved yet).");
+          return;
+        }
+        done(/** @type {any} */ (act));
+      });
+      document.body.appendChild(back);
+      document.addEventListener("keydown", onKey, true);
+      try {
+        back.querySelector('[data-act="receive"]').focus();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  /**
+   * Before a save: ask, and apply "receive" through ERPNext's own fields. A failed facts read never
+   * blocks the save — the question is a help, not a gate.
+   * @returns {Promise<{ proceed: boolean, offLines: number }>}
+   */
+  async function resolveReceiveBeforeSave() {
+    const go = { proceed: true, offLines: 0 };
+    if (!api || !api.billReceiveFacts || !lastDoc || !editable()) return go;
+    const codes = (Array.isArray(lastDoc.items) ? lastDoc.items : []).map((r) => r && r.item_code).filter(Boolean);
+    if (!codes.length) return go;
+    let facts = null;
+    try {
+      facts = await api.billReceiveFacts(codes, lastDoc.company || "");
+    } catch {
+      return go;
+    }
+    if (!facts || !facts.ok) return go;
+    const decision = receiveAskDecision({
+      doc: lastDoc,
+      stockCodes: facts.stockCodes || [],
+      askAtSave: facts.askAtSave !== false,
+      answered: receiveAnswered,
+    });
+    if (!decision.ask) return { proceed: true, offLines: decision.why === "ask at save is off" ? decision.lines.length : 0 };
+    const needsWarehouse = decision.lines.some((r) => !r.warehouse) && !lastDoc.set_warehouse;
+    const choice = await showReceiveAskModal({
+      lineCount: decision.lines.length,
+      warehouse: needsWarehouse ? facts.defaultWarehouse || "" : "",
+      perpetual: facts.perpetual !== false,
+    });
+    if (choice.dontAsk && api.setBillReceiveAsk) await api.setBillReceiveAsk(false).catch(() => {});
+    if (choice.action === "cancel") {
+      setStatus("Save cancelled — nothing saved.");
+      return { proceed: false, offLines: 0 };
+    }
+    if (choice.action === "bill-only") {
+      receiveAnswered.add(String(lastDoc.name || ""));
+      return go;
+    }
+    setStatus("Turning on Update Stock (receive with this bill)…");
+    const r1 = await api.setHeader("update_stock", 1);
+    if (!(r1 && r1.ok)) {
+      setStatus((r1 && r1.reason) || "Could not turn on Update Stock.", "err");
+      return { proceed: false, offLines: 0 };
+    }
+    let doc = r1.doc || lastDoc;
+    if (needsWarehouse && facts.defaultWarehouse) {
+      // Through the form, so ERPNext's own set_warehouse trigger fills every line's warehouse.
+      const r2 = await api.setHeader("set_warehouse", facts.defaultWarehouse);
+      if (r2 && r2.ok && r2.doc) doc = r2.doc;
+    }
+    noteUserEdit();
+    paint(doc, amountDue);
+    return go;
+  }
+
   async function doSave(submit) {
     if (!api) return { ok: false, reason: "Bill API unavailable." };
     if (saveInFlight) return { ok: false, reason: "Save already in progress." };
@@ -4691,6 +4838,9 @@ export async function bootBillFormPage(api) {
         announceSaveBlocker(capBlockers[0], capBlockers);
         return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
+      const receive = await resolveReceiveBeforeSave();
+      if (!receive.proceed) return { ok: false, reason: "Save cancelled." };
+      const nameBeforeSave = String((lastDoc && lastDoc.name) || "");
       const choice = submit ? "submit" : "save";
       setStatus(commitGateProgressLabel(choice));
       let r = await api.save({ submit: !!submit });
@@ -4700,6 +4850,14 @@ export async function bootBillFormPage(api) {
         paint(r.doc, amountDue);
       }
       if (r && r.ok) {
+        // A new draft is renamed on its first save; keep "bill only" answered under the new name.
+        if (receiveAnswered.has(nameBeforeSave) && r.doc && r.doc.name) receiveAnswered.add(String(r.doc.name));
+        if (receive.offLines > 0) {
+          showBlockingToast(`${receiveAskOffNote(receive.offLines)} Click to ask at save again.`, () => {
+            if (api.setBillReceiveAsk) void api.setBillReceiveAsk(true);
+            setStatus("‘Receive with this bill?’ will be asked at save again.");
+          }, 12000);
+        }
         userEdited = false;
         metaBlockers = [];
         accountCompanyBlockers = [];
@@ -4794,7 +4952,17 @@ export async function bootBillFormPage(api) {
       }
     };
   }
-  
+
+  if (el.appliedPaymentsBody) {
+    // Delegated: the rows are repainted on every load.
+    el.appliedPaymentsBody.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest("[data-peek-route]") : null;
+      if (!btn) return;
+      ev.preventDefault();
+      void requestLinkedSourcePeek(btn.getAttribute("data-peek-route") || "", "payment-entry");
+    });
+  }
+
   el.vendor.addEventListener("change", () => onHeaderBlur(el.vendor));
   el.terms.addEventListener("change", () => onHeaderBlur(el.terms));
   el.date.addEventListener("change", () => onHeaderBlur(el.date));
@@ -4973,6 +5141,14 @@ export async function bootBillFormPage(api) {
     };
   }
   document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+  docNumberUi = wireDocNumberLead({
+    api,
+    button: document.getElementById("btn-number-lead"),
+    identEl: document.getElementById("doc-ident"),
+    getDoctypeKey: () => "purchase-invoice",
+    getDoc: () => lastDoc,
+  });
+
   docCapsUi = wireDocCapsUi({
     capsButton: el.caps,
     getCapsOn: () => docCapsOn,

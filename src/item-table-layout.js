@@ -356,6 +356,54 @@ export function distributeColWidths(cols, availablePx, overrides = {}) {
 }
 
 /**
+ * How wide Description may *ask* to be when deciding whether the table needs more than the card.
+ * It is the one column that wraps, so a long description is a reason to wrap, never a reason to
+ * grow the table (5zorro 2026-10-01). It still takes any width the table has to spare.
+ */
+export const FLEX_NEED_CAP_PX = 320;
+
+/**
+ * The width the line table needs to show every column unwrapped (Description up to
+ * FLEX_NEED_CAP_PX), resolving each column the way distributeColWidths does.
+ * @param {ColDemand[]} cols
+ * @param {Record<string, number>} [overrides] user-dragged widths
+ * @returns {number} px
+ */
+export function naturalTableWidthPx(cols, overrides = {}) {
+  const over = overrides && typeof overrides === "object" ? overrides : {};
+  let total = 0;
+  for (const col of Array.isArray(cols) ? cols : []) {
+    if (!col || typeof col.key !== "string" || !col.key) continue;
+    const min = toFiniteNumber(col.minPx) ?? MIN_COL_WIDTH_PX;
+    const max = toFiniteNumber(col.maxPx) ?? MAX_COL_WIDTH_PX;
+    const override = clampColWidthPx(over[col.key], { min, max });
+    const fixed = toFiniteNumber(col.fixedPx);
+    if (override != null) total += override;
+    else if (fixed != null) total += fixed;
+    else if (col.flex === true) total += clampColWidthPx(col.demandPx, { min, max: Math.min(max, FLEX_NEED_CAP_PX) }) ?? min;
+    else total += clampColWidthPx(col.demandPx, { min, max }) ?? min;
+  }
+  return Math.round(total);
+}
+
+/**
+ * Line-table width (5zorro 2026-10-01, replacing the Sep-6 full bleed): the card's own width while
+ * the content fits in it; when it does not, grow **to the right only** (the left edge stays on the
+ * card — paper is held on the left) as far as the content needs, up to the room before the window
+ * edge. Past that the table scrolls sideways inside itself; the page never does.
+ * @param {{ needPx: number, paperPx: number, roomPx: number }} input
+ * @returns {number} px
+ */
+export function lineTableWidthPx({ needPx, paperPx, roomPx }) {
+  const paper = toFiniteNumber(paperPx);
+  const need = toFiniteNumber(needPx);
+  if (paper == null || paper <= 0) return need != null && need > 0 ? need : 0;
+  if (need == null || need <= paper) return paper;
+  const room = toFiniteNumber(roomPx);
+  return Math.round(room == null ? paper : Math.max(paper, Math.min(need, room)));
+}
+
+/**
  * Per-column sizing rules, keyed by the column's sort key (which both row
  * builders already emit as `th[data-sort]`).
  *
@@ -369,7 +417,8 @@ const COL_RULES = Object.freeze({
   lineNo: { fixedPx: 38, minPx: 30 },
   poLine: { fixedPx: 54, minPx: 40 },
   item_code: { minPx: 90, maxPx: 420 },
-  description: { minPx: 120, maxPx: 900, flex: true },
+  // The wrapping column: its floor keeps a sentence from becoming a tower of one-word lines.
+  description: { minPx: 180, maxPx: 900, flex: true },
   qty: { fixedPx: 58, minPx: 48 },
   rate: { fixedPx: 88, minPx: 70 },
   amount: { fixedPx: 96, minPx: 76 },

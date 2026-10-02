@@ -40,6 +40,17 @@
   /* background: role wash via doc-wash.css when html[data-doc-role] is set */
   background: #f8fafc;
 }
+.doc-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+}
+.doc-ident[hidden] { display: none; }
+.doc-ident-secondary {
+  font-size: 12px;
+  color: #64748b;
+}
 .tb-group-label {
   font-size: 10px;
   font-weight: 700;
@@ -663,6 +674,12 @@
 .addr-modal h2 {
   margin: 0 0 8px;
   font-size: 16px;
+}
+.addr-modal-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
 }
 .addr-modal-subtitle {
   margin: 14px 0 0;

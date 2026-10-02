@@ -37,6 +37,14 @@
     .health.bad .dot { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
     .health.ok { color: #d5f5e3; }
     .health.bad { color: #f9d4cf; }
+    /* Shown only when the server says this window's session is not logged in (health.js
+       probeLogin). Amber, not red: the DB is fine, the clerk just has to sign in. */
+    .login {
+      background: #f39c12; color: #1f2d3d; font-weight: 700; border-radius: 6px; padding: 4px 12px;
+      border: none; cursor: pointer; flex-shrink: 0;
+    }
+    .login:hover { background: #f5b041; }
+    .login[hidden] { display: none; }
     .src { color: #8fa6bd; font-size: 12px; }
     .dbg { color: #a8c0d4; font-size: 12px; }
   </style>
@@ -58,6 +66,7 @@
       <span class="dot" aria-hidden="true"></span>
       <span class="htext">DB …</span>
     </button>
+    <button type="button" class="login" id="btn-login" data-testid="btn-login" hidden title="ERPNext says this window is not logged in — click to log in">Log in</button>
     <button type="button" class="btn" id="btn-feedback" data-testid="btn-feedback" title="Send feedback (Google Form)">Feedback</button>
     <button type="button" class="btn dbg" id="btn-devtools" data-testid="btn-devtools" title="Open Electron DevTools for the ERP pane (Inspect / Console)">ERP console</button>
     <button type="button" class="btn src" id="btn-source" data-testid="btn-source">Source code</button>
@@ -124,6 +133,12 @@
       if (diagnoseOpen && api.closeDiagnose) api.closeDiagnose();
       else if (api.openDiagnose) api.openDiagnose();
     };
+    const loginBtn = document.getElementById("btn-login");
+    loginBtn.onclick = () => api && api.openLogin && api.openLogin();
+    function setLogin(s) {
+      const out = !!s && s.state === "out";
+      loginBtn.hidden = !out;
+    }
     document.getElementById("btn-devtools").onclick = () => api && api.openDevtools("erp");
     document.getElementById("btn-source").onclick = () => {
       api && api.getConfig().then((c) => api.openExternal(c.repo));
@@ -131,6 +146,7 @@
 
     if (api) {
       api.onHealth(setHealth);
+      if (api.onLoginState) api.onLoginState(setLogin);
       api.onState((s) => applyUiState(s || {}));
       api.getConfig().then((c) => {
         if (c && c.version) {

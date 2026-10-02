@@ -306,6 +306,25 @@
       border-radius: 8px; color: #991b1b; font-size: 12px;
     }
     #load-error[hidden] { display: none; }
+    /* DF-01 D -- drafts post nothing, so the AP report cannot see them; this panel can. */
+    #draft-payments {
+      margin: 12px 0; padding: 10px 14px; background: #fffbeb; border: 1px solid #fcd34d;
+      border-radius: 8px;
+    }
+    #draft-payments[hidden] { display: none; }
+    #draft-payments h2 { margin: 0 0 2px; font-size: 13px; color: #78350f; }
+    .draft-why { margin: 0 0 6px; font-size: 12px; color: #92400e; }
+    .draft-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 6px 0; border-top: 1px solid #fde68a;
+    }
+    .draft-what { flex: 1; min-width: 260px; font-size: 12px; color: #0f172a; }
+    .draft-bills { color: #475569; font-size: 11px; margin-top: 2px; }
+    .draft-row .method-panel-status { flex-basis: 100%; }
+    .btn-danger {
+      border: 1px solid #fca5a5; background: #fff; color: #b91c1c; border-radius: 6px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+    }
     .vendor-card {
       background: #fff; border: 1px solid #d6dee6; border-radius: 10px;
       box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 18px;
@@ -650,6 +669,9 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
+      <!-- OI-170: one app-wide setting, shared with every Doc skin's File group. -->
+      <button type="button" class="sort-btn" id="number-lead" data-testid="pay-number-lead"
+        title="Which number leads on each invoice — the vendor's own number or ERPNext's ID. Hover an invoice for both.">No.: Supplier No</button>
       <button type="button" class="sort-btn" id="find-payments" data-testid="pay-outstanding-find"
         title="Find a payment already made — every check and transfer, by vendor or check no.">Find Payments…</button>
       <button type="button" id="prefs-toggle" aria-expanded="false"></button>
@@ -854,6 +876,11 @@
   </div>
   <main>
     <div id="load-error" hidden></div>
+    <section id="draft-payments" hidden data-testid="draft-payments" aria-labelledby="draft-payments-title">
+      <h2 id="draft-payments-title">Draft payments</h2>
+      <p class="draft-why">Not posted yet, so the bills they cover still show as unpaid below. Submit each one, or delete it.</p>
+      <div id="draft-payments-list"></div>
+    </section>
     <div id="empty" hidden data-testid="pay-outstanding-empty">Nothing outstanding.</div>
     <!-- C8. Hidden while no check run is set, so the dashboard reads exactly as before the cutoff. -->
     <div id="run-strip" hidden data-testid="run-strip">
@@ -949,6 +976,17 @@
       summarizeModeChange,
     } from "../src/mode-change-plan.js";
     import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
+    import {
+      billRowNumbers,
+      flipNumberLead,
+      normalizeNumberLead,
+      numberLeadButtonLabel,
+    } from "../src/doc-number-pref.js";
+    import {
+      draftPaymentsByInvoice,
+      draftPaymentAdvisory,
+      draftPaymentConfirmText,
+    } from "../src/payment-drafts.js";
     import { uiIconHtml } from "../src/ui-icons.js";
     import { formatUsdAmount, formatUsdAmountHtml, moneyTextHtml } from "../src/money.js";
     import {
@@ -1461,8 +1499,34 @@
     function matchesFilter(bill, filter) {
       if (!filter) return true;
       const f = filter.toLowerCase();
-      return bill.supplier.toLowerCase().includes(f) || bill.invoice.toLowerCase().includes(f);
+      return (
+        bill.supplier.toLowerCase().includes(f) ||
+        bill.invoice.toLowerCase().includes(f) ||
+        String(bill.billNo || "").toLowerCase().includes(f)
+      );
     }
+
+    /** OI-170 — which number leads on an invoice node; main keeps it, every page shares it. */
+    let numberLead = "theirs";
+    const numberLeadBtn = document.getElementById("number-lead");
+    function paintNumberLeadButton() {
+      if (numberLeadBtn) numberLeadBtn.textContent = numberLeadButtonLabel("purchase-invoice", numberLead);
+    }
+    if (numberLeadBtn) {
+      numberLeadBtn.onclick = async () => {
+        numberLead = flipNumberLead(numberLead);
+        paintNumberLeadButton();
+        render();
+        if (api && api.setNumberLead) {
+          numberLead = normalizeNumberLead(await api.setNumberLead(numberLead).catch(() => numberLead));
+        }
+      };
+    }
+    window.addEventListener("doc-number-lead", (ev) => {
+      numberLead = normalizeNumberLead(ev.detail);
+      paintNumberLeadButton();
+      render();
+    });
     const filterInput = document.getElementById("filter-input");
     filterInput.addEventListener("input", () => {
       filterText = filterInput.value.trim();
@@ -1613,6 +1677,8 @@
       };
       row.appendChild(peek);
       const advisories = billAdvisories(bill, { today: todayIso(), prefs });
+      const draftAdvice = draftPaymentAdvisory(draftsByInvoice.get(bill.invoice));
+      if (draftAdvice) advisories.unshift(draftAdvice);
       const chip = advisoryChipEl(advisories, balloonHost);
       // Inserted before the peek button so the row reads date - method - amount - note - peek.
       if (chip) row.insertBefore(chip, peek);
@@ -1691,7 +1757,12 @@
       head.className = "invoice-head";
       const name = document.createElement("div");
       name.className = "invoice-name";
-      name.textContent = inv.invoice;
+      const nums = billRowNumbers({ invoice: inv.invoice, billNo: inv.rows[0] && inv.rows[0].billNo }, numberLead);
+      name.textContent = nums.primary.value;
+      name.title = [nums.primary, nums.secondary]
+        .filter(Boolean)
+        .map((n) => `${n.label}: ${n.value || "—"}`)
+        .join("\n");
       head.appendChild(name);
       const peek = document.createElement("button");
       peek.type = "button";
@@ -3005,6 +3076,7 @@
     }
 
     function render() {
+      paintDraftPayments();
       vendorsEl.innerHTML = "";
       // C8: resolved once per render against the clerk's own date, so a dashboard left open past
       // midnight re-reads the schedule (and drops an early run) on its next render.
@@ -3652,16 +3724,97 @@
       }
     }
 
+    /** @type {import("../src/payment-drafts.js").DraftPayment[]} */
+    let draftPayments = [];
+    /** @type {Map<string, string[]>} */
+    let draftsByInvoice = new Map();
+
+    async function loadDraftPayments() {
+      draftPayments = [];
+      draftsByInvoice = new Map();
+      if (!api || !api.getDraftPayments) return;
+      const res = await api.getDraftPayments().catch(() => null);
+      draftPayments = (res && res.ok && res.drafts) || [];
+      draftsByInvoice = draftPaymentsByInvoice(draftPayments);
+    }
+
+    /**
+     * DF-01 D. One row per draft: what it pays, and the three ways out of the draft state. Submit
+     * and Delete are confirmed and re-read the payment first in main, so a stale board cannot act
+     * on a payment that has already moved on.
+     */
+    function paintDraftPayments() {
+      const panel = document.getElementById("draft-payments");
+      const list = document.getElementById("draft-payments-list");
+      if (!panel || !list) return;
+      list.innerHTML = "";
+      panel.hidden = !draftPayments.length;
+      for (const d of draftPayments) {
+        const row = document.createElement("div");
+        row.className = "draft-row";
+        row.dataset.testid = "draft-payment-row";
+        const bills = d.references.length
+          ? d.references.map((r) => `${escapeHtml(r.name)} ${formatUsdAmountHtml(r.allocated)}`).join(" · ")
+          : "Not applied to any bill yet";
+        row.appendChild(
+          htmlDiv(
+            "draft-what",
+            `<strong>${escapeHtml(d.name)}</strong> · ${escapeHtml(d.party)} · ${formatUsdAmountHtml(d.paidAmount)}` +
+              `${d.modeOfPayment ? ` · ${escapeHtml(d.modeOfPayment)}` : ""}${d.postingDate ? ` · ${escapeHtml(d.postingDate)}` : ""}` +
+              `<div class="draft-bills">${bills}</div>`,
+          ),
+        );
+        const status = textDiv("method-panel-status", "");
+        const act = (label, cls, testid, title, onClick) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = cls;
+          b.dataset.testid = testid;
+          b.textContent = label;
+          b.title = title;
+          b.onclick = onClick;
+          row.appendChild(b);
+          return b;
+        };
+        act("Open", "btn-secondary", "draft-payment-open", "Open this draft as a payment document to finish it.", () => {
+          if (api && api.openPaymentDoc) api.openPaymentDoc(d.name);
+        });
+        const run = async (action) => {
+          if (!window.confirm(draftPaymentConfirmText(d, action))) return;
+          const fn = action === "submit" ? api && api.submitDraftPayment : api && api.deleteDraftPayment;
+          if (!fn) return;
+          row.querySelectorAll("button").forEach((b) => (b.disabled = true));
+          status.className = "method-panel-status";
+          status.textContent = action === "submit" ? "Submitting…" : "Deleting…";
+          const res = await fn(d.name).catch((e) => ({ ok: false, reason: String(e && e.message ? e.message : e) }));
+          if (!res || !res.ok) {
+            row.querySelectorAll("button").forEach((b) => (b.disabled = false));
+            status.className = "method-panel-status err";
+            status.textContent = (res && res.reason) || `Could not ${action} ${d.name}.`;
+            return;
+          }
+          await reloadBills();
+        };
+        act("Submit", "btn-primary", "draft-payment-submit", "Post this payment. Its bills drop off the board.", () => run("submit"));
+        act("Delete", "btn-danger", "draft-payment-delete", "Remove this draft. Nothing was posted, so no ledger changes.", () => run("delete"));
+        row.appendChild(status);
+        list.appendChild(row);
+      }
+    }
+
     async function reloadBills() {
       if (!api || !api.getOutstandingBills) return;
       const res = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
       allBills = (res && res.ok && res.bills) || [];
       if (!res || !res.ok) showError((res && res.reason) || "Could not reload outstanding bills.");
       await loadRelinkReviews();
+      await loadDraftPayments();
       render();
     }
 
     async function init() {
+      if (api && api.getNumberLead) numberLead = normalizeNumberLead(await api.getNumberLead().catch(() => numberLead));
+      paintNumberLeadButton();
       buildMethodFeeInputs();
       buildTermModalOptions();
       prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);
@@ -3693,6 +3846,7 @@
         if (again && again.ok) allBills = again.bills || [];
       }
       await loadRelinkReviews();
+      await loadDraftPayments();
       render();
     }
 

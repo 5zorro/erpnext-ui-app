@@ -8,6 +8,14 @@ import { formatUsAddressBlock } from "./address-format.js";
 /** @typedef {"billing"|"ship_from"|"ship_to"} AddressRole */
 
 /**
+ * Where a company's default ship-to is kept: an Address linked to the Company with "Preferred
+ * Shipping Address" ticked (ERPNext's get_billing_shipping_address fills a new Bill / PO from it).
+ * The list filter rides as route_options; saving an Address with a Company link sets
+ * is_your_company_address itself (erpnext/accounts/custom/address.py update_company_address).
+ */
+export const COMPANY_ADDRESS_LIST_ROUTE = "/app/address?is_your_company_address=1";
+
+/**
  * @typedef {{
  *   role: AddressRole,
  *   displayField: string,
@@ -16,6 +24,7 @@ import { formatUsAddressBlock } from "./address-format.js";
  *   party?: "supplier"|"company"|"customer",
  *   partyWhenCustomer?: "customer",
  *   title?: string,
+ *   hint?: string,
  *   pickable: boolean,
  * }} AddressRoleMeta
  */
@@ -48,6 +57,12 @@ export const BILL_ADDRESS_ROLES = Object.freeze(
       label: "Ship to / receiving address",
       party: "company",
       title: "Pick ship-to / receiving address (company or warehouse)",
+      // A Purchase Invoice has no Customer field, so Vanilla's own Ship To query offers only company
+      // addresses (buying.js set_query). Drop ship lives on the Purchase Order (5zorro 2026-10-01).
+      hint:
+        "Drop ship? ERPNext keeps the customer's ship-to on the Purchase Order, not the Bill. " +
+        "Set Customer (drop ship) inside the PO's Ship to, then bill from that PO (Select PO / source) " +
+        "and its address comes along. A NIC bill (no PO) can only ship to a company or warehouse address.",
       pickable: true,
     },
   ]),

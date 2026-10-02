@@ -9,6 +9,9 @@ import {
   withEmptySearchActions,
   isCreateSupplierLinkAction,
   isCreatePaymentTermsLinkAction,
+  isCreateItemLinkAction,
+  itemCreateRoute,
+  LINK_ACTION_CREATE_ITEM,
   LINK_ACTION_CREATE_SUPPLIER,
   LINK_ACTION_CREATE_PAYMENT_TERMS,
   PAYMENT_TERMS_TEMPLATE_DOCTYPE,
@@ -102,6 +105,44 @@ describe("withEmptySearchActions", () => {
   it("leaves non-empty and other doctypes alone", () => {
     const rows = [{ value: "A", description: "A" }];
     assert.deepEqual(withEmptySearchActions(rows, "Supplier"), rows);
-    assert.deepEqual(withEmptySearchActions([], "Item"), []);
+    assert.deepEqual(withEmptySearchActions(rows, "Item"), rows);
+    assert.deepEqual(withEmptySearchActions([], "Warehouse"), []);
+  });
+
+  // 5zorro 2026-09-30, DF-01 on a blank bench: "No matches for WIDGET" and no way forward.
+  it("offers Create Item when Item search is empty", () => {
+    const out = withEmptySearchActions([], "Item");
+    assert.equal(out.length, 1);
+    assert.equal(out[0].value, LINK_ACTION_CREATE_ITEM);
+    assert.equal(isCreateItemLinkAction(out[0]), true);
+    assert.equal(isCreateItemLinkAction(LINK_ACTION_CREATE_ITEM), true);
+    assert.equal(isCreateSupplierLinkAction(out[0]), false);
+    assert.match(linkOptionClassNames(out[0]), /link-action/);
+    assert.match(linkOptionLabel(out[0]), /create Item/i);
+  });
+
+  it("never lets a create action through the client-side refine", () => {
+    const out = filterLinkOptions(withEmptySearchActions([], "Item"), "item");
+    assert.deepEqual(out, []);
+  });
+});
+
+describe("itemCreateRoute", () => {
+  it("carries what was typed as the item code and name", () => {
+    const route = itemCreateRoute("  WIDGET A ");
+    assert.equal(route.split("?")[0], "/app/item/new");
+    const q = new URLSearchParams(route.split("?")[1]);
+    assert.equal(q.get("item_code"), "WIDGET A");
+    assert.equal(q.get("item_name"), "WIDGET A");
+  });
+
+  it("escapes characters that would break the address", () => {
+    const q = new URLSearchParams(itemCreateRoute("A&B=C #1").split("?")[1]);
+    assert.equal(q.get("item_code"), "A&B=C #1");
+  });
+
+  it("opens a bare new Item when nothing was typed", () => {
+    assert.equal(itemCreateRoute(""), "/app/item/new");
+    assert.equal(itemCreateRoute(null), "/app/item/new");
   });
 });

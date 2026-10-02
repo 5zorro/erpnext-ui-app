@@ -15,6 +15,9 @@ import {
 } from "../src/sample-data/dogfood-ap-sources.js";
 import { renderDogfoodSourceHtml } from "../src/sample-data/render-dogfood-html.js";
 
+
+/** The four-paper A/R walk (estimate → order → invoice → payment); other A/R papers stand alone. */
+const AR_FLOW_IDS = ["DF-18", "DF-19", "DF-20", "DF-21"];
 describe("dogfood AP sources", () => {
   it("covers OI-103 scenarios 1–8 at least once", () => {
     const hit = new Set(
@@ -129,11 +132,53 @@ describe("the dogfood catalogue is well formed", () => {
     assert.equal(sourceOi({}), "");
   });
 
-  it("the three sales-side scenarios target the three sales doctypes", () => {
+  it("the sales side walks the whole A/R flow: estimate, order, invoice, payment received", () => {
     assert.deepEqual(
-      DOGFOOD_AR_SOURCES.map((d) => sourceTarget(d)),
-      ["Quotation", "Sales Order", "Sales Invoice"],
+      DOGFOOD_AR_SOURCES.filter((d) => AR_FLOW_IDS.includes(d.id)).map((d) => sourceTarget(d)),
+      ["Quotation", "Sales Order", "Sales Invoice", "Payment Entry"],
     );
+  });
+
+  // 5zorro 2026-10-01: drop ship, end to end. ERPNext marks drop ship on the Sales Order line only.
+  it("drop ship runs Sales Order → PO → Bill, and says where the Doc skins fall short", () => {
+    const byId = Object.fromEntries(DOGFOOD_SOURCES.map((d) => [d.id, d]));
+    assert.deepEqual(
+      ["DF-24a", "DF-24b", "DF-24c"].map((id) => byId[id] && sourceTarget(byId[id])),
+      ["Sales Order", "Purchase Order", "Purchase Invoice"],
+    );
+    for (const id of ["DF-24a", "DF-24b", "DF-24c"]) {
+      assert.ok(byId[id].expect && byId[id].checks.length, `${id} needs expect + checks`);
+    }
+    assert.match(byId["DF-24a"].dogfoodHint, /Supplier delivers to Customer/);
+    assert.deepEqual(byId["DF-24c"].poNos, [byId["DF-24b"].docNo]);
+  });
+
+  // 5zorro 2026-09-26: "add them as paper… so that i hit them when i go through the source".
+  it("every A/R skin and both date fixes have paper, and each says what to check after", () => {
+    const byId = Object.fromEntries(DOGFOOD_SOURCES.map((d) => [d.id, d]));
+    for (const id of ["DF-18", "DF-19", "DF-20", "DF-21", "DF-22", "DF-23"]) {
+      assert.ok(byId[id], `${id} missing`);
+      assert.ok(Array.isArray(byId[id].checks) && byId[id].checks.length, `${id} has no checks`);
+    }
+    // The remittance depends on DF-20's invoice, found by the customer's number.
+    assert.match(byId["DF-21"].dogfoodHint, /DF-20/);
+    assert.deepEqual(byId["DF-21"].poNos, ["CPO-88120"]);
+    assert.equal(sourceGrandTotal(byId["DF-21"]), 860);
+    assert.equal(sourceSubtotal(byId["DF-20"]), 885, "DF-21's check is written against DF-20's $885.00");
+    // The date papers name the posting date as the thing to look at.
+    for (const id of ["DF-22", "DF-23"]) assert.ok(byId[id].checks.some((c) => /Posting Date/.test(c)), id);
+    // The click-throughs ride on papers where that screen is already open.
+    const all = DOGFOOD_SOURCES.flatMap((d) => d.checks || []).join("\n");
+    for (const re of [/Hatch/, /Find Payments…/, /Show 200 more/, /Clear search/, /Customers reads Estimates/]) {
+      assert.match(all, re);
+    }
+  });
+
+  it("the sales papers name what the skins cannot do yet, so it is done in Vanilla", () => {
+    for (const id of ["DF-18", "DF-19", "DF-20"]) {
+      const d = DOGFOOD_SOURCES.find((x) => x.id === id);
+      assert.ok(d.knownGaps && d.knownGaps.length, `${id} has no known gaps`);
+    }
   });
 
   // 🔴 DF-17 is the one that stops a bill being paid twice — the residue P1's own amend creates.
@@ -157,7 +202,7 @@ describe("the dogfood catalogue is well formed", () => {
 
 describe("renderDogfoodSourceHtml — the sales side", () => {
   it("titles each new kind as the paper a person would recognise", () => {
-    const titles = DOGFOOD_AR_SOURCES.map((d) => {
+    const titles = DOGFOOD_AR_SOURCES.filter((d) => AR_FLOW_IDS.includes(d.id)).map((d) => {
       const m = /<h1>([^<]*)<\/h1>/.exec(renderDogfoodSourceHtml(d));
       return m && m[1];
     });
@@ -165,6 +210,7 @@ describe("renderDogfoodSourceHtml — the sales side", () => {
       "Request for Quote",
       "Customer Purchase Order",
       "Shipping Notice / Billing Instruction",
+      "Remittance Advice",
     ]);
   });
 
@@ -192,5 +238,23 @@ describe("renderDogfoodSourceHtml — the sales side", () => {
       assert.match(html, /<!DOCTYPE html>/);
       assert.match(html, new RegExp(d.docNo));
     }
+  });
+});
+
+describe("renderDogfoodSourceHtml — checks and known gaps", () => {
+  it("prints the checks as tick boxes and the gaps on the banner", () => {
+    const html = renderDogfoodSourceHtml(DOGFOOD_SOURCES.find((d) => d.id === "DF-20"));
+    assert.match(html, /<h2>Then check<\/h2>/);
+    assert.match(html, /☐/);
+    const banner = html.slice(html.indexOf('<header class="banner">'), html.indexOf("</header>"));
+    assert.match(banner, /Known gap today/);
+    assert.match(banner, /Create › Sales Invoice/);
+  });
+
+  it("prints neither block on a paper that has none, and a remittance totals as a check", () => {
+    const plain = renderDogfoodSourceHtml(DOGFOOD_SOURCES.find((d) => d.id === "DF-02"));
+    assert.doesNotMatch(plain, /Then check|Known gap/);
+    const rem = renderDogfoodSourceHtml(DOGFOOD_SOURCES.find((d) => d.id === "DF-21"));
+    assert.match(rem, /Check amount<\/span><span>\$860\.00/);
   });
 });

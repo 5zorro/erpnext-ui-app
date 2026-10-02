@@ -744,6 +744,9 @@ export function isWritableBillHeaderField(field) {
   return (
     field === "is_paid" ||
     field === "is_return" ||
+    // DF-01 R: "receive with this bill" — ERPNext's Update Stock and the warehouse it receives into.
+    field === "update_stock" ||
+    field === "set_warehouse" ||
     field === "mode_of_payment" ||
     field === "cash_bank_account" ||
     field === "paid_amount" ||
