@@ -25,7 +25,7 @@ describe("doc-number-pref (OI-170, DF-01 E)", () => {
     assert.equal(theirNumberFor("purchase-invoice").field, "bill_no");
     assert.equal(theirNumberFor("purchase_order").field, "title");
     assert.equal(theirNumberFor("Purchase Receipt").field, "lr_no");
-    assert.equal(theirNumberFor("sales-order").field, "po_no");
+    assert.equal(theirNumberFor("sales-order"), null, "a Sales Order is its own reference");
     assert.equal(theirNumberFor("quotation"), null);
   });
 
@@ -64,5 +64,21 @@ describe("doc-number-pref (OI-170, DF-01 E)", () => {
     assert.equal(numberLeadButtonLabel("purchase-invoice", "theirs"), "No.: Supplier No");
     assert.equal(numberLeadButtonLabel("purchase-order", "theirs"), "No.: Logbook PO#");
     assert.equal(numberLeadButtonLabel("purchase-order", "ours"), "No.: Our No");
+  });
+
+  // 5zorro 2026-10-01: on the sales side the Sales Order is the approval, as the PO is when buying.
+  it("a Sales Invoice leads with the Sales Order(s) it bills", () => {
+    const doc = {
+      name: "ACC-SINV-2026-00004",
+      po_no: "CPO-88120",
+      items: [{ sales_order: "SAL-ORD-2026-00012" }, { sales_order: "SAL-ORD-2026-00012" }, { sales_order: "" }],
+    };
+    const n = docNumbers("sales-invoice", doc, "theirs");
+    assert.deepEqual(n.primary, { label: "Sales Order", value: "SAL-ORD-2026-00012" });
+    assert.equal(n.secondary.value, "ACC-SINV-2026-00004");
+    assert.equal(numberLeadButtonLabel("sales-invoice", "theirs"), "No.: Sales Order");
+    const two = docNumbers("sales-invoice", { name: "X", items: [{ sales_order: "A" }, { sales_order: "B" }] }, "theirs");
+    assert.equal(two.primary.value, "A, B");
+    assert.equal(docNumbers("sales-invoice", { name: "X", items: [] }, "theirs").primary.value, "X");
   });
 });
