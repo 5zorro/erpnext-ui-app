@@ -25,6 +25,10 @@ export function linkedSourcePeekRoute(kind, name) {
   if (k === "sales-order" || k === "so") {
     return `/app/sales-order/${encodeURIComponent(n)}`;
   }
+  // The Bill's Applied payments rows (5zorro 2026-09-30): reach a draft payment to submit or delete it.
+  if (k === "payment-entry" || k === "pe") {
+    return `/app/payment-entry/${encodeURIComponent(n)}`;
+  }
   return null;
 }
 
@@ -38,7 +42,8 @@ export function canSoftPeekLinkedSourceRoute(route) {
     r.startsWith("/app/purchase-order/") ||
     r.startsWith("/app/purchase-receipt/") ||
     r.startsWith("/app/purchase-invoice/") ||
-    r.startsWith("/app/sales-order/")
+    r.startsWith("/app/sales-order/") ||
+    r.startsWith("/app/payment-entry/")
   );
 }
 
@@ -55,5 +60,6 @@ export function linkedSourcePeekKindLabel(kind) {
   if (k === "purchase-receipt" || k === "pr" || k === "item-receipt") return "Item Receipt";
   if (k === "purchase-invoice" || k === "bill") return "Bill";
   if (k === "sales-order" || k === "so") return "Sales Order";
+  if (k === "payment-entry" || k === "pe") return "Payment";
   return "source document";
 }

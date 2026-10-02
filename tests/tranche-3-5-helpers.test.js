@@ -38,6 +38,14 @@ describe("source-doc-peek", () => {
     assert.equal(canSoftPeekLinkedSourceRoute("/app/sales-invoice/SI-1"), false);
   });
 
+  it("peeks a Bill's applied payment, draft or submitted (5zorro 2026-09-30)", () => {
+    const route = linkedSourcePeekRoute("payment-entry", "ACC-PAY-2026-00001");
+    assert.equal(route, "/app/payment-entry/ACC-PAY-2026-00001");
+    assert.equal(canSoftPeekLinkedSourceRoute(route), true);
+    assert.equal(linkedSourcePeekKindLabel("payment-entry"), "Payment");
+    assert.equal(linkedSourcePeekRoute("payment-entry", " "), null);
+  });
+
   it("linkedSourcePeekKindLabel names PO, IR, Bill, Sales Order", () => {
     assert.equal(linkedSourcePeekKindLabel("purchase-order"), "Purchase Order");
     assert.equal(linkedSourcePeekKindLabel("purchase-receipt"), "Item Receipt");

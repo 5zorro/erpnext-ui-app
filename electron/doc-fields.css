@@ -11,6 +11,11 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto
 
 .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
 
+/* Title + File / Navigate toolbar sit in the same column as .wrap, so their left edge lines up
+   with the document card at every window width (5zorro 2026-09-30: flush-left chrome over a
+   centred card jumped around as the window resized). Same box model as .wrap on purpose. */
+.doc-chrome { max-width: 1100px; margin: 0 auto; padding: 12px 18px 0; }
+
 .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 
 .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
@@ -433,6 +438,16 @@ td.cell-wrap > .link-wrap {
 td.cell-wrap:focus-within > input,
 td.cell-wrap:focus-within > .link-wrap {
   opacity: 1;
+}
+
+/* While the editor shows, the resting text must not. The input's white fill used to hide it, but a
+   washed row (tr[data-wash-source]) makes inputs transparent and the two layers read as doubled,
+   slightly offset text (5zorro 2026-09-30). `visibility`, not `display`: the text still sizes the row. */
+td.cell-wrap:focus-within > .cell-text {
+  visibility: hidden;
+}
+[data-cell-mode="nav"] td.cell-wrap:focus-within > .cell-text {
+  visibility: visible;
 }
 
 /* Nav mode keeps the wrapped text readable — you are moving, not typing. */
