@@ -68,6 +68,8 @@ export function billApiFromErpDoc(api) {
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
     softPeekRoute: (route) => api.softPeekRoute(route || ""),
+    getNumberLead: () => (api.getNumberLead ? api.getNumberLead() : Promise.resolve("theirs")),
+    setNumberLead: (lead) => (api.setNumberLead ? api.setNumberLead(lead) : Promise.resolve(lead)),
     logNav: (event, detail) =>
       api.logNav ? api.logNav(event, detail) : undefined,
     // The page calls this one `navDebug` and the preload calls it `logNav`. Translating names is

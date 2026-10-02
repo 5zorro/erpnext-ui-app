@@ -40,6 +40,17 @@
   /* background: role wash via doc-wash.css when html[data-doc-role] is set */
   background: #f8fafc;
 }
+.doc-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+}
+.doc-ident[hidden] { display: none; }
+.doc-ident-secondary {
+  font-size: 12px;
+  color: #64748b;
+}
 .tb-group-label {
   font-size: 10px;
   font-weight: 700;

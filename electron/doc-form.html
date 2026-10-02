@@ -14,6 +14,8 @@
   <div id="doc-chrome" class="doc-chrome" data-testid="doc-chrome">
     <div class="banner">
       <h1 id="doc-title">Document</h1>
+      <!-- OI-170: the number this document is tracked by, the other beside it (src/doc-number-ui.js). -->
+      <span class="doc-ident" id="doc-ident" data-testid="doc-ident" hidden></span>
       <span class="doc-status-badge" id="doc-status-badge" data-testid="doc-status-badge" hidden></span>
       <span class="status" id="status" data-testid="doc-status">Loading…</span>
       <span class="banner-actions">
@@ -32,6 +34,7 @@
           title="Discard unsaved edits (reload saved document, or start fresh).">Revert unsaved changes</button>
         <button type="button" class="primary" id="btn-save" data-testid="doc-save">Save draft</button>
         <button type="button" id="btn-submit" data-testid="doc-submit">Save draft &amp; submit</button>
+        <button type="button" class="ghost" id="btn-number-lead" data-testid="doc-number-lead" tabindex="-1">No.: Supplier No</button>
       </div>
       <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
         <span class="tb-group-label">Navigate</span>

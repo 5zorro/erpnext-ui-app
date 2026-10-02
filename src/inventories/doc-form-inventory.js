@@ -137,6 +137,7 @@ const DOC_FORM_SHARED = Object.freeze([
   { id: "doc-refresh", kind: "button", modeSwitch: "none" },
   { id: "doc-vanilla", kind: "button", modeSwitch: "none" },
   { id: "doc-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
+  { id: "doc-number-lead", kind: "button", modeSwitch: "none", notes: "OI-170 which number leads (theirs / ours), app-wide" },
   // Assumptions + lines chrome
   { id: "doc-assumptions", kind: "disclosure", modeSwitch: "none", notes: "details/summary" },
   {

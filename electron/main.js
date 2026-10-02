@@ -98,6 +98,7 @@ import {
   relinkProvenanceNote,
 } from "../src/payment-relink.js";
 import { normalizeDraftPayments } from "../src/payment-drafts.js";
+import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -370,6 +371,8 @@ let lensPrefs = {};
 let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
+/** OI-170: which number leads — theirs or ours. One app-wide setting (DF-01 E). */
+let docNumberPrefs = mergeNumberPrefs(null);
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -654,6 +657,9 @@ function docWashPrefsPath() {
 function paymentDirectionPrefsPath() {
   return path.join(app.getPath("userData"), "payment-direction-prefs.json");
 }
+function docNumberPrefsPath() {
+  return path.join(app.getPath("userData"), "doc-number-prefs.json");
+}
 /**
  * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
  * spreadsheets but only store as a csv?"*). The stored file is therefore the same artefact the
@@ -716,6 +722,11 @@ function loadPrefs() {
     docWashPrefs = mergeDocWashPrefs(JSON.parse(fs.readFileSync(docWashPrefsPath(), "utf8")));
   } catch {
     docWashPrefs = mergeDocWashPrefs(null);
+  }
+  try {
+    docNumberPrefs = mergeNumberPrefs(JSON.parse(fs.readFileSync(docNumberPrefsPath(), "utf8")));
+  } catch {
+    docNumberPrefs = mergeNumberPrefs(null);
   }
 }
 
@@ -10325,6 +10336,27 @@ async function actOnDraftPayment(action, name) {
 }
 
 ipcMain.handle("get-draft-payments", async () => fetchDraftPayments());
+
+ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
+/**
+ * Set it, save it, and tell every open shell page — a toggle on the Bill must not leave the
+ * payment board (already loaded) leading with the other number.
+ */
+ipcMain.handle("set-doc-number-lead", async (_e, lead) => {
+  docNumberPrefs = { lead: normalizeNumberLead(lead) };
+  try {
+    fs.writeFileSync(docNumberPrefsPath(), JSON.stringify(docNumberPrefs));
+  } catch {
+    /* ignore */
+  }
+  const js = `window.dispatchEvent(new CustomEvent("doc-number-lead", { detail: ${JSON.stringify(docNumberPrefs.lead)} }))`;
+  for (const v of [docForm, payOutstanding, paymentDoc]) {
+    if (v && !v.webContents.isDestroyed() && (v.webContents.getURL() || "").startsWith("file:")) {
+      v.webContents.executeJavaScript(js).catch(() => {});
+    }
+  }
+  return docNumberPrefs.lead;
+});
 ipcMain.handle("submit-draft-payment", async (_e, name) => actOnDraftPayment("submit", name));
 ipcMain.handle("delete-draft-payment", async (_e, name) => actOnDraftPayment("delete", name));
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
