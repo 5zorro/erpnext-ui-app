@@ -589,6 +589,15 @@ the payment board.
 - Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
 
 ### Waiting on 5zorro
+### J — just-in-time Item Receipt from Bill lines (parked 2026-10-01)
+Wanted: "received on / received by" per bill line, a receipt made only when filled. It needs custom
+fields (nowhere on a Purchase Invoice line to keep them, no "received by" on a receipt), which the
+core app does not impose. **Parked as an opt-in module**; 5zorro files the GitHub issue (drafted).
+Decided for when it is built: the receipt is made **on bill Submit** with ERPNext's own
+`make_purchase_receipt` (`args.filtered_children`, one receipt per received-on + received-by group,
+dated the day received), and **Received by is a link to a system User**. A second issue covers the
+PO skin's use of `terms` as its remarks field (prints, copies onto the bill) until frappe/erpnext#59413.
+
 ### T — line tables take room only when they need it (built 2026-10-01; replaces `7ab1c2f`'s full bleed)
 Agreed definition (5zorro 2026-10-01): the table sits on the card. Each column's width is its widest
 value (or header), capped; Description is the one column that wraps and takes what is left, so it
@@ -633,4 +642,5 @@ Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); 
 | DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
 | DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
+| DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
