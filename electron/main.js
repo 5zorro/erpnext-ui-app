@@ -1987,7 +1987,10 @@ async function ensureErpMatchesShellRoute(appPath) {
  */
 async function softPeekErp(route) {
   const path = normalizeAppRoute(route, ERP_BASE).path || route;
-  navDebug("soft-peek", path);
+  // A query (e.g. `/app/item/new?item_code=…`) prefills the new form: it rides to Frappe as
+  // route_options on the in-SPA hop, or as the address's search on a full load.
+  const search = String(route || "").split("#")[0].split("?")[1] || "";
+  navDebug("soft-peek", search ? `${path}?${search}` : path);
   try {
     if (surfaceMode === "doc") await snapshotDocForm();
     else if (routeInfo(currentRoute || "", ERP_BASE).doctype === "purchase-invoice") {
@@ -2004,7 +2007,7 @@ async function softPeekErp(route) {
   }
   parkDocSurfaceIfNeeded();
   notePeekParentAndChild(path, currentUnsaved);
-  showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false });
+  showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false, search });
   armSoftPeekEscHook(true).catch(() => {});
   sendHistory();
 }
@@ -2309,6 +2312,13 @@ async function erpSoftSetRoute(appPath, opts = {}) {
   const parts = appRouteParts(appPath, ERP_BASE);
   if (!parts.length) return { ok: false, reason: "no-parts" };
   const abandonUnsaved = !!opts.abandonUnsaved;
+  // frappe.set_route cannot take a query string, but the router merges an existing
+  // frappe.route_options into the next route (router.js set_route_options_from_url), and
+  // get_new_doc copies them onto a new document — the same thing the address's ?search does.
+  const routeOptions =
+    typeof opts.search === "string" && opts.search
+      ? Object.fromEntries(new URLSearchParams(opts.search.replace(/^\?/, "")))
+      : null;
   try {
     const result = await erp.webContents.executeJavaScript(
       `(async () => {
@@ -2326,6 +2336,7 @@ async function erpSoftSetRoute(appPath, opts = {}) {
               : ""
           }
           const parts = ${JSON.stringify(parts)};
+          ${routeOptions ? `frappe.route_options = Object.assign(frappe.route_options || {}, ${JSON.stringify(routeOptions)});` : ""}
           await frappe.set_route(...parts);
           return { ok: true };
         } catch (e) {
@@ -4365,7 +4376,10 @@ function showErp(route = "/desk", opts = {}) {
     };
 
     if (trySoft) {
-      erpSoftSetRoute(info.path || path, { abandonUnsaved: !!opts.abandonUnsaved }).then((r) => {
+      erpSoftSetRoute(info.path || path, {
+        abandonUnsaved: !!opts.abandonUnsaved,
+        search: opts.search,
+      }).then((r) => {
         if (r && r.ok) {
           trackNav(target, { fromBrowser: false });
           afterNav();

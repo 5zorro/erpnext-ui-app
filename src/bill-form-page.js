@@ -2677,7 +2677,7 @@ export async function bootBillFormPage(api) {
       el.appliedPaymentsBody.innerHTML = rows
         .map(
           (r) => `<tr>
-            <td>${escapeHtml(r.paymentEntry)}</td>
+            <td>${escapeHtml(r.paymentEntry)}${appliedPaymentPeekHtml(r.paymentEntry)}</td>
             <td>${escapeHtml(r.postingDate)}</td>
             <td>${escapeHtml(r.modeOfPayment)}</td>
             <td class="num">${formatUsdAmountHtml(r.allocatedAmount) || escapeHtml(String(r.allocatedAmount))}</td>
@@ -2688,6 +2688,15 @@ export async function bootBillFormPage(api) {
     }
   }
   
+  /** Eye button after a payment's name — soft-peeks it in Vanilla (Esc returns to the Bill). */
+  function appliedPaymentPeekHtml(name) {
+    const route = linkedSourcePeekRoute("payment-entry", name);
+    if (!route) return "";
+    return ` <button type="button" class="applied-payment-peek" tabindex="-1" data-peek-route="${escapeHtml(route)}"
+      data-testid="bill-applied-payment-peek" title="Peek this payment (Esc returns to Bill)"
+      aria-label="Peek payment ${escapeHtml(name)}">${uiIconHtml("eye")}</button>`;
+  }
+
   function freezeTaxDeletesForAllocModal(frozen) {
     allocateChargeModalOpen = !!frozen;
     if (!el.taxesBody) return;
@@ -4794,7 +4803,17 @@ export async function bootBillFormPage(api) {
       }
     };
   }
-  
+
+  if (el.appliedPaymentsBody) {
+    // Delegated: the rows are repainted on every load.
+    el.appliedPaymentsBody.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest("[data-peek-route]") : null;
+      if (!btn) return;
+      ev.preventDefault();
+      void requestLinkedSourcePeek(btn.getAttribute("data-peek-route") || "", "payment-entry");
+    });
+  }
+
   el.vendor.addEventListener("change", () => onHeaderBlur(el.vendor));
   el.terms.addEventListener("change", () => onHeaderBlur(el.terms));
   el.date.addEventListener("change", () => onHeaderBlur(el.date));
