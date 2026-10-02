@@ -829,6 +829,105 @@ export const DOGFOOD_SOURCES = [
       { sku: "SAMPLE-SKU-02", description: "Sample Item 02", qty: 12, rate: 18.5 },
     ],
   },
+  // DF-24: drop ship (5zorro 2026-10-01). ERPNext marks a line drop-ship only on the Sales Order
+  // ("Supplier delivers to Customer"); the PO made from it inherits that read-only, and a Bill line
+  // from such a PO line skips the Stock Received But Not Billed swap (purchase_invoice.py
+  // set_expense_account). The PO skin's "Customer (drop ship)" sets only the address, not the lines.
+  {
+    id: "DF-24a",
+    scenario: "Drop ship, step 1 — the customer orders something we have the vendor ship straight to them",
+    kind: "customer_po",
+    template: "ack",
+    dogfoodHint:
+      "Enter as a Sales Order. The line is drop-ship: tick ‘Supplier delivers to Customer’ and pick SUMMIT PUMP SUPPLY as its Supplier — ERPNext only knows drop ship from that tick on the Sales Order line. Then, from the submitted Sales Order, Create › Purchase Order: that PO is DF-24b.",
+    expect:
+      "The submitted Sales Order's line shows ‘Supplier delivers to Customer’ with SUMMIT PUMP SUPPLY, and Create › Purchase Order offers it as a drop-ship PO to the customer's address.",
+    checks: [
+      "Customer PO No.: CPO-88410 — Find Sales Orders finds it by that number.",
+      "Ship to is the Twin Falls site, not head office.",
+    ],
+    knownGaps: [
+      "The A/R Doc skins have no ‘Supplier delivers to Customer’ / Supplier column — tick them on the line in Vanilla (Open in Default-skin), then Refresh.",
+      "Ship to is read-only on the A/R skins — set the Twin Falls address in Vanilla.",
+    ],
+    vendor: {
+      legalName: "NORTHWIND FABRICATION LLC",
+      accountNo: "CPO-88410",
+      address: ["4400 Industrial Pkwy", "Boise, ID 83702"],
+    },
+    shipTo: {
+      name: "Northwind — Twin Falls Pump Station",
+      address: ["1250 Canal Rd", "Twin Falls, ID 83301"],
+    },
+    docNo: "CPO-88410",
+    docDate: "10/01/2026",
+    terms: "Net 30",
+    notes: [
+      "Ship DIRECT to the Twin Falls pump station. Do not route through your warehouse.",
+      "Our PO number CPO-88410 must appear on the invoice.",
+    ],
+    lines: [{ sku: "SAMPLE-SKU-09", description: "Sample Item 09 — drop ship", qty: 2, rate: 640 }],
+  },
+  {
+    id: "DF-24b",
+    scenario: "Drop ship, step 2 — our PO tells the vendor to ship to the customer, not to us",
+    kind: "purchase_order",
+    template: "ack",
+    dogfoodHint:
+      "Do not type this PO from scratch: it is what Create › Purchase Order on DF-24a's Sales Order makes. Open that PO in the Doc skin and compare it with this paper. Type the logbook PO# PO-DOG-4410 into PO# (logbook).",
+    expect:
+      "The PO's Ship to is the customer's Twin Falls address with Customer (drop ship) = NORTHWIND FABRICATION LLC, and its line is drop-ship (‘To be Delivered to Customer’ in Vanilla). There is nothing to receive into our warehouse.",
+    checks: [
+      "Click Ship to on the PO Doc skin: Customer (drop ship) reads NORTHWIND FABRICATION LLC and the Twin Falls address is current.",
+      "The No.: toggle in File shows PO-DOG-4410 leading, the ERPNext PO name beside it.",
+      "When the vendor confirms delivery: in Vanilla, the PO's Status › Deliver (Dropship), quantity 2; the Sales Order then reads Delivered.",
+    ],
+    knownGaps: [
+      "Marking the drop-ship line delivered is Vanilla-only (Purchase Order › Status › Deliver (Dropship)).",
+    ],
+    vendor: {
+      legalName: "SUMMIT PUMP SUPPLY",
+      address: ["77 Foundry St", "Pocatello, ID 83201"],
+    },
+    shipTo: {
+      name: "DROP SHIP — Northwind — Twin Falls Pump Station",
+      address: ["1250 Canal Rd", "Twin Falls, ID 83301"],
+    },
+    docNo: "PO-DOG-4410",
+    docDate: "10/01/2026",
+    terms: "Net 30",
+    notes: ["DROP SHIP to our customer at the address above. Reference customer PO CPO-88410 on the packing slip."],
+    lines: [{ sku: "SAMPLE-SKU-09", description: "Sample Item 09 — drop ship", qty: 2, rate: 455 }],
+  },
+  {
+    id: "DF-24c",
+    scenario: "Drop ship, step 3 — the vendor bills us for goods that went straight to the customer",
+    kind: "vendor_invoice",
+    template: "grid",
+    dogfoodHint:
+      "Doc Bill → Select PO / source → PO-DOG-4410. Do not build it as a NIC bill: a Purchase Invoice has no customer field, so only a Bill made from the drop-ship PO can carry the customer's ship-to (the Bill's Ship to picker says so).",
+    expect:
+      "The Bill's Ship to is the Twin Falls address carried from the PO, and Submit shows no ‘Expense Head Changed’ message — a drop-ship line is not waiting on a receipt into our stock, so it is not parked in Stock Received But Not Billed.",
+    checks: [
+      "Ship to reads the Twin Falls address without picking it.",
+      "Submit: no Expense Head Changed popup, and no ‘receive with this bill?’ question either.",
+      "Now try the same lines as a NIC bill (no PO), then Revert: the Ship to picker offers only company addresses and explains why.",
+    ],
+    vendor: {
+      legalName: "SUMMIT PUMP SUPPLY",
+      accountNo: "SPS-NW-118",
+      address: ["77 Foundry St", "Pocatello, ID 83201"],
+    },
+    shipTo: {
+      name: "Northwind — Twin Falls Pump Station (drop ship)",
+      address: ["1250 Canal Rd", "Twin Falls, ID 83301"],
+    },
+    docNo: "SPS-30418",
+    docDate: "10/08/2026",
+    poNos: ["PO-DOG-4410"],
+    terms: "Net 30",
+    lines: [{ sku: "SAMPLE-SKU-09", description: "Sample Item 09 — drop ship", qty: 2, rate: 455 }],
+  },
 ];
 
 /**
