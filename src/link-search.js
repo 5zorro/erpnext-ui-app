@@ -11,6 +11,8 @@ import { vendorActivitySuffix } from "./vendor-activity.js";
 /** Sentinel value: empty Supplier search → open Vanilla “new Supplier”. */
 export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
 export const LINK_ACTION_CREATE_PROJECT = "__doc_create_project__";
+/** Empty Item search → soft-peek Vanilla "new Item", item code prefilled with what was typed. */
+export const LINK_ACTION_CREATE_ITEM = "__doc_create_item__";
 /** Soft-peek Vanilla Payment Terms Template form (shared Bill · PO). */
 export const LINK_ACTION_CREATE_PAYMENT_TERMS = "__doc_create_payment_terms__";
 export const PAYMENT_TERMS_TEMPLATE_DOCTYPE = "Payment Terms Template";
@@ -72,6 +74,15 @@ export function withEmptySearchActions(rows, doctype) {
       },
     ];
   }
+  if (doctype === "Item") {
+    return [
+      {
+        value: LINK_ACTION_CREATE_ITEM,
+        description: "No items found — create Item…",
+        action: "create_item",
+      },
+    ];
+  }
   if (doctype === "Project") {
     return [
       {
@@ -118,6 +129,30 @@ export function isCreateProjectLinkAction(optOrValue) {
 }
 
 /**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreateItemLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_ITEM;
+  return optOrValue.value === LINK_ACTION_CREATE_ITEM || optOrValue.action === "create_item";
+}
+
+/**
+ * Vanilla "new Item" route carrying what the clerk typed. Frappe copies query parameters into
+ * `frappe.route_options`, and `get_new_doc` (create_new.js) writes those onto the new document —
+ * item_code is the Item's name field (`autoname: field:item_code`), item_name its title.
+ * @param {string|null|undefined} typed
+ * @returns {string}
+ */
+export function itemCreateRoute(typed) {
+  const code = String(typed ?? "").trim();
+  if (!code) return "/app/item/new";
+  const q = new URLSearchParams({ item_code: code, item_name: code });
+  return `/app/item/new?${q.toString()}`;
+}
+
+/**
  * Client-side refine (when ERP returns a broad list or for offline fixtures).
  * @param {LinkOption[]} options
  * @param {string} query
@@ -134,7 +169,12 @@ export function filterLinkOptions(options, query, opts = {}) {
   const scored = [];
   for (const o of list) {
     if (!o || !o.value) continue;
-    if (isCreateSupplierLinkAction(o) || isCreatePaymentTermsLinkAction(o) || isCreateProjectLinkAction(o)) {
+    if (
+      isCreateSupplierLinkAction(o) ||
+      isCreatePaymentTermsLinkAction(o) ||
+      isCreateProjectLinkAction(o) ||
+      isCreateItemLinkAction(o)
+    ) {
       continue;
     }
     const hay = `${o.value} ${o.description || ""}`.toLowerCase();
@@ -155,6 +195,7 @@ export function linkOptionLabel(opt) {
   if (isCreateSupplierLinkAction(opt)) return opt.description || "Go to Vendor add…";
   if (isCreatePaymentTermsLinkAction(opt)) return opt.description || "Create new Payment Terms…";
   if (isCreateProjectLinkAction(opt)) return opt.description || "Create Project…";
+  if (isCreateItemLinkAction(opt)) return opt.description || "Create Item…";
   let label = opt.description || opt.value;
   if (opt.description && opt.description !== opt.value) {
     label = `${opt.description} (${opt.value})`;
@@ -177,7 +218,8 @@ export function linkOptionClassNames(opt) {
   if (
     isCreateSupplierLinkAction(opt) ||
     isCreatePaymentTermsLinkAction(opt) ||
-    isCreateProjectLinkAction(opt)
+    isCreateProjectLinkAction(opt) ||
+    isCreateItemLinkAction(opt)
   ) {
     bits.push("link-action");
   }

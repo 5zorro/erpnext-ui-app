@@ -27,6 +27,7 @@
  *   focusSurface?: () => void,
  *   onApply: (linkField: string, addressName: string) => void|Promise<void>,
  *   onEditVendor?: () => void|Promise<void>,
+ *   onManageCompanyAddresses?: () => void|Promise<void>,
  *   customerDropShip?: {
  *     label: string,
  *     hint?: string,
@@ -190,6 +191,7 @@ export function showAddressPickerModal(opts) {
   backdrop.innerHTML = `
     <div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="addr-modal-title">
       <h2 id="addr-modal-title">${escapeHtml(meta.title || "Pick address")}</h2>
+      ${meta.hint ? `<p class="addr-modal-hint" data-testid="doc-addr-hint">${escapeHtml(meta.hint)}</p>` : ""}
       ${customerBlock}
       <div class="addr-modal-list">${listHtml}</div>
       <div class="addr-modal-actions">
@@ -202,6 +204,16 @@ export function showAddressPickerModal(opts) {
           ? `<div class="addr-modal-foot">
         <button type="button" data-addr-edit-vendor data-testid="${editVendorTestId}">
           Discard draft and edit available addresses for this vendor
+        </button>
+      </div>`
+          : ""
+      }
+      ${
+        meta.party === "company" && meta.role === "ship_to" && opts.onManageCompanyAddresses
+          ? `<div class="addr-modal-foot">
+        <button type="button" data-addr-manage-company data-testid="doc-addr-manage-company"
+          title="Opens the company's addresses in Vanilla (Esc returns here). Tick Preferred Shipping Address on the one new documents should ship to.">
+          Set the company's default ship-to address…
         </button>
       </div>`
           : ""
@@ -285,6 +297,11 @@ export function showAddressPickerModal(opts) {
   editVendorBtn?.addEventListener("click", () => {
     closeAddressPickerModal(modalId);
     void opts.onEditVendor?.();
+  });
+
+  backdrop.querySelector("[data-addr-manage-company]")?.addEventListener("click", () => {
+    closeAddressPickerModal(modalId);
+    void opts.onManageCompanyAddresses?.();
   });
 
   const focusApply = () => {

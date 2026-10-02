@@ -90,7 +90,8 @@
             <span class="credit-memo-toggle-label">Credit memo (Vendor Credit)?</span>
             <span class="credit-memo-toggle-hint">Set this before entering lines — quantities must be negative. Link it to the original Bill / Sales Order below once you know which one.</span>
           </div>
-          <button type="button" id="f-is-return" class="credit-memo-switch" data-field="is_return"
+          <!-- Click-only (5zorro 2026-09-30): Tab goes header → lines without stopping here. -->
+          <button type="button" id="f-is-return" class="credit-memo-switch" data-field="is_return" tabindex="-1"
             data-testid="bill-is-return" role="switch" aria-checked="false" aria-label="Credit memo: No">
             <span class="switch-word switch-word-no">No</span>
             <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>

@@ -11,6 +11,11 @@ html, body { margin: 0; height: 100%; font-family: system-ui, "Segoe UI", Roboto
 
 .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 18px 32px; }
 
+/* Title + File / Navigate toolbar sit in the same column as .wrap, so their left edge lines up
+   with the document card at every window width (5zorro 2026-09-30: flush-left chrome over a
+   centred card jumped around as the window resized). Same box model as .wrap on purpose. */
+.doc-chrome { max-width: 1100px; margin: 0 auto; padding: 12px 18px 0; }
+
 .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 
 .banner h1 { margin: 0; font-size: 20px; font-weight: 700; }
@@ -373,23 +378,13 @@ td.line-meta { width: 3.2rem; color: #64748b; font-variant-numeric: tabular-nums
    the items/taxes grids the document metaphor yields; it still governs the
    header, addresses, totals and notes.                                       */
 
-:root {
-  /* Set from JS (scrollbarGutterPx). 0 is correct for overlay scrollbars, and
-     is a safe fallback if the wiring never runs — the bleed just reaches the
-     scrollbar edge instead of stopping short of it. */
-  --doc-bleed-gutter: 0px;
-}
-
-/* A1 — line sections break out of the 1100px document column to the viewport.
-   Same negative-margin idiom already used by .bill-section .line-tabs.
+/* A1 (revised 5zorro 2026-10-01) — line sections sit on the card and grow to the right only when
+   their content needs it; src/item-col-resize.js growSectionToNeed sets an inline width + negative
+   right margin. The Sep-6 full bleed (100vw) stretched even a blank table to the window edges.
    Side padding stays 14px on purpose: .line-tabs' -14px pull depends on it. */
 .bill-section-lines,
 .bill-section-taxes {
   box-sizing: border-box;
-  width: calc(100vw - var(--doc-bleed-gutter));
-  margin-inline: calc(50% - 50vw + (var(--doc-bleed-gutter) / 2));
-  border-inline: none;
-  border-radius: 0;
 }
 
 /* B — cells read as wrapped text at rest; the editor overlays them on demand.
@@ -433,6 +428,16 @@ td.cell-wrap > .link-wrap {
 td.cell-wrap:focus-within > input,
 td.cell-wrap:focus-within > .link-wrap {
   opacity: 1;
+}
+
+/* While the editor shows, the resting text must not. The input's white fill used to hide it, but a
+   washed row (tr[data-wash-source]) makes inputs transparent and the two layers read as doubled,
+   slightly offset text (5zorro 2026-09-30). `visibility`, not `display`: the text still sizes the row. */
+td.cell-wrap:focus-within > .cell-text {
+  visibility: hidden;
+}
+[data-cell-mode="nav"] td.cell-wrap:focus-within > .cell-text {
+  visibility: visible;
 }
 
 /* Nav mode keeps the wrapped text readable — you are moving, not typing. */

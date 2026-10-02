@@ -125,9 +125,12 @@ import {
 } from "./doc-wash.js";
 import { wireItemImportButton } from "./item-import-ui.js";
 import { wireDocCapsUi } from "./doc-caps-ui.js";
+import { theirNumberFor } from "./doc-number-pref.js";
+import { wireDocNumberLead } from "./doc-number-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
+  COMPANY_ADDRESS_LIST_ROUTE,
 } from "./doc-address.js";
 import {
   showAddressPickerModal,
@@ -151,6 +154,8 @@ let userEdited = false;
 let docCapsOn = true;
 /** @type {{ syncCapsButton: () => void }|null} */
 let docCapsUi = null;
+/** @type {{ paint: () => void } | null} */
+let docNumberUi = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -239,7 +244,8 @@ function publishCalcHistory(payload) {
  */
 function docTrackingRef(doc) {
   if (!doc || !ui) return "";
-  const field = ui.profileId === "po" ? "title" : ui.profileId === "receipt" ? "lr_no" : "";
+  const key = ui.profileId === "po" ? "purchase-order" : ui.profileId === "receipt" ? "purchase-receipt" : "";
+  const field = theirNumberFor(key)?.field || "";
   if (!field) return "";
   const v = /** @type {Record<string, unknown>} */ (doc)[field];
   return v == null ? "" : String(v).trim();
@@ -511,6 +517,11 @@ async function openDocAddressPicker(role) {
     setStatus,
     focusSurface: () => api.focusSurface?.(),
     customerDropShip: poShipTo,
+    onManageCompanyAddresses: async () => {
+      if (!api?.softPeekRoute) return;
+      const r = await api.softPeekRoute(COMPANY_ADDRESS_LIST_ROUTE);
+      setStatus(r && r.ok === false ? r.reason || "Could not open addresses." : "Company addresses — Esc returns here.", r && r.ok === false ? "err" : "");
+    },
     onApply: async (linkField, addressName) => {
       if (!api || !linkField) return;
       setStatus(addressName ? "Setting address…" : "Clearing address…");
@@ -1161,7 +1172,7 @@ function sizeItemColumns() {
     const tableKey = itemsTableKey();
     mountColResize(table, { tableKey, onChange: sizeItemColumns });
     mountDensityControl({ table, button: document.getElementById("btn-density") });
-    autoSizeItemColumns(table, { tableKey });
+    autoSizeItemColumns(table, { tableKey, growSection: table.closest(".bill-section") });
   } catch {
     /* column sizing is presentation; never let it break a repaint */
   }
@@ -1174,7 +1185,7 @@ function sizeTaxColumns() {
     if (!table) return;
     const tableKey = taxesTableKey();
     mountColResize(table, { tableKey, onChange: sizeTaxColumns });
-    autoSizeItemColumns(table, { tableKey, sticky: false });
+    autoSizeItemColumns(table, { tableKey, sticky: false, growSection: table.closest(".bill-section") });
   } catch {
     /* ignore */
   }
@@ -2482,6 +2493,7 @@ function paint(doc, snapScratch, opts = {}) {
 
   const name = doc.name || "(new)";
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
+  if (docNumberUi) docNumberUi.paint();
   if (opts.focusVendor) {
     docCapsOn = true;
     if (docCapsUi) docCapsUi.syncCapsButton();
@@ -3051,6 +3063,16 @@ export async function bootDocFormPage(injectedApi) {
     setCapsOn: (v) => {
       docCapsOn = v;
     },
+  });
+
+  docNumberUi = wireDocNumberLead({
+    api,
+    button: document.getElementById("btn-number-lead"),
+    identEl: document.getElementById("doc-ident"),
+    getDoctypeKey: () =>
+      (ui && ui.doctypeKey) ||
+      (ui && ui.profileId === "po" ? "purchase-order" : ui && ui.profileId === "receipt" ? "purchase-receipt" : ""),
+    getDoc: () => lastDoc,
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");

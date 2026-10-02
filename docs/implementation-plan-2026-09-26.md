@@ -413,6 +413,35 @@ All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
    it; an open Doc Purchase Order (or Bill) is hatched when you return to it. **Off** clears both.
    The choice survives a restart.
 
+**The paper for all of this is in the dogfood pack** (5zorro 2026-09-26: "add them as paper… so
+that i hit them when i go through the source"). He dogfoods by typing real-looking paper under
+`npm run start:chaos` — that is the one test that finds shell↔Electron↔ERPNext gotchas, so it is
+never replaced by automation. Catalogue `src/sample-data/dogfood-ap-sources.js` (tracked);
+`npm run dogfood:ap-sources -- --pdf` writes `ops/sample-data/dogfood-sources/generated/`
+(gitignored, 27 papers + README index). Each paper can carry `checks` (tick boxes printed at the
+foot — the click-through checks above ride on the paper where that screen is already open) and
+`knownGaps` (red on the banner: do that part in Vanilla).
+
+| Paper | Covers |
+|---|---|
+| DF-01 | hatch toggle; Find Bill… → Find Bills; the peek; Open this Bill |
+| DF-06 | Find Payments… from Pay Bills and from the check page (F4) |
+| DF-16 | Find page sort, Show 200 more, remembered search across a restart, Clear search |
+| DF-18 → DF-21 | the A/R flow end to end on one customer (Northwind): Estimate → Sales Order (CPO-88120) → partial Invoice ($885, tax cleared) → a check that short-pays it by $25 and names only their PO number |
+| DF-22 / DF-23 | a Bill and a packing list typed weeks after their date — the posting date follows the typed date |
+
+### A/R skin gaps (known, marked on the paper, not built)
+
+Found while writing DF-18…21 — each is a candidate for the next A/R stage, and each paper says to
+do that part in Vanilla until it exists:
+
+- **Customer ▾ cannot create a customer** (Vendor's picker can) — new customers go through Customer Center.
+- **No customer part number column** on Estimate lines (ERPNext has `customer_item_code`).
+- **No box for the customer's RFQ number** on the Estimate.
+- **Bill to / Ship to are read-only** on the A/R skins — no address picker (the A/P skins have one).
+- **The Invoice cannot pull lines from a Sales Order** — no source picker like the Bill's Select PO; today it is Vanilla's Create › Sales Invoice, then the Document-skin tab.
+- (By design, not a gap: no void-and-amend and no Simplified seed on A/R yet.)
+
 ## Dogfood checklist (F1 + F2)
 
 1. Doc Bill → **Find Bill…** → the Find Bills mockup, cursor in *Vendor's invoice no.* Recent shows
@@ -433,9 +462,185 @@ All seven Find pages now show real documents; `find-skin-mock.js` is deleted.
    Vanilla list with Ref No. and vendor already filtered, cursor in Ref No.
 10. (F2) While on Pay Bills or a payment, nothing you do there adds stray rows to Recent.
 
+## Dogfood round 2026-09-30 — four nav/focus bugs that chained together
+
+Found from the nav incidents and focus incidents filed while starting DF-01 on the blank sandbox
+(chaos mode on, but none of these need chaos). One sequence: Vanilla Bill → make a vendor, its
+address and a payment terms template from it → Esc → New Bill → Item Receipt Doc → Doc tab back
+to the Bill.
+
+| # | Family | What broke | Cause |
+|---|---|---|---|
+| N1 | Peek stack | Esc bounced between Supplier and Address forever | Returning to the parent is read as a *new* hop from the child, and the hop rule for payment pages re-parents the stack, so parent and child swap on every Esc (`applyErpHopToPeekStack`). Also: an unsaved new Vanilla Bill never became the parent, so the tree started at the vendor |
+| N2 | Blocked unload | New Bill stayed on the Supplier page for 15 s, then the shell recorded a fake "Bill → Supplier" peek | A Frappe form with unsaved changes adds a `beforeunload` listener (`form.js` `dirty()`); Electron then **silently cancels** any page load unless `will-prevent-unload` is handled, and nothing handled it. When the shell's wait timed out it accepted the old page as a new arrival |
+| N3 | Wrong page code | After Item Receipt → Doc tab, the Bill ran on the PO/IR page code: single-pick source window, focus fell to the toolbar after it, no vendor address refresh | `doc-form.html` picks Bill vs PO/IR code once per load; `showDocForm` reloads it when the kind changes, `resumeParkedDoc` did not |
+| N4 | Stale resume | The Bill showed a vendor that wasn't on the real draft; the first edit wiped it | The park held the generic `/app/purchase-invoice/new`, so resuming it made a **fresh** draft while the skin painted the old saved copy. The "route-hold" fallback also parked a stale copy while the clerk was on Vanilla |
+
+Not a code bug: the blank site's company address is not linked to the company, so ERPNext has no
+Billing address to fill. Not proven yet: payment terms clearing the Invoice date (re-run after
+N3/N4; the skipped-write path left no breadcrumb).
+
+**Fixes (built 2026-09-30):**
+
+- **N2.** The ERP view handles `will-prevent-unload`. A pure rule (`src/erp-unload-guard.js`)
+  decides: when the shell's own unsaved-changes check passed in the last few seconds (Doc skin
+  clean, or the clerk answered the shell's prompt), the load goes through; otherwise the clerk is
+  asked, like a browser would ask — *Stay* or *Leave and discard*. Staying puts the shell back on
+  the Vanilla page it never left, cancels the pending load, and the open that asked for it stops.
+  When a navigation wait times out, the shell re-reads where the ERP view really is instead of
+  treating it as a hop.
+- **N3.** Resume reloads the doc-form page when the page code changes (same rule as
+  `showDocForm`, now one pure function in `src/doc-shell-kind.js`).
+- **N4.** A park on a generic `/new` address is resumed by the draft's own name
+  (`new-purchase-invoice-…`), which Frappe still holds in memory; resume then re-reads the live
+  form instead of painting the saved copy, and logs `doc-rebind-mismatch` if the draft is gone.
+  The "route-hold" fallback no longer parks while the clerk is on Vanilla.
+- **N4, second half (found while proving N2):** Vanilla → Doc on the draft Vanilla is showing used to
+  reload it — which, once N2 asks before a reload, would have asked the clerk to discard their own
+  typing. Now the Doc skin reads that form in place (`opensInPlace`), and typing that came along
+  counts as the clerk's for the Doc gate (`carriesClerkEdits`: a saved document that is dirty, or a
+  new draft holding a party or an item line — Frappe calls every new draft unsaved from birth).
+  First slice of museum OI-180; Doc → Vanilla does not carry yet.
+
+**Layer-3:** `e2e/scaffold-unload-resume.spec.js` — Stay, Leave, Esc-resume, Vanilla → Doc carry
+(4/4 against the blank sandbox). The full suite's 7 other failures fail the same way on the code
+before this change: they assert sample data the reinstalled sandbox does not have.
+
+**N1 — 5zorro 2026-09-30, decided and built same day.** Who is a parent, and what Recent shows.
+
+- **The page reports its own hops.** A listener on Frappe's router `change` event (it fires after
+  Frappe records the route, `router.js` `route()`) sends the shell, for each hop: where it landed, the
+  form it came from (`frappe.route_history`), whether that form had unsaved changes (`__unsaved` in
+  `locals`), and `frappe._from_link`. Peek bookkeeping is driven by that, no longer by the shell's own
+  `currentRoute` — the guess that invented the "Bill → Supplier" peek of nav incident 03:52.
+  Pure part: `src/erp-route-hop.js` (`describeRouteHop`, serialized into the page like
+  `shouldEscDismissSoftPeek`); preload `erpUiShell.noteRouteHop` → IPC `erp-route-hop`.
+- **Parent rule (5zorro: "sounds good"):** the form Frappe itself names as the caller — a Link
+  field's *Create a new …* sets `_from_link.set_route_args` — when the hop really is that (the
+  previous form is the caller and the landing is a new record of the link's doctype; `_from_link` is
+  only cleared on save, so a leftover one must not count). Otherwise the form left **with unsaved
+  changes** (Frappe's own `__unsaved`, which a new draft has from birth — the unsaved Vanilla Bill of
+  the incident is a parent). Any doctype; no Bill/PO/IR list. A child is a setup/master *record*
+  (`isSoftPeekRoute` + a record), as before. Depth stays one: a hop from a child to another record
+  is a sibling, except that a child left with unsaved changes (or named by `_from_link`) becomes the
+  new parent — unless a Doc skin is parked under the session, which stays the anchor so Esc can
+  always get back to it. The Doc skin's own peek buttons keep the Doc document as parent.
+- **A return is a return:** a hop onto the current parent, or onto one of its children, leaves the
+  stack alone (the Esc ping-pong).
+- **Recent:** children fold under their parent's row as a dropdown (open while that session is live,
+  closed after). A child row opens the child as a peek of that parent; Esc returns to the parent —
+  in place when the parent is still loaded, otherwise by reopening it in the clerk's preferred lens
+  (`reopen` on the parent ref; Esc action `reopen-parent`). A child later opened on its own (not
+  under that parent) goes back to being a plain row. Children no longer take Recent slots.
+## DF-01 follow-ups (5zorro 2026-09-30 notes → 2026-10-01)
+
+Found on the first blank-bench dogfood (paper DF-01, entered three ways: Doc, Simplified, Vanilla).
+The small fixes are in `368eba9` and the commit after it: toolbar in the card's column, no doubled
+text while editing a grid cell, Vendor Credit switch out of the tab order, *create Item…* from an
+empty Item search (soft peek of `/app/item/new` carrying what was typed), a peek button on the
+Bill's Applied payments rows, and in the Ship To picker a link to the company's addresses plus a
+drop-ship note.
+
+**Verified ERP behaviour behind them** (read from the sandbox tags, not guessed):
+- A new Bill / PO fills Ship To from an Address **linked to the Company** with *Preferred Shipping
+  Address* ticked (`company.py get_billing_shipping_address`). A Warehouse-linked address never
+  counts, and Manufacturing Settings' warehouses feed Work Orders only. Saving an Address with a
+  Company link ticks *Is Your Company Address* by itself (`accounts/custom/address.py`).
+- **Drop ship belongs to the Purchase Order.** The PO has `customer`; its Ship To query switches to
+  that customer's addresses (`buying.js` set_query). A Purchase Invoice has no `customer`, so Vanilla
+  offers it company addresses only. A Bill made from a drop-ship PO carries the address over; a NIC
+  Bill cannot have one. No generated dogfood paper covers drop ship yet.
+- *Expense Head Changed* on submit is ERPNext moving a stock line with no receipt to *Stock Received
+  But Not Billed* (perpetual inventory on). Expected.
+- **ERPNext's own "receive with the bill" is the Purchase Invoice's `update_stock`.** Nothing here
+  forces a separate receipt (`Buying Settings.pr_required` = No). `update_stock` is not
+  `allow_on_submit`, is hidden once any line came from a receipt (`depends_on: !item.pr_detail`), and
+  needs a warehouse per line (`set_warehouse` shows when it is on).
+
+### D — Draft payments on the Pay Outstanding board (built 2026-10-01)
+**Why it matters:** a draft Payment Entry writes no ledger, so the Accounts Payable report — the
+board's only source — shows its bills as fully unpaid. Nothing stops the clerk paying them again.
+- Load draft *Pay / Supplier* Payment Entries with each load of the board, beside the relink reviews.
+- A **Draft payments** panel above the board: one group per draft — payment, vendor, amount, method,
+  date, and the bills it covers — with **Open**, **Submit** and **Delete** (each confirmed; both log
+  before and after to `nav-debug.log`).
+- Each bill a draft covers gets an advisory on its row (*a draft payment covers this bill*).
+  Advisory, not a gate (invariant 7).
+- Pure part: `src/payment-drafts.js`.
+
+### E — Supplier No / Our No toggle (OI-170, the plan-09-16 P1e — built 2026-10-01)
+5zorro: the number to track by is the vendor's ref (Bill) or the logbook PO# (PO), not the ERPNext
+ID, which changes on every amend. Wanted: a toggle in the **File** group of every Doc skin, and on
+the payment board.
+- One global setting, kept in main like `payment-direction-prefs.json`, so every page agrees.
+- Doc skins: a fixed identity line in the banner (the status line is overwritten by every message,
+  so it cannot carry it) — the chosen number large, the other beside it, muted.
+- Payment board: each invoice node shows the chosen number; the filter matches both. The AP report
+  already returns `bill_no`, so there is no extra read.
+- "Their number" per doctype (`src/doc-number-pref.js` `THEIR_NUMBER`, now also what the void-and-amend
+  confirm quotes): Bill `bill_no`, PO `title` (logbook), Item Receipt `lr_no` (packing list / BOL —
+  what that skin already tracked by), Payment `reference_no`.
+- **A/R (5zorro 2026-10-01):** the salesman makes a Sales Order once the customer's PO arrives.
+  Asking the customer about an order you quote *their* PO; the customer asking about delivery quotes
+  *our* Sales Order. So a **Sales Order** toggles Customer PO (`po_no`) ↔ its own number, and a
+  **Sales Invoice** leads with the Sales Order(s) it bills (the approval, as the PO is when buying;
+  it survives an invoice amend), its own number beside it. An Estimate shows its own number only.
+  DF-21's remittance naming only the customer's PO is expected, not a gap: it is found by `po_no`.
+- Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
+
+### Waiting on 5zorro
+### J — just-in-time Item Receipt from Bill lines (parked 2026-10-01)
+Wanted: "received on / received by" per bill line, a receipt made only when filled. It needs custom
+fields (nowhere on a Purchase Invoice line to keep them, no "received by" on a receipt), which the
+core app does not impose. **Parked as an opt-in module**; 5zorro files the GitHub issue (drafted).
+Decided for when it is built: the receipt is made **on bill Submit** with ERPNext's own
+`make_purchase_receipt` (`args.filtered_children`, one receipt per received-on + received-by group,
+dated the day received), and **Received by is a link to a system User**. A second issue covers the
+PO skin's use of `terms` as its remarks field (prints, copies onto the bill) until frappe/erpnext#59413.
+
+### T — line tables take room only when they need it (built 2026-10-01; replaces `7ab1c2f`'s full bleed)
+Agreed definition (5zorro 2026-10-01): the table sits on the card. Each column's width is its widest
+value (or header), capped; Description is the one column that wraps and takes what is left, so it
+never *asks* for room (counted at most 320px). When those widths plus any dragged ones exceed the
+card, the section grows **to the right only**, as far as needed and no further than the window
+(16px gutter); past that the table scrolls inside itself, never the page. Blank → never grows.
+Cross-reference columns (Source line, Customer, Sales Order, Project) spill only when there is no
+room — revisit if dogfood says otherwise. Wrapping columns get taller rows automatically; their
+floors (Description 180px, Item 90px, text columns 70px) stop a sentence becoming one word per line.
+Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); DOM:
+`growSectionToNeed` (`item-col-resize.js`), re-run on window resize. Verified live at 1700 and 1250.
+- **Invoice series from the Sales Order** (5zorro 2026-10-01: an invoice named `<SO>-01`, `-02`).
+  Frappe's naming series can include a document field (`naming.py parse_naming_series`, a
+  `{fieldname}` part) and counts per prefix, so `.{field}.-.##` gives `<value>-01`, `-02`. A Sales
+  Invoice has no header Sales Order field (it is per line), so it needs a Custom Field the shell fills —
+  site customization, no code. Not started; worth it once A/R is dogfooded.
+
+### R — receive with the bill (built 2026-10-01)
+- Vanilla offers **default on** only: Customize Form › Purchase Invoice › Update Stock › Default = 1
+  (a Property Setter). There is no "ask at save" in Vanilla.
+- **Doc Bill:** at Save / Submit, when a draft has stock lines with no receipt (not drop ship, not a
+  credit memo or opening entry) and Update Stock is off, a dialog: *Receive with this bill* (sets
+  `update_stock`, and `set_warehouse` from Stock Settings' default through the form so ERPNext fills
+  the lines), *Bill only*, *Cancel*, a *Don't ask at save* box, and a link to the Customize Form
+  default. Switched off, a save that leaves stock un-received says so in a toast that turns the
+  question back on. Pure part: `src/bill-receive-ask.js`; setting in `bill-receive-prefs.json`.
+- **Simplified:** ERPNext's own *Expense Head Changed* dialog gets a note — tick Update Stock before
+  submitting, or default it in Customize Form (`assume-applier-payload.js`, version 12).
+
 ## Dogfood residuals
 
 | Family | Residual | State |
 |---|---|---|
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
-| A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1 |
+| A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
+| A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
+| 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |
+| 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
+| 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
+| DF-01 D | Draft payments on the Pay Outstanding board | built 2026-10-01 — the read runs live; Submit / Delete not yet clicked (5zorro's dogfood: make a draft from the Bill's *Add payment*) |
+| DF-01 E | Supplier No / Our No toggle (OI-170) | built 2026-10-01 — driven live on ACC-PINV-2026-00001 (Bill). PO / IR / A/R skins share the code but were not opened; the separate Payment document page and the Find pages do not have it yet |
+| DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
+| DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
+| DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
+| DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
+| 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

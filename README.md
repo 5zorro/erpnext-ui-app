@@ -57,7 +57,7 @@ narrowed. Reproduce with `npm run report:input-count`; redraw the chart above wi
 
 </details>
 
-## Architecture (same as the prior decision log)
+## Architecture
 
 | Layer | What it is |
 |-------|------------|
@@ -65,7 +65,7 @@ narrowed. Reproduce with `npm run report:input-count`; redraw the chart above wi
 | ERPNext | Unmodified server — also usable in a normal browser for troubleshooting |
 | Link | HTTP / API only (Clean Core: no edits under `apps/frappe` or `apps/erpnext`) |
 
-Language for this tree: **plain JavaScript** . That is a tooling choice, not an architecture change.
+Language for this tree: **plain JavaScript** - a tooling choice.
 
 Areas that have achieved "MVP" status:
  - A/P form entry documents (purchase order, purchase receipt, and purchase invoice)

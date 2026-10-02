@@ -45,6 +45,7 @@ export const DOC_TOOLBAR_BUTTON_GROUP = Object.freeze({
   "btn-vanilla": "navigate",
   "btn-copy": "navigate",
   "btn-attach-toolbar": "fileRetention",
+  "btn-number-lead": "fileRetention",
 });
 
 /**

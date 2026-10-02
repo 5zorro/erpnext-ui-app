@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld("erpUi", {
     ipcRenderer.on("health", handler);
     return () => ipcRenderer.removeListener("health", handler);
   },
+  openLogin: () => ipcRenderer.send("open-login"),
+  onLoginState: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on("login-state", handler);
+    return () => ipcRenderer.removeListener("login-state", handler);
+  },
   onState: (cb) => {
     const handler = (_e, state) => cb(state);
     ipcRenderer.on("ui-state", handler);
