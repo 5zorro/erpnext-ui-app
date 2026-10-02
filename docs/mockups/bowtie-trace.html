@@ -922,6 +922,24 @@ function layout(sl) {
 }
 
 /* ---------------- bowtie render ---------------- */
+/* Their / Our number — decided and BUILT 2026-10-01 (OI-170; plan 2026-09-26 "DF-01 follow-ups" E).
+   Build the Find pages' toggle against these, not against this mockup's `ref` shortcut:
+   - SSoT is src/doc-number-pref.js: THEIR_NUMBER (field per doctype), docNumbers() / billRowNumbers()
+     (lead order), numberLeadButtonLabel(). Reuse them; do not keep a second per-doctype map here.
+   - ONE app-wide setting, not per page: main keeps it in doc-number-prefs.json, IPC
+     get-doc-number-lead / set-doc-number-lead, and broadcasts a `doc-number-lead` window event to open
+     shell pages. The Doc skins (File group "No.:" button) and Pay Outstanding already follow it, so a
+     Find page must read the same setting and listen for the event. Default: "theirs".
+   - Their number per doctype: Bill = bill_no (Supplier No) · PO = title (Logbook PO#) — NOT ERPNext's
+     id, so a PO is not "no number from the other side" as cardHtml/statement treat it below ·
+     Item Receipt = lr_no (packing list / BOL) · Payment = reference_no (Check / Ref No) ·
+     Sales Order = po_no (Customer PO: you quote theirs asking them; they quote our SO asking you) ·
+     Sales Invoice = the Sales Order(s) it bills (items[].sales_order — the approval, as the PO is on
+     the buying side; survives an invoice amend) · Estimate = none, ours only.
+   - Never lead with a blank: when the chosen number is empty (an unsaved draft has no id, a bill may
+     have no ref yet) the other leads, and the empty one still shows as "—" beside it.
+   - The other number is always one glance away (beside it, or in the hover title), never hidden.
+   - A search/filter box matches BOTH numbers whatever the toggle says (the board's filter does). */
 function idFor(d) {
   if (state.idMode === "theirs" && d.ref) return d.ref;
   return d.id;

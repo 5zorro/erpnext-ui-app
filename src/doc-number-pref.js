@@ -28,10 +28,12 @@ export const THEIR_NUMBER = Object.freeze({
   // The Item Receipt skin tracks by its packing list / BOL ref (receipt-map.js), not the supplier
   // delivery note.
   "purchase-receipt": Object.freeze({ field: "lr_no", label: "Packing list / BOL" }),
-  // A/R (5zorro 2026-10-01): the Sales Order is the approval, as the PO is on the buying side, so an
-  // invoice leads with the order it bills — which also survives the invoice being amended. A Sales
-  // Order (and an Estimate) is its own reference and shows ours only. The customer's PO stays in
-  // its own field and on the Find pages; it is not this toggle's number.
+  // A/R (5zorro 2026-10-01). The salesman makes a Sales Order from the customer's PO: asking the
+  // customer about an order, you quote *their* PO; the customer asking about delivery quotes *our*
+  // Sales Order. So a Sales Order toggles between the two. The Sales Order is also the approval, as
+  // the PO is on the buying side, so an invoice leads with the order it bills — which survives the
+  // invoice being amended. An Estimate has no number from the other side.
+  "sales-order": Object.freeze({ field: "po_no", label: "Customer PO" }),
   "sales-invoice": Object.freeze({
     field: "items[].sales_order",
     label: "Sales Order",

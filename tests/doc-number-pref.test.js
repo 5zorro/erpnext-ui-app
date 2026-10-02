@@ -25,7 +25,7 @@ describe("doc-number-pref (OI-170, DF-01 E)", () => {
     assert.equal(theirNumberFor("purchase-invoice").field, "bill_no");
     assert.equal(theirNumberFor("purchase_order").field, "title");
     assert.equal(theirNumberFor("Purchase Receipt").field, "lr_no");
-    assert.equal(theirNumberFor("sales-order"), null, "a Sales Order is its own reference");
+    assert.equal(theirNumberFor("sales-order").field, "po_no", "the customer's PO the order was made from");
     assert.equal(theirNumberFor("quotation"), null);
   });
 
