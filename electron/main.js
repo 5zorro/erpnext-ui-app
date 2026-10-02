@@ -97,6 +97,7 @@ import {
   relinkReviewNote,
   relinkProvenanceNote,
 } from "../src/payment-relink.js";
+import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -10234,6 +10235,98 @@ ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
 });
 ipcMain.handle("get-payment-entry", async (_e, name) => fetchPaymentEntry(name));
 ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
+
+/**
+ * Draft supplier payments for the board's Draft payments panel (plan 2026-09-26, DF-01 D). A draft
+ * posts nothing, so the AP report cannot see it; without this the board offers its bills twice.
+ */
+async function fetchDraftPayments() {
+  const raw = await erpEval(`(async () => {
+    try {
+      var list = await frappe.call({
+        method: "frappe.client.get_list",
+        args: {
+          doctype: "Payment Entry",
+          filters: { docstatus: 0, payment_type: "Pay", party_type: "Supplier" },
+          fields: ["name"],
+          order_by: "posting_date asc",
+          limit_page_length: 100,
+        },
+      });
+      var names = ((list && list.message) || []).map(function (r) { return r.name; });
+      var docs = await Promise.all(names.map(async function (name) {
+        try {
+          var r = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
+          return (r && r.message) || null;
+        } catch (eDoc) {
+          return null;
+        }
+      }));
+      return { ok: true, docs: docs.filter(Boolean) };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), docs: [] };
+    }
+  })()`);
+  if (!(raw && raw.ok)) {
+    return { ok: false, reason: (raw && raw.reason) || "Could not load draft payments.", drafts: [] };
+  }
+  return { ok: true, drafts: normalizeDraftPayments(raw.docs) };
+}
+
+/**
+ * Submit or delete one draft Payment Entry. Re-reads the document first and refuses anything that
+ * is no longer a draft, so a stale board cannot act on a payment someone already moved on.
+ * @param {"submit"|"delete"} action
+ * @param {string} name
+ */
+async function actOnDraftPayment(action, name) {
+  const pe = normalizeEditableText(name);
+  if (!pe) return { ok: false, reason: "No payment named." };
+  if (action !== "submit" && action !== "delete") return { ok: false, reason: "Unknown action." };
+  navDebug(`draft-payment-${action}`, `${pe} start`);
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var got = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
+      var doc = got && got.message;
+      if (!doc) return { ok: false, reason: "Payment Entry not found — it may already be gone.", step: "read" };
+      if (Number(doc.docstatus) !== 0) {
+        return { ok: false, reason: doc.name + " is no longer a draft (docstatus " + doc.docstatus + ").", step: "read" };
+      }
+      if (${JSON.stringify(action)} === "delete") {
+        try {
+          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
+        } catch (eDel) {
+          return { ok: false, reason: reasonFrom(eDel), step: "delete" };
+        }
+        return { ok: true, name: doc.name, deleted: true };
+      }
+      var sub;
+      try {
+        sub = await frappe.call({ method: "frappe.client.submit", args: { doc: doc } });
+      } catch (eSub) {
+        return { ok: false, reason: reasonFrom(eSub), step: "submit" };
+      }
+      if (sub && sub.exc) return { ok: false, reason: reasonFrom(sub), step: "submit" };
+      var done = (sub && sub.message) || {};
+      return { ok: true, name: done.name || doc.name, docstatus: done.docstatus };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  const res =
+    raw && typeof raw === "object"
+      ? raw.ok
+        ? raw
+        : { ok: false, reason: formatClientErrorReason(raw.reason || raw, `Could not ${action} ${pe}.`), step: raw.step }
+      : { ok: false, reason: `Could not ${action} ${pe}.` };
+  navDebug(`draft-payment-${action}`, `${pe} ${res.ok ? "ok" : `failed (${res.step || "?"}): ${res.reason}`}`);
+  return res;
+}
+
+ipcMain.handle("get-draft-payments", async () => fetchDraftPayments());
+ipcMain.handle("submit-draft-payment", async (_e, name) => actOnDraftPayment("submit", name));
+ipcMain.handle("delete-draft-payment", async (_e, name) => actOnDraftPayment("delete", name));
 ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
 ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
   const check = validatePaymentBatchPrefs(prefs);

@@ -532,6 +532,60 @@ before this change: they assert sample data the reinstalled sandbox does not hav
   in place when the parent is still loaded, otherwise by reopening it in the clerk's preferred lens
   (`reopen` on the parent ref; Esc action `reopen-parent`). A child later opened on its own (not
   under that parent) goes back to being a plain row. Children no longer take Recent slots.
+## DF-01 follow-ups (5zorro 2026-09-30 notes → 2026-10-01)
+
+Found on the first blank-bench dogfood (paper DF-01, entered three ways: Doc, Simplified, Vanilla).
+The small fixes are in `368eba9` and the commit after it: toolbar in the card's column, no doubled
+text while editing a grid cell, Vendor Credit switch out of the tab order, *create Item…* from an
+empty Item search (soft peek of `/app/item/new` carrying what was typed), a peek button on the
+Bill's Applied payments rows, and in the Ship To picker a link to the company's addresses plus a
+drop-ship note.
+
+**Verified ERP behaviour behind them** (read from the sandbox tags, not guessed):
+- A new Bill / PO fills Ship To from an Address **linked to the Company** with *Preferred Shipping
+  Address* ticked (`company.py get_billing_shipping_address`). A Warehouse-linked address never
+  counts, and Manufacturing Settings' warehouses feed Work Orders only. Saving an Address with a
+  Company link ticks *Is Your Company Address* by itself (`accounts/custom/address.py`).
+- **Drop ship belongs to the Purchase Order.** The PO has `customer`; its Ship To query switches to
+  that customer's addresses (`buying.js` set_query). A Purchase Invoice has no `customer`, so Vanilla
+  offers it company addresses only. A Bill made from a drop-ship PO carries the address over; a NIC
+  Bill cannot have one. No generated dogfood paper covers drop ship yet.
+- *Expense Head Changed* on submit is ERPNext moving a stock line with no receipt to *Stock Received
+  But Not Billed* (perpetual inventory on). Expected.
+- **ERPNext's own "receive with the bill" is the Purchase Invoice's `update_stock`.** Nothing here
+  forces a separate receipt (`Buying Settings.pr_required` = No). `update_stock` is not
+  `allow_on_submit`, is hidden once any line came from a receipt (`depends_on: !item.pr_detail`), and
+  needs a warehouse per line (`set_warehouse` shows when it is on).
+
+### D — Draft payments on the Pay Outstanding board (building now)
+**Why it matters:** a draft Payment Entry writes no ledger, so the Accounts Payable report — the
+board's only source — shows its bills as fully unpaid. Nothing stops the clerk paying them again.
+- Load draft *Pay / Supplier* Payment Entries with each load of the board, beside the relink reviews.
+- A **Draft payments** panel above the board: one group per draft — payment, vendor, amount, method,
+  date, and the bills it covers — with **Open**, **Submit** and **Delete** (each confirmed; both log
+  before and after to `nav-debug.log`).
+- Each bill a draft covers gets an advisory on its row (*a draft payment covers this bill*).
+  Advisory, not a gate (invariant 7).
+- Pure part: `src/payment-drafts.js`.
+
+### E — Supplier No / Our No toggle (OI-170, the plan-09-16 P1e)
+5zorro: the number to track by is the vendor's ref (Bill) or the logbook PO# (PO), not the ERPNext
+ID, which changes on every amend. Wanted: a toggle in the **File** group of every Doc skin, and on
+the payment board.
+- One global setting, kept in main like `payment-direction-prefs.json`, so every page agrees.
+- Doc skins: a fixed identity line in the banner (the status line is overwritten by every message,
+  so it cannot carry it) — the chosen number large, the other beside it, muted.
+- Payment board: each invoice node shows the chosen number; the filter matches both. The AP report
+  already returns `bill_no`, so there is no extra read.
+- "Their number" per doctype: Bill `bill_no`, PO `title` (logbook), Item Receipt
+  `supplier_delivery_note`, Sales Order / Invoice `po_no`; a doctype without one shows the ERP ID.
+
+### Waiting on 5zorro
+- **T — line tables take room only when they need it.** Replaces the Sep-6 full-bleed (`7ab1c2f`).
+  Definition proposed 2026-10-01, not yet agreed.
+- **R — receive with the bill.** Either default `update_stock` on (Customize Form, a site setting) or
+  a just-in-time choice at Save. Not started.
+
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -542,4 +596,7 @@ before this change: they assert sample data the reinstalled sandbox does not hav
 | 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
+| DF-01 D | Draft payments on the Pay Outstanding board | building 2026-10-01 |
+| DF-01 E | Supplier No / Our No toggle (OI-170) | building 2026-10-01 |
+| DF-01 T / R | Table room; receive with the bill | waiting on 5zorro |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

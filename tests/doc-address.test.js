@@ -9,6 +9,7 @@ import {
   profileHasPickableAddresses,
   BILL_ADDRESS_ROLES,
   PO_ADDRESS_ROLES,
+  COMPANY_ADDRESS_LIST_ROUTE,
 } from "../src/doc-address.js";
 import { DOC_SKIN_PROFILES } from "../src/doc-skin-registry.js";
 
@@ -56,5 +57,29 @@ describe("doc-address (tranche 6)", () => {
       addressPickerOpenDecision({ supplier: "S" }, "bill", "billing", { editable: false }).open,
       false,
     );
+  });
+});
+
+describe("company ship-to default (5zorro 2026-10-01)", () => {
+  it("opens the Address list filtered to company addresses", () => {
+    const [path, query] = COMPANY_ADDRESS_LIST_ROUTE.split("?");
+    assert.equal(path, "/app/address");
+    assert.equal(new URLSearchParams(query).get("is_your_company_address"), "1");
+  });
+
+  it("every ship-to that offers it is a company-party role", () => {
+    for (const profile of ["bill", "po"]) {
+      const meta = addressRoleMeta(profile, "ship_to");
+      assert.equal(meta && meta.party, "company", profile);
+    }
+  });
+});
+
+describe("drop ship on a Bill (5zorro 2026-10-01)", () => {
+  it("the Bill's ship-to picker says where drop ship lives; the PO's does not need to", () => {
+    const bill = addressRoleMeta("bill", "ship_to");
+    assert.match(bill.hint, /Purchase Order/);
+    assert.match(bill.hint, /NIC/);
+    assert.equal(addressRoleMeta("po", "ship_to").hint, undefined);
   });
 });

@@ -102,6 +102,7 @@ import {
   billAddressRoleMeta,
   addressPickerOpenDecision,
 } from "../src/bill-address.js";
+import { COMPANY_ADDRESS_LIST_ROUTE } from "../src/doc-address.js";
 import {
   showAddressPickerModal,
   wireAddressPickerFields,
@@ -2522,6 +2523,15 @@ export async function bootBillFormPage(api) {
       onApply: applyAddressPick,
       onEditVendor: () => {
         void discardBillDraftAndEditVendorAddresses();
+      },
+      onManageCompanyAddresses: async () => {
+        if (!api || !api.softPeekRoute) {
+          setStatus("Peek API missing — restart the shell.", "err");
+          return;
+        }
+        const r = await api.softPeekRoute(COMPANY_ADDRESS_LIST_ROUTE);
+        if (r && r.ok === false) setStatus(r.reason || "Could not open addresses.", "err");
+        else setStatus("Company addresses — tick Preferred Shipping Address; Esc returns to Bill.");
       },
     });
   }

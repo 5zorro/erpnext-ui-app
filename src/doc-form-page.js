@@ -128,6 +128,7 @@ import { wireDocCapsUi } from "./doc-caps-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
+  COMPANY_ADDRESS_LIST_ROUTE,
 } from "./doc-address.js";
 import {
   showAddressPickerModal,
@@ -511,6 +512,11 @@ async function openDocAddressPicker(role) {
     setStatus,
     focusSurface: () => api.focusSurface?.(),
     customerDropShip: poShipTo,
+    onManageCompanyAddresses: async () => {
+      if (!api?.softPeekRoute) return;
+      const r = await api.softPeekRoute(COMPANY_ADDRESS_LIST_ROUTE);
+      setStatus(r && r.ok === false ? r.reason || "Could not open addresses." : "Company addresses — Esc returns here.", r && r.ok === false ? "err" : "");
+    },
     onApply: async (linkField, addressName) => {
       if (!api || !linkField) return;
       setStatus(addressName ? "Setting address…" : "Clearing address…");
