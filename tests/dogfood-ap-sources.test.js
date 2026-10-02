@@ -15,6 +15,9 @@ import {
 } from "../src/sample-data/dogfood-ap-sources.js";
 import { renderDogfoodSourceHtml } from "../src/sample-data/render-dogfood-html.js";
 
+
+/** The four-paper A/R walk (estimate → order → invoice → payment); other A/R papers stand alone. */
+const AR_FLOW_IDS = ["DF-18", "DF-19", "DF-20", "DF-21"];
 describe("dogfood AP sources", () => {
   it("covers OI-103 scenarios 1–8 at least once", () => {
     const hit = new Set(
@@ -131,9 +134,23 @@ describe("the dogfood catalogue is well formed", () => {
 
   it("the sales side walks the whole A/R flow: estimate, order, invoice, payment received", () => {
     assert.deepEqual(
-      DOGFOOD_AR_SOURCES.map((d) => sourceTarget(d)),
+      DOGFOOD_AR_SOURCES.filter((d) => AR_FLOW_IDS.includes(d.id)).map((d) => sourceTarget(d)),
       ["Quotation", "Sales Order", "Sales Invoice", "Payment Entry"],
     );
+  });
+
+  // 5zorro 2026-10-01: drop ship, end to end. ERPNext marks drop ship on the Sales Order line only.
+  it("drop ship runs Sales Order → PO → Bill, and says where the Doc skins fall short", () => {
+    const byId = Object.fromEntries(DOGFOOD_SOURCES.map((d) => [d.id, d]));
+    assert.deepEqual(
+      ["DF-24a", "DF-24b", "DF-24c"].map((id) => byId[id] && sourceTarget(byId[id])),
+      ["Sales Order", "Purchase Order", "Purchase Invoice"],
+    );
+    for (const id of ["DF-24a", "DF-24b", "DF-24c"]) {
+      assert.ok(byId[id].expect && byId[id].checks.length, `${id} needs expect + checks`);
+    }
+    assert.match(byId["DF-24a"].dogfoodHint, /Supplier delivers to Customer/);
+    assert.deepEqual(byId["DF-24c"].poNos, [byId["DF-24b"].docNo]);
   });
 
   // 5zorro 2026-09-26: "add them as paper… so that i hit them when i go through the source".
@@ -185,7 +202,7 @@ describe("the dogfood catalogue is well formed", () => {
 
 describe("renderDogfoodSourceHtml — the sales side", () => {
   it("titles each new kind as the paper a person would recognise", () => {
-    const titles = DOGFOOD_AR_SOURCES.map((d) => {
+    const titles = DOGFOOD_AR_SOURCES.filter((d) => AR_FLOW_IDS.includes(d.id)).map((d) => {
       const m = /<h1>([^<]*)<\/h1>/.exec(renderDogfoodSourceHtml(d));
       return m && m[1];
     });
