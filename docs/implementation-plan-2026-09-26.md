@@ -580,10 +580,12 @@ the payment board.
 - "Their number" per doctype (`src/doc-number-pref.js` `THEIR_NUMBER`, now also what the void-and-amend
   confirm quotes): Bill `bill_no`, PO `title` (logbook), Item Receipt `lr_no` (packing list / BOL —
   what that skin already tracked by), Payment `reference_no`.
-- **A/R (5zorro 2026-10-01, tentative until A/R is dogfooded):** the Sales Order is the approval, as
-  the PO is when buying, so a Sales Invoice leads with the Sales Order(s) it bills, its own number
-  beside it. A Sales Order and an Estimate show their own number only. The customer's PO (`po_no`)
-  stays in its field and on the Find pages — DF-19 / DF-21 test whether that is enough.
+- **A/R (5zorro 2026-10-01):** the salesman makes a Sales Order once the customer's PO arrives.
+  Asking the customer about an order you quote *their* PO; the customer asking about delivery quotes
+  *our* Sales Order. So a **Sales Order** toggles Customer PO (`po_no`) ↔ its own number, and a
+  **Sales Invoice** leads with the Sales Order(s) it bills (the approval, as the PO is when buying;
+  it survives an invoice amend), its own number beside it. An Estimate shows its own number only.
+  DF-21's remittance naming only the customer's PO is expected, not a gap: it is found by `po_no`.
 - Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
 
 ### Waiting on 5zorro
