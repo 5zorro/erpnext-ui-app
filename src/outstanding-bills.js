@@ -10,6 +10,7 @@
  *   invoice: string,          // Purchase Invoice name (report's voucher_no) — NOT always unique; see installmentKey
  *   installmentKey: string,   // unique per row: `invoice` normally, `${invoice}#${n}` for an exploded installment
  *   supplier: string,         // report's party (shared AR/AP engine field name)
+ *   billNo: string,           // the vendor's own invoice no. (report's bill_no) — OI-170, "" when not typed
  *   postingDate: string,      // ISO
  *   dueDate: string,          // ISO — header due_date (last installment; bill-payment-schedule.js convention)
  *   invoiced: number,         // bill's own grand total — needed for Percentage discount math, not just display
@@ -123,6 +124,7 @@ export function normalizeAccountsPayableRow(reportRow) {
     invoice,
     installmentKey: invoice,
     supplier: strOrEmpty(r.party ?? r.supplier_name),
+    billNo: strOrEmpty(r.bill_no).trim(),
     postingDate: strOrEmpty(r.posting_date),
     dueDate: strOrEmpty(r.due_date),
     invoiced: numOrZero(r.invoiced),

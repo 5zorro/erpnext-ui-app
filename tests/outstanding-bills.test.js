@@ -48,6 +48,7 @@ describe("outstanding-bills: normalizeAccountsPayableRow", () => {
       invoice: "ACC-PINV-2026-00229",
       installmentKey: "ACC-PINV-2026-00229",
       supplier: "SAMPLE Vendor Daily Payrun",
+      billNo: "",
       postingDate: "2026-07-22",
       dueDate: "2026-10-20",
       invoiced: 4500.0,
@@ -61,6 +62,14 @@ describe("outstanding-bills: normalizeAccountsPayableRow", () => {
     assert.equal(row.invoice, "ACC-PINV-2026-00230");
     assert.equal(row.invoiced, 225000.0);
     assert.equal(row.outstanding, 225000.0);
+  });
+
+  // OI-170: the Payable report merges each bill's bill_no into its row (accounts_receivable.py
+  // get_invoice_details), so the board can lead with the vendor's own number.
+  it("carries the vendor's bill_no", () => {
+    const row = normalizeAccountsPayableRow({ ...CAPTURED_SMALL_ROW, bill_no: " ASI-77821 SIMP " });
+    assert.equal(row.billNo, "ASI-77821 SIMP");
+    assert.equal(normalizeAccountsPayableRow({ ...CAPTURED_SMALL_ROW, bill_no: null }).billNo, "");
   });
 
   it("falls back to name/supplier_name when voucher_no/party are absent", () => {
@@ -83,6 +92,7 @@ describe("outstanding-bills: normalizeAccountsPayableRow", () => {
       invoice: "",
       installmentKey: "",
       supplier: "",
+      billNo: "",
       postingDate: "",
       dueDate: "",
       invoiced: 0,

@@ -145,6 +145,7 @@ import {
   shouldLeaveItemTableBackward,
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
+import { wireDocNumberLead } from "../src/doc-number-ui.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
 import {
   fieldsSettlingFor,
@@ -254,6 +255,8 @@ export async function bootBillFormPage(api) {
   let docCapsOn = true;
   /** @type {{ syncCapsButton: () => void }|null} */
   let docCapsUi = null;
+  /** @type {{ paint: () => void } | null} */
+  let docNumberUi = null;
   /** Suppress change while Tab keydown commits the item cell. */
   let itemTabGuard = false;
   /** Suppress blur while Tab/arrow moves between tax cells. */
@@ -4454,6 +4457,7 @@ export async function bootBillFormPage(api) {
     ensureHeaderLinkPickers();
     const name = doc.name || "(new)";
     setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
+    if (docNumberUi) docNumberUi.paint();
     paintDirtyPill();
     paintChip();
     void ensureAtLeastOneItemRow(doc);
@@ -5002,6 +5006,14 @@ export async function bootBillFormPage(api) {
     };
   }
   document.getElementById("btn-vanilla").onclick = () => api && api.openVanilla();
+  docNumberUi = wireDocNumberLead({
+    api,
+    button: document.getElementById("btn-number-lead"),
+    identEl: document.getElementById("doc-ident"),
+    getDoctypeKey: () => "purchase-invoice",
+    getDoc: () => lastDoc,
+  });
+
   docCapsUi = wireDocCapsUi({
     capsButton: el.caps,
     getCapsOn: () => docCapsOn,

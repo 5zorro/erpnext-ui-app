@@ -669,6 +669,9 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
+      <!-- OI-170: one app-wide setting, shared with every Doc skin's File group. -->
+      <button type="button" class="sort-btn" id="number-lead" data-testid="pay-number-lead"
+        title="Which number leads on each invoice — the vendor's own number or ERPNext's ID. Hover an invoice for both.">No.: Supplier No</button>
       <button type="button" class="sort-btn" id="find-payments" data-testid="pay-outstanding-find"
         title="Find a payment already made — every check and transfer, by vendor or check no.">Find Payments…</button>
       <button type="button" id="prefs-toggle" aria-expanded="false"></button>
@@ -973,6 +976,12 @@
       summarizeModeChange,
     } from "../src/mode-change-plan.js";
     import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
+    import {
+      billRowNumbers,
+      flipNumberLead,
+      normalizeNumberLead,
+      numberLeadButtonLabel,
+    } from "../src/doc-number-pref.js";
     import {
       draftPaymentsByInvoice,
       draftPaymentAdvisory,
@@ -1490,8 +1499,34 @@
     function matchesFilter(bill, filter) {
       if (!filter) return true;
       const f = filter.toLowerCase();
-      return bill.supplier.toLowerCase().includes(f) || bill.invoice.toLowerCase().includes(f);
+      return (
+        bill.supplier.toLowerCase().includes(f) ||
+        bill.invoice.toLowerCase().includes(f) ||
+        String(bill.billNo || "").toLowerCase().includes(f)
+      );
     }
+
+    /** OI-170 — which number leads on an invoice node; main keeps it, every page shares it. */
+    let numberLead = "theirs";
+    const numberLeadBtn = document.getElementById("number-lead");
+    function paintNumberLeadButton() {
+      if (numberLeadBtn) numberLeadBtn.textContent = numberLeadButtonLabel("purchase-invoice", numberLead);
+    }
+    if (numberLeadBtn) {
+      numberLeadBtn.onclick = async () => {
+        numberLead = flipNumberLead(numberLead);
+        paintNumberLeadButton();
+        render();
+        if (api && api.setNumberLead) {
+          numberLead = normalizeNumberLead(await api.setNumberLead(numberLead).catch(() => numberLead));
+        }
+      };
+    }
+    window.addEventListener("doc-number-lead", (ev) => {
+      numberLead = normalizeNumberLead(ev.detail);
+      paintNumberLeadButton();
+      render();
+    });
     const filterInput = document.getElementById("filter-input");
     filterInput.addEventListener("input", () => {
       filterText = filterInput.value.trim();
@@ -1722,7 +1757,12 @@
       head.className = "invoice-head";
       const name = document.createElement("div");
       name.className = "invoice-name";
-      name.textContent = inv.invoice;
+      const nums = billRowNumbers({ invoice: inv.invoice, billNo: inv.rows[0] && inv.rows[0].billNo }, numberLead);
+      name.textContent = nums.primary.value;
+      name.title = [nums.primary, nums.secondary]
+        .filter(Boolean)
+        .map((n) => `${n.label}: ${n.value || "—"}`)
+        .join("\n");
       head.appendChild(name);
       const peek = document.createElement("button");
       peek.type = "button";
@@ -3773,6 +3813,8 @@
     }
 
     async function init() {
+      if (api && api.getNumberLead) numberLead = normalizeNumberLead(await api.getNumberLead().catch(() => numberLead));
+      paintNumberLeadButton();
       buildMethodFeeInputs();
       buildTermModalOptions();
       prefs = mergePaymentBatchPrefs(api && api.getPrefs ? await api.getPrefs().catch(() => null) : null);

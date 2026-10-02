@@ -75,6 +75,7 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-amount-due", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-due-date", kind: "date", modeSwitch: "date" },
   { id: "doc-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
+  { id: "doc-number-lead", kind: "button", modeSwitch: "none", notes: "OI-170 which number leads (theirs / ours), app-wide" },
   {
     id: "bill-lines-section",
     kind: "section",

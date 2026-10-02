@@ -125,6 +125,8 @@ import {
 } from "./doc-wash.js";
 import { wireItemImportButton } from "./item-import-ui.js";
 import { wireDocCapsUi } from "./doc-caps-ui.js";
+import { theirNumberFor } from "./doc-number-pref.js";
+import { wireDocNumberLead } from "./doc-number-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -152,6 +154,8 @@ let userEdited = false;
 let docCapsOn = true;
 /** @type {{ syncCapsButton: () => void }|null} */
 let docCapsUi = null;
+/** @type {{ paint: () => void } | null} */
+let docNumberUi = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -240,7 +244,8 @@ function publishCalcHistory(payload) {
  */
 function docTrackingRef(doc) {
   if (!doc || !ui) return "";
-  const field = ui.profileId === "po" ? "title" : ui.profileId === "receipt" ? "lr_no" : "";
+  const key = ui.profileId === "po" ? "purchase-order" : ui.profileId === "receipt" ? "purchase-receipt" : "";
+  const field = theirNumberFor(key)?.field || "";
   if (!field) return "";
   const v = /** @type {Record<string, unknown>} */ (doc)[field];
   return v == null ? "" : String(v).trim();
@@ -2488,6 +2493,7 @@ function paint(doc, snapScratch, opts = {}) {
 
   const name = doc.name || "(new)";
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
+  if (docNumberUi) docNumberUi.paint();
   if (opts.focusVendor) {
     docCapsOn = true;
     if (docCapsUi) docCapsUi.syncCapsButton();
@@ -3057,6 +3063,16 @@ export async function bootDocFormPage(injectedApi) {
     setCapsOn: (v) => {
       docCapsOn = v;
     },
+  });
+
+  docNumberUi = wireDocNumberLead({
+    api,
+    button: document.getElementById("btn-number-lead"),
+    identEl: document.getElementById("doc-ident"),
+    getDoctypeKey: () =>
+      (ui && ui.doctypeKey) ||
+      (ui && ui.profileId === "po" ? "purchase-order" : ui && ui.profileId === "receipt" ? "purchase-receipt" : ""),
+    getDoc: () => lastDoc,
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");

@@ -557,7 +557,7 @@ drop-ship note.
   `allow_on_submit`, is hidden once any line came from a receipt (`depends_on: !item.pr_detail`), and
   needs a warehouse per line (`set_warehouse` shows when it is on).
 
-### D — Draft payments on the Pay Outstanding board (building now)
+### D — Draft payments on the Pay Outstanding board (built 2026-10-01)
 **Why it matters:** a draft Payment Entry writes no ledger, so the Accounts Payable report — the
 board's only source — shows its bills as fully unpaid. Nothing stops the clerk paying them again.
 - Load draft *Pay / Supplier* Payment Entries with each load of the board, beside the relink reviews.
@@ -568,7 +568,7 @@ board's only source — shows its bills as fully unpaid. Nothing stops the clerk
   Advisory, not a gate (invariant 7).
 - Pure part: `src/payment-drafts.js`.
 
-### E — Supplier No / Our No toggle (OI-170, the plan-09-16 P1e)
+### E — Supplier No / Our No toggle (OI-170, the plan-09-16 P1e — built 2026-10-01)
 5zorro: the number to track by is the vendor's ref (Bill) or the logbook PO# (PO), not the ERPNext
 ID, which changes on every amend. Wanted: a toggle in the **File** group of every Doc skin, and on
 the payment board.
@@ -577,8 +577,11 @@ the payment board.
   so it cannot carry it) — the chosen number large, the other beside it, muted.
 - Payment board: each invoice node shows the chosen number; the filter matches both. The AP report
   already returns `bill_no`, so there is no extra read.
-- "Their number" per doctype: Bill `bill_no`, PO `title` (logbook), Item Receipt
-  `supplier_delivery_note`, Sales Order / Invoice `po_no`; a doctype without one shows the ERP ID.
+- "Their number" per doctype (`src/doc-number-pref.js` `THEIR_NUMBER`, now also what the void-and-amend
+  confirm quotes): Bill `bill_no`, PO `title` (logbook), Item Receipt `lr_no` (packing list / BOL —
+  what that skin already tracked by), Sales Order / Invoice `po_no`, Payment `reference_no`;
+  Estimate has none and shows the ERP ID.
+- Not yet: the Payment document page (`payment-doc.html`, its own chrome) and the Find pages.
 
 ### Waiting on 5zorro
 - **T — line tables take room only when they need it.** Replaces the Sep-6 full-bleed (`7ab1c2f`).
@@ -596,7 +599,7 @@ the payment board.
 | 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N2 | Blocked page unload strands navigation | built 2026-09-30 — 5zorro to dogfood |
 | 09-30 N3 | Resume keeps the wrong page code | built 2026-09-30 — 5zorro to dogfood |
-| DF-01 D | Draft payments on the Pay Outstanding board | building 2026-10-01 |
-| DF-01 E | Supplier No / Our No toggle (OI-170) | building 2026-10-01 |
+| DF-01 D | Draft payments on the Pay Outstanding board | built 2026-10-01 — the read runs live; Submit / Delete not yet clicked (5zorro's dogfood: make a draft from the Bill's *Add payment*) |
+| DF-01 E | Supplier No / Our No toggle (OI-170) | built 2026-10-01 — driven live on ACC-PINV-2026-00001 (Bill). PO / IR / A/R skins share the code but were not opened; the separate Payment document page and the Find pages do not have it yet |
 | DF-01 T / R | Table room; receive with the bill | waiting on 5zorro |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

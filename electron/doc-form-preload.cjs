@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
       (await billActive()) ? "bill-open-payment-terms-add" : "doc-open-payment-terms-add",
     ),
   softPeekRoute: (route) => ipcRenderer.invoke("soft-peek-route", route || ""),
+  getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
+  setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
   logNav: (event, detail) => ipcRenderer.send("nav-debug", event || "renderer", detail != null ? String(detail) : ""),
   focusSurface: async () =>
     ipcRenderer.send((await billActive()) ? "bill-focus-surface" : "doc-focus-surface"),

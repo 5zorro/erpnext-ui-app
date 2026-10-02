@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("erpPayOutstanding", {
   getOutstandingBills: () => ipcRenderer.invoke("get-outstanding-bills"),
   getDraftPayments: () => ipcRenderer.invoke("get-draft-payments"),
+  getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
+  setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
   submitDraftPayment: (name) => ipcRenderer.invoke("submit-draft-payment", name || ""),
   deleteDraftPayment: (name) => ipcRenderer.invoke("delete-draft-payment", name || ""),
   getPrefs: () => ipcRenderer.invoke("get-payment-batch-prefs"),
