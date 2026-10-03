@@ -1,0 +1,430 @@
+{
+ "focus": [
+  "Sales Order::SAL-ORD-2026-00543",
+  "Purchase Invoice::ACC-PINV-2026-00231-1"
+ ],
+ "exported": "2026-10-03",
+ "truncated": false,
+ "docs": [
+  {
+   "doctype": "Sales Order",
+   "name": "SAL-ORD-2026-00543",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:23.280423",
+   "owner": "Administrator",
+   "transaction_date": "2026-08-06",
+   "customer": "SAMPLE Customer Bowtie Trace",
+   "grand_total": 600,
+   "base_grand_total": 600,
+   "items": [
+    {
+     "name": "e4oeous5b5",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 150,
+     "amount": 600,
+     "base_net_amount": 600,
+     "prevdoc_docname": "SAL-QTN-2026-00608",
+     "quotation_item": "e4monbntn6"
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Invoice",
+   "name": "ACC-PINV-2026-00231-1",
+   "docstatus": 1,
+   "creation": "2026-09-21 23:29:09.025456",
+   "owner": "Administrator",
+   "posting_date": "2026-09-10",
+   "bill_date": "2026-09-10",
+   "due_date": "2026-10-07",
+   "paid_amount": 0,
+   "supplier": "SAMPLE Vendor 01",
+   "bill_no": "SMP-V01-INV-01",
+   "is_return": 0,
+   "amended_from": "ACC-PINV-2026-00231",
+   "grand_total": 9,
+   "base_grand_total": 9,
+   "outstanding_amount": 0,
+   "items": [
+    {
+     "name": "dbilecjacr",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-01",
+     "item_name": "SAMPLE Item 01",
+     "qty": 1,
+     "rate": 10,
+     "amount": 10,
+     "base_net_amount": 10,
+     "item_tax_amount": 0,
+     "landed_cost_voucher_amount": 0,
+     "valuation_rate": 10,
+     "is_fixed_asset": "0",
+     "purchase_receipt": "MAT-PRE-2026-00179",
+     "pr_detail": "r1uj3j5hmu",
+     "purchase_order": "PUR-ORD-2026-00370",
+     "po_detail": "qvldccoj3a"
+    }
+   ],
+   "taxes": [
+    {
+     "idx": 1,
+     "category": "Total",
+     "charge_type": "Actual",
+     "add_deduct_tax": "Deduct",
+     "description": "TDS Payable - HI",
+     "tax_amount": 1,
+     "base_tax_amount_after_discount_amount": 1
+    }
+   ]
+  },
+  {
+   "doctype": "Quotation",
+   "name": "SAL-QTN-2026-00608",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:23.014572",
+   "owner": "Administrator",
+   "transaction_date": "2026-08-02",
+   "party_name": "SAMPLE Customer Bowtie Trace",
+   "grand_total": 600,
+   "base_grand_total": 600,
+   "items": [
+    {
+     "name": "e4monbntn6",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 150,
+     "amount": 600,
+     "base_net_amount": 600
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Order",
+   "name": "PUR-ORD-2026-00404",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:23.414707",
+   "owner": "Administrator",
+   "transaction_date": "2026-08-10",
+   "supplier": "SAMPLE Vendor Bowtie Trace",
+   "grand_total": 500,
+   "base_grand_total": 500,
+   "items": [
+    {
+     "name": "e4qnbo7crc",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 125,
+     "amount": 500,
+     "base_net_amount": 500,
+     "sales_order": "SAL-ORD-2026-00543"
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Receipt",
+   "name": "MAT-PRE-2026-00211",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:23.563248",
+   "owner": "Administrator",
+   "posting_date": "2026-08-18",
+   "supplier": "SAMPLE Vendor Bowtie Trace",
+   "is_return": 0,
+   "grand_total": 500,
+   "base_grand_total": 500,
+   "items": [
+    {
+     "name": "e4ro931llq",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 125,
+     "amount": 500,
+     "base_net_amount": 500,
+     "purchase_order": "PUR-ORD-2026-00404",
+     "purchase_order_item": "e4qnbo7crc",
+     "sales_order": "SAL-ORD-2026-00543"
+    }
+   ]
+  },
+  {
+   "doctype": "Delivery Note",
+   "name": "MAT-DN-2026-00001",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:24.972109",
+   "owner": "Administrator",
+   "posting_date": "2026-09-01",
+   "customer": "SAMPLE Customer Bowtie Trace",
+   "is_return": 0,
+   "grand_total": 600,
+   "base_grand_total": 600,
+   "items": [
+    {
+     "name": "e59qm16ibl",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 150,
+     "amount": 600,
+     "base_net_amount": 600,
+     "against_sales_order": "SAL-ORD-2026-00543",
+     "so_detail": "e4oeous5b5"
+    }
+   ]
+  },
+  {
+   "doctype": "Sales Invoice",
+   "name": "ACC-SINV-2026-00525",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:25.654865",
+   "owner": "Administrator",
+   "posting_date": "2026-09-01",
+   "due_date": "2026-10-01",
+   "paid_amount": 0,
+   "customer": "SAMPLE Customer Bowtie Trace",
+   "is_return": 0,
+   "grand_total": 600,
+   "base_grand_total": 600,
+   "outstanding_amount": 0,
+   "items": [
+    {
+     "name": "e5gfrqu0ac",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 150,
+     "amount": 600,
+     "base_net_amount": 600,
+     "delivery_note": "MAT-DN-2026-00001",
+     "dn_detail": "e59qm16ibl",
+     "sales_order": "SAL-ORD-2026-00543",
+     "so_detail": "e4oeous5b5"
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Receipt",
+   "name": "MAT-PRE-2026-00179",
+   "docstatus": 1,
+   "creation": "2026-09-09 23:20:06.217173",
+   "owner": "Administrator",
+   "posting_date": "2026-09-09",
+   "supplier": "SAMPLE Vendor 01",
+   "is_return": 0,
+   "grand_total": 10,
+   "base_grand_total": 10,
+   "items": [
+    {
+     "name": "r1uj3j5hmu",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-01",
+     "item_name": "SAMPLE Item 01",
+     "qty": 1,
+     "rate": 10,
+     "amount": 10,
+     "base_net_amount": 10,
+     "purchase_order": "PUR-ORD-2026-00370",
+     "purchase_order_item": "qvldccoj3a",
+     "sales_order": "SAL-ORD-2026-00513"
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Order",
+   "name": "PUR-ORD-2026-00370",
+   "docstatus": 1,
+   "creation": "2026-09-09 23:19:58.978435",
+   "owner": "Administrator",
+   "transaction_date": "2026-09-08",
+   "supplier": "SAMPLE Vendor 01",
+   "grand_total": 10,
+   "base_grand_total": 10,
+   "items": [
+    {
+     "name": "qvldccoj3a",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-01",
+     "item_name": "SAMPLE Item 01",
+     "qty": 1,
+     "rate": 10,
+     "amount": 10,
+     "base_net_amount": 10,
+     "sales_order": "SAL-ORD-2026-00513"
+    }
+   ]
+  },
+  {
+   "doctype": "Payment Entry",
+   "name": "ACC-PAY-2026-00002",
+   "docstatus": 1,
+   "creation": "2026-09-12 00:32:31.712853",
+   "owner": "shell-writepath@sandbox.local",
+   "posting_date": "2026-09-12",
+   "reference_date": "2026-09-12",
+   "reference_no": "Batch of 2",
+   "paid_amount": 19,
+   "payment_type": "Pay",
+   "party_type": "Supplier",
+   "party": "SAMPLE Vendor 01",
+   "mode_of_payment": "ACH",
+   "party_name": "SAMPLE Vendor 01",
+   "references": [
+    {
+     "idx": 1,
+     "reference_doctype": "Purchase Invoice",
+     "reference_name": "ACC-PINV-2026-00255",
+     "allocated_amount": 10
+    },
+    {
+     "idx": 2,
+     "reference_doctype": "Purchase Invoice",
+     "reference_name": "ACC-PINV-2026-00231-1",
+     "allocated_amount": 9
+    }
+   ]
+  },
+  {
+   "doctype": "Purchase Invoice",
+   "name": "ACC-PINV-2026-00268",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:24.758481",
+   "owner": "Administrator",
+   "posting_date": "2026-08-20",
+   "bill_date": "2026-08-20",
+   "due_date": "2026-09-16",
+   "paid_amount": 0,
+   "supplier": "SAMPLE Vendor Bowtie Trace",
+   "bill_no": "SMP-BOWTIE-INV-01",
+   "is_return": 0,
+   "grand_total": 500,
+   "base_grand_total": 500,
+   "outstanding_amount": 0,
+   "items": [
+    {
+     "name": "e57tge9i6l",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-BOWTIE",
+     "item_name": "SAMPLE Item Bowtie Trace",
+     "qty": 4,
+     "rate": 125,
+     "amount": 500,
+     "base_net_amount": 500,
+     "item_tax_amount": 0,
+     "landed_cost_voucher_amount": 0,
+     "valuation_rate": 125,
+     "is_fixed_asset": "0",
+     "purchase_receipt": "MAT-PRE-2026-00211",
+     "pr_detail": "e4ro931llq",
+     "purchase_order": "PUR-ORD-2026-00404",
+     "po_detail": "e4qnbo7crc"
+    }
+   ],
+   "taxes": []
+  },
+  {
+   "doctype": "Payment Entry",
+   "name": "ACC-PAY-2026-00005",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:26.588196",
+   "owner": "Administrator",
+   "posting_date": "2026-09-15",
+   "reference_date": "2026-09-15",
+   "reference_no": "BT-PE-RCV",
+   "paid_amount": 600,
+   "payment_type": "Receive",
+   "party_type": "Customer",
+   "party": "SAMPLE Customer Bowtie Trace",
+   "mode_of_payment": "ACH",
+   "party_name": "SAMPLE Customer Bowtie Trace",
+   "references": [
+    {
+     "idx": 1,
+     "reference_doctype": "Sales Invoice",
+     "reference_name": "ACC-SINV-2026-00525",
+     "allocated_amount": 600
+    }
+   ]
+  },
+  {
+   "doctype": "Sales Order",
+   "name": "SAL-ORD-2026-00513",
+   "docstatus": 1,
+   "creation": "2026-09-09 23:19:44.978666",
+   "owner": "Administrator",
+   "transaction_date": "2026-09-09",
+   "customer": "SAMPLE Customer 01",
+   "grand_total": 10,
+   "base_grand_total": 10,
+   "items": [
+    {
+     "name": "qr9oclgege",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-01",
+     "item_name": "SAMPLE Item 01",
+     "qty": 1,
+     "rate": 10,
+     "amount": 10,
+     "base_net_amount": 10,
+     "prevdoc_docname": "SAL-QTN-2026-00578",
+     "quotation_item": "qq0hma5omg"
+    }
+   ]
+  },
+  {
+   "doctype": "Payment Entry",
+   "name": "ACC-PAY-2026-00004",
+   "docstatus": 1,
+   "creation": "2026-09-26 19:06:26.438666",
+   "owner": "Administrator",
+   "posting_date": "2026-08-28",
+   "reference_date": "2026-08-28",
+   "reference_no": "BT-PE-PAY",
+   "paid_amount": 500,
+   "payment_type": "Pay",
+   "party_type": "Supplier",
+   "party": "SAMPLE Vendor Bowtie Trace",
+   "mode_of_payment": "USPS_Check",
+   "party_name": "SAMPLE Vendor Bowtie Trace",
+   "references": [
+    {
+     "idx": 1,
+     "reference_doctype": "Purchase Invoice",
+     "reference_name": "ACC-PINV-2026-00268",
+     "allocated_amount": 500
+    }
+   ]
+  },
+  {
+   "doctype": "Quotation",
+   "name": "SAL-QTN-2026-00578",
+   "docstatus": 1,
+   "creation": "2026-09-09 23:19:40.832826",
+   "owner": "Administrator",
+   "transaction_date": "2026-09-08",
+   "party_name": "SAMPLE Customer 01",
+   "grand_total": 10,
+   "base_grand_total": 10,
+   "items": [
+    {
+     "name": "qq0hma5omg",
+     "idx": 1,
+     "item_code": "SAMPLE-SKU-01",
+     "item_name": "SAMPLE Item 01",
+     "qty": 1,
+     "rate": 10,
+     "amount": 10,
+     "base_net_amount": 10
+    }
+   ]
+  }
+ ]
+}

@@ -258,3 +258,28 @@ describe("renderDogfoodSourceHtml — checks and known gaps", () => {
     assert.match(rem, /Check amount<\/span><span>\$860\.00/);
   });
 });
+
+describe("the trace chain paper (DF-25, plan 2026-10-03)", () => {
+  const byId = Object.fromEntries(DOGFOOD_SOURCES.map((d) => [d.id, d]));
+  const ids = ["DF-25a", "DF-25b", "DF-25c", "DF-25d", "DF-25e", "DF-25f", "DF-25g", "DF-25h", "DF-25i"];
+  it("walks one customer order through both sides, each paper saying what to check", () => {
+    for (const id of ids) {
+      assert.ok(byId[id], `${id} missing`);
+      assert.equal(byId[id].oi, "OI-041");
+      assert.ok(byId[id].expect && byId[id].checks.length, `${id} needs expect + checks`);
+    }
+    assert.deepEqual(ids.map((id) => byId[id].kind), [
+      "customer_rfq", "customer_po", "purchase_order", "packing_list", "packing_list", "vendor_invoice", "vendor_invoice", "billing_instruction", "customer_remittance",
+    ]);
+  });
+  it("carries the same numbers as the trace test fixture", () => {
+    assert.equal(sourceSubtotal(byId["DF-25c"]), 835, "the PO");
+    assert.equal(sourceGrandTotal(byId["DF-25f"]), 900, "the bill: 855 of lines + 45 of charges");
+    assert.equal(sourceSubtotal(byId["DF-25g"]), 45, "the credit");
+    assert.equal(sourceSubtotal(byId["DF-25h"]), 1000, "the customer's invoice");
+  });
+  it("dates the second receipt the day after the bill, so the trace has a link that runs backwards", () => {
+    const d = (s) => new Date(s).getTime();
+    assert.ok(d(byId["DF-25e"].docDate) > d(byId["DF-25f"].docDate));
+  });
+});
