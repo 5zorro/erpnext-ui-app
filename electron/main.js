@@ -107,6 +107,7 @@ import {
   MULTI_PDF_SYNC_MAX,
   addToPrintQueue,
   classifyErpPrintUrl,
+  diagnosePrintFailure,
   groupPrintQueue,
   mergePrintPrefs,
   multiPdfUrl,
@@ -404,6 +405,13 @@ let shellDetour = null;
 let printPrefs = mergePrintPrefs(null);
 /** @type {import("../src/print-service.js").PrintItem[]} */
 let printQueue = [];
+/**
+ * Self-healing printing: the last engine / session fault this session, said in the dialog with its
+ * fix until a PDF from ERPNext works again. @type {{ kind: string, cause: string, fix: string, at: string }|null}
+ */
+let printTrouble = null;
+/** Print Settings as last read (the fallback PDF uses ERPNext's page size). */
+let lastPrintSettings = {};
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -959,6 +967,14 @@ function syncE2eApi() {
     fetchPrintPdf: async (item) => {
       const r = await fetchErpPdf(pdfUrl(ERP_BASE, item || {}));
       return r.ok ? { ok: true, size: r.bytes.length, head: r.bytes.subarray(0, 5).toString("latin1") } : r;
+    },
+    // Self-healing PDF for one document, without a save dialog (tests only).
+    healedPdf: async (item) => {
+      const r = await pdfForItem(null, item || {});
+      if (r.worker && !r.worker.isDestroyed()) r.worker.destroy();
+      return r.ok
+        ? { ok: true, healed: !!r.healed, head: Buffer.from(r.bytes).subarray(0, 5).toString("latin1"), trouble: printTrouble }
+        : { ok: false, reason: r.reason, trouble: printTrouble };
     },
     getPrintQueue: () => printQueue.map((q) => ({ ...q })),
     windowCount: () => BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed()).length,
@@ -10326,6 +10342,7 @@ async function printOptions(doctype) {
       out.settings = {
         allow_print_for_draft: p.allow_print_for_draft, allow_print_for_cancelled: p.allow_print_for_cancelled,
         with_letterhead: p.with_letterhead, add_draft_heading: p.add_draft_heading,
+        pdf_page_size: p.pdf_page_size,
       };
       return out;
     } catch (e) {
@@ -10340,8 +10357,10 @@ async function printOptions(doctype) {
     printers = [];
   }
   const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read print settings." };
+  if (base.settings) lastPrintSettings = base.settings;
   return {
     ...base,
+    trouble: printTrouble,
     // The three most recently used first (5zorro 2026-10-03), then the rest as the system lists them.
     printers: sortPrintersByRecent(
       printers.map((p) => ({
@@ -10420,6 +10439,16 @@ async function printOneOnWorker(worker, item, opts) {
  */
 async function printItemsToPrinter(items, opts = {}) {
   const list = Array.isArray(items) ? items : [];
+  // Self-healing: a printer that has gone away (unplugged, renamed, network down) is said up front
+  // rather than failing once per document; the jobs stay queued.
+  if (opts.deviceName && win && !win.isDestroyed()) {
+    const known = await win.webContents.getPrintersAsync().catch(() => null);
+    if (known && !known.some((p) => p.name === opts.deviceName)) {
+      const reason = `Printer "${opts.deviceName}" is not available on this computer now.`;
+      navDebug("print-done", reason);
+      return { ok: false, reason: `${reason} Pick another, or the system dialog — nothing was printed.`, results: list.map((item) => ({ item, ok: false, reason })) };
+    }
+  }
   navDebug("print-start", `${list.length} → ${opts.deviceName || "system dialog"}`);
   const worker = newPrintWorker();
   const results = [];
@@ -10468,6 +10497,72 @@ async function fetchErpPdf(url) {
 }
 
 /**
+ * Self-healing: when ERPNext's PDF engine fails (not a rule — see diagnosePrintFailure), make the
+ * PDF from ERPNext's own print page with this app's Chromium. Same HTML and print style from
+ * ERPNext; only the PDF maker differs (page breaks and headers may differ slightly from
+ * wkhtmltopdf's).
+ * @param {BrowserWindow} worker
+ * @param {import("../src/print-service.js").PrintItem} item
+ */
+async function renderPrintviewPdf(worker, item) {
+  let status = 0;
+  const onNav = (_e, _u, code) => {
+    status = code || status;
+  };
+  worker.webContents.on("did-navigate", onNav);
+  try {
+    await worker.loadURL(printviewUrl(ERP_BASE, item));
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  } finally {
+    worker.webContents.removeListener("did-navigate", onNav);
+  }
+  if (status >= 400) return { ok: false, reason: `ERPNext refused the print page (${status}).` };
+  await worker.webContents
+    .executeJavaScript(`(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => true)`)
+    .catch(() => {});
+  const size = String(lastPrintSettings.pdf_page_size || "A4");
+  const pageSize = ["A3", "A4", "A5", "Legal", "Letter", "Tabloid"].includes(size) ? size : "A4";
+  try {
+    const bytes = await worker.webContents.printToPDF({ printBackground: true, pageSize });
+    return { ok: true, bytes };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
+/**
+ * ERPNext's PDF for one document, healed by the fallback when ERPNext's engine is what failed.
+ * @param {BrowserWindow|null} worker reused across a batch; created on first need
+ * @param {import("../src/print-service.js").PrintItem} item
+ * @returns {Promise<{ ok: boolean, bytes?: Buffer, reason?: string, healed?: boolean, worker: BrowserWindow|null }>}
+ */
+async function pdfForItem(worker, item) {
+  const got = await fetchErpPdf(pdfUrl(ERP_BASE, item));
+  if (got.ok) {
+    if (printTrouble && printTrouble.kind === "engine") printTrouble = null;
+    return { ...got, worker };
+  }
+  const d = diagnosePrintFailure(got.reason);
+  if (d.kind !== "engine") {
+    if (d.kind === "session") printTrouble = { ...d, at: new Date().toISOString() };
+    return { ok: false, reason: got.reason, worker };
+  }
+  printTrouble = { ...d, at: new Date().toISOString() };
+  navDebug("pdf-heal", `${item.name}: ${got.reason}`);
+  const w = worker || newPrintWorker();
+  const made = await renderPrintviewPdf(w, item);
+  return made.ok ? { ok: true, bytes: made.bytes, healed: true, worker: w } : { ok: false, reason: `${got.reason}; the app's own PDF failed too: ${made.reason}`, worker: w };
+}
+
+/** A sentence for a summary when some PDFs were made by the fallback. */
+function healedNote(count) {
+  return count
+    ? ` ${count === 1 ? "It was" : `${count} were`} made by this app because ERPNext's PDF engine failed — ${printTrouble ? printTrouble.fix : "IT can check the server"}.`
+    : "";
+}
+
+/**
  * Save ERPNext's PDFs: one merged file, or one file per document in a folder.
  * @param {import("../src/print-service.js").PrintItem[]} items
  * @param {{ merged?: boolean }} opts
@@ -10484,19 +10579,35 @@ async function saveItemsAsPdf(items, opts = {}) {
     });
     if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
     const first = list[0];
-    const url =
-      list.length === 1
-        ? pdfUrl(ERP_BASE, first)
-        : multiPdfUrl(ERP_BASE, list, { format: first.format, noLetterhead: first.noLetterhead, letterhead: first.letterhead });
     navDebug("pdf-start", `${list.length} merged → ${pick.filePath}${list.length > MULTI_PDF_SYNC_MAX ? " (large)" : ""}`);
-    const got = await fetchErpPdf(url);
-    if (!got.ok) {
-      navDebug("pdf-done", `failed: ${got.reason}`);
-      return { ok: false, reason: got.reason };
+    if (list.length === 1) {
+      const one = await pdfForItem(null, first);
+      if (one.worker && !one.worker.isDestroyed()) one.worker.destroy();
+      if (!one.ok) {
+        navDebug("pdf-done", `failed: ${one.reason}`);
+        return { ok: false, reason: one.reason, trouble: printTrouble };
+      }
+      fs.writeFileSync(pick.filePath, one.bytes);
+      navDebug("pdf-done", `saved ${pick.filePath}${one.healed ? " (healed)" : ""}`);
+      return { ok: true, files: [pick.filePath], summary: `Saved PDF — ${pick.filePath}.${healedNote(one.healed ? 1 : 0)}`, trouble: printTrouble };
     }
-    fs.writeFileSync(pick.filePath, got.bytes);
-    navDebug("pdf-done", `saved ${pick.filePath}`);
-    return { ok: true, files: [pick.filePath], summary: `Saved ${list.length === 1 ? "PDF" : `${list.length} documents as one PDF`} — ${pick.filePath}` };
+    const got = await fetchErpPdf(
+      multiPdfUrl(ERP_BASE, list, { format: first.format, noLetterhead: first.noLetterhead, letterhead: first.letterhead }),
+    );
+    if (got.ok) {
+      if (printTrouble && printTrouble.kind === "engine") printTrouble = null;
+      fs.writeFileSync(pick.filePath, got.bytes);
+      navDebug("pdf-done", `saved ${pick.filePath}`);
+      return { ok: true, files: [pick.filePath], summary: `Saved ${list.length} documents as one PDF — ${pick.filePath}` };
+    }
+    if (diagnosePrintFailure(got.reason).kind !== "engine") {
+      navDebug("pdf-done", `failed: ${got.reason}`);
+      return { ok: false, reason: got.reason, trouble: printTrouble };
+    }
+    // Healing a merged file needs a PDF merger this app does not carry: save one file per document
+    // beside the chosen one instead, and say so.
+    const outcome = await savePdfsEach(list, path.dirname(pick.filePath));
+    return { ...outcome, summary: `ERPNext could not make one merged PDF, so each document was saved separately in ${path.dirname(pick.filePath)}. ${outcome.summary}` };
   }
   const dir = await dialog.showOpenDialog(win, {
     title: `Save ${list.length} PDFs — one per document`,
@@ -10505,22 +10616,39 @@ async function saveItemsAsPdf(items, opts = {}) {
   });
   if (dir.canceled || !dir.filePaths || !dir.filePaths[0]) return { ok: false, cancelled: true, reason: "Not saved." };
   navDebug("pdf-start", `${list.length} each → ${dir.filePaths[0]}`);
+  return savePdfsEach(list, dir.filePaths[0]);
+}
+
+/**
+ * One PDF per document into a folder, healing engine failures per document.
+ * @param {import("../src/print-service.js").PrintItem[]} list
+ * @param {string} folder
+ */
+async function savePdfsEach(list, folder) {
   const results = [];
   const files = [];
-  for (const item of list) {
-    const got = await fetchErpPdf(pdfUrl(ERP_BASE, item));
-    if (!got.ok) {
-      results.push({ item, ok: false, reason: got.reason });
-      continue;
+  let worker = null;
+  let healed = 0;
+  try {
+    for (const item of list) {
+      const got = await pdfForItem(worker, item);
+      worker = got.worker;
+      if (!got.ok) {
+        results.push({ item, ok: false, reason: got.reason });
+        continue;
+      }
+      if (got.healed) healed += 1;
+      const file = path.join(folder, pdfFileName(item.name));
+      fs.writeFileSync(file, got.bytes);
+      files.push(file);
+      results.push({ item, ok: true });
     }
-    const file = path.join(dir.filePaths[0], pdfFileName(item.name));
-    fs.writeFileSync(file, got.bytes);
-    files.push(file);
-    results.push({ item, ok: true });
+  } finally {
+    if (worker && !worker.isDestroyed()) worker.destroy();
   }
-  const summary = summarizePrintResults(results, "Saved");
+  const summary = summarizePrintResults(results, "Saved") + healedNote(healed);
   navDebug("pdf-done", summary);
-  return { ok: results.every((r) => r.ok), results, files, summary };
+  return { ok: results.every((r) => r.ok), results, files, summary, trouble: printTrouble };
 }
 
 /**

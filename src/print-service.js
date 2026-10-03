@@ -345,3 +345,57 @@ export function printerLabel(p) {
   const address = str(o["device-uri"] || o["printer-uri-supported"] || o["printer-location"] || (p && p.description) || "");
   return { label: address && address !== name ? `${name} — ${address}` : name, address: address === name ? "" : address };
 }
+
+/**
+ * Self-healing printing (5zorro 2026-10-03: "ideally this app will self heal from stuff like that
+ * common docker issue"). Every failure is sorted by who can fix it:
+ *
+ * - `rule`    — ERPNext said no on purpose (a draft / cancelled document, a permission). Passed
+ *               through unchanged; never worked around.
+ * - `session` — logged out. The clerk logs in again.
+ * - `engine`  — ERPNext's PDF engine broke (wkhtmltopdf cannot reach the site's own CSS inside
+ *               Docker, is missing, or crashed). The shell heals it for the clerk: it renders
+ *               ERPNext's own /printview to PDF itself. IT gets the cause and the exact fix.
+ * - `printer` — this computer's printer: gone, offline, refused. The job stays queued.
+ * - `unknown` — said as ERPNext said it.
+ *
+ * The shell never changes the server: it talks HTTP only, and the fix is IT's (Clean Core).
+ * @param {string|null|undefined} reason the failure text (ERPNext's message, or Electron's)
+ * @returns {{ kind: "rule"|"session"|"engine"|"printer"|"unknown", cause: string, fix: string }}
+ */
+export function diagnosePrintFailure(reason) {
+  const r = String(reason || "");
+  if (/not allowed to print|PermissionError|insufficient permission|no permission/i.test(r)) {
+    return { kind: "rule", cause: "ERPNext does not allow printing this document.", fix: "" };
+  }
+  if (/\b401\b|not logged in|session expired|login required|AuthenticationError/i.test(r)) {
+    return { kind: "session", cause: "The ERPNext session has ended.", fix: "Log in again (the Log in button in the top bar)." };
+  }
+  if (/network error|ConnectionRefused|HostNotFound|UnknownNetworkError|ConnectionRefusedError/i.test(r)) {
+    return {
+      kind: "engine",
+      cause:
+        "ERPNext's PDF engine (wkhtmltopdf) cannot reach the site's own address from inside the server, so it cannot load the page's styles. Common with Docker.",
+      fix:
+        "IT: point the site at an address the server can reach, e.g. in frappe_docker: bench --site <site> set-config host_name 'http://frontend:8080'",
+    };
+  }
+  if (/wkhtmltopdf|OSError|IOError|pdfkit|PDF generation|\b50[023]\b/i.test(r)) {
+    return {
+      kind: "engine",
+      cause: "ERPNext's PDF engine (wkhtmltopdf) failed on the server.",
+      // Over HTTP ERPNext says only "OSError"; the usual cause in Docker is the network one.
+      fix:
+        "IT: most often the server cannot reach the site's own address (Docker) — in frappe_docker: bench --site <site> set-config host_name 'http://frontend:8080'. Otherwise check wkhtmltopdf (0.12.x with patched qt) and the server's error log.",
+    };
+  }
+  if (/printer|device|deviceName|offline|print job|not printed|cups/i.test(r)) {
+    return {
+      kind: "printer",
+      cause: "The printer did not take the job.",
+      fix: "Pick another printer, or the system dialog; the job stays in the print queue.",
+    };
+  }
+  return { kind: "unknown", cause: r || "Printing failed.", fix: "" };
+}
+

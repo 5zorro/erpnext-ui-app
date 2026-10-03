@@ -23,3 +23,23 @@ That is enough to test printer choice, the recent-printers list and silent batch
 Not needed for development. A Windows printer can be reached from WSL's CUPS by its network
 address (`lpadmin -p <name> -E -v ipp://<printer-or-host>/ipp/print -m everywhere`), or run the
 Windows build of the shell, which sees Windows printers directly.
+
+## If ERPNext's PDFs fail (the shell heals, IT fixes)
+
+ERPNext makes PDFs on the server with wkhtmltopdf, which loads the page's styles from the site's
+own address. Inside Docker that address (`localhost:8080`) is often unreachable from the server
+itself, and every PDF fails ("network error: ConnectionRefusedError", shown as `OSError`) — in
+Vanilla too. The shell then makes the PDF itself from ERPNext's own print page and says so in the
+print dialog, with IT's fix:
+
+```bash
+bench --site <site> set-config host_name 'http://frontend:8080'   # frappe_docker's internal address
+```
+
+The change reaches ERPNext's running workers in about a minute (or restart the backend container).
+
+## Windows (optional, not used yet)
+
+**SumatraPDF** can print a PDF silently to a named printer
+(`SumatraPDF.exe -print-to "<printer>" -silent file.pdf`). It would let the Windows build send
+ERPNext's own server PDF straight to paper; a candidate third print path, not wired today.

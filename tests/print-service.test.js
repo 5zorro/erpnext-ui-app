@@ -19,6 +19,7 @@ import {
   RECENT_PRINTERS_MAX,
   isCheckModeOfPayment,
   printerLabel,
+  diagnosePrintFailure,
 } from "../src/print-service.js";
 
 const BASE = "http://localhost:8080";
@@ -185,6 +186,28 @@ describe("check runs and printer labels", () => {
       address: "ipp://192.168.1.40/ipp/print",
     });
     assert.deepEqual(printerLabel({ name: "PDF", options: {} }), { label: "PDF", address: "" });
+  });
+});
+
+// 5zorro 2026-10-03: "ideally this app will self heal from stuff like that common docker issue".
+describe("diagnosePrintFailure — who can fix it", () => {
+  it("the Docker problem found 2026-10-03 is an engine fault the shell heals, with IT's fix", () => {
+    const d = diagnosePrintFailure("ERPNext: wkhtmltopdf reported an error: Exit with code 1 due to network error: ConnectionRefusedError");
+    assert.equal(d.kind, "engine");
+    assert.match(d.fix, /host_name/);
+    assert.equal(diagnosePrintFailure("ERPNext: OSError").kind, "engine");
+    assert.equal(diagnosePrintFailure("ERPNext did not return a PDF (500).").kind, "engine");
+  });
+
+  it("ERPNext's rules pass through — never healed around", () => {
+    assert.equal(diagnosePrintFailure("ERPNext: Not allowed to print cancelled documents").kind, "rule");
+    assert.equal(diagnosePrintFailure("ERPNext: Not allowed to print draft documents").kind, "rule");
+  });
+
+  it("a lost session and a printer problem are named as such", () => {
+    assert.equal(diagnosePrintFailure("ERPNext did not return a PDF (401).").kind, "session");
+    assert.equal(diagnosePrintFailure("Invalid deviceName provided").kind, "printer");
+    assert.equal(diagnosePrintFailure("something odd").kind, "unknown");
   });
 });
 

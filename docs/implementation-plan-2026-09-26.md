@@ -815,6 +815,20 @@ frappe_docker deployment needs the same.
 - Remembered per doctype / purpose in `print-prefs.json`, never on the site.
 - Verified live (`e2e/scaffold-print.spec.js`): ERPNext's PDF over the app's session, the dialog in
   place with the doctype's formats, queue add, a Vanilla PDF popup caught.
+- **Self-healing** (5zorro 2026-10-03: *"ideally this app will self heal from stuff like that"*).
+  `diagnosePrintFailure` sorts every failure by who can fix it: **rule** (ERPNext said no — passed
+  through, never worked around), **session** (log in), **engine** (ERPNext's PDF engine broke —
+  the shell makes the PDF itself from ERPNext's own `/printview` with Electron's `printToPDF`, says
+  so, and the dialog shows IT's fix), **printer** (gone / refused — said up front, jobs stay
+  queued). The shell never changes the server (HTTP only, Clean Core). A merged PDF cannot be
+  healed without a PDF merger this app does not carry, so it falls back to one file per document
+  beside the chosen file. **Proven live 2026-10-03**: with `host_name` blanked (the Docker fault
+  back) the app still produced a PDF, marked healed, and a cancelled bill was still refused; with
+  `host_name` restored ERPNext's own PDF came back and the notice cleared. A site-config change
+  takes about a minute to reach ERPNext's workers.
+- **Windows option (5zorro)**: SumatraPDF prints a PDF silently to a named printer — a candidate
+  third path (ERPNext's server PDF straight to paper) for the Windows build; noted in
+  `ops/wsl-printing/README.md`, not wired.
 - **Not yet**: printing to a printer (no CUPS here); a Cheque Print Template, the alignment page,
   the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
   queue"; the queue does not survive a restart.

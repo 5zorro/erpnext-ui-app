@@ -29,6 +29,8 @@ const CSS = `
 .pd-queue li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pd-queue li button { padding: 0 6px; }
 .pd-status { min-height: 18px; font-size: 12px; margin-top: 10px; color: #0f766e; }
+.pd-trouble { font-size: 12px; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; }
+.pd-trouble code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .pd-status.err { color: #b91c1c; }
 `;
 
@@ -138,8 +140,10 @@ export async function openPrintDialog(opts) {
     .concat([`<option value=""${defaultPrinter ? "" : " selected"}>Choose in the system print dialog…</option>`])
     .join("");
 
+  const trouble = o && o.trouble;
   body.innerHTML = `
     ${block ? `<div class="pd-block" data-testid="print-block">${esc(block)}</div>` : ""}
+    ${trouble ? `<div class="pd-trouble" data-testid="print-trouble"><b>${trouble.kind === "engine" ? "Self-healing: " : ""}</b>${esc(trouble.cause)}${trouble.kind === "engine" ? " PDFs are being made by this app meanwhile — same ERPNext layout." : ""}${trouble.fix ? `<code>${esc(trouble.fix)}</code>` : ""}</div>` : ""}
     <div class="pd-row">
       <label for="pd-format">Print format</label>
       <select id="pd-format" data-testid="print-format">${formatOptions}</select>
