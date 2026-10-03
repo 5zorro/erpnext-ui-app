@@ -34,6 +34,8 @@ import {
 import {
   applyPeekTreeToHistory,
   applyErpHopToPeekStack,
+  renameInPeekStack,
+  renameInPeekLinks,
   beginPeekParent,
   collapsePeekStack,
   isActivePeekStack,
@@ -1246,6 +1248,13 @@ function onErpRouteHop(hop) {
   if (surfaceOwnsRoute(surfaceMode)) {
     navDebug("route-hop-hidden", `${hop.prev || "-"} → ${to}`);
     return;
+  }
+  if (hop.renamed && Object.keys(hop.renamed).length) {
+    const before = isActivePeekStack(peekStack) ? peekStack.parent.route : "";
+    peekStack = renameInPeekStack(peekStack, hop.renamed, ERP_BASE);
+    peekLinks = renameInPeekLinks(peekLinks, hop.renamed, ERP_BASE);
+    const after = isActivePeekStack(peekStack) ? peekStack.parent.route : "";
+    if (before !== after) navDebug("peek-rename", `${before} → ${after}`);
   }
   const had = isActivePeekStack(peekStack);
   const beforeParent = had ? peekStack.parent.route : "";
@@ -9264,8 +9273,12 @@ ipcMain.on("bill-open-vanilla", () => {
   showErp(route, { forceLoad: true });
 });
 
+// A "create X…" door from a Doc skin is a soft peek, never a hard navigation: the Doc page is
+// parked as the parent and Esc comes back to it (nav incident 2026-10-03 — a hard load here dropped
+// the Bill, so saving the new Supplier left no way back). tests/peek-doors.test.js holds every
+// `*-open-*-add` handler to this.
 ipcMain.on("bill-open-vendor-add", () => {
-  showErp("/app/supplier/new", { forceLoad: true });
+  softPeekErp("/app/supplier/new");
 });
 
 ipcMain.handle("bill-open-supplier-form", async (_e, supplier) => {
@@ -9279,7 +9292,7 @@ ipcMain.handle("bill-open-supplier-form", async (_e, supplier) => {
 });
 
 ipcMain.on("bill-open-project-add", () => {
-  showErp("/app/project/new", { forceLoad: true });
+  softPeekErp("/app/project/new");
 });
 
 ipcMain.on("bill-open-payment-terms-add", () => {
@@ -9984,7 +9997,7 @@ ipcMain.on("doc-open-vanilla", () => {
 });
 
 ipcMain.on("doc-open-vendor-add", () => {
-  showErp("/app/supplier/new", { forceLoad: true });
+  softPeekErp("/app/supplier/new");
 });
 
 ipcMain.on("doc-open-payment-terms-add", () => {

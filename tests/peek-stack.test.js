@@ -16,6 +16,8 @@ import {
   syncPeekLinks,
   isPeekChildRoute,
   PEEK_LINK_CAP,
+  renameInPeekStack,
+  renameInPeekLinks,
 } from "../src/peek-stack.js";
 import { normalizeAppRoute } from "../src/route-info.js";
 
@@ -396,3 +398,77 @@ describe("resolveSoftPeekEscAction", () => {
   });
 });
 
+// Nav incident 2026-10-03 (DF-02): Doc Bill → vendor picker "Go to Vendor add…" → new Supplier →
+// (unsaved) Create a new Payment Terms Template → save it → save the Supplier → Esc. The clerk
+// wanted the Bill back and got the Supplier just saved. Replayed hop by hop, as main applies them.
+describe("nav incident 2026-10-03 — a Supplier created from the Doc Bill, saved, then Esc", () => {
+  const bill = "/app/purchase-invoice/new-purchase-invoice-sqtmgsgbgs";
+  const parked = { route: bill, mode: "doc" };
+  const opts = { anchorRoute: bill };
+
+  function replay() {
+    // softPeekErp from the Doc skin: the parked Bill is the parent, the new Supplier its child.
+    let stack = beginPeekParent(null, resolveSoftPeekParent({ surfaceMode: "doc", parkedRoute: bill, currentRoute: bill }));
+    stack = pushPeekChild(stack, "/app/supplier/new");
+    // Frappe reroutes /new to the draft's own name.
+    stack = applyErpHopToPeekStack(stack, "/app/supplier/new", "/app/supplier/new-supplier-ydoenvughm", opts);
+    // Create a new Payment Terms Template from the unsaved Supplier.
+    stack = applyErpHopToPeekStack(
+      stack,
+      "/app/supplier/new-supplier-ydoenvughm",
+      "/app/payment-terms-template/new-payment-terms-template-mssertehbg",
+      { ...opts, prevUnsaved: true },
+    );
+    // Template saved, back to the Supplier; then the Supplier is saved and renamed.
+    const renamed = {
+      "new-payment-terms-template-mssertehbg": "NET 30 DAYS",
+      "new-supplier-ydoenvughm": "SUMMIT TRADERS",
+    };
+    stack = renameInPeekStack(stack, renamed);
+    stack = applyErpHopToPeekStack(stack, "/app/supplier/new", "/app/supplier/SUMMIT%20TRADERS", opts);
+    return stack;
+  }
+
+  it("the Bill stays the parent through the whole session — a parked Doc anchors it", () => {
+    const stack = replay();
+    assert.equal(stack.parent.route, bill);
+  });
+
+  it("the saved records are held under their real names, not their placeholders", () => {
+    const routes = replay().children.map((c) => c.route);
+    assert.ok(routes.includes("/app/supplier/SUMMIT%20TRADERS"), routes.join(" | "));
+    assert.ok(routes.includes("/app/payment-terms-template/NET%2030%20DAYS"), routes.join(" | "));
+    assert.ok(!routes.some((r) => /\/new(-|$)/.test(r)), `a placeholder survived: ${routes.join(" | ")}`);
+  });
+
+  it("Esc from the saved Supplier goes back to the Bill", () => {
+    const decision = resolveSoftPeekEscAction({
+      parked,
+      peekStack: replay(),
+      currentRoute: "/app/supplier/SUMMIT%20TRADERS",
+    });
+    assert.deepEqual(decision, { action: "resume-park", route: bill });
+  });
+
+  it("a parent saved during its own session is renamed too (unsaved Vanilla parent)", () => {
+    let stack = beginPeekParent(null, "/app/supplier/new-supplier-abc");
+    stack = pushPeekChild(stack, "/app/address/new-address-xyz");
+    stack = renameInPeekStack(stack, { "new-supplier-abc": "ACME" });
+    assert.equal(stack.parent.route, "/app/supplier/ACME");
+    assert.deepEqual(stack.children.map((c) => c.route), ["/app/address/new-address-xyz"]);
+  });
+
+  it("Recent's child → parent links follow the rename", () => {
+    const links = renameInPeekLinks(
+      { "/app/payment-terms-template/new-payment-terms-template-q": "/app/supplier/new-supplier-abc" },
+      { "new-supplier-abc": "ACME", "new-payment-terms-template-q": "NET 30" },
+    );
+    assert.deepEqual(links, { "/app/payment-terms-template/NET%2030": "/app/supplier/ACME" });
+  });
+
+  it("no renames → the same stack object back", () => {
+    const stack = beginPeekParent(null, bill);
+    assert.equal(renameInPeekStack(stack, {}), stack);
+    assert.equal(renameInPeekStack(null, { a: "b" }), null);
+  });
+});

@@ -123,7 +123,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       input.value = restore;
       if (isCreateSupplierLinkAction(v)) {
         if (api && api.openVendorAdd) {
-          setStatus("Opening Vendor add in Vanilla…");
+          setStatus("Opening a new Vendor in Vanilla (Esc returns here)…");
           api.openVendorAdd();
         } else {
           setStatus("Vendor add API missing — restart the shell.", "err");
@@ -150,7 +150,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
         return;
       }
       if (api && api.openProjectAdd) {
-        setStatus("Opening Project add in Vanilla…");
+        setStatus("Opening a new Project in Vanilla (Esc returns here)…");
         api.openProjectAdd();
       } else {
         setStatus("Project add API missing — restart the shell.", "err");

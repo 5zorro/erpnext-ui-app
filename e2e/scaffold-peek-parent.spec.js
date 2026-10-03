@@ -4,7 +4,7 @@
  * Never saves.
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, e2eCall, waitForE2eApi } from "./helpers.js";
+import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 
 /** @param {import('@playwright/test').ElectronApplication} app @param {string} js */
 const inErp = (app, js) => e2eCall(app, "execInView", "erp", js);
@@ -135,5 +135,30 @@ test.describe("scaffold: peek parents and the Recent dropdown (N1)", () => {
     await waitForm(app, "Address");
     await new Promise((r) => setTimeout(r, 1000));
     expect(await peek(app)).toBe(null);
+  });
+
+  // Nav incident 2026-10-03 (DF-02). "Go to Vendor add…" from the Doc Bill's vendor picker was a
+  // hard navigation: it dropped the Bill, so after the new Supplier was saved Esc had nowhere to go.
+  // A create door from a Doc skin is a peek — the Bill is parked as the parent. Never saves.
+  test("Doc Bill → Go to Vendor add…: the Bill is parked as the parent and Esc comes back to it", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    ignorePageDialogs(app);
+
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eCall(app, "getActiveDocSkin"), { timeout: 20_000 }).toBe("bill");
+    await new Promise((r) => setTimeout(r, 3000));
+
+    // The picker's empty-search action calls exactly this.
+    await e2eCall(app, "execInView", "docForm", `window.erpDoc.openVendorAdd(); true`);
+    await waitForm(app, "Supplier");
+    const stack = await peek(app);
+    expect(stack?.parent?.dt).toBe("purchase-invoice");
+    expect((stack?.children || []).map((c) => c.dt)).toEqual(["supplier"]);
+
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("doc");
+    expect(await e2eCall(app, "getActiveDocSkin")).toBe("bill");
   });
 });

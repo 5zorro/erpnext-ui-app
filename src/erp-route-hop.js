@@ -17,7 +17,12 @@
  *   prevUnsaved: boolean,
  *   fromLinkParent: string,
  *   fromLinkTarget: string,
+ *   renamed: Record<string, string>,
  * }} RouteHop
+ *   `renamed`: Frappe's own map of a draft's placeholder name to the name it got on save
+ *   (`frappe.model.new_names`, filled by model/sync.js). A saved parent or child keeps its place
+ *   in a peek session under its real name (nav incident 2026-10-03: a Supplier created from a Bill
+ *   was saved, and Esc went back to its stale `new-supplier-…` placeholder).
  */
 
 /**
@@ -26,6 +31,7 @@
  *   routeHistory: unknown[],
  *   locals: Record<string, Record<string, { __unsaved?: unknown }>>,
  *   fromLink: any,
+ *   newNames?: Record<string, unknown>,
  *   slug: (doctype: string) => string,
  * }} env
  * @returns {RouteHop}
@@ -82,12 +88,20 @@ export function describeRouteHop(env) {
     fromLinkTarget = target ? slug(target) : "";
   }
 
+  var renamed = {};
+  var nn = e.newNames && typeof e.newNames === "object" ? e.newNames : {};
+  var nnKeys = Object.keys(nn).slice(-50);
+  for (var k = 0; k < nnKeys.length; k++) {
+    if (typeof nn[nnKeys[k]] === "string" && nn[nnKeys[k]]) renamed[nnKeys[k]] = nn[nnKeys[k]];
+  }
+
   return {
     to: String(e.pathname || ""),
     prev: prev,
     prevUnsaved: prevUnsaved,
     fromLinkParent: fromLinkParent,
     fromLinkTarget: fromLinkTarget,
+    renamed: renamed,
   };
 }
 
@@ -108,7 +122,19 @@ export function sanitizeRouteHop(raw) {
     prevUnsaved: r.prevUnsaved === true,
     fromLinkParent: str(r.fromLinkParent),
     fromLinkTarget: str(r.fromLinkTarget),
+    renamed: sanitizeRenamed(r.renamed),
   };
+}
+
+/** @param {unknown} raw @returns {Record<string, string>} */
+function sanitizeRenamed(raw) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw).slice(-50)) {
+    if (typeof k === "string" && k && k.length <= 200 && typeof v === "string" && v && v.length <= 200) out[k] = v;
+  }
+  return out;
 }
 
 /**
@@ -130,6 +156,7 @@ export function buildRouteHopReporterJs() {
           routeHistory: frappe.route_history,
           locals: window.locals,
           fromLink: frappe._from_link,
+          newNames: frappe.model && frappe.model.new_names,
           slug: function (d) { return frappe.router.slug(d); }
         }));
       } catch (e) {}

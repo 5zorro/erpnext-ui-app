@@ -22,6 +22,7 @@ describe("describeRouteHop (runs in the ERP page)", () => {
       prevUnsaved: true,
       fromLinkParent: "",
       fromLinkTarget: "",
+      renamed: {},
     });
   });
 
@@ -95,6 +96,7 @@ describe("sanitizeRouteHop (what the shell accepts from the page)", () => {
       prevUnsaved: false,
       fromLinkParent: "",
       fromLinkTarget: "",
+      renamed: {},
     });
   });
 
@@ -110,5 +112,31 @@ describe("buildRouteHopReporterJs", () => {
     assert.doesNotThrow(() => new Function(js));
     assert.match(js, /frappe\.router\.on\("change"/);
     assert.match(js, /function describeRouteHop/);
+  });
+});
+
+// Nav incident 2026-10-03: a Supplier saved inside a peek session is renamed by Frappe; the hop
+// carries Frappe's own placeholder → saved-name map so the peek stack can follow it.
+describe("route hop — Frappe's rename map", () => {
+  it("passes frappe.model.new_names through, strings only", () => {
+    const hop = describeRouteHop({
+      pathname: "/app/supplier/SUMMIT%20TRADERS",
+      routeHistory: [["Form", "Supplier", "new"], ["Form", "Supplier", "SUMMIT TRADERS"]],
+      locals: {},
+      newNames: { "new-supplier-ydoenvughm": "SUMMIT TRADERS", junk: 5 },
+      slug,
+    });
+    assert.deepEqual(hop.renamed, { "new-supplier-ydoenvughm": "SUMMIT TRADERS" });
+  });
+
+  it("the shell keeps only sane pairs from what the page sent", () => {
+    const hop = sanitizeRouteHop({ to: "/app/x/y", renamed: { a: "b", "": "c", d: 7, e: "x".repeat(300) } });
+    assert.deepEqual(hop.renamed, { a: "b" });
+    assert.deepEqual(sanitizeRouteHop({ to: "/app/x/y" }).renamed, {});
+  });
+
+  it("the page script reads frappe.model.new_names", () => {
+    assert.match(buildRouteHopReporterJs(), /newNames: frappe\.model && frappe\.model\.new_names/);
+    assert.doesNotThrow(() => new Function(buildRouteHopReporterJs()));
   });
 });

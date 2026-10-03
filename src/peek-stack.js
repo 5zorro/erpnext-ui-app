@@ -386,6 +386,86 @@ export function resolveSoftPeekParent(s = {}) {
 }
 
 /**
+ * A child opened as `/app/<doctype>/new` is rerouted by Frappe to its draft name
+ * (`new-supplier-abc`). Record that name, so a later save can rename it (renameInPeekStack) and
+ * Recent does not keep a generic "new" row that would start yet another draft.
+ * @param {PeekStack} stack
+ * @param {string} to
+ * @param {string} [erpBase]
+ * @returns {PeekStack}
+ */
+function pinDraftName(stack, to, erpBase) {
+  const toInfo = normalizeAppRoute(to, erpBase);
+  if (!toInfo.record || toInfo.record === "new" || !toInfo.isNew) return stack;
+  let changed = false;
+  const children = stack.children.map((c) => {
+    const ci = normalizeAppRoute(c.route, erpBase);
+    if (ci.doctype !== toInfo.doctype || ci.record !== "new") return c;
+    changed = true;
+    return { ...c, route: toInfo.path };
+  });
+  return changed ? { parent: stack.parent, children } : stack;
+}
+
+/**
+ * A draft saved during a peek session keeps its place under its real name. Frappe renames a new
+ * record on its first save (`new-supplier-abc` → `SUMMIT TRADERS`) and records the pair in
+ * `frappe.model.new_names`; any parent or child still held by its placeholder is renamed here.
+ * Nav incident 2026-10-03: without it, Esc returned to the placeholder, which Frappe's form view
+ * resolves to the saved record — so the clerk landed on the record just saved, not the parent.
+ * @param {PeekStack|null|undefined} stack
+ * @param {Record<string, string>|null|undefined} renamed placeholder → saved name
+ * @param {string} [erpBase]
+ * @returns {PeekStack|null}
+ */
+export function renameInPeekStack(stack, renamed, erpBase) {
+  if (!isActivePeekStack(stack)) return stack ? stack : null;
+  const map = renamed && typeof renamed === "object" ? renamed : {};
+  if (!Object.keys(map).length) return stack;
+  let changed = false;
+  /** @param {PeekRef} ref */
+  const fix = (ref) => {
+    const n = normalizeAppRoute(ref.route, erpBase);
+    const rec = n.record ? decodeURIComponent(n.record) : "";
+    const saved = rec && map[rec];
+    if (!saved || saved === rec) return ref;
+    changed = true;
+    const route = `/app/${n.doctype}/${encodeURIComponent(saved)}`;
+    return {
+      ...ref,
+      route,
+      label: historyLabelFor(n.doctype, saved) || ref.label,
+      detail: ref.detail === "setup" ? ref.detail : saved,
+    };
+  };
+  const parent = fix(stack.parent);
+  const children = stack.children.map(fix);
+  return changed ? { parent, children } : stack;
+}
+
+/**
+ * Same rename for Recent's remembered child → parent links.
+ * @param {PeekLinks|null|undefined} links
+ * @param {Record<string, string>|null|undefined} renamed
+ * @param {string} [erpBase]
+ * @returns {PeekLinks}
+ */
+export function renameInPeekLinks(links, renamed, erpBase) {
+  const map = renamed && typeof renamed === "object" ? renamed : {};
+  const src = links || {};
+  if (!Object.keys(map).length) return { ...src };
+  const fixPath = (p) => {
+    const n = normalizeAppRoute(p, erpBase);
+    const rec = n.record ? decodeURIComponent(n.record) : "";
+    return rec && map[rec] ? `/app/${n.doctype}/${encodeURIComponent(map[rec])}` : p;
+  };
+  /** @type {PeekLinks} */
+  const out = {};
+  for (const [child, parent] of Object.entries(src)) out[fixPath(child)] = fixPath(parent);
+  return out;
+}
+
+/**
  * One in-SPA Desk hop, as the page reported it (`erp-route-hop.js`). Plan 2026-09-26 N1:
  *
  * 1. A hop onto the parent or one of its children is a return — the stack stays as it is.
@@ -417,12 +497,14 @@ export function applyErpHopToPeekStack(stack, fromPath, toPath, opts = {}) {
   const from = fromPath ? normalizeAppRoute(fromPath, erpBase).path || "" : "";
   const to = toPath ? normalizeAppRoute(toPath, erpBase).path || "" : "";
   if (!to) return keep;
-  if (from && routesReferToSameDoc(from, to, erpBase)) return keep;
   const isParent = (r) => live && !!r && routesReferToSameDoc(stack.parent.route, r, erpBase);
   const isChild = (r) =>
     live && !!r && stack.children.some((c) => routesReferToSameDoc(c.route, r, erpBase));
+  // Before the same-document return below: Frappe's `/new` → `new-x-…` reroute is exactly that.
+  if (isChild(to)) return pinDraftName(stack, to, erpBase);
+  if (from && routesReferToSameDoc(from, to, erpBase)) return keep;
 
-  if (isParent(to) || isChild(to)) return stack;
+  if (isParent(to)) return stack;
 
   if (isPeekChildRoute(to, erpBase)) {
     const fromIsForm = !!(from && normalizeAppRoute(from, erpBase).record);
