@@ -666,7 +666,7 @@ pays to correct it — including a void and amend — and must land back on the 
 - The return point may be a **shell page** (Pay Outstanding, the payment document page), not only a
   Doc skin. Today only a Doc skin can be parked (`parkDocSurfaceIfNeeded`) and the errand always
   opens in Vanilla; both are new.
-- The bill opens **in the clerk's lens** (the Doc Bill normally), not forced into Vanilla.
+- The bill opens **in the clerk's usual lens** (currently the Doc skin), not forced into any skin.
 - **The way back is visible**: a "← Back to Pay Outstanding" control in the Doc chrome while on the
   errand. Esc also returns when the page is not using Esc itself — a Doc skin also uses Esc to close
   its own dialogs and cancel an edit, so Esc alone is not enough.
@@ -682,6 +682,19 @@ the table and uses the call its kind says". The rule moves into `HANDOFF.md` § 
 table lands.
 
 **Order:** the table + 1–3 (small, existing machinery), then 4 (the two new abilities).
+
+**Built 2026-10-03.** `src/doc-doors.js` lists every door; HANDOFF invariant 8 states the rule.
+1–3 are peeks and no longer touch the lens (nor does Print, which had the same side effect).
+"Discard draft and edit available addresses" is now "Edit this vendor's addresses… (Esc returns
+here)" — no gate, nothing discarded; click the address box again on return (the picker re-reads).
+Door 4: the board's two bill eyes, and an eye on each bill of a check stub (board drawer and the
+payment page), call `shell-detour-open`; `openRoutePreferred(…, { skipDirtyGate: true })` leaves the
+board loaded. The way back is a "← Back to …" button in the top bar (every lens), Esc on a Doc page
+when no dialog is open and no field is being typed in (`doc-form-boot.js`), and the soft-peek Esc in
+Vanilla once the peek stack has nothing to say. Return shows the page without reloading and fires
+`shell-detour-return`: the board re-reads bills and runs the re-link pass; the payment page re-reads
+unless it has unsaved edits. Home, Find or any other shell page ends a detour.
+**Print stays pending:** a full load into Vanilla for the print preview; making it a peek is next.
 
 ## Dogfood residuals
 
@@ -699,6 +712,6 @@ table lands.
 | DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
-| Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | agreed 2026-10-02 — not started |
+| Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

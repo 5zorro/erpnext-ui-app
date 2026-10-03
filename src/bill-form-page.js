@@ -1080,23 +1080,6 @@ export async function bootBillFormPage(api) {
       else setStatus((res && res.reason) || "Print failed.", "err");
       return;
     }
-    if (action === "edit-vendor-addresses") {
-      const sup =
-        (trigger && trigger.supplier) ||
-        normalizeEditableText(lastDoc && lastDoc.supplier) ||
-        normalizeEditableText(el.vendor && el.vendor.value);
-      if (!sup) {
-        setStatus("No vendor — cannot open Supplier addresses.", "warn");
-        return;
-      }
-      setStatus("Opening vendor to edit addresses…");
-      const res = await api.openSupplierForm(sup);
-      if (res && res.ok === false) {
-        setStatus((res && res.reason) || "Could not open Supplier.", "err");
-      } else {
-        setStatus("Vanilla Supplier opened — edit Addresses, then return to Bill.");
-      }
-    }
   }
   
   async function requestToolbarAction(action, extra = null) {
@@ -2531,7 +2514,7 @@ export async function bootBillFormPage(api) {
       },
       onApply: applyAddressPick,
       onEditVendor: () => {
-        void discardBillDraftAndEditVendorAddresses();
+        void editVendorAddresses();
       },
       onManageCompanyAddresses: async () => {
         if (!api || !api.softPeekRoute) {
@@ -2545,7 +2528,8 @@ export async function bootBillFormPage(api) {
     });
   }
   
-  async function discardBillDraftAndEditVendorAddresses() {
+  /** Doors rule: an errand for this bill — a peek, so the draft is parked and Esc returns. */
+  async function editVendorAddresses() {
     const sup =
       normalizeEditableText(lastDoc && lastDoc.supplier) ||
       normalizeEditableText(el.vendor && el.vendor.value);
@@ -2557,19 +2541,10 @@ export async function bootBillFormPage(api) {
       setStatus("Open supplier API missing — restart the shell.", "err");
       return;
     }
-    if (!shouldOpenCommitGate(userEdited)) {
-      setStatus("Opening vendor to edit addresses…");
-      const res = await api.openSupplierForm(sup);
-      if (!(res && res.ok === false)) setStatus("Vanilla Supplier opened — edit Addresses, then return to Bill.");
-      else setStatus((res && res.reason) || "Could not open Supplier.", "err");
-      return;
-    }
-    openGate({
-      kind: "toolbar",
-      action: "edit-vendor-addresses",
-      label: "edit vendor addresses",
-      supplier: sup,
-    });
+    setStatus("Opening the vendor to edit addresses…");
+    const res = await api.openSupplierForm(sup);
+    if (res && res.ok === false) setStatus(res.reason || "Could not open Supplier.", "err");
+    else setStatus("Vendor opened — edit its Addresses, then Esc returns to this Bill.");
   }
   
   async function applyAddressPick(linkField, addressName) {

@@ -2,34 +2,69 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { DOC_DOORS, doorFor, isDoorChannel } from "../src/doc-doors.js";
 
 const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
 
-/** Every `ipcMain.on|handle("<name>", …)` handler body, up to its closing `});` at column 0. */
-function handlers(pattern) {
+/** Every `ipcMain.on|handle("<name>", …)` handler body. */
+function handlers() {
   const out = [];
-  const re = /^ipcMain\.(?:on|handle)\("([^"]+)"[\s\S]*?^\}\);/gm;
+  // One-line handlers end on their own line; multi-line ones at the first `});` / `);` at column 0.
+  const re = /^ipcMain\.(?:on|handle)\("([^"]+)"(?:[^\n]*\);$|[\s\S]*?^\}?\);$)/gm;
   let m;
-  while ((m = re.exec(main))) if (pattern.test(m[1])) out.push({ name: m[1], body: m[0] });
+  while ((m = re.exec(main))) out.push({ name: m[1], body: m[0] });
   return out;
 }
+const all = handlers();
+const doors = all.filter((h) => isDoorChannel(h.name));
 
-// Nav incident 2026-10-03: "Go to Vendor add…" was a hard navigation, so it dropped the Doc Bill
-// and saving the new Supplier left no way back. A "create X…" door from a Doc skin is a peek.
-describe("create doors from a Doc skin are soft peeks, never hard navigation", () => {
-  const doors = handlers(/^(bill|doc)-open-[a-z-]+-add$/);
-
-  it("finds the doors (so this test cannot pass by matching nothing)", () => {
-    const names = doors.map((d) => d.name).sort();
-    for (const n of ["bill-open-vendor-add", "bill-open-project-add", "bill-open-payment-terms-add", "doc-open-vendor-add"]) {
-      assert.ok(names.includes(n), `${n} not found among ${names.join(", ")}`);
+// Plan 2026-09-26 "Doors: peek or navigate" (5zorro 2026-10-02). Born of nav incident 2026-10-03:
+// "Go to Vendor add…" navigated away while Payment Terms add next to it peeked, so the Bill was lost.
+describe("Doc-skin doors follow one convention (src/doc-doors.js)", () => {
+  it("finds the doors (so this cannot pass by matching nothing)", () => {
+    for (const n of ["bill-open-vendor-add", "bill-attach-file", "bill-find", "bill-open-vanilla", "shell-detour-open"]) {
+      assert.ok(doors.some((d) => d.name === n), `${n} not found`);
     }
   });
 
+  it("every door-shaped handler in main is in the table", () => {
+    const missing = doors.map((d) => d.name).filter((n) => !doorFor(n));
+    assert.deepEqual(missing, [], "add these to src/doc-doors.js with their kind and reason");
+  });
+
+  it("every door in the table exists in main", () => {
+    const names = new Set(all.map((h) => h.name));
+    assert.deepEqual(Object.keys(DOC_DOORS).filter((n) => !names.has(n)), []);
+  });
+
   for (const d of doors) {
-    it(`${d.name} peeks (parks the Doc page; Esc returns)`, () => {
-      assert.match(d.body, /softPeekErp\(/, `${d.name} must use softPeekErp`);
-      assert.doesNotMatch(d.body, /showErp\(/, `${d.name} must not hard-navigate with showErp`);
+    const door = doorFor(d.name);
+    if (!door || door.pending) continue;
+    it(`${d.name} is a ${door.kind}`, () => {
+      if (door.kind === "peek") {
+        assert.match(d.body, /softPeekErp\(/, "a peek parks the page: softPeekErp");
+        assert.doesNotMatch(d.body, /showErp\(|loadErpUrl\(/, "a peek never hard-navigates");
+      } else if (door.kind === "navigate") {
+        assert.doesNotMatch(d.body, /softPeekErp\(/, "other work is not a peek");
+      } else if (door.kind === "lens") {
+        assert.match(d.body, /showErp\(/);
+      } else if (door.kind === "detour") {
+        assert.match(d.body, /openDetourFromShell\(/);
+      }
     });
   }
+
+  it("no door but a lens click changes the remembered lens", () => {
+    // Landed Cost and Attach used to set the Bill lens to Vanilla as a side effect.
+    for (const d of doors) {
+      const door = doorFor(d.name);
+      if (door && door.kind !== "lens") assert.doesNotMatch(d.body, /rememberLens\(/, d.name);
+    }
+  });
+
+  it("a pending door says why", () => {
+    for (const [n, door] of Object.entries(DOC_DOORS)) {
+      if (door.pending) assert.ok(door.pending.length > 10, n);
+    }
+  });
 });

@@ -13,6 +13,7 @@
 import { mountLinkPicker } from "./link-picker-ui.js";
 import { checkDocLinkFilters } from "./payment-entry-link-filters.js";
 import { formatUsdAmountHtml } from "./money.js";
+import { uiIconHtml } from "./ui-icons.js";
 
 /**
  * What the write-mode submit button acts on -- set by setCheckDocBatchSource, read by
@@ -79,6 +80,18 @@ export function setCheckDocDocument(name) {
   currentDocName = name ? String(name) : null;
 }
 
+/** @type {((invoice: string) => void)|null} */
+let invoiceOpener = null;
+
+/**
+ * Doors rule, door 4: how this page opens a bill on the remittance stub — a detour, so the clerk
+ * fixes the bill and comes back to the payment. Unset, the stub names its bills as plain text.
+ * @param {((invoice: string) => void)|null} fn
+ */
+export function setCheckDocInvoiceOpener(fn) {
+  invoiceOpener = typeof fn === "function" ? fn : null;
+}
+
 /**
  * Register what a later submit-click should act on. Call before/with paintCheckDoc when the
  * mount is an unsaved proposal; never call it for an existing-document mount.
@@ -139,6 +152,22 @@ export function paintCheckDoc(root, viewModel, opts = {}) {
       const inv = document.createElement("span");
       inv.className = "check-doc-stub-invoice";
       inv.textContent = row.invoice;
+      if (invoiceOpener && row.invoice) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "check-doc-stub-open";
+        open.dataset.testid = "check-doc-stub-open";
+        open.tabIndex = -1;
+        open.title = `Open ${row.invoice} to check or fix it — ← Back returns to this payment`;
+        open.setAttribute("aria-label", `Open ${row.invoice}`);
+        open.innerHTML = uiIconHtml("eye", { size: 12 });
+        const name = String(row.invoice);
+        open.onclick = (ev) => {
+          ev.stopPropagation();
+          if (invoiceOpener) invoiceOpener(name);
+        };
+        inv.append(" ", open);
+      }
       const due = document.createElement("span");
       due.className = "check-doc-stub-due";
       due.textContent = row.dueDate;

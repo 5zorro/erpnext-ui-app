@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   softPeekRoute: (route) => ipcRenderer.invoke("soft-peek-route", route || ""),
   billReceiveFacts: (codes, company) => ipcRenderer.invoke("bill-receive-facts", codes || [], company || ""),
   setBillReceiveAsk: (on) => ipcRenderer.invoke("set-bill-receive-ask", on !== false),
+  detourBack: () => ipcRenderer.send("shell-detour-back"),
   getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
   setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
   logNav: (event, detail) => ipcRenderer.send("nav-debug", event || "renderer", detail != null ? String(detail) : ""),

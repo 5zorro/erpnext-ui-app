@@ -102,6 +102,7 @@ import {
 import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
+import { beginShellDetour, detourBackLabel } from "../src/shell-detour.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -378,6 +379,12 @@ let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
 let docNumberPrefs = mergeNumberPrefs(null);
 /** DF-01 R: ask "receive with this bill?" at Save on the Doc Bill. */
 let billReceivePrefs = mergeReceiveAskPrefs(null);
+/**
+ * A detour from a shell page (src/shell-detour.js): the payment board or payment page stays loaded
+ * behind while the clerk fixes the bill a payment pays. One at a time.
+ * @type {import("../src/shell-detour.js").ShellDetour|null}
+ */
+let shellDetour = null;
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -1170,6 +1177,7 @@ function sendUiState() {
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
+      detourBack: detourBackLabel(shellDetour, surfaceMode),
       softPeekHint: softPeekReturnLabel(
         parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
         isActivePeekStack(peekStack) ? peekStack.parent : null,
@@ -2082,6 +2090,10 @@ function dismissSoftPeekFromEsc() {
     });
     return;
   }
+  if (decision.action === "none" && shellDetour) {
+    returnFromShellDetour("esc");
+    return;
+  }
   if (decision.action === "disarm") {
     navDebug("soft-peek-esc", "disarm");
     collapsePeekStackHard("esc-disarm");
@@ -2184,6 +2196,8 @@ async function openPeekChild(childRoute, parentRoute) {
  */
 async function armSoftPeekEscHook(armed) {
   if (!erp || erp.webContents.isDestroyed()) return;
+  // Away on a detour in Vanilla, Esc is the way back too (when the page is not using it).
+  if (!armed && shellDetour && surfaceMode === "erp") armed = true;
   try {
     // The gate itself is the pure, unit-tested predicate — serialized in rather than
     // hand-copied, so tests/history-nav.test.js covers the rule that actually ships.
@@ -4112,6 +4126,7 @@ async function gatePayOutstandingDirtyThen(doNav) {
 
 function showHome() {
   gateDirtyThen(() => {
+    endShellDetour("home");
     collapsePeekStackHard("home");
     parkedDocSurface = null;
     armSoftPeekEscHook(false).catch(() => {});
@@ -4151,6 +4166,7 @@ function noteShellDocSurfaceRoute(route) {
  * @param {SurfaceMode} mode
  */
 function enterShellSurface(mode) {
+  endShellDetour(`enter ${mode}`);
   collapsePeekStackHard(mode);
   parkedDocSurface = null;
   armSoftPeekEscHook(false).catch(() => {});
@@ -6896,6 +6912,8 @@ function createWindow() {
     ensureErpRouteHopReporter().catch(() => {});
     ensureSimplifiedSkin().catch(() => {});
     if (surfaceMode === "erp") scheduleErpKeyboardFocus();
+    // A fresh page lost the Esc listener; away on a detour, Esc must still lead back.
+    if (shellDetour && surfaceMode === "erp") armSoftPeekEscHook(true).catch(() => {});
   });
 
   scheduleRelayout();
@@ -8752,12 +8770,11 @@ ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => 
 });
 
 /** Soft path to Vanilla Landed Cost Voucher (native distribute). */
+// Doors (plan 2026-09-26 "Doors: peek or navigate"): an errand for this bill — a peek, and no
+// door changes the remembered lens; only a lens click does. src/doc-doors.js lists every door.
 ipcMain.handle("bill-open-landed-cost", async () => {
   const route = "/app/landed-cost-voucher/new";
-  currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
-  savePrefs();
-  showErp(route, { forceLoad: true });
+  await softPeekErp(route);
   return { ok: true, route };
 });
 
@@ -8774,10 +8791,9 @@ ipcMain.handle("bill-attach-file", async () => {
     };
   }
   const route = `/app/purchase-invoice/${doc.name}`;
-  currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
-  savePrefs();
-  showErp(route, { forceLoad: true });
+  // A peek onto this bill's own Vanilla form, for Frappe's uploader: Esc comes back to the Doc
+  // skin, and the remembered lens is left alone.
+  await softPeekErp(route);
   // Wait for form, then open attach (museum bind.js Attach).
   await waitForPurchaseInvoice(15000);
   const opened = await erpEval(`(async () => {
@@ -9182,8 +9198,7 @@ ipcMain.handle("bill-print", async () => {
   // Show Vanilla so the print page is visible (Electron has no browser "new tab").
   dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
   surfaceMode = "erp";
-  lensPrefs = rememberLens(lensPrefs, "purchase-invoice", "vanilla");
-  savePrefs();
+  // No lens change: printing is not choosing Vanilla for this bill (doors rule, src/doc-doors.js).
   place();
   sendUiState();
   syncE2eApi();
@@ -9286,8 +9301,8 @@ ipcMain.handle("bill-open-supplier-form", async (_e, supplier) => {
   if (!name) {
     return { ok: false, reason: "No supplier name." };
   }
-  // Desk route uses the document name as-is (spaces allowed in path segment encoding).
-  showErp(`/app/supplier/${encodeURIComponent(name)}`, { forceLoad: true });
+  // A peek: the Bill draft is parked, not discarded, and Esc comes back to it.
+  await softPeekErp(`/app/supplier/${encodeURIComponent(name)}`);
   return { ok: true, supplier: name };
 });
 
@@ -9579,10 +9594,8 @@ ipcMain.handle("doc-attach-file", async () => {
     };
   }
   const route = `/app/${profile.doctypeKey}/${doc.name}`;
-  currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, profile.doctypeKey, "vanilla");
-  savePrefs();
-  showErp(route, { forceLoad: true });
+  // A peek onto this document's own Vanilla form, for Frappe's uploader (see bill-attach-file).
+  await softPeekErp(route);
   await waitForDocForm(15000);
   const opened = await erpEval(`(async () => {
     try {
@@ -9816,8 +9829,7 @@ ipcMain.handle("doc-print", async () => {
   surfaceMode = "erp";
   activeDocSkin = null;
   currentRoute = route;
-  lensPrefs = rememberLens(lensPrefs, profile.doctypeKey, "vanilla");
-  savePrefs();
+  // No lens change: printing is not choosing Vanilla for this document (doors rule).
   place();
   history = pushHistory(history, route, { erpBase: ERP_BASE, labels: DOCTYPE_LABELS });
   sendHistory();
@@ -10360,6 +10372,78 @@ async function actOnDraftPayment(action, name) {
 }
 
 ipcMain.handle("get-draft-payments", async () => fetchDraftPayments());
+
+/**
+ * Doors rule, door 4: from the payment board / payment page to the bill a payment pays, in the
+ * clerk's usual lens, with the shell page kept loaded as the return point. Leaving skips the
+ * page's own unsaved-check gate on purpose: nothing is being discarded.
+ * @param {string} route
+ */
+function openDetourFromShell(route) {
+  const path = normalizeAppRoute(typeof route === "string" ? route : "", ERP_BASE).path || "";
+  if (!path || path === "/") return { ok: false, reason: "No document to open." };
+  const detour = beginShellDetour(surfaceMode, currentRoute || "");
+  if (!detour) {
+    navDebug("detour-none", `${surfaceMode} → ${path} (not a return point)`);
+    openHistoryRoute(path);
+    return { ok: true, detour: false };
+  }
+  shellDetour = detour;
+  navDebug("detour-open", `${detour.surface} → ${path}`);
+  openRoutePreferred(path, { skipDirtyGate: true });
+  return { ok: true, detour: true };
+}
+
+/** @param {string} why */
+function endShellDetour(why) {
+  if (!shellDetour) return;
+  navDebug("detour-end", `${shellDetour.surface} (${why})`);
+  shellDetour = null;
+}
+
+/**
+ * Back to the shell page: shown again as it was left (no reload — a half-written check stays),
+ * then told to re-read, because the bill may have been amended. The bill's own unsaved edits get
+ * the ordinary gate first.
+ * @param {string} how "button" | "esc"
+ */
+function returnFromShellDetour(how) {
+  const d = shellDetour;
+  if (!d) return false;
+  const view = d.surface === "pay-outstanding" ? payOutstanding : paymentDoc;
+  const page = d.surface === "pay-outstanding" ? "pay-outstanding.html" : "payment-doc.html";
+  const loaded = !!(view && !view.webContents.isDestroyed() && (view.webContents.getURL() || "").includes(page));
+  navDebug("detour-return", `${d.surface} via ${how}${loaded ? "" : " (reload: page was not loaded)"}`);
+  gateDirtyThen(() => {
+    shellDetour = null;
+    if (!loaded) {
+      if (d.surface === "pay-outstanding") showPayOutstanding();
+      else showPaymentDoc(routeInfo(d.route, ERP_BASE).record);
+      return;
+    }
+    enterShellSurface(d.surface);
+    noteShellDocSurfaceRoute(
+      docSkinTargetRoute(
+        d.surface === "pay-outstanding"
+          ? { kind: "pay-outstanding" }
+          : { kind: "payment-doc", record: routeInfo(d.route, ERP_BASE).record },
+      ),
+    );
+    place();
+    view.webContents
+      .executeJavaScript(`window.dispatchEvent(new CustomEvent("shell-detour-return")); true`)
+      .catch(() => {});
+    sendUiState();
+    sendHistory();
+    syncE2eApi();
+  });
+  return true;
+}
+
+ipcMain.handle("shell-detour-open", async (_e, route) => openDetourFromShell(route));
+ipcMain.on("shell-detour-back", () => {
+  if (shellDetour) returnFromShellDetour("button");
+});
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
 

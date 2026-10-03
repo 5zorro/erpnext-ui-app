@@ -958,6 +958,7 @@
       mountCheckDocWrite,
       mountCheckDocBlank,
       setCheckDocBatchSource,
+      setCheckDocInvoiceOpener,
       applyCheckDocDefaults,
     } from "../src/check-doc-mount.js";
     import { buildCheckDocViewModel, blankCheckViewModel } from "../src/check-doc-view.js";
@@ -1668,12 +1669,12 @@
       peek.type = "button";
       peek.className = "flow-btn";
       peek.dataset.testid = "bill-row-peek";
-      peek.title = `Peek at ${bill.invoice}`;
-      peek.setAttribute("aria-label", `Peek at ${bill.invoice}`);
+      peek.title = `Open ${bill.invoice} to check or fix it — ← Back returns to Pay Outstanding`;
+      peek.setAttribute("aria-label", `Open ${bill.invoice}`);
       peek.innerHTML = uiIconHtml("eye", { size: 13 });
       peek.onclick = (ev) => {
         ev.stopPropagation();
-        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(bill.invoice)}`);
+        openBillDetour(bill.invoice);
       };
       row.appendChild(peek);
       const advisories = billAdvisories(bill, { today: todayIso(), prefs });
@@ -1768,12 +1769,12 @@
       peek.type = "button";
       peek.className = "flow-btn";
       peek.dataset.testid = "invoice-peek";
-      peek.title = `Peek at ${inv.invoice}`;
-      peek.setAttribute("aria-label", `Peek at ${inv.invoice}`);
+      peek.title = `Open ${inv.invoice} to check or fix it — ← Back returns to Pay Outstanding`;
+      peek.setAttribute("aria-label", `Open ${inv.invoice}`);
       peek.innerHTML = uiIconHtml("eye", { size: 13 });
       peek.onclick = (ev) => {
         ev.stopPropagation();
-        if (api && api.openErp) api.openErp(`/app/purchase-invoice/${encodeURIComponent(inv.invoice)}`);
+        openBillDetour(inv.invoice);
       };
       head.appendChild(peek);
       wrap.appendChild(head);
@@ -3802,6 +3803,39 @@
       }
     }
 
+    /**
+     * Doors rule, door 4 (5zorro 2026-10-02): open the bill a payment pays, in the clerk's usual
+     * lens, with this board kept as it is to come back to — a half-written check included.
+     * @param {string} invoice
+     */
+    function openBillDetour(invoice) {
+      if (!invoice) return;
+      const route = `/app/purchase-invoice/${encodeURIComponent(invoice)}`;
+      if (api && api.openDetour) void api.openDetour(route);
+      else if (api && api.openErp) api.openErp(route);
+    }
+    setCheckDocInvoiceOpener(openBillDetour);
+
+    /** Vendors carrying a credit — the only ones worth a re-link pass (an amend detaches payments). */
+    function suppliersWithCredit(bills) {
+      return [
+        ...new Set(
+          bills
+            .filter((b) => !/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || "")) || !(Number(b.outstanding) > 0))
+            .map((b) => b.supplier)
+            .filter(Boolean),
+        ),
+      ];
+    }
+
+    // Back from a detour: the page was kept, not reloaded, so the drawer still holds what was typed.
+    // Re-read the bills (one may have been voided and amended) and run the re-link pass, as a load does.
+    window.addEventListener("shell-detour-return", async () => {
+      await reloadBills();
+      const withCredit = suppliersWithCredit(allBills);
+      if (withCredit.length && (await runAutoRelinks(withCredit))) await reloadBills();
+    });
+
     async function reloadBills() {
       if (!api || !api.getOutstandingBills) return;
       const res = await api.getOutstandingBills().catch((e) => ({ ok: false, reason: String(e), bills: [] }));
@@ -3832,14 +3866,7 @@
 
       // Vendors carrying a credit are the only ones worth a re-link pass, and there are usually
       // none — so this costs nothing on an ordinary load.
-      const withCredit = [
-        ...new Set(
-          allBills
-            .filter((b) => !/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || "")) || !(Number(b.outstanding) > 0))
-            .map((b) => b.supplier)
-            .filter(Boolean),
-        ),
-      ];
+      const withCredit = suppliersWithCredit(allBills);
       if (withCredit.length && (await runAutoRelinks(withCredit))) {
         // Something was posted, so the board is describing bills that are now paid.
         const again = await api.getOutstandingBills().catch(() => null);

@@ -118,6 +118,18 @@ flowchart LR
    because the opposite instinct is easy to have twice — it was specced into the Doc Pay skin
    tranche's Payment Entry step and had to be reversed before build (plan since closed).
 
+8. **Every door says how it moves the clerk** (5zorro 2026-10-02) — one question per door: *will
+   the clerk come back to this page when done?* Yes → **peek** (an errand: create a missing
+   master, look at or fix a linked document; the page is parked, Esc returns, nothing is
+   discarded — a peek is **not** read-only). No → **navigate** (other work; the unsaved-changes
+   gate asks first). Same document, other view → **lens**. From a shell page (the payment board,
+   the payment page) an errand is a **detour** (`src/shell-detour.js`): the page stays loaded
+   behind, the document opens in the clerk's usual lens, and "← Back to …" (or Esc when the page is
+   not using it) returns. **Only a lens click changes the remembered lens** — no door does it as a
+   side effect. Every door is a row in `src/doc-doors.js`, and `tests/peek-doors.test.js` fails on a
+   door that is missing from the table or does not use the call its kind says. Born of nav
+   incident 2026-10-03, where a July-era door navigated away while its neighbour peeked.
+
 ### Editing a submitted document (OI-171, built 2026-09-22…26)
 
 ERPNext cannot edit a submitted document, so *edit* means **void and amend**: cancel it, then insert
