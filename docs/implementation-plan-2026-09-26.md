@@ -627,6 +627,62 @@ Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); 
 - **Simplified:** ERPNext's own *Expense Head Changed* dialog gets a note — tick Update Stock before
   submitting, or default it in Customize Form (`assume-applier-payload.js`, version 12).
 
+## Doors: peek or navigate — one convention (agreed 5zorro 2026-10-02)
+
+**Why.** Nav incident 2026-10-03 (DF-02): "Go to Vendor add…" on the Doc Bill was a hard navigation
+written in July, before peeks existed, while Payment Terms add next to it was a peek. The hard one
+dropped the Bill. How a door moves the clerk was decided door by door, which is where the
+workarounds come from. Fixed in `606fc73` for the create doors; this section makes it a rule.
+
+**What a peek is.** An errand you come back from. **Not read-only**: you can edit and save on a peek
+(creating the Vendor is one). What makes it a peek is that the page you left is kept as the return
+point and Esc (or a visible back control) takes you there, with nothing discarded.
+
+**The rule — one question per door: will the clerk come back to this page when done?**
+
+| Kind | When | What happens |
+|---|---|---|
+| **Peek** | Yes — an errand for this document: create a missing master (Vendor, Item, Terms, Project, Address), look at or fix a linked document (source PO, a payment, the bill a check pays), a setting this document needs | The page is parked as the parent; Esc returns; a draft saved on the errand is followed under its new name (`renameInPeekStack`) |
+| **Navigate** | No — other work: Find, New, a different document as the job | The page is left; the unsaved-changes gate asks first |
+| **Lens** | Same document, other view: Open in Default-skin / Simplified | Only an explicit lens click changes the remembered lens — no door changes it as a side effect |
+
+**Doors today, against the rule** (Bill / PO / IR / A/R Doc skins and the payment pages):
+
+| Door | Today | Rule says |
+|---|---|---|
+| Create Vendor / Item / Payment Terms / Project | peek (Vendor + Project fixed `606fc73`) | ✅ peek |
+| Linked source ↗ (PO / receipt / bill / Sales Order), Applied payment 👁, Add payment | peek | ✅ peek |
+| Ship To → company addresses; receive dialog → Customize Form | peek | ✅ peek |
+| Find…, New, Select PO / source | navigate / in place | ✅ navigate |
+| Open in Default-skin / Simplified | lens | ✅ lens |
+| **1. Landed Cost Voucher** (Bill) | hard navigate **and sets the Bill lens to Vanilla** | peek; lens untouched |
+| **2. Attach file** | hard navigate to the same bill in Vanilla **and sets the lens to Vanilla** | peek to Vanilla's uploader on this bill; lens untouched |
+| **3. "Discard draft and edit available addresses for this vendor"** | discards the draft, then navigates | peek to the Supplier; nothing discarded; reopen the picker on return |
+| **4. Payment board eye "Peek at …" (and the payment document page's bill links)** | navigates (opens the bill via Recent's door); no way back to the board | peek with the board as the return point — below |
+
+1–3 agreed. **4, clarified by 5zorro 2026-10-02:** writing a check, the clerk opens the bill it
+pays to correct it — including a void and amend — and must land back on the payment work. So:
+
+- The return point may be a **shell page** (Pay Outstanding, the payment document page), not only a
+  Doc skin. Today only a Doc skin can be parked (`parkDocSurfaceIfNeeded`) and the errand always
+  opens in Vanilla; both are new.
+- The bill opens **in the clerk's lens** (the Doc Bill normally), not forced into Vanilla.
+- **The way back is visible**: a "← Back to Pay Outstanding" control in the Doc chrome while on the
+  errand. Esc also returns when the page is not using Esc itself — a Doc skin also uses Esc to close
+  its own dialogs and cancel an edit, so Esc alone is not enough.
+- **Void and amend keeps the way back**: the amended bill's new name (`…-1`) is followed, like any
+  draft renamed on save.
+- **On return the board re-reads its bills** (the amend changed them; the re-link pass runs) and an
+  unsaved check in the drawer keeps what was typed.
+
+**Enforcement.** Every Doc-skin and payment-page door goes in one table, `src/doc-doors.js`
+(door → peek / navigate / lens, with its reason), the way `src/shell-surfaces.js` lists the shell
+pages. `tests/peek-doors.test.js` grows from "create doors peek" to "every navigating door is in
+the table and uses the call its kind says". The rule moves into `HANDOFF.md` § Invariants when the
+table lands.
+
+**Order:** the table + 1–3 (small, existing machinery), then 4 (the two new abilities).
+
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -642,5 +698,7 @@ Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); 
 | DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
 | DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
+| 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
+| Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | agreed 2026-10-02 — not started |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
