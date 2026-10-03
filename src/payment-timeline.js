@@ -6,7 +6,8 @@
  * One timeline, newest first:
  *   1. **planned checks** — every open bill on the check run that pays it, by the Pay Outstanding
  *      rule (src/check-run-schedule.js: a run pays everything that would be late if it waited for
- *      the run after it). Open credits come off the first planned check. Paid-in-full bills never
+ *      the run after it). An open credit comes off the check that pays the bill it is against, else
+ *      off the next planned check. Paid-in-full bills never
  *      appear here.
  *   2. **today**
  *   3. **checks written** — each with whether it has cleared the bank. A Payment Entry with no
@@ -28,7 +29,8 @@ const addDays = (iso, n) => {
 };
 
 /**
- * @typedef {{ key: string, total: number, open: number, payBy?: string, date?: string, isCredit?: boolean }} OpenInvoice
+ * @typedef {{ key: string, total: number, open: number, payBy?: string, date?: string, isCredit?: boolean, against?: string }} OpenInvoice
+ *   `against` — a credit's `return_against` bill key
  * @typedef {{ key: string, ref: string, date: string, total: number, cleared: string,
  *   refs: Array<{ invoiceKey: string, amount: number }> }} WrittenPayment
  * @typedef {{ state: string, runDate: string, intervalDays: number }} RunLike
@@ -67,12 +69,16 @@ export function paymentTimeline({ invoices = [], payments = [], run = null, toda
     if (!groups.has(k)) groups.set(k, { kind: p.kind, date: p.date, items: [] });
     groups.get(k).items.push({ invoiceKey: b.key, amount: r2(b.open) });
   }
-  // Open credits come off the first check that will be written.
+  // An open credit comes off the check that pays the bill it is against; with no such bill still
+  // open (none named, or already paid), off the next check (5zorro 2026-10-03).
   const ordered = [...groups.values()].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
-  if (credits.length) {
-    const first = ordered[0] || { kind: "unscheduled", date: "", items: [] };
-    if (!ordered.length) { groups.set("unscheduled|", first); ordered.push(first); }
-    for (const c of credits) first.items.push({ invoiceKey: c.key, amount: r2(-Math.abs(c.open)) });
+  for (const c of credits) {
+    let g = c.against ? ordered.find((x) => x.items.some((i) => i.invoiceKey === c.against)) : null;
+    if (!g) {
+      g = ordered[0];
+      if (!g) { g = { kind: "unscheduled", date: "", items: [] }; groups.set("unscheduled|", g); ordered.push(g); }
+    }
+    g.items.push({ invoiceKey: c.key, amount: r2(-Math.abs(c.open)) });
   }
   const planned = ordered
     .map((g) => ({ ...g, total: r2(g.items.reduce((t, i) => t + i.amount, 0)) }))

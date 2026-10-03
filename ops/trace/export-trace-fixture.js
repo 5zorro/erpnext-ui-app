@@ -37,7 +37,7 @@ const keep = (row, fields) => Object.fromEntries(fields.filter((f) => row[f] !==
 const HEADER = ["name", "docstatus", "creation", "owner", "transaction_date", "posting_date", "bill_date", "due_date", "reference_date", "reference_no",
   "clearance_date", "paid_amount", "payment_type", "party_type", "party", "mode_of_payment", "party_name", "customer", "supplier", "po_no", "bill_no",
   "supplier_delivery_note", "is_return", "return_against", "amended_from", "grand_total", "base_grand_total", "outstanding_amount"];
-const TAX = ["idx", "category", "charge_type", "add_deduct_tax", "description", "tax_amount", "base_tax_amount_after_discount_amount"];
+const TAX = ["idx", "category", "charge_type", "add_deduct_tax", "description", "account_head", "tax_amount", "base_tax_amount_after_discount_amount", "allocate_full_amount_to_stock_items"];
 const REF = ["idx", "reference_doctype", "reference_name", "allocated_amount"];
 
 async function getDoc(doctype, name) {

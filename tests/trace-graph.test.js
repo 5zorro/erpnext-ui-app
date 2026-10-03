@@ -5,7 +5,7 @@ import {
   TRACE_DOCTYPES, LINE_LINKS, HEADER_LINKS, TABLE_DOCTYPE, lineLinksFor, linksInto, traceDates, traceLineFields,
 } from "../src/trace-links.js";
 import {
-  buildTraceGraph, reachFrom, landedLine, landedInTrace, unallocatedCharges, paidShare, costForSalesOrderLine,
+  buildTraceGraph, reachFrom, landedLine, landedInTrace, unallocatedCharges, chargeAdvisories, paidShare, costForSalesOrderLine,
   outOfSequence, dateOrder, ancestorsOf, descendantsOf,
 } from "../src/trace-graph.js";
 
@@ -175,5 +175,29 @@ describe("trace-graph: a PO-wide cost spread by a Landed Cost Voucher", () => {
   it("flows into the customer's margin", () => {
     const c = costForSalesOrderLine(withVoucher(), K("Sales Order", "SAL-ORD-0543"), 0);
     assert.equal(c.billed, 454.37);
+  });
+});
+
+describe("trace-graph: why a charge is in no item's cost", () => {
+  it("explains a Total-only charge and names the setting that would spread it", () => {
+    const bill = traceChain().find((d) => d.name === "ACC-PINV-0268");
+    const [a] = chargeAdvisories(bill);
+    assert.equal(a.code, "total-only");
+    assert.equal(a.amount, 15);
+    assert.match(a.text, /Fuel surcharge 15\.00 is in no item's cost/);
+    assert.match(a.fix, /Valuation and Total/);
+    assert.match(a.fix, /void and amend/, "a submitted bill changes through Edit");
+    assert.equal(a.route, "/app/purchase-invoice/ACC-PINV-0268");
+  });
+  it("explains a valuation share that fell on a non-stock line", () => {
+    const bill = traceChain().find((d) => d.name === "ACC-PINV-0268");
+    bill.items[3].item_tax_amount = 0.62; // 1.00 of the freight left on the pallet wrap
+    const a = chargeAdvisories(bill).find((x) => x.code === "non-stock-share");
+    assert.equal(a.amount, 1);
+    assert.match(a.fix, /Allocate full amount to stock items/);
+  });
+  it("says nothing about a withholding deduction", () => {
+    const bill = { name: "B", docstatus: 1, taxes: [{ category: "Total", add_deduct_tax: "Deduct", tax_amount: 1, description: "TDS" }], items: [] };
+    assert.deepEqual(chargeAdvisories(bill), []);
   });
 });

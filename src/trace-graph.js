@@ -107,6 +107,42 @@ export function unallocatedCharges(bill) {
 }
 
 /**
+ * ⓘ advisories for the charges that are in no item's cost — the trace agrees with the books, but
+ * says why a charge was not spread and how to change it (5zorro 2026-10-03: "it would be common
+ * for a user to want it to be spread but confused as to why it isn't").
+ *   - a **Total**-only charge: added to what the vendor is owed, never to stock value;
+ *   - a valuation charge whose share fell on a **non-stock** line, because "Allocate full amount to
+ *     stock items" was not ticked: computed for that line, but in no item's cost.
+ * Each says which setting moves it, and `route` is the bill, for an "Open the bill" door.
+ * @param {Record<string, any>} bill a Purchase Invoice
+ * @returns {Array<{ kind: "info", code: string, charge: string, amount: number, text: string, fix: string, route: string }>}
+ */
+export function chargeAdvisories(bill) {
+  const out = [];
+  const route = `/app/purchase-invoice/${encodeURIComponent(bill.name)}`;
+  const edit = Number(bill.docstatus) === 1 ? " On a submitted bill that is a change through Edit (void and amend)." : "";
+  const money = (n) => r2(n).toFixed(2);
+  for (const t of Array.isArray(bill.taxes) ? bill.taxes : []) {
+    if (t.add_deduct_tax === "Deduct") continue;
+    const amount = r2(t.base_tax_amount_after_discount_amount ?? t.tax_amount);
+    if (!amount) continue;
+    const name = t.description || t.account_head || "A charge";
+    if (t.category === "Total") {
+      out.push({ kind: "info", code: "total-only", charge: name, amount, route,
+        text: `${name} ${money(amount)} is in no item's cost: its "Consider Tax or Charge for" is Total, so ERPNext adds it to what the vendor is owed but not to stock value.`,
+        fix: `To spread it over the items like freight, set the charge's "Consider Tax or Charge for" to "Valuation and Total" (and tick "Allocate full amount to stock items" to keep it off non-stock lines).${edit}` });
+    }
+  }
+  const { notCapitalised } = unallocatedCharges(bill);
+  if (notCapitalised > 0.005) {
+    out.push({ kind: "info", code: "non-stock-share", charge: "valuation charges", amount: notCapitalised, route,
+      text: `${money(notCapitalised)} of this bill's valuation charges fell on non-stock lines and is in no item's cost.`,
+      fix: `Tick "Allocate full amount to stock items" on the charge to spread all of it over the stock lines.${edit}` });
+  }
+  return out;
+}
+
+/**
  * @typedef {{ key: string, i: number, row: Record<string, any> }} TraceLine
  * @typedef {{
  *   from: string, fromRow: number|null, to: string, toRow: number|null,

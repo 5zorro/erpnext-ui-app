@@ -41,8 +41,20 @@ describe("paymentTimeline", () => {
       ["2026-10-02", ["PI::276", "PI::284", "PI::273"]],
     ]);
   });
-  it("takes open credits off the first planned check", () => {
+  it("takes an open credit with no open bill behind it off the next planned check", () => {
     assert.equal(t.planned[1].total, 1755);
+  });
+  it("takes an open credit off the check that pays the bill it is against", () => {
+    const withAgainst = invoices.map((i) => (i.key === "PI::273" ? { ...i, against: "PI::290" } : i));
+    const t2 = paymentTimeline({ invoices: withAgainst, payments, run, today: "2026-09-28" });
+    assert.deepEqual(t2.planned[0].items.map((i) => i.invoiceKey), ["PI::290", "PI::273"]);
+    assert.equal(t2.planned[0].total, 1105);
+    assert.equal(t2.planned[1].total, 1800);
+  });
+  it("falls back to the next check when the bill it is against is already paid", () => {
+    const paidAgainst = invoices.map((i) => (i.key === "PI::273" ? { ...i, against: "PI::268" } : i));
+    const t3 = paymentTimeline({ invoices: paidAgainst, payments, run, today: "2026-09-28" });
+    assert.ok(t3.planned[1].items.some((i) => i.invoiceKey === "PI::273"));
   });
   it("lists checks written newest first, with whether the bank has seen them", () => {
     assert.deepEqual(t.written.map((w) => [w.ref, w.status]), [["Check 10511", "not-cleared"], ["Check 10452", "cleared"]]);

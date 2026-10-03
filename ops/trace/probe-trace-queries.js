@@ -63,6 +63,9 @@ for (const doctype of Object.keys(TABLE_DOCTYPE)) {
 }
 for (const l of LINE_LINKS) await run(`link ${l.doctype}.${l.field} / ${l.row}`, l.doctype, { fields: ["name"], filters: [[TABLE_DOCTYPE[l.doctype], l.field, "=", NONE], [TABLE_DOCTYPE[l.doctype], l.row, "=", NONE]] });
 for (const [doctype, f] of Object.entries(RETURN_ROW)) await run(`return row ${TABLE_DOCTYPE[doctype]}.${f}`, doctype, { fields: ["name"], filters: [[TABLE_DOCTYPE[doctype], f, "=", NONE]] });
+for (const f of ["category", "charge_type", "add_deduct_tax", "description", "account_head", "tax_amount", "base_tax_amount_after_discount_amount", "allocate_full_amount_to_stock_items"]) {
+  await run(`Purchase Taxes and Charges.${f}`, "Purchase Invoice", { fields: ["name"], filters: [["Purchase Taxes and Charges", f, "=", NONE]] });
+}
 await run("Payment Entry Reference fields", PAYMENT_LINK.doctype, { fields: ["name"], filters: [[PAYMENT_LINK.tableDoctype, PAYMENT_LINK.nameField, "=", NONE], [PAYMENT_LINK.tableDoctype, PAYMENT_LINK.doctypeField, "=", "Purchase Invoice"], [PAYMENT_LINK.tableDoctype, PAYMENT_LINK.amountField, ">", 0]] });
 for (const doctype of Object.keys(TRACE_DOCTYPES)) {
   for (const q of downstreamQueries(`${doctype}::${NONE}`)) await run(`downstream of ${doctype}: ${q.why.replace(NONE, "…")}`, q.doctype, { fields: q.fields, filters: q.filters });
