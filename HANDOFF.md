@@ -183,6 +183,10 @@ local deviation — but a second deployment may differ, which is the reason for 
 | `Accounts Settings.automatically_fetch_payment_terms` | `0` | With the template's `allocate_payment_based_on_payment_terms`, lets `set_payment_schedule` refetch a bill's whole schedule from its order | The batch method change **reads the mode back** after amending rather than trusting the patch stuck (`accounts_controller.py:2658` is the path that would undo it) |
 | `Document Naming Settings.default_amend_naming` | `Amend Counter` | Whether an amendment is `<name>-1` / `<name>-2`, or takes a fresh series name | `predictAmendedName` returns `""` under "Default Naming" and the confirm simply does not name the new ID, rather than promising one |
 | `Payment Terms Template.allocate_payment_based_on_payment_terms` | per template | Whether payments maintain `paid_amount`/`outstanding` on schedule **rows** | Multi-installment templates the shell creates set it; pre-existing ones may not (`payment-term-plan.js`) |
+| `Print Settings.pdf_page_size` | `A4` | The page ERPNext lays documents out on | The print dialog compares it with each printer's paper; a mismatch shows ⚠ and the job is shrunk to fit (never for checks) |
+| `Print Settings.allow_print_for_draft` / `add_draft_heading` / `allow_print_for_cancelled` | `1` / `1` / `0` | Whether drafts / cancelled documents print at all, and drafts with a "Draft" heading | `printBlockReason` says it before ERPNext refuses; the shell never works around them |
+| `Stock Settings.default_warehouse` | site's own | Where *Receive with this bill* puts stock lines with no warehouse | Read at Save (`bill-receive-facts`); none set → the lines' own warehouses |
+| `site_config.json host_name` (deployment, not Desk) | unset | 🔴 ERPNext's PDF engine (wkhtmltopdf) loads the page's CSS from `get_url()`; inside Docker the browser's address is unreachable from the server and **every PDF fails** (`OSError`, Vanilla too) | Set it to the compose network's frontend (`http://frontend:8080` in frappe_docker). Until then the shell heals: it renders `/printview` to PDF itself and says so (see *Printing*) |
 
 **Why `auto_reconcile_payments` stays off** (5zorro 2026-09-26, after reading the source): it would
 not have solved the case that prompted the question, and when it does run it gets that case wrong.
@@ -193,6 +197,39 @@ therefore falls back to oldest-invoice-first, which on a supplier with more than
 the loose money against the wrong one and leaves the amended bill outstanding — a wrong ledger
 *and* still exposed to paying twice. The shell proposes the pairing instead (`payment-relink.js`),
 using the one fact the allocator ignores: an amendment carries `amended_from`.
+
+### Printing (folded from plan 2026-09-26 "Printing" / "Printer hardening", built 2026-10-03)
+
+How Frappe prints, read from v16: its **Print** button `window.open`s `/printview?…&trigger_print=1`
+(the page calls the browser's print), **PDF** opens `frappe.utils.print_format.download_pdf`
+(server-side wkhtmltopdf), list **bulk print** uses `download_multi_pdf` (≤ 500, one merged file,
+`{doctype: [names]}` mixes doctypes). Every render writes an Access Log entry. In Electron each
+`window.open` would be a popup — the bug 5zorro first met.
+
+1. **ERPNext renders, the shell delivers.** Pages from `/printview`, PDFs from ERPNext's endpoints,
+   with ERPNext's Print Format / Letter Head / print style. The shell has no second layout.
+2. **Never a popup, never a page change.** The ERP view's window-open handler hands print URLs to
+   the print service (Vanilla's own buttons included); `print-run` / `print-queue-run` are in-place
+   actions the doors test checks.
+3. **Self-healing, sorted by who can fix it** (`diagnosePrintFailure`): *rule* (ERPNext said no —
+   passed through, never worked around), *session* (log in), *engine* (ERPNext's PDF engine broke —
+   the shell renders `/printview` with `printToPDF` itself and shows IT's fix), *printer* (gone,
+   refused — said up front, jobs stay queued). The shell never changes the server.
+4. **Printer path.** Chromium's silent print on Linux refuses CUPS printers ("Invalid printer
+   settings"); the document's PDF then goes to the OS: `lp` (Linux / macOS), SumatraPDF (Windows,
+   when installed). **Print as image** is on by default (remembered): pages flattened onto white at
+   240 dpi (`electron/print-raster.html`), so a driver only sees pictures. A paper mismatch with
+   `pdf_page_size` shows ⚠ and shrinks to fit. Sent jobs are watched (CUPS `lpstat`,
+   `printer-state-reasons`) with *Check again* / *Stop watching (Esc)*; every print call has a
+   90-second deadline.
+5. **Checks are exact**: no shrink, no image conversion, no scaling — alignment on stock depends on it.
+6. **One app-wide print queue**; a payment made by check joins it. Printers: the 3 most recently
+   used sort first, each with its full name and address.
+7. **Save as one PDF** (Papers): pictures flattened and held to one page; Word keeps its pages;
+   spreadsheets only when they fit one page (45 × 10), otherwise "open it in Excel".
+
+Not built yet: Cheque Print Template + alignment page + spoiled-check path; Find-page multi-select
+into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printing/README.md`.
 
 ### Extension points (where new work plugs in)
 
@@ -230,6 +267,14 @@ using the one fact the allocator ignores: an amendment carries `amended_from`.
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`4c8f72b`) |
 | **Fixed** Setup peek return (OI-112 class) | `docs/bug-bounty-setup-peek-return.md` | Vanilla Create-new-Account; Esc/Recent parent now in-SPA |
 | Bill feature catalog (museum↔alpha) | `src/bill-feature-catalog.js` + `tests/bill-*.test.js` | Pure contracts; CI fails if built features lack tests |
+| Doors: peek / navigate / lens / detour (invariant 8) | `doc-doors.js` (`DOC_DOORS`, `IN_PLACE_ACTIONS`), `shell-detour.js` | Every Doc-skin door is a row; `tests/peek-doors.test.js` holds `main.js` to it. A detour (payment board → the bill a payment pays) keeps the shell page loaded; "← Back to …" in the top bar, or Esc |
+| Peek sessions follow renames | `peek-stack.js` (`renameInPeekStack`, `renameInPeekLinks`), `erp-route-hop.js` (`renamed` = Frappe's `frappe.model.new_names`) | A draft saved during a peek keeps its place under its saved name |
+| Which number leads (OI-170) | `doc-number-pref.js` (`THEIR_NUMBER` per doctype — Bill `bill_no`, PO `title` logbook, IR `lr_no`, SO `po_no`, SI its Sales Order(s), Payment `reference_no`), `doc-number-ui.js` | One app-wide setting (`doc-number-prefs.json`), the File group's **No.:** button, the banner's identity line, Pay Outstanding's invoice nodes. Never leads with a blank; the other number always beside it |
+| Printing | `print-service.js` (URLs, popup classifier, queue, remembered choices, `diagnosePrintFailure`, paper / plan / job-status helpers), `print-dialog-ui.js`, `print-raster-page.js` | In place, never a popup — see *Printing* below. `print-prefs.json` |
+| Papers — compare pane | `compare-papers.js`, `compare-pane-ui.js`, `sheet-preview.js` (CSV / .xlsx one-page tables), `zip-store.js` | **Papers** on every Doc skin: the document's ERPNext attachments (optionally its PO's / receipt's) stacked beside it as one column (PDF.js, mammoth); drop to attach (Frappe `upload_file`); Save all as ZIP / as one PDF. Runtime deps `pdfjs-dist`, `mammoth` |
+| Draft payments on the board | `payment-drafts.js` | Pay Outstanding's *Draft payments* panel (Open / Submit / Delete) and a warn advisory on each bill a draft covers — a draft posts nothing, so the AP report shows its bills unpaid |
+| Receive with the bill | `bill-receive-ask.js` | Doc Bill Save / Submit asks when stock lines have no receipt: Update Stock (+ `set_warehouse`), bill only, or don't ask again (`bill-receive-prefs.json`); Simplified annotates ERPNext's *Expense Head Changed* |
+| Line tables take room only when needed | `item-table-layout.js` (`naturalTableWidthPx`, `lineTableWidthPx`), `item-col-resize.js` (`growSectionToNeed`) | Items / taxes sit on the card and grow to the right only when content needs it, stopping at the window or the Papers pane |
 
 Toolbar **Home** → **Doc Workflow Home** (tiled shell page, not ERP Desk).
 **Vanilla skin** → ERP `/desk`. Site root `/` is a tile under Shell.
@@ -440,7 +485,10 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `config.test.js` | `ERP_BASE` from env | `scaffold-url-api` (`erpBase`) |
 | `route-info.test.js` | Parse desk/app routes | Indirect via `scaffold-pure-wiring` (`trackNav` → history entries) |
 | `history.test.js` | Dedupe, cap, `splitHistory` | `scaffold-pure-wiring` (`trackNav` / `getHistory`); split UI still best-effort in hist view |
-| `peek-stack.test.js` | Who is a parent (caller / unsaved); return-is-a-return; Esc incl. reopen; Recent dropdown grouping | The dropdown itself is visual; `e2e/scaffold-peek-parent.spec.js` drives it live |
+| `peek-stack.test.js` | Who is a parent (caller / unsaved); return-is-a-return; Esc incl. reopen; Recent dropdown grouping; renames follow a saved draft (nav incident 2026-10-03 replayed hop by hop) | The dropdown itself is visual; `e2e/scaffold-peek-parent.spec.js` drives it live, incl. Doc Bill → *Go to Vendor add…* → Esc back to the Bill |
+| `peek-doors.test.js` | Every Doc-skin door is in `doc-doors.js` and uses its kind's call; no door but a lens click touches the remembered lens; print actions never navigate | Source scan of `main.js` — the guard itself |
+| `shell-detour.test.js` | Return points, the back label, when Esc returns | `e2e/scaffold-detour.spec.js` — board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it |
+| `print-service.test.js` | Print URLs, popup classifier, queue, remembered printers, failure diagnosis, paper mismatch, per-document plan, job status | `e2e/scaffold-print.spec.js` — ERPNext's PDF over the session, the dialog in place, queue add, Vanilla's PDF popup caught. Printer output, healing and Letter shrink were proven live by hand (plan 2026-09-26) |
 | `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
 | `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
 | `chrome-state.test.js` | Toolbar lens chip (live path beats stale route); rail width | `scaffold-chrome` (lens buttons; `showingHome` polled, never read bare) |
