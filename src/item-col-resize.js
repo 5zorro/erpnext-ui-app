@@ -255,7 +255,12 @@ function growSectionToNeed(section, host, cols, overrides) {
   // A hidden tab panel measures 0 — leave the section on the card.
   if (!(paperPx > 0)) return paperPx || null;
   const chromePx = section.offsetWidth - paperPx;
-  const viewport = document.documentElement.clientWidth;
+  // The compare pane, when it sits beside the document, is the right edge (compare-pane-ui.js).
+  const root = document.documentElement;
+  const pane = root.classList.contains("compare-side")
+    ? parseFloat(getComputedStyle(root).getPropertyValue("--compare-pane-width")) || 0
+    : 0;
+  const viewport = root.clientWidth - pane;
   const roomPx = viewport - section.getBoundingClientRect().left - GROW_RIGHT_GUTTER_PX - chromePx;
   const width = lineTableWidthPx({ needPx: naturalTableWidthPx(cols, overrides), paperPx, roomPx });
   const extra = Math.round(width - paperPx);

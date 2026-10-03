@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld("erpDoc", {
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => invokeSkin("bill-new", "doc-new"),
   // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
+  // Compare pane (plan 2026-09-26): the document's papers, over the ERP session.
+  papersList: (sources) => ipcRenderer.invoke("papers-list", sources || []),
+  papersBytes: (fileUrl) => ipcRenderer.invoke("papers-bytes", fileUrl || ""),
+  papersUpload: (req) => ipcRenderer.invoke("papers-upload", req || {}),
+  papersOpen: (req) => ipcRenderer.invoke("papers-open", req || {}),
   printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
   printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
   printRun: (req) => ipcRenderer.invoke("print-run", req || {}),

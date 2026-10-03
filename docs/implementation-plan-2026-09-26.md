@@ -839,7 +839,7 @@ frappe_docker deployment needs the same.
   the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
   queue"; the queue does not survive a restart.
 
-## Idea — Compare pane (5zorro 2026-10-03, "moonshot"; not started)
+## Compare pane (5zorro 2026-10-03, "moonshot" — step 1 built 2026-10-03)
 
 Beside the Doc Bill (when the window is wide enough), the papers it should match — scanned PDFs,
 phone photos, a .docx — shown as **one continuous document**, as if a single PDF. Sketch, for when it
@@ -856,7 +856,26 @@ is picked up:
 - **Then:** save the stack as one PDF (`printToPDF`) and attach it to the bill; and the real compare
   — find the bill's numbers (supplier no., date, total, line amounts) in the papers' text and mark
   both sides where they match or do not (text PDFs and .docx first; OCR for photos later).
-- New dependencies it would add: `pdfjs-dist`, `mammoth` (and `tesseract.js` for OCR, later).
+- New dependencies: `pdfjs-dist`, `mammoth` (added 2026-10-03; `npm audit --omit=dev` clean), and
+  `tesseract.js` for OCR, later.
+
+**Step 1 (building):** a "Papers" toggle on the Doc skins opens the pane. It lists the document's
+attachments — and, on a Bill, its source POs' and receipts' — read over the ERP session (the page
+itself cannot reach ERPNext's private files), stacked in one column: PDFs page by page, images,
+.docx as HTML; anything else is a card with *Open* (the system's viewer). Files dropped on the pane
+are uploaded to ERPNext as attachments of the document (private), so they are there next time and in
+Vanilla; on an unsaved draft they are shown but not uploaded, and the pane says so. Side by side from
+1700px of window (the document column moves left; the line tables' grow-to-need stops at the pane),
+an overlay below that. Steps 2 (one PDF, attached) and 3 (find the bill's numbers) come after.
+
+**Built 2026-10-03.** `src/compare-papers.js` (pure) + `src/compare-pane-ui.js`; main's
+`papers-list` / `papers-bytes` / `papers-upload` (Frappe's `upload_file` from the logged-in page,
+CSRF and all; logged both sides) / `papers-open`. The pane scrolls on its own — the wheel over the
+papers moves the papers, over the document moves the document. **Include PO and receipt papers**
+(5zorro 2026-10-03) is a checkbox in the pane's header, shown only when the bill has a PO or
+receipt, off by default, remembered. Verified live on ACC-PINV-2026-00004 at 1960px: a PDF drawn
+page by page, a PNG, a .docx as text and a table, a .HEIC as its "cannot draw" card, side by side
+with the bill (the line tables stop at the pane). The four test attachments were deleted after.
 
 ## Dogfood residuals
 
@@ -876,5 +895,6 @@ is picked up:
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
 | Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
 | Printing | Print service, dialog, queue, no-popup handler, recent printers, self-healing | built 2026-10-03 — PDF, popup catch, healing and silent printing (CUPS `lp`) all verified live |
+| Compare | Papers pane beside the Doc skins (step 1) | built 2026-10-03 — verified live with PDF / PNG / DOCX / HEIC; steps 2–3 not started |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

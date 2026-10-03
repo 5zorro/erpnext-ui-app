@@ -128,6 +128,7 @@ import { wireDocCapsUi } from "./doc-caps-ui.js";
 import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
 import { openPrintDialog } from "./print-dialog-ui.js";
+import { mountComparePane } from "./compare-pane-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -157,6 +158,8 @@ let docCapsOn = true;
 let docCapsUi = null;
 /** @type {{ paint: () => void } | null} */
 let docNumberUi = null;
+/** @type {{ refresh: () => void } | null} */
+let comparePane = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -2493,6 +2496,7 @@ function paint(doc, snapScratch, opts = {}) {
   const name = doc.name || "(new)";
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
   if (docNumberUi) docNumberUi.paint();
+  if (comparePane) comparePane.refresh();
   if (opts.focusVendor) {
     docCapsOn = true;
     if (docCapsUi) docCapsUi.syncCapsButton();
@@ -3072,6 +3076,14 @@ export async function bootDocFormPage(injectedApi) {
       (ui && ui.doctypeKey) ||
       (ui && ui.profileId === "po" ? "purchase-order" : ui && ui.profileId === "receipt" ? "purchase-receipt" : ""),
     getDoc: () => lastDoc,
+  });
+
+  comparePane = mountComparePane({
+    api,
+    button: document.getElementById("btn-papers"),
+    getDoc: () => lastDoc,
+    selfLabel: () => docTitle(),
+    setStatus,
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");

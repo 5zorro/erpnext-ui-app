@@ -103,6 +103,7 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel } from "../src/shell-detour.js";
+import { MAX_PAPER_BYTES } from "../src/compare-papers.js";
 import {
   MULTI_PDF_SYNC_MAX,
   addToPrintQueue,
@@ -10787,6 +10788,119 @@ ipcMain.handle("print-queue-run", async (_e, req) => {
   printQueue = removeFromPrintQueue(printQueue, done);
   return { ...out, ...printQueueState() };
 });
+
+/* ---------------- Compare pane (plan 2026-09-26 "Compare pane") ---------------- */
+
+/**
+ * Attachments of these documents (ERPNext `File` rows), newest metadata only — the bytes come one
+ * file at a time through papers-bytes.
+ * @param {Array<{ doctype: string, name: string }>} sources
+ */
+async function listPapers(sources) {
+  const list = (Array.isArray(sources) ? sources : [])
+    .filter((s) => s && s.doctype && s.name)
+    .slice(0, 20)
+    .map((s) => ({ doctype: String(s.doctype), name: String(s.name) }));
+  if (!list.length) return { ok: true, files: [] };
+  const raw = await erpEval(`(async () => {
+    try {
+      var out = [];
+      for (var s of ${JSON.stringify(list)}) {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "File",
+          filters: { attached_to_doctype: s.doctype, attached_to_name: s.name, is_folder: 0 },
+          fields: ["name", "file_name", "file_url", "is_private", "creation", "file_size", "attached_to_doctype", "attached_to_name"],
+          order_by: "creation asc", limit_page_length: 100 } });
+        out.push.apply(out, (r && r.message) || []);
+      }
+      return { ok: true, files: out };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e), files: [] };
+    }
+  })()`);
+  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not list attachments.", files: [] };
+}
+
+/** One attachment's bytes over the ERP view's session (private files need it). */
+async function paperBytes(fileUrl) {
+  const u = String(fileUrl || "");
+  if (!/^\/(private\/)?files\//.test(u)) return { ok: false, reason: "Not an ERPNext file address." };
+  if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
+  try {
+    const res = await erp.webContents.session.fetch(`${ERP_BASE}${encodeURI(decodeURI(u))}`);
+    if (!res.ok) return { ok: false, reason: `ERPNext could not send the file (${res.status}).` };
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };
+    return { ok: true, bytes: new Uint8Array(buf), type: res.headers.get("content-type") || "" };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
+/**
+ * Attach a dropped file to the document in ERPNext (private), the way Desk's own Attach does —
+ * Frappe's upload_file from the logged-in page, CSRF token and all. Logged both sides (it writes).
+ * @param {{ doctype?: string, name?: string, fileName?: string, bytes?: Uint8Array }} req
+ */
+async function uploadPaper(req) {
+  const r = req || {};
+  const doctype = normalizeEditableText(r.doctype);
+  const name = normalizeEditableText(r.name);
+  const fileName = normalizeEditableText(r.fileName) || "paper";
+  if (!doctype || !name || /^new-/.test(name)) return { ok: false, reason: "Save the document first — ERPNext attaches files to a saved document." };
+  const bytes = r.bytes ? Buffer.from(r.bytes) : null;
+  if (!bytes || !bytes.length) return { ok: false, reason: "Empty file." };
+  if (bytes.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large (25 MB at most)." };
+  navDebug("paper-upload", `${doctype} ${name} ← ${fileName} (${bytes.length} bytes) start`);
+  const raw = await erpEval(`(async () => {
+    try {
+      var b64 = ${JSON.stringify(bytes.toString("base64"))};
+      var bin = atob(b64); var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      var fd = new FormData();
+      fd.append("file", new Blob([arr]), ${JSON.stringify(fileName)});
+      fd.append("is_private", "1");
+      fd.append("doctype", ${JSON.stringify(doctype)});
+      fd.append("docname", ${JSON.stringify(name)});
+      var res = await fetch("/api/method/upload_file", { method: "POST", body: fd,
+        headers: { "X-Frappe-CSRF-Token": frappe.csrf_token, Accept: "application/json" } });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || !j.message) {
+        var msg = "";
+        try { msg = JSON.parse(JSON.parse(j._server_messages)[0]).message; } catch (e) {}
+        return { ok: false, reason: msg || j.exception || ("upload failed (" + res.status + ")") };
+      }
+      return { ok: true, file: { name: j.message.name, file_name: j.message.file_name, file_url: j.message.file_url, creation: j.message.creation } };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const res = raw && typeof raw === "object" ? raw : { ok: false, reason: "Upload failed." };
+  navDebug("paper-upload", `${doctype} ${name} ← ${fileName} ${res.ok ? `ok ${res.file && res.file.file_url}` : `failed: ${res.reason}`}`);
+  return res;
+}
+
+/** Open a paper in the system's own viewer (a temp copy). */
+async function openPaper(req) {
+  const r = req || {};
+  let bytes = r.bytes ? Buffer.from(r.bytes) : null;
+  if (!bytes && r.fileUrl) {
+    const got = await paperBytes(r.fileUrl);
+    if (!got.ok) return got;
+    bytes = Buffer.from(got.bytes);
+  }
+  if (!bytes) return { ok: false, reason: "Nothing to open." };
+  const safe = String(r.fileName || "paper").replace(/[\\/:*?"<>|]+/g, "-");
+  const file = path.join(app.getPath("temp"), `erpnext-ui-paper-${Date.now()}-${safe}`);
+  fs.writeFileSync(file, bytes);
+  const err = await shell.openPath(file);
+  return err ? { ok: false, reason: err } : { ok: true };
+}
+
+ipcMain.handle("papers-list", async (_e, sources) => listPapers(sources));
+ipcMain.handle("papers-bytes", async (_e, fileUrl) => paperBytes(fileUrl));
+ipcMain.handle("papers-upload", async (_e, req) => uploadPaper(req));
+ipcMain.handle("papers-open", async (_e, req) => openPaper(req));
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
 

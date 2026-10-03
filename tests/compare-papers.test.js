@@ -1,0 +1,76 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  SIDE_BY_SIDE_MIN_PX,
+  paperKind,
+  paperCantShow,
+  paperSources,
+  orderPapers,
+  paneLayout,
+  paperFromLabel,
+  hasPaperSources,
+} from "../src/compare-papers.js";
+
+// 5zorro 2026-10-03: compare a bill against scanned / photographed / written .png .pdf .docx, all as
+// if one PDF, to the right of the bill.
+describe("compare-papers", () => {
+  it("knows how to show each kind of paper", () => {
+    assert.equal(paperKind("scan.PDF"), "pdf");
+    assert.equal(paperKind("photo.jpeg"), "image");
+    assert.equal(paperKind("IMG_0042.HEIC"), "heic");
+    assert.equal(paperKind("notes.docx"), "docx");
+    assert.equal(paperKind("blob", "application/pdf"), "pdf");
+    assert.equal(paperKind("old.doc"), "other");
+    assert.match(paperCantShow("heic", "IMG_1.HEIC"), /JPG/);
+    assert.match(paperCantShow("other", "old.doc"), /\.docx/);
+  });
+
+  it("a bill's papers are its own and its source POs' and receipts', once each", () => {
+    const s = paperSources({
+      doctype: "Purchase Invoice",
+      name: "ACC-PINV-2026-00004",
+      items: [{ purchase_order: "PO-1" }, { purchase_order: "PO-1", purchase_receipt: "MAT-PRE-1" }, {}],
+    });
+    assert.deepEqual(s, [
+      { doctype: "Purchase Invoice", name: "ACC-PINV-2026-00004", role: "self" },
+      { doctype: "Purchase Order", name: "PO-1", role: "source" },
+      { doctype: "Purchase Receipt", name: "MAT-PRE-1", role: "source" },
+    ]);
+    assert.deepEqual(paperSources({ doctype: "Purchase Invoice", name: "new-purchase-invoice-x" }), [], "an unsaved draft has no attachments yet");
+  });
+
+  it("own papers first, then sources, then dropped — oldest first inside each", () => {
+    const p = (fileName, role, creation) => ({ key: fileName, fileName, role, kind: "pdf", from: "", creation });
+    const out = orderPapers([p("drop.png", "dropped", "3"), p("po.pdf", "source", "1"), p("b2.pdf", "self", "2"), p("b1.pdf", "self", "1")]);
+    assert.deepEqual(out.map((x) => x.fileName), ["b1.pdf", "b2.pdf", "po.pdf", "drop.png"]);
+  });
+
+  it("side by side from 1700px when the pane gets a useful width; otherwise over the document", () => {
+    assert.equal(SIDE_BY_SIDE_MIN_PX, 1700);
+    assert.deepEqual(paneLayout(1900, 1150), { mode: "side", paneWidth: 750 });
+    assert.equal(paneLayout(1250, 1150).mode, "overlay");
+    assert.ok(paneLayout(1250, 1150).paneWidth >= 520);
+  });
+
+  it("labels where a paper came from", () => {
+    assert.equal(paperFromLabel({ doctype: "Purchase Invoice", name: "X", role: "self" }, "Bill"), "This Bill");
+    assert.equal(paperFromLabel({ doctype: "Purchase Order", name: "PO-1", role: "source" }), "PO PO-1");
+    assert.equal(paperFromLabel(null), "Dropped here");
+  });
+});
+
+// 5zorro 2026-10-03: "can i have a toggle to include the po and ir attachments if any?"
+describe("including the PO and receipt papers", () => {
+  const bill = { doctype: "Purchase Invoice", name: "B1", items: [{ purchase_order: "PO-1", purchase_receipt: "PR-1" }] };
+  it("off: the bill's own papers only", () => {
+    assert.deepEqual(paperSources(bill, { includeSources: false }).map((s) => s.name), ["B1"]);
+  });
+  it("on: the bill's, then its PO's and receipt's", () => {
+    assert.deepEqual(paperSources(bill, { includeSources: true }).map((s) => s.name), ["B1", "PO-1", "PR-1"]);
+  });
+  it("the toggle only shows when there is a PO or receipt to include", () => {
+    assert.equal(hasPaperSources(bill), true);
+    assert.equal(hasPaperSources({ doctype: "Purchase Invoice", name: "B2", items: [{}] }), false);
+  });
+});
+
