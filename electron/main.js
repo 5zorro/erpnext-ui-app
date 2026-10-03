@@ -108,6 +108,8 @@ import {
   addToPrintQueue,
   classifyErpPrintUrl,
   diagnosePrintFailure,
+  isChromiumPrintRefusal,
+  osPrintCommand,
   groupPrintQueue,
   mergePrintPrefs,
   multiPdfUrl,
@@ -176,7 +178,7 @@ import {
   isAllowedAutofixScriptPath,
   autofixReady,
 } from "../src/health-remediation.js";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { findListFocusField, findListFocusLabel } from "../src/doc-chrome.js";
 import {
   resolveFeedbackFormUrl,
@@ -412,6 +414,8 @@ let printQueue = [];
 let printTrouble = null;
 /** Print Settings as last read (the fallback PDF uses ERPNext's page size). */
 let lastPrintSettings = {};
+/** Once Chromium has refused a silent print this session, go straight to the OS print command. */
+let preferOsPrint = false;
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -10433,6 +10437,50 @@ async function printOneOnWorker(worker, item, opts) {
   });
 }
 
+/** SumatraPDF on Windows, when installed (SUMATRA_PDF, per-user or machine-wide install). */
+function findSumatraPdf() {
+  if (process.platform !== "win32") return "";
+  const candidates = [
+    process.env.SUMATRA_PDF,
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "SumatraPDF", "SumatraPDF.exe"),
+    process.env.ProgramFiles && path.join(process.env.ProgramFiles, "SumatraPDF", "SumatraPDF.exe"),
+  ].filter(Boolean);
+  return candidates.find((p) => {
+    try {
+      return fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  }) || "";
+}
+
+/**
+ * Self-healing printer path: the document's PDF (ERPNext's, or the app's own when ERPNext's engine
+ * is down) handed to the operating system's print command.
+ * @param {BrowserWindow|null} worker
+ * @param {import("../src/print-service.js").PrintItem} item
+ * @param {string} deviceName
+ */
+async function printViaOs(worker, item, deviceName) {
+  const got = await pdfForItem(worker, item);
+  if (!got.ok) return { ok: false, reason: got.reason, worker: got.worker };
+  const file = path.join(app.getPath("temp"), `erpnext-ui-print-${Date.now()}-${pdfFileName(item.name)}`);
+  fs.writeFileSync(file, got.bytes);
+  const cmd = osPrintCommand({ platform: process.platform, deviceName, file, title: item.name, sumatraPath: findSumatraPdf() });
+  if (!cmd) {
+    fs.rm(file, () => {});
+    return { ok: false, reason: "This computer has no print command the app can use (on Windows, install SumatraPDF).", worker: got.worker };
+  }
+  const res = await new Promise((resolve) => {
+    execFile(cmd.cmd, cmd.args, { timeout: 60_000 }, (err, _out, errText) =>
+      resolve(err ? { ok: false, reason: String(errText || err.message || err).trim().slice(0, 200) } : { ok: true }),
+    );
+  });
+  // lp copies the file into the spool before it returns; the temp copy can go.
+  setTimeout(() => fs.rm(file, () => {}), 30_000);
+  return { ...res, worker: got.worker, healed: got.healed };
+}
+
 /**
  * @param {import("../src/print-service.js").PrintItem[]} items
  * @param {{ deviceName?: string }} opts
@@ -10451,16 +10499,32 @@ async function printItemsToPrinter(items, opts = {}) {
   }
   navDebug("print-start", `${list.length} → ${opts.deviceName || "system dialog"}`);
   const worker = newPrintWorker();
+  let pdfWorker = null;
   const results = [];
   try {
     for (const item of list) {
-      const r = await printOneOnWorker(worker, item, opts);
-      results.push({ item, ...r });
+      let r = { ok: false, reason: "" };
+      if (opts.deviceName && preferOsPrint) {
+        r = await printViaOs(pdfWorker, item, opts.deviceName);
+        pdfWorker = r.worker || pdfWorker;
+      } else {
+        r = await printOneOnWorker(worker, item, opts);
+        if (!r.ok && opts.deviceName && isChromiumPrintRefusal(r.reason)) {
+          // Self-healing: Chromium refused the printer itself; the OS print command takes over
+          // for this document and the rest of the session.
+          navDebug("print-heal", `${opts.deviceName}: ${r.reason} → OS print`);
+          preferOsPrint = true;
+          r = await printViaOs(pdfWorker, item, opts.deviceName);
+          pdfWorker = r.worker || pdfWorker;
+        }
+      }
+      results.push({ item, ok: r.ok, reason: r.reason });
       // The system dialog once is enough: cancelling it stops the batch.
       if (!opts.deviceName && !r.ok && /cancel/i.test(String(r.reason || ""))) break;
     }
   } finally {
     if (!worker.isDestroyed()) worker.destroy();
+    if (pdfWorker && !pdfWorker.isDestroyed()) pdfWorker.destroy();
   }
   const summary = summarizePrintResults(results, "Printed");
   navDebug("print-done", summary);

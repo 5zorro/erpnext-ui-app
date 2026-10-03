@@ -399,3 +399,33 @@ export function diagnosePrintFailure(reason) {
   return { kind: "unknown", cause: r || "Printing failed.", fix: "" };
 }
 
+/**
+ * Self-healing, printer side (found 2026-10-03: Chromium's silent print on Linux refused a working
+ * CUPS printer with "Invalid printer settings" whatever the options). The same PDF the clerk would
+ * save — ERPNext's, or the app's own when ERPNext's engine is down — goes to the operating system's
+ * print command instead: `lp` on Linux / macOS (CUPS), SumatraPDF on Windows when it is installed
+ * (5zorro's suggestion). Null when this platform has none.
+ * @param {{ platform: string, deviceName: string, file: string, title?: string, sumatraPath?: string }} o
+ * @returns {{ cmd: string, args: string[] }|null}
+ */
+export function osPrintCommand(o) {
+  const device = str(o && o.deviceName);
+  const file = str(o && o.file);
+  if (!device || !file) return null;
+  if (o.platform === "linux" || o.platform === "darwin") {
+    const args = ["-d", device];
+    if (str(o.title)) args.push("-t", str(o.title));
+    args.push(file);
+    return { cmd: "lp", args };
+  }
+  if (o.platform === "win32" && str(o.sumatraPath)) {
+    return { cmd: str(o.sumatraPath), args: ["-print-to", device, "-silent", file] };
+  }
+  return null;
+}
+
+/** Chromium's silent print refusing the printer itself — the cue to switch to the OS command. */
+export function isChromiumPrintRefusal(reason) {
+  return /invalid printer settings|printer settings|failed to print|print job (failed|canceled)/i.test(String(reason || ""));
+}
+

@@ -20,6 +20,8 @@ import {
   isCheckModeOfPayment,
   printerLabel,
   diagnosePrintFailure,
+  osPrintCommand,
+  isChromiumPrintRefusal,
 } from "../src/print-service.js";
 
 const BASE = "http://localhost:8080";
@@ -208,6 +210,32 @@ describe("diagnosePrintFailure — who can fix it", () => {
     assert.equal(diagnosePrintFailure("ERPNext did not return a PDF (401).").kind, "session");
     assert.equal(diagnosePrintFailure("Invalid deviceName provided").kind, "printer");
     assert.equal(diagnosePrintFailure("something odd").kind, "unknown");
+  });
+});
+
+// Found live 2026-10-03: Chromium on Linux refused CUPS's PDF printer ("Invalid printer settings")
+// for every option set, while `lp` printed fine.
+describe("OS print command — the printer-side fallback", () => {
+  it("lp on Linux and macOS, with the job titled", () => {
+    assert.deepEqual(osPrintCommand({ platform: "linux", deviceName: "PDF", file: "/tmp/a.pdf", title: "ACC-PINV-1" }), {
+      cmd: "lp",
+      args: ["-d", "PDF", "-t", "ACC-PINV-1", "/tmp/a.pdf"],
+    });
+    assert.equal(osPrintCommand({ platform: "darwin", deviceName: "P", file: "/f.pdf" }).cmd, "lp");
+  });
+
+  it("SumatraPDF on Windows only when it is installed", () => {
+    assert.deepEqual(osPrintCommand({ platform: "win32", deviceName: "Front Office", file: "C:\\t\\a.pdf", sumatraPath: "C:\\S\\SumatraPDF.exe" }), {
+      cmd: "C:\\S\\SumatraPDF.exe",
+      args: ["-print-to", "Front Office", "-silent", "C:\\t\\a.pdf"],
+    });
+    assert.equal(osPrintCommand({ platform: "win32", deviceName: "P", file: "a.pdf" }), null);
+    assert.equal(osPrintCommand({ platform: "linux", deviceName: "", file: "a.pdf" }), null);
+  });
+
+  it("knows Chromium's refusal when it sees it", () => {
+    assert.equal(isChromiumPrintRefusal("Invalid printer settings"), true);
+    assert.equal(isChromiumPrintRefusal("cancelled"), false);
   });
 });
 

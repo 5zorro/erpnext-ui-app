@@ -18,6 +18,10 @@ lpstat -p                    # should list a printer named "PDF"
 That is enough to test printer choice, the recent-printers list and silent batch printing
 (a check run) without paper.
 
+Chromium's own silent printing on Linux refuses CUPS printers with "Invalid printer settings"
+(seen 2026-10-03, every option set). The shell heals that by itself: it prints the document's PDF
+with `lp` instead, so nothing here needs configuring beyond the two packages above.
+
 ## Real printers
 
 Not needed for development. A Windows printer can be reached from WSL's CUPS by its network

@@ -829,9 +829,34 @@ frappe_docker deployment needs the same.
 - **Windows option (5zorro)**: SumatraPDF prints a PDF silently to a named printer — a candidate
   third path (ERPNext's server PDF straight to paper) for the Windows build; noted in
   `ops/wsl-printing/README.md`, not wired.
-- **Not yet**: printing to a printer (no CUPS here); a Cheque Print Template, the alignment page,
+- **Printer path, proven live 2026-10-03 with CUPS + cups-pdf.** Chromium's silent print on Linux
+  refused the working CUPS printer ("Invalid printer settings") for every option set tried, while
+  `lp` printed. Self-healing: on that refusal the document's PDF (ERPNext's, or the app's own) goes
+  to the OS print command — `lp -d <printer> -t <doc>` on Linux / macOS, SumatraPDF `-print-to
+  -silent` on Windows when installed — and the rest of the session goes straight there. One bill and
+  a two-bill batch printed silently to the "PDF" printer, each job titled with its document.
+- **Not yet**: a Cheque Print Template, the alignment page,
   the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
   queue"; the queue does not survive a restart.
+
+## Idea — Compare pane (5zorro 2026-10-03, "moonshot"; not started)
+
+Beside the Doc Bill (when the window is wide enough), the papers it should match — scanned PDFs,
+phone photos, a .docx — shown as **one continuous document**, as if a single PDF. Sketch, for when it
+is picked up:
+
+- **Where the files come from:** the bill's own ERPNext attachments (`File`, `attached_to_doctype`
+  / `attached_to_name`), its source PO / receipt's attachments, and files dropped on the pane — which
+  are uploaded to ERPNext as attachments (`upload_file`), so they are there next time and in Vanilla.
+- **One column, every page:** PDFs rendered page by page (PDF.js), images as pages, .docx converted
+  to HTML (mammoth — text and tables, layout approximate; "open in Word" for the exact look). HEIC
+  phone photos are not readable by Chromium.
+- **Layout:** the bill keeps its column on the left (papers are stapled on the left) and the pane
+  fills the right from about 1700px of window; narrower, it is a toggle.
+- **Then:** save the stack as one PDF (`printToPDF`) and attach it to the bill; and the real compare
+  — find the bill's numbers (supplier no., date, total, line amounts) in the papers' text and mark
+  both sides where they match or do not (text PDFs and .docx first; OCR for photos later).
+- New dependencies it would add: `pdfjs-dist`, `mammoth` (and `tesseract.js` for OCR, later).
 
 ## Dogfood residuals
 
@@ -850,6 +875,6 @@ frappe_docker deployment needs the same.
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
 | Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
-| Printing | Print service, dialog, queue, no-popup handler, recent printers | built 2026-10-03 — PDF path and popup catch verified live; printer path waits on CUPS (`ops/wsl-printing`) |
+| Printing | Print service, dialog, queue, no-popup handler, recent printers, self-healing | built 2026-10-03 — PDF, popup catch, healing and silent printing (CUPS `lp`) all verified live |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
