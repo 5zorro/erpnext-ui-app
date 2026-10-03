@@ -107,9 +107,11 @@ describe("one page per picture; Word whole; spreadsheets left to their own progr
     assert.match(html, /max-height:24cm/);
     assert.doesNotMatch(html, /zoom/);
   });
-  it("a spreadsheet says to open it in Excel", () => {
-    assert.equal(paperKind("costs.xlsx"), "other");
-    assert.match(paperCantShow("other", "costs.xlsx"), /spreadsheet.*Excel/);
-    assert.match(paperCantShow("other", "export.CSV"), /spreadsheet/);
+  // 5zorro 2026-10-03: "csv and spreadsheets that are only one page is enough".
+  it("a CSV or .xlsx is a sheet (a table when it fits one page); an old .xls says to open it in Excel", () => {
+    assert.equal(paperKind("costs.xlsx"), "sheet");
+    assert.equal(paperKind("export.CSV"), "sheet");
+    assert.equal(paperKind("old.xls"), "other");
+    assert.match(paperCantShow("other", "old.xls"), /spreadsheet.*Excel/);
   });
 });

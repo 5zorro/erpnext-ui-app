@@ -863,6 +863,12 @@ frappe_docker deployment needs the same.
   (out of paper, paused, a door open…) with *Check again* / *Stop watching (Esc)*. A trouble state
   was proven in unit tests only — pausing a CUPS printer needs admin rights here.
 - Every Electron print call has a 90-second deadline, so a hung driver cannot freeze a batch.
+- **Spreadsheets that fit one page are shown** (5zorro: "csv and spreadsheets that are only one
+  page is enough"): a CSV / TSV or the first sheet of an .xlsx as a plain table (values only) in the
+  pane and in "Save as one PDF", up to 45 rows × 10 columns; bigger ones say "more than one page (N
+  rows × M columns) — open it in its own program (Excel)". No library: `src/sheet-preview.js` reads
+  the .xlsx ZIP with the platform's DecompressionStream; old binary .xls stays "open it in Excel".
+  Proven live with a 3-row CSV, a 300-row CSV and a small .xlsx (attachments deleted after).
 
 ## Compare pane (5zorro 2026-10-03, "moonshot" — step 1 built 2026-10-03)
 

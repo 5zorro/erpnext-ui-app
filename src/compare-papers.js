@@ -17,7 +17,7 @@ const str = (v) => (v == null ? "" : String(v).trim());
  * How a file is shown.
  * @param {string} fileName
  * @param {string} [mime]
- * @returns {"pdf"|"image"|"docx"|"heic"|"other"}
+ * @returns {"pdf"|"image"|"docx"|"sheet"|"heic"|"other"}
  */
 export function paperKind(fileName, mime = "") {
   const ext = (str(fileName).toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || "";
@@ -26,6 +26,8 @@ export function paperKind(fileName, mime = "") {
   if (ext === "heic" || ext === "heif" || /heic|heif/.test(m)) return "heic";
   if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext) || /^image\//.test(m)) return "image";
   if (ext === "docx" || m === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
+  // Shown as a table when it fits one page (sheet-preview.js); old binary .xls cannot be read.
+  if (["csv", "tsv", "xlsx", "xlsm"].includes(ext) || m === "text/csv") return "sheet";
   return "other";
 }
 
@@ -171,6 +173,7 @@ section.brk{break-before:page}
 img{display:block;max-width:100%;max-height:${ONE_PAGE_CM}cm;width:auto;height:auto;margin:0 auto 6px;break-inside:avoid}
 .docx{line-height:1.45}.docx img{max-width:100%;width:auto}.docx table{border-collapse:collapse}.docx td,.docx th{border:1px solid #999;padding:2px 6px}
 .note{color:#64748b}
+table.sheet{border-collapse:collapse;font-size:11px}table.sheet th,table.sheet td{border:1px solid #999;padding:2px 6px;text-align:left;vertical-align:top}table.sheet th{background:#eee}
 </style></head><body>${body}</body></html>`;
 }
 

@@ -17,6 +17,7 @@ import {
   printedDocsFor,
   onePdfHtml,
 } from "./compare-papers.js";
+import { parseCsv, readXlsxFirstSheet, sheetFitsOnePage, sheetTableHtml, sheetTooBigNote } from "./sheet-preview.js";
 
 const OPEN_KEY = "compare-pane-open";
 const SOURCES_KEY = "compare-pane-include-sources";
@@ -50,6 +51,8 @@ html.compare-overlay .cp-pane { box-shadow: -12px 0 32px rgba(15,23,42,.22); }
 .cp-docx { background: #fff; padding: 24px 28px; box-shadow: 0 1px 4px rgba(15,23,42,.18); line-height: 1.45; overflow-wrap: anywhere; }
 .cp-docx img { max-width: 100%; }
 .cp-docx table { border-collapse: collapse; } .cp-docx td, .cp-docx th { border: 1px solid #cbd5e1; padding: 2px 6px; }
+.cp-sheet { background: #fff; padding: 12px; box-shadow: 0 1px 4px rgba(15,23,42,.18); overflow: auto; }
+.cp-sheet table { border-collapse: collapse; font-size: 12px; } .cp-sheet th, .cp-sheet td { border: 1px solid #cbd5e1; padding: 2px 6px; text-align: left; vertical-align: top; } .cp-sheet th { background: #f1f5f9; }
 .cp-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; color: #475569; font-size: 12px; }
 .cp-note { font-size: 12px; color: #64748b; margin: 0 0 10px; }
 .cp-err { color: #b91c1c; }
@@ -218,7 +221,13 @@ export function mountComparePane(opts) {
         const bytes = got.bytes instanceof Uint8Array ? got.bytes : new Uint8Array(got.bytes);
         if (p.kind === "pdf") sections.push({ title: p.fileName, from: p.from, pages: await pdfPagesAsImages(bytes) });
         else if (p.kind === "image") sections.push({ title: p.fileName, from: p.from, pages: [await flattenImage(new Blob([bytes]))] });
-        else if (p.kind === "docx") {
+        else if (p.kind === "sheet") {
+          const rows = await sheetRows(p, bytes);
+          const size = sheetFitsOnePage(rows);
+          sections.push(size.fits
+            ? { title: p.fileName, from: p.from, html: sheetTableHtml(rows) }
+            : { title: p.fileName, from: p.from, note: `Not included — ${sheetTooBigNote(p.fileName, size)}` });
+        } else if (p.kind === "docx") {
           const mammoth = await loadMammoth();
           const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
           sections.push({ title: p.fileName, from: p.from, html: out.value || "<p>(empty)</p>" });
@@ -336,6 +345,12 @@ export function mountComparePane(opts) {
     }
   }
 
+  /** A CSV or the first sheet of an .xlsx, as rows of text. */
+  async function sheetRows(p, bytes) {
+    if (/\.xls[xm]$/i.test(p.fileName)) return readXlsxFirstSheet(bytes);
+    return parseCsv(new TextDecoder().decode(bytes));
+  }
+
   async function bytesFor(p) {
     const local = localOnly.get(p.key);
     if (local) return { ok: true, bytes: local.bytes };
@@ -369,6 +384,12 @@ export function mountComparePane(opts) {
         body.innerHTML = `<div class="cp-docx">${out.value || "<p>(empty)</p>"}</div><p class="cp-note">Word file shown as text and tables — Open for its exact layout.</p>`;
       } else if (p.kind === "pdf") {
         await renderPdf(bytes, body, token);
+      } else if (p.kind === "sheet") {
+        const rows = await sheetRows(p, bytes);
+        const size = sheetFitsOnePage(rows);
+        body.innerHTML = size.fits
+          ? `<div class="cp-sheet">${sheetTableHtml(rows)}</div><p class="cp-note">Values only — Open for the formatted file.</p>`
+          : `<div class="cp-card">${esc(sheetTooBigNote(p.fileName, size))}</div>`;
       }
     } catch (e) {
       body.innerHTML = `<div class="cp-card cp-err">${esc(`${p.fileName} could not be drawn: ${e && e.message ? e.message : e}`)}</div>`;
