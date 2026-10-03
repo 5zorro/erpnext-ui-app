@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+// @covers electron/home.html electron/doc-wash.css
 const read = (rel) => readFileSync(new URL(`../electron/${rel}`, import.meta.url), "utf8");
 const docWashCss = read("doc-wash.css");
 const homeHtml = read("home.html");

@@ -476,6 +476,13 @@ and a live ERPNext dependency.
 
 ### Unit ↔ e2e coverage matrix
 
+> **The coverage map is now `src/architecture-families.js`** (plan 2026-10-03 stage C): every
+> `src/` module, Electron file and e2e spec belongs to one architecture family; unit tests are
+> worked out from what they import; dogfood papers name their families (`touches`). It is held to
+> the tree by `tests/architecture-families.test.js`, and `npm run dogfood:for-change [base]` prints
+> the tests, specs and papers for a change — a change to a `breaking` family (the navigation spine,
+> `main.js`) asks for a broad round. The table below keeps its notes but is no longer the source.
+
 Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wiring** through Electron.
 
 | Unit suite (`tests/`) | What units prove | Covered by e2e wiring? |

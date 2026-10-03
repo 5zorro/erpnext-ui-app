@@ -27,6 +27,7 @@
  * |---|---|
  * | `checks` | ticks to do right after entering it — including the click-through checks (Find pages, the hatch toggle, Home) placed on the paper where you are already on that screen |
  * | `knownGaps` | what the Doc skin cannot do yet, so that part is done in Vanilla instead of typed into a wall |
+ * | `touches` | the architecture families it exercises beyond its kind's own (src/architecture-families.js) — `npm run dogfood:for-change` picks papers by it |
  */
 
 /**
@@ -95,6 +96,7 @@ export const SOURCE_KIND_FLOW = Object.freeze({
  *   notes?: string[],
  *   checks?: string[],       // ticks right after entering it (see the table above)
  *   knownGaps?: string[],    // what the Doc skin cannot do yet — do that part in Vanilla
+ *   touches?: string[],      // architecture families beyond its kind's (src/architecture-families.js)
  *   lines: SourceLine[],
  * }} DogfoodSourceDoc
  */
@@ -103,6 +105,7 @@ export const SOURCE_KIND_FLOW = Object.freeze({
 export const DOGFOOD_SOURCES = [
   {
     id: "DF-01",
+    touches: ["home", "find", "nav"],
     scenario: "Invoice includes tax that should be backed out when paying in full",
     oi103: 1,
     kind: "vendor_invoice",
@@ -204,6 +207,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-03c",
+    touches: ["sources"],
     scenario: "Multi-PO → one Bill — combined vendor invoice",
     oi103: 3,
     kind: "vendor_invoice",
@@ -253,6 +257,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-04a",
+    touches: ["sources"],
     scenario: "Multi-Bill → one PO — first partial invoice",
     oi103: 4,
     kind: "vendor_invoice",
@@ -274,6 +279,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-04b",
+    touches: ["sources"],
     scenario: "Multi-Bill → one PO — second partial invoice",
     oi103: 4,
     kind: "vendor_invoice",
@@ -295,6 +301,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-05",
+    touches: ["doc-form"],
     scenario: "Odd line order for sort dogfood",
     oi103: 5,
     kind: "vendor_invoice",
@@ -317,6 +324,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-06",
+    touches: ["pay", "find"],
     scenario: "Credit-card pay path cue",
     oi103: 6,
     kind: "vendor_invoice",
@@ -483,6 +491,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-13",
+    touches: ["doc-form"],
     scenario: "Messy vendor spreadsheet paste — OI-132 Import lines",
     kind: "purchase_order",
     template: "grid",
@@ -506,6 +515,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-14",
+    touches: ["sources"],
     scenario: "OI-149 — PO + partial IR same vendor (multi-source Bill dogfood)",
     kind: "vendor_invoice",
     template: "classic",
@@ -531,6 +541,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-15",
+    touches: ["pay"],
     scenario: "OI-153 — Vendor prepayment (pay before goods)",
     kind: "purchase_order",
     template: "ack",
@@ -559,6 +570,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-16",
+    touches: ["find"],
     scenario: "OI-154 — Logbook PO# Find (title TO-5599, not ERP name)",
     kind: "purchase_order",
     template: "ack",
@@ -585,6 +597,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-17",
+    touches: ["edit-submitted", "pay"],
     scenario: "Vendor statement still shows a bill you already paid — because amending it detached the payment",
     oi: "OI-171",
     kind: "vendor_statement",
@@ -612,6 +625,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-18",
+    touches: ["home"],
     scenario: "Customer RFQ priced under THEIR part numbers, with a quantity break and an expiry",
     oi: "OI-143",
     kind: "customer_rfq",
@@ -656,6 +670,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-19",
+    touches: ["find", "doc-form"],
     scenario: "Customer PO: bill-to is head office, ship-to is a jobsite, and their PO# is the only number they will quote",
     oi: "OI-134",
     kind: "customer_po",
@@ -698,6 +713,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-20",
+    touches: ["doc-form"],
     scenario: "Bill only what shipped: partial invoice against a customer PO, with the rest on backorder",
     oi: "OI-134",
     kind: "billing_instruction",
@@ -740,6 +756,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-21",
+    touches: ["find"],
     scenario: "Customer check short-pays an invoice they identify only by THEIR PO number",
     kind: "customer_remittance",
     template: "classic",
@@ -777,6 +794,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-22",
+    touches: ["doc-form"],
     scenario: "A bill entered weeks after its invoice date must post on the invoice date, not the day it was typed",
     kind: "vendor_invoice",
     template: "grid",
@@ -805,6 +823,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-23",
+    touches: ["doc-form", "find"],
     scenario: "Goods received last week, receipt typed today — the Item Receipt must keep the received date",
     kind: "packing_list",
     template: "ack",
@@ -835,6 +854,7 @@ export const DOGFOOD_SOURCES = [
   // set_expense_account). The PO skin's "Customer (drop ship)" sets only the address, not the lines.
   {
     id: "DF-24a",
+    touches: ["doc-form"],
     scenario: "Drop ship, step 1 — the customer orders something we have the vendor ship straight to them",
     kind: "customer_po",
     template: "ack",
@@ -870,6 +890,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-24b",
+    touches: ["po-ir", "doc-form"],
     scenario: "Drop ship, step 2 — our PO tells the vendor to ship to the customer, not to us",
     kind: "purchase_order",
     template: "ack",
@@ -901,6 +922,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-24c",
+    touches: ["sources", "doc-form"],
     scenario: "Drop ship, step 3 — the vendor bills us for goods that went straight to the customer",
     kind: "vendor_invoice",
     template: "grid",
@@ -934,6 +956,7 @@ export const DOGFOOD_SOURCES = [
   // the same story and the same numbers as tests/fixtures/trace-chain.js.
   {
     id: "DF-25a",
+    touches: ["trace", "find"],
     oi: "OI-041",
     scenario: "Trace chain, step 1 — the customer asks for a price on two items",
     kind: "customer_rfq",
@@ -952,6 +975,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25b",
+    touches: ["trace", "find"],
     oi: "OI-041",
     scenario: "Trace chain, step 2 — the customer's PO, made into a Sales Order from the Estimate",
     kind: "customer_po",
@@ -970,6 +994,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25c",
+    touches: ["trace", "doc-form"],
     oi: "OI-041",
     scenario: "Trace chain, step 3 — one PO carries the customer's lines, a line not on their order, and stock for the warehouse",
     kind: "purchase_order",
@@ -999,6 +1024,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25d",
+    touches: ["trace", "doc-form"],
     oi: "OI-041",
     scenario: "Trace chain, step 4 — first delivery: the customer's SKU-10 and the warehouse's stock",
     kind: "packing_list",
@@ -1018,6 +1044,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25e",
+    touches: ["trace"],
     oi: "OI-041",
     scenario: "Trace chain, step 5 — the rest arrives the day AFTER the vendor dated its invoice",
     kind: "packing_list",
@@ -1037,6 +1064,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25f",
+    touches: ["trace", "sources", "pay"],
     oi: "OI-041",
     scenario: "Trace chain, step 6 — one bill for both deliveries, with freight, a fuel surcharge and a line nobody ordered",
     kind: "vendor_invoice",
@@ -1069,6 +1097,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25g",
+    touches: ["trace"],
     oi: "OI-041",
     scenario: "Trace chain, step 7 — the vendor credits back the item the customer never ordered",
     kind: "vendor_invoice",
@@ -1085,6 +1114,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25h",
+    touches: ["trace"],
     oi: "OI-041",
     scenario: "Trace chain, step 8 — invoice the customer for what they ordered",
     kind: "billing_instruction",
@@ -1104,6 +1134,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-25i",
+    touches: ["trace"],
     oi: "OI-041",
     scenario: "Trace chain, step 9 — the customer's check pays the invoice in full",
     kind: "customer_remittance",

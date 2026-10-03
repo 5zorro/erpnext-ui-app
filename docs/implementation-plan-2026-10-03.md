@@ -12,7 +12,7 @@ only** (`src/trace-*.js`, `src/payment-timeline.js`, `ops/trace/`, tests) and on
 **Museum OIs in play:** OI-041 (AP bowtie — widened 2026-09-28 into this) · OI-065 (sales side) ·
 OI-108 (schema research, superseded by `src/trace-links.js`).
 
-> **Status 2026-10-03:** stages **1 and 2 built** (pure logic + readers; `npm test` green). Every
+> **Status 2026-10-03:** stages **1, 2 and C built** (pure logic + readers + the coverage map; `npm test` green). Every
 > question the trace asks was proven against the live site, read-only (133 of 133 accepted). The
 > pages (stages 3–6) are not built: they need 5zorro's data to be checked, and stage 4 edits the
 > Find page the 09-26 plan built, which is still being dogfooded. Paper DF-25a…i is in the pack, so
@@ -109,6 +109,19 @@ are summarised under *Decisions* below; the mockup itself stays in `docs/mockups
    **painted** pixels after every draw. Item rows are fixed-height strips (a table cell's height is
    only a minimum). A payment's other bills are one "Other payables" box until it is in focus.
 10. **Gantt:** each row washed up to its paper date, bordered on to its posted date.
+11. **Charges in no item's cost** (5zorro 2026-10-03): *"the trace should agree with the books, but
+    an 'info' emoji with a link to how to change the 'total only' should be available. I think it
+    would be common for a user to want it to be spread but confused as to why it isn't."* Built:
+    `chargeAdvisories` — an ⓘ per Total-only charge (and per valuation share left on a non-stock
+    line) saying why, the setting that would spread it, and the bill to open (Edit → void and amend
+    on a submitted one).
+12. **Dates** (5zorro 2026-10-03): prefer the received / reference date, else the posting date —
+    ERPNext's own model. As built: a receipt's `posting_date` *is* its received date (backdatable),
+    keyed in = `creation`; a payment's paper date is `reference_date` (the check date), else
+    `posting_date`. Who submitted, and when, come later from the version history (one query).
+13. **Open credits** (5zorro 2026-10-03): *"should come off the check where the linked bill is. If
+    there is no linked bill then they should come off the next planned check."* Built: a credit's
+    `return_against` bill decides its planned check; a bill already paid, or none, means the next.
 
 ## What ERPNext already does (read from the v16 source and this instance, 2026-10-03)
 
@@ -182,27 +195,26 @@ the backup (SQL standing in for HTTP, answering the same child-table filters) an
 | 6 | **Gantt** over the same slice | 5zorro | DF-25e |
 | 7 | **Seed**: add the trace chain's edge cases to `corpus-plan.js` (2+ POs into one bill, a Material Request line, NIC + valuation charges, a paper-date lag, a mismatch, a part payment, an uncleared check, a credit); set `sales_order_item` on PO lines the way ERPNext does; give most payments a clearance date | `seed:sample` on a sandbox, only after 5zorro's blank-site round | — |
 | L | **Spread over the PO** — from a bill whose freight covers the whole PO: a **draft** Landed Cost Voucher listing the PO's submitted receipts, claiming the freight from this bill (`vendor_invoices`), distributed by Amount; the clerk reviews and submits it. Refuses (with the reason) a freight that is a *Valuation* charge row, or a PO with nothing received. Adds the voucher to the trace as a source of charges across bills (`src/trace-links.js` row: `Landed Cost Purchase Receipt.receipt_document`, `Landed Cost Vendor Invoice.vendor_invoice`). A write path: navDebug both sides | layer-2 against a sandbox copy + 5zorro | a DF-26 pair: a PO with a whole-order freight note, five bills, one with the freight |
-| **C** | **Coverage map** — proposal below; not built | its own test | tags every paper |
+| **C — built** | **Coverage map** — `src/architecture-families.js`, `scripts/dogfood-for-change.js` (`npm run dogfood:for-change [base]`), `touches` on papers | `tests/architecture-families.test.js` (the tree, the papers, the planner) | every paper tagged |
 
 ## Open questions for 5zorro
 
-1. **Charges ERPNext does not put into cost** — a "Total"-only charge (the DF-25f fuel surcharge),
-   and a valuation charge's share on a non-stock line. Show them beside the landed cost as "in no
-   line's cost" (built that way), or have the shell spread them by dollar share like the mockup
-   did? Recommendation: show, don't spread — the trace should agree with the books, and the fix for
-   a charge that should be in cost is its category on the bill.
-2. **"Posted" for a receipt** — ERPNext's posting date *is* the arrival date, so "posted" is the
-   day it was keyed in (`creation`). Fine?
-3. **Open credits off the first planned check** — the timeline assumes a credit is used on the next
-   check to that vendor. Right default?
+(1–3 answered 2026-10-03 — decisions 11–13 above.)
 
-4. **The PO-wide freight (stage L).** How does that freight arrive on the one bill — as a line
-   (e.g. an item FREIGHT) or as a charge row? The voucher needs it as a non-stock *line*. And when
-   should the voucher be made: when that bill is entered (covering the receipts so far), or when the
-   PO is fully received? Recommendation: offered on the bill, covering the receipts so far, with the
-   trace marking the PO's later receipts "no freight share yet".
+4. **The PO-wide freight (stage L)** — three choices, laid out in chat 2026-10-03 with the facts
+   below; waiting on 5zorro.
+   - 🔴 **ERPNext copies a PO's charge table onto every bill made from it** (PO → Bill mapping,
+     `"Purchase Taxes and Charges": {"reset_value": True}` — no proration). A "100 freight" row on
+     the PO lands on all five bills unless removed from four.
+   - **(a) Where the freight sits** — on the PO as a charge row (copied, as above), on the one bill
+     as a charge row, or on the one bill as a non-stock line (an item FREIGHT). Only the last can be
+     *claimed* by a Landed Cost Voucher (`vendor_invoices`), which also records the claim on the bill.
+   - **(b) Which receipts share it** — a voucher can only spread over receipts that exist.
+   - **(c) When the voucher is made** — at that bill (receipts so far), or when the PO is fully
+     received (one voucher, right total; ERPNext reposts the stock value, so earlier sales' cost is
+     corrected — asynchronously), or one voucher per receipt for its share.
 
-## Coverage map (stage C) — proposal, not built
+## Coverage map (stage C) — built 2026-10-03
 
 5zorro, 2026-10-03: *"Perhaps there needs to be a formalized 'this part of the unit tests refer to
 this part of the architecture' and 'this part of the dogfood generated sources should touch this
@@ -227,8 +239,13 @@ missing most modules), the 09-26 plan's paper → coverage table, and each paper
   every paper that touches the navigation spine — the "possibly breaking" case.
 - HANDOFF's coverage matrix becomes a pointer to the registry instead of a second copy.
 
-Cost: the registry (one pass over ~200 `src/` files to assign families), the test, the script, and
-tagging ~60 papers. Worth doing **before** stages 3–6, so the trace pages land already mapped.
+**As built:** 21 families over all 174 `src/` modules, every Electron file and all 15 e2e specs;
+unit tests are worked out from imports (plus an explicit `// @covers path …` for a test that names
+its files indirectly — two did); papers get families from their `kind` plus `touches`
+(`PAPER_KIND_FAMILIES`). A changed test is listed to run, never dogfooded; a changed fixture lists
+the tests that read it. The run on this tranche's own changes printed three families — the trace,
+the paper pack, repo process — and the DF-25 papers, not the whole pack. Families with no paper
+say why (`noPaper`): printing, Papers and the calculator are the real gaps.
 
 ## Dogfood paper for this tranche
 

@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// @covers scripts/check-commit-attribution.sh
 const scanner = join(repoRoot, "scripts", "check-commit-attribution.sh");
 
 function scanMessage(message) {
