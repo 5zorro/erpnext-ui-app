@@ -132,14 +132,14 @@ That last row is the sharp edge of this whole packet, and it is the reason stage
 than first: "change the method on this vendor's five bills" is five cancels, and any of those bills
 that has been partly paid silently loses its payment allocation.
 
-### Status — stages 1, 2 and 3 built. Only OI-170's toggle (P1e) is outstanding.
+### Status — stages 1, 2 and 3 built; OI-170's toggle (P1e) built 2026-10-01 (plan 2026-09-26, *DF-01 follow-ups* E).
 
 | | What it is | State |
 |---|---|---|
 | Stage 1 | the Edit button on the **Bill** skin | ✅ built, dogfooded by 5zorro 2026-09-22 (two real bills) |
 | Stage 2 | the same action on **PO, Item Receipt and Payment Entry** | ✅ built 2026-09-24; confirms read against live ERP on all four skins, writes not yet run live |
 | Stage 3 | the dashboard's **just-in-time, multi-bill method change** | ✅ built 2026-09-26; plan + confirm read against live ERP, the batch write not yet run live |
-| P1e | OI-170's **dominant-number toggle** | ❌ not built — the one thing still owed |
+| P1e | OI-170's **dominant-number toggle** | ✅ built 2026-10-01 — plan 2026-09-26 *DF-01 follow-ups* E (`doc-number-pref.js`) |
 
 🔴 **What has and has not touched ERP.** Every *read* path is verified against the running sandbox:
 the facts probes, the confirms, the per-doctype consequence sentences, the name predictions. The
@@ -854,7 +854,7 @@ it from the engine.
 | Family | Status | Notes |
 |---|---|---|
 | P1 / OI-171 — sandbox state | 🟡 one harmless artifact | `Unreconcile Payment` **fog3it52jk** is submitted against `ACC-PAY-2026-00002`. It was created on 2026-09-26 to recreate a stranded payment for testing; its net effect was undone by an `update_voucher_outstanding` repost, so it has no live ledger effect and the books read correctly (payment applied, `ACC-PINV-2026-00231-1` Paid). Left in place rather than cancelling a submitted accounting document to tidy up |
-| P1e — OI-170's dominant-number toggle | ❌ not built | The one outstanding item of P1. Which number reads as dominant on Bill / PO surfaces (the vendor's own ref and the PO logbook number survive an amend; the ERPNext ID does not), persisted the way `lens-prefs.js` persists the lens |
+| P1e — OI-170's dominant-number toggle | ✅ built 2026-10-01 | Built under plan 2026-09-26 *DF-01 follow-ups* E: one app-wide setting, the File group's **No.:** button, the banner identity line, the payment board |
 | P1 stage 2 / 3 — writes | 🟡 unproven in situ | The confirms and every read path are verified against live ERP; the stage-2 and stage-3 *writes* have only been exercised as far as the confirm. They share `voidAndAmendDoc`, which stage 1 dogfooded, but stage 3 additionally submits and reads back |
 | Auto re-link trigger | 🟡 unproven in situ | The posting call (`relinkPayment`) and the whole review loop (flag → badge → *Seems okay* → ToDo `Closed`) are verified live; nothing has yet watched the board-load pass fire on a freshly stranded payment. The clean way to prove it is the next real void-and-amend of a paid bill |
 
