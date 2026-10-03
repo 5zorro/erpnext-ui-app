@@ -14,10 +14,13 @@ import {
   paperKind,
   paperSources,
   hasPaperSources,
+  printedDocsFor,
+  onePdfHtml,
 } from "./compare-papers.js";
 
 const OPEN_KEY = "compare-pane-open";
 const SOURCES_KEY = "compare-pane-include-sources";
+const PRINTED_KEY = "compare-pane-include-printed";
 const STYLE_ID = "cp-style";
 const CSS = `
 .cp-pane { position: fixed; top: 0; right: 0; bottom: 0; width: var(--compare-pane-width, 600px); z-index: 60;
@@ -29,6 +32,12 @@ html.compare-overlay .cp-pane { box-shadow: -12px 0 32px rgba(15,23,42,.22); }
 .cp-head label { font-size: 12px; color: #334155; display: flex; gap: 4px; align-items: center; }
 .cp-head label[hidden] { display: none; }
 .cp-head button, .cp-paper-head button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 3px 10px; font: inherit; cursor: pointer; }
+.cp-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 6px 12px; background: #f8fafc; border-bottom: 1px solid #cbd5e1; font-size: 12px; }
+.cp-actions button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 3px 10px; font: inherit; cursor: pointer; }
+.cp-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.cp-actions label { display: flex; gap: 4px; align-items: center; color: #334155; }
+.cp-actions .cp-act-status { flex-basis: 100%; color: #0f766e; min-height: 0; }
+.cp-actions .cp-act-status.err { color: #b91c1c; }
 .cp-scroll { flex: 1; overflow: auto; padding: 12px; }
 .cp-drop { border: 2px dashed #94a3b8; border-radius: 8px; padding: 10px; text-align: center; color: #475569; font-size: 12px; margin-bottom: 12px; background: #f8fafc; }
 .cp-pane.cp-dragging .cp-drop { border-color: #2563eb; background: #eff6ff; color: #1e3a8a; }
@@ -112,6 +121,12 @@ export function mountComparePane(opts) {
   pane.innerHTML = `<div class="cp-head"><h2 data-cp="title">Papers</h2>
       <label data-cp="sources-label" hidden title="Also show the papers attached to this document's PO(s) and Item Receipt(s)"><input type="checkbox" data-cp="sources" data-testid="compare-include-sources" /> Include PO and receipt papers</label>
       <button type="button" data-cp="close" title="Close the papers">Close</button></div>
+    <div class="cp-actions">
+      <button type="button" data-cp="zip" data-testid="compare-zip" title="Every paper shown here, as files, in one .zip">Save all as ZIP</button>
+      <button type="button" data-cp="onepdf" data-testid="compare-onepdf" title="Every paper shown here, page after page, in one PDF">Save as one PDF</button>
+      <label title="Add the document as ERPNext prints it (and its PO / receipt when their papers are included)"><input type="checkbox" data-cp="printed" data-testid="compare-include-printed" /> <span data-cp="printed-label">Include the printed document</span></label>
+      <span class="cp-act-status" data-cp="act-status" data-testid="compare-act-status"></span>
+    </div>
     <div class="cp-scroll" data-cp="scroll">
       <div class="cp-drop" data-cp="drop">Drop scans, photos, PDFs or Word files here — they are attached to this document in ERPNext.</div>
       <div data-cp="list"></div>
@@ -123,6 +138,8 @@ export function mountComparePane(opts) {
   const localOnly = new Map();
   let loadedFor = "";
   let renderToken = 0;
+  /** @type {import("./compare-papers.js").Paper[]} what the pane shows now, in order */
+  let currentPapers = [];
   const sourcesBox = /** @type {HTMLInputElement} */ (pane.querySelector('[data-cp="sources"]'));
   const sourcesLabel = /** @type {HTMLElement} */ (pane.querySelector('[data-cp="sources-label"]'));
   try {
@@ -130,6 +147,97 @@ export function mountComparePane(opts) {
   } catch {
     sourcesBox.checked = false;
   }
+  const printedBox = /** @type {HTMLInputElement} */ (pane.querySelector('[data-cp="printed"]'));
+  const printedLabel = /** @type {HTMLElement} */ (pane.querySelector('[data-cp="printed-label"]'));
+  const actStatus = /** @type {HTMLElement} */ (pane.querySelector('[data-cp="act-status"]'));
+  try {
+    printedBox.checked = localStorage.getItem(PRINTED_KEY) === "1";
+  } catch {
+    printedBox.checked = false;
+  }
+  printedBox.addEventListener("change", () => {
+    try {
+      localStorage.setItem(PRINTED_KEY, printedBox.checked ? "1" : "0");
+    } catch {
+      /* per-viewer convenience only */
+    }
+  });
+  const say = (text, err) => {
+    actStatus.textContent = text || "";
+    actStatus.classList.toggle("err", !!err);
+  };
+  const actButtons = () => pane.querySelectorAll('[data-cp="zip"], [data-cp="onepdf"]');
+  const busy = (on) => actButtons().forEach((b) => (/** @type {HTMLButtonElement} */ (b).disabled = on));
+  const printedDocs = () => {
+    const doc = getDoc() || {};
+    return printedBox.checked ? printedDocsFor(doc, sourcesBox.checked) : [];
+  };
+  const baseName = () => {
+    const doc = getDoc() || {};
+    return `${doc.name || "papers"}-papers`;
+  };
+
+  pane.querySelector('[data-cp="zip"]').addEventListener("click", async () => {
+    busy(true);
+    say("Gathering the papers…");
+    try {
+      const papers = currentPapers.map((p) => {
+        const local = localOnly.get(p.key);
+        return local ? { fileName: local.name, bytes: local.bytes } : { fileName: p.fileName, fileUrl: p.fileUrl };
+      });
+      const r = await api.papersZip({ zipName: baseName(), papers, printDocs: printedDocs() });
+      say(r && r.cancelled ? "" : (r && (r.summary || r.reason)) || "Done.", !(r && (r.ok || r.cancelled)));
+    } catch (e) {
+      say(String(e && e.message ? e.message : e), true);
+    } finally {
+      busy(false);
+    }
+  });
+
+  pane.querySelector('[data-cp="onepdf"]').addEventListener("click", async () => {
+    busy(true);
+    say("Drawing every page…");
+    try {
+      /** @type {Array<{ title: string, from?: string, pages?: string[], html?: string, note?: string }>} */
+      const sections = [];
+      for (const d of printedDocs()) {
+        const got = await api.papersPrintedPdf(d);
+        if (got && got.ok) sections.push({ title: `${d.name}.pdf`, from: `${d.doctype}, as ERPNext prints it`, pages: await pdfPagesAsImages(got.bytes) });
+        else sections.push({ title: d.name, note: `Not included: ${(got && got.reason) || "could not print it"}` });
+      }
+      for (const p of currentPapers) {
+        if (p.kind === "heic" || p.kind === "other") {
+          sections.push({ title: p.fileName, from: p.from, note: `Not included — ${paperCantShow(p.kind, p.fileName)}` });
+          continue;
+        }
+        const got = await bytesFor(p).catch((e) => ({ ok: false, reason: String(e) }));
+        if (!got || !got.ok) {
+          sections.push({ title: p.fileName, from: p.from, note: `Not included: ${(got && got.reason) || "could not load it"}` });
+          continue;
+        }
+        const bytes = got.bytes instanceof Uint8Array ? got.bytes : new Uint8Array(got.bytes);
+        if (p.kind === "pdf") sections.push({ title: p.fileName, from: p.from, pages: await pdfPagesAsImages(bytes) });
+        else if (p.kind === "image") sections.push({ title: p.fileName, from: p.from, pages: [await blobAsDataUrl(new Blob([bytes]))] });
+        else if (p.kind === "docx") {
+          const mammoth = await loadMammoth();
+          const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+          sections.push({ title: p.fileName, from: p.from, html: out.value || "<p>(empty)</p>" });
+        }
+      }
+      if (!sections.length) {
+        say("Nothing to save — no papers, and the printed document is not included.", true);
+        return;
+      }
+      say("Saving…");
+      const r = await api.papersPdf({ html: onePdfHtml(baseName(), sections), fileName: baseName() });
+      say(r && r.cancelled ? "" : (r && (r.summary || r.reason)) || "Done.", !(r && (r.ok || r.cancelled)));
+    } catch (e) {
+      say(String(e && e.message ? e.message : e), true);
+    } finally {
+      busy(false);
+    }
+  });
+
   sourcesBox.addEventListener("change", () => {
     try {
       localStorage.setItem(SOURCES_KEY, sourcesBox.checked ? "1" : "0");
@@ -200,6 +308,8 @@ export function mountComparePane(opts) {
       papers.push({ key: k, fileName: v.name, from: "Dropped here — not attached (save first)", role: "dropped", kind: paperKind(v.name), local: true });
     }
     const ordered = orderPapers(papers);
+    currentPapers = ordered;
+    printedLabel.textContent = `Include the printed ${selfLabel()}${sourcesBox.checked && hasPaperSources(doc) ? " (and PO / receipt)" : ""}`;
     title.textContent = ordered.length ? `Papers (${ordered.length})` : "Papers";
     if (res && res.ok === false) {
       list.innerHTML = `<p class="cp-note cp-err">${esc(res.reason || "Could not list the attachments.")}</p>`;
@@ -263,6 +373,32 @@ export function mountComparePane(opts) {
     } catch (e) {
       body.innerHTML = `<div class="cp-card cp-err">${esc(`${p.fileName} could not be drawn: ${e && e.message ? e.message : e}`)}</div>`;
     }
+  }
+
+  /** Every page of a PDF as an image, wide enough to print (one-PDF export). */
+  async function pdfPagesAsImages(bytes, widthPx = 1240) {
+    const pdfjs = await loadPdfjs();
+    const pdf = await pdfjs.getDocument({ data: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes) }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i += 1) {
+      const page = await pdf.getPage(i);
+      const vp = page.getViewport({ scale: widthPx / page.getViewport({ scale: 1 }).width });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(vp.width);
+      canvas.height = Math.floor(vp.height);
+      await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+      pages.push(canvas.toDataURL("image/jpeg", 0.9));
+    }
+    return pages;
+  }
+
+  function blobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result));
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(blob);
+    });
   }
 
   /** PDF pages into canvases, drawn as they scroll into view so a 60-page scan does not stall. */

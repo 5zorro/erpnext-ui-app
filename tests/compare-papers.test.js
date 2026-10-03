@@ -9,6 +9,8 @@ import {
   paneLayout,
   paperFromLabel,
   hasPaperSources,
+  printedDocsFor,
+  onePdfHtml,
 } from "../src/compare-papers.js";
 
 // 5zorro 2026-10-03: compare a bill against scanned / photographed / written .png .pdf .docx, all as
@@ -71,6 +73,27 @@ describe("including the PO and receipt papers", () => {
   it("the toggle only shows when there is a PO or receipt to include", () => {
     assert.equal(hasPaperSources(bill), true);
     assert.equal(hasPaperSources({ doctype: "Purchase Invoice", name: "B2", items: [{}] }), false);
+  });
+});
+
+// 5zorro 2026-10-03: "save all attachments as zip" … "save as pdf next to the zip".
+describe("ZIP and one PDF", () => {
+  const bill = { doctype: "Purchase Invoice", name: "B1", items: [{ purchase_order: "PO-1" }] };
+  it("the printed documents follow the PO / receipt toggle", () => {
+    assert.deepEqual(printedDocsFor(bill, false), [{ doctype: "Purchase Invoice", name: "B1" }]);
+    assert.deepEqual(printedDocsFor(bill, true).map((d) => d.name), ["B1", "PO-1"]);
+  });
+  it("one page per paper, page breaks between, nothing silently dropped", () => {
+    const html = onePdfHtml("B1 papers", [
+      { title: "B1.pdf", from: "Printed Bill", pages: ["data:image/jpeg;base64,AAA", "data:image/jpeg;base64,BBB"] },
+      { title: "notes.docx", html: "<p>Received</p>" },
+      { title: "IMG_1.HEIC", note: "cannot be drawn" },
+    ]);
+    assert.equal((html.match(/<img /g) || []).length, 2);
+    assert.equal((html.match(/class="brk"/g) || []).length, 2, "every paper after the first starts a page");
+    assert.match(html, /<p>Received<\/p>/);
+    assert.match(html, /cannot be drawn/);
+    assert.doesNotMatch(onePdfHtml("x", [{ title: "<script>" }]), /<script>/);
   });
 });
 

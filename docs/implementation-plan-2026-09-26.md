@@ -877,6 +877,21 @@ receipt, off by default, remembered. Verified live on ACC-PINV-2026-00004 at 196
 page by page, a PNG, a .docx as text and a table, a .HEIC as its "cannot draw" card, side by side
 with the bill (the line tables stop at the pane). The four test attachments were deleted after.
 
+**Step 2, reshaped by 5zorro 2026-10-03 and built the same day.** Above the papers: **Save all as
+ZIP** and **Save as one PDF**, with **Include the printed Bill** (and PO / receipt when their papers
+are included). Usually printing the bill alone is enough; these are for bringing context to a
+question. ZIP: the files as they are (`src/zip-store.js`, a stored-entry ZIP writer, no dependency).
+One PDF: the pane draws every paper (PDF pages as images, a .docx as HTML, a HEIC as a "not
+included" note) into one page that Chromium prints — no PDF merger. Printed documents go through the
+self-healing PDF path. Verified live: a ZIP of 5 (printed Bill + 4 papers, byte-identical, valid)
+and a 5-page PDF; test attachments deleted after. A "print all of it" button was considered and left
+out: the saved PDF prints from the print dialog like any file.
+
+**Step 3 parked (5zorro 2026-10-03)** until several other parts of the app reach MVP. "Find the
+bill's numbers in the papers" was the idea of marking where the papers' amounts / dates / supplier
+no. match the bill's. 5zorro's longer-term direction instead: link **emailed PDFs** to bills, and
+extract them into a draft bill when approved / received. Far off.
+
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -895,6 +910,6 @@ with the bill (the line tables stop at the pane). The four test attachments were
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
 | Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
 | Printing | Print service, dialog, queue, no-popup handler, recent printers, self-healing | built 2026-10-03 — PDF, popup catch, healing and silent printing (CUPS `lp`) all verified live |
-| Compare | Papers pane beside the Doc skins (step 1) | built 2026-10-03 — verified live with PDF / PNG / DOCX / HEIC; steps 2–3 not started |
+| Compare | Papers pane beside the Doc skins; Save all as ZIP / as one PDF | built 2026-10-03 — verified live; step 3 (match numbers, emailed-PDF intake) parked |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

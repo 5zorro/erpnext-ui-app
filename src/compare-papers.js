@@ -116,3 +116,51 @@ export function hasPaperSources(doc) {
   return paperSources(doc, { includeSources: true }).some((s) => s.role === "source");
 }
 
+/**
+ * The documents whose printed form goes in a ZIP / one PDF when "Include the printed …" is ticked:
+ * the document itself, and its PO / receipt when their papers are included.
+ * @param {any} doc
+ * @param {boolean} includeSources
+ * @returns {Array<{ doctype: string, name: string }>}
+ */
+export function printedDocsFor(doc, includeSources) {
+  return paperSources(doc, { includeSources }).map((s) => ({ doctype: s.doctype, name: s.name }));
+}
+
+const escHtml = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * One printable page holding every paper, page after page — what "Save as one PDF" prints
+ * (5zorro 2026-10-03). PDF pages and photos arrive as images; a Word file as HTML; a paper that
+ * cannot be drawn as a note saying so, never silently dropped.
+ * @param {string} title
+ * @param {Array<{ title: string, from?: string, pages?: string[], html?: string, note?: string }>} sections
+ * @returns {string}
+ */
+export function onePdfHtml(title, sections) {
+  const body = (sections || [])
+    .map((s, i) => {
+      const head = `<div class="h">${escHtml(s.title)}${s.from ? ` <span>· ${escHtml(s.from)}</span>` : ""}</div>`;
+      const inner = s.pages && s.pages.length
+        ? s.pages.map((src) => `<img src="${escHtml(src)}">`).join("")
+        : s.html
+          ? `<div class="docx">${s.html}</div>`
+          : `<p class="note">${escHtml(s.note || "Not included.")}</p>`;
+      return `<section${i ? ' class="brk"' : ""}>${head}${inner}</section>`;
+    })
+    .join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>
+body{margin:0;font:12px system-ui,"Segoe UI",Roboto,sans-serif;color:#1f2d3d}
+section.brk{break-before:page}
+.h{font-weight:700;margin:0 0 6px}.h span{font-weight:400;color:#64748b}
+img{display:block;width:100%;break-inside:avoid;margin:0 0 6px}
+.docx{line-height:1.45}.docx img{max-width:100%;width:auto}.docx table{border-collapse:collapse}.docx td,.docx th{border:1px solid #999;padding:2px 6px}
+.note{color:#64748b}
+</style></head><body>${body}</body></html>`;
+}
+

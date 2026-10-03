@@ -104,6 +104,7 @@ import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel } from "../src/shell-detour.js";
 import { MAX_PAPER_BYTES } from "../src/compare-papers.js";
+import { buildZip } from "../src/zip-store.js";
 import {
   MULTI_PDF_SYNC_MAX,
   addToPrintQueue,
@@ -982,6 +983,10 @@ function syncE2eApi() {
         : { ok: false, reason: r.reason, trouble: printTrouble };
     },
     getPrintQueue: () => printQueue.map((q) => ({ ...q })),
+    setNextSavePath: (p) => {
+      e2eNextSavePath = String(p || "");
+      return true;
+    },
     windowCount: () => BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed()).length,
     getRecentRows: () =>
       JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
@@ -10309,6 +10314,18 @@ ipcMain.on("shell-detour-back", () => {
 
 /* ---------------- Printing (plan 2026-09-26 "Printing"; src/print-service.js) ---------------- */
 
+/** Tests only (E2E=1): the next save dialog answers with this path instead of opening. */
+let e2eNextSavePath = "";
+/** @param {Electron.SaveDialogOptions} options */
+async function askSavePath(options) {
+  if (process.env.E2E === "1" && e2eNextSavePath) {
+    const filePath = e2eNextSavePath;
+    e2eNextSavePath = "";
+    return { canceled: false, filePath };
+  }
+  return dialog.showSaveDialog(win, options);
+}
+
 function savePrintPrefs() {
   try {
     fs.writeFileSync(printPrefsPath(), JSON.stringify(printPrefs));
@@ -10637,7 +10654,7 @@ async function saveItemsAsPdf(items, opts = {}) {
   if (!list.length) return { ok: false, reason: "Nothing to save." };
   if (opts.merged || list.length === 1) {
     const defaultName = list.length === 1 ? pdfFileName(list[0].name) : `${pdfFileName(list[0].name).replace(/\.pdf$/, "")}-and-${list.length - 1}-more.pdf`;
-    const pick = await dialog.showSaveDialog(win, {
+    const pick = await askSavePath({
       title: list.length === 1 ? "Save PDF" : `Save ${list.length} documents as one PDF`,
       defaultPath: path.join(app.getPath("documents"), defaultName),
       filters: [{ name: "PDF", extensions: ["pdf"] }],
@@ -10897,6 +10914,102 @@ async function openPaper(req) {
   return err ? { ok: false, reason: err } : { ok: true };
 }
 
+/**
+ * "Save all as ZIP" (5zorro 2026-10-03): the papers shown in the pane, and — when asked — the
+ * document itself as ERPNext prints it (its PO / receipt too), in one .zip. Printed PDFs go through
+ * the self-healing PDF path. Writes only the local file the clerk chooses.
+ * @param {{ zipName?: string, papers?: Array<{ fileName: string, fileUrl?: string, bytes?: Uint8Array }>, printDocs?: Array<{ doctype: string, name: string }> }} req
+ */
+async function zipPapers(req) {
+  const r = req || {};
+  const papers = Array.isArray(r.papers) ? r.papers : [];
+  const docs = Array.isArray(r.printDocs) ? r.printDocs.filter((d) => d && d.doctype && d.name) : [];
+  if (!papers.length && !docs.length) return { ok: false, reason: "Nothing to save." };
+  const pick = await askSavePath({
+    title: "Save all as ZIP",
+    defaultPath: path.join(app.getPath("documents"), `${String(r.zipName || "papers").replace(/[\\/:*?"<>|]+/g, "-")}.zip`),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+  });
+  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
+  navDebug("papers-zip", `${docs.length} printed + ${papers.length} papers → ${pick.filePath} start`);
+  const files = [];
+  const missed = [];
+  let worker = null;
+  try {
+    for (const d of docs) {
+      const got = await pdfForItem(worker, { doctype: d.doctype, name: d.name, format: printPrefs.formats[d.doctype] || "" });
+      worker = got.worker;
+      if (got.ok) files.push({ name: pdfFileName(d.name), bytes: new Uint8Array(got.bytes) });
+      else missed.push(`${d.name}: ${got.reason}`);
+    }
+  } finally {
+    if (worker && !worker.isDestroyed()) worker.destroy();
+  }
+  for (const p of papers) {
+    if (p.bytes) {
+      files.push({ name: p.fileName, bytes: new Uint8Array(p.bytes) });
+      continue;
+    }
+    const got = await paperBytes(p.fileUrl);
+    if (got.ok) files.push({ name: p.fileName, bytes: got.bytes });
+    else missed.push(`${p.fileName}: ${got.reason}`);
+  }
+  if (!files.length) return { ok: false, reason: `Nothing could be read — ${missed.join("; ")}` };
+  fs.writeFileSync(pick.filePath, buildZip(files));
+  const summary = `Saved ${files.length} file${files.length === 1 ? "" : "s"} in ${pick.filePath}${missed.length ? ` — not included: ${missed.join("; ")}` : "."}`;
+  navDebug("papers-zip", summary);
+  return { ok: !missed.length, files: files.length, summary };
+}
+
+ipcMain.handle("papers-zip", async (_e, req) => zipPapers(req));
+
+/** The document as ERPNext prints it (self-healing), for the pane to draw into one PDF. */
+ipcMain.handle("papers-printed-pdf", async (_e, d) => {
+  if (!d || !d.doctype || !d.name) return { ok: false, reason: "No document." };
+  const got = await pdfForItem(null, { doctype: d.doctype, name: d.name, format: printPrefs.formats[d.doctype] || "" });
+  if (got.worker && !got.worker.isDestroyed()) got.worker.destroy();
+  return got.ok ? { ok: true, bytes: new Uint8Array(got.bytes), healed: !!got.healed } : { ok: false, reason: got.reason };
+});
+
+/**
+ * "Save as one PDF" (5zorro 2026-10-03): the pane hands over one HTML page with every paper laid
+ * out page after page (PDF pages already drawn as images); Chromium prints it to a single PDF. No
+ * PDF merger needed. Writes only the local file the clerk chooses.
+ * @param {{ html?: string, fileName?: string }} req
+ */
+ipcMain.handle("papers-pdf", async (_e, req) => {
+  const r = req || {};
+  if (!r.html) return { ok: false, reason: "Nothing to save." };
+  const pick = await askSavePath({
+    title: "Save as one PDF",
+    defaultPath: path.join(app.getPath("documents"), `${String(r.fileName || "papers").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`),
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
+  navDebug("papers-pdf", `→ ${pick.filePath} start`);
+  const page = path.join(app.getPath("temp"), `erpnext-ui-papers-${Date.now()}.html`);
+  fs.writeFileSync(page, r.html);
+  const worker = newPrintWorker();
+  try {
+    await worker.loadFile(page);
+    await worker.webContents
+      .executeJavaScript(`Promise.all(Array.from(document.images).map((i) => i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))).then(() => true)`)
+      .catch(() => {});
+    const size = String(lastPrintSettings.pdf_page_size || "A4");
+    const pageSize = ["A3", "A4", "A5", "Legal", "Letter", "Tabloid"].includes(size) ? size : "A4";
+    const bytes = await worker.webContents.printToPDF({ printBackground: true, pageSize });
+    fs.writeFileSync(pick.filePath, bytes);
+    navDebug("papers-pdf", `saved ${pick.filePath}`);
+    return { ok: true, summary: `Saved as one PDF — ${pick.filePath}` };
+  } catch (e) {
+    const reason = String(e && e.message ? e.message : e);
+    navDebug("papers-pdf", `failed: ${reason}`);
+    return { ok: false, reason };
+  } finally {
+    if (!worker.isDestroyed()) worker.destroy();
+    fs.rm(page, () => {});
+  }
+});
 ipcMain.handle("papers-list", async (_e, sources) => listPapers(sources));
 ipcMain.handle("papers-bytes", async (_e, fileUrl) => paperBytes(fileUrl));
 ipcMain.handle("papers-upload", async (_e, req) => uploadPaper(req));
@@ -11005,7 +11118,7 @@ ipcMain.handle("set-delay-calendar", (_e, csv) => {
 });
 /** Save-as, for the copy that goes into Excel. The renderer sends the Excel-flavoured text. */
 ipcMain.handle("export-delay-calendar", async (_e, csv) => {
-  const r = await dialog.showSaveDialog(win, {
+  const r = await askSavePath({
     title: "Export delay calendar",
     defaultPath: path.join(app.getPath("documents"), "delay-calendar.csv"),
     filters: [{ name: "CSV (Excel)", extensions: ["csv"] }],
