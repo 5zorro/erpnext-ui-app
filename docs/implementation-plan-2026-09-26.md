@@ -696,6 +696,102 @@ Vanilla once the peek stack has nothing to say. Return shows the page without re
 unless it has unsaved edits. Home, Find or any other shell page ends a detour.
 **Print stays pending:** a full load into Vanilla for the print preview; making it a peek is next.
 
+## Printing — how Frappe does it, and one convention for the shell (research 2026-10-03, not built)
+
+5zorro 2026-10-03: *"I have no idea how the underlying printing engine works or why it works on
+vanilla but not on the doc skins … hitting print would have opened a popup."* Checks are printed in
+batches (a check run); invoices are generated and then printed or saved in batches; POs, Item
+Receipts and Bills are one-offs.
+
+### How Frappe prints (read from the v16 source on this instance)
+
+| What | Where | What it does |
+|---|---|---|
+| **Print** button | `printing/page/print/print.js` `printit()` → `render_page("/printview?", true)` | **`window.open`** of `/printview?doctype&name&format&no_letterhead&letterhead&settings&trigger_print=1`. That page renders the document as HTML and, because of `trigger_print`, calls the browser's own print. In a browser that is a new tab; **in Electron it is a new window — the popup** |
+| **PDF** button | same file, `render_pdf()` | `window.open` of `/api/method/frappe.utils.print_format.download_pdf?doctype&name&format&…` — the server makes the PDF (`Print Settings.pdf_generator`: `wkhtmltopdf` here; `chrome` exists) |
+| **Bulk print** (list view → Print) | `list/bulk_operations.js` `print()` | Up to **500** docs → `download_multi_pdf` (one merged PDF; `doctype` may be a `{doctype: [names]}` map, so several doctypes go in one file), or `download_multi_pdf_async` (a background job that saves a private File and announces it over realtime) |
+| HTML only | `www/printview.py` `get_html_and_style` (whitelisted) | The rendered body + print-style CSS, no page around it |
+| Server-side printer | `print_format.py` `print_by_server` | Prints on a **CUPS printer the server can reach** (`Network Printer Settings`, needs `pycups`); `enable_print_server` = 0 here |
+| Raw printing | `print.js` via QZ Tray | Label/receipt printers, raw commands; `enable_raw_printing` = 0 here |
+
+Rules ERPNext applies whatever the client (`printview.py`):
+- **Drafts** print only with `Print Settings.allow_print_for_draft` (**1** here) and then carry a
+  **"Draft" heading** (`add_draft_heading` = 1). **Cancelled** documents are refused
+  (`allow_print_for_cancelled` = 0). The shell reflects these; it never works around them.
+- **Every render is logged**: `make_access_log(method="Print", file_type="PDF", page="Print Format: …")`.
+  That is a record that a print was *rendered* — a preview counts — not proof that paper came out.
+- The layout is a **Print Format** (Jinja; this site has the standard ones, e.g. *Purchase Invoice
+  Standard*, *Drop Shipping Format* for PO, *Bank and Cash Payment Voucher* for Payment Entry), plus
+  a **Letter Head** and the site's **print style** (`Redesign`).
+- **Checks**: ERPNext's **Cheque Print Template** (per bank) generates a Payment Entry Print Format
+  with fields placed over pre-printed check stock (`create_or_update_cheque_print_format`). None
+  exists on this sandbox yet.
+
+### Why the Doc skin's Print breaks today
+`bill-print` / `doc-print` hard-load the document in Vanilla, call Frappe's `print_doc()` (its print
+*page*), switch the clerk to the ERP view, and set the lens to Vanilla (that last part removed
+2026-10-03). The clerk then presses Frappe's Print, which `window.open`s the print view — and the
+ERP view's `setWindowOpenHandler` **allows** any ERPNext-origin URL, so Electron opens a separate
+window. That breaks invariant 6 (one window) and is the popup 5zorro remembers. Vanilla's own
+Print / PDF buttons inside the shell do the same thing.
+
+### The convention
+
+1. **ERPNext renders; the shell only delivers.** Every printed page and PDF comes from ERPNext's
+   own endpoints (`/printview`, `download_pdf`, `download_multi_pdf`) with ERPNext's Print Format,
+   Letter Head and print style. Same output as Vanilla, and no second layout to drift. Clean Core.
+2. **Print is an in-place action, not a door.** It never leaves the page and never opens a window.
+   (`src/doc-doors.js` lists `bill-print` / `doc-print` as *pending peeks* today; they become
+   in-place actions, which the doors test will check.)
+3. **No popups, ever.** The ERP view's window-open handler sends `/printview` and
+   `/api/method/frappe.utils.print_format.download_*` URLs to the shell's print service instead of
+   allowing a window. That also fixes Vanilla's own Print / PDF buttons inside the shell.
+4. **Two destinations, one engine each.**
+   - **Printer**: load `/printview?…` (without `trigger_print`) in a hidden, never-shown view and
+     call Electron's `webContents.print()` — the same HTML-to-printer path a browser takes on
+     Vanilla's Print. The printer is chosen in the shell (Electron `getPrintersAsync`) and
+     remembered per purpose (checks / invoices / everything else); with one chosen, a batch prints
+     **silently** (`print({ silent: true, deviceName })`), with no dialog per document.
+   - **File**: ERPNext's PDF (`download_pdf`, or `download_multi_pdf` for one merged file; the async
+     variant above ~20 documents), saved where the clerk says.
+5. **Print what ERPNext has saved.** Printing an unsaved page asks first (*Save draft, then print*);
+   the commit gate already has a `print` action. Drafts and cancelled documents follow the site's
+   own settings above.
+6. **Choose the format, then remember it.** ERPNext's default Print Format for the doctype unless
+   the clerk picks another; letter head on/off from Print Settings. The pick is remembered per
+   doctype (like the lens), never written to the site.
+7. **One print queue, app-wide.** "Add to print queue" from any Doc skin or Find page (multi-select),
+   and automatically from a check run. The queue groups by doctype + format and offers *Print all*
+   and *Save as one PDF / one PDF each*, reporting per document — a batch that prints 9 of 10 says
+   which one did not.
+
+### Per document
+- **Checks (batch).** A check run already groups payments (Pay Outstanding). Its Payment Entries go
+  to the queue in check-number order with the bank's Cheque Print Template format, to the printer
+  remembered for checks. Needs: an **alignment test page** before a run; a **spoiled check** path
+  (the number is used — void-and-amend or edit the draft's number, never reprint the same number);
+  and a decision on **print before or after submit** — a draft check would carry the "Draft"
+  heading if its format renders it (to verify against a Cheque Print Template format).
+- **Invoices (batch).** Generated Sales Invoices go to the queue: print, one PDF each (named by
+  invoice number, for emailing), or one merged PDF. Emailing is ERPNext's own *Email* with the print
+  attached — a later step.
+- **PO, Item Receipt, Bill (one-off).** Print in place: format and letter head as remembered,
+  printer or PDF, back on the same page.
+
+### What a Bill print has to handle (the one 5zorro tried)
+1. Stay on the Bill — no Vanilla hop, no popup, no lens change.
+2. Saved state only: unsaved edits → *Save draft, then print*.
+3. Draft → prints with ERPNext's "Draft" heading (site setting); cancelled → ERPNext refuses, so the
+   button says why instead.
+4. Which Print Format (*Purchase Invoice Standard* by default) and letter head.
+5. Destination: printer or PDF file; optionally the PDF **attached to the Bill** for the record.
+6. The Access Log entry is ERPNext's; nothing extra to record.
+
+### Environment note
+This WSL setup has **no CUPS client**, so Electron here sees no printers — only *Save as PDF*.
+Real printing needs the Windows build of the shell (Windows printers) or CUPS in WSL. Dogfood
+printing here goes to PDF until then.
+
 ## Dogfood residuals
 
 | Family | Residual | State |
@@ -713,5 +809,6 @@ unless it has unsaved edits. Home, Find or any other shell page ends a detour.
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
 | Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
+| Printing | Convention written (research 2026-10-03); print service, queue, no-popup handler | not started — 5zorro to read and agree |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
