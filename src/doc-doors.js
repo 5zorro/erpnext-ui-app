@@ -34,16 +34,6 @@ export const DOC_DOORS = Object.freeze({
   // The page's own peeks: linked source ↗, applied payment 👁, create Item, company addresses,
   // Customize Form from the receive question.
   "soft-peek-route": { kind: "peek", why: "look at or fix a document this one links to" },
-  "bill-print": {
-    kind: "peek",
-    why: "print this bill and carry on",
-    pending: "still a full load into Vanilla to show the print preview; Esc does not come back yet",
-  },
-  "doc-print": {
-    kind: "peek",
-    why: "print this document and carry on",
-    pending: "still a full load into Vanilla to show the print preview; Esc does not come back yet",
-  },
   // Other work.
   "bill-find": { kind: "navigate", why: "find another bill" },
   "doc-find": { kind: "navigate", why: "find another document" },
@@ -55,6 +45,16 @@ export const DOC_DOORS = Object.freeze({
   "doc-open-vanilla": { kind: "lens", why: "this document in Default-skin" },
   // From a payment page to the bill it pays, and back.
   "shell-detour-open": { kind: "detour", why: "fix the bill a payment pays, then back to the payment work" },
+});
+
+/**
+ * Not doors: actions that never move the clerk at all. Printing (plan 2026-09-26 "Printing") is
+ * one — it prints or saves ERPNext's own output in place, never a page change, never a window.
+ * tests/peek-doors.test.js holds these to "no navigation of any kind".
+ */
+export const IN_PLACE_ACTIONS = Object.freeze({
+  "print-run": "print or save this document as ERPNext renders it",
+  "print-queue-run": "print or save the print queue",
 });
 
 /**

@@ -51,7 +51,15 @@ contextBridge.exposeInMainWorld("erpDoc", {
   refocusListFilter: (fieldname) =>
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => invokeSkin("bill-new", "doc-new"),
-  printDoc: () => invokeSkin("bill-print", "doc-print"),
+  // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
+  printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
+  printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
+  printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
+  printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
+  printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
+  printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
+  printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),
+  printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),

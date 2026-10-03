@@ -146,6 +146,7 @@ import {
 } from "../src/item-table-nav.js";
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
+import { openPrintDialog } from "../src/print-dialog-ui.js";
 import {
   UPDATE_STOCK_DEFAULT_ROUTE,
   receiveAskDecision,
@@ -1074,10 +1075,8 @@ export async function bootBillFormPage(api) {
       return;
     }
     if (action === "print") {
-      setStatus("Opening print…");
-      const res = await api.printBill();
-      if (res && res.ok) setStatus(res.reason || "Print opened.");
-      else setStatus((res && res.reason) || "Print failed.", "err");
+      // In place: the dialog prints / saves ERPNext's own output; the Bill never moves.
+      await openPrintDialog({ api, doc: lastDoc, label: "Bill" });
       return;
     }
   }

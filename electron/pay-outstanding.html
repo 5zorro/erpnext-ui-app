@@ -669,6 +669,8 @@
         <button type="button" class="sort-btn active" id="sort-date" data-testid="sort-date">Date</button>
         <button type="button" class="sort-btn" id="sort-invoice" data-testid="sort-invoice">Invoice</button>
       </div>
+      <button type="button" class="sort-btn" id="print-queue-btn" data-testid="pay-print-queue"
+        title="Print or save the queued documents — checks from a check run land here">Print queue</button>
       <!-- OI-170: one app-wide setting, shared with every Doc skin's File group. -->
       <button type="button" class="sort-btn" id="number-lead" data-testid="pay-number-lead"
         title="Which number leads on each invoice — the vendor's own number or ERPNext's ID. Hover an invoice for both.">No.: Supplier No</button>
@@ -1073,6 +1075,8 @@
       summarizeModeChange,
     } from "../src/mode-change-plan.js";
     import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
+    import { openPrintDialog } from "../src/print-dialog-ui.js";
+    import { isCheckModeOfPayment } from "../src/print-service.js";
     import {
       billRowNumbers,
       flipNumberLead,
@@ -1425,7 +1429,12 @@
       linkMounted,
       onDirty: setDrawerDirty,
       onFieldEdited: () => refreshDrawerDefaults(),
-      onSubmitted: () => {
+      onSubmitted: async (result, intent) => {
+        // Printing convention: a check run's checks go straight into the print queue.
+        if (result && result.name && isCheckModeOfPayment(intent && intent.modeOfPayment) && api && api.printQueueAdd) {
+          await api.printQueueAdd([{ doctype: "Payment Entry", name: result.name }]).catch(() => null);
+          await paintPrintQueueButton();
+        }
         closeCheckDrawer();
         init(); // refresh: paid bills should drop off the list
       },
@@ -3931,6 +3940,21 @@
       const withCredit = suppliersWithCredit(allBills);
       if (withCredit.length && (await runAutoRelinks(withCredit))) await reloadBills();
     });
+
+    /** Print queue (plan "Printing"): the count on the header button, and the dialog. */
+    const printQueueBtn = document.getElementById("print-queue-btn");
+    async function paintPrintQueueButton() {
+      if (!printQueueBtn || !api || !api.printQueueGet) return;
+      const st = await api.printQueueGet().catch(() => null);
+      const n = (st && st.queue && st.queue.length) || 0;
+      printQueueBtn.textContent = n ? `Print queue (${n})` : "Print queue";
+    }
+    if (printQueueBtn) {
+      printQueueBtn.onclick = () => {
+        if (api && api.printOptions) openPrintDialog({ api, onClose: () => paintPrintQueueButton() });
+      };
+    }
+    paintPrintQueueButton();
 
     async function reloadBills() {
       if (!api || !api.getOutstandingBills) return;

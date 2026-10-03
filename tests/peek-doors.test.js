@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DOC_DOORS, doorFor, isDoorChannel } from "../src/doc-doors.js";
+import { DOC_DOORS, IN_PLACE_ACTIONS, doorFor, isDoorChannel } from "../src/doc-doors.js";
 
 const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
 
@@ -59,6 +59,15 @@ describe("Doc-skin doors follow one convention (src/doc-doors.js)", () => {
     for (const d of doors) {
       const door = doorFor(d.name);
       if (door && door.kind !== "lens") assert.doesNotMatch(d.body, /rememberLens\(/, d.name);
+    }
+  });
+
+  // Printing convention (plan 2026-09-26 "Printing"): print never leaves the page.
+  it("in-place actions never navigate and never open a window", () => {
+    for (const name of Object.keys(IN_PLACE_ACTIONS)) {
+      const h = all.find((x) => x.name === name);
+      assert.ok(h, `${name} not found in main`);
+      assert.doesNotMatch(h.body, /showErp\(|softPeekErp\(|loadErpUrl\(|openRoutePreferred\(|showDocForm\(/, name);
     }
   });
 

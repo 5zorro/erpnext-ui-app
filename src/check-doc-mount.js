@@ -360,7 +360,7 @@ export function closeCheckDoc(root) {
  *   api?: { searchLink?: Function, createBatchPaymentEntry?: Function },
  *   linkMounted?: WeakMap<Element, true>,
  *   onDirty?: (dirty: boolean) => void,
- *   onSubmitted?: (result: { ok: true, name: string|null }) => void,
+ *   onSubmitted?: (result: { ok: true, name: string|null }, intent: { modeOfPayment?: string }) => void,
  *   onFieldEdited?: (testid: string) => void,
  * }} [deps] `onFieldEdited` (C9) fires after the clerk types into or picks one of the four
  *   write fields — the page re-proposes the others from it (a new method changes the account and
@@ -460,7 +460,7 @@ export function mountCheckDocWrite(root, deps = {}) {
     }
     if (statusEl) statusEl.textContent = `Created ${result.name || "Payment Entry"}.`;
     if (onDirty) onDirty(false);
-    if (onSubmitted) onSubmitted(result);
+    if (onSubmitted) onSubmitted(result, intent);
   });
 }
 

@@ -103,6 +103,24 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel } from "../src/shell-detour.js";
+import {
+  MULTI_PDF_SYNC_MAX,
+  addToPrintQueue,
+  classifyErpPrintUrl,
+  groupPrintQueue,
+  mergePrintPrefs,
+  multiPdfUrl,
+  pdfFileName,
+  pdfUrl,
+  printBlockReason,
+  printerPurposeFor,
+  printviewUrl,
+  rememberPrintChoice,
+  removeFromPrintQueue,
+  printerLabel,
+  sortPrintersByRecent,
+  summarizePrintResults,
+} from "../src/print-service.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -290,11 +308,8 @@ import { findSkinFor } from "../src/find-skin-registry.js";
 import { surfaceIsDocLens, surfaceOwnsRoute, surfacePlacement } from "../src/shell-surfaces.js";
 import {
   BILL_FIND_TIMEOUT_MS,
-  BILL_PRINT_TIMEOUT_MS,
   BILL_SAVE_TIMEOUT_MS,
   classifyPrintNavResult,
-  normalizePrintIpcResult,
-  printFormMatchesBill,
   timeoutFailure,
 } from "../src/bill-action-flow.js";
 import {
@@ -385,6 +400,10 @@ let billReceivePrefs = mergeReceiveAskPrefs(null);
  * @type {import("../src/shell-detour.js").ShellDetour|null}
  */
 let shellDetour = null;
+/** Printing (src/print-service.js): remembered formats / letter head / printers, and the queue. */
+let printPrefs = mergePrintPrefs(null);
+/** @type {import("../src/print-service.js").PrintItem[]} */
+let printQueue = [];
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -672,6 +691,9 @@ function paymentDirectionPrefsPath() {
 function docNumberPrefsPath() {
   return path.join(app.getPath("userData"), "doc-number-prefs.json");
 }
+function printPrefsPath() {
+  return path.join(app.getPath("userData"), "print-prefs.json");
+}
 function billReceivePrefsPath() {
   return path.join(app.getPath("userData"), "bill-receive-prefs.json");
 }
@@ -742,6 +764,11 @@ function loadPrefs() {
     docNumberPrefs = mergeNumberPrefs(JSON.parse(fs.readFileSync(docNumberPrefsPath(), "utf8")));
   } catch {
     docNumberPrefs = mergeNumberPrefs(null);
+  }
+  try {
+    printPrefs = mergePrintPrefs(JSON.parse(fs.readFileSync(printPrefsPath(), "utf8")));
+  } catch {
+    printPrefs = mergePrintPrefs(null);
   }
   try {
     billReceivePrefs = mergeReceiveAskPrefs(JSON.parse(fs.readFileSync(billReceivePrefsPath(), "utf8")));
@@ -928,6 +955,13 @@ function syncE2eApi() {
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
     getHistory: () => history.map((h) => ({ ...h })),
     getPeekStack: () => (peekStack ? JSON.parse(JSON.stringify(peekStack)) : null),
+    // Printing: ERPNext's PDF through the ERP view's session, without a save dialog (tests only).
+    fetchPrintPdf: async (item) => {
+      const r = await fetchErpPdf(pdfUrl(ERP_BASE, item || {}));
+      return r.ok ? { ok: true, size: r.bytes.length, head: r.bytes.subarray(0, 5).toString("latin1") } : r;
+    },
+    getPrintQueue: () => printQueue.map((q) => ({ ...q })),
+    windowCount: () => BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed()).length,
     getRecentRows: () =>
       JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
     getShelved: () => shelvedDrafts.map((d) => ({ ...d })),
@@ -6885,9 +6919,16 @@ function createWindow() {
     win.loadFile(path.join(__dirname, "..", "e2e", "probe.html"));
   }
 
-  erp.webContents.setWindowOpenHandler(({ url }) =>
-    isAllowedErpUrl(ERP_BASE, url) ? { action: "allow" } : { action: "deny" },
-  );
+  erp.webContents.setWindowOpenHandler(({ url }) => {
+    // Printing convention: Frappe's Print / PDF / bulk-print buttons window.open these. In Electron
+    // that is a popup (and a second window, against invariant 6). The print service does it in place.
+    const printReq = classifyErpPrintUrl(url, ERP_BASE);
+    if (printReq) {
+      handleErpPrintRequest(printReq).catch((e) => navDebug("print-intercept-err", String(e && e.message ? e.message : e)));
+      return { action: "deny" };
+    }
+    return isAllowedErpUrl(ERP_BASE, url) ? { action: "allow" } : { action: "deny" };
+  });
   erp.webContents.on("will-navigate", (e, url) => {
     if (!isAllowedErpUrl(ERP_BASE, url)) e.preventDefault();
   });
@@ -9101,123 +9142,11 @@ ipcMain.handle("bill-new", async () => {
   return billNewInflight;
 });
 
-/** Wait until Vanilla URL is the print preview for this Bill. */
-async function waitForPrintPreview(expectedName, timeoutMs = BILL_PRINT_TIMEOUT_MS) {
-  const start = Date.now();
-  let last = "";
-  while (Date.now() - start < timeoutMs) {
-    if (!erp || erp.webContents.isDestroyed()) {
-      return { ok: false, reason: "ERP view not ready" };
-    }
-    last = erp.webContents.getURL() || "";
-    if (/\/login/i.test(last)) {
-      return { ok: false, reason: "Please log in on Vanilla skin, then try Print again." };
-    }
-    const classified = classifyPrintNavResult(last, expectedName, ERP_BASE);
-    if (classified.ok) return classified;
-    await sleep(150);
-  }
-  return classifyPrintNavResult(last, expectedName, ERP_BASE);
-}
 
 /**
  * Print: open Vanilla print preview as a real navigation (visible ERP surface + Recent).
  * Matches clerk expectation of "new tab" → print page (OI-058 dogfood 2026-07-21).
  */
-ipcMain.handle("bill-print", async () => {
-  const doc = dirtyState.doc;
-  const name = doc && doc.name != null ? String(doc.name) : "";
-  if (!name || isNewDocRecord(name)) {
-    return {
-      ok: false,
-      reason: "Save the Bill draft first — print needs a document name.",
-    };
-  }
-
-  const route = `/app/purchase-invoice/${encodeURIComponent(name)}`;
-  const curUrl = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
-  const cur = routeInfo(curUrl, ERP_BASE);
-  const alreadyOnBill =
-    cur.doctype === "purchase-invoice" && cur.record === name && !isNewDocRecord(cur.record);
-
-  if (!alreadyOnBill) {
-    const target = erpUrl(ERP_BASE, route);
-    if (!(await loadErpUrl(target))) {
-      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
-    }
-  }
-
-  const snap = await raceTimeout(
-    waitForPurchaseInvoice(BILL_PRINT_TIMEOUT_MS),
-    BILL_PRINT_TIMEOUT_MS + 1000,
-    "Print form load",
-  );
-  if (!(snap && snap.ok && snap.doc)) {
-    return {
-      ok: false,
-      reason: (snap && snap.reason) || "No form loaded.",
-    };
-  }
-  const match = printFormMatchesBill(snap.doc, name);
-  if (!match.ok) {
-    return match;
-  }
-
-  const opened = await raceTimeout(
-    erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      var want = ${JSON.stringify(name)};
-      if (!f || !f.doc) return { ok: false, reason: "No form loaded." };
-      if (f.doc.doctype !== "Purchase Invoice") {
-        return { ok: false, reason: "Wrong form type (" + (f.doc.doctype || "?") + ")." };
-      }
-      if (String(f.doc.name) !== want) {
-        return { ok: false, reason: "Vanilla is on a different Bill (" + f.doc.name + "), not " + want + "." };
-      }
-      if (typeof f.print_doc === "function") {
-        f.print_doc();
-        return { ok: true, reason: "Navigating to print preview…" };
-      }
-      if (window.frappe && frappe.ui && frappe.ui.get_print_settings) {
-        frappe.ui.get_print_settings(false, function () {}, f.doc.doctype);
-        return { ok: true, reason: "Opened print settings." };
-      }
-      return { ok: false, reason: "Print UI missing on this Desk build." };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`),
-    BILL_PRINT_TIMEOUT_MS,
-    "Print",
-  );
-
-  const started = normalizePrintIpcResult(opened);
-  if (!started.ok) return started;
-
-  // Show Vanilla so the print page is visible (Electron has no browser "new tab").
-  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
-  surfaceMode = "erp";
-  // No lens change: printing is not choosing Vanilla for this bill (doors rule, src/doc-doors.js).
-  place();
-  sendUiState();
-  syncE2eApi();
-  try {
-    if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
-    if (win && !win.isDestroyed()) win.focus();
-  } catch {
-    /* ignore */
-  }
-
-  const landed = await waitForPrintPreview(name, BILL_PRINT_TIMEOUT_MS);
-  if (!(landed && landed.ok)) {
-    return {
-      ok: false,
-      reason: (landed && landed.reason) || "Print preview did not open.",
-    };
-  }
-  return { ok: true, reason: "Print preview opened." };
-});
 
 /**
  * Museum bind.js Revert: new → frappe.new_doc; else frm.reload_doc.
@@ -9763,94 +9692,6 @@ ipcMain.handle("doc-new", async () => {
   return { ok: true };
 });
 
-ipcMain.handle("doc-print", async () => {
-  const profile = activeDocProfile();
-  if (!profile || profile.shell !== "doc-form") {
-    return { ok: false, reason: "No Doc form skin active." };
-  }
-  const doc = dirtyState.doc;
-  const name = doc && doc.name != null ? String(doc.name) : "";
-  if (!name || isNewDocRecord(name)) {
-    return {
-      ok: false,
-      reason: `Save the ${profile.title} draft first — print needs a document name.`,
-    };
-  }
-
-  const route = `/app/${profile.doctypeKey}/${encodeURIComponent(name)}`;
-  const curUrl = erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "";
-  const cur = routeInfo(curUrl, ERP_BASE);
-  const alreadyOnDoc =
-    cur.doctype === profile.doctypeKey && cur.record === name && !isNewDocRecord(cur.record);
-
-  if (!alreadyOnDoc) {
-    const target = erpUrl(ERP_BASE, route);
-    if (!(await loadErpUrl(target))) {
-      return { ok: false, reason: "Print stopped — a page with unsaved changes was kept open." };
-    }
-  }
-
-  const snap = await raceTimeout(
-    waitForDocForm(BILL_PRINT_TIMEOUT_MS),
-    BILL_PRINT_TIMEOUT_MS + 1000,
-    "Print form load",
-  );
-  if (!(snap && snap.ok)) {
-    return {
-      ok: false,
-      reason: (snap && snap.reason) || "Could not load document for print.",
-    };
-  }
-
-  const opened = await erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      if (!f || !f.doc) return { ok: false, reason: "Vanilla form not ready." };
-      if (typeof f.print_doc === "function") {
-        f.print_doc();
-        return { ok: true };
-      }
-      if (window.frappe && frappe.ui && frappe.ui.form && frappe.ui.form.print) {
-        frappe.ui.form.print(f);
-        return { ok: true };
-      }
-      return { ok: false, reason: "No print UI on this Desk build." };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  if (!(opened && opened.ok)) {
-    return opened && typeof opened === "object"
-      ? opened
-      : { ok: false, reason: "Could not open print." };
-  }
-
-  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
-  surfaceMode = "erp";
-  activeDocSkin = null;
-  currentRoute = route;
-  // No lens change: printing is not choosing Vanilla for this document (doors rule).
-  place();
-  history = pushHistory(history, route, { erpBase: ERP_BASE, labels: DOCTYPE_LABELS });
-  sendHistory();
-  sendUiState();
-  syncE2eApi();
-  try {
-    if (erp && !erp.webContents.isDestroyed()) erp.webContents.focus();
-    if (win && !win.isDestroyed()) win.focus();
-  } catch {
-    /* ignore */
-  }
-
-  const landed = await waitForPrintPreview(name, BILL_PRINT_TIMEOUT_MS);
-  if (!(landed && landed.ok)) {
-    return {
-      ok: false,
-      reason: (landed && landed.reason) || "Print preview did not open.",
-    };
-  }
-  return { ok: true, reason: "Print preview opened." };
-});
 
 ipcMain.handle("doc-revert-unsaved", async () => {
   const raw = await erpEval(`(async () => {
@@ -10443,6 +10284,316 @@ function returnFromShellDetour(how) {
 ipcMain.handle("shell-detour-open", async (_e, route) => openDetourFromShell(route));
 ipcMain.on("shell-detour-back", () => {
   if (shellDetour) returnFromShellDetour("button");
+});
+
+/* ---------------- Printing (plan 2026-09-26 "Printing"; src/print-service.js) ---------------- */
+
+function savePrintPrefs() {
+  try {
+    fs.writeFileSync(printPrefsPath(), JSON.stringify(printPrefs));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * What a print dialog needs for one doctype: ERPNext's Print Formats (and its default), Letter
+ * Heads, the site's Print Settings, the printers this machine sees, and what was chosen last time.
+ * @param {string} doctype ERPNext doctype, e.g. "Purchase Invoice"
+ */
+async function printOptions(doctype) {
+  const dt = normalizeEditableText(doctype);
+  const raw = await erpEval(`(async () => {
+    try {
+      var dt = ${JSON.stringify(dt)};
+      var out = { ok: true, formats: [], defaultFormat: "", letterheads: [], defaultLetterhead: "", settings: {} };
+      if (dt) {
+        var f = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Print Format", filters: { doc_type: dt, disabled: 0 }, fields: ["name"], order_by: "name asc", limit_page_length: 0 } });
+        out.formats = ((f && f.message) || []).map(function (r) { return r.name; });
+        try {
+          await frappe.model.with_doctype(dt);
+          out.defaultFormat = (frappe.get_meta(dt) || {}).default_print_format || "";
+        } catch (e) {}
+      }
+      var l = await frappe.call({ method: "frappe.client.get_list", args: {
+        doctype: "Letter Head", filters: { disabled: 0 }, fields: ["name", "is_default"], limit_page_length: 0 } });
+      out.letterheads = ((l && l.message) || []).map(function (r) { return r.name; });
+      var def = ((l && l.message) || []).find(function (r) { return Number(r.is_default); });
+      out.defaultLetterhead = def ? def.name : "";
+      var ps = await frappe.call({ method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
+      var p = (ps && ps.message) || {};
+      out.settings = {
+        allow_print_for_draft: p.allow_print_for_draft, allow_print_for_cancelled: p.allow_print_for_cancelled,
+        with_letterhead: p.with_letterhead, add_draft_heading: p.add_draft_heading,
+      };
+      return out;
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  /** @type {{ name: string, displayName?: string, isDefault?: boolean }[]} */
+  let printers = [];
+  try {
+    if (win && !win.isDestroyed()) printers = await win.webContents.getPrintersAsync();
+  } catch {
+    printers = [];
+  }
+  const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read print settings." };
+  return {
+    ...base,
+    // The three most recently used first (5zorro 2026-10-03), then the rest as the system lists them.
+    printers: sortPrintersByRecent(
+      printers.map((p) => ({
+        name: p.name,
+        displayName: p.displayName || p.name,
+        isDefault: !!p.isDefault,
+        // Full name + where it is, so two similar printers can be told apart (never truncated).
+        ...printerLabel(p),
+      })),
+      printPrefs.recentPrinters,
+    ).map((p) => ({ ...p, recent: printPrefs.recentPrinters.includes(p.name) })),
+    remembered: {
+      format: printPrefs.formats[dt] || "",
+      withLetterhead: printPrefs.letterhead[dt],
+      printer: printPrefs.printers[printerPurposeFor(dt)] || "",
+    },
+  };
+}
+
+/** One hidden window for printer jobs: never shown (invariant 6), same session as the ERP view. */
+function newPrintWorker() {
+  return new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1200,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+}
+
+/**
+ * Load ERPNext's print view for one document and print it. With `deviceName` it prints silently
+ * to that printer (a batch, no dialog per document); without, the system print dialog opens.
+ * @param {BrowserWindow} worker
+ * @param {import("../src/print-service.js").PrintItem} item
+ * @param {{ deviceName?: string }} opts
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+async function printOneOnWorker(worker, item, opts) {
+  const url = printviewUrl(ERP_BASE, item);
+  let status = 0;
+  const onNav = (_e, _u, code) => {
+    status = code || status;
+  };
+  worker.webContents.on("did-navigate", onNav);
+  try {
+    await worker.loadURL(url);
+  } catch (e) {
+    return { ok: false, reason: `Could not load the print view (${String(e && e.message ? e.message : e)}).` };
+  } finally {
+    worker.webContents.removeListener("did-navigate", onNav);
+  }
+  if (status >= 400) {
+    const msg = await worker.webContents
+      .executeJavaScript(`(document.querySelector(".page-content, .error-message, body") || {}).innerText || ""`)
+      .catch(() => "");
+    return { ok: false, reason: `ERPNext refused (${status})${msg ? `: ${String(msg).trim().slice(0, 160)}` : ""}` };
+  }
+  // Fonts and images before paper: the page is otherwise printed half-drawn.
+  await worker.webContents
+    .executeJavaScript(
+      `Promise.all([document.fonts ? document.fonts.ready : null, ...Array.from(document.images).map((i) => i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))]).then(() => true)`,
+    )
+    .catch(() => {});
+  const silent = !!opts.deviceName;
+  return new Promise((resolve) => {
+    worker.webContents.print(
+      { silent, deviceName: opts.deviceName || undefined, printBackground: true },
+      (success, failureReason) => resolve(success ? { ok: true } : { ok: false, reason: failureReason || "not printed" }),
+    );
+  });
+}
+
+/**
+ * @param {import("../src/print-service.js").PrintItem[]} items
+ * @param {{ deviceName?: string }} opts
+ */
+async function printItemsToPrinter(items, opts = {}) {
+  const list = Array.isArray(items) ? items : [];
+  navDebug("print-start", `${list.length} → ${opts.deviceName || "system dialog"}`);
+  const worker = newPrintWorker();
+  const results = [];
+  try {
+    for (const item of list) {
+      const r = await printOneOnWorker(worker, item, opts);
+      results.push({ item, ...r });
+      // The system dialog once is enough: cancelling it stops the batch.
+      if (!opts.deviceName && !r.ok && /cancel/i.test(String(r.reason || ""))) break;
+    }
+  } finally {
+    if (!worker.isDestroyed()) worker.destroy();
+  }
+  const summary = summarizePrintResults(results, "Printed");
+  navDebug("print-done", summary);
+  return { ok: results.length > 0 && results.every((r) => r.ok), results, summary };
+}
+
+/**
+ * Fetch one of ERPNext's PDFs over the ERP view's own session (it is logged in) and refuse
+ * anything that is not a PDF — an error page must never be saved as one.
+ * @param {string} url
+ */
+async function fetchErpPdf(url) {
+  if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
+  try {
+    const res = await erp.webContents.session.fetch(url);
+    const type = res.headers.get("content-type") || "";
+    if (!res.ok || !/pdf/i.test(type)) {
+      const text = await res.text().catch(() => "");
+      let reason = `ERPNext did not return a PDF (${res.status}).`;
+      try {
+        const j = JSON.parse(text);
+        const msgs = j && j._server_messages ? JSON.parse(j._server_messages).map((m) => JSON.parse(m).message).join(" ") : "";
+        const said = msgs || (j && (j.exception || j.exc_type)) || "";
+        if (said) reason = `ERPNext: ${String(said).replace(/<[^>]+>/g, "").split("\n")[0].slice(0, 240)}`;
+      } catch {
+        if (text) reason += ` ${text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200)}`;
+      }
+      return { ok: false, reason };
+    }
+    return { ok: true, bytes: Buffer.from(await res.arrayBuffer()) };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
+/**
+ * Save ERPNext's PDFs: one merged file, or one file per document in a folder.
+ * @param {import("../src/print-service.js").PrintItem[]} items
+ * @param {{ merged?: boolean }} opts
+ */
+async function saveItemsAsPdf(items, opts = {}) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return { ok: false, reason: "Nothing to save." };
+  if (opts.merged || list.length === 1) {
+    const defaultName = list.length === 1 ? pdfFileName(list[0].name) : `${pdfFileName(list[0].name).replace(/\.pdf$/, "")}-and-${list.length - 1}-more.pdf`;
+    const pick = await dialog.showSaveDialog(win, {
+      title: list.length === 1 ? "Save PDF" : `Save ${list.length} documents as one PDF`,
+      defaultPath: path.join(app.getPath("documents"), defaultName),
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
+    const first = list[0];
+    const url =
+      list.length === 1
+        ? pdfUrl(ERP_BASE, first)
+        : multiPdfUrl(ERP_BASE, list, { format: first.format, noLetterhead: first.noLetterhead, letterhead: first.letterhead });
+    navDebug("pdf-start", `${list.length} merged → ${pick.filePath}${list.length > MULTI_PDF_SYNC_MAX ? " (large)" : ""}`);
+    const got = await fetchErpPdf(url);
+    if (!got.ok) {
+      navDebug("pdf-done", `failed: ${got.reason}`);
+      return { ok: false, reason: got.reason };
+    }
+    fs.writeFileSync(pick.filePath, got.bytes);
+    navDebug("pdf-done", `saved ${pick.filePath}`);
+    return { ok: true, files: [pick.filePath], summary: `Saved ${list.length === 1 ? "PDF" : `${list.length} documents as one PDF`} — ${pick.filePath}` };
+  }
+  const dir = await dialog.showOpenDialog(win, {
+    title: `Save ${list.length} PDFs — one per document`,
+    defaultPath: app.getPath("documents"),
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (dir.canceled || !dir.filePaths || !dir.filePaths[0]) return { ok: false, cancelled: true, reason: "Not saved." };
+  navDebug("pdf-start", `${list.length} each → ${dir.filePaths[0]}`);
+  const results = [];
+  const files = [];
+  for (const item of list) {
+    const got = await fetchErpPdf(pdfUrl(ERP_BASE, item));
+    if (!got.ok) {
+      results.push({ item, ok: false, reason: got.reason });
+      continue;
+    }
+    const file = path.join(dir.filePaths[0], pdfFileName(item.name));
+    fs.writeFileSync(file, got.bytes);
+    files.push(file);
+    results.push({ item, ok: true });
+  }
+  const summary = summarizePrintResults(results, "Saved");
+  navDebug("pdf-done", summary);
+  return { ok: results.every((r) => r.ok), results, files, summary };
+}
+
+/**
+ * Frappe tried to open a print window (Vanilla's Print / PDF / list bulk print). Print button →
+ * the system dialog, as in a browser; PDF / bulk → a save dialog. Never a popup.
+ * @param {NonNullable<ReturnType<typeof classifyErpPrintUrl>>} req
+ */
+async function handleErpPrintRequest(req) {
+  navDebug("print-intercept", `${req.kind} ${req.items.length}`);
+  if (req.kind === "printview") return printItemsToPrinter(req.items, {});
+  return saveItemsAsPdf(req.items, { merged: req.kind === "multi-pdf" });
+}
+
+/** Results for the print dialog: the queue as it stands, grouped. */
+function printQueueState() {
+  return { ok: true, queue: printQueue.map((q) => ({ ...q })), groups: groupPrintQueue(printQueue) };
+}
+
+ipcMain.handle("print-options", async (_e, doctype) => printOptions(doctype));
+ipcMain.handle("print-block-reason", async (_e, doc, settings) => printBlockReason(doc, settings));
+/**
+ * Print or save, in place (the page never moves). `remember` stores the clerk's choices per
+ * doctype / purpose (print-prefs.json), never on the site.
+ */
+ipcMain.handle("print-run", async (_e, req) => {
+  const r = req && typeof req === "object" ? req : {};
+  const items = Array.isArray(r.items) ? r.items.filter((i) => i && i.doctype && i.name) : [];
+  if (!items.length) return { ok: false, reason: "Nothing to print." };
+  if (r.remember && typeof r.remember === "object") {
+    printPrefs = rememberPrintChoice(printPrefs, r.remember);
+    savePrintPrefs();
+  }
+  if (r.dest === "printer") return printItemsToPrinter(items, { deviceName: r.deviceName || "" });
+  return saveItemsAsPdf(items, { merged: r.dest === "pdf-merged" });
+});
+ipcMain.handle("print-queue-get", async () => printQueueState());
+ipcMain.handle("print-queue-add", async (_e, items) => {
+  // An item queued without a format (a check run) takes the one last chosen for its doctype.
+  const withFormats = (Array.isArray(items) ? items : []).map((it) =>
+    it && !it.format && printPrefs.formats[it.doctype] ? { ...it, format: printPrefs.formats[it.doctype] } : it,
+  );
+  const r = addToPrintQueue(printQueue, withFormats);
+  printQueue = r.queue;
+  navDebug("print-queue-add", `+${r.added}${r.refused ? ` (${r.refused} over the limit)` : ""} = ${printQueue.length}`);
+  return { ...printQueueState(), added: r.added, refused: r.refused };
+});
+ipcMain.handle("print-queue-remove", async (_e, items) => {
+  printQueue = removeFromPrintQueue(printQueue, Array.isArray(items) ? items : []);
+  return printQueueState();
+});
+ipcMain.handle("print-queue-clear", async () => {
+  printQueue = [];
+  return printQueueState();
+});
+/**
+ * Run the queue (or part of it): print to the printer, one merged PDF, or one PDF each. What
+ * succeeded leaves the queue; what failed stays, with its reason in the summary.
+ */
+ipcMain.handle("print-queue-run", async (_e, req) => {
+  const r = req && typeof req === "object" ? req : {};
+  const pick = Array.isArray(r.items) && r.items.length ? removeFromPrintQueue(printQueue, removeFromPrintQueue(printQueue, r.items)) : printQueue.slice();
+  if (!pick.length) return { ok: false, reason: "The print queue is empty." };
+  if (r.dest === "printer" && r.deviceName) {
+    printPrefs = rememberPrintChoice(printPrefs, { deviceName: r.deviceName });
+    savePrintPrefs();
+  }
+  const out =
+    r.dest === "printer"
+      ? await printItemsToPrinter(pick, { deviceName: r.deviceName || "" })
+      : await saveItemsAsPdf(pick, { merged: r.dest === "pdf-merged" });
+  const done = out.results ? out.results.filter((x) => x.ok).map((x) => x.item) : out.ok ? pick : [];
+  printQueue = removeFromPrintQueue(printQueue, done);
+  return { ...out, ...printQueueState() };
 });
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);

@@ -127,6 +127,7 @@ import { wireItemImportButton } from "./item-import-ui.js";
 import { wireDocCapsUi } from "./doc-caps-ui.js";
 import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
+import { openPrintDialog } from "./print-dialog-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -836,10 +837,8 @@ async function runPendingAction(action) {
     return;
   }
   if (action === "print") {
-    setStatus("Opening print…");
-    const res = await api.printDoc();
-    if (res && res.ok) setStatus(res.reason || "Print opened.");
-    else setStatus((res && res.reason) || "Print failed.", "err");
+    // In place: the dialog prints / saves ERPNext's own output; the page never moves.
+    await openPrintDialog({ api, doc: lastDoc, label: docTitle() });
   }
 }
 

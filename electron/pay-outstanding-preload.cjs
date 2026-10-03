@@ -3,6 +3,15 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("erpPayOutstanding", {
   getOutstandingBills: () => ipcRenderer.invoke("get-outstanding-bills"),
+  // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
+  printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
+  printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
+  printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
+  printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
+  printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
+  printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
+  printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),
+  printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
   getDraftPayments: () => ipcRenderer.invoke("get-draft-payments"),
   getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
   setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),

@@ -789,8 +789,35 @@ Print / PDF buttons inside the shell do the same thing.
 
 ### Environment note
 This WSL setup has **no CUPS client**, so Electron here sees no printers — only *Save as PDF*.
-Real printing needs the Windows build of the shell (Windows printers) or CUPS in WSL. Dogfood
-printing here goes to PDF until then.
+`ops/wsl-printing/README.md` is the minimal setup (`cups` + `printer-driver-cups-pdf`, a virtual
+"PDF" printer). Real printers need the Windows build of the shell or CUPS in WSL.
+
+🔴 **ERPNext's PDFs were broken on this sandbox, in Vanilla too** (found 2026-10-03): wkhtmltopdf
+fetches the page's CSS from `get_url()`, which without `host_name` is the address the request came
+in on (`localhost:8080`) — unreachable from inside the backend container ("network error:
+ConnectionRefusedError", surfacing as `OSError`). Fixed by
+`bench --site frontend set-config host_name 'http://frontend:8080'` (the compose network's
+frontend). Side effect: ERPNext-made absolute links (emails) name `frontend:8080`. Any
+frappe_docker deployment needs the same.
+
+### Built 2026-10-03
+- `src/print-service.js` (pure) + main's print service; `src/print-dialog-ui.js` (the dialog, shared).
+- **No popups**: the ERP view's window-open handler hands `/printview` and `download_*pdf` to the
+  print service — Vanilla's own Print / PDF / bulk print included. Verified live: no new window.
+- **Doc skins**: Print opens the dialog in place (format, letter head, printer, Print / Save PDF /
+  Add to print queue); the old Vanilla-hop `bill-print` / `doc-print` are deleted. `print-run` and
+  `print-queue-run` are in-place actions the doors test holds to "never navigates".
+- **Queue**: app-wide in main (in memory, this session); Print all / one merged PDF / one PDF each;
+  what printed leaves the queue, what failed stays and is named. Pay Outstanding has a
+  "Print queue (n)" button, and a payment made **by check** joins the queue on submit.
+- **Printers**: the 3 most recently used sort to the top (5zorro 2026-10-03); each shows its full
+  name and, when the system reports it, its address; the chosen one is spelled out under the menu.
+- Remembered per doctype / purpose in `print-prefs.json`, never on the site.
+- Verified live (`e2e/scaffold-print.spec.js`): ERPNext's PDF over the app's session, the dialog in
+  place with the doctype's formats, queue add, a Vanilla PDF popup caught.
+- **Not yet**: printing to a printer (no CUPS here); a Cheque Print Template, the alignment page,
+  the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
+  queue"; the queue does not survive a restart.
 
 ## Dogfood residuals
 
@@ -809,6 +836,6 @@ printing here goes to PDF until then.
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
 | 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
 | Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
-| Printing | Convention written (research 2026-10-03); print service, queue, no-popup handler | not started — 5zorro to read and agree |
+| Printing | Print service, dialog, queue, no-popup handler, recent printers | built 2026-10-03 — PDF path and popup catch verified live; printer path waits on CUPS (`ops/wsl-printing`) |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |
