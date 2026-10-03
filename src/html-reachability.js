@@ -12,6 +12,7 @@ export const PRODUCTION_HTML_ALLOWLIST = Object.freeze({
   "submitted-dropdown.html": "Submitted-this-session popover (left-rail Submitted button)",
   "nav-incident-dialog.html": "Fail-loud nav issue note (toolbar Nav issue)",
   "focus-incident-dialog.html": "Fail-loud focus issue note (DB diagnose Focus issue)",
+  "print-raster.html": "Print as image — hidden window that flattens a PDF to pictures before it goes to a printer (printer hardening)",
   "pay-outstanding.html": "OI-161 Doc Pay skin — DOC_SKIN_INDEX payment-entry, isNew: true target",
 });
 

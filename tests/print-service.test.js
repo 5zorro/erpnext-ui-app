@@ -106,6 +106,7 @@ describe("remembered choices — never written to the site", () => {
       formats: {},
       letterhead: {},
       recentPrinters: [],
+      printAsImage: true,
     });
   });
 });
@@ -227,7 +228,7 @@ describe("OS print command — the printer-side fallback", () => {
   it("SumatraPDF on Windows only when it is installed", () => {
     assert.deepEqual(osPrintCommand({ platform: "win32", deviceName: "Front Office", file: "C:\\t\\a.pdf", sumatraPath: "C:\\S\\SumatraPDF.exe" }), {
       cmd: "C:\\S\\SumatraPDF.exe",
-      args: ["-print-to", "Front Office", "-silent", "C:\\t\\a.pdf"],
+      args: ["-print-to", "Front Office", "-print-settings", "noscale", "-silent", "C:\\t\\a.pdf"],
     });
     assert.equal(osPrintCommand({ platform: "win32", deviceName: "P", file: "a.pdf" }), null);
     assert.equal(osPrintCommand({ platform: "linux", deviceName: "", file: "a.pdf" }), null);
@@ -236,6 +237,75 @@ describe("OS print command — the printer-side fallback", () => {
   it("knows Chromium's refusal when it sees it", () => {
     assert.equal(isChromiumPrintRefusal("Invalid printer settings"), true);
     assert.equal(isChromiumPrintRefusal("cancelled"), false);
+  });
+});
+
+
+// Printer hardening (5zorro 2026-10-03).
+import {
+  normalizePaper,
+  parseCupsPaper,
+  paperMismatch,
+  paperMismatchText,
+  printPlan,
+  parseLpJobId,
+  interpretJobStatus,
+  PRINT_AS_IMAGE_OFF_NOTE,
+} from "../src/print-service.js";
+
+describe("printer hardening — paper size", () => {
+  it("reads CUPS's paper list and its starred default (seen on this machine's PDF printer)", () => {
+    const p = parseCupsPaper("PageSize/Page Size: Custom.WIDTHxHEIGHT 11x17 A3 *A4 A5 Letter Legal Ledger\nOther: x");
+    assert.equal(p.default, "A4");
+    assert.ok(p.supported.includes("Letter") && p.supported.includes("Tabloid"));
+    assert.equal(normalizePaper("na_letter_8.5x11in"), "Letter");
+  });
+
+  it("flags A4 documents on a Letter printer, and explains — checks differently", () => {
+    const m = paperMismatch("A4", { default: "Letter" });
+    assert.deepEqual(m, { mismatch: true, doc: "A4", printer: "Letter" });
+    assert.match(paperMismatchText(m, false), /shrinks each page to fit Letter/);
+    assert.match(paperMismatchText(m, false), /Print Settings/);
+    assert.match(paperMismatchText(m, true), /exact size, never shrunk/);
+    assert.equal(paperMismatch("A4", { default: "A4" }).mismatch, false);
+    assert.equal(paperMismatch("A4", null).mismatch, false, "unknown paper: no marker rather than a guess");
+  });
+});
+
+describe("printer hardening — the plan per document", () => {
+  it("print as image is on by default, remembered when turned off", () => {
+    assert.equal(mergePrintPrefs(null).printAsImage, true);
+    assert.equal(rememberPrintChoice(mergePrintPrefs(null), { printAsImage: false }).printAsImage, false);
+    assert.match(PRINT_AS_IMAGE_OFF_NOTE, /slightly increased risk/);
+  });
+
+  it("checks are exact: no shrink, no image conversion", () => {
+    assert.deepEqual(printPlan({ doctype: "Payment Entry", printAsImage: true, mismatch: true }), { exact: true, asImage: false, fitToPage: false });
+    assert.deepEqual(printPlan({ doctype: "Purchase Invoice", printAsImage: true, mismatch: true }), { exact: false, asImage: true, fitToPage: true });
+    assert.deepEqual(printPlan({ doctype: "Purchase Invoice", printAsImage: false, mismatch: false }), { exact: false, asImage: false, fitToPage: false });
+  });
+});
+
+describe("printer hardening — watching a job", () => {
+  it("reads lp's job id", () => {
+    assert.equal(parseLpJobId("request id is PDF-12 (1 file(s))\n"), "PDF-12");
+  });
+
+  it("done once CUPS no longer lists it; trouble with the printer's own reason; printing meanwhile", () => {
+    assert.equal(interpretJobStatus({ jobId: "PDF-12", pendingText: "", printerText: "printer PDF is idle.", waitedMs: 2000 }).state, "done");
+    const out = interpretJobStatus({ jobId: "PDF-12", pendingText: "PDF-12 pi 1024 Sat", printerText: "printer PDF disabled since Sat -\n\tPaused", stateReasons: "media-empty-error", waitedMs: 2000 });
+    assert.equal(out.state, "trouble");
+    assert.match(out.reason, /out of paper/);
+    assert.equal(interpretJobStatus({ jobId: "PDF-12", pendingText: "PDF-12 pi", printerText: "printer PDF now printing PDF-12.", waitedMs: 3000 }).state, "printing");
+    assert.match(interpretJobStatus({ jobId: "PDF-12", pendingText: "PDF-12 pi", printerText: "printer PDF is idle.", waitedMs: 61_000 }).reason, /after a minute/);
+  });
+});
+
+describe("printer hardening — fit to page in the OS command", () => {
+  it("shrinks to fit on a mismatch; never for checks", () => {
+    assert.deepEqual(osPrintCommand({ platform: "linux", deviceName: "P", file: "/a.pdf", fitToPage: true }).args, ["-d", "P", "-o", "fit-to-page", "/a.pdf"]);
+    assert.deepEqual(osPrintCommand({ platform: "linux", deviceName: "P", file: "/a.pdf", fitToPage: true, exact: true }).args, ["-d", "P", "/a.pdf"]);
+    assert.ok(osPrintCommand({ platform: "win32", deviceName: "P", file: "a.pdf", sumatraPath: "S.exe", fitToPage: true }).args.includes("fit"));
   });
 });
 

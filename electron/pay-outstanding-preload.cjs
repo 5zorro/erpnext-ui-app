@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
   printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
   printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
+  printJobStatus: (jobs) => ipcRenderer.invoke("print-job-status", jobs || []),
   printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
   printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
   printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),

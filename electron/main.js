@@ -112,6 +112,11 @@ import {
   diagnosePrintFailure,
   isChromiumPrintRefusal,
   osPrintCommand,
+  interpretJobStatus,
+  paperMismatch,
+  parseCupsPaper,
+  parseLpJobId,
+  printPlan,
   groupPrintQueue,
   mergePrintPrefs,
   multiPdfUrl,
@@ -10394,6 +10399,11 @@ async function printOptions(doctype) {
       })),
       printPrefs.recentPrinters,
     ).map((p) => ({ ...p, recent: printPrefs.recentPrinters.includes(p.name) })),
+    paperByPrinter: Object.fromEntries(
+      await Promise.all(printers.map(async (p) => [p.name, await printerPaper(p.name).catch(() => null)])),
+    ),
+    docPaper: (base.settings && base.settings.pdf_page_size) || "A4",
+    printAsImage: printPrefs.printAsImage,
     remembered: {
       format: printPrefs.formats[dt] || "",
       withLetterhead: printPrefs.letterhead[dt],
@@ -10447,11 +10457,12 @@ async function printOneOnWorker(worker, item, opts) {
     )
     .catch(() => {});
   const silent = !!opts.deviceName;
-  return new Promise((resolve) => {
-    worker.webContents.print(
-      { silent, deviceName: opts.deviceName || undefined, printBackground: true },
-      (success, failureReason) => resolve(success ? { ok: true } : { ok: false, reason: failureReason || "not printed" }),
-    );
+  return printWithTimeout(worker.webContents, {
+    silent,
+    deviceName: opts.deviceName || undefined,
+    printBackground: true,
+    // The print view is HTML: on a printer with different paper it lays out on that paper itself.
+    ...(opts.pageSize ? { pageSize: opts.pageSize } : {}),
   });
 }
 
@@ -10472,6 +10483,73 @@ function findSumatraPdf() {
   }) || "";
 }
 
+/** @type {Map<string, { default: string, supported: string[] }>} per printer, this session */
+const printerPaperCache = new Map();
+
+/** Run a command; resolve its stdout (never reject). */
+function run(cmd, args, timeout = 8000) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout }, (err, out, errText) => resolve({ ok: !err, out: String(out || ""), err: String(errText || (err && err.message) || "") }));
+  });
+}
+
+/**
+ * The paper a printer loads (printer hardening). CUPS reports it with `lpoptions -l` (default
+ * starred); Windows with PowerShell's Get-PrintConfiguration. Unknown → null, and no ⚠ is shown.
+ * @param {string} name
+ */
+async function printerPaper(name) {
+  if (!name) return null;
+  if (printerPaperCache.has(name)) return printerPaperCache.get(name);
+  let paper = null;
+  if (process.platform === "linux" || process.platform === "darwin") {
+    const r = await run("lpoptions", ["-p", name, "-l"]);
+    if (r.ok) paper = parseCupsPaper(r.out);
+  } else if (process.platform === "win32") {
+    const r = await run("powershell.exe", ["-NoProfile", "-Command", `(Get-PrintConfiguration -PrinterName '${name.replace(/'/g, "''")}').PaperSize`]);
+    if (r.ok && r.out.trim()) paper = { default: parseCupsPaper(`PageSize: *${r.out.trim()}`).default, supported: [] };
+  }
+  if (paper && paper.default) printerPaperCache.set(name, paper);
+  return paper && paper.default ? paper : null;
+}
+
+/** "Print as image": a hidden page that flattens a PDF onto white at printer resolution. */
+async function rasterWorker(bytes) {
+  const w = newPrintWorker();
+  await w.loadFile(path.join(__dirname, "print-raster.html"));
+  for (let i = 0; i < 100; i += 1) {
+    if (await w.webContents.executeJavaScript("!!window.rasterReady").catch(() => false)) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const info = await w.webContents.executeJavaScript(`window.rasterize(${JSON.stringify(Buffer.from(bytes).toString("base64"))}, 240)`);
+  return { worker: w, info };
+}
+
+/** @param {Uint8Array|Buffer} bytes @returns {Promise<Buffer>} the same pages, flat */
+async function rasterizePdf(bytes) {
+  const { worker } = await rasterWorker(bytes);
+  try {
+    return Buffer.from(await worker.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: "none" } }));
+  } finally {
+    if (!worker.isDestroyed()) worker.destroy();
+  }
+}
+
+/**
+ * Electron's print with a deadline: a hung driver must not freeze a batch.
+ * @param {Electron.WebContents} wc
+ * @param {Electron.WebContentsPrintOptions} options
+ */
+function printWithTimeout(wc, options, ms = 90_000) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ ok: false, reason: "the printer did not answer within 90 seconds" }), ms);
+    wc.print(options, (success, failureReason) => {
+      clearTimeout(t);
+      resolve(success ? { ok: true } : { ok: false, reason: failureReason || "not printed" });
+    });
+  });
+}
+
 /**
  * Self-healing printer path: the document's PDF (ERPNext's, or the app's own when ERPNext's engine
  * is down) handed to the operating system's print command.
@@ -10479,19 +10557,37 @@ function findSumatraPdf() {
  * @param {import("../src/print-service.js").PrintItem} item
  * @param {string} deviceName
  */
-async function printViaOs(worker, item, deviceName) {
+async function printViaOs(worker, item, deviceName, plan = { asImage: false, fitToPage: false, exact: false }) {
   const got = await pdfForItem(worker, item);
   if (!got.ok) return { ok: false, reason: got.reason, worker: got.worker };
+  let bytes = got.bytes;
+  if (plan.asImage) {
+    try {
+      bytes = await rasterizePdf(bytes);
+    } catch (e) {
+      navDebug("print-raster-fail", `${item.name}: ${String(e && e.message ? e.message : e)} — printing the PDF as is`);
+    }
+  }
   const file = path.join(app.getPath("temp"), `erpnext-ui-print-${Date.now()}-${pdfFileName(item.name)}`);
-  fs.writeFileSync(file, got.bytes);
-  const cmd = osPrintCommand({ platform: process.platform, deviceName, file, title: item.name, sumatraPath: findSumatraPdf() });
+  fs.writeFileSync(file, bytes);
+  const cmd = osPrintCommand({ platform: process.platform, deviceName, file, title: item.name, sumatraPath: findSumatraPdf(), fitToPage: plan.fitToPage, exact: plan.exact });
   if (!cmd) {
     fs.rm(file, () => {});
+    // Windows without SumatraPDF: Chromium prints the flattened pages itself.
+    if (plan.asImage) {
+      const { worker: rw } = await rasterWorker(got.bytes);
+      try {
+        const r = await printWithTimeout(rw.webContents, { silent: true, deviceName, printBackground: true });
+        return { ...r, worker: got.worker };
+      } finally {
+        if (!rw.isDestroyed()) rw.destroy();
+      }
+    }
     return { ok: false, reason: "This computer has no print command the app can use (on Windows, install SumatraPDF).", worker: got.worker };
   }
   const res = await new Promise((resolve) => {
-    execFile(cmd.cmd, cmd.args, { timeout: 60_000 }, (err, _out, errText) =>
-      resolve(err ? { ok: false, reason: String(errText || err.message || err).trim().slice(0, 200) } : { ok: true }),
+    execFile(cmd.cmd, cmd.args, { timeout: 60_000 }, (err, out, errText) =>
+      resolve(err ? { ok: false, reason: String(errText || err.message || err).trim().slice(0, 200) } : { ok: true, jobId: parseLpJobId(out) }),
     );
   });
   // lp copies the file into the spool before it returns; the temp copy can go.
@@ -10515,27 +10611,37 @@ async function printItemsToPrinter(items, opts = {}) {
       return { ok: false, reason: `${reason} Pick another, or the system dialog — nothing was printed.`, results: list.map((item) => ({ item, ok: false, reason })) };
     }
   }
-  navDebug("print-start", `${list.length} → ${opts.deviceName || "system dialog"}`);
+  const asImage = typeof opts.printAsImage === "boolean" ? opts.printAsImage : printPrefs.printAsImage;
+  const paper = opts.deviceName ? await printerPaper(opts.deviceName) : null;
+  const mm = paperMismatch(lastPrintSettings.pdf_page_size || "A4", paper);
+  navDebug(
+    "print-start",
+    `${list.length} → ${opts.deviceName || "system dialog"}${opts.deviceName ? ` (as image ${asImage ? "on" : "off"}${mm.mismatch ? `, ${mm.doc} on ${mm.printer}` : ""})` : ""}`,
+  );
   const worker = newPrintWorker();
   let pdfWorker = null;
   const results = [];
+  const jobs = [];
   try {
     for (const item of list) {
+      const plan = printPlan({ doctype: item.doctype, printAsImage: asImage, mismatch: mm.mismatch });
       let r = { ok: false, reason: "" };
-      if (opts.deviceName && preferOsPrint) {
-        r = await printViaOs(pdfWorker, item, opts.deviceName);
+      if (opts.deviceName && (plan.asImage || preferOsPrint)) {
+        // Print as image (the default) and the OS path both print the document's PDF.
+        r = await printViaOs(pdfWorker, item, opts.deviceName, plan);
         pdfWorker = r.worker || pdfWorker;
       } else {
-        r = await printOneOnWorker(worker, item, opts);
+        r = await printOneOnWorker(worker, item, { ...opts, pageSize: plan.fitToPage && !plan.exact ? mm.printer : undefined });
         if (!r.ok && opts.deviceName && isChromiumPrintRefusal(r.reason)) {
           // Self-healing: Chromium refused the printer itself; the OS print command takes over
           // for this document and the rest of the session.
           navDebug("print-heal", `${opts.deviceName}: ${r.reason} → OS print`);
           preferOsPrint = true;
-          r = await printViaOs(pdfWorker, item, opts.deviceName);
+          r = await printViaOs(pdfWorker, item, opts.deviceName, plan);
           pdfWorker = r.worker || pdfWorker;
         }
       }
+      if (r.ok && r.jobId) jobs.push({ id: r.jobId, printer: opts.deviceName, name: item.name, sentAt: Date.now() });
       results.push({ item, ok: r.ok, reason: r.reason });
       // The system dialog once is enough: cancelling it stops the batch.
       if (!opts.deviceName && !r.ok && /cancel/i.test(String(r.reason || ""))) break;
@@ -10544,9 +10650,40 @@ async function printItemsToPrinter(items, opts = {}) {
     if (!worker.isDestroyed()) worker.destroy();
     if (pdfWorker && !pdfWorker.isDestroyed()) pdfWorker.destroy();
   }
-  const summary = summarizePrintResults(results, "Printed");
-  navDebug("print-done", summary);
-  return { ok: results.length > 0 && results.every((r) => r.ok), results, summary };
+  const summary = summarizePrintResults(results, jobs.length ? "Sent" : "Printed");
+  navDebug("print-done", `${summary}${jobs.length ? ` jobs ${jobs.map((j) => j.id).join(",")}` : ""}`);
+  return { ok: results.length > 0 && results.every((r) => r.ok), results, summary, jobs };
+}
+
+/**
+ * Where sent jobs stand (printer hardening): printed, still printing, or the printer stopped and
+ * why. CUPS only; elsewhere a sent job reads as done.
+ * @param {Array<{ id: string, printer: string, sentAt: number }>} jobs
+ */
+async function printJobStatus(jobs) {
+  const list = Array.isArray(jobs) ? jobs.filter((j) => j && j.id && j.printer) : [];
+  if (process.platform !== "linux" && process.platform !== "darwin") return list.map((j) => ({ ...j, state: "done", reason: "" }));
+  let reasonsByPrinter = {};
+  try {
+    const ps = win && !win.isDestroyed() ? await win.webContents.getPrintersAsync() : [];
+    reasonsByPrinter = Object.fromEntries(ps.map((p) => [p.name, (p.options && p.options["printer-state-reasons"]) || ""]));
+  } catch {
+    reasonsByPrinter = {};
+  }
+  const out = [];
+  for (const j of list) {
+    const pending = await run("lpstat", ["-W", "not-completed", "-o", j.printer]);
+    const printer = await run("lpstat", ["-l", "-p", j.printer]);
+    const st = interpretJobStatus({
+      jobId: j.id,
+      pendingText: pending.out,
+      printerText: printer.out,
+      stateReasons: reasonsByPrinter[j.printer] || "",
+      waitedMs: Date.now() - (Number(j.sentAt) || Date.now()),
+    });
+    out.push({ ...j, ...st });
+  }
+  return out;
 }
 
 /**
@@ -10763,10 +10900,13 @@ ipcMain.handle("print-run", async (_e, req) => {
     printPrefs = rememberPrintChoice(printPrefs, r.remember);
     savePrintPrefs();
   }
-  if (r.dest === "printer") return printItemsToPrinter(items, { deviceName: r.deviceName || "" });
+  if (r.dest === "printer") {
+    return printItemsToPrinter(items, { deviceName: r.deviceName || "", printAsImage: typeof r.printAsImage === "boolean" ? r.printAsImage : undefined });
+  }
   return saveItemsAsPdf(items, { merged: r.dest === "pdf-merged" });
 });
 ipcMain.handle("print-queue-get", async () => printQueueState());
+ipcMain.handle("print-job-status", async (_e, jobs) => printJobStatus(jobs));
 ipcMain.handle("print-queue-add", async (_e, items) => {
   // An item queued without a format (a check run) takes the one last chosen for its doctype.
   const withFormats = (Array.isArray(items) ? items : []).map((it) =>
@@ -10799,7 +10939,7 @@ ipcMain.handle("print-queue-run", async (_e, req) => {
   }
   const out =
     r.dest === "printer"
-      ? await printItemsToPrinter(pick, { deviceName: r.deviceName || "" })
+      ? await printItemsToPrinter(pick, { deviceName: r.deviceName || "", printAsImage: typeof r.printAsImage === "boolean" ? r.printAsImage : undefined })
       : await saveItemsAsPdf(pick, { merged: r.dest === "pdf-merged" });
   const done = out.results ? out.results.filter((x) => x.ok).map((x) => x.item) : out.ok ? pick : [];
   printQueue = removeFromPrintQueue(printQueue, done);

@@ -31,6 +31,10 @@ export function paperKind(fileName, mime = "") {
 
 /** What the pane says about a file it cannot draw. */
 export function paperCantShow(kind, fileName) {
+  // 5zorro 2026-10-03: Excel does not turn into pages consistently — its own program prints it right.
+  if (/\.(xlsx|xlsm|xls|ods|csv)$/i.test(fileName)) {
+    return `${fileName} is a spreadsheet — spreadsheets do not turn into pages reliably; open it in its own program (Excel) and print from there.`;
+  }
   if (kind === "heic") return `${fileName} is an iPhone photo (HEIC), which this app cannot draw — open it, or save it as JPG.`;
   if (/\.doc$/i.test(fileName)) return `${fileName} is an old Word file (.doc) — open it, or save it as .docx.`;
   return `${fileName} cannot be shown here — open it in its own program.`;
@@ -135,6 +139,12 @@ const escHtml = (v) =>
     .replace(/"/g, "&quot;");
 
 /**
+ * The tallest a picture may be in "Save as one PDF": one page of A4 or Letter, less margins and its
+ * heading (5zorro 2026-10-03). Word files keep all their pages; spreadsheets are left out (below).
+ */
+export const ONE_PAGE_CM = 24;
+
+/**
  * One printable page holding every paper, page after page — what "Save as one PDF" prints
  * (5zorro 2026-10-03). PDF pages and photos arrive as images; a Word file as HTML; a paper that
  * cannot be drawn as a note saying so, never silently dropped.
@@ -158,7 +168,7 @@ export function onePdfHtml(title, sections) {
 body{margin:0;font:12px system-ui,"Segoe UI",Roboto,sans-serif;color:#1f2d3d}
 section.brk{break-before:page}
 .h{font-weight:700;margin:0 0 6px}.h span{font-weight:400;color:#64748b}
-img{display:block;width:100%;break-inside:avoid;margin:0 0 6px}
+img{display:block;max-width:100%;max-height:${ONE_PAGE_CM}cm;width:auto;height:auto;margin:0 auto 6px;break-inside:avoid}
 .docx{line-height:1.45}.docx img{max-width:100%;width:auto}.docx table{border-collapse:collapse}.docx td,.docx th{border:1px solid #999;padding:2px 6px}
 .note{color:#64748b}
 </style></head><body>${body}</body></html>`;

@@ -93,7 +93,23 @@ describe("ZIP and one PDF", () => {
     assert.equal((html.match(/class="brk"/g) || []).length, 2, "every paper after the first starts a page");
     assert.match(html, /<p>Received<\/p>/);
     assert.match(html, /cannot be drawn/);
-    assert.doesNotMatch(onePdfHtml("x", [{ title: "<script>" }]), /<script>/);
+    const hostile = onePdfHtml("x", [{ title: "<script>alert(1)</script>" }]);
+    assert.match(hostile, /&lt;script&gt;alert\(1\)/, "a file name is text, never markup");
+    assert.equal((hostile.match(/<script>/g) || []).length, 0);
   });
 });
 
+// 5zorro 2026-10-03: a picture fits one page; "microsoft word is okay, microsoft excel doesn't render
+// to pdf consistently well".
+describe("one page per picture; Word whole; spreadsheets left to their own program", () => {
+  it("every picture is held to one page; Word is not shrunk", () => {
+    const html = onePdfHtml("x", [{ title: "a.png", pages: ["data:image/png;base64,AA"] }, { title: "b.docx", html: "<p>x</p>" }]);
+    assert.match(html, /max-height:24cm/);
+    assert.doesNotMatch(html, /zoom/);
+  });
+  it("a spreadsheet says to open it in Excel", () => {
+    assert.equal(paperKind("costs.xlsx"), "other");
+    assert.match(paperCantShow("other", "costs.xlsx"), /spreadsheet.*Excel/);
+    assert.match(paperCantShow("other", "export.CSV"), /spreadsheet/);
+  });
+});

@@ -839,6 +839,31 @@ frappe_docker deployment needs the same.
   the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
   queue"; the queue does not survive a restart.
 
+## Printer hardening (5zorro 2026-10-03; built 2026-10-03)
+
+*"I don't want intermittent printer driver problems to be an issue for a user in this app."*
+
+| Risk | Decision (5zorro) |
+|---|---|
+| **Paper size mismatch** — ERPNext prints A4 (Print Settings › PDF Page Size) while US printers load Letter: the job stalls ("load A4"), clips, or shrinks | Printers report their sizes (CUPS `lpoptions` *PageSize*, default starred; Windows `Get-PrintConfiguration`). A ⚠ beside each mismatched printer in the menu and the chosen one; clicking it explains document size vs the printer's paper, that the app **shrinks to fit**, and links to Print Settings so the override is not needed |
+| **Driver crashes** — transparency (letter-head logos are transparent PNGs), complex pages | **Print as image on by default**: every page flattened onto white at printer resolution, so the driver gets plain pictures. The clerk may turn it off (remembered); then an ℹ says *"print jobs will be faster but there is a slightly increased risk that the printer driver won't be able to handle the job"* |
+| **Jobs that queue but never print** | After sending, watch the job: printed, or *the printer stopped* with its reason (out of paper, paused) and two ways on — **Check again** (after fixing it) or **Stop watching** (Esc) |
+| **Checks** | The exception: exact size, no shrink, no image conversion, never scaled — alignment depends on it |
+| **Huge photos / long attachments in "Save as one PDF"** | Each picture fits **one page**; photos flattened onto white and capped at print resolution. **Word keeps all its pages** (5zorro: "microsoft word is okay"). **Spreadsheets** (Excel, CSV — "a csv that accidentally takes up 20 pages and no headers") are left out with "open it in its own program", unless they fit one page |
+
+**Built and proven live 2026-10-03** (`src/print-service.js` pure; main's print service;
+`electron/print-raster.html` + `src/print-raster-page.js`, the hidden "print as image" page):
+- The PDF printer, set to Letter for the test, showed ⚠ in the menu and beside the selection; the ⚠
+  opened "ERPNext lays documents out on A4 … this printer loads Letter. The app shrinks each page to
+  fit … Open Print Settings".
+- *Print as image* was on by default. The printed file came out on **Letter** (612×792 pt) with one
+  image and no fonts — a flat picture, shrunk to fit — and the watcher read "The printer has all 1
+  job". (The printer's paper and the test's `print-prefs.json` were put back after.)
+- Job watching reads CUPS (`lpstat`) and Electron's `printer-state-reasons`; trouble names the cause
+  (out of paper, paused, a door open…) with *Check again* / *Stop watching (Esc)*. A trouble state
+  was proven in unit tests only — pausing a CUPS printer needs admin rights here.
+- Every Electron print call has a 90-second deadline, so a hung driver cannot freeze a batch.
+
 ## Compare pane (5zorro 2026-10-03, "moonshot" — step 1 built 2026-10-03)
 
 Beside the Doc Bill (when the window is wide enough), the papers it should match — scanned PDFs,

@@ -43,6 +43,7 @@ export function billApiFromErpDoc(api) {
     printBlockReason: (doc, settings) => api.printBlockReason(doc, settings),
     printRun: (req) => api.printRun(req),
     printQueueGet: () => api.printQueueGet(),
+    printJobStatus: (jobs) => api.printJobStatus(jobs),
     printQueueAdd: (items) => api.printQueueAdd(items),
     printQueueRemove: (items) => api.printQueueRemove(items),
     printQueueClear: () => api.printQueueClear(),

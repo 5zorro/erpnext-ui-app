@@ -217,7 +217,7 @@ export function mountComparePane(opts) {
         }
         const bytes = got.bytes instanceof Uint8Array ? got.bytes : new Uint8Array(got.bytes);
         if (p.kind === "pdf") sections.push({ title: p.fileName, from: p.from, pages: await pdfPagesAsImages(bytes) });
-        else if (p.kind === "image") sections.push({ title: p.fileName, from: p.from, pages: [await blobAsDataUrl(new Blob([bytes]))] });
+        else if (p.kind === "image") sections.push({ title: p.fileName, from: p.from, pages: [await flattenImage(new Blob([bytes]))] });
         else if (p.kind === "docx") {
           const mammoth = await loadMammoth();
           const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
@@ -390,6 +390,27 @@ export function mountComparePane(opts) {
       pages.push(canvas.toDataURL("image/jpeg", 0.9));
     }
     return pages;
+  }
+
+  /**
+   * Printer hardening: a photo onto white (no transparency reaches a driver) and no larger than
+   * print resolution (a 12-megapixel phone photo is a huge job for nothing).
+   */
+  async function flattenImage(blob, maxSide = 2400) {
+    try {
+      const bmp = await createImageBitmap(blob);
+      const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bmp.width * k));
+      canvas.height = Math.max(1, Math.round(bmp.height * k));
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.92);
+    } catch {
+      return blobAsDataUrl(blob);
+    }
   }
 
   function blobAsDataUrl(blob) {

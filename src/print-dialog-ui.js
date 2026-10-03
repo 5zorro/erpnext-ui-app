@@ -6,6 +6,8 @@
  * DOM only. Carries its own styles (`pd-` prefix) so any shell page can open it.
  */
 
+import { PRINT_AS_IMAGE_OFF_NOTE, paperMismatch, paperMismatchText, printerPurposeFor } from "./print-service.js";
+
 const STYLE_ID = "pd-style";
 const CSS = `
 .pd-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.38); z-index: 90; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px; }
@@ -17,6 +19,17 @@ const CSS = `
 .pd select { padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; max-width: 100%; }
 .pd #pd-printer { width: 100%; }
 .pd-printer-detail { font-size: 12px; color: #334155; overflow-wrap: anywhere; margin: 2px 0 0; }
+.pd-mark { border: none !important; background: none !important; padding: 0 4px !important; font-size: 15px; cursor: pointer; line-height: 1; }
+.pd-mark[hidden] { display: none; }
+.pd-explain { font-size: 12px; color: #78350f; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
+.pd-explain[hidden] { display: none; }
+.pd-explain a { color: #1d4ed8; cursor: pointer; text-decoration: underline; }
+.pd-info { font-size: 12px; color: #475569; }
+.pd-info[hidden] { display: none; }
+.pd-watch { font-size: 12px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; margin-top: 8px; background: #f8fafc; }
+.pd-watch[hidden] { display: none; }
+.pd-watch.trouble { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+.pd-watch button { margin: 6px 6px 0 0; }
 .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .pd button { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
 .pd button.pd-primary { background: #2c3e50; border-color: #2c3e50; color: #fff; }
@@ -108,8 +121,11 @@ export async function openPrintDialog(opts) {
     if (ev.key !== "Escape") return;
     ev.preventDefault();
     ev.stopPropagation();
+    // Watching a print job: Esc stops watching (the job itself carries on at the printer).
+    if (typeof stopWatchingIfAny === "function" && stopWatchingIfAny()) return;
     close();
   };
+  let stopWatchingIfAny = null;
   document.addEventListener("keydown", onKey, true);
   back.querySelector('[data-pd="close"]').addEventListener("click", close);
   back.addEventListener("click", (ev) => {
@@ -131,12 +147,18 @@ export async function openPrintDialog(opts) {
   const defaultPrinter = remembered.printer || (printers.find((p) => p.isDefault) || {}).name || "";
   const block = doc && api.printBlockReason ? await api.printBlockReason(doc, (o && o.settings) || {}) : "";
 
+  // Printer hardening: which printers load other paper than ERPNext lays documents out on.
+  const docPaper = (o && o.docPaper) || "A4";
+  const paperBy = (o && o.paperByPrinter) || {};
+  const mismatchFor = (name) => paperMismatch(docPaper, paperBy[name] || null);
+  const exact = printerPurposeFor(doctype) === "checks";
+  const asImageDefault = !(o && o.printAsImage === false);
   const formatOptions = [`<option value="">ERPNext default${o && o.defaultFormat ? ` (${esc(o.defaultFormat)})` : " (Standard)"}</option>`]
     .concat(formats.map((f) => `<option value="${esc(f)}"${f === chosenFormat ? " selected" : ""}>${esc(f)}</option>`))
     .join("");
   const letterheads = (o && o.letterheads) || [];
   const printerOptions = printers
-    .map((p) => `<option value="${esc(p.name)}" title="${esc(p.label || p.displayName || p.name)}"${p.name === defaultPrinter ? " selected" : ""}>${esc(p.label || p.displayName || p.name)}${p.recent ? " · recent" : ""}</option>`)
+    .map((p) => `<option value="${esc(p.name)}" title="${esc(p.label || p.displayName || p.name)}"${p.name === defaultPrinter ? " selected" : ""}>${mismatchFor(p.name).mismatch ? "⚠ " : ""}${esc(p.label || p.displayName || p.name)}${p.recent ? " · recent" : ""}</option>`)
     .concat([`<option value=""${defaultPrinter ? "" : " selected"}>Choose in the system print dialog…</option>`])
     .join("");
 
@@ -153,8 +175,16 @@ export async function openPrintDialog(opts) {
     <div class="pd-row">
       <label for="pd-printer">Printer</label>
       <select id="pd-printer" data-testid="print-printer">${printerOptions}</select>
+      <button type="button" class="pd-mark" data-pd="paper-mark" data-testid="print-paper-mark" title="This printer loads different paper — click for details" hidden>⚠</button>
       <p class="pd-printer-detail" data-pd="printer-detail" data-testid="print-printer-detail"></p>
     </div>
+    <div class="pd-explain" data-pd="paper-explain" data-testid="print-paper-explain" hidden></div>
+    <div class="pd-row">
+      <label title="${exact ? "Checks print at exact size — never converted or scaled" : "Every page is flattened onto white at printer resolution, so the printer driver only sees plain pictures"}"><input type="checkbox" id="pd-asimage" data-testid="print-as-image" ${!exact && asImageDefault ? "checked" : ""} ${exact ? "disabled" : ""}/> Print as image</label>
+      <span class="pd-info" data-pd="asimage-info" data-testid="print-as-image-info" ${!exact && !asImageDefault ? "" : "hidden"}>ℹ ${esc(PRINT_AS_IMAGE_OFF_NOTE)}</span>
+      ${exact ? `<span class="pd-info">Checks print at exact size — no shrinking, no image conversion.</span>` : ""}
+    </div>
+    <div class="pd-watch" data-pd="watch" data-testid="print-watch" hidden></div>
     ${printers.length ? "" : `<p class="pd-note" data-testid="print-no-printers">This computer reports no printers — Save PDF works; printing opens the system dialog (Print to file). On WSL / Linux, see ops/wsl-printing/README.md.</p>`}
     ${doc ? `<div class="pd-actions">
       <button type="button" class="pd-primary" data-pd="print" data-testid="print-go" ${block ? "disabled" : ""}>Print</button>
@@ -173,11 +203,13 @@ export async function openPrintDialog(opts) {
 
   const $ = (sel) => /** @type {HTMLElement} */ (back.querySelector(sel));
   const choice = () => {
+    const asImageBox = /** @type {HTMLInputElement} */ ($("#pd-asimage"));
+    const printAsImage = !!asImageBox && asImageBox.checked && !exact;
     const format = /** @type {HTMLSelectElement} */ ($("#pd-format")).value;
     const lh = /** @type {HTMLInputElement} */ ($("#pd-lh")).checked;
     const lhName = $("#pd-lh-name") ? /** @type {HTMLSelectElement} */ ($("#pd-lh-name")).value : (o && o.defaultLetterhead) || "";
     const deviceName = /** @type {HTMLSelectElement} */ ($("#pd-printer")).value;
-    return { format, withLetterhead: lh, letterhead: lh ? lhName : "", deviceName };
+    return { format, withLetterhead: lh, letterhead: lh ? lhName : "", deviceName, printAsImage };
   };
   const itemFor = (c) => ({
     doctype,
@@ -186,6 +218,12 @@ export async function openPrintDialog(opts) {
     noLetterhead: !c.withLetterhead,
     letterhead: c.letterhead,
   });
+  stopWatchingIfAny = () => {
+    const box = back.querySelector('[data-pd="watch"]');
+    if (!box || box.hidden) return false;
+    if (typeof stopWatching === "function") stopWatching();
+    return true;
+  };
   const busy = (on) => back.querySelectorAll(".pd-actions button").forEach((b) => {
     if (b.getAttribute("data-pd") !== "close") /** @type {HTMLButtonElement} */ (b).disabled = on || (!!block && ["print", "pdf", "queue-add"].includes(b.getAttribute("data-pd") || ""));
   });
@@ -213,8 +251,80 @@ export async function openPrintDialog(opts) {
       ? [p.displayName || p.name, p.address ? `at ${p.address}` : "", p.name !== (p.displayName || p.name) ? `(${p.name})` : ""].filter(Boolean).join(" ")
       : "The system print dialog will ask which printer.";
   };
-  $("#pd-printer").addEventListener("change", paintPrinterDetail);
+  const paintPaper = () => {
+    const sel = /** @type {HTMLSelectElement} */ ($("#pd-printer"));
+    const m = sel.value ? mismatchFor(sel.value) : { mismatch: false };
+    $('[data-pd="paper-mark"]').hidden = !m.mismatch;
+    const box = $('[data-pd="paper-explain"]');
+    if (!m.mismatch) box.hidden = true;
+    box.innerHTML = m.mismatch
+      ? `${esc(paperMismatchText(m, exact))}${exact ? "" : ` <a data-pd="print-settings" data-testid="print-settings-link">Open Print Settings</a>`}`
+      : "";
+    box.querySelector('[data-pd="print-settings"]')?.addEventListener("click", () => {
+      close();
+      if (api.softPeekRoute) void api.softPeekRoute("/app/print-settings");
+      else if (api.openErp) api.openErp("/app/print-settings");
+    });
+  };
+  $('[data-pd="paper-mark"]').addEventListener("click", () => {
+    const box = $('[data-pd="paper-explain"]');
+    box.hidden = !box.hidden;
+  });
+  $("#pd-printer").addEventListener("change", () => {
+    paintPrinterDetail();
+    paintPaper();
+  });
   paintPrinterDetail();
+  paintPaper();
+  $("#pd-asimage")?.addEventListener("change", () => {
+    $('[data-pd="asimage-info"]').hidden = /** @type {HTMLInputElement} */ ($("#pd-asimage")).checked;
+  });
+
+  // Watching sent jobs (printer hardening): printed, or the printer stopped and why — then
+  // Check again (after fixing it) or Stop watching (Esc).
+  let watching = null;
+  const stopWatching = () => {
+    if (watching) clearTimeout(watching.timer);
+    watching = null;
+    $('[data-pd="watch"]').hidden = true;
+  };
+  async function watchJobs(jobs) {
+    stopWatching();
+    if (!api.printJobStatus || !jobs || !jobs.length) return;
+    const box = $('[data-pd="watch"]');
+    watching = { jobs, timer: 0 };
+    const tick = async () => {
+      if (!watching) return;
+      const st = await api.printJobStatus(watching.jobs).catch(() => []);
+      if (!watching) return;
+      const trouble = st.filter((j) => j.state === "trouble");
+      const left = st.filter((j) => j.state !== "done");
+      box.hidden = false;
+      if (!left.length) {
+        box.classList.remove("trouble");
+        box.textContent = `The printer has all ${st.length} job${st.length === 1 ? "" : "s"}.`;
+        watching = null;
+        return;
+      }
+      if (trouble.length) {
+        box.classList.add("trouble");
+        box.innerHTML = `<b>The printer stopped:</b> ${esc(trouble[0].reason)}. ${left.length} job${left.length === 1 ? " is" : "s are"} waiting.<br><button type="button" data-pd="w-again" data-testid="print-watch-again">Check again</button><button type="button" data-pd="w-stop" data-testid="print-watch-stop">Stop watching (Esc)</button>`;
+        box.querySelector('[data-pd="w-again"]').addEventListener("click", () => {
+          // Fixed the printer (paper, door, power): look again from now.
+          watching = { jobs: watching ? watching.jobs.map((j) => ({ ...j, sentAt: Date.now() })) : [], timer: 0 };
+          box.classList.remove("trouble");
+          box.textContent = "Checking the printer again…";
+          void tick();
+        });
+        box.querySelector('[data-pd="w-stop"]').addEventListener("click", stopWatching);
+        return; // waits for Check again or Stop watching
+      }
+      box.classList.remove("trouble");
+      box.textContent = `Printing… ${left.length} job${left.length === 1 ? "" : "s"} still at the printer.`;
+      watching.timer = setTimeout(tick, 2000);
+    };
+    await tick();
+  }
 
   paintQueue(await api.printQueueGet().catch(() => null));
 
@@ -226,18 +336,25 @@ export async function openPrintDialog(opts) {
       if (r && r.cancelled) setStatus("Cancelled — nothing saved.");
       else setStatus((r && (r.summary || r.reason)) || "Done.", !(r && r.ok));
       if (r && r.queue) paintQueue(r);
+      if (r && Array.isArray(r.jobs) && r.jobs.length) void watchJobs(r.jobs);
     } catch (e) {
       setStatus(String(e && e.message ? e.message : e), true);
     } finally {
       busy(false);
     }
   };
-  const remember = (c) => ({ doctype, format: c.format, withLetterhead: c.withLetterhead, deviceName: c.deviceName });
+  const remember = (c) => ({
+    doctype,
+    format: c.format,
+    withLetterhead: c.withLetterhead,
+    deviceName: c.deviceName,
+    ...(exact ? {} : { printAsImage: c.printAsImage }),
+  });
 
   if (doc) {
     $('[data-pd="print"]').addEventListener("click", () => {
       const c = choice();
-      run(() => api.printRun({ items: [itemFor(c)], dest: "printer", deviceName: c.deviceName, remember: remember(c) }), "Printing");
+      run(() => api.printRun({ items: [itemFor(c)], dest: "printer", deviceName: c.deviceName, printAsImage: c.printAsImage, remember: remember(c) }), "Printing");
     });
     $('[data-pd="pdf"]').addEventListener("click", () => {
       const c = choice();
@@ -252,7 +369,7 @@ export async function openPrintDialog(opts) {
   }
   $('[data-pd="q-print"]').addEventListener("click", () => {
     const c = choice();
-    run(() => api.printQueueRun({ dest: "printer", deviceName: c.deviceName }), "Printing the queue");
+    run(() => api.printQueueRun({ dest: "printer", deviceName: c.deviceName, printAsImage: c.printAsImage }), "Printing the queue");
   });
   $('[data-pd="q-merged"]').addEventListener("click", () => run(() => api.printQueueRun({ dest: "pdf-merged" }), "Saving one PDF"));
   $('[data-pd="q-each"]').addEventListener("click", () => run(() => api.printQueueRun({ dest: "pdf" }), "Saving PDFs"));

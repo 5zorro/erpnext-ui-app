@@ -168,6 +168,7 @@ export function printerPurposeFor(doctype) {
  *   formats: Record<string, string>,
  *   letterhead: Record<string, boolean>,
  *   recentPrinters: string[],
+ *   printAsImage: boolean,
  * }} PrintPrefs
  *   `letterhead[doctype]` = print with letter head. Never written to the site.
  */
@@ -184,6 +185,8 @@ export function mergePrintPrefs(raw) {
     formats: strings(r.formats),
     letterhead: bools(r.letterhead),
     recentPrinters: [...new Set(recent)].slice(0, RECENT_PRINTERS_MAX),
+    // Printer hardening (5zorro 2026-10-03): on unless the clerk turned it off.
+    printAsImage: r.printAsImage !== false,
   };
 }
 
@@ -225,6 +228,7 @@ export function rememberPrintChoice(prefs, choice) {
     if (str(c.deviceName)) p.printers[purpose] = str(c.deviceName);
     else delete p.printers[purpose];
   }
+  if (typeof c.printAsImage === "boolean") p.printAsImage = c.printAsImage;
   if (str(c.deviceName)) {
     p.recentPrinters = [str(c.deviceName), ...p.recentPrinters.filter((n) => n !== str(c.deviceName))].slice(0, RECENT_PRINTERS_MAX);
   }
@@ -412,14 +416,17 @@ export function osPrintCommand(o) {
   const device = str(o && o.deviceName);
   const file = str(o && o.file);
   if (!device || !file) return null;
+  // Printer hardening: shrink to the printer's paper when it differs; checks never scale.
+  const fit = !!(o && o.fitToPage) && !(o && o.exact);
   if (o.platform === "linux" || o.platform === "darwin") {
     const args = ["-d", device];
     if (str(o.title)) args.push("-t", str(o.title));
+    if (fit) args.push("-o", "fit-to-page");
     args.push(file);
     return { cmd: "lp", args };
   }
   if (o.platform === "win32" && str(o.sumatraPath)) {
-    return { cmd: str(o.sumatraPath), args: ["-print-to", device, "-silent", file] };
+    return { cmd: str(o.sumatraPath), args: ["-print-to", device, "-print-settings", fit ? "fit" : "noscale", "-silent", file] };
   }
   return null;
 }
@@ -427,5 +434,129 @@ export function osPrintCommand(o) {
 /** Chromium's silent print refusing the printer itself — the cue to switch to the OS command. */
 export function isChromiumPrintRefusal(reason) {
   return /invalid printer settings|printer settings|failed to print|print job (failed|canceled)/i.test(String(reason || ""));
+}
+
+/* ---------------- Printer hardening (5zorro 2026-10-03) ---------------- */
+
+const PAPER_ALIASES = Object.freeze({
+  letter: "Letter",
+  "na_letter_8.5x11in": "Letter",
+  ansia: "Letter",
+  legal: "Legal",
+  "na_legal_8.5x14in": "Legal",
+  a4: "A4",
+  iso_a4_210x297mm: "A4",
+  a3: "A3",
+  iso_a3_297x420mm: "A3",
+  a5: "A5",
+  iso_a5_148x210mm: "A5",
+  tabloid: "Tabloid",
+  ledger: "Tabloid",
+  "11x17": "Tabloid",
+  executive: "Executive",
+});
+
+/**
+ * One name per paper size, whatever the system calls it ("na_letter_8.5x11in", "Letter", 1).
+ * @param {unknown} raw
+ * @returns {string} "" when unknown
+ */
+export function normalizePaper(raw) {
+  const k = str(raw).replace(/^\*/, "").toLowerCase();
+  return PAPER_ALIASES[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : "");
+}
+
+/**
+ * CUPS `lpoptions -p <printer> -l` → the printer's default and supported paper sizes.
+ * The line looks like `PageSize/Page Size: Letter *A4 Legal …` (the default starred).
+ * @param {string} text
+ * @returns {{ default: string, supported: string[] }}
+ */
+export function parseCupsPaper(text) {
+  const line = String(text || "").split(/\r?\n/).find((l) => /^(PageSize|media)\b[^:]*:/i.test(l)) || "";
+  const values = line.replace(/^[^:]*:\s*/, "").split(/\s+/).filter(Boolean);
+  const def = values.find((v) => v.startsWith("*")) || "";
+  const supported = [...new Set(values.map(normalizePaper).filter((v) => v && !/^Custom/i.test(v)))];
+  return { default: normalizePaper(def), supported };
+}
+
+/**
+ * Does the document's paper differ from what the printer loads by default?
+ * @param {string} docPaper ERPNext Print Settings' pdf_page_size ("A4")
+ * @param {{ default?: string, supported?: string[] }|null|undefined} printerPaper
+ * @returns {{ mismatch: boolean, doc: string, printer: string }}
+ */
+export function paperMismatch(docPaper, printerPaper) {
+  const doc = normalizePaper(docPaper) || "A4";
+  const printer = normalizePaper(printerPaper && printerPaper.default);
+  return { mismatch: !!printer && printer !== doc, doc, printer };
+}
+
+/** The explanation behind the ⚠ — document size vs paper, what the app does, how to stop needing it. */
+export function paperMismatchText(m, exact) {
+  if (!m || !m.mismatch) return "";
+  const base = `ERPNext lays documents out on ${m.doc} (Print Settings › PDF Page Size); this printer loads ${m.printer}.`;
+  return exact
+    ? `${base} Checks print at exact size, never shrunk — load the check stock their format expects.`
+    : `${base} The app shrinks each page to fit ${m.printer}, so it prints, slightly smaller. To print without shrinking, set ERPNext's PDF Page Size to ${m.printer} in Print Settings.`;
+}
+
+/**
+ * How one document goes to paper. Checks are the exception: exact size, no shrink, no image
+ * conversion — their alignment on pre-printed stock depends on it.
+ * @param {{ doctype: string, printAsImage: boolean, mismatch: boolean }} o
+ * @returns {{ exact: boolean, asImage: boolean, fitToPage: boolean }}
+ */
+export function printPlan(o) {
+  const exact = printerPurposeFor(o && o.doctype) === "checks";
+  return {
+    exact,
+    asImage: !exact && !!(o && o.printAsImage),
+    fitToPage: !exact && !!(o && o.mismatch),
+  };
+}
+
+/** The ℹ shown when "Print as image" is off (5zorro's wording). */
+export const PRINT_AS_IMAGE_OFF_NOTE =
+  "Print jobs will be faster but there is a slightly increased risk that the printer driver won't be able to handle the job.";
+
+/** `lp` prints "request id is PDF-12 (1 file(s))". */
+export function parseLpJobId(stdout) {
+  const m = /request id is (\S+)/i.exec(String(stdout || ""));
+  return m ? m[1] : "";
+}
+
+const STATE_REASONS = Object.freeze({
+  "media-empty": "out of paper",
+  "media-needed": "needs paper loaded",
+  "media-jam": "paper jam",
+  "toner-empty": "out of toner",
+  "marker-supply-empty": "out of ink or toner",
+  "door-open": "a door is open",
+  "cover-open": "the cover is open",
+  offline: "offline",
+  paused: "paused",
+  "connecting-to-device": "cannot reach the printer",
+  "timed-out": "not answering",
+  "stopped-partly": "stopped",
+});
+
+/**
+ * Where a sent job stands, from CUPS: is it still waiting, and does the printer report trouble?
+ * @param {{ jobId: string, pendingText: string, printerText: string, stateReasons?: string, waitedMs: number }} o
+ *   pendingText = `lpstat -W not-completed -o <printer>`; printerText = `lpstat -l -p <printer>`
+ * @returns {{ state: "done"|"printing"|"trouble", reason: string }}
+ */
+export function interpretJobStatus(o) {
+  const pending = String((o && o.pendingText) || "").split(/\r?\n/).some((l) => l.split(/\s+/)[0] === (o && o.jobId));
+  if (!pending) return { state: "done", reason: "" };
+  const printer = String((o && o.printerText) || "");
+  const reasons = `${(o && o.stateReasons) || ""} ${printer}`.toLowerCase();
+  const said = Object.keys(STATE_REASONS).filter((k) => reasons.includes(k)).map((k) => STATE_REASONS[k]);
+  if (/disabled|stopped|paused/i.test(printer.split(/\r?\n/)[0] || "") || said.length) {
+    return { state: "trouble", reason: said.length ? [...new Set(said)].join(", ") : "the printer stopped" };
+  }
+  if ((o && o.waitedMs) > 60_000) return { state: "trouble", reason: "still waiting in the queue after a minute — is the printer on and connected?" };
+  return { state: "printing", reason: "" };
 }
 
