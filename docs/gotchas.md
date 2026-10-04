@@ -636,3 +636,32 @@ on the retry, and the sandbox now carries nothing queued and nothing failed.
 document an **explicit `posting_time`**. Without the latter a seeded document takes its insert's
 wall-clock time, and `future_sle_exists` matches at `posting_datetime >= …`, so two documents sharing
 a date and a second each queue a repost for the other.
+
+---
+
+## G15 — Ribbons drawn to the right numbers, painted 7–12px off their rows (2026-09-29, bowtie mockup)
+
+**Observed:** 5zorro, from a screenshot: the payment's ribbon ended between two rows. The page's own
+self-check said every ribbon end was 0.00px off its row.
+
+**Expected:** each ribbon's centre on the centre of the row it starts or ends at — and a check that
+can tell when it is not.
+
+**Architecture / fix:** two causes, each invisible to arithmetic.
+
+1. **An SVG whose `height` grows without its `viewBox`** keeps its old coordinate box, and the
+   browser centres that box in the taller element (`preserveAspectRatio` default `xMidYMid meet`):
+   everything paints lower by half the growth. Keep `viewBox` equal to the element's size, and set
+   `preserveAspectRatio="xMinYMin meet"` so a mismatch shows at the top instead of sliding.
+2. **A `<table>` row's height is a minimum, not a size.** A header border, a taller fallback font or
+   a ⚠ glyph stretched rows from 16px to 16.5px and up, and every row below slid. Rows that something
+   else is drawn *to* must be fixed-height strips that clip (`display: grid; height: 16px;
+   overflow: hidden`), and the card's own border is part of the arithmetic.
+
+**Dogfood:** the check compared the numbers written into each path with the rows — they agreed while
+the picture did not (G8 again). Measure **painted** points:
+`path.getPointAtLength(…).matrixTransform(path.getScreenCTM())` against `getBoundingClientRect()`
+of the row, and prove the check by putting the bug back (it then read 11.90px, matching the
+screenshot). An exemption in the check (braced bundles) hid a 1.5px error the same way — no
+exemptions. The bowtie build (plan 2026-10-03 stage 5) carries both rules.
+

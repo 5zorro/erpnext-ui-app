@@ -13,7 +13,7 @@ only** (`src/trace-*.js`, `src/payment-timeline.js`, `ops/trace/`, tests) and on
 OI-108 (schema research, superseded by `src/trace-links.js`).
 
 > **Status 2026-10-03:** stages **1, 2 and C built** (pure logic + readers + the coverage map; `npm test` green). Every
-> question the trace asks was proven against the live site, read-only (133 of 133 accepted). The
+> question the trace asks was proven against the live site, read-only (144 of 144 accepted, including the charge and receipt-voucher fields). The
 > pages (stages 3–6) are not built: they need 5zorro's data to be checked, and stage 4 edits the
 > Find page the 09-26 plan built, which is still being dogfooded. Paper DF-25a…i is in the pack, so
 > the data can be typed before the pages exist.
@@ -188,7 +188,7 @@ the backup (SQL standing in for HTTP, answering the same child-table filters) an
 | Stage | What | Proof | Paper |
 |---|---|---|---|
 | **1 — built** | `src/trace-links.js` (registry, paper / posted dates), `src/trace-graph.js` (line links, `reachFrom`, landed, unallocated charges and deductions, paid share, cost of a Sales Order line, backwards links, date order), `src/trace-lifecycle.js` (stories, by stage + by document, marks, margin), `src/payment-timeline.js` (planned checks on the run rule, checks written, clearance) | `tests/trace-graph`, `trace-lifecycle`, `payment-timeline`, `trace-real-chain` (the seeded chain read back out of the 09-28 backup) | — |
-| **2 — built** | `src/trace-query.js` — the questions (`downstreamQueries`, `upstreamKeys`) and `fetchTrace` (up from what is in focus, down from it, bounded at 80 documents, submitted only, a payment's other bills not walked unless it is in focus) | `tests/trace-query` (a fake ERPNext answering the same filters); `ops/trace/probe-trace-queries.js` against the live site: **133/133** | — |
+| **2 — built** | `src/trace-query.js` — the questions (`downstreamQueries`, `upstreamKeys`) and `fetchTrace` (up from what is in focus, down from it, bounded at 80 documents, submitted only, a payment's other bills not walked unless it is in focus) | `tests/trace-query` (a fake ERPNext answering the same filters); `ops/trace/probe-trace-queries.js` against the live site: **144/144** | — |
 | 3 | **Lifecycle page**: a shell page (`shell-surfaces.js` row, invariant 6) reached from a Doc skin's ⋈ / ☰ door; IPC `trace-fetch` in `main.js` calls `fetchTrace` with `frappeResourceGetDoc` / `frappeResourceGetList` over `session.fetch`; date-order arcs and header highlight from the mockup | layer-3 smoke + 5zorro | DF-25a…i |
 | 4 | **Statement** on the Find page: quick filters (Bills default), receipts-not-billed indented, Focus Bills / Payments using `paymentTimeline` with the Pay Outstanding check-run setting and `derivePaymentDate` | layer-3 smoke + 5zorro. 🔴 Waits for 5zorro's 09-26 Find-page dogfood — it edits `find-doc.html` | DF-25f, DF-25g |
 | 5 | **Bowtie**: lanes, locked right columns, item-row ribbons; the geometry (layout, ribbon ends) moved into `src/` so it is unit-tested; the painted-pixel check kept as a dev assertion | painted-pixel check + 5zorro | DF-25c, DF-25i |
