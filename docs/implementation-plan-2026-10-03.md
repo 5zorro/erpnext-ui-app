@@ -194,25 +194,49 @@ the backup (SQL standing in for HTTP, answering the same child-table filters) an
 | 5 | **Bowtie**: lanes, locked right columns, item-row ribbons; the geometry (layout, ribbon ends) moved into `src/` so it is unit-tested; the painted-pixel check kept as a dev assertion | painted-pixel check + 5zorro | DF-25c, DF-25i |
 | 6 | **Gantt** over the same slice | 5zorro | DF-25e |
 | 7 | **Seed**: add the trace chain's edge cases to `corpus-plan.js` (2+ POs into one bill, a Material Request line, NIC + valuation charges, a paper-date lag, a mismatch, a part payment, an uncleared check, a credit); set `sales_order_item` on PO lines the way ERPNext does; give most payments a clearance date | `seed:sample` on a sandbox, only after 5zorro's blank-site round | — |
-| L | **Spread over the PO** — from a bill whose freight covers the whole PO: a **draft** Landed Cost Voucher listing the PO's submitted receipts, claiming the freight from this bill (`vendor_invoices`), distributed by Amount; the clerk reviews and submits it. Refuses (with the reason) a freight that is a *Valuation* charge row, or a PO with nothing received. Adds the voucher to the trace as a source of charges across bills (`src/trace-links.js` row: `Landed Cost Purchase Receipt.receipt_document`, `Landed Cost Vendor Invoice.vendor_invoice`). A write path: navDebug both sides | layer-2 against a sandbox copy + 5zorro | a DF-26 pair: a PO with a whole-order freight note, five bills, one with the freight |
+| L — **parked** | **PO-wide freight** — parked 2026-10-03 by 5zorro; see *PO-wide freight (parked)* below. The trace already reads any Landed Cost Voucher a backward-looking costing process makes (`landedInTrace`) | — | — |
 | **C — built** | **Coverage map** — `src/architecture-families.js`, `scripts/dogfood-for-change.js` (`npm run dogfood:for-change [base]`), `touches` on papers | `tests/architecture-families.test.js` (the tree, the papers, the planner) | every paper tagged |
 
 ## Open questions for 5zorro
 
 (1–3 answered 2026-10-03 — decisions 11–13 above.)
 
-4. **The PO-wide freight (stage L)** — three choices, laid out in chat 2026-10-03 with the facts
-   below; waiting on 5zorro.
-   - 🔴 **ERPNext copies a PO's charge table onto every bill made from it** (PO → Bill mapping,
-     `"Purchase Taxes and Charges": {"reset_value": True}` — no proration). A "100 freight" row on
-     the PO lands on all five bills unless removed from four.
-   - **(a) Where the freight sits** — on the PO as a charge row (copied, as above), on the one bill
-     as a charge row, or on the one bill as a non-stock line (an item FREIGHT). Only the last can be
-     *claimed* by a Landed Cost Voucher (`vendor_invoices`), which also records the claim on the bill.
-   - **(b) Which receipts share it** — a voucher can only spread over receipts that exist.
-   - **(c) When the voucher is made** — at that bill (receipts so far), or when the PO is fully
-     received (one voucher, right total; ERPNext reposts the stock value, so earlier sales' cost is
-     corrected — asynchronously), or one voucher per receipt for its share.
+(4, the PO-wide freight, is parked — next section.)
+
+## PO-wide freight (parked 2026-10-03)
+
+5zorro confirmed the model, then parked it: *"If we can figure out a way to make the user have zero
+friction and not leave artifacts in the accounting software for partial receipts or changes in
+freight from expected to actual then this is something that would be a clear value add. I don't want
+to build it right now because it will muddy something for a 'nice to have, but ultimately might
+break everything' kind of feature."* And: *"if the user has additional friction — has to allocate
+against stuff that the user doesn't see directly — then I think the cost is not worth the benefit.
+I would leave it to whatever backwards-looking landed cost process instead of the forward-looking
+'analyse this transaction in progress' report we are looking at."*
+
+**The model, as agreed** (so a later attempt starts here, not from scratch):
+
+- **The PO is the source of truth for its freight** until its last receipt is billed. Each bill made
+  from the PO carries the share for the goods it bills (by amount): that share is a *Valuation*
+  charge, spread over the bill's lines into landed cost.
+- **Freight billed up front** (all of it on the first bill): the part for goods not yet received is
+  booked to a **Prepaid Freight Expense** account (a *Total*-only charge, in no item's cost). Every
+  later bill from that PO then carries a **derecognition** of its share as part of its charges —
+  its share moved out of Prepaid Freight Expense and into its items' cost — netting to zero against
+  the vendor's total. **Freight charged as billed** (a share on each bill) needs no derecognition.
+- **Facts it rests on** (v16): ERPNext copies a PO's charge table onto every bill made from it, in
+  full (`reset_value`, no proration); a Landed Cost Voucher spreads over receipts only, and can claim
+  a cost from a vendor bill that has a non-stock line.
+
+**Not covered yet — the next edge case when this resumes:** a **separate freight vendor**. The
+freight arrives on a different vendor's bill and has to be allocated to the goods of another
+vendor's PO — and possibly to the Sales Order those goods were bought for.
+
+**The bar for resuming:** zero extra steps for the clerk, nothing to allocate against documents the
+clerk does not see, and no leftover entries in the books for partial receipts or for freight that
+turns out different from expected. Until then the trace stays forward-looking and agrees with the
+books: per-bill landed cost (built), an ⓘ for charges in no item's cost (built), and any Landed Cost
+Voucher a backward-looking costing process makes is read on the receipt line (built).
 
 ## Coverage map (stage C) — built 2026-10-03
 
