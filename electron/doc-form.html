@@ -24,7 +24,7 @@
     </div>
     <div class="toolbar" data-testid="doc-toolbar">
       <div class="tb-group" data-testid="doc-toolbar-file" title="Keep, print, discard, or finalize this document">
-        <span class="tb-group-label">File</span>
+        <span class="tb-group-label hatch-clear">File</span>
         <span class="dirty-pill tone-draft" id="dirty-pill" data-testid="doc-dirty-pill">Draft · all saved</span>
         <button type="button" class="ghost" id="btn-print" data-testid="doc-print"
           title="Print this document (save first if new).">Print</button>
@@ -37,7 +37,7 @@
         <button type="button" class="ghost" id="btn-number-lead" data-testid="doc-number-lead" tabindex="-1">No.: Supplier No</button>
       </div>
       <div class="tb-group" data-testid="doc-toolbar-navigate" title="Find, open, or jump elsewhere">
-        <span class="tb-group-label">Navigate</span>
+        <span class="tb-group-label hatch-clear">Navigate</span>
         <button type="button" id="btn-find" data-testid="doc-find">Find…</button>
         <button type="button" id="btn-new" data-testid="doc-new">New</button>
         <button type="button" id="btn-select-po" data-testid="bill-select-po" hidden>Select PO / source</button>
@@ -405,7 +405,7 @@
               <button type="button" id="btn-back-top" data-testid="bill-back-top"
                 title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
             </div>
-            <p class="hint">
+            <p class="hint hatch-clear">
               Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters).
               Item subtotal is Σ line amounts; Taxes and Charges roll into Grand total.
               Amount Due (header) must match Grand total — checksum chip shows $ difference; Bill $ beside it is the same target.
@@ -515,7 +515,7 @@
                 <button type="button" id="btn-back-top" data-testid="doc-back-top"
                   title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
               </div>
-              <p class="hint" id="doc-hint"></p>
+              <p class="hint hatch-clear" id="doc-hint"></p>
             </div>
     </div>
   </div>

@@ -26,6 +26,7 @@
     html[data-pattern="ar"][data-find-desk="ar"] header,
     html[data-pattern="ap"][data-find-desk="ap"] header,
     html[data-pattern="both"][data-find-desk] header { background-image: var(--hatch-desk); }
+    header { --hatch-base: var(--role-wash); }
     .stamp { width: 22px; height: 22px; opacity: .7; }
     h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
     .hdr-actions { margin-left: auto; display: flex; gap: 8px; }
@@ -134,7 +135,7 @@
 <body>
   <header>
     <img class="stamp" id="stamp" alt="" />
-    <h1 id="title" data-testid="find-doc-title">Find</h1>
+    <h1 id="title" class="hatch-clear" data-testid="find-doc-title">Find</h1>
     <div class="hdr-actions">
       <button type="button" class="btn" id="btn-new" data-testid="find-doc-new">New</button>
       <button type="button" class="btn primary" id="btn-vanilla" data-testid="find-doc-vanilla"
