@@ -968,6 +968,13 @@ function syncE2eApi() {
   if (process.env.E2E !== "1") return;
   globalThis.__erpE2e = {
     lastHealth,
+    // A test that needs a lens says so, rather than inheriting the clerk's (e.g. Payments list on
+    // Vanilla sends Find Payments to the Vanilla list). Writes lens-prefs.json — back it up.
+    setLensPref: (key, lens) => {
+      lensPrefs = rememberLens(lensPrefs, String(key || ""), lens === "vanilla" ? "vanilla" : lens === "simplified" ? "simplified" : "doc");
+      savePrefs();
+      return lensPrefs;
+    },
     showingHome: showingHome(),
     surfaceMode,
     erpBase: ERP_BASE,
