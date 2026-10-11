@@ -938,7 +938,7 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   new Item when it was saved (`src/peek-return-focus.js`).
 - **Item Code (fixed `cbc98b1`).** Item columns use ERPNext's word. "Description" already is the
   long description field (it starts as the item name); no Item Name column.
-- **Taxes and charges (building).**
+- **Taxes and charges (built `05f57b3`).**
   - Root cause of "typed 0 in Amount, grand total did not move": **Tab** out of an edited Amount
     dropped the edit (the move guard also blocked the commit). Clicking away worked. Reproduced live.
   - Tab order follows ERPNext's own rule: a % row tabs Account → Rate %, a fixed (Actual) row
@@ -960,7 +960,13 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     item code), hidden from the memo box and removed once the receipts exist.
   - Any line with who/when, or any line already from a receipt → the receipt route (ERPNext refuses
     Update Stock on such a bill). Otherwise "Receive with this bill" stays as it is.
-  - Open question to 5zorro: stock lines with no who/when on a receipt-route bill.
+  - Stock lines with no who/when on a receipt-route bill (5zorro 2026-10-10): the receive question
+    at Submit names them and offers **Receive them now as <you> on <date>** (both editable) or
+    **Not received yet (bill only)**. The date defaults to **the day before the invoice date** —
+    common ERP practice, so goods sold the day they are billed are not costed as sold before they
+    were received (negative-stock guess, the local notes file "Shipping before receiving").
+  - Known gap, v1: the receipt carries no taxes; a bill tax with a Valuation category would not
+    reach stock cost through these receipts.
 - **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
 
 ## Dogfood residuals
