@@ -999,17 +999,23 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   Pay Bills' check: highest all-digit reference on that bank account + 1; with none it asks for the
   first — the blank site's earlier references were all text, so DF-01 got the ask; next on
   OPERATING ACCOUNT is 1235. Vanilla Payment Entry proposes nothing); the items table's scroll bars
-  when blank (T above); Simplified's Update Stock tick (above). *Not built* — right-click menu on a
-  Find row; Find pages hide cancelled documents by default (toggle to show); a clearer path than the
-  three-step delete (bill → payment → payment ledger); link dropdowns wider than their column
-  (`.link-dd` is `left:0; right:0` of the cell).
+  when blank (T above); Simplified's Update Stock tick (above). *Built 2026-10-11:* link dropdowns
+  placed against the window, ≥360px, flipping above near the bottom (`57aaa52`); Find pages hide
+  cancelled documents, *Show cancelled* (or the Cancelled status) brings them back, not remembered
+  (`2383557`); right-click / Menu key on a Find row (`6c793cb`) — four groups (party, this document,
+  view & edit, this page), ≤12 items, data in `src/find-row-menu.js`; placeholders greyed: new
+  document for the party, linked documents, **cancel or delete…** (where the three-step delete path
+  goes — still not built), print, page settings. Copy is not driven by an app test.
 - **DF-02 second round (2026-10-11):** JIT Submit dogfooded (ACC-PINV-2026-00008 → MAT-PRE-2026-00002).
   Rec'd by / Rec'd Date blank until Refresh, after Submit and after Simplified → Doc: two Doc-skin
   open pushes dropped `linkedReceipts`, and the JIT step did not return the new receipts — fixed
   `e006ee3`, but **not reproduced in a test** (the page's own fetch refills it there), so a
   `bill-recd-source` breadcrumb now logs which paint left a receipt line blank; 5zorro to repeat and
-  file a nav incident if it recurs. Open question: Customer / Sales Order cross-reference columns on
-  the Bill wear the Sales Order wash (as Rec'd wears the Item Receipt wash)?
+  file a nav incident if it recurs — 5zorro could not reproduce after the fix (two nav incidents
+  2026-10-11; on ACC-PINV-2026-00010 the JIT paint logged `given=1 … blank=0`). Open: the Bill's
+  Customer / Sales order(s) columns — a Bill line has no Sales Order field; both are read through
+  its PO line (`sales_order`, editable on a draft PO, locked once submitted → void-and-amend the PO).
+  5zorro's idea: headers in the PO wash, cells in the Sales Order wash, a peek per cell.
 - **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
