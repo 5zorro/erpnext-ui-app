@@ -995,12 +995,24 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   list had not seeded them); 2026-10-11 5zorro: Simplified's assumptions come from the Doc skin
   (generated) or the clerk's own saved customization — so they follow the rule, quiet & locked.
 - **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
-- **Open — DF-01 notes not yet read back** (from the same notes file; the 10-01 round did not pick
-  them up): right-click menu on a Find row; Find pages hide cancelled documents by default (toggle
-  to show) and the three-step delete (bill → payment → payment ledger) wants a clearer path;
-  item-number dropdowns wider than their column; sequential check numbers per bank account with a
-  manual override (check what ERPNext offers first — Cheque Print Template work is parked).
-  Simplified's Update Stock tick (DF-01) is fixed above.
+- **DF-01 notes, read back 2026-10-11:** *built* — sequential check numbers (`proposeReferenceNo`,
+  Pay Bills' check: highest all-digit reference on that bank account + 1; with none it asks for the
+  first — the blank site's earlier references were all text, so DF-01 got the ask; next on
+  OPERATING ACCOUNT is 1235. Vanilla Payment Entry proposes nothing); the items table's scroll bars
+  when blank (T above); Simplified's Update Stock tick (above). *Not built* — right-click menu on a
+  Find row; Find pages hide cancelled documents by default (toggle to show); a clearer path than the
+  three-step delete (bill → payment → payment ledger); link dropdowns wider than their column
+  (`.link-dd` is `left:0; right:0` of the cell).
+- **DF-02 second round (2026-10-11):** JIT Submit dogfooded (ACC-PINV-2026-00008 → MAT-PRE-2026-00002).
+  Rec'd by / Rec'd Date blank until Refresh, after Submit and after Simplified → Doc: two Doc-skin
+  open pushes dropped `linkedReceipts`, and the JIT step did not return the new receipts — fixed
+  `e006ee3`, but **not reproduced in a test** (the page's own fetch refills it there), so a
+  `bill-recd-source` breadcrumb now logs which paint left a receipt line blank; 5zorro to repeat and
+  file a nav incident if it recurs. Open question: Customer / Sales Order cross-reference columns on
+  the Bill wear the Sales Order wash (as Rec'd wears the Item Receipt wash)?
+- **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
+  matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
+  no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
 
 ## Dogfood residuals
 
