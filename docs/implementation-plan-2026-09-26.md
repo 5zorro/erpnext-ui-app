@@ -1026,6 +1026,15 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   MAT-PRE-2026-00002 through Recent (2026-10-11 06:03). Same for the new SO / PO peeks. Fix needs
   a Doc → Doc errand (park the bill, Esc / "← Back to bill" on the child Doc page) — likely the
   detour mechanism (`shell-detour.js`) widened to Doc pages; not started, read back first.
+  **The unsaved parent (5zorro's question, 2026-10-11):** a parked Doc page is only `{skinId, route}`;
+  the unsaved bill itself lives in Frappe's `locals` in the ERP view, which survives in-SPA hops
+  (looking at a PO, editing and saving a draft PO) but **not a full load** — and Void & amend's
+  reopen (`reopenAfterVoidAndAmend` → `showDocForm` → `loadErpUrl`) and any navigate from the child
+  page are full loads. Frappe's own guard (`form.js` `dirty()` adds a `beforeunload` listener on the
+  bill's form, removed only on that form's refresh; skipped in developer_mode) may refuse such a
+  load, but what the shell then does mid-errand is unproven. Proposal: no question at the door;
+  a dirty gate for the **parked** bill at the moment an errand action would full-load (Save it as a
+  draft and continue / Back to the bill / Cancel); Esc / "← Back to bill" returns to the in-memory draft.
 - **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
