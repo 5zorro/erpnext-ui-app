@@ -23,6 +23,7 @@ import {
   scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
 import { logFocus } from "./focus-debug-client.js";
+import { linkDropdownPlacement } from "./link-dropdown-place.js";
 import { uiIconHtml } from "./ui-icons.js";
 
 /**
@@ -93,6 +94,26 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   dd.className = "link-dd";
   dd.hidden = true;
   wrap.appendChild(dd);
+
+  /** Against the window, not the cell: a line cell clips what overflows it (DF-01). */
+  function placeDropdown() {
+    if (dd.hidden) return;
+    const r = wrap.getBoundingClientRect();
+    const p = linkDropdownPlacement(r, { width: window.innerWidth, height: window.innerHeight });
+    dd.classList.add("link-dd-floating");
+    dd.style.left = `${p.left}px`;
+    dd.style.width = `${p.width}px`;
+    dd.style.maxHeight = `${p.maxHeight}px`;
+    dd.style.top = p.top == null ? "auto" : `${p.top}px`;
+    dd.style.bottom = p.bottom == null ? "auto" : `${p.bottom}px`;
+  }
+  function showDropdown() {
+    dd.hidden = false;
+    placeDropdown();
+  }
+  window.addEventListener("resize", placeDropdown);
+  // Any scroller (the line table, the page) moves the box; the dropdown follows it.
+  window.addEventListener("scroll", placeDropdown, true);
 
   let timer = null;
   /** @type {HTMLButtonElement[]} */
@@ -205,11 +226,11 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
 
   async function runSearch(q) {
     if (!api || !api.searchLink) {
-      dd.hidden = false;
+      showDropdown();
       dd.innerHTML = `<div class="link-muted">Search API missing — restart the shell.</div>`;
       return;
     }
-    dd.hidden = false;
+    showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
     const res = await api.searchLink(doctype, q || "");
     if (!res || !res.ok) {

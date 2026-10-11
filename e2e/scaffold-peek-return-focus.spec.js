@@ -52,6 +52,43 @@ test.describe("scaffold: Esc back from create Item lands in the Item cell (DF-02
     app = undefined;
   });
 
+  // DF-01: "the dropdown box was constrained by the same width restriction of the item number column".
+  test("the Item dropdown is wider than its column and nothing clips it", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    // The default test window is short enough that line 1 sits below the fold.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 1000));
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 })
+      .toBe(true);
+    await inDoc(
+      app,
+      `(() => { const i = document.querySelector('input[data-row="0"][data-field="item_code"]'); i.scrollIntoView({ block: "center" }); i.focus(); i.value = "ZZ"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) .link-opt')`), { timeout: 15_000 }).toBe(true);
+    const m = await inDoc(
+      app,
+      `(() => {
+        const dd = document.querySelector('.link-dd:not([hidden])');
+        const td = dd.closest("td");
+        const r = dd.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.right - 8, r.top + 8);
+        return { dd: Math.round(r.width), cell: Math.round(td.getBoundingClientRect().width), right: r.right, vw: window.innerWidth, visible: !!hit && dd.contains(hit) };
+      })()`,
+    );
+    expect(m.dd).toBeGreaterThanOrEqual(Math.min(360, m.vw - 32));
+    expect(m.dd).toBeGreaterThan(m.cell);
+    expect(m.right).toBeLessThanOrEqual(m.vw - 16 + 1);
+    expect(m.visible).toBe(true);
+  });
+
   test("abandoned: cursor back in line 1's Item cell", async () => {
     test.setTimeout(150_000);
     app = await launchShell();

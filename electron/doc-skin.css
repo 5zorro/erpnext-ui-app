@@ -419,6 +419,13 @@
   overflow: auto;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
+/* Placed against the window by link-picker-ui (link-dropdown-place.js), so a narrow line cell
+   does not clip it (DF-01). */
+.link-dd.link-dd-floating {
+  position: fixed;
+  right: auto;
+  z-index: 60;
+}
 .link-opt {
   display: block;
   width: 100%;
