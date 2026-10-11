@@ -3,7 +3,7 @@
  * Grand total stays flat: item amounts rise by the charge; a Deduct tax offsets the Add charge.
  *
  * Modes: by basket amount (price), by qty, or custom $/line (or % of charge).
- * Rounding remainder → largest basis line; ties → lowest rowIndex (first unique id).
+ * Leftover cents: one at a time to the lines nearest the next cent (largest remainder; ties → first).
  * If nothing eligible, remainder stays unallocated (cents unadjusted).
  *
  * The lines must take *exactly* the charge (5zorro 2026-10-11, DF-02: 14.28 allocated, the lines
@@ -149,7 +149,11 @@ export function allocationBasisWeights(items, mode) {
 }
 
 /**
- * Split `chargeAmount` across weights; remainder cents → largest weight (tie → lowest index).
+ * Split `chargeAmount` across weights, to the cent, as evenly as the cents allow (5zorro 2026-10-11):
+ * every line starts rounded down, then the leftover cents go one at a time to the lines whose share
+ * was closest to the next cent (the largest-remainder method; ties → the earlier line). 67¢ over ten
+ * equal lines is seven 7¢ and three 6¢ — not 13¢ on the first line, as the old rule gave; 3.33 over
+ * ten is three 34¢ and seven 33¢.
  * @param {number} chargeAmount
  * @param {number[]} weights
  * @returns {{ shares: number[], remainder: number }}
@@ -164,27 +168,20 @@ export function splitByWeights(chargeAmount, weights) {
   if (!(total > 0) || !(sumW > 0)) {
     return { shares: w.map(() => 0), remainder: total > 0 ? total : 0 };
   }
-  /** @type {number[]} */
-  const raw = w.map((wi) => (wi / sumW) * total);
-  const floors = raw.map((x) => Math.floor(x * 100) / 100);
-  let assigned = money2(floors.reduce((a, b) => a + b, 0));
-  let rem = money2(total - assigned);
-  if (rem > 0) {
-    let best = -1;
-    let bestW = -1;
-    for (let i = 0; i < w.length; i++) {
-      if (w[i] <= 0) continue;
-      if (w[i] > bestW || (w[i] === bestW && (best < 0 || i < best))) {
-        bestW = w[i];
-        best = i;
-      }
-    }
-    if (best >= 0) {
-      floors[best] = money2(floors[best] + rem);
-      rem = 0;
-    }
+  const totalCents = Math.round(total * 100);
+  const rawCents = w.map((wi) => (wi / sumW) * totalCents);
+  // Float noise off before flooring (0.29 × 100 is 28.999…).
+  const cents = rawCents.map((x) => Math.floor(x + 1e-9));
+  let left = totalCents - cents.reduce((a, b) => a + b, 0);
+  const order = rawCents
+    .map((x, i) => ({ i, frac: w[i] > 0 ? x - Math.floor(x + 1e-9) : -1 }))
+    .filter((o) => o.frac >= 0)
+    .sort((a, b) => (Math.abs(b.frac - a.frac) > 1e-9 ? b.frac - a.frac : a.i - b.i));
+  for (let k = 0; left > 0 && order.length; k = (k + 1) % order.length) {
+    cents[order[k].i] += 1;
+    left -= 1;
   }
-  return { shares: floors.map(money2), remainder: money2(rem) };
+  return { shares: cents.map((c) => c / 100), remainder: 0 };
 }
 
 /**

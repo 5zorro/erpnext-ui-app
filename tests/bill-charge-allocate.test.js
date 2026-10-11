@@ -193,3 +193,18 @@ describe("allocation is exact to the cent", () => {
     assert.deepEqual(exactRates([{ qty: 3, rateCents: 2100, prevCents: 6300, shareCents: 528 }], 528).missCents, 0);
   });
 });
+
+// 5zorro 2026-10-11: ten $1 SKUs — leftover cents spread one at a time, not piled on the first line.
+describe("leftover cents spread evenly (largest remainder)", () => {
+  const tenOnes = Array.from({ length: 10 }, (_, i) => ({ rowIndex: i, qty: 1, rate: 1, amount: 1 }));
+  const cents = (charge, items = tenOnes) =>
+    planChargeToStockAllocation({ items, chargeAmount: charge, mode: "amount", chargeAccount: "X" }).itemUpdates.map((u) => Math.round(u.addAmount * 100));
+  it("60¢ → 6¢ each", () => assert.deepEqual(cents(0.6), [6, 6, 6, 6, 6, 6, 6, 6, 6, 6]));
+  it("67¢ → seven 7¢ and three 6¢ (was 13¢ on the first line)", () => assert.deepEqual(cents(0.67), [7, 7, 7, 7, 7, 7, 7, 6, 6, 6]));
+  it("3.33 → only three round up to 34¢", () => assert.deepEqual(cents(3.33), [34, 34, 34, 33, 33, 33, 33, 33, 33, 33]));
+  it("29¢ → nine 3¢ and one 2¢", () => assert.deepEqual(cents(0.29), [3, 3, 3, 3, 3, 3, 3, 3, 3, 2]));
+  it("unequal lines: the cent goes to the share nearest rounding up, not the biggest line", () => {
+    // 10¢ over $3 / $2 / $1 lines → 5.00 / 3.33 / 1.67: the last line's .67 is nearest the next cent.
+    assert.deepEqual(splitByWeights(0.1, [3, 2, 1]).shares, [0.05, 0.03, 0.02]);
+  });
+});
