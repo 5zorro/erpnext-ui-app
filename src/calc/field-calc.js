@@ -261,3 +261,23 @@ function startCalc(st, fieldValue, op) {
 export function isCalcEligibleField(kind) {
   return kind === "amountDue" || kind === "qty" || kind === "rate" || kind === "amount";
 }
+
+/**
+ * A sum typed into a box the calculator never saw — pasted, or typed before the calculator was on
+ * that box (5zorro 2026-10-11: `169.00*1.0845` in the taxes Amount, then Add did nothing). Same
+ * engine and same left-to-right math as the calculator. Commas, spaces and `$` are ignored.
+ * @param {string|null|undefined} text
+ * @returns {number|null} null = not a sum (a plain number is not a sum either: parse it as money)
+ */
+export function evaluateTypedSum(text) {
+  const s = String(text ?? "").replace(/[\s,$]/g, "");
+  if (!/^[0-9.+\-*/]+$/.test(s) || !/[0-9.][+\-*/]/.test(s) || !/[0-9.]$/.test(s)) return null;
+  let session = createCalcSession(DIALECT_EXCEL);
+  for (const ch of s) {
+    const out = feedCalcKey(session, ch);
+    if (out.error) return null;
+    session = out.session;
+  }
+  const end = feedCalcKey(session, "=");
+  return end.done && Number.isFinite(end.result) ? end.result : null;
+}

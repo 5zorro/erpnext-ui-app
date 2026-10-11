@@ -2,6 +2,7 @@
  * Pure money helpers for the Doc Workflow shell.
  * No ERPNext imports — unit-testable offline (ADR-0002: unit tests first).
  */
+import { evaluateTypedSum } from "./calc/field-calc.js";
 
 /**
  * Round a dollar amount to the nearest nickel (5 cents).
@@ -26,6 +27,20 @@ export function parseMoney(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   const n = Number(String(value).replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * A money box's text as an amount: a plain number, or a sum typed in it (`169.00*1.0845`), worked out
+ * with the calculator's math and rounded to cents (5zorro 2026-10-11 — the taxes Add box).
+ * @param {unknown} value
+ * @returns {number|null}
+ */
+export function parseMoneyOrSum(value) {
+  const sum = typeof value === "string" ? evaluateTypedSum(value) : null;
+  if (sum != null) return Math.round(sum * 100) / 100;
+  // An unfinished sum (`5*`) is not 5: parseMoney would drop the operator and read the digits.
+  if (typeof value === "string" && (/[+*/]/.test(value) || /[0-9.]\s*-/.test(value))) return null;
+  return parseMoney(value);
 }
 
 /**

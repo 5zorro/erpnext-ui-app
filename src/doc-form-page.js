@@ -23,6 +23,7 @@ import {
   formatGroupedNumber,
   formatUsdAmountHtml,
   parseMoney,
+  parseMoneyOrSum,
 } from "./money.js";
 import {
   nextItemFocusAfterEdit,
@@ -3196,16 +3197,32 @@ function wireStaticControls() {
       el.taxDefault.insertAdjacentHTML("beforeend", uiIconHtml("info", { size: 12 }));
     }
     if (el.taxDefault) el.taxDefault.onclick = () => void toggleTaxDefaultNote();
+    // The calculator on the Add amount box, as on the line cells (5zorro 2026-10-11).
+    if (el.taxAmount && !el.taxAmount.dataset.calcWired) {
+      el.taxAmount.dataset.calcWired = "1";
+      calcUi.attach(el.taxAmount, {
+        kind: "amount",
+        isPainting: () => painting,
+        isEditable: () => editable(),
+        onHistory: publishCalcHistory,
+        onCommit: (value) => {
+          const n = parseMoney(value);
+          el.taxAmount.value = n == null ? "" : formatGroupedNumber(n);
+        },
+      });
+    }
     el.addTax.onclick = async () => {
       if (!api || !editable() || !api.addTax) return;
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
-      const n = parseMoney(el.taxAmount && el.taxAmount.value);
+      // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
+      const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
+      const n = parseMoneyOrSum(typed);
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
       }
       if (n == null) {
-        setStatus("Enter a tax/charge Amount.", "warn");
+        setStatus(typed ? `“${typed}” is not an amount or a sum — fix the Amount, then Add.` : "Enter a tax/charge Amount.", "warn");
         return;
       }
       setStatus("Adding tax/charge…");

@@ -134,6 +134,7 @@ import {
   formatUsdAmountHtml,
   formatSignedUsdHtml,
   parseMoney,
+  parseMoneyOrSum,
 } from "../src/money.js";
 import {
   linkDoctypeForBillField,
@@ -5831,13 +5832,15 @@ export async function bootBillFormPage(api) {
     el.addTax.onclick = async () => {
       if (!api || !editable() || !api.addTax) return;
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
-      const n = parseMoney(el.taxAmount && el.taxAmount.value);
+      // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
+      const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
+      const n = parseMoneyOrSum(typed);
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
       }
       if (n == null) {
-        setStatus("Enter a tax/charge Amount.", "warn");
+        setStatus(typed ? `“${typed}” is not an amount or a sum — fix the Amount, then Add.` : "Enter a tax/charge Amount.", "warn");
         return;
       }
       setStatus("Adding tax/charge…");
@@ -5854,6 +5857,16 @@ export async function bootBillFormPage(api) {
         setStatus((res && res.reason) || "Add tax failed.", "err");
       }
     };
+  }
+  // The calculator on the Add amount box, as on Cost and Amount Due (5zorro 2026-10-11).
+  if (el.taxAmount) {
+    wireFieldCalc(el.taxAmount, {
+      kind: "amount",
+      onCommit: (value) => {
+        const n = parseMoney(value);
+        el.taxAmount.value = n == null ? "" : formatGroupedNumber(n);
+      },
+    });
   }
   function wireTaxAddRowTabCycle() {
     /** @type {Record<string, HTMLElement|null|undefined>} */

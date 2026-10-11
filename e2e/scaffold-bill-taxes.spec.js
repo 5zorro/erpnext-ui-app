@@ -155,4 +155,52 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
       .poll(async () => inDoc(app, `document.querySelector('[data-testid="bill-tax-default-note"]').hidden`), { timeout: 10_000 })
       .toBe(true);
   });
+
+  // 5zorro 2026-10-11: `169.00*1.0845` in the Add tax/charge Amount — no calculator, and Add did nothing.
+  test("Add tax/charge Amount: the shared calculator works out a sum; Add takes a typed sum", async () => {
+    test.setTimeout(150_000);
+    const { doc } = await billWithDefaultTax(app);
+    const acct = doc.taxes[0].account_head;
+    await inDoc(app, `(() => { const a = document.querySelector('#f-tax-account'); a.value = ${JSON.stringify(acct)}; a.dataset.linkCommitted = a.value; return true; })()`);
+    // Real keys, so the calculator sees them like a clerk's.
+    await inDoc(app, `(() => { const i = document.querySelector('[data-testid="bill-tax-amount"]'); i.value = ""; i.focus(); return true; })()`);
+    await app.evaluate(({ webContents }, keys) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.focus();
+      for (const k of keys) {
+        w.sendInputEvent({ type: "keyDown", keyCode: k });
+        w.sendInputEvent({ type: "char", keyCode: k });
+        w.sendInputEvent({ type: "keyUp", keyCode: k });
+      }
+    }, [..."169*1.0845", "Enter"]);
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="bill-tax-amount"]').value`), { timeout: 10_000 }).toBe("183.28");
+    // A sum the calculator never saw (pasted): Add works it out.
+    const before = (await inDoc(app, TAXES)).rows.length;
+    await inDoc(app, `(() => { const i = document.querySelector('[data-testid="bill-tax-amount"]'); i.value = "169.00*1.0845"; return true; })()`);
+    await inDoc(app, `document.querySelector('[data-testid="bill-add-tax"]').click(); true`);
+    await expect.poll(async () => (await inDoc(app, TAXES)).rows.length, { timeout: 20_000 }).toBe(before + 1);
+    expect((await inDoc(app, TAXES)).rows[before]).toMatchObject({ type: "Actual", amount: 183.28 });
+  });
+
+  // The PO Doc skin has no taxes section; the Item Receipt is the other page with an Add box.
+  test("the Item Receipt's Add tax/charge Amount has the same calculator", async () => {
+    test.setTimeout(150_000);
+    await e2eCall(app, "openReceipt", "/app/purchase-receipt/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(() => { const i = document.querySelector('[data-testid="doc-tax-amount"]'); return !!i && !i.disabled && i.getClientRects().length > 0; })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(() => { const i = document.querySelector('[data-testid="doc-tax-amount"]'); i.value = ""; i.focus(); return true; })()`);
+    await app.evaluate(({ webContents }, keys) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.focus();
+      for (const k of keys) {
+        w.sendInputEvent({ type: "keyDown", keyCode: k });
+        w.sendInputEvent({ type: "char", keyCode: k });
+        w.sendInputEvent({ type: "keyUp", keyCode: k });
+      }
+    }, [..."169*1.0845", "Enter"]);
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-tax-amount"]').value`), { timeout: 10_000 }).toBe("183.28");
+  });
 });
+
