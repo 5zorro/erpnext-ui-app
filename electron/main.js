@@ -102,7 +102,7 @@ import {
 import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
-import { beginShellDetour, detourBackLabel } from "../src/shell-detour.js";
+import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
 import { MAX_PAPER_BYTES } from "../src/compare-papers.js";
 import { buildZip } from "../src/zip-store.js";
 import {
@@ -1250,7 +1250,7 @@ function sendUiState() {
       route: ctx.route,
       diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
-      detourBack: detourBackLabel(shellDetour, surfaceMode),
+      detourBack: detourBackLabel(shellDetour, surfaceMode, currentRoute || "", ERP_BASE),
       softPeekHint: softPeekReturnLabel(
         parkedDocSurface && surfaceMode === "erp" ? parkedDocSurface : null,
         isActivePeekStack(peekStack) ? peekStack.parent : null,
@@ -9939,6 +9939,8 @@ ipcMain.on("open-peek-child", (_e, childRoute, parentRoute) => {
 ipcMain.handle("soft-peek-route", async (_e, route) => {
   const r = typeof route === "string" && route.trim() ? route.trim() : "";
   if (!r) return { ok: false, reason: "Empty peek route." };
+  // From a Doc page to a document with its own Doc skin: an errand, asked at the door.
+  if (surfaceMode === "doc" && isDocErrandTarget(r, ERP_BASE)) return openDocErrand(r);
   try {
     await softPeekErp(r);
     return { ok: true, route: r };
@@ -10285,6 +10287,36 @@ function openDetourFromShell(route) {
   return { ok: true, detour: true };
 }
 
+/**
+ * From a Doc page to a document with its own Doc skin — the bill's PO, Item Receipt, Sales Order,
+ * a payment (5zorro 2026-10-11). The unsaved bill lives only in the hidden ERP form's memory, which
+ * opening another Doc skin can reload away, so the unsaved-changes gate asks first (at the door —
+ * 5zorro: more intuitive than at the moment of danger). Then the document opens in the clerk's usual
+ * lens, and "← Back to …" / Esc reopen the bill, saved by then. Temporary: a second window per
+ * errand is the lasting answer (OI-040).
+ * @param {string} route
+ */
+async function openDocErrand(route) {
+  const path = normalizeAppRoute(route, ERP_BASE).path || route;
+  navDebug("doc-errand", `${currentRoute || "-"} → ${path}`);
+  await gateDirtyThen(async () => {
+    // The name now: a Save at the gate renames a new document.
+    const info = routeInfo(currentRoute || "", ERP_BASE);
+    let name = info.record || "";
+    try {
+      const live = await snapshotDocForm();
+      if (live && live.ok && live.doc && live.doc.name) name = String(live.doc.name);
+    } catch {
+      /* keep the route's name */
+    }
+    const doctypeKey = info.doctype || "";
+    shellDetour = beginDocDetour({ doctypeKey, name, label: DOCTYPE_LABELS[doctypeKey] || "the document" });
+    navDebug(shellDetour ? "detour-open" : "detour-none", shellDetour ? `doc ${shellDetour.route} → ${path}` : `${doctypeKey} ${name} (never saved: no way back)`);
+    openRoutePreferred(path, { skipDirtyGate: true });
+  });
+  return { ok: true, errand: true };
+}
+
 /** @param {string} why */
 function endShellDetour(why) {
   if (!shellDetour) return;
@@ -10301,6 +10333,21 @@ function endShellDetour(why) {
 function returnFromShellDetour(how) {
   const d = shellDetour;
   if (!d) return false;
+  if (d.surface === "doc") {
+    // Already back on it (Recent, say): nothing to reopen — the errand is over.
+    if (surfaceMode === "doc" && routesReferToSameDoc(currentRoute || "", d.route, ERP_BASE)) {
+      endShellDetour("back on it");
+      sendUiState();
+      return false;
+    }
+    // Back to the bill the errand left — saved at the door, so a plain reopen.
+    navDebug("detour-return", `doc ${d.route} via ${how}`);
+    gateDirtyThen(() => {
+      shellDetour = null;
+      openRoutePreferred(d.route, { skipDirtyGate: true });
+    });
+    return true;
+  }
   const view = d.surface === "pay-outstanding" ? payOutstanding : paymentDoc;
   const page = d.surface === "pay-outstanding" ? "pay-outstanding.html" : "payment-doc.html";
   const loaded = !!(view && !view.webContents.isDestroyed() && (view.webContents.getURL() || "").includes(page));

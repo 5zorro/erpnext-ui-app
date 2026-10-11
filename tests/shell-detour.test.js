@@ -4,6 +4,8 @@ import {
   DETOUR_SURFACES,
   beginShellDetour,
   detourBackLabel,
+  isDocErrandTarget,
+  beginDocDetour,
   shouldEscReturnFromDetour,
 } from "../src/shell-detour.js";
 
@@ -34,3 +36,31 @@ describe("shell-detour", () => {
     assert.equal(shouldEscReturnFromDetour({ key: "Enter" }), false);
   });
 });
+
+// 5zorro 2026-10-11: from a bill to its PO / Item Receipt / Sales Order — ask at the door, then a way back.
+describe("Doc page as the return point", () => {
+  it("another Doc-skinned document is an errand; a setup master is a Vanilla peek", () => {
+    assert.equal(isDocErrandTarget("/app/purchase-order/PUR-ORD-1"), true);
+    assert.equal(isDocErrandTarget("/app/purchase-receipt/MAT-PRE-2026-00002"), true);
+    assert.equal(isDocErrandTarget("/app/sales-order/SAL-ORD-1"), true);
+    assert.equal(isDocErrandTarget("/app/supplier/SUMMIT%20TRADERS"), false);
+    assert.equal(isDocErrandTarget("/app/item/new?item_code=X"), false);
+    assert.equal(isDocErrandTarget("/app/purchase-order"), false, "a list is not a document");
+  });
+  it("the saved bill is the way back; a never-saved one has none", () => {
+    assert.deepEqual(beginDocDetour({ doctypeKey: "purchase-invoice", name: "ACC-PINV-2026-00008", label: "Bill" }), {
+      surface: "doc",
+      label: "Bill ACC-PINV-2026-00008",
+      route: "/app/purchase-invoice/ACC-PINV-2026-00008",
+    });
+    assert.equal(beginDocDetour({ doctypeKey: "purchase-invoice", name: "new-purchase-invoice-abcdefghij", label: "Bill" }), null);
+    assert.equal(beginDocDetour({ doctypeKey: "", name: "X" }), null);
+  });
+  it("the back button shows until that document is on screen again", () => {
+    const d = beginDocDetour({ doctypeKey: "purchase-invoice", name: "ACC-PINV-2026-00008", label: "Bill" });
+    assert.equal(detourBackLabel(d, "doc", "/app/purchase-order/PUR-ORD-1"), "← Back to Bill ACC-PINV-2026-00008");
+    assert.equal(detourBackLabel(d, "erp", "/app/purchase-order/PUR-ORD-1"), "← Back to Bill ACC-PINV-2026-00008");
+    assert.equal(detourBackLabel(d, "doc", "/app/purchase-invoice/ACC-PINV-2026-00008"), "");
+  });
+});
+

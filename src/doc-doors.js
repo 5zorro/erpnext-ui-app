@@ -33,6 +33,8 @@ export const DOC_DOORS = Object.freeze({
   "bill-open-add-payment": { kind: "peek", why: "draft a payment against this bill" },
   // The page's own peeks: linked source ↗, applied payment 👁, create Item, company addresses,
   // Customize Form from the receive question.
+  // Into a document with its own Doc skin (PO, Item Receipt, Sales Order, payment) the same channel
+  // is an errand: the unsaved-changes gate at the door, then "← Back to …" (5zorro 2026-10-11).
   "soft-peek-route": { kind: "peek", why: "look at or fix a document this one links to" },
   // Other work.
   "bill-find": { kind: "navigate", why: "find another bill" },

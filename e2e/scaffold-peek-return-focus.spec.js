@@ -240,8 +240,94 @@ test.describe("scaffold: Bill line order peeks", () => {
     else expect(look.tdImage).toBe("none");
     await inDoc(app, `document.querySelector('[data-testid="bill-peek-0-po"]').click(); true`);
     await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/purchase-order/PUR-ORD-E2E-NONE");
-    // Not asserted yet: Esc back to the bill. A peek into a document with its own Doc skin records
-    // no way back (`peek-none … (not a record)`) — the known gap in plan 09-26, 2026-10-11.
+    // The way back from a clean bill's errand is the next describe's job (an unsaved new bill like
+    // this one has no saved address to come back to).
+  });
+});
+
+/** A real Esc keypress on the Doc page. */
+async function escOnDocPage(app) {
+  await app.evaluate(({ webContents }) => {
+    const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+    w.focus();
+    w.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    w.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  });
+}
+const backLabel = (app) =>
+  e2eCall(app, "execInView", "chrome", `(() => { const b = document.querySelector('[data-testid="btn-detour-back"]'); return b && !b.hidden ? b.textContent : ""; })()`);
+
+// 5zorro 2026-10-11: from a bill to a document with its own Doc skin — ask at the door when the bill
+// is unsaved, then "← Back to Bill …" / Esc. Read-only: test A uses an existing submitted bill, test B
+// cancels the gate.
+test.describe("scaffold: errand from a bill to another Doc-skinned document", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("clean bill → its Item Receipt: no question, then Back to Bill and Esc return", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const bill = await inErp(
+      app,
+      `(async () => {
+        const r = await frappe.call({ method: "frappe.client.get_list", args: { doctype: "Purchase Invoice Item", parent: "Purchase Invoice",
+          filters: [["purchase_receipt", "is", "set"], ["docstatus", "=", 1]], fields: ["parent"], limit_page_length: 1 } });
+        return ((r.message || [])[0] || {}).parent || "";
+      })()`,
+    );
+    test.skip(!bill, "no submitted bill with an Item Receipt line on this site");
+    await e2eCall(app, "openBill", `/app/purchase-invoice/${bill}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-linked-pr-peek-0"]')`), { timeout: 40_000 }).toBe(true);
+    await inDoc(app, `document.querySelector('[data-testid="bill-linked-pr-peek-0"]').click(); true`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/purchase-receipt/");
+    expect(await inDoc(app, `!document.querySelector('[data-testid="doc-commit-gate"]').hidden`)).toBe(false);
+    await expect.poll(async () => backLabel(app), { timeout: 15_000 }).toBe(`← Back to Bill ${bill}`);
+    await new Promise((r) => setTimeout(r, 1000));
+    await escOnDocPage(app);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toBe(`/app/purchase-invoice/${bill}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => backLabel(app), { timeout: 15_000 }).toBe("");
+  });
+
+  test("unsaved bill → a PO: the unsaved-changes gate asks first; Cancel stays on the bill", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await inErp(app, `(() => { cur_frm.doc.items[0].purchase_order = "PUR-ORD-E2E-NONE"; return true; })()`);
+    const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { ok: true, doc: s.doc, amountDue: s.amountDue }; })()`);
+    await app.evaluate(({ webContents }, sn) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", sn);
+    }, snap);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-peek-0-po"]')`), { timeout: 15_000 }).toBe(true);
+    // A clerk's edit: Amount Due typed.
+    await inDoc(
+      app,
+      `(() => { const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = "12.34"; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`,
+    );
+    const before = await e2eCall(app, "currentRoute");
+    await inDoc(app, `document.querySelector('[data-testid="bill-peek-0-po"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `!document.querySelector('[data-testid="doc-commit-gate"]').hidden`), { timeout: 20_000 })
+      .toBe(true);
+    expect(await e2eCall(app, "currentRoute")).toBe(before);
+    await inDoc(app, `document.querySelector("#commit-gate [data-gate='cancel']").click()`);
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-commit-gate"]').hidden`), { timeout: 10_000 }).toBe(true);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(await e2eCall(app, "currentRoute")).toBe(before);
+    expect(String((await inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`)))).toMatch(/^new-purchase-invoice-/);
+    expect(await backLabel(app)).toBe("");
   });
 });
 

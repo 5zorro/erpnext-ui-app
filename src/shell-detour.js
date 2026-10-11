@@ -9,8 +9,17 @@
  * - nothing about the bill (its name changing on amend) ends the detour; leaving for other work
  *   (Home, Find, another shell page) does.
  *
+ * A Doc page can be the return point too (5zorro 2026-10-11): from a bill to a document with its
+ * own Doc skin (its PO, Item Receipt, Sales Order, a payment) is an errand. ERPNext keeps an unsaved
+ * bill only in the hidden form's memory, which opening another Doc skin can reload away — so the
+ * unsaved-changes gate asks **at the door** (5zorro: more intuitive than asking at the moment of
+ * danger), and "← Back to …" / Esc reopen the bill, by then saved. The lasting answer is a second
+ * window per errand (OI-040, multi-window); this is the temporary one.
+ *
  * Pure: main keeps the one live detour.
  */
+import { isNewDocRecord, normalizeAppRoute, routesReferToSameDoc } from "./route-info.js";
+import { isSoftPeekRoute } from "./history-nav.js";
 
 /** Shell pages that can be a detour's return point, and how the back control names them. */
 export const DETOUR_SURFACES = Object.freeze({
@@ -20,6 +29,7 @@ export const DETOUR_SURFACES = Object.freeze({
 
 /**
  * @typedef {{ surface: string, label: string, route: string }} ShellDetour
+ * `surface` "doc" = a Doc page is the return point; `route` is the document to reopen.
  */
 
 /**
@@ -35,12 +45,43 @@ export function beginShellDetour(surfaceMode, route = "") {
 }
 
 /**
+ * Does opening this address from a Doc page leave for another Doc-skinned document (an errand that
+ * gets the door gate), rather than a setup master that peeks in Vanilla (vendor, item, terms)?
+ * @param {string} route
+ * @param {string} [erpBase]
+ */
+export function isDocErrandTarget(route, erpBase) {
+  const n = normalizeAppRoute(route, erpBase);
+  if (!n.doctype || !n.record || n.doctype === "query-report") return false;
+  return !isSoftPeekRoute(route, erpBase);
+}
+
+/**
+ * The return point once the gate has let the clerk go. A document that was never saved has no
+ * address to come back to (the gate's Discard on a new bill), so there is no way back to offer.
+ * @param {{ doctypeKey: string, name: string, label: string }} parent
+ * @returns {ShellDetour|null}
+ */
+export function beginDocDetour(parent) {
+  const p = parent || /** @type {any} */ ({});
+  const name = String(p.name || "").trim();
+  const key = String(p.doctypeKey || "").trim();
+  if (!name || !key || isNewDocRecord(name)) return null;
+  return { surface: "doc", label: `${p.label || "the document"} ${name}`, route: `/app/${key}/${encodeURIComponent(name)}` };
+}
+
+/**
  * Toolbar text while away on a detour; "" when there is none or the clerk is back on it.
  * @param {ShellDetour|null|undefined} detour
  * @param {string} surfaceMode
+ * @param {string} [currentRoute] a Doc-page detour is over when that document is on screen again
+ * @param {string} [erpBase]
  */
-export function detourBackLabel(detour, surfaceMode) {
-  if (!detour || !detour.surface || surfaceMode === detour.surface) return "";
+export function detourBackLabel(detour, surfaceMode, currentRoute = "", erpBase = "") {
+  if (!detour || !detour.surface) return "";
+  if (detour.surface === "doc") {
+    if (surfaceMode === "doc" && routesReferToSameDoc(currentRoute, detour.route, erpBase)) return "";
+  } else if (surfaceMode === detour.surface) return "";
   return `← Back to ${detour.label}`;
 }
 

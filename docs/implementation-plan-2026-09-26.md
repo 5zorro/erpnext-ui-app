@@ -1042,6 +1042,13 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   Sizing given 2026-10-11: a plain Vanilla pop-out window is small; Doc skins in a second window
   mean splitting `main.js`'s single-window state (~78 module-level variables; `dirtyState` alone is
   read ~180 times, one hidden ERP view behind every `erpEval`) into one state object per window.
+  **Built 2026-10-11:** `soft-peek-route` from a Doc page to a Doc-skinned record (`isDocErrandTarget`)
+  runs `openDocErrand`: the unsaved-changes gate first (clean → straight through), then the document
+  opens in the clerk's usual lens with a Doc-page detour (`beginDocDetour`: the saved name, read after
+  the gate; a never-saved bill gets no way back) — "← Back to Bill …" in the top bar and Esc return;
+  being back on the bill by other means ends it. App tests: clean bill → Item Receipt → Esc back;
+  unsaved bill → PO → gate → Cancel stays. **Not driven:** the gate's *Save* then the errand (it writes
+  a draft) — 5zorro's to dogfood. One detour at a time: an errand from the errand replaces the way back.
 - **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
