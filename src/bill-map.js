@@ -201,7 +201,7 @@ export { JOB_COST_CENTER_FIELD, JOB_COST_CENTER_LABEL };
 
 /** Items tab columns; null = display-only Amount from ERPNext. */
 export const BILL_ITEM_BASE_COLS = [
-  { label: "Item", field: "item_code", linkDoctype: "Item" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item" },
   { label: "Description", field: "description" },
   { label: "Qty", field: "qty" },
   { label: "Cost", field: "rate" },

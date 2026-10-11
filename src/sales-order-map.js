@@ -83,7 +83,7 @@ export const SALES_ORDER_HEADER_FIELDS = [
 /** @type {import("./sales-doc-map.js").SalesLineCol[]} */
 export const SALES_ORDER_ITEM_COLS = [
   { label: "Line", field: "__line_no", displayOnly: true, readOnly: true, sortKey: "lineNo" },
-  { label: "Item", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
   { label: "Description", field: "description", sortKey: "description" },
   { label: "Qty", field: "qty", sortKey: "qty" },
   { label: "Rate", field: "rate", sortKey: "rate" },

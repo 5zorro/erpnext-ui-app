@@ -2799,7 +2799,7 @@ export async function bootBillFormPage(api) {
         <table>
           <thead>
             <tr>
-              <th>Item</th>
+              <th>Item Code</th>
               <th class="num">Qty</th>
               <th class="num">Cost</th>
               <th class="num">Amount</th>

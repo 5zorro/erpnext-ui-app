@@ -261,7 +261,7 @@ function valueForSortKey(model, sortKey) {
 export const BILL_ITEM_SORTABLE_HEADERS = Object.freeze([
   { label: "Line", sortKey: "lineNo" },
   { label: "Source line", sortKey: "poLine" },
-  { label: "Item", sortKey: "item_code" },
+  { label: "Item Code", sortKey: "item_code" },
   { label: "Description", sortKey: "description" },
   { label: "Qty", sortKey: "qty" },
   { label: "Cost", sortKey: "rate" },
