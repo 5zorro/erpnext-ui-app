@@ -6,9 +6,9 @@
  * Idempotent: no-ops if already installed at the same version.
  */
 
-import { SEED_PROFILES } from "./simplified-seed-profiles.js";
+import { SEED_PROFILES, SEED_VALUES } from "./simplified-seed-profiles.js";
 
-const VERSION = 12;
+const VERSION = 13;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -171,7 +171,14 @@ const CORE_INLINE = `
       var n=normExpr(x); if(!n) return null;
       return {id:x.id||(x.base+"_"+(parseInt(x.offset,10)||0)),label:x.label||presetLabel(n),base:n.base,offset:n.offset};
     }).filter(Boolean);
-    return {doctype:doctype||p.doctype||null,fields:fields,presets:presets};
+    var out={doctype:doctype||p.doctype||null,fields:fields,presets:presets};
+    if(p.source==="doc-skin") out.source="doc-skin";
+    return out;
+  }
+  function shouldLockAssumed(fieldtype, value){
+    if(value===null||value===undefined||value==="") return false;
+    if(fieldtype==="Check"&&!Number(value)) return false;
+    return true;
   }
   function isAssumed(p,fn){ return !!(p&&p.fields&&p.fields[fn]&&p.fields[fn].placement!=="vanilla"); }
   function placementFor(p,fn){ return isAssumed(p,fn)?p.fields[fn].placement:"vanilla"; }
@@ -248,7 +255,7 @@ const CORE_INLINE = `
     isAssumed:isAssumed,placementFor:placementFor,valueFor:valueFor,assumedFields:assumedFields,
     tabSkips:tabSkips,checkProfile:checkProfile,setAssumption:setAssumption,
     resolveExpr:resolveExpr,presetLabel:presetLabel,resolveFieldValue:resolveFieldValue,
-    addPreset:addPreset,isEffectivelyEmpty:isEffectivelyEmpty};
+    addPreset:addPreset,isEffectivelyEmpty:isEffectivelyEmpty,shouldLockAssumed:shouldLockAssumed};
 });
 `;
 
@@ -287,14 +294,19 @@ export function buildSimplifiedPayload() {
 
   /* ---- Persistence ---- */
   var SEED_PROFILES = ${JSON.stringify(seedProfiles)};
+  var SEED_VALUES = ${JSON.stringify(SEED_VALUES)};
   function seedProfile(doctype) {
     var seed = SEED_PROFILES[doctype];
     if (!seed) return null;
     var fields = {};
+    var values = SEED_VALUES[doctype] || {};
     Object.keys(seed).forEach(function(fn) {
-      fields[fn] = { value: null, placement: seed[fn], valueSource: "literal", expr: null };
+      var v = values[fn];
+      fields[fn] = v
+        ? { value: null, placement: seed[fn], valueSource: v.valueSource, expr: { base: v.expr.base, offset: v.expr.offset } }
+        : { value: null, placement: seed[fn], valueSource: "literal", expr: null };
     });
-    return { doctype: doctype, fields: fields, presets: [] };
+    return { doctype: doctype, fields: fields, presets: [], source: "doc-skin" };
   }
   function load(doctype) {
     var raw = null;
@@ -527,11 +539,39 @@ export function buildSimplifiedPayload() {
       : { hidden: 0, read_only: 0, description: "" };
   }
 
+  /* Doc-skin rule (5zorro DF-02): the Doc Bill shows only the Supplier Invoice Date, and the
+     Posting Date follows it — typed: Edit Posting Date ticked and Posting Date = that date;
+     cleared: back to today. Same rule as the Doc Bill's bridge (setHeader postingDateFollows).
+     Simplified cannot hide Posting Date (ERPNext requires it), so here it stays visible and
+     follows. Only while the Doc-skin assumptions are the active profile. */
+  var postingFollowsInstalled = false;
+  function installPostingFollows() {
+    if (postingFollowsInstalled || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
+    postingFollowsInstalled = true;
+    frappe.ui.form.on("Purchase Invoice", "bill_date", function(frm) {
+      if (destroyed || !frm || frm.doc.docstatus !== 0) return;
+      if (load("Purchase Invoice").source !== "doc-skin") return;
+      var typed = frm.doc.bill_date ? String(frm.doc.bill_date) : "";
+      var today = frappe.datetime.get_today();
+      if (typed && (frm.doc.posting_date !== typed || !frm.doc.set_posting_time)) {
+        frm.set_value({ set_posting_time: 1, posting_date: typed });
+      } else if (!typed && frm.doc.set_posting_time) {
+        frm.set_value({ set_posting_time: 0, posting_date: today });
+      }
+    });
+  }
+
   function apply(frm) {
     if (destroyed) return;
     if (!frm || !frm.doctype) return;
     installScrollNav(frm);
     var profile = load(frm.doctype);
+    if (frm.doctype === "Purchase Invoice" && profile.source === "doc-skin") {
+      installPostingFollows();
+      try {
+        frm.set_df_property("posting_date", "description", "Follows the Supplier Invoice Date (Doc-skin assumptions).");
+      } catch(e) {}
+    }
     var check = core.checkProfile(profile, frm.meta ? frm.meta.fields : []);
     if (!check.ok && window.frappe && frappe.show_alert) {
       frappe.show_alert({
@@ -567,7 +607,8 @@ export function buildSimplifiedPayload() {
            value outright when System Settings "hide_empty_read_only_fields" is on — so a
            seeded L1/L2 field with no literal value (the common case here) would silently
            vanish instead of showing quiet-but-visible. Skip the lock rather than the field. */
-        if (!blank) frm.set_df_property(fn, "read_only", 1);
+        var ftype = frm.fields_dict && frm.fields_dict[fn] && frm.fields_dict[fn].df ? frm.fields_dict[fn].df.fieldtype : "";
+        if (core.shouldLockAssumed(ftype, frm.doc ? frm.doc[fn] : null)) frm.set_df_property(fn, "read_only", 1);
         frm.set_df_property(fn, "description", "Set as a general assumption — change it in ⚙ Assumptions.");
         if (pl === "L2") deemph(frm, fn, true);
         if (pl === "L1") prefillMark(frm, fn, true);

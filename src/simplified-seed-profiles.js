@@ -39,14 +39,17 @@
  * - `bill_date` (vanilla label "Supplier Invoice Date") — Doc Bill's header field labeled
  *   "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes here directly, matching
  *   vanilla's own due-date-for-credit-terms basis (`accounts_controller.py`:
- *   `date = bill_date or posting_date`). `posting_date` stays unseeded too (required field,
- *   above) but Doc Bill no longer writes it at all — it keeps its DocType default ("Today")
- *   and gets forced back to today at save time regardless (`alignPostingDateLikeVanillaOk`
- *   in erp-form-bridge-page.js, mirroring Vanilla's own posting-date-confirm). See
- *   gotchas.md G5 for the full history: an earlier pass here read `bill_date`'s absence
- *   from `BILL_HEADER_FIELDS` as "not surfaced by doc skin" and seeded it L2 — at the time
- *   correct about the code, but the code itself had "Invoice date" wired to the wrong
- *   field; the real fix repointed `bill-map.js` at `bill_date`, not this seed.
+ *   `date = bill_date or posting_date`). Since 2026-09-26 the Doc Bill's Posting Date
+ *   **follows** it (typed: `set_posting_time` ticked and `posting_date` = the Invoice date;
+ *   cleared: back to today — bridge `setHeader` `postingDateFollows`). The Doc skin shows only
+ *   the Supplier Invoice Date; Simplified cannot hide `posting_date` (required), so under the
+ *   Doc-skin profile it stays visible and follows (assume-applier-payload.js
+ *   `installPostingFollows`). `set_posting_time` is therefore L1, never locked.
+ *   History (gotchas.md G5): this list was derived by hand on 2026-09-03/04, when the Doc
+ *   Bill's "Invoice date" wrote `posting_date` by mistake; it was never re-derived after the
+ *   09-26 change, which left Edit Posting Date locked unticked here (DF-02). The guard test
+ *   (tests/simplified-seed-profiles.test.js) now fails if a field the Doc Bill writes is
+ *   seeded L2/L3.
  * - Any field already `hidden` or hidden-by-`Table`/`Button` fieldtype in the doctype
  *   JSON — nothing to quiet, it is not visible in Vanilla either.
  */
@@ -58,6 +61,10 @@ const PURCHASE_INVOICE_SEED = Object.freeze({
   // Details tab — not on Doc Bill header/items/taxes
   apply_tds: "L2",
   cost_center: "L2",
+  // The Doc Bill does not show these: Posting Date follows the Supplier Invoice Date and is
+  // stamped at submit (5zorro DF-02: "why do I need to have it in focus?"). Quiet, Tab-skipped;
+  // Posting Date stays visible because ERPNext requires it (SEED_VALUES gives it "Today").
+  posting_date: "L2",
   posting_time: "L2",
   set_posting_time: "L2",
   on_hold: "L2",
@@ -71,9 +78,10 @@ const PURCHASE_INVOICE_SEED = Object.freeze({
   buying_price_list: "L2",
   plc_conversion_rate: "L2",
   ignore_pricing_rule: "L2",
-  set_warehouse: "L2", // matches BILL_ASSUMPTIONS: "Warehouse defaults to Finished Goods."
+  // Doc Bill's "Receive with this bill" writes both (DF-01 R): quiet, but never locked.
+  set_warehouse: "L1",
   rejected_warehouse: "L2",
-  update_stock: "L2",
+  update_stock: "L1",
   scan_barcode: "L2",
   tax_category: "L2",
   shipping_rule: "L2",
@@ -214,6 +222,17 @@ const PURCHASE_RECEIPT_SEED = Object.freeze({
 });
 
 /** @type {Readonly<Record<string, Readonly<Record<string, SeedPlacement>>>>} */
+/**
+ * Default values a seed field needs beyond its placement. A required field assumed with no value
+ * is left alone (assume-core checkProfile), so Posting Date carries "Today" — what ERPNext stamps.
+ * @type {Readonly<Record<string, Readonly<Record<string, { valueSource: "expr", expr: { base: "today"|"som"|"eom", offset: number } }>>>>}
+ */
+export const SEED_VALUES = Object.freeze({
+  "Purchase Invoice": Object.freeze({
+    posting_date: Object.freeze({ valueSource: "expr", expr: Object.freeze({ base: "today", offset: 0 }) }),
+  }),
+});
+
 export const SEED_PROFILES = Object.freeze({
   "Purchase Invoice": PURCHASE_INVOICE_SEED,
   "Purchase Order": PURCHASE_ORDER_SEED,
@@ -231,8 +250,12 @@ export function seedProfileFor(doctype) {
   if (!seed) return null;
   /** @type {Record<string, { value: null, placement: SeedPlacement, valueSource: "literal", expr: null }>} */
   const fields = {};
+  const values = SEED_VALUES[doctype] || {};
   for (const fn of Object.keys(seed)) {
-    fields[fn] = { value: null, placement: seed[fn], valueSource: "literal", expr: null };
+    const v = values[fn];
+    fields[fn] = v
+      ? { value: null, placement: seed[fn], valueSource: v.valueSource, expr: { ...v.expr } }
+      : { value: null, placement: seed[fn], valueSource: "literal", expr: null };
   }
-  return { doctype, fields, presets: [] };
+  return { doctype, fields, presets: [], source: "doc-skin" };
 }

@@ -63,7 +63,24 @@ export function normalizeProfile(raw, doctype) {
       };
     })
     .filter(Boolean);
-  return { doctype: doctype || p.doctype || null, fields, presets };
+  // "doc-skin": the profile is the Doc skin's own defaults (SEED_PROFILES) — it then also follows
+  // the Doc skin's rules, e.g. a Bill's Posting Date follows its Supplier Invoice Date.
+  const source = p.source === "doc-skin" ? "doc-skin" : undefined;
+  return { doctype: doctype || p.doctype || null, fields, presets, ...(source ? { source } : {}) };
+}
+
+/**
+ * Whether an assumed field may be locked read-only on the live form. A field with no value is
+ * never locked (ERPNext hides an empty read-only field outright), and neither is an unticked
+ * checkbox: 0 is a checkbox's "not answered", so locking it froze Update Stock and Edit Posting
+ * Date unticked for good (5zorro DF-01 / DF-02).
+ * @param {string} fieldtype
+ * @param {unknown} value
+ */
+export function shouldLockAssumed(fieldtype, value) {
+  if (value === null || value === undefined || value === "") return false;
+  if (fieldtype === "Check" && !Number(value)) return false;
+  return true;
 }
 
 /** @param {Profile} profile @param {string} fieldname */
