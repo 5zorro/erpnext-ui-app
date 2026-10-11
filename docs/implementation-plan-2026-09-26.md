@@ -950,7 +950,12 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     bill is saved (a vendor change would otherwise refill them from the template).
   - **ⓘ Vendor tax template default**: why these taxes (the template marked Default, or a Tax Rule
     naming this vendor) and how to change it (peek either).
-- **J — just-in-time receipts (un-parked 2026-10-10; next).** No custom fields:
+- **J — just-in-time receipts (un-parked and built 2026-10-10: `931cf28`, `0c74ee1`, `600a862`; paper
+  DF-26).** Rec'd by / Rec'd Date columns; a click opens a small editor (one line, or every line not
+  yet received — stock items only); not Tab-walk cells yet. The block is written into the draft's
+  Remarks on every change, not only at Save, so the draft carries it and the gate guards it.
+  Submit order: ask about unfilled lines → save the draft → make + submit each receipt → point the
+  lines at them (bridge v25 `linkReceiptLines`) → trim the block → submit. No custom fields:
   - Per line, Received by (plain text) and Received on. On Submit, before the bill: one Item Receipt
     per person + date, lines from several POs and NIC together, qty and rate from the bill (the bill
     is the source of truth; PO 3 / bill 5 is the existing over-PO split), dated the day received,
@@ -973,6 +978,9 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
 
 | Family | Residual | State |
 |---|---|---|
+| DF-02 hang | Receive question behind the unsaved gate | fixed `a94bdca` — app test drives the exact path; 5zorro to re-run DF-02 |
+| DF-02 taxes | Tab commit, rate/amount rule, Remove all, no sideways scroll, ⓘ template default | built `05f57b3`, `e5b6a51` — app tests (4); the ⓘ's Tax Rule link not clicked through |
+| DF-02 J | Just-in-time receipts from Bill lines | built — editor, block, question and ERPNext's acceptance of the receipt proven; **a real Submit has not run** (it leaves submitted documents). 5zorro: paper DF-26 |
 | A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
 | A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |

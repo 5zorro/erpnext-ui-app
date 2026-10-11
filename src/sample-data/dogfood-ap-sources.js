@@ -1148,6 +1148,43 @@ export const DOGFOOD_SOURCES = [
     poNos: ["CPO-55120"],
     lines: [{ sku: "PAYMENT", description: "Payment — invoice for CPO-55120", qty: 1, rate: 1000 }],
   },
+  // DF-26: just-in-time Item Receipts from Bill lines (plan 2026-09-26 "DF-02 follow-ups", J —
+  // 5zorro 2026-10-10). Two people received this invoice's goods; the bill says who, and Submit
+  // makes one receipt per person + date before the bill. No custom fields: who is in Remarks.
+  {
+    id: "DF-26",
+    touches: ["doc-form"],
+    scenario: "Two people received this invoice's goods — the Bill records who, and Submit makes one Item Receipt per person + date",
+    kind: "vendor_invoice",
+    template: "grid",
+    dogfoodHint:
+      "Enter on the Doc Bill with no PO and no Item Receipt. Click Rec'd by on line 1: John, Rec'd Date 10/04/2026 (it starts on 10/04, the day before the invoice date). Line 2: Jason, 10/04/2026. Leave line 3 blank. Save draft, reopen it, then Save draft & submit.",
+    expect:
+      "Submit asks about line 3 only, offering your name and 10/04/2026; choose Receive them now with John. Two Item Receipts are made, dated 10/04/2026 — one for John (lines 1 and 3), one for Jason (line 2) — and the bill submits with every line pointing at its receipt.",
+    checks: [
+      "After Save draft: the memo box does not show the [received] block, but Vanilla's Remarks does; reopening the Doc Bill shows John / Jason back in the columns.",
+      "After Submit: Rec'd by / Rec'd Date are read-only and come from the receipts; Find Item Receipts lists the two, each with ‘Received by: …’ in its Remarks and Posting Date 10/04/2026.",
+      "Vanilla's Remarks on the bill no longer has the [received] block. Update Stock is off.",
+      "nav-debug.log has jit-receipt-insert / jit-receipt-submitted / jit-receipt-linked for each receipt.",
+    ],
+    vendor: {
+      legalName: "SAMPLE Vendor 05",
+      address: ["500 Sample Ln", "Lehi, UT 84043"],
+    },
+    docNo: "SV5-INV-1005",
+    docDate: "10/05/2026",
+    terms: "NET 30 DAYS",
+    taxNote: "No tax — resale",
+    taxAmount: 0,
+    notes: [
+      "Dock note: lines 1 and 3 signed in by John, line 2 by Jason — 10/04/2026.",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-05", description: "Sample Item 05", qty: 4, rate: 12 },
+      { sku: "SAMPLE-SKU-06", description: "Sample Item 06", qty: 6, rate: 9.5 },
+      { sku: "SAMPLE-SKU-07", description: "Sample Item 07", qty: 2, rate: 30 },
+    ],
+  },
 ];
 
 /**
