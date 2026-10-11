@@ -611,6 +611,9 @@ tr.row-note-row[hidden] { display: none; }
   text-decoration: underline dotted #94a3b8; text-underline-offset: 3px; white-space: nowrap;
 }
 .rec-btn:hover { color: #0f172a; text-decoration-color: #0f172a; }
+td.rec-cell { cursor: pointer; }
+td.rec-cell .rec-btn { display: block; width: 100%; text-align: left; }
+td.rec-cell:hover .rec-btn { color: #0f172a; text-decoration-color: #0f172a; }
 .rec-fields { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin: 10px 0 6px; }
 .rec-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #475569; }
 .rec-fields input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }

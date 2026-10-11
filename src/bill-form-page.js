@@ -2138,6 +2138,9 @@ export async function bootBillFormPage(api) {
     const pending = pendingReceived(doc);
     const cur = (row.name && pending.get(String(row.name))) || { by: "", on: "" };
     const defaultOn = dayBefore(String(doc.bill_date || doc.posting_date || ""));
+    // Nothing recorded on any line yet: the usual case is one delivery, so start with "all lines"
+    // ticked — there is nothing it could overwrite. Lines already from a receipt are never touched.
+    const startAll = pending.size === 0;
     const back = document.createElement("div");
     back.className = "addr-modal-backdrop";
     back.dataset.testid = "bill-rec-editor";
@@ -2148,7 +2151,7 @@ export async function bootBillFormPage(api) {
         <label>Rec'd by <input type="text" data-rec-by data-testid="bill-rec-editor-by" value="${escapeHtml(cur.by || lastReceivedBy)}" autocomplete="off" /></label>
         <label>Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-editor-on" value="${escapeHtml(cur.on || defaultOn)}" /></label>
       </div>
-      <label class="rec-all"><input type="checkbox" data-rec-all data-testid="bill-rec-editor-all" /> Every line not yet received</label>
+      <label class="rec-all"><input type="checkbox" data-rec-all data-testid="bill-rec-editor-all"${startAll ? " checked" : ""} /> All item lines were received by this person on this date</label>
       <p class="addr-modal-hint">The date starts the day before the invoice date, so goods sold the day they are billed are not costed as sold before they arrived.</p>
       <div class="addr-modal-actions">
         <button type="button" data-act="clear" data-testid="bill-rec-editor-clear">Clear</button>
@@ -2644,8 +2647,11 @@ export async function bootBillFormPage(api) {
         await apply(next);
       });
     });
-    el.items.querySelectorAll("button[data-rec]").forEach((btn) => {
-      btn.addEventListener("click", () => openReceivedEditor(Number(btn.getAttribute("data-rec"))));
+    // The whole cell opens the editor, not only its text (5zorro DF-02: a blank cell is mostly padding).
+    el.items.querySelectorAll("td.rec-cell").forEach((td) => {
+      const btn = td.querySelector("button[data-rec]");
+      if (!btn) return;
+      td.addEventListener("click", () => openReceivedEditor(Number(btn.getAttribute("data-rec"))));
     });
     el.items.querySelectorAll("button[data-del]").forEach((btn) => {
       btn.addEventListener("click", async () => {

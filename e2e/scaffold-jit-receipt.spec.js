@@ -65,11 +65,16 @@ async function billWithStockLines(app, lines) {
   return { facts, snap };
 }
 
+/** Whether "all item lines" started ticked the last time the editor opened. */
+let lastAllDefault = false;
+
 /** The editor on line `ri`: type who, keep the default date unless given, Apply. */
 async function receiveLine(app, ri, by, all = false) {
-  await inDoc(app, `document.querySelector('[data-testid="bill-rec-${ri}-by"]').click()`);
+  // A click anywhere in the cell, not on its text (5zorro: a blank cell is mostly padding).
+  await inDoc(app, `document.querySelector('[data-testid="bill-rec-${ri}-by"]').closest("td").click()`);
   await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-rec-editor"]')`), { timeout: 10_000 }).toBe(true);
   const shownDate = await inDoc(app, `document.querySelector('[data-testid="bill-rec-editor-on"]').value`);
+  lastAllDefault = await inDoc(app, `document.querySelector('[data-testid="bill-rec-editor-all"]').checked`);
   await inDoc(
     app,
     `(() => { const e = document.querySelector('[data-testid="bill-rec-editor"]'); e.querySelector('[data-rec-by]').value = ${JSON.stringify(by)}; e.querySelector('[data-rec-all]').checked = ${all}; e.querySelector('[data-act="apply"]').click(); })()`,
@@ -94,6 +99,7 @@ test.describe("scaffold: just-in-time receipts from Bill lines (DF-02 J)", () =>
     const { facts } = await billWithStockLines(app, 1);
     const shownDate = await receiveLine(app, 0, "Jason");
     expect(shownDate).toBe("2026-10-04"); // the day before the invoice date
+    expect(lastAllDefault).toBe(true); // nothing recorded yet → "all item lines" starts ticked
     await expect
       .poll(async () => (await inDoc(app, SNAP)).doc.remarks || "", { timeout: 15_000 })
       .toBe(`[received]\n1 | ${facts.items[0]} | Jason | 2026-10-04\n[/received]`);
