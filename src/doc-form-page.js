@@ -103,6 +103,7 @@ import { taxDefaultWhy } from "./tax-default-why.js";
 import { uiIconHtml } from "./ui-icons.js";
 import { taxRowNavFields } from "./bill-tax-table-nav.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
+import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
 import {
   paintCommitGateValidation,
@@ -361,6 +362,11 @@ function commitGateEls() {
     commitGateHint: el.commitGateHint,
   };
 }
+
+// The clerk's own moves, counted before any handler sees the key (user-move-guard.js).
+const userMoves = createUserMoveGuard();
+document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
+document.addEventListener("pointerdown", () => userMoves.bump(), true);
 
 /** The line cell a "create …" peek was opened from (DF-02). */
 let peekReturn = null;
@@ -1857,13 +1863,17 @@ function paintItems(doc) {
       if (!api || painting) return;
       const run = async () => {
         setStatus(`Updating ${field}…`);
+        const moveMark = userMoves.mark();
         const res = await api.setItem(ri, field, value);
         if (res && res.ok) {
           noteUserEdit();
           if (res.scratch) scratch = res.scratch;
           paint(res.doc, res.scratch || scratch);
           setStatus("Line updated.");
-          if (opts.focus && opts.focus.field) {
+          if (userMoves.movedSince(moveMark)) {
+            // The clerk moved on while ERPNext answered: leave focus where they put it.
+            logFocus("focus-after-edit-skipped", field);
+          } else if (opts.focus && opts.focus.field) {
             focusItemCell(opts.focus.rowIndex, opts.focus.field, {
               mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
             });

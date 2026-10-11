@@ -30,7 +30,7 @@ export const ARCHITECTURE_FAMILIES = [
     label: "Navigation spine — doors, peeks, detours, Recent / Drafts / Submitted, lenses, focus",
     breaking: true,
     modules: ["route-info", "history", "history-nav", "history-copy-ref", "peek-stack", "peek-return-focus", "nav-*", "erp-nav-intent", "erp-route-hop",
-      "erp-unload-guard", "shell-detour", "shell-surfaces", "shell-relayout", "doc-doors", "dirty-gate", "stale-focus-guard", "chrome-state",
+      "erp-unload-guard", "shell-detour", "shell-surfaces", "shell-relayout", "doc-doors", "dirty-gate", "stale-focus-guard", "user-move-guard", "chrome-state",
       "lens-prefs", "lens-context", "doctype-labels", "submitted-docs", "shelved-drafts", "doc-resume", "focus-*"],
     paths: ["electron/history.html", "electron/history-preload.cjs", "electron/submitted-dropdown.html", "electron/submitted-preload.cjs",
       "electron/nav-incident-dialog.html", "electron/nav-incident-preload.cjs", "electron/focus-incident-dialog.html",

@@ -252,6 +252,7 @@ import {
 import { wireItemImportButton } from "../src/item-import-ui.js";
 import { formatDueDateSettleLog } from "../src/bill-payment-terms-settle.js";
 import { installFocusRing, logFocus } from "../src/focus-debug-client.js";
+import { createUserMoveGuard, isUserMoveKey } from "../src/user-move-guard.js";
 import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
@@ -648,6 +649,11 @@ export async function bootBillFormPage(api) {
     };
   }
   
+  // The clerk's own moves, counted before any handler sees the key (user-move-guard.js).
+  const userMoves = createUserMoveGuard();
+  document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
+  document.addEventListener("pointerdown", () => userMoves.bump(), true);
+
   /** The line cell a "create …" peek was opened from (DF-02). */
   let peekReturn = null;
 
@@ -2458,12 +2464,16 @@ export async function bootBillFormPage(api) {
         if (!api || painting) return;
         const run = async () => {
           setStatus(`Updating ${field}…`);
+          const moveMark = userMoves.mark();
           const res = await api.setItem(ri, field, value);
           if (res && res.ok) {
             noteUserEdit();
             paint(res.doc, amountDue);
             setStatus("Line updated.");
-            if (opts.focus && opts.focus.field) {
+            if (userMoves.movedSince(moveMark)) {
+              // The clerk moved on while ERPNext answered: leave focus where they put it.
+              logFocus("focus-after-edit-skipped", field);
+            } else if (opts.focus && opts.focus.field) {
               focusItemCell(opts.focus.rowIndex, opts.focus.field, {
                 mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
               });

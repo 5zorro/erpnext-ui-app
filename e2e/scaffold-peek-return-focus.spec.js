@@ -331,3 +331,55 @@ test.describe("scaffold: errand from a bill to another Doc-skinned document", ()
   });
 });
 
+// 5zorro focus incident 2026-10-11T21:14:44Z: pick an Item on a line, Tab from Description to Qty —
+// yanked back to Description ~150 ms later, when the pick's own post-ERPNext move landed. Run it
+// with ERP_CHAOS_LAG_MS / ERP_CHAOS_LAG_PCT to widen the race the way 5zorro's session had it.
+test.describe("scaffold: a late post-edit move never overrides the clerk's Tab", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("Tab-pick an Item, Tab on from Description to Qty, and stay on Qty", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const item = await inErp(app, `(async () => { const r = await frappe.db.get_list("Item", { filters: { disabled: 0 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`);
+    test.skip(!item, "sandbox has no Item");
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 }).toBe(true);
+    // A new bill settles first (its opening focus lands on Vendor); this test is about what follows.
+    await expect.poll(async () => inDoc(app, `document.activeElement && document.activeElement.id`), { timeout: 20_000 }).toBe("f-vendor");
+    await new Promise((r) => setTimeout(r, 2000));
+    await inDoc(
+      app,
+      `(() => { const i = document.querySelector('input[data-row="0"][data-field="item_code"]'); i.focus(); i.value = ${JSON.stringify(item)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) .link-opt:not(.link-action)')`), { timeout: 15_000 }).toBe(true);
+    const key = (k) =>
+      app.evaluate(({ webContents }, kk) => {
+        const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+        w.focus();
+        w.sendInputEvent({ type: "keyDown", keyCode: kk });
+        w.sendInputEvent({ type: "keyUp", keyCode: kk });
+      }, k);
+    // Tab accepts the highlighted Item and moves to Description at once; the pick's update is still
+    // on its way to ERPNext (5zorro's trail: Description at +0.1 s, ERPNext's answer at +0.9 s).
+    await key("Tab");
+    // As soon as the clerk is on Description, Tab on.
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000, intervals: [50] }).toMatchObject({ field: "description" });
+    await key("Tab");
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 5_000, intervals: [50] }).toMatchObject({ field: "qty" });
+    // Long enough for ERPNext's answer and any late move.
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(await inDoc(app, ACTIVE)).toMatchObject({ row: "0", field: "qty" });
+  });
+});
+
