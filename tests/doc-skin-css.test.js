@@ -528,3 +528,15 @@ describe("flow nodes fit their span (Packet 4b, 2026-09-08)", () => {
     assert.match(payOutstandingSrc, /aggId:\s*groupIdOf\(/);
   });
 });
+
+describe("questions asked mid-save sit above the commit gate (DF-02 hang)", () => {
+  const z = (re) => Number((docSkinCss.match(re) || [])[1]);
+  it("over-gate layer is above the gate", () => {
+    const gate = z(/\.commit-gate\s*\{[^}]*z-index:\s*(\d+)/s);
+    const over = z(/\.addr-modal-backdrop\.over-gate\s*\{[^}]*z-index:\s*(\d+)/s);
+    assert.ok(gate > 0 && over > gate, `over-gate ${over} must exceed commit-gate ${gate}`);
+  });
+  it("the receive-with-bill question uses it", () => {
+    assert.match(billFormPage, /className = "addr-modal-backdrop over-gate";\s*\n\s*back\.dataset\.testid = "bill-receive-ask"/);
+  });
+});

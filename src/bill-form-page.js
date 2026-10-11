@@ -4670,7 +4670,8 @@ export async function bootBillFormPage(api) {
     return new Promise((resolve) => {
       const c = receiveAskCopy(copyInput);
       const back = document.createElement("div");
-      back.className = "addr-modal-backdrop";
+      // over-gate: Save in the unsaved-changes gate reaches here with the gate still up.
+      back.className = "addr-modal-backdrop over-gate";
       back.dataset.testid = "bill-receive-ask";
       back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="receive-ask-title">
         <h2 id="receive-ask-title">${escapeHtml(c.title)}</h2>
