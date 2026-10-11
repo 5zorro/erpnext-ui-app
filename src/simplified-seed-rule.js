@@ -85,7 +85,6 @@ export function deriveSeed(fields, cfg) {
 }
 
 const ROUNDING = "a rounding-math toggle is not the kind of field to silently lock";
-const REVISIT = "not seeded by the 2026-09-04 hand pass, reason not recorded — kept Normal so generating changed nothing; revisit after dogfood";
 
 /**
  * What each Doc skin shows, asks, and works out — read from the skins' own maps, so a skin change
@@ -105,9 +104,6 @@ export const SEED_RULE_CONFIG = Object.freeze({
       unrealized_profit_loss_account: "shown only for an internal supplier (depends_on is_internal_supplier)",
       set_from_warehouse: "shown only for an internal supplier receiving stock",
       supplier_warehouse: "shown only on a subcontracted bill (depends_on is_subcontracted)",
-      project: REVISIT,
-      subscription: REVISIT,
-      title: REVISIT,
     },
   },
   "Purchase Order": {

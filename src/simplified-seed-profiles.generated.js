@@ -44,6 +44,8 @@ export const GENERATED_SEED_PROFILES = Object.freeze({
     "is_opening": "L2",
     "from_date": "L2",
     "to_date": "L2",
+    "project": "L2",
+    "subscription": "L2",
     "incoterm": "L2",
     "named_place": "L2",
     "only_include_allocated_payments": "L2",
@@ -55,6 +57,7 @@ export const GENERATED_SEED_PROFILES = Object.freeze({
     "tax_withholding_group": "L2",
     "ignore_tax_withholding_threshold": "L2",
     "override_tax_withholding_entries": "L2",
+    "title": "L2",
   }),
   "Purchase Order": Object.freeze({
     "schedule_date": "L2",

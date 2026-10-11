@@ -991,7 +991,9 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   **generated**: `npm run seeds:simplified` applies `src/simplified-seed-rule.js` to a snapshot of
   ERPNext's field lists (`tests/fixtures/simplified-seed-meta/`, refresh with `-- --refresh-meta`
   after an upgrade) and writes `src/simplified-seed-profiles.generated.js`; a drift test fails
-  until it is re-run. Kept Normal pending 5zorro's call: PI `project`, `subscription`, `title`.
+  until it is re-run. PI `project`, `subscription`, `title` were first kept Normal (the old hand
+  list had not seeded them); 2026-10-11 5zorro: Simplified's assumptions come from the Doc skin
+  (generated) or the clerk's own saved customization — so they follow the rule, quiet & locked.
 - **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
 - **Open — DF-01 notes not yet read back** (from the same notes file; the 10-01 round did not pick
   them up): right-click menu on a Find row; Find pages hide cancelled documents by default (toggle
