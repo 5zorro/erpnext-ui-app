@@ -29,10 +29,17 @@ describe("findListQuery", () => {
     assert.equal(findListQuery("item"), null);
   });
 
-  it("a blank page asks for everything (a payment page still picks its direction)", () => {
-    assert.deepEqual(findListQuery("purchase-invoice").filters, []);
-    assert.deepEqual(findListQuery("payment-entry").filters, [["payment_type", "=", "Pay"]]);
-    assert.deepEqual(findListQuery("payment-entry", { direction: "Receive" }).filters, [["payment_type", "=", "Receive"]]);
+  it("a blank page asks for everything not cancelled (a payment page still picks its direction)", () => {
+    assert.deepEqual(findListQuery("purchase-invoice").filters, [["docstatus", "!=", "2"]]);
+    assert.deepEqual(findListQuery("payment-entry").filters, [["docstatus", "!=", "2"], ["payment_type", "=", "Pay"]]);
+    assert.deepEqual(findListQuery("payment-entry", { direction: "Receive" }).filters, [["docstatus", "!=", "2"], ["payment_type", "=", "Receive"]]);
+  });
+
+  // 5zorro DF-01: cancelled entries hidden by default, a toggle to see them.
+  it("Show cancelled, or the Cancelled status itself, lets cancelled documents back in", () => {
+    assert.deepEqual(findListQuery("purchase-invoice", { showCancelled: true }).filters, []);
+    assert.deepEqual(findListQuery("payment-entry", { status: "Cancelled" }).filters, [["status", "=", "Cancelled"], ["payment_type", "=", "Pay"]]);
+    assert.deepEqual(findListQuery("purchase-invoice", { showCancelled: "yes" }).filters, [["docstatus", "!=", "2"]]);
   });
 
   it("boxes match part of a value; the party box matches id or name; status is exact", () => {
@@ -43,6 +50,7 @@ describe("findListQuery", () => {
     assert.deepEqual(q.filters, [
       ["bill_no", "like", "%123%"],
       ["status", "=", "Unpaid"],
+      ["docstatus", "!=", "2"],
     ]);
     assert.deepEqual(q.orFilters, [
       ["supplier", "like", "%Vendor 0%"],
@@ -51,7 +59,7 @@ describe("findListQuery", () => {
   });
 
   it("drops a status the page does not offer", () => {
-    assert.deepEqual(findListQuery("sales-order", { status: "Bogus" }).filters, []);
+    assert.deepEqual(findListQuery("sales-order", { status: "Bogus" }).filters, [["docstatus", "!=", "2"]]);
   });
 
   it("builds a /api/resource URL with or_filters and order_by", () => {

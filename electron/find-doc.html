@@ -60,6 +60,8 @@
     .direction button.active { background: #2c3e50; color: #fff; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
     .chips-label { font-size: 11px; color: #64748b; margin-right: 4px; }
+    .show-cancelled { margin-left: 12px; font-size: 12px; color: #475569; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+    .show-cancelled input:disabled + span { color: #94a3b8; }
     .chip {
       border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 999px;
       padding: 3px 10px; font-size: 11px; cursor: pointer;
@@ -155,7 +157,7 @@
       <div class="summary-row">
         <p class="summary" id="summary"></p>
         <button type="button" class="linkish" id="btn-clear" data-testid="find-doc-clear" hidden
-          title="Empty the boxes, back to every status and the newest-first order">Clear search</button>
+          title="Empty the boxes, back to every status (cancelled hidden) and the newest-first order">Clear search</button>
       </div>
       <div id="results"></div>
       <div class="more-row" id="more-row" hidden>
@@ -202,6 +204,8 @@
     const state = {
       direction: q.get("direction") === "Receive" ? "Receive" : "Pay",
       status: "",
+      // Cancelled documents hidden on every open (5zorro DF-01); not part of the remembered search.
+      showCancelled: false,
       values: {},
       selected: "",
       rows: [],
@@ -224,6 +228,7 @@
     }
     const searchIsDefault = () =>
       !state.status &&
+      !state.showCancelled &&
       !Object.values(state.values).some((v) => String(v || "").trim()) &&
       state.sort.field === "creation" &&
       state.sort.dir === "desc";
@@ -312,6 +317,13 @@
         c.onclick = () => { state.status = st; paintSearch(); runQuery(); };
         chips.appendChild(c);
       }
+      const sc = document.createElement("label");
+      sc.className = "show-cancelled";
+      sc.title = "Cancelled documents are hidden unless this is on";
+      const picked = state.status === "Cancelled";
+      sc.innerHTML = `<input type="checkbox" data-testid="find-doc-show-cancelled"${state.showCancelled || picked ? " checked" : ""}${picked ? " disabled" : ""} /><span>Show cancelled</span>`;
+      sc.querySelector("input").onchange = (e) => { state.showCancelled = e.target.checked; runQuery(); };
+      chips.appendChild(sc);
     }
 
     function queueQuery() {
@@ -335,6 +347,7 @@
             .list(doctypeKey, {
               values: state.values,
               status: state.status,
+              showCancelled: state.showCancelled,
               direction: state.direction,
               sort: state.sort,
               start: append ? state.rows.length : 0,
@@ -487,6 +500,7 @@
       $("btn-clear").onclick = () => {
         state.values = {};
         state.status = "";
+        state.showCancelled = false;
         state.sort = findSortFor(doctypeKey, null);
         state.selected = "";
         paintAll();

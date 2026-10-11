@@ -318,4 +318,31 @@ test.describe("scaffold: find pages", () => {
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
     await expect.poll(async () => inFind(app, `document.activeElement && document.activeElement.dataset.id`)).toBe("ref");
   });
+
+  // 5zorro DF-01: "by default, a find page filters out the cancelled entries, but you can toggle it on".
+  test("cancelled documents are hidden until Show cancelled is ticked", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "payOutstanding", `document.querySelector('[data-testid="pay-outstanding-find"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
+    await clearFindSearch(app);
+    const cancelled = await inFind(
+      app,
+      `(async () => { const r = await window.erpFindDoc.list("payment-entry", { direction: "Pay", showCancelled: true }); return r.rows.filter((x) => Number(x.docstatus) === 2).map((x) => x.name); })()`,
+    );
+    test.skip(!cancelled.length, "no cancelled Pay payment in this sandbox");
+    const shown = () => inFind(app, `[...document.querySelectorAll("tr.row")].map((t) => t.dataset.name)`);
+    await expect.poll(async () => (await shown()).length, { timeout: 20_000 }).toBeGreaterThan(0);
+    expect((await shown()).filter((n) => cancelled.includes(n))).toEqual([]);
+    expect(await inFind(app, `document.querySelector('[data-testid="find-doc-show-cancelled"]').checked`)).toBe(false);
+    await inFind(app, `(() => { const c = document.querySelector('[data-testid="find-doc-show-cancelled"]'); c.click(); return true; })()`);
+    await expect.poll(async () => (await shown()).filter((n) => cancelled.includes(n)).sort(), { timeout: 20_000 }).toEqual([...cancelled].sort());
+    // Clear search hides them again.
+    await clearFindSearch(app);
+    await expect.poll(async () => (await shown()).filter((n) => cancelled.includes(n)), { timeout: 20_000 }).toEqual([]);
+  });
 });
