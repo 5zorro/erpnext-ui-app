@@ -253,8 +253,26 @@
     /* DF-02 J: Rec'd by / Rec'd Date are the Item Receipt's facts — its wash on every row. */
     #items-body tr[data-wash-source] td.rec-col,
     #items-head-row th.rec-col { background-color: var(--wash-fulfill); }
+    /* Customer / Sales order(s) are read through the line's PO (5zorro 2026-10-11): the header wears
+       the order wash plain (it lives on the PO); the cells add the A/R desk hatch when the clerk
+       hatches A/R — Sales Order facts on an A/P page. Their text sits in a hatch-free box. */
+    #items-head-row th.so-col { background-color: var(--wash-order); }
+    #items-body tr[data-wash-source] td.so-cell {
+      --hatch-base: var(--wash-order);
+      --role-accent: var(--accent-order);
+      background-color: var(--wash-order);
+    }
+    html[data-pattern="ar"] #items-body tr[data-wash-source] td.so-cell,
+    html[data-pattern="both"] #items-body tr[data-wash-source] td.so-cell { background-image: var(--hatch-desk); }
     #items-body tr[data-wash-source] td input,
     #items-body tr[data-wash-source] td .ro { background-color: transparent; }
+    #items-body tr[data-wash-source] td.so-cell .hatch-clear { background-color: var(--hatch-base); }
+    .order-peek {
+      display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 1px 5px;
+      border: 1px solid color-mix(in srgb, var(--accent-order) 45%, #cbd5e1); border-radius: 5px;
+      background: #fff; color: #1e3a5f; font-size: 10.5px; line-height: 1.3; cursor: pointer; vertical-align: middle;
+    }
+    .order-peek:hover, .order-peek:focus-visible { background: #eaf4ff; }
     #items-body tr[data-wash-source] td.num .amount-back-in { background-color: transparent; }
 
     .amount-due-row {

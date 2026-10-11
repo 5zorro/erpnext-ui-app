@@ -63,3 +63,29 @@ export function linkedSourcePeekKindLabel(kind) {
   if (k === "payment-entry" || k === "pe") return "Payment";
   return "source document";
 }
+
+/**
+ * The peeks a Bill line's Sales order(s) cell offers (5zorro 2026-10-11): each Sales Order, then the
+ * Purchase Order the link lives on — a sourced PO, or the just-in-time bridge PO "Assign…" made.
+ * The Bill line has no Sales Order field of its own, so changing the link is a PO errand (draft:
+ * edit it; submitted: void & amend), which is why the PO sits beside the Sales Order.
+ * @param {{ salesOrders?: string[], bridgePo?: string }|null|undefined} alloc
+ * @param {{ purchase_order?: string }|null|undefined} item
+ * @returns {{ kind: "sales-order"|"purchase-order", name: string, route: string }[]}
+ */
+export function billLineOrderPeeks(alloc, item) {
+  const a = alloc || {};
+  /** @type {{ kind: "sales-order"|"purchase-order", name: string, route: string }[]} */
+  const out = [];
+  const seen = new Set();
+  for (const so of Array.isArray(a.salesOrders) ? a.salesOrders : []) {
+    const name = String(so || "").trim();
+    if (!name || seen.has(`so:${name}`)) continue;
+    seen.add(`so:${name}`);
+    out.push({ kind: "sales-order", name, route: /** @type {string} */ (linkedSourcePeekRoute("sales-order", name)) });
+  }
+  const po = String((item && item.purchase_order) || a.bridgePo || "").trim();
+  if (po) out.push({ kind: "purchase-order", name: po, route: /** @type {string} */ (linkedSourcePeekRoute("purchase-order", po)) });
+  return out;
+}
+

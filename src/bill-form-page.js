@@ -21,7 +21,7 @@ import {
   linkedPurchaseOrdersForBill,
   linkedPurchaseReceiptsForBill,
 } from "../src/bill-map.js";
-import { ALLOC_SALES_ORDERS_FIELD } from "../src/bill-line-allocation.js";
+import { ALLOC_SALES_ORDERS_FIELD, ALLOC_CUSTOMER_FIELD } from "../src/bill-line-allocation.js";
 import {
   buildBillItemRowModels,
   sortBillItemRowModels,
@@ -54,6 +54,7 @@ import {
   linkedSourcePeekRoute,
   canSoftPeekLinkedSourceRoute,
   linkedSourcePeekKindLabel,
+  billLineOrderPeeks,
 } from "../src/source-doc-peek.js";
 import {
   isCreditMemoBill,
@@ -2268,7 +2269,10 @@ export async function bootBillFormPage(api) {
           : `Sort by ${h.label} · Ctrl+click to add a secondary sort`;
         // Rec'd by / Rec'd Date describe the Item Receipt, so they wear its wash (5zorro DF-02).
         const rec = h.sortKey === "receivedBy" || h.sortKey === "receivedOn" ? " rec-col" : "";
-        return `<th class="sortable${st.active ? " sorted" : ""}${rec}" data-sort="${h.sortKey}" title="${tip}">${h.label}${arrow}</th>`;
+        // Customer / Sales order(s) live on the line's PO (5zorro 2026-10-11): the header wears the
+        // order wash plain; the cells add the A/R hatch (bill-dashboard.css .so-cell).
+        const so = h.sortKey === "customer" || h.sortKey === "salesOrders" ? " so-col" : "";
+        return `<th class="sortable${st.active ? " sorted" : ""}${rec}${so}" data-sort="${h.sortKey}" title="${tip}">${h.label}${arrow}</th>`;
       }).join("") + "<th></th>";
     if (!itemsHeadWired) {
       itemsHeadWired = true;
@@ -2316,7 +2320,18 @@ export async function bootBillFormPage(api) {
             const assignBtn = canEdit
               ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
               : "";
-            return `<td class="alloc-so"><span class="ro alloc-so-text">${escapeHtml(val) || "—"}</span>${assignBtn}</td>`;
+            // Peek the Sales Order, and the PO the link lives on (change it there, or void & amend).
+            const peeks = billLineOrderPeeks(model.alloc, model.item)
+              .map((p) => {
+                const label = linkedSourcePeekKindLabel(p.kind);
+                const tag = p.kind === "sales-order" ? "SO" : "PO";
+                return `<button type="button" class="order-peek" tabindex="-1" data-peek-route="${escapeHtml(p.route)}" data-peek-kind="${p.kind}" data-testid="bill-peek-${ri}-${tag.toLowerCase()}" title="Peek ${label} ${escapeHtml(p.name)} — Esc returns to this bill" aria-label="Peek ${label} ${escapeHtml(p.name)}">${uiIconHtml("eye", { size: 12 })}${tag}</button>`;
+              })
+              .join("");
+            return `<td class="alloc-so so-cell"><span class="ro alloc-so-text hatch-clear">${escapeHtml(val) || "—"}</span>${peeks}${assignBtn}</td>`;
+          }
+          if (col.field === ALLOC_CUSTOMER_FIELD) {
+            return `<td class="so-cell"><span class="ro hatch-clear">${escapeHtml(val) || "—"}</span></td>`;
           }
           if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
             const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
@@ -2732,6 +2747,14 @@ export async function bootBillFormPage(api) {
       btn.addEventListener("click", () => {
         if (!editable() || painting) return;
         openLineAllocationPicker(Number(btn.getAttribute("data-assign")));
+      });
+    });
+    // A peek works on a submitted bill too: it only looks (or fixes the linked PO).
+    el.items.querySelectorAll("button[data-peek-route]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        void requestLinkedSourcePeek(btn.getAttribute("data-peek-route") || "", btn.getAttribute("data-peek-kind") || "");
       });
     });
   }

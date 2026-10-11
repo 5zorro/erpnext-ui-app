@@ -196,3 +196,52 @@ test.describe("scaffold: create Customer from the Sales Order's Customer box (DF
   });
 });
 
+// 5zorro 2026-10-11: the Bill's Customer / Sales order(s) columns — PO wash on the header, Sales
+// Order wash (+ A/R hatch) on the cells, and a peek for the PO the link lives on. Never saves: the
+// line's PO is set in the hidden form only (this site has no POs), so the peek lands on "not found".
+test.describe("scaffold: Bill line order peeks", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("Customer / Sales order(s): washes, and the PO peek opens the PO", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await inErp(app, `(() => { cur_frm.doc.items[0].purchase_order = "PUR-ORD-E2E-NONE"; return true; })()`);
+    const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { ok: true, doc: s.doc, amountDue: s.amountDue }; })()`);
+    await app.evaluate(({ webContents }, sn) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", sn);
+    }, snap);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-peek-0-po"]')`), { timeout: 15_000 }).toBe(true);
+    const look = await inDoc(
+      app,
+      `(() => {
+        const th = document.querySelector('#items-head-row th.so-col');
+        const td = document.querySelector('[data-testid="bill-peek-0-po"]').closest("td");
+        const css = (e) => getComputedStyle(e);
+        return { pattern: document.documentElement.dataset.pattern || "", th: css(th).backgroundColor, td: css(td).backgroundColor,
+          tdImage: css(td).backgroundImage, headers: document.querySelectorAll('#items-head-row th.so-col').length, so: !!document.querySelector('[data-testid="bill-peek-0-so"]') };
+      })()`,
+    );
+    expect(look.headers).toBe(2);
+    expect(look.th).toBe(look.td); // both the order wash
+    expect(look.so).toBe(false); // no Sales Order on this line
+    if (look.pattern === "ar" || look.pattern === "both") expect(look.tdImage).toMatch(/repeating-linear-gradient/);
+    else expect(look.tdImage).toBe("none");
+    await inDoc(app, `document.querySelector('[data-testid="bill-peek-0-po"]').click(); true`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/purchase-order/PUR-ORD-E2E-NONE");
+    // Not asserted yet: Esc back to the bill. A peek into a document with its own Doc skin records
+    // no way back (`peek-none … (not a record)`) — the known gap in plan 09-26, 2026-10-11.
+  });
+});
+

@@ -1015,7 +1015,17 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   2026-10-11; on ACC-PINV-2026-00010 the JIT paint logged `given=1 … blank=0`). Open: the Bill's
   Customer / Sales order(s) columns — a Bill line has no Sales Order field; both are read through
   its PO line (`sales_order`, editable on a draft PO, locked once submitted → void-and-amend the PO).
-  5zorro's idea: headers in the PO wash, cells in the Sales Order wash, a peek per cell.
+  Built 2026-10-11 (5zorro: peek the Sales Order *and the PO*, to fix or void & amend the PO): headers
+  plain order wash, cells order wash + the A/R desk hatch (when the clerk hatches A/R), text in a
+  hatch-free box; the Sales order(s) cell has 👁 SO and 👁 PO peeks (`billLineOrderPeeks`).
+- **🔴 Gap found 2026-10-11 — a peek into a Doc-skinned document has no way back.** The doors table
+  below marks *Linked source ↗ (PO / receipt / bill / Sales Order)* as a peek where Esc returns, but
+  `notePeekParentAndChild` only records a child when `isSoftPeekRoute` says `vanilla-always` (a
+  master with no Doc skin). A PO / Item Receipt / Sales Order opens in its own Doc skin, logs
+  `peek-none … (not a record)`, and Esc has nothing to return to — 5zorro came back from
+  MAT-PRE-2026-00002 through Recent (2026-10-11 06:03). Same for the new SO / PO peeks. Fix needs
+  a Doc → Doc errand (park the bill, Esc / "← Back to bill" on the child Doc page) — likely the
+  detour mechanism (`shell-detour.js`) widened to Doc pages; not started, read back first.
 - **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
