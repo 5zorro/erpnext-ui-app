@@ -8,8 +8,12 @@ describe("peekReturnTarget", () => {
   it("remembers a line cell", () => {
     assert.deepEqual(peekReturnTarget(cell(2, "item_code"), "Item"), { doctype: "Item", row: 2, field: "item_code" });
   });
-  it("ignores a header field (no row) and missing input", () => {
-    assert.equal(peekReturnTarget({ dataset: { field: "supplier" } }, "Supplier"), null);
+  it("remembers a header field (no row) — DF-03 create Customer", () => {
+    assert.deepEqual(peekReturnTarget({ dataset: { field: "customer" } }, "Customer"), { doctype: "Customer", row: null, field: "customer" });
+  });
+  it("ignores a box with no field, a bad row, and missing input", () => {
+    assert.equal(peekReturnTarget({ dataset: {} }, "Customer"), null);
+    assert.equal(peekReturnTarget({ dataset: { row: "-1", field: "item_code" } }, "Item"), null);
     assert.equal(peekReturnTarget(null, "Item"), null);
   });
 });
@@ -30,5 +34,15 @@ describe("peekReturnPlan (DF-02: Esc back from create Item)", () => {
   });
   it("nothing remembered → nothing to do", () => {
     assert.equal(peekReturnPlan(null, "/app/item/X"), null);
+  });
+});
+
+describe("peekReturnPlan (DF-03: Esc back from create Customer)", () => {
+  const t = peekReturnTarget({ dataset: { field: "customer" } }, "Customer");
+  it("saved Customer → fill the header field", () => {
+    assert.deepEqual(peekReturnPlan(t, "/app/customer/Acme%20Corp"), { row: null, field: "customer", fill: "Acme Corp" });
+  });
+  it("abandoned → focus only", () => {
+    assert.equal(peekReturnPlan(t, "/app/customer/new-customer-abcdefghij").fill, "");
   });
 });

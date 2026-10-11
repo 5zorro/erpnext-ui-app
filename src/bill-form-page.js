@@ -653,7 +653,8 @@ export async function bootBillFormPage(api) {
   async function comeBackFromPeek(leftFrom) {
     const plan = peekReturnPlan(peekReturn, leftFrom);
     peekReturn = null;
-    if (!plan) return;
+    // The Bill opens create peeks from line cells only (its Vendor box goes to Vendor add).
+    if (!plan || plan.row == null) return;
     if (plan.fill && api && editable()) {
       const res = await api.setItem(plan.row, plan.field, plan.fill);
       if (res && res.ok) {

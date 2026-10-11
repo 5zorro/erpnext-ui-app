@@ -13,6 +13,8 @@ export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
 export const LINK_ACTION_CREATE_PROJECT = "__doc_create_project__";
 /** Empty Item search → soft-peek Vanilla "new Item", item code prefilled with what was typed. */
 export const LINK_ACTION_CREATE_ITEM = "__doc_create_item__";
+/** Empty Customer search → soft-peek Vanilla "new Customer", name prefilled (DF-03). */
+export const LINK_ACTION_CREATE_CUSTOMER = "__doc_create_customer__";
 /** Soft-peek Vanilla Payment Terms Template form (shared Bill · PO). */
 export const LINK_ACTION_CREATE_PAYMENT_TERMS = "__doc_create_payment_terms__";
 export const PAYMENT_TERMS_TEMPLATE_DOCTYPE = "Payment Terms Template";
@@ -83,6 +85,15 @@ export function withEmptySearchActions(rows, doctype) {
       },
     ];
   }
+  if (doctype === "Customer") {
+    return [
+      {
+        value: LINK_ACTION_CREATE_CUSTOMER,
+        description: "No customers found — create Customer…",
+        action: "create_customer",
+      },
+    ];
+  }
   if (doctype === "Project") {
     return [
       {
@@ -139,6 +150,30 @@ export function isCreateItemLinkAction(optOrValue) {
 }
 
 /**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreateCustomerLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_CUSTOMER;
+  return optOrValue.value === LINK_ACTION_CREATE_CUSTOMER || optOrValue.action === "create_customer";
+}
+
+/**
+ * Vanilla "new Customer" route carrying what the clerk typed. Not `customer_name=`: that field is
+ * `no_copy`, and get_new_doc (create_new.js) skips no_copy route options. `name_field` is what
+ * Vanilla's own Link "Create a new Customer" passes — get_new_doc writes it into the title field
+ * (customer_name). The saved name follows Selling Settings (by Customer Name by default).
+ * @param {string|null|undefined} typed
+ * @returns {string}
+ */
+export function customerCreateRoute(typed) {
+  const name = String(typed ?? "").trim();
+  if (!name) return "/app/customer/new";
+  return `/app/customer/new?${new URLSearchParams({ name_field: name }).toString()}`;
+}
+
+/**
  * Vanilla "new Item" route carrying what the clerk typed. Frappe copies query parameters into
  * `frappe.route_options`, and `get_new_doc` (create_new.js) writes those onto the new document —
  * item_code is the Item's name field (`autoname: field:item_code`), item_name its title.
@@ -173,7 +208,8 @@ export function filterLinkOptions(options, query, opts = {}) {
       isCreateSupplierLinkAction(o) ||
       isCreatePaymentTermsLinkAction(o) ||
       isCreateProjectLinkAction(o) ||
-      isCreateItemLinkAction(o)
+      isCreateItemLinkAction(o) ||
+      isCreateCustomerLinkAction(o)
     ) {
       continue;
     }
@@ -196,6 +232,7 @@ export function linkOptionLabel(opt) {
   if (isCreatePaymentTermsLinkAction(opt)) return opt.description || "Create new Payment Terms…";
   if (isCreateProjectLinkAction(opt)) return opt.description || "Create Project…";
   if (isCreateItemLinkAction(opt)) return opt.description || "Create Item…";
+  if (isCreateCustomerLinkAction(opt)) return opt.description || "Create Customer…";
   let label = opt.description || opt.value;
   if (opt.description && opt.description !== opt.value) {
     label = `${opt.description} (${opt.value})`;
@@ -219,7 +256,8 @@ export function linkOptionClassNames(opt) {
     isCreateSupplierLinkAction(opt) ||
     isCreatePaymentTermsLinkAction(opt) ||
     isCreateProjectLinkAction(opt) ||
-    isCreateItemLinkAction(opt)
+    isCreateItemLinkAction(opt) ||
+    isCreateCustomerLinkAction(opt)
   ) {
     bits.push("link-action");
   }

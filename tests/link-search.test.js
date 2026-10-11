@@ -11,6 +11,9 @@ import {
   isCreatePaymentTermsLinkAction,
   isCreateItemLinkAction,
   itemCreateRoute,
+  isCreateCustomerLinkAction,
+  customerCreateRoute,
+  LINK_ACTION_CREATE_CUSTOMER,
   LINK_ACTION_CREATE_ITEM,
   LINK_ACTION_CREATE_SUPPLIER,
   LINK_ACTION_CREATE_PAYMENT_TERMS,
@@ -121,9 +124,33 @@ describe("withEmptySearchActions", () => {
     assert.match(linkOptionLabel(out[0]), /create Item/i);
   });
 
+  // 5zorro 2026-10-11, DF-03: a Sales Order on a blank site had no way to add its customer.
+  it("offers Create Customer when Customer search is empty", () => {
+    const out = withEmptySearchActions([], "Customer");
+    assert.equal(out.length, 1);
+    assert.equal(out[0].value, LINK_ACTION_CREATE_CUSTOMER);
+    assert.equal(isCreateCustomerLinkAction(out[0]), true);
+    assert.equal(isCreateItemLinkAction(out[0]), false);
+    assert.match(linkOptionClassNames(out[0]), /link-action/);
+    assert.match(linkOptionLabel(out[0]), /create Customer/i);
+    assert.deepEqual(filterLinkOptions(out, "cust"), []);
+  });
+
   it("never lets a create action through the client-side refine", () => {
     const out = filterLinkOptions(withEmptySearchActions([], "Item"), "item");
     assert.deepEqual(out, []);
+  });
+});
+
+describe("customerCreateRoute", () => {
+  // customer_name is no_copy, so Frappe ignores it as a route option; name_field fills the title.
+  it("carries what was typed as name_field, not customer_name", () => {
+    const route = customerCreateRoute(" Acme & Sons ");
+    assert.equal(route.split("?")[0], "/app/customer/new");
+    const q = new URLSearchParams(route.split("?")[1]);
+    assert.equal(q.get("name_field"), "Acme & Sons");
+    assert.equal(q.get("customer_name"), null);
+    assert.equal(customerCreateRoute(""), "/app/customer/new");
   });
 });
 

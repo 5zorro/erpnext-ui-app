@@ -1,5 +1,6 @@
 /**
- * DF-02 (2026-10-10), against the live sandbox. Never saves.
+ * DF-02 (2026-10-10), against the live sandbox. The Item cases never save; the Customer case
+ * (DF-03, 2026-10-11) saves one throwaway Customer and deletes it.
  *
  * Esc back from "create Item…" (picked in a Bill line's Item cell) must land the cursor in that
  * same cell. When the errand saved the Item, the cell holds it. Saving a real Item is a write, so
@@ -87,3 +88,74 @@ test.describe("scaffold: Esc back from create Item lands in the Item cell (DF-02
     await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ row: "0", field: "item_code", value: item });
   });
 });
+
+/** New Doc Sales Order, then "create Customer…" from its Customer box. */
+async function openCreateCustomerPeek(app, typed) {
+  await e2eCall(app, "showLauncher");
+  await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-so-new"]').click(); true`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+  await expect
+    .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), {
+      timeout: 40_000,
+    })
+    .toBe(true);
+  await inDoc(
+    app,
+    `(() => { const i = document.querySelector('input[data-field="customer"]'); i.focus(); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+  );
+  await expect
+    .poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_customer__"]')`), { timeout: 15_000 })
+    .toBe(true);
+  await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_customer__"]').click()`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+  await expect
+    .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Customer")`), { timeout: 30_000 })
+    .toBe(true);
+}
+
+test.describe("scaffold: create Customer from the Sales Order's Customer box (DF-03)", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("abandoned: the new Customer form had the typed name; cursor back in the Customer box", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openCreateCustomerPeek(app, "ZZ NO SUCH CUSTOMER E2E");
+    expect(await inErp(app, `cur_frm.doc.customer_name`)).toBe("ZZ NO SUCH CUSTOMER E2E");
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ field: "customer" });
+  });
+
+  test("saved: the Sales Order holds the new Customer (then it is deleted)", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const typed = `ZZ E2E CUSTOMER ${Date.now()}`;
+    await openCreateCustomerPeek(app, typed);
+    let saved = "";
+    try {
+      saved = await inErp(app, `(async () => { await cur_frm.save(); return cur_frm.doc.name; })()`);
+      expect(saved).toBeTruthy();
+      await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 10_000 }).toContain("/customer/");
+      await inErp(app, `window.erpUiShell.softPeekEsc()`);
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+      await expect
+        .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.customer)()`), { timeout: 20_000 })
+        .toBe(saved);
+      await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ field: "customer" });
+    } finally {
+      if (saved) {
+        // Drop the unsaved order's hold on it, then delete the Customer.
+        await inErp(app, `(async () => { if (window.cur_frm && cur_frm.doctype === "Sales Order") cur_frm.doc.customer = ""; })()`).catch(() => {});
+        await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Customer", name: ${JSON.stringify(saved)} } }).then(() => true)`);
+      }
+    }
+  });
+});
+

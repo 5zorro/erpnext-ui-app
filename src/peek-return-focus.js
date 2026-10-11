@@ -6,25 +6,28 @@
 import { routeInfo, isNewDocRecord } from "./route-info.js";
 
 /**
- * Where to come back to. Reads a line cell's own `data-row` / `data-field`; a header field
- * (no row) has nothing to come back to here.
+ * Where to come back to. Reads the box's own `data-row` / `data-field`: a line cell has both, a
+ * header field (the Sales Order's Customer — DF-03) has only `data-field`.
  * @param {{ dataset?: Record<string, string|undefined> }|null|undefined} input
  * @param {string} doctype what the peek creates, e.g. "Item"
- * @returns {{ doctype: string, row: number, field: string } | null}
+ * @returns {{ doctype: string, row: number|null, field: string } | null} row null = header field
  */
 export function peekReturnTarget(input, doctype) {
   const ds = (input && input.dataset) || {};
-  const row = Number(ds.row);
   const field = ds.field ? String(ds.field) : "";
-  if (!doctype || !field || !Number.isInteger(row) || row < 0) return null;
+  if (!doctype || !field) return null;
+  if (ds.row == null || ds.row === "") return { doctype: String(doctype), row: null, field };
+  const row = Number(ds.row);
+  if (!Number.isInteger(row) || row < 0) return null;
   return { doctype: String(doctype), row, field };
 }
 
 /**
- * @param {{ doctype: string, row: number, field: string } | null | undefined} target
+ * @param {{ doctype: string, row: number|null, field: string } | null | undefined} target
  * @param {string} leftFrom the ERP route the peek was on when the clerk came back
- * @returns {{ row: number, field: string, fill: string } | null} `fill` is the saved record's
- *   name, or "" when the errand was abandoned / ended somewhere else (focus only).
+ * @returns {{ row: number|null, field: string, fill: string } | null} `fill` is the saved record's
+ *   name, or "" when the errand was abandoned / ended somewhere else (focus only); row null =
+ *   a header field.
  */
 export function peekReturnPlan(target, leftFrom) {
   if (!target) return null;

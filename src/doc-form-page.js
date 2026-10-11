@@ -367,8 +367,24 @@ let peekReturn = null;
 /** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
 async function comeBackFromPeek(leftFrom) {
   const plan = peekReturnPlan(peekReturn, leftFrom);
+  const what = (peekReturn && peekReturn.doctype) || "";
   peekReturn = null;
   if (!plan) return;
+  if (plan.row == null) {
+    // A header field — the Sales Order's Customer (DF-03).
+    if (plan.fill && api && editable()) {
+      const res = await api.setHeader(plan.field, plan.fill);
+      if (res && res.ok && !res.skipped) {
+        noteUserEdit();
+        await refresh();
+        setStatus(`New ${what} ${plan.fill} is set.`);
+      } else if (!res || !res.ok) {
+        setStatus((res && res.reason) || `Could not set ${plan.fill}.`, "warn");
+      }
+    }
+    focusHeaderField(plan.field);
+    return;
+  }
   if (plan.fill && api && editable()) {
     const res = await api.setItem(plan.row, plan.field, plan.fill);
     if (res && res.ok) {
@@ -2617,6 +2633,16 @@ function paint(doc, snapScratch, opts = {}) {
         inp.placeholder = "MM/DD/YYYY";
         if (meta.validationHint) inp.title = meta.validationHint;
       }
+      continue;
+    }
+    if (
+      meta.linkDoctype &&
+      inp === document.activeElement &&
+      String(val) === String(inp.dataset.linkCommitted ?? "") &&
+      inp.value !== String(val)
+    ) {
+      // The clerk is typing a search here, and the repaint brings no new value: keep the typing
+      // (DF-03 — a new Sales Order's settling repaint wiped a half-typed customer name).
       continue;
     }
     if (meta.type === "date") {

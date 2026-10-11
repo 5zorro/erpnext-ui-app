@@ -11,6 +11,8 @@ import {
   isCreateProjectLinkAction,
   isCreateItemLinkAction,
   itemCreateRoute,
+  isCreateCustomerLinkAction,
+  customerCreateRoute,
 } from "./link-search.js";
 import {
   initialLinkHighlightIndex,
@@ -111,7 +113,8 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       isCreateSupplierLinkAction(v) ||
       isCreatePaymentTermsLinkAction(v) ||
       isCreateProjectLinkAction(v) ||
-      isCreateItemLinkAction(v)
+      isCreateItemLinkAction(v) ||
+      isCreateCustomerLinkAction(v)
     ) {
       dd.hidden = true;
       hi = -1;
@@ -136,6 +139,18 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
           api.openPaymentTermsAdd();
         } else {
           setStatus("Payment Terms add API missing — restart the shell.", "err");
+        }
+        return;
+      }
+      if (isCreateCustomerLinkAction(v)) {
+        if (api && api.softPeekRoute) {
+          setStatus("Opening a new Customer in Vanilla (Esc returns here)…");
+          // Esc back lands in this box, holding the new Customer if it was saved (DF-03).
+          if (onCreatePeek) onCreatePeek(input, "Customer");
+          const res = await api.softPeekRoute(customerCreateRoute(typed));
+          if (res && res.ok === false) setStatus(res.reason || "Could not open a new Customer.", "err");
+        } else {
+          setStatus("Customer add API missing — restart the shell.", "err");
         }
         return;
       }
