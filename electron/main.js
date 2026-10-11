@@ -4780,6 +4780,9 @@ async function showDocForm(skinId, route, opts = {}) {
             doc: snap.doc,
             amountDue: snap.amountDue != null ? snap.amountDue : amountDueScratch,
             linkedPos: snap.linkedPos || [],
+            // The Rec'd by / Rec'd Date columns read these (DF-02: blank until Refresh without them).
+            linkedReceipts: snap.linkedReceipts || [],
+            enrichPending: snap.enrichPending,
             poLineMeta: snap.poLineMeta || {},
             lineAllocations: snap.lineAllocations || {},
             userEdited: !!dirtyState.userEdited,
@@ -5012,6 +5015,8 @@ async function showDocForm(skinId, route, opts = {}) {
           doc: snap.doc,
           amountDue: amountDueScratch,
           linkedPos: snap.linkedPos || [],
+          linkedReceipts: snap.linkedReceipts || [],
+          enrichPending: snap.enrichPending,
           poLineMeta: snap.poLineMeta || {},
           lineAllocations: snap.lineAllocations || {},
           userEdited: carriedEdits,
@@ -11318,8 +11323,16 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     billPoLineMetaByDoc[key] = meta;
     navDebug("jit-receipt-meta", `${doc.name} caps=${links.filter((l) => meta[l.rowIndex] && meta[l.rowIndex].maxBillableQty != null).length}/${links.length}`);
   }
-  if (failure) return { ok: false, made, doc, reason: failure, poLineMeta: getBillPoLineMeta() };
-  return { ok: true, made, doc, poLineMeta: getBillPoLineMeta() };
+  // Who/when now live on the receipts; the page's Rec'd columns read them from this list, and
+  // the list it holds predates these receipts (DF-02: blank until Refresh after a JIT Submit).
+  let linkedReceipts;
+  try {
+    linkedReceipts = doc ? await linkedReceiptsForBillDoc(doc) : undefined;
+  } catch (e) {
+    navDebug("jit-receipt-refs-fail", String((e && e.message) || e));
+  }
+  if (failure) return { ok: false, made, doc, reason: failure, poLineMeta: getBillPoLineMeta(), linkedReceipts };
+  return { ok: true, made, doc, poLineMeta: getBillPoLineMeta(), linkedReceipts };
 });
 
 /** DF-02 "Vendor tax template default ⓘ": the Default purchase template and any Tax Rule naming the vendor. */

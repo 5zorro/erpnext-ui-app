@@ -5,12 +5,13 @@
  * cleaned off the site (5zorro dogfoods that). What runs here: the Rec'd by / Rec'd Date editor
  * writes the Remarks block; the memo box hides it and keeps it; Submit with an unfilled line asks
  * and Cancel saves nothing; ERPNext accepts the receipt document the shell builds (inserted as a
- * draft, then deleted).
+ * draft, then deleted). And, read-only: a submitted bill whose lines came from just-in-time receipts
+ * shows Rec'd by / Rec'd Date as soon as it opens (DF-02 2026-10-11: blank until Refresh).
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 import { billCompareTotal } from "../src/bill-map.js";
-import { receiptDocFor } from "../src/jit-receipt.js";
+import { receiptDocFor, receivedByOf } from "../src/jit-receipt.js";
 
 /** @param {import('@playwright/test').ElectronApplication} app @param {string} js */
 const inErp = (app, js) => e2eCall(app, "execInView", "erp", js);
@@ -151,5 +152,41 @@ test.describe("scaffold: just-in-time receipts from Bill lines (DF-02 J)", () =>
       })()`,
     );
     expect(res).toMatchObject({ ok: true, posting_date: "2026-10-04", remarks: "Received by: E2E probe", qty: 2, rate: 10 });
+  });
+
+  test("a submitted bill shows its receipts' Rec'd by / Rec'd Date on open, without Refresh", async () => {
+    test.setTimeout(150_000);
+    const found = await inErp(
+      app,
+      `(async () => {
+        const prs = await frappe.db.get_list("Purchase Receipt", {
+          filters: [["docstatus", "=", 1], ["remarks", "like", "Received by:%"]], fields: ["name", "remarks", "posting_date"], limit: 20,
+        });
+        for (const pr of prs) {
+          const r = await frappe.call({ method: "frappe.client.get_list", args: {
+            doctype: "Purchase Invoice Item", parent: "Purchase Invoice",
+            filters: [["purchase_receipt", "=", pr.name], ["docstatus", "=", 1]], fields: ["parent", "idx"], limit_page_length: 1 } });
+          const row = (r.message || [])[0];
+          if (row) return { bill: row.parent, idx: row.idx, remarks: pr.remarks, on: pr.posting_date };
+        }
+        return null;
+      })()`,
+    );
+    test.skip(!found, "no submitted bill with a just-in-time receipt on this site (dogfood paper DF-26 makes one)");
+    // 5zorro's path: the bill in Simplified, then the Doc tab.
+    await e2eCall(app, "openErp", `/app/purchase-invoice/${found.bill}`);
+    await expect.poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doc.name === ${JSON.stringify(found.bill)})`), { timeout: 30_000 }).toBe(true);
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-simplified"]').click(); true`);
+    await expect.poll(async () => inErp(app, `!!window.__simplifiedSkin`), { timeout: 30_000 }).toBe(true);
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    const ri = found.idx - 1;
+    await expect
+      .poll(async () => inDoc(app, `(() => { const c = document.querySelector('[data-testid="bill-rec-${ri}-by"]'); return c ? c.textContent : ""; })()`), {
+        timeout: 40_000,
+      })
+      .toBe(receivedByOf({ remarks: found.remarks }));
+    const [y, m, d] = String(found.on).split("-");
+    expect(await inDoc(app, `document.querySelector('[data-testid="bill-rec-${ri}-on"]').textContent`)).toBe(`${m}/${d}/${y}`);
   });
 });

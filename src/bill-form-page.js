@@ -2093,6 +2093,28 @@ export async function bootBillFormPage(api) {
     return pendingFromBlock(doc, parseReceivedBlock(doc && doc.remarks)).pending;
   }
 
+  /** Last `bill-recd-source` breadcrumb, so a repaint with the same answer does not log again. */
+  let lastRecdSourceNote = "";
+
+  /**
+   * Breadcrumb for DF-02 "Rec'd by / Rec'd Date blank until Refresh": which paint left lines that
+   * point at a receipt with no receipt to read who/when from.
+   */
+  function noteRecdColumnSource(doc, opts) {
+    if (!api || typeof api.navDebug !== "function" || !doc) return;
+    const items = Array.isArray(doc.items) ? doc.items : [];
+    const fromReceipt = items.filter((r) => r && r.purchase_receipt);
+    if (!fromReceipt.length) return;
+    const known = new Set((lastLinkedReceipts || []).map((r) => String(r.name)));
+    const missing = fromReceipt.filter((r) => !known.has(String(r.purchase_receipt))).length;
+    const given = opts.linkedReceipts === undefined ? "kept" : `given=${Array.isArray(opts.linkedReceipts) ? opts.linkedReceipts.length : 0}`;
+    const note = `${doc.name} caller=${opts.caller || "-"} ${given} known=${known.size} lines=${fromReceipt.length} blank=${missing}`;
+    const key = `${doc.name}|${known.size}|${missing}`;
+    if (key === lastRecdSourceNote) return;
+    lastRecdSourceNote = key;
+    api.navDebug("bill-recd-source", note);
+  }
+
   /** Who/when per row index: the line's receipt, else what is pending. */
   function receivedRowsFor(doc) {
     const out = {};
@@ -4662,6 +4684,7 @@ export async function bootBillFormPage(api) {
     if (opts.linkedReceipts !== undefined) {
       lastLinkedReceipts = Array.isArray(opts.linkedReceipts) ? opts.linkedReceipts : [];
     }
+    noteRecdColumnSource(doc, opts);
     if (opts.enrichPending !== undefined) {
       lastEnrichPending =
         opts.enrichPending && typeof opts.enrichPending === "object" ? opts.enrichPending : null;
@@ -5193,7 +5216,13 @@ export async function bootBillFormPage(api) {
     setStatus(`Making ${p.groups.length} Item Receipt${p.groups.length === 1 ? "" : "s"}…`);
     const made = await api.makeJitReceipts(p.groups);
     // The new receipt lines' limits come back with it, so the over-billing check can pass.
-    if (made && made.doc) paint(made.doc, amountDue, made.poLineMeta ? { poLineMeta: made.poLineMeta } : {});
+    // …and the receipts' who/when, so the Rec'd columns keep showing once the block is trimmed.
+    if (made && made.doc) {
+      paint(made.doc, amountDue, {
+        ...(made.poLineMeta ? { poLineMeta: made.poLineMeta } : {}),
+        ...(Array.isArray(made.linkedReceipts) ? { linkedReceipts: made.linkedReceipts } : {}),
+      });
+    }
     if (!(made && made.ok)) {
       const done = made && Array.isArray(made.made) && made.made.length
         ? ` Made ${made.made.join(", ")}; their lines are linked.`
