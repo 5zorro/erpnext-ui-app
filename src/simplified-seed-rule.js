@@ -37,10 +37,12 @@ export function isSeedWritePath(fieldname) {
 
 /** "Today" — what ERPNext stamps on a posting date. */
 const TODAY = Object.freeze({ valueSource: "expr", expr: Object.freeze({ base: "today", offset: 0 }) });
+/** Edit Posting Date stays off: a Bill's posting date is a stamp (5zorro 2026-10-10). */
+const UNTICKED = Object.freeze({ valueSource: "literal", value: 0 });
 
 /**
  * @typedef {{ fieldname: string, fieldtype?: string, reqd?: number|boolean, hidden?: number|boolean, read_only?: number|boolean }} MetaField
- * @typedef {{ valueSource: "expr", expr: { base: string, offset: number } }} SeedValue
+ * @typedef {{ valueSource: "expr", expr: { base: string, offset: number } } | { valueSource: "literal", value: string|number }} SeedValue
  * @typedef {{
  *   surfaced: (fieldname: string) => boolean,
  *   quietClickable?: readonly string[],
@@ -97,7 +99,7 @@ export const SEED_RULE_CONFIG = Object.freeze({
     surfaced: (fn) =>
       isWritableBillHeaderField(fn) || fn === BILL_MEMO_FIELD || fn === BILL_TERMS_FIELD || fn === "bill_date" || fn === "due_date",
     quietClickable: BILL_QUESTION_FIELDS,
-    derived: Object.fromEntries(BILL_DERIVED_FIELDS.map((fn) => [fn, fn === "posting_date" ? TODAY : null])),
+    derived: Object.fromEntries(BILL_DERIVED_FIELDS.map((fn) => [fn, fn === "posting_date" ? TODAY : UNTICKED])),
     keepNormal: {
       disable_rounded_total: ROUNDING,
       unrealized_profit_loss_account: "shown only for an internal supplier (depends_on is_internal_supplier)",

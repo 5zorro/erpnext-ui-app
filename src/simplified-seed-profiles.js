@@ -43,19 +43,19 @@
  *   these via its own picker/display paths (OI-136 address picker, tax rows); hiding the
  *   raw vanilla field would cut off the fallback path those pickers rely on.
  * - `bill_date` (vanilla label "Supplier Invoice Date") — Doc Bill's header field labeled
- *   "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes here directly, matching
- *   vanilla's own due-date-for-credit-terms basis (`accounts_controller.py`:
- *   `date = bill_date or posting_date`). Since 2026-09-26 the Doc Bill's Posting Date
- *   **follows** it (typed: `set_posting_time` ticked and `posting_date` = the Invoice date;
- *   cleared: back to today — bridge `setHeader` `postingDateFollows`). The Doc skin shows only
- *   the Supplier Invoice Date; Simplified cannot hide `posting_date` (required), so under the
- *   Doc-skin profile it stays visible and follows (assume-applier-payload.js
- *   `installPostingFollows`). `set_posting_time` is therefore L1, never locked.
+ *   "Invoice date" (`BILL_HEADER_FIELDS` in ./bill-map.js) writes here directly; it drives the
+ *   due date (`accounts_controller.py`: `date = bill_date or posting_date`). A Bill's **posting
+ *   date is a stamp** — the day it is saved or submitted (5zorro 2026-10-10, reversing
+ *   2026-09-26's "posts on its Invoice date"). The Doc skin does not show it and stamps it at
+ *   save (bridge `stampBillPostingDate`); Simplified cannot hide `posting_date` (required), so
+ *   under the Doc-skin profile it is quiet with "Today", Edit Posting Date is locked off
+ *   (`set_posting_time` = 0), and save stamps today (assume-applier-payload.js
+ *   `installPostingStamp`).
  *   History (gotchas.md G5): this list was derived by hand on 2026-09-03/04, when the Doc
- *   Bill's "Invoice date" wrote `posting_date` by mistake; it was never re-derived after the
- *   09-26 change, which left Edit Posting Date locked unticked here (DF-02). The guard test
- *   (tests/simplified-seed-profiles.test.js) now fails if a field the Doc Bill writes is
- *   seeded L2/L3.
+ *   Bill's "Invoice date" wrote `posting_date` by mistake, and was never re-derived after the
+ *   later posting-date changes. Since 2026-10-10 it is generated from a written rule
+ *   (src/simplified-seed-rule.js), and a guard test fails if it locks a field the clerk sets on
+ *   the Doc Bill.
  * - Any field already `hidden` or hidden-by-`Table`/`Button` fieldtype in the doctype
  *   JSON — nothing to quiet, it is not visible in Vanilla either.
  */
@@ -88,7 +88,7 @@ export function seedProfileFor(doctype) {
   for (const fn of Object.keys(seed)) {
     const v = values[fn];
     fields[fn] = v
-      ? { value: null, placement: seed[fn], valueSource: v.valueSource, expr: { ...v.expr } }
+      ? { value: v.value === undefined ? null : v.value, placement: seed[fn], valueSource: v.valueSource, expr: v.expr ? { ...v.expr } : null }
       : { value: null, placement: seed[fn], valueSource: "literal", expr: null };
   }
   return { doctype, fields, presets: [], source: "doc-skin" };

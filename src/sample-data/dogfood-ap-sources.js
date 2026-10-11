@@ -795,17 +795,17 @@ export const DOGFOOD_SOURCES = [
   {
     id: "DF-22",
     touches: ["doc-form"],
-    scenario: "A bill entered weeks after its invoice date must post on the invoice date, not the day it was typed",
+    scenario: "A bill entered weeks after its invoice date: it posts the day it is entered, and its due date still counts from the invoice date",
     kind: "vendor_invoice",
     template: "grid",
     dogfoodHint:
-      "Enter as printed on the Doc Bill. The Invoice date is 08/04/2026; you are typing it much later. The fix of 2026-09-26: a typed Invoice date is also the posting date (ERPNext's own ‘invoice date, else posting date’ rule). Before it, this bill posted to the ledger today.",
+      "Enter as printed on the Doc Bill, typing the vendor first and then the Invoice date 08/04/2026; you are typing it much later. A Bill's posting date is a stamp — the day it is saved or submitted (5zorro 2026-10-10, reversing 2026-09-26's ‘posts on its invoice date’). The Invoice date drives the due date. Before 2026-10-10 the Doc Bill counted terms from today here and ERPNext refused the save (‘Due Date cannot be after …’).",
     expect:
-      "In Vanilla the saved Bill shows Posting Date 08/04/2026 with Edit Posting Date ticked, and the Due Date is 30 days after 08/04 — not after today.",
+      "The Bill saves and submits. In Vanilla: Posting Date is the day you entered it, ‘Edit Posting Date and Time’ is not ticked, Supplier Invoice Date is 08/04/2026, and the Due Date is 09/03/2026 — 30 days after 08/04, not after today.",
     checks: [
-      "After typing the Invoice date — Open in Default-skin: Posting Date is 08/04/2026 and ‘Edit Posting Date and Time’ is ticked.",
-      "With Terms NET 30 DAYS, the Due date reads 09/03/2026 — 30 days from the invoice date.",
-      "Back on the Doc skin, clear the Invoice date: in Vanilla the Posting Date returns to today. Retype 08/04/2026 before saving.",
+      "After typing the Invoice date, the Due date reads 09/03/2026 (NET 30 DAYS from 08/04).",
+      "Change the vendor and pick it again: the Due date still reads 09/03/2026.",
+      "Open in Default-skin: Posting Date is today, Edit Posting Date unticked.",
       "Save, then Find Bills: the Bill date column shows Aug 4, 2026.",
     ],
     vendor: {

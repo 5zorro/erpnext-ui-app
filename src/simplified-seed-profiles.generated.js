@@ -124,7 +124,7 @@ export const GENERATED_SEED_PROFILES = Object.freeze({
   }),
 });
 
-/** @type {Readonly<Record<string, Readonly<Record<string, { valueSource: "expr", expr: { base: "today"|"som"|"eom", offset: number } }>>>>} */
+/** @type {Readonly<Record<string, Readonly<Record<string, { valueSource: "expr", expr: { base: "today"|"som"|"eom", offset: number } } | { valueSource: "literal", value: string|number }>>>>} */
 export const GENERATED_SEED_VALUES = Object.freeze({
   "Purchase Invoice": Object.freeze({
     "posting_date": Object.freeze({
@@ -133,6 +133,10 @@ export const GENERATED_SEED_VALUES = Object.freeze({
         "base": "today",
         "offset": 0,
       }),
+    }),
+    "set_posting_time": Object.freeze({
+      "valueSource": "literal",
+      "value": 0,
     }),
   }),
 });

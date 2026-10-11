@@ -64,7 +64,7 @@ export function normalizeProfile(raw, doctype) {
     })
     .filter(Boolean);
   // "doc-skin": the profile is the Doc skin's own defaults (SEED_PROFILES) — it then also follows
-  // the Doc skin's rules, e.g. a Bill's Posting Date follows its Supplier Invoice Date.
+  // the Doc skin's rules, e.g. a Bill's Posting Date is stamped with the day it is saved.
   const source = p.source === "doc-skin" ? "doc-skin" : undefined;
   return { doctype: doctype || p.doctype || null, fields, presets, ...(source ? { source } : {}) };
 }

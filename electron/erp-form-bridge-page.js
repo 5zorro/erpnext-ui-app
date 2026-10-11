@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 25;
+  var VERSION = 26;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -62,6 +62,28 @@
       if (frappe && frappe.throw_msg) push(frappe.throw_msg);
     } catch (eT) {}
     return parts;
+  }
+
+  /**
+   * A Bill's posting date is a stamp — the day it is saved or submitted (5zorro 2026-10-10). Untick
+   * Edit Posting Date and stamp today, so a draft left with it ticked (the 2026-09-26 rule, now
+   * reversed) cannot post on an old date. Direct assignment: no triggers fire mid-save.
+   */
+  function stampBillPostingDate(f) {
+    try {
+      if (!f || !f.doc || f.doc.doctype !== "Purchase Invoice") return null;
+      var today = frappe.datetime.get_today();
+      if (!Number(f.doc.set_posting_time) && f.doc.posting_date === today) return null;
+      var prev = f.doc.posting_date;
+      f.doc.set_posting_time = 0;
+      f.doc.posting_date = today;
+      try {
+        f.refresh_fields(["set_posting_time", "posting_date"]);
+      } catch (eRf) {}
+      return { from: prev, to: today };
+    } catch (e) {
+      return null;
+    }
   }
 
   /**
@@ -353,6 +375,8 @@
         clearSaveLocks();
         installSaveWatch();
 
+        // A Bill posts the day it is saved or submitted.
+        stampBillPostingDate(f);
         // Avoid hanging on ERPNext posting-date confirm (hidden under Doc skin).
         alignPostingDateLikeVanillaOk(f);
 
@@ -1026,6 +1050,40 @@
     return { ok: false, rows: 0, reason: "payment_schedule empty (timeout)" };
   }
 
+  /**
+   * The payment schedule the way ERPNext's own save builds it (accounts_controller
+   * set_payment_schedule): counted from `bill_date or posting_date`, passing that date AS the posting
+   * date. The form-side call (transaction.js payment_terms_template) passes the real posting date,
+   * and get_payment_term_details pulls any due date earlier than it up to the posting date — on a
+   * backdated invoice that gives "today", which the save then refuses ("Due Date cannot be after
+   * <invoice date + terms>"). Hidden while a Bill posted on its Invoice date; exposed when the
+   * posting date became a stamp (5zorro 2026-10-10).
+   * @returns {Promise<boolean>} true when a schedule was set
+   */
+  async function fetchScheduleLikeSave(f) {
+    try {
+      var d = f && f.doc;
+      if (!d || d.doctype !== "Purchase Invoice" || !d.bill_date || !d.payment_terms_template || d.is_return) return false;
+      var r = await frappe.call({
+        method: "erpnext.controllers.accounts_controller.get_payment_terms",
+        args: {
+          terms_template: d.payment_terms_template,
+          posting_date: d.bill_date,
+          grand_total: d.rounded_total || d.grand_total,
+          base_grand_total: d.base_rounded_total || d.base_grand_total,
+          bill_date: d.bill_date,
+        },
+      });
+      if (!r || !Array.isArray(r.message) || !r.message.length) return false;
+      var ret = f.set_value("payment_schedule", r.message);
+      if (ret && typeof ret.then === "function") await ret;
+      await afterAjaxQuiet(2000);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async function fetchPartyDueDate(f) {
     try {
       if (!f || !f.doc) return { due_date: null };
@@ -1170,6 +1228,7 @@
         var retTerms = f.trigger("payment_terms_template");
         if (retTerms && typeof retTerms.then === "function") await retTerms;
         var waitSched = await waitForPaymentScheduleRows(f, 12000);
+        if (await fetchScheduleLikeSave(f)) waitSched = { ok: true, rows: (f.doc.payment_schedule || []).length };
         meta.waited_ms = Date.now() - t0;
         meta.schedule_rows = waitSched.rows || 0;
         if (!waitSched.ok) meta.reason = waitSched.reason || "schedule timeout";
@@ -1186,6 +1245,7 @@
           var retRecalc = f.trigger("payment_terms_template");
           if (retRecalc && typeof retRecalc.then === "function") await retRecalc;
           var waitSched2 = await waitForPaymentScheduleRows(f, 12000);
+          if (await fetchScheduleLikeSave(f)) waitSched2 = { ok: true, rows: (f.doc.payment_schedule || []).length };
           meta.waited_ms = Date.now() - t0;
           meta.schedule_rows = waitSched2.rows || 0;
           if (!waitSched2.ok) meta.reason = waitSched2.reason || "schedule timeout";
@@ -1222,13 +1282,10 @@
   /**
    * @param {string} field
    * @param {unknown} value
-   * @param {{ keepTypedPostingDate?: boolean, postingDateFollows?: boolean }} [opts]
+   * @param {{ keepTypedPostingDate?: boolean }} [opts]
    *   keepTypedPostingDate: tick `set_posting_time` first, so ERPNext keeps a typed posting
    *   date instead of resetting it to today on save (Invoice, Item Receipt; what Vanilla's
    *   "Edit Posting Date and Time" box does).
-   *   postingDateFollows (Bill's Invoice date): the typed date is also the posting date — the
-   *   rule ERPNext itself uses for due dates, `bill_date or posting_date` (5zorro 2026-09-26:
-   *   "use typed date and if not exists, then posted date"). Clearing it goes back to today.
    */
   function setHeader(field, value, opts) {
     return (async function () {
@@ -1250,21 +1307,14 @@
           var tick = f.set_value("set_posting_time", 1);
           if (tick && typeof tick.then === "function") await tick;
         }
-        // Posting date first, then the typed date: the terms settle below keys off bill_date and
-        // must run last, or the posting_date script would recompute the due date after it.
-        if (opts && opts.postingDateFollows && hasPostingTime) {
-          var typed = value != null ? String(value).trim() : "";
-          var follow = typed
-            ? f.set_value({ set_posting_time: 1, posting_date: typed })
-            : f.set_value({ set_posting_time: 0, posting_date: frappe.datetime.get_today() });
-          if (follow && typeof follow.then === "function") await follow;
-          await afterAjaxQuiet();
-        }
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
         if (field === "payment_terms_template" || field === "bill_date") {
           paymentTermsSettle = await settlePaymentTermsAfterHeaderChange(f, field);
+        } else if (field === "supplier" && f.doc.bill_date && f.doc.payment_terms_template) {
+          // The vendor's terms arrive through the form-side call; re-count them from the Invoice date.
+          if (await fetchScheduleLikeSave(f)) syncHeaderDueDateFromSchedule(f);
         } else if (field === "due_date") {
           dueDateScheduleSync = syncScheduleFromHeaderDueDate(f, value);
         }

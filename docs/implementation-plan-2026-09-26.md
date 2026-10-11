@@ -972,10 +972,22 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     were received (negative-stock guess, the local notes file "Shipping before receiving").
   - Known gap, v1: the receipt carries no taxes; a bill tax with a Valuation category would not
     reach stock cost through these receipts.
+- **A Bill's posting date is a stamp (5zorro 2026-10-10 — reverses the 09-26 "posts on its Invoice
+  date").** It is the day the Bill is saved or submitted; the Supplier Invoice Date drives only the
+  due date. Doc Bill: typing the Invoice date no longer moves the posting date, and save stamps
+  today (bridge v26 `stampBillPostingDate`, which also corrects drafts left ticked). Simplified
+  (Doc-skin profile): Posting Date quiet with "Today", Edit Posting Date locked off, save stamps
+  today. Item Receipts keep their typed Date (DF-23) and just-in-time receipts their received date.
+  🔴 **Exposed by the reversal, fixed:** on a backdated invoice ERPNext's form-side terms call
+  (`get_payment_terms` with the real posting date) pulls a due date earlier than the posting date
+  up to it, and its save then refuses it ("Due Date cannot be after <invoice date + terms>"). The
+  bridge now fetches the schedule as ERPNext's save does, from `bill_date or posting_date`
+  (`fetchScheduleLikeSave`), after the Invoice date, the terms, or a vendor change. DF-22 rewritten.
+  Already-submitted ACC-PINV-2026-00006 posted on 07/22 under the old rule; left as is.
 - **Simplified's Doc-skin defaults (DF-01 Update Stock, DF-02 posting date; built 2026-10-10).** The
-  defaults were a hand-made list (09-03/04) that froze unticked checkboxes and never followed the
-  09-26 posting-date change. Now: an unticked box is never locked; under the Doc-skin profile the
-  Posting Date follows the Supplier Invoice Date and is quiet (stamped at submit). And the list is
+  defaults were a hand-made list (09-03/04) that froze unticked checkboxes. Now: an unticked box is
+  never locked unless the profile decides its value; under the Doc-skin profile the posting date is
+  stamped as above. And the list is
   **generated**: `npm run seeds:simplified` applies `src/simplified-seed-rule.js` to a snapshot of
   ERPNext's field lists (`tests/fixtures/simplified-seed-meta/`, refresh with `-- --refresh-meta`
   after an upgrade) and writes `src/simplified-seed-profiles.generated.js`; a drift test fails
@@ -989,7 +1001,7 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
 | DF-02 hang | Receive question behind the unsaved gate | fixed `a94bdca` — app test drives the exact path; 5zorro to re-run DF-02 |
 | DF-02 taxes | Tab commit, rate/amount rule, Remove all, no sideways scroll, ⓘ template default | built `05f57b3`, `e5b6a51` — app tests (4); the ⓘ's Tax Rule link not clicked through |
 | DF-02 J | Just-in-time receipts from Bill lines | built — editor, block, question and ERPNext's acceptance of the receipt proven; **a real Submit has not run** (it leaves submitted documents). 5zorro: paper DF-26 |
-| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
+| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. *(The Bill half — posting on the Invoice date — was reversed 2026-10-10: a Bill posts the day it is saved; see DF-02 follow-ups.)* IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
 | A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
 | 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |

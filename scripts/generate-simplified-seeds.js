@@ -72,7 +72,7 @@ export function renderGenerated({ profiles, values }, refs) {
 /** @type {Readonly<Record<string, Readonly<Record<string, "L1"|"L2">>>>} */
 export const GENERATED_SEED_PROFILES = ${freeze(profiles, "")};
 
-/** @type {Readonly<Record<string, Readonly<Record<string, { valueSource: "expr", expr: { base: "today"|"som"|"eom", offset: number } }>>>>} */
+/** @type {Readonly<Record<string, Readonly<Record<string, { valueSource: "expr", expr: { base: "today"|"som"|"eom", offset: number } } | { valueSource: "literal", value: string|number }>>>>} */
 export const GENERATED_SEED_VALUES = ${freeze(values, "")};
 `;
 }

@@ -27,8 +27,8 @@ const NEVER_SEEDED_PI = [
   "payment_terms_template",
   "remarks",
   "terms",
-  // bill_date ("Supplier Invoice Date") — the Doc Bill's "Invoice date" box writes it, and the
-  // Posting Date follows it. See simplified-seed-profiles.js header + gotchas.md G5.
+  // bill_date ("Supplier Invoice Date") — the Doc Bill's "Invoice date" box writes it; it drives
+  // the due date, and the posting date is stamped at save. See simplified-seed-profiles.js header.
   "bill_date",
 ];
 
@@ -124,10 +124,16 @@ test("seedProfileFor builds a normalizeProfile()-compatible raw profile", () => 
   assert.ok(assumed.length > 0);
   assert.ok(assumed.includes("cost_center"));
   for (const fn of assumed) {
-    assert.equal(normalized.fields[fn].value, null);
-    // Only SEED_VALUES fields carry a value — Posting Date's "Today" (DF-02).
-    if (fn === "posting_date") assert.equal(normalized.fields[fn].valueSource, "expr");
-    else assert.equal(normalized.fields[fn].valueSource, "literal");
+    // Only SEED_VALUES fields carry a value: Posting Date's "Today", and Edit Posting Date fixed
+    // off — a Bill's posting date is a stamp (5zorro 2026-10-10).
+    if (fn === "posting_date") {
+      assert.equal(normalized.fields[fn].valueSource, "expr");
+    } else if (fn === "set_posting_time") {
+      assert.deepEqual([normalized.fields[fn].valueSource, normalized.fields[fn].value], ["literal", 0]);
+    } else {
+      assert.equal(normalized.fields[fn].value, null);
+      assert.equal(normalized.fields[fn].valueSource, "literal");
+    }
   }
 });
 

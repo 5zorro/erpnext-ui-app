@@ -194,9 +194,9 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
 }
 
 /**
- * Fields the Doc Bill works out instead of asking: its Posting Date follows the typed Invoice date
- * (bridge setHeader `postingDateFollows`) and is stamped at submit. The clerk never sets them, so
- * Simplified's Doc-skin defaults keep them quiet — unlike the fields the clerk does set.
+ * Fields the Doc Bill works out instead of asking: a Bill's posting date is a stamp — the day it is
+ * saved or submitted (5zorro 2026-10-10; the bridge's save stamps it), so Edit Posting Date stays
+ * off. The clerk never sets them, so Simplified's Doc-skin defaults keep them quiet and locked.
  */
 export const BILL_DERIVED_FIELDS = Object.freeze(["set_posting_time", "posting_date"]);
 

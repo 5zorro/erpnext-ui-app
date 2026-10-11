@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES, SEED_VALUES } from "./simplified-seed-profiles.js";
 
-const VERSION = 13;
+const VERSION = 14;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -303,7 +303,8 @@ export function buildSimplifiedPayload() {
     Object.keys(seed).forEach(function(fn) {
       var v = values[fn];
       fields[fn] = v
-        ? { value: null, placement: seed[fn], valueSource: v.valueSource, expr: { base: v.expr.base, offset: v.expr.offset } }
+        ? { value: v.value === undefined ? null : v.value, placement: seed[fn], valueSource: v.valueSource,
+            expr: v.expr ? { base: v.expr.base, offset: v.expr.offset } : null }
         : { value: null, placement: seed[fn], valueSource: "literal", expr: null };
     });
     return { doctype: doctype, fields: fields, presets: [], source: "doc-skin" };
@@ -539,25 +540,22 @@ export function buildSimplifiedPayload() {
       : { hidden: 0, read_only: 0, description: "" };
   }
 
-  /* Doc-skin rule (5zorro DF-02): the Doc Bill shows only the Supplier Invoice Date, and the
-     Posting Date follows it — typed: Edit Posting Date ticked and Posting Date = that date;
-     cleared: back to today. Same rule as the Doc Bill's bridge (setHeader postingDateFollows).
-     Simplified cannot hide Posting Date (ERPNext requires it), so here it stays visible and
-     follows. Only while the Doc-skin assumptions are the active profile. */
-  var postingFollowsInstalled = false;
-  function installPostingFollows() {
-    if (postingFollowsInstalled || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
-    postingFollowsInstalled = true;
-    frappe.ui.form.on("Purchase Invoice", "bill_date", function(frm) {
-      if (destroyed || !frm || frm.doc.docstatus !== 0) return;
+  /* Doc-skin rule (5zorro 2026-10-10): a Bill's posting date is a stamp — the day it is saved or
+     submitted. The Doc Bill shows only the Supplier Invoice Date (it drives the due date);
+     Simplified cannot hide Posting Date (ERPNext requires it), so under the Doc-skin profile it is
+     quiet, Edit Posting Date is locked unticked, and save stamps today. */
+  var postingStampInstalled = false;
+  function installPostingStamp() {
+    if (postingStampInstalled || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
+    postingStampInstalled = true;
+    frappe.ui.form.on("Purchase Invoice", "validate", function(frm) {
+      if (destroyed || !frm || !frm.doc || frm.doc.docstatus !== 0) return;
       if (load("Purchase Invoice").source !== "doc-skin") return;
-      var typed = frm.doc.bill_date ? String(frm.doc.bill_date) : "";
       var today = frappe.datetime.get_today();
-      if (typed && (frm.doc.posting_date !== typed || !frm.doc.set_posting_time)) {
-        frm.set_value({ set_posting_time: 1, posting_date: typed });
-      } else if (!typed && frm.doc.set_posting_time) {
-        frm.set_value({ set_posting_time: 0, posting_date: today });
-      }
+      if (!Number(frm.doc.set_posting_time) && frm.doc.posting_date === today) return;
+      /* Direct: no triggers mid-save. */
+      frm.doc.set_posting_time = 0; frm.doc.posting_date = today;
+      try { frm.refresh_fields(["set_posting_time", "posting_date"]); } catch(e) {}
     });
   }
 
@@ -566,12 +564,8 @@ export function buildSimplifiedPayload() {
     if (!frm || !frm.doctype) return;
     installScrollNav(frm);
     var profile = load(frm.doctype);
-    if (frm.doctype === "Purchase Invoice" && profile.source === "doc-skin") {
-      installPostingFollows();
-      try {
-        frm.set_df_property("posting_date", "description", "Follows the Supplier Invoice Date (Doc-skin assumptions).");
-      } catch(e) {}
-    }
+    var docSkinBill = frm.doctype === "Purchase Invoice" && profile.source === "doc-skin";
+    if (docSkinBill) installPostingStamp();
     var check = core.checkProfile(profile, frm.meta ? frm.meta.fields : []);
     if (!check.ok && window.frappe && frappe.show_alert) {
       frappe.show_alert({
@@ -608,7 +602,11 @@ export function buildSimplifiedPayload() {
            seeded L1/L2 field with no literal value (the common case here) would silently
            vanish instead of showing quiet-but-visible. Skip the lock rather than the field. */
         var ftype = frm.fields_dict && frm.fields_dict[fn] && frm.fields_dict[fn].df ? frm.fields_dict[fn].df.fieldtype : "";
-        if (core.shouldLockAssumed(ftype, frm.doc ? frm.doc[fn] : null)) frm.set_df_property(fn, "read_only", 1);
+        /* A value the profile decides (e.g. Edit Posting Date = 0 under the Doc-skin rule) locks the
+           field even when it reads as "not answered"; otherwise an unticked box stays clickable. */
+        var asm = profile.fields[fn];
+        var decided = !!asm && asm.valueSource === "literal" && asm.value !== null && asm.value !== undefined && asm.value !== "";
+        if (decided || core.shouldLockAssumed(ftype, frm.doc ? frm.doc[fn] : null)) frm.set_df_property(fn, "read_only", 1);
         frm.set_df_property(fn, "description", "Set as a general assumption — change it in ⚙ Assumptions.");
         if (pl === "L2") deemph(frm, fn, true);
         if (pl === "L1") prefillMark(frm, fn, true);
@@ -616,6 +614,12 @@ export function buildSimplifiedPayload() {
       } catch(e) {}
     });
 
+    /* After the loop, which gives every assumed field the generic note. */
+    if (docSkinBill) {
+      try {
+        frm.set_df_property("posting_date", "description", "Stamped with the day you save (Doc-skin assumptions). The Supplier Invoice Date drives the due date.");
+      } catch(e) {}
+    }
     if (frm.refresh_fields) { try { frm.refresh_fields(); } catch(e) {} }
     /* Keep assumed-default forms clean (don't mark dirty just from applying defaults). */
     if (wasClean && frm.doc) {
@@ -928,7 +932,7 @@ export function buildSimplifiedPayload() {
 
   /* ---- DF-01 R: say what to do after ERPNext's "Expense Head Changed" ----
      ERPNext raises it on a bill whose stock lines have no receipt (purchase_invoice.py
-     set_expense_account). By then a submitted bill can no longer receive the goods; the note says
+     set_expense_account) — and also on one that receives with Update Stock, skipped below. By then a submitted bill can no longer receive the goods; the note says
      how to next time, and where the site-wide default lives. Watches for the dialog, adds one
      paragraph, never touches the form. */
   var expenseHeadObserver = null;
@@ -939,6 +943,11 @@ export function buildSimplifiedPayload() {
       var modal = t.closest(".modal");
       var body = modal && modal.querySelector(".modal-body");
       if (!body || body.querySelector(".ss-receive-note")) return;
+      /* ERPNext shows this dialog both ways: Update Stock off (cost parked in Stock Received But Not
+         Billed) and on (cost moved to the warehouse's Stock In Hand — the goods were received).
+         The hint is for the first only (5zorro 2026-10-10: it told him to tick a box he had ticked). */
+      var frm = window.cur_frm;
+      if (frm && frm.doc && Number(frm.doc.update_stock)) return;
       var p = document.createElement("div");
       p.className = "ss-receive-note";
       p.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:12px;color:#475569;";
