@@ -122,6 +122,18 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-tax-amount", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-add-tax", kind: "button", modeSwitch: "none" },
   {
+    id: "bill-remove-all-tax",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "DF-02: clears every tax row and the template; stays removed until save (mouse only)",
+  },
+  {
+    id: "bill-tax-default",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "DF-02 ⓘ: why these taxes (Default template / vendor Tax Rule) and how to change them",
+  },
+  {
     id: "bill-open-landed-cost",
     kind: "button",
     modeSwitch: "none",

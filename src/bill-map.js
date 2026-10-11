@@ -747,6 +747,8 @@ export function isWritableBillHeaderField(field) {
     // DF-01 R: "receive with this bill" — ERPNext's Update Stock and the warehouse it receives into.
     field === "update_stock" ||
     field === "set_warehouse" ||
+    // DF-02: Remove all taxes clears the template too, or ERPNext refills the rows from it.
+    field === "taxes_and_charges" ||
     field === "mode_of_payment" ||
     field === "cash_bank_account" ||
     field === "paid_amount" ||

@@ -11198,6 +11198,30 @@ ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
   return { ...base, askAtSave: billReceivePrefs.askAtSave };
 });
 
+/** DF-02 "Vendor tax template default ⓘ": the Default purchase template and any Tax Rule naming the vendor. */
+ipcMain.handle("tax-default-facts", async (_e, supplier) => {
+  const raw = await erpEval(`(async () => {
+    try {
+      var d = await frappe.call({ method: "frappe.client.get_list", args: {
+        doctype: "Purchase Taxes and Charges Template", filters: { is_default: 1, disabled: 0 },
+        fields: ["name"], limit_page_length: 1 } });
+      var sup = ${JSON.stringify(String(supplier || ""))};
+      var rule = null;
+      if (sup) {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Tax Rule", filters: { tax_type: "Purchase", supplier: sup },
+          fields: ["name", "purchase_tax_template"], order_by: "priority desc", limit_page_length: 1 } });
+        var row = r && r.message && r.message[0];
+        if (row) rule = { name: row.name, template: row.purchase_tax_template || "" };
+      }
+      return { ok: true, defaultTemplate: (d && d.message && d.message[0] && d.message[0].name) || "", vendorRule: rule };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read tax defaults." };
+});
+
 ipcMain.handle("set-bill-receive-ask", async (_e, on) => {
   billReceivePrefs = mergeReceiveAskPrefs({ askAtSave: on !== false });
   try {

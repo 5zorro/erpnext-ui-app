@@ -249,10 +249,16 @@
             <div class="line-tabs line-tabs-static" role="presentation">
               <span class="line-tab active" aria-current="page">Taxes and Charges</span>
               <div class="line-tabs-tools">
+                <button type="button" class="linkish" id="btn-tax-default" data-testid="bill-tax-default" tabindex="-1"
+                  title="Why these taxes, and how to change them">Vendor tax template default</button>
                 <button type="button" class="linkish" id="btn-landed-cost" data-testid="bill-open-landed-cost" tabindex="-1"
                   title="Open Vanilla Landed Cost Voucher (Qty / Amount / Manual distribute)">Landed Cost Voucher…</button>
               </div>
             </div>
+            <div class="tax-default-note" id="tax-default-note" data-testid="bill-tax-default-note" hidden></div>
+            <!-- Inner panel like the items table: laid out against the section's own padding the table
+                 came out 28px too wide and scrolled sideways (DF-02). -->
+            <div class="line-panel tax-panel" data-testid="bill-tax-panel">
             <table class="taxes-tbl">
               <colgroup>
                 <col class="c-line"><col class="c-acct"><col class="c-desc">
@@ -268,7 +274,7 @@
                   <th class="sortable num" data-tax-sort="rate" title="Sort by Rate">Rate %</th>
                   <th class="sortable num" data-tax-sort="tax_amount" title="Sort by Amount">Amount</th>
                   <th class="sortable" data-tax-sort="add_deduct_tax" title="Sort by Add/Deduct">Add/Deduct</th>
-                  <th></th>
+                  <th data-col-key="tax_actions"></th>
                 </tr>
               </thead>
               <tbody id="taxes-body" data-testid="bill-taxes"></tbody>
@@ -284,6 +290,7 @@
                 </tr>
               </tfoot>
             </table>
+            </div>
             <div class="line-actions" id="taxes-add" data-testid="bill-taxes-add">
               <div class="inline-add-fields">
                 <div class="inline-field inline-field--account">
@@ -296,6 +303,8 @@
                 </div>
               </div>
               <button type="button" id="btn-add-tax" data-testid="bill-add-tax">Add tax/charge</button>
+              <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="bill-remove-all-tax" tabindex="-1"
+                title="Remove every tax and charge row, and the template they came from. They stay removed until you save this document.">Remove all taxes/charges</button>
             </div>
           </section>
           <section class="bill-section bill-section-summary" data-testid="bill-summary-section">
@@ -460,12 +469,17 @@
             </section>
             <section class="bill-section bill-section-taxes" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
                 <span class="taxes-title">Taxes and Charges</span>
+                <button type="button" class="linkish" id="btn-tax-default" data-testid="doc-tax-default" tabindex="-1"
+                  title="Why these taxes, and how to change them">Vendor tax template default</button>
+                <div class="tax-default-note" id="tax-default-note" data-testid="doc-tax-default-note" hidden></div>
+                <div class="line-panel tax-panel" data-testid="doc-tax-panel">
                 <table class="taxes-table">
                   <thead>
                     <tr id="taxes-head-row"></tr>
                   </thead>
                   <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
                 </table>
+                </div>
                 <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
                   <div class="field">
                     <label for="f-tax-account">Account</label>
@@ -476,6 +490,8 @@
                     <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
                   </div>
                   <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+                  <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="doc-remove-all-tax" tabindex="-1"
+                    title="Remove every tax and charge row, and the template they came from. They stay removed until you save this document.">Remove all taxes/charges</button>
                 </div>
                 <div class="money-stack" data-testid="doc-money-stack">
                   <div class="ms-row">

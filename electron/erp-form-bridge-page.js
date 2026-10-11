@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 23;
+  var VERSION = 24;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1659,6 +1659,24 @@
     add_deduct_tax: true,
   };
 
+  /**
+   * DF-02: each item line keeps a copy of the tax rates (`item_tax_rate`) taken when it was added,
+   * and ERPNext computes a % row from that copy, not from the row. So a new Rate % showed the old
+   * amount until save, when the server rebuilds the copies (`taxes_and_totals.update_item_tax_map`
+   * → `get_item_tax_map`). Rebuild them here the same way: lines without an Item Tax Template get
+   * { account: rate } of every row not set by an item template. Lines with a template keep theirs.
+   */
+  function rebuildItemTaxMaps(f) {
+    var map = {};
+    (f.doc.taxes || []).forEach(function (t) {
+      if (!t.set_by_item_tax_template && t.account_head) map[t.account_head] = t.rate;
+    });
+    var json = JSON.stringify(map);
+    (f.doc.items || []).forEach(function (it) {
+      if (!it.item_tax_template) it.item_tax_rate = json;
+    });
+  }
+
   function setTaxRow(rowIndex, field, value) {
     return (async function () {
       try {
@@ -1678,6 +1696,7 @@
         }
         await setValueAsync(row.doctype, row.name, field, value);
         await afterAjaxQuiet();
+        if (field === "rate" && row.charge_type !== "Actual") rebuildItemTaxMaps(f);
         await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };

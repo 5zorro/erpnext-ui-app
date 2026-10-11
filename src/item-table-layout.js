@@ -423,6 +423,8 @@ const COL_RULES = Object.freeze({
   rate: { fixedPx: 88, minPx: 70 },
   amount: { fixedPx: 96, minPx: 76 },
   __action: { fixedPx: 32, minPx: 28 },
+  // Taxes' actions hold Allocate and 🗑 (DF-02): measured from the buttons, so 🗑 is never clipped.
+  tax_actions: { minPx: 36, maxPx: 240 },
 });
 
 /** Text columns with no explicit rule (customer, project, sales orders, …). */

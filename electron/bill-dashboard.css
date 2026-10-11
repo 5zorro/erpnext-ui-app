@@ -185,7 +185,8 @@
     }
     #panel-items { overflow-x: auto; }
     #panel-items table { min-width: 760px; }
-    .bill-section-taxes { overflow-x: auto; }
+    /* The panel scrolls, never the section: the section's padding is outside the table's room. */
+    .tax-panel { overflow-x: auto; }
     .bill-section-taxes table { min-width: 520px; }
 
     /* Items table column widths */

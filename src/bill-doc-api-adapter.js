@@ -83,6 +83,8 @@ export function billApiFromErpDoc(api) {
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
     softPeekRoute: (route) => api.softPeekRoute(route || ""),
+    taxDefaultFacts: (supplier) =>
+      api.taxDefaultFacts ? api.taxDefaultFacts(supplier || "") : Promise.resolve({ ok: false }),
     billReceiveFacts: (codes, company) =>
       api.billReceiveFacts ? api.billReceiveFacts(codes || [], company || "") : Promise.resolve({ ok: false }),
     setBillReceiveAsk: (on) => (api.setBillReceiveAsk ? api.setBillReceiveAsk(on) : Promise.resolve(on)),

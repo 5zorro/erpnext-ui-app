@@ -41,12 +41,17 @@
         </section>
         <section class="bill-section bill-section-taxes" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
             <span class="taxes-title">Taxes and Charges</span>
+            <button type="button" class="linkish" id="btn-tax-default" data-testid="doc-tax-default" tabindex="-1"
+              title="Why these taxes, and how to change them">Vendor tax template default</button>
+            <div class="tax-default-note" id="tax-default-note" data-testid="doc-tax-default-note" hidden></div>
+            <div class="line-panel tax-panel" data-testid="doc-tax-panel">
             <table class="taxes-table">
               <thead>
                 <tr id="taxes-head-row"></tr>
               </thead>
               <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
             </table>
+            </div>
             <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
               <div class="field">
                 <label for="f-tax-account">Account</label>
@@ -57,6 +62,8 @@
                 <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
               </div>
               <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+              <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="doc-remove-all-tax" tabindex="-1"
+                title="Remove every tax and charge row, and the template they came from. They stay removed until you save this document.">Remove all taxes/charges</button>
             </div>
             <div class="money-stack" data-testid="doc-money-stack">
               <div class="ms-row">

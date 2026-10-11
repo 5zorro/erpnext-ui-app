@@ -153,17 +153,36 @@ function measureDemands(table, heads) {
   });
 
   for (const row of body ? [...body.querySelectorAll("tr")] : []) {
+    // A full-width row (a row's opened note, "No rows yet") is not one column's width.
+    if (row.hidden || [...row.children].some((c) => c.colSpan > 1)) continue;
     const cells = [...row.children];
     heads.forEach(({ key }, i) => {
       const cell = cells[i];
       if (!cell) return;
       const text = cell.querySelector(".cell-text");
       const input = cell.querySelector("input");
+      // A cell with buttons is as wide as its buttons (taxes: Allocate + 🗑) plus any words beside
+      // them (a Type cell's "Actual" + its ⓘ), not the buttons' own text.
+      const buttons = !text && !input ? [...cell.querySelectorAll("button")] : [];
+      if (buttons.length) {
+        const words = [...cell.childNodes]
+          .filter((n) => !(n.nodeType === 1 && /** @type {Element} */ (n).tagName === "BUTTON"))
+          .map((n) => n.textContent || "")
+          .join("")
+          .trim();
+        const px =
+          buttons.reduce((sum, b) => sum + b.offsetWidth, 0) +
+          4 * (buttons.length - 1) +
+          (words ? measureCell(words) + 4 : 0);
+        if (px > (demands[key] || 0)) demands[key] = px;
+        return;
+      }
+      // innerText, not textContent: a hidden note in the cell (a row marker's) is not its width.
       const value = text
         ? text.textContent || ""
         : input
           ? /** @type {HTMLInputElement} */ (input).value || ""
-          : cell.textContent || "";
+          : (cell.innerText != null ? cell.innerText : cell.textContent) || "";
       const px = measureCell(value.trim());
       if (px > (demands[key] || 0)) demands[key] = px;
     });
