@@ -1053,6 +1053,14 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
 
+- **Late focus moves (5zorro focus incident 2026-10-11):** a line edit's after-ERPNext move, and a
+  new bill's opening "focus Vendor" (retried to 500 ms), no longer override the clerk — both check
+  `user-move-guard.js` (Tab / Enter / Esc / arrows / clicks since the edit, or since the bill first
+  appeared) and log `focus-after-edit-skipped` / `focus-vendor-skipped`. A repaint that rebuilds the
+  line the clerk is in now puts them back in the same row and field (`restoreBillFocus`). **Known
+  gap:** under heavy lag (1.2 s on every ERPNext call) a new bill's loading can still drop focus to
+  nowhere before a repaint starts — not a steal; seen only in tests so far.
+
 ## Dogfood residuals
 
 | Family | Residual | State |

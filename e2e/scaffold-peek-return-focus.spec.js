@@ -381,5 +381,37 @@ test.describe("scaffold: a late post-edit move never overrides the clerk's Tab",
     await new Promise((r) => setTimeout(r, 3000));
     expect(await inDoc(app, ACTIVE)).toMatchObject({ row: "0", field: "qty" });
   });
+
+  // Same family: a new bill's opening "focus Vendor" retries for half a second while it loads; a clerk
+  // who has already clicked into a line keeps their place.
+  test("clicking into a line while a new bill loads is not pulled back to Vendor", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 1000));
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="qty"]')`), { timeout: 40_000, intervals: [50] }).toBe(true);
+    // Click into Qty like a clerk — again if the loading page moved under the pointer.
+    const clickQty = async () => {
+      const box = await inDoc(app, `(() => { const i = document.querySelector('input[data-row="0"][data-field="qty"]'); if (!i) return null; i.scrollIntoView({ block: "center" }); const r = i.getBoundingClientRect(); return { x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) }; })()`);
+      if (!box) return false;
+      await app.evaluate(({ webContents }, p) => {
+        const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+        w.focus();
+        w.sendInputEvent({ type: "mouseDown", x: p.x, y: p.y, button: "left", clickCount: 1 });
+        w.sendInputEvent({ type: "mouseUp", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      }, box);
+      await new Promise((r) => setTimeout(r, 150));
+      return ((await inDoc(app, ACTIVE)) || {}).field === "qty";
+    };
+    let inQty = false;
+    for (let k = 0; k < 10 && !inQty; k++) inQty = await clickQty();
+    expect(inQty).toBe(true);
+    await new Promise((r) => setTimeout(r, 4000));
+    // Never pulled to Vendor. (Known gap, 2026-10-11: under heavy lag a loading repaint can still
+    // drop focus to nowhere — not a steal; tracked in the plan.)
+    expect((await inDoc(app, ACTIVE)) || {}).not.toMatchObject({ field: "supplier" });
+  });
 });
 

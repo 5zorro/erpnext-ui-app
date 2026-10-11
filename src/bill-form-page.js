@@ -253,7 +253,7 @@ import { wireItemImportButton } from "../src/item-import-ui.js";
 import { formatDueDateSettleLog } from "../src/bill-payment-terms-settle.js";
 import { installFocusRing, logFocus } from "../src/focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "../src/user-move-guard.js";
-import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
+import { captureBillFocus, restoreBillFocus, isBillFormFocusTarget } from "../src/bill-focus-guard.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
@@ -653,6 +653,9 @@ export async function bootBillFormPage(api) {
   const userMoves = createUserMoveGuard();
   document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
   document.addEventListener("pointerdown", () => userMoves.bump(), true);
+  /** The clerk's move count when the bill on screen first appeared (focusVendorField). */
+  let docShownMoveMark = 0;
+  let docShownName = "";
 
   /** The line cell a "create …" peek was opened from (DF-02). */
   let peekReturn = null;
@@ -4419,7 +4422,22 @@ export async function bootBillFormPage(api) {
   }
   
   function focusVendorField() {
+    // A new bill starts in Vendor — unless the clerk is already somewhere on it (a slow load and
+    // they clicked into a line), and never a retry after they have moved (user-move-guard.js).
+    const already = document.activeElement;
+    if (already && already !== el.vendor && isBillFormFocusTarget(already)) {
+      logFocus("focus-vendor-skipped", "clerk already in a field");
+      return;
+    }
+    // Moves count from when this bill first appeared, not from this call: a repaint can drop the
+    // clerk's focus before the opening focus is asked for.
+    const moveMark = docShownMoveMark;
+    if (userMoves.movedSince(moveMark)) {
+      logFocus("focus-vendor-skipped", "clerk moved since the bill appeared");
+      return;
+    }
     const tryFocus = () => {
+      if (userMoves.movedSince(moveMark)) return;
       try {
         el.vendor.focus({ preventScroll: false });
         el.vendor.select();
@@ -4701,6 +4719,10 @@ export async function bootBillFormPage(api) {
   }
 
   function paint(doc, scratchDue, opts = {}) {
+    if (doc && doc.name && String(doc.name) !== docShownName) {
+      docShownName = String(doc.name);
+      docShownMoveMark = userMoves.mark();
+    }
     painting = true;
     const savedFocus = opts.preserveFocus ?? captureBillFocus();
     const paintCaller = opts.caller || (opts.focusVendor ? "focusVendor" : "");
