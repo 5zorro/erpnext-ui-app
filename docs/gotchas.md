@@ -665,3 +665,31 @@ of the row, and prove the check by putting the bug back (it then read 11.90px, m
 screenshot). An exemption in the check (braced bundles) hid a 1.5px error the same way — no
 exemptions. The bowtie build (plan 2026-10-03 stage 5) carries both rules.
 
+
+## G16 — A backdated invoice: ERPNext's own form and save disagree on the due date (2026-10-10)
+
+**Observed:** with the Bill's posting date a stamp (today) and a Supplier Invoice Date in July, the
+Doc Bill's save was refused: "Due Date cannot be after 08-27-2026". Vanilla saved the same bill.
+
+**Cause:** `get_payment_term_details` (accounts_controller.py) counts from `bill_date or
+posting_date`, then **pulls any due date earlier than the posting date up to it**. The form-side
+call (`transaction.js payment_terms_template`) passes the real posting date → due = today. The save
+path (`set_payment_schedule`) passes `bill_date or posting_date` *as* the posting date → no pull,
+and `validate_due_date_with_template` refuses anything after invoice date + terms. The Doc Bill
+re-ran the form-side call after the Invoice date; hidden while posting = invoice date.
+
+**Fix:** the bridge fetches the schedule the save's way (`fetchScheduleLikeSave`) after the Invoice
+date, the terms, or a vendor change. **Generalize:** when ERPNext computes the same thing on the
+client and the server, they can differ — prefer the server path's arguments.
+
+## G17 — A percentage tax row computes from a copy on each item line (2026-10-10)
+
+**Observed:** changing a tax row's Rate % from 6 to 5 left its Amount at 24.00 — in Vanilla too —
+until save.
+
+**Cause:** v16 stamps each item line's `item_tax_rate` with the taxes table's rates when the line is
+added (`get_item_tax_map`), and the client computes a % row from that copy. The server rebuilds
+the copies on every save (`taxes_and_totals.update_item_tax_map`); the client refresh
+(`update_item_tax_map`) only touches lines with an Item Tax Template. **Fix:** the bridge rebuilds
+the copies the server's way after a Rate % edit. Also: a typed Amount on a % row is thrown away
+unless the row is "Actual" — the bridge switches it, mirroring Vanilla's editable-field rule.

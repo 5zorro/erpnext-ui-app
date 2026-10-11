@@ -993,6 +993,12 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   after an upgrade) and writes `src/simplified-seed-profiles.generated.js`; a drift test fails
   until it is re-run. Kept Normal pending 5zorro's call: PI `project`, `subscription`, `title`.
 - **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
+- **Open — DF-01 notes not yet read back** (from the same notes file; the 10-01 round did not pick
+  them up): right-click menu on a Find row; Find pages hide cancelled documents by default (toggle
+  to show) and the three-step delete (bill → payment → payment ledger) wants a clearer path;
+  item-number dropdowns wider than their column; sequential check numbers per bank account with a
+  manual override (check what ERPNext offers first — Cheque Print Template work is parked).
+  Simplified's Update Stock tick (DF-01) is fixed above.
 
 ## Dogfood residuals
 
