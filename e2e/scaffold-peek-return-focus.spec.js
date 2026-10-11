@@ -384,7 +384,7 @@ test.describe("scaffold: a late post-edit move never overrides the clerk's Tab",
 
   // Same family: a new bill's opening "focus Vendor" retries for half a second while it loads; a clerk
   // who has already clicked into a line keeps their place.
-  test("clicking into a line while a new bill loads is not pulled back to Vendor", async () => {
+  test("clicking into a line while a new bill loads keeps the clerk there", async () => {
     test.setTimeout(150_000);
     app = await launchShell();
     await waitForE2eApi(app);
@@ -409,9 +409,9 @@ test.describe("scaffold: a late post-edit move never overrides the clerk's Tab",
     for (let k = 0; k < 10 && !inQty; k++) inQty = await clickQty();
     expect(inQty).toBe(true);
     await new Promise((r) => setTimeout(r, 4000));
-    // Never pulled to Vendor. (Known gap, 2026-10-11: under heavy lag a loading repaint can still
-    // drop focus to nowhere — not a steal; tracked in the plan.)
-    expect((await inDoc(app, ACTIVE)) || {}).not.toMatchObject({ field: "supplier" });
+    // Still in Qty: not pulled to Vendor, and not dropped by a loading repaint that skipped putting
+    // the clerk back because it expected Vendor to take focus.
+    expect(await inDoc(app, ACTIVE)).toMatchObject({ row: "0", field: "qty" });
   });
 });
 

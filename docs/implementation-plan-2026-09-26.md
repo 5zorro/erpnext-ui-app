@@ -1057,9 +1057,10 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   new bill's opening "focus Vendor" (retried to 500 ms), no longer override the clerk — both check
   `user-move-guard.js` (Tab / Enter / Esc / arrows / clicks since the edit, or since the bill first
   appeared) and log `focus-after-edit-skipped` / `focus-vendor-skipped`. A repaint that rebuilds the
-  line the clerk is in now puts them back in the same row and field (`restoreBillFocus`). **Known
-  gap:** under heavy lag (1.2 s on every ERPNext call) a new bill's loading can still drop focus to
-  nowhere before a repaint starts — not a steal; seen only in tests so far.
+  line the clerk is in now puts them back in the same row and field (`restoreBillFocus`). The
+  heavy-lag drop first left as a gap was the same family: a "start in Vendor" repaint skipped putting
+  the clerk back on the assumption Vendor would take focus; once the guard could decline, nobody did.
+  The repaint now restores whenever Vendor did not actually take focus. Proven under 1.2 s lag.
 
 ## Dogfood residuals
 

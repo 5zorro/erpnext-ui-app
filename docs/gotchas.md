@@ -708,4 +708,7 @@ or Tab sends them to the top of the table. And any focus move the shell makes *a
 ERPNext must first check the clerk has not moved (`user-move-guard.js`): a late move pulled a clerk
 from Qty back to Description (focus incident 2026-10-11). The new bill's opening Vendor focus had
 50/200/500 ms retries from a July debugging pass — removed; now one try and one after layout.
+A focus-skipping path must hand the clerk's place back: a repaint that skipped its restore because
+"Vendor will take focus" lost the clerk when Vendor declined. Skip the restore only when the other
+focus actually happened (`vendorFocused` in the Bill's `paint`).
 

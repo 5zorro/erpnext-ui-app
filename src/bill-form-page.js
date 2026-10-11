@@ -4427,14 +4427,14 @@ export async function bootBillFormPage(api) {
     const already = document.activeElement;
     if (already && already !== el.vendor && isBillFormFocusTarget(already)) {
       logFocus("focus-vendor-skipped", "clerk already in a field");
-      return;
+      return false;
     }
     // Moves count from when this bill first appeared, not from this call: a repaint can drop the
     // clerk's focus before the opening focus is asked for.
     const moveMark = docShownMoveMark;
     if (userMoves.movedSince(moveMark)) {
       logFocus("focus-vendor-skipped", "clerk moved since the bill appeared");
-      return;
+      return false;
     }
     const tryFocus = () => {
       if (userMoves.movedSince(moveMark)) return;
@@ -4453,6 +4453,7 @@ export async function bootBillFormPage(api) {
     // from 2026-07 — 5zorro 2026-10-11 — and the late ones could land after the clerk had moved.)
     tryFocus();
     requestAnimationFrame(tryFocus);
+    return true;
   }
   
   async function requestLinkedSourcePeek(route, kind) {
@@ -4724,6 +4725,9 @@ export async function bootBillFormPage(api) {
     }
     painting = true;
     const savedFocus = opts.preserveFocus ?? captureBillFocus();
+    // Set when the opening Vendor focus really happened; otherwise the clerk's place is put back
+    // (the guard can decline it — 5zorro 2026-10-11, focus lost during a slow load).
+    let vendorFocused = false;
     const paintCaller = opts.caller || (opts.focusVendor ? "focusVendor" : "");
     logFocus("paint-start", paintCaller);
     try {
@@ -4903,13 +4907,13 @@ export async function bootBillFormPage(api) {
     if (opts.focusVendor) {
       docCapsOn = true;
       if (docCapsUi) docCapsUi.syncCapsButton();
-      if (canEdit) focusVendorField();
+      if (canEdit) vendorFocused = focusVendorField();
     }
     paintedBillDocName = nextDocName;
     } finally {
       painting = false;
       logFocus("paint-end", lastDoc && lastDoc.name ? String(lastDoc.name) : "");
-      restoreBillFocus(savedFocus, { allowFocusVendor: !!opts.focusVendor });
+      restoreBillFocus(savedFocus, { allowFocusVendor: vendorFocused });
     }
   }
   
