@@ -97,6 +97,7 @@ import {
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
 import { mountLinkPicker } from "./link-picker-ui.js";
+import { peekReturnTarget, peekReturnPlan } from "./peek-return-focus.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
 import {
@@ -349,8 +350,37 @@ function commitGateEls() {
   };
 }
 
+/** The line cell a "create …" peek was opened from (DF-02). */
+let peekReturn = null;
+
+/** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
+async function comeBackFromPeek(leftFrom) {
+  const plan = peekReturnPlan(peekReturn, leftFrom);
+  peekReturn = null;
+  if (!plan) return;
+  if (plan.fill && api && editable()) {
+    const res = await api.setItem(plan.row, plan.field, plan.fill);
+    if (res && res.ok) {
+      noteUserEdit();
+      if (res.scratch) scratch = res.scratch;
+      paint(res.doc, res.scratch || scratch);
+      setStatus(`New Item ${plan.fill} is on line ${plan.row + 1}.`);
+    } else {
+      setStatus((res && res.reason) || `Could not put ${plan.fill} on line ${plan.row + 1}.`, "warn");
+    }
+  }
+  focusItemCell(plan.row, plan.field, { mode: plan.fill ? CELL_MODE_NAV : CELL_MODE_EDIT });
+}
+
 function linkPickerDeps() {
-  return { api, linkMounted, setStatus };
+  return {
+    api,
+    linkMounted,
+    setStatus,
+    onCreatePeek: (input, doctype) => {
+      peekReturn = peekReturnTarget(input, doctype);
+    },
+  };
 }
 
 function mountDocLinkPicker(input, doctype, onPicked, pickOpts) {
@@ -3098,6 +3128,7 @@ export async function bootDocFormPage(injectedApi) {
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
       });
+      if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
     });
   }
 

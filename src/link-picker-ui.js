@@ -73,7 +73,7 @@ function attrsToString(attrs) {
  */
 export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   const { refocusAfterPick = true } = pickOpts;
-  const { api, linkMounted, setStatus, onBeforePick, optionDataAttrs } = deps;
+  const { api, linkMounted, setStatus, onBeforePick, optionDataAttrs, onCreatePeek } = deps;
   if (!input || linkMounted.get(input)) return;
   linkMounted.set(input, true);
   const wrap = document.createElement("div");
@@ -142,6 +142,8 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       if (isCreateItemLinkAction(v)) {
         if (api && api.softPeekRoute) {
           setStatus("Opening a new Item in Vanilla (Esc returns here)…");
+          // Esc back lands in this cell, holding the new Item if it was saved (DF-02).
+          if (onCreatePeek) onCreatePeek(input, "Item");
           const res = await api.softPeekRoute(itemCreateRoute(typed));
           if (res && res.ok === false) setStatus(res.reason || "Could not open a new Item.", "err");
         } else {

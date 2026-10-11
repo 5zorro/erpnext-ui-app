@@ -155,6 +155,7 @@ import {
   receiveAskOffNote,
 } from "../src/bill-receive-ask.js";
 import { mountLinkPicker } from "../src/link-picker-ui.js";
+import { peekReturnTarget, peekReturnPlan } from "../src/peek-return-focus.js";
 import {
   fieldsSettlingFor,
   remainingHoldMs,
@@ -624,11 +625,35 @@ export async function bootBillFormPage(api) {
     };
   }
   
+  /** The line cell a "create …" peek was opened from (DF-02). */
+  let peekReturn = null;
+
+  /** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
+  async function comeBackFromPeek(leftFrom) {
+    const plan = peekReturnPlan(peekReturn, leftFrom);
+    peekReturn = null;
+    if (!plan) return;
+    if (plan.fill && api && editable()) {
+      const res = await api.setItem(plan.row, plan.field, plan.fill);
+      if (res && res.ok) {
+        noteUserEdit();
+        paint(res.doc, amountDue);
+        setStatus(`New Item ${plan.fill} is on line ${plan.row + 1}.`);
+      } else {
+        setStatus((res && res.reason) || `Could not put ${plan.fill} on line ${plan.row + 1}.`, "warn");
+      }
+    }
+    focusItemCell(plan.row, plan.field, { mode: plan.fill ? CELL_MODE_NAV : CELL_MODE_EDIT });
+  }
+
   function linkPickerDeps() {
     return {
       api,
       linkMounted,
       setStatus,
+      onCreatePeek: (input, doctype) => {
+        peekReturn = peekReturnTarget(input, doctype);
+      },
       onBeforePick: (value, doctype, btn) => {
         if (doctype !== "Account") return;
         if (btn && btn.getAttribute("data-company-mismatch") === "1") {
@@ -5381,8 +5406,13 @@ export async function bootBillFormPage(api) {
   }
   
   if (api && api.onSnapshot) {
-    api.onSnapshot((snap) =>
-      paint(snap && snap.doc, snap && snap.amountDue, {
+    api.onSnapshot((snap) => {
+      paintSnapshot(snap);
+      if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
+    });
+  }
+  function paintSnapshot(snap) {
+    paint(snap && snap.doc, snap && snap.amountDue, {
         caller: snap && snap.enrichProgress ? "enrich-progress" : "onSnapshot",
         reason: snap && snap.reason,
         focusVendor: !!(snap && snap.focusVendor),
@@ -5393,8 +5423,7 @@ export async function bootBillFormPage(api) {
         poLineMeta: snap && snap.poLineMeta,
         enrichPending: snap && snap.enrichPending,
         preserveFocus: snap && snap.enrichProgress ? captureBillFocus() : undefined,
-      }),
-    );
+    });
   }
   
   // Navigation (Home / Vanilla / Recent) routes through this SAME in-page gate.

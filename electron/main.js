@@ -2310,6 +2310,9 @@ async function resumeParkedDoc(route) {
   if (!routesReferToSameDoc(parkedDocSurface.route, route, ERP_BASE)) return false;
   const park = parkedDocSurface;
   parkedDocSurface = null;
+  // Where the errand ended (e.g. /app/item/SKU-9 once a new Item is saved): the page fills the
+  // cell it was opened from (src/peek-return-focus.js).
+  const peekReturnFrom = currentRoute;
   const profile = park.skinId ? DOC_SKIN_PROFILES[park.skinId] : null;
   const expectedName =
     dirtyState.doc && dirtyState.doc.name != null ? String(dirtyState.doc.name) : "";
@@ -2391,6 +2394,7 @@ async function resumeParkedDoc(route) {
         isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
         softPeekReturn: true,
+        peekReturnFrom,
       });
     } else {
       pushDocFormSnapshot({
@@ -2400,6 +2404,8 @@ async function resumeParkedDoc(route) {
         userEdited,
         isNew: live && live.ok ? !!live.isNew : !!dirtyState.isNew,
         focusVendor: false,
+        softPeekReturn: true,
+        peekReturnFrom,
       });
     }
     sendUiState();
