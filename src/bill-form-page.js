@@ -5178,7 +5178,8 @@ export async function bootBillFormPage(api) {
     paint(saved.doc, amountDue);
     setStatus(`Making ${p.groups.length} Item Receipt${p.groups.length === 1 ? "" : "s"}…`);
     const made = await api.makeJitReceipts(p.groups);
-    if (made && made.doc) paint(made.doc, amountDue);
+    // The new receipt lines' limits come back with it, so the over-billing check can pass.
+    if (made && made.doc) paint(made.doc, amountDue, made.poLineMeta ? { poLineMeta: made.poLineMeta } : {});
     if (!(made && made.ok)) {
       const done = made && Array.isArray(made.made) && made.made.length
         ? ` Made ${made.made.join(", ")}; their lines are linked.`
@@ -5187,7 +5188,14 @@ export async function bootBillFormPage(api) {
     }
     // Who/when now live on the receipts; the linked lines drop out of the Remarks block.
     await writePendingReceived(lastDoc, pendingReceived(lastDoc));
-    setStatus(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made — submitting the bill…`);
+    // Save the links before the Submit: if the Submit is refused, the bill still knows its
+    // receipts, and a retry cannot make them twice (dogfood 2026-10-10).
+    const kept = await api.save({ submit: false });
+    if (!(kept && kept.ok)) {
+      return stop(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made, but saving their links failed: ${formatSaveFailureReason(kept, "Save draft")} Submit again — the receipts are reused, not made twice.`);
+    }
+    paint(kept.doc, amountDue);
+    setStatus(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made and linked — submitting the bill…`);
     return { proceed: true, offLines: 0 };
   }
 

@@ -117,3 +117,36 @@ describe("receiptDocFor", () => {
     assert.match(r.reason, /no warehouse/);
   });
 });
+
+import { matchExistingReceipt } from "../src/jit-receipt.js";
+
+describe("matchExistingReceipt (a retried Submit reuses, never receives twice)", () => {
+  // The dogfood run of 2026-10-10: MAT-PRE-2026-00001 made from ACC-PINV-2026-00005, bill unlinked.
+  const stuck = {
+    name: "ACC-PINV-2026-00005",
+    items: [
+      { name: "a", idx: 1, item_code: "SAMPLE-SKU-03", qty: 3 },
+      { name: "b", idx: 2, item_code: "SAMPLE-SKU-04", qty: 4 },
+    ],
+  };
+  const receipt = {
+    name: "MAT-PRE-2026-00001",
+    posting_date: "2026-07-21",
+    remarks: "Received by: JASON\nMade from bill ACC-PINV-2026-00005 by the Doc shell",
+    items: [
+      { name: "jofi292kck", item_code: "SAMPLE-SKU-04", qty: 4 },
+      { name: "jofk3m7g42", item_code: "SAMPLE-SKU-03", qty: 3 },
+    ],
+  };
+  const group = { by: "JASON", on: "2026-07-21", rows: [0, 1] };
+  it("finds the receipt and pairs each bill line with its receipt line", () => {
+    assert.deepEqual(matchExistingReceipt({ bill: stuck, group, receipts: [receipt] }), { name: "MAT-PRE-2026-00001", prDetails: ["jofk3m7g42", "jofi292kck"] });
+  });
+  it("another person, date, bill or qty is not a match", () => {
+    assert.equal(matchExistingReceipt({ bill: stuck, group: { ...group, by: "John" }, receipts: [receipt] }), null);
+    assert.equal(matchExistingReceipt({ bill: stuck, group: { ...group, on: "2026-07-22" }, receipts: [receipt] }), null);
+    assert.equal(matchExistingReceipt({ bill: { ...stuck, name: "ACC-PINV-2026-00009" }, group, receipts: [receipt] }), null);
+    const more = { ...stuck, items: [stuck.items[0], { ...stuck.items[1], qty: 5 }] };
+    assert.equal(matchExistingReceipt({ bill: more, group, receipts: [receipt] }), null);
+  });
+});

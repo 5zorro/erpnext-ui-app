@@ -124,7 +124,7 @@ export function remapPending(pending, oldItems, newItems) {
 /** `Received by: <name>` — the receipt's own record of who (5zorro: Remarks, no custom field). */
 export function receiptRemarks(by, billName) {
   const lines = [`Received by: ${String(by || "").trim()}`];
-  if (billName) lines.push(`Made from bill ${billName} by the Doc shell`);
+  if (billName) lines.push(madeFromBillToken(billName));
   return lines.join("\n");
 }
 
@@ -238,4 +238,37 @@ export function receiptDocFor({ bill, group, defaultWarehouse = "" }) {
       items,
     },
   };
+}
+
+/** The token a just-in-time receipt carries in its Remarks, naming the bill it was made for. */
+export function madeFromBillToken(billName) {
+  return `Made from bill ${billName} by the Doc shell`;
+}
+
+/**
+ * A receipt already made from this bill for this person + date, whose lines cover the group's
+ * lines (same item, same qty, each receipt line used once). Reusing it keeps a retried Submit
+ * from receiving the same goods twice — the first dogfood run made a receipt, then the bill's
+ * save was refused, leaving the receipt submitted and the bill unlinked (5zorro 2026-10-10).
+ * @param {{ bill: any, group: { by: string, on: string, rows: number[] }, receipts: { name: string, posting_date: string, remarks: string, items: { name: string, item_code: string, qty: number }[] }[] }} input
+ * @returns {{ name: string, prDetails: string[] } | null} prDetails in group.rows order
+ */
+export function matchExistingReceipt({ bill, group, receipts }) {
+  const token = madeFromBillToken(bill && bill.name);
+  for (const r of receipts || []) {
+    if (!r || !String(r.remarks || "").includes(token)) continue;
+    if (String(r.posting_date) !== group.on) continue;
+    if (receivedByOf(r).toLowerCase() !== String(group.by).toLowerCase()) continue;
+    const free = [...(r.items || [])];
+    const prDetails = [];
+    for (const i of group.rows) {
+      const line = (bill.items || [])[i];
+      const k = free.findIndex((it) => line && it.item_code === line.item_code && Math.abs(Number(it.qty) - Number(line.qty)) < 1e-9);
+      if (k < 0) break;
+      prDetails.push(free[k].name);
+      free.splice(k, 1);
+    }
+    if (prDetails.length === group.rows.length) return { name: r.name, prDetails };
+  }
+  return null;
 }

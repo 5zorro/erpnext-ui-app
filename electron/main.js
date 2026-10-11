@@ -261,7 +261,7 @@ import {
   applySourceSliceToGroups,
 } from "../src/source-list-slices.js";
 import { formatJitPoTitle } from "../src/jit-po-bridge.js";
-import { receiptDocFor } from "../src/jit-receipt.js";
+import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
 import {
   normalizeLineAllocation,
@@ -11224,12 +11224,46 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     }
   })()`);
   const defaultWarehouse = typeof whRaw === "string" ? whRaw : "";
+  // Receipts already made from this bill (a Submit that stopped after making them): reuse, never
+  // receive the same goods twice.
+  let prior = [];
+  if (live.doc.name && !String(live.doc.name).startsWith("new-")) {
+    const likeToken = JSON.stringify("%" + madeFromBillToken(live.doc.name) + "%");
+    prior = await erpEval(`(async () => {
+      try {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Purchase Receipt",
+          filters: [["docstatus", "=", 1], ["remarks", "like", ${likeToken}]],
+          fields: ["name"], limit_page_length: 0 } });
+        var out = [];
+        for (var i = 0; i < ((r && r.message) || []).length; i++) {
+          var d = await frappe.call({ method: "frappe.client.get", args: { doctype: "Purchase Receipt", name: r.message[i].name } });
+          var doc = d && d.message;
+          if (doc) out.push({ name: doc.name, posting_date: doc.posting_date, remarks: doc.remarks || "",
+            items: (doc.items || []).map(function (it) { return { name: it.name, item_code: it.item_code, qty: it.qty }; }) });
+        }
+        return out;
+      } catch (e) {
+        return [];
+      }
+    })()`);
+  }
+  const priorReceipts = Array.isArray(prior) ? prior : [];
   /** @type {{ rowIndex: number, purchase_receipt: string, pr_detail: string }[]} */
   const links = [];
   /** @type {string[]} */
   const made = [];
   let failure = "";
   for (const group of list) {
+    const reuse = matchExistingReceipt({ bill: live.doc, group, receipts: priorReceipts });
+    if (reuse) {
+      navDebug("jit-receipt-reused", `${live.doc.name} → ${reuse.name} by=${group.by} on=${group.on}`);
+      made.push(reuse.name);
+      group.rows.forEach((rowIndex, k) => links.push({ rowIndex, purchase_receipt: reuse.name, pr_detail: reuse.prDetails[k] }));
+      const at = priorReceipts.findIndex((r) => r.name === reuse.name);
+      if (at >= 0) priorReceipts.splice(at, 1);
+      continue;
+    }
     const built = receiptDocFor({ bill: live.doc, group, defaultWarehouse });
     if (!built.ok) {
       failure = built.reason;
@@ -11268,9 +11302,27 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     }
     doc = linked.doc;
     dirtyState = markUserEdited({ ...dirtyState, doc, isDirty: true });
+    // The over-billing check refuses a save while any sourced line has no known limit, and the
+    // limits are loaded with the bill's sources — before these receipts existed. Load them now
+    // (5zorro dogfood 2026-10-10: Submit stopped on "PO/PR line limit still loading" for good).
+    try {
+      await enrichBillLineContext(doc);
+    } catch (e) {
+      navDebug("jit-receipt-meta-fail", String((e && e.message) || e));
+    }
+    // Backstop: a just-in-time line's limit is exact — its receipt took the bill line's qty.
+    const key = currentBillDocKey();
+    const meta = { ...(billPoLineMetaByDoc[key] || {}) };
+    for (const l of links) {
+      const row = (doc.items || [])[l.rowIndex];
+      const has = meta[l.rowIndex] && meta[l.rowIndex].maxBillableQty != null;
+      if (row && !has) meta[l.rowIndex] = { ...(meta[l.rowIndex] || {}), maxBillableQty: Number(row.qty) || 0 };
+    }
+    billPoLineMetaByDoc[key] = meta;
+    navDebug("jit-receipt-meta", `${doc.name} caps=${links.filter((l) => meta[l.rowIndex] && meta[l.rowIndex].maxBillableQty != null).length}/${links.length}`);
   }
-  if (failure) return { ok: false, made, doc, reason: failure };
-  return { ok: true, made, doc };
+  if (failure) return { ok: false, made, doc, reason: failure, poLineMeta: getBillPoLineMeta() };
+  return { ok: true, made, doc, poLineMeta: getBillPoLineMeta() };
 });
 
 /** DF-02 "Vendor tax template default ⓘ": the Default purchase template and any Tax Rule naming the vendor. */
