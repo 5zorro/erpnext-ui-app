@@ -250,6 +250,9 @@
     #items-body tr[data-wash-source="order"] td { background-color: var(--wash-order); }
     #items-body tr[data-wash-source="fulfill"] td { background-color: var(--wash-fulfill); }
     #items-body tr[data-wash-source="invoice"] td { background-color: var(--wash-invoice); }
+    /* DF-02 J: Rec'd by / Rec'd Date are the Item Receipt's facts — its wash on every row. */
+    #items-body tr[data-wash-source] td.rec-col,
+    #items-head-row th.rec-col { background-color: var(--wash-fulfill); }
     #items-body tr[data-wash-source] td input,
     #items-body tr[data-wash-source] td .ro { background-color: transparent; }
     #items-body tr[data-wash-source] td.num .amount-back-in { background-color: transparent; }

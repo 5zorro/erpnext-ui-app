@@ -2228,7 +2228,9 @@ export async function bootBillFormPage(api) {
         const tip = st.active
           ? `Sort by ${h.label} (${st.asc ? "asc" : "desc"}) · Ctrl+click to add another column`
           : `Sort by ${h.label} · Ctrl+click to add a secondary sort`;
-        return `<th class="sortable${st.active ? " sorted" : ""}" data-sort="${h.sortKey}" title="${tip}">${h.label}${arrow}</th>`;
+        // Rec'd by / Rec'd Date describe the Item Receipt, so they wear its wash (5zorro DF-02).
+        const rec = h.sortKey === "receivedBy" || h.sortKey === "receivedOn" ? " rec-col" : "";
+        return `<th class="sortable${st.active ? " sorted" : ""}${rec}" data-sort="${h.sortKey}" title="${tip}">${h.label}${arrow}</th>`;
       }).join("") + "<th></th>";
     if (!itemsHeadWired) {
       itemsHeadWired = true;
@@ -2282,10 +2284,10 @@ export async function bootBillFormPage(api) {
             const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
             const which = col.field === REC_BY_FIELD ? "by" : "on";
             if (canEdit && lineCanBeReceived(model.item)) {
-              return `<td class="rec-cell"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
+              return `<td class="rec-cell rec-col"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
             }
             const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
-            return `<td><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
+            return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
           }
           if (col.scratch && col.readOnly) {
             return `<td><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
