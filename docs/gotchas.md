@@ -693,3 +693,19 @@ the copies on every save (`taxes_and_totals.update_item_tax_map`); the client re
 (`update_item_tax_map`) only touches lines with an Item Tax Template. **Fix:** the bridge rebuilds
 the copies the server's way after a Rate % edit. Also: a typed Amount on a % row is thrown away
 unless the row is "Actual" — the bridge switches it, mirroring Vanilla's editable-field rule.
+
+## G18 — Lost focus: where Tab goes next (2026-10-11)
+
+When focus leaves a box, the next Tab depends on how it left. Measured in the Doc Bill (Chromium):
+
+| How focus was lost | Next Tab goes to |
+|---|---|
+| Blur — the box still exists | the box after it (Qty → Cost): Chromium keeps its "sequential focus navigation starting point" on the blurred box |
+| The repaint replaced that box (the line was rebuilt) | the first tabbable in the container — line 1's Item Code, from any line |
+
+So a repaint that rebuilds the clerk's line must put focus back by row + field (`restoreBillFocus`),
+or Tab sends them to the top of the table. And any focus move the shell makes *after waiting* on
+ERPNext must first check the clerk has not moved (`user-move-guard.js`): a late move pulled a clerk
+from Qty back to Description (focus incident 2026-10-11). The new bill's opening Vendor focus had
+50/200/500 ms retries from a July debugging pass — removed; now one try and one after layout.
+

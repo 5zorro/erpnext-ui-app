@@ -4449,11 +4449,10 @@ export async function bootBillFormPage(api) {
         }
       }
     };
+    // Now, and once more after layout. (The old 50/200/500 ms retries were a debugging leftover
+    // from 2026-07 — 5zorro 2026-10-11 — and the late ones could land after the clerk had moved.)
     tryFocus();
     requestAnimationFrame(tryFocus);
-    setTimeout(tryFocus, 50);
-    setTimeout(tryFocus, 200);
-    setTimeout(tryFocus, 500);
   }
   
   async function requestLinkedSourcePeek(route, kind) {
