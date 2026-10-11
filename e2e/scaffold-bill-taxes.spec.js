@@ -2,7 +2,8 @@
  * DF-02 taxes and charges (2026-10-10), against the live sandbox. Never saves.
  *
  * A new Doc Bill with one stock line picks up the site's Default purchase template (a 6% "On Net
- * Total" row on the blank bench). Each test checks one thing 5zorro hit or asked for:
+ * Total" row on the blank bench). When the Default has no percentage row (5zorro later made TAX
+ * FREE the Default), the unsaved bill is given a template that has one — the site is not changed. Each test checks one thing 5zorro hit or asked for:
  * Tab out of a typed Amount commits it; the Tab walk follows ERPNext's rule; Rate % on a % row
  * keeps it a % row; Remove all stays removed through a vendor change; the table never scrolls
  * sideways; the ⓘ explains the default.
@@ -31,10 +32,14 @@ async function billWithDefaultTax(app) {
       const s = await frappe.db.get_list("Supplier", { limit: 2 });
       const i = await frappe.db.get_list("Item", { filters: { is_stock_item: 1, disabled: 0 }, limit: 1 });
       const d = await frappe.db.get_list("Purchase Taxes and Charges Template", { filters: { is_default: 1 }, limit: 1 });
-      return { suppliers: s.map((x) => x.name), item: (i[0] && i[0].name) || "", tmpl: (d[0] && d[0].name) || "" };
+      const pct = await frappe.call({ method: "frappe.client.get_list", args: { doctype: "Purchase Taxes and Charges",
+        parent: "Purchase Taxes and Charges Template", filters: { charge_type: "On Net Total", parenttype: "Purchase Taxes and Charges Template" },
+        fields: ["parent"], limit_page_length: 1 } });
+      const pctTmpl = (pct.message && pct.message[0] && pct.message[0].parent) || "";
+      return { suppliers: s.map((x) => x.name), item: (i[0] && i[0].name) || "", tmpl: (d[0] && d[0].name) || "", pctTmpl };
     })()`,
   );
-  test.skip(!facts.suppliers.length || !facts.item || !facts.tmpl, "sandbox needs a Supplier, a stock Item and a Default purchase tax template");
+  test.skip(!facts.suppliers.length || !facts.item || !facts.tmpl || !facts.pctTmpl, "sandbox needs a Supplier, a stock Item, a Default purchase tax template and one with a % row");
   const filled = await inDoc(
     app,
     `(async () => {
@@ -46,6 +51,11 @@ async function billWithDefaultTax(app) {
       await d.setItem(0, "qty", 10);
       await d.setItem(0, "rate", 40);
       s = await d.getSnapshot();
+      const pctRow = (s.doc.taxes || []).some((t) => t.charge_type === "On Net Total");
+      if (!pctRow) {
+        await d.setHeader("taxes_and_charges", ${JSON.stringify(facts.pctTmpl)});
+        s = await d.getSnapshot();
+      }
       return { doc: s.doc, amountDue: s.amountDue };
     })()`,
   );
@@ -109,7 +119,7 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     expect(changed.ok).toBe(true);
     // Whether the vendor change refilled them depends on the site's Tax Rules; a refill is the
     // template coming back, so put it back the way ERPNext would and expect them gone again.
-    const refilled = await inDoc(app, `(async () => { const s = await window.erpDoc.setHeader("taxes_and_charges", ${JSON.stringify(facts.tmpl)}); return ((s.doc && s.doc.taxes) || []).length; })()`);
+    const refilled = await inDoc(app, `(async () => { const s = await window.erpDoc.setHeader("taxes_and_charges", ${JSON.stringify(facts.pctTmpl)}); return ((s.doc && s.doc.taxes) || []).length; })()`);
     expect(refilled).toBeGreaterThan(0);
     const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc, amountDue: s.amountDue }; })()`);
     await app.evaluate(({ webContents }, s) => {
@@ -136,5 +146,13 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     await expect
       .poll(async () => inDoc(app, `document.querySelector('[data-testid="bill-tax-default-note"]').textContent`), { timeout: 15_000 })
       .toContain(`${facts.tmpl}, the template marked Default`);
+    // A reload (a fresh copy of the document from main) starts with the note closed (5zorro DF-02).
+    const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc, amountDue: s.amountDue }; })()`);
+    await app.evaluate(({ webContents }, s) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", s);
+    }, snap);
+    await expect
+      .poll(async () => inDoc(app, `document.querySelector('[data-testid="bill-tax-default-note"]').hidden`), { timeout: 10_000 })
+      .toBe(true);
   });
 });

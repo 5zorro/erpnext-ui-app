@@ -1933,6 +1933,7 @@ export async function bootBillFormPage(api) {
     });
     paintMoneyStack(doc);
     keepTaxesRemoved(doc);
+    if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
   }
 
   /**
@@ -1996,15 +1997,26 @@ export async function bootBillFormPage(api) {
     void removeAllTaxes({ quiet: true });
   }
 
+  /** Which bill + vendor the open note explains; anything else closes it (5zorro DF-02). */
+  let taxNoteKey = "";
+  const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
+
+  /** Close the note: on Refresh, on a fresh snapshot, or when the bill or vendor changes. */
+  function collapseTaxDefaultNote() {
+    if (el.taxDefaultNote) el.taxDefaultNote.hidden = true;
+    taxNoteKey = "";
+  }
+
   /** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
   async function toggleTaxDefaultNote() {
     const note = el.taxDefaultNote;
     if (!note) return;
     if (!note.hidden) {
-      note.hidden = true;
+      collapseTaxDefaultNote();
       return;
     }
     note.hidden = false;
+    taxNoteKey = taxNoteKeyOf(lastDoc);
     note.textContent = "Reading the tax defaults…";
     const supplier = (lastDoc && lastDoc.supplier) || "";
     const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
@@ -4857,6 +4869,7 @@ export async function bootBillFormPage(api) {
 
   async function refresh(opts = {}) {
     if (!api) return;
+    collapseTaxDefaultNote();
     setStatus("Refreshing…");
     const snap = await api.getSnapshot();
     paint(snap && snap.doc, snap && snap.amountDue, {
@@ -5872,6 +5885,9 @@ export async function bootBillFormPage(api) {
   
   if (api && api.onSnapshot) {
     api.onSnapshot((snap) => {
+      // A fresh copy of the document (load, reload, back from a peek) starts with the note closed;
+      // background enrich progress is the same page filling in, not a reload.
+      if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
     });

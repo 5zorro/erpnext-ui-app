@@ -1537,6 +1537,7 @@ function paintTaxes(doc) {
   });
   paintMoneyStack(doc);
   keepTaxesRemoved(doc);
+  if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
 }
 
 function isPurchaseTaxDoc(doc) {
@@ -1623,15 +1624,26 @@ function keepTaxesRemoved(doc) {
   void removeAllTaxes({ quiet: true });
 }
 
+/** Which document + vendor the open note explains; anything else closes it (5zorro DF-02). */
+let taxNoteKey = "";
+const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
+
+/** Close the note: on Refresh, on a fresh snapshot, or when the document or vendor changes. */
+function collapseTaxDefaultNote() {
+  if (el && el.taxDefaultNote) el.taxDefaultNote.hidden = true;
+  taxNoteKey = "";
+}
+
 /** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
 async function toggleTaxDefaultNote() {
   const note = el.taxDefaultNote;
   if (!note) return;
   if (!note.hidden) {
-    note.hidden = true;
+    collapseTaxDefaultNote();
     return;
   }
   note.hidden = false;
+  taxNoteKey = taxNoteKeyOf(lastDoc);
   note.textContent = "Reading the tax defaults…";
   const supplier = (lastDoc && lastDoc.supplier) || "";
   const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
@@ -2691,6 +2703,7 @@ function paint(doc, snapScratch, opts = {}) {
 
 async function refresh() {
   if (!api) return;
+  collapseTaxDefaultNote();
   setStatus("Refreshing…");
   const snap = await api.getSnapshot();
   paint(snap && snap.doc, (snap && snap.scratch) || {}, {
@@ -3280,6 +3293,7 @@ export async function bootDocFormPage(injectedApi) {
 
   if (api.onSnapshot) {
     api.onSnapshot(async (snap) => {
+      collapseTaxDefaultNote();
       await ensureUiConfig();
       paint(snap && snap.doc, (snap && snap.scratch) || {}, {
         reason: snap && snap.reason,
