@@ -423,6 +423,9 @@ const COL_RULES = Object.freeze({
   rate: { fixedPx: 88, minPx: 70 },
   amount: { fixedPx: 96, minPx: 76 },
   __action: { fixedPx: 32, minPx: 28 },
+  // DF-02 J: a date is as wide as its format (MM/DD/YYYY); a name is measured.
+  receivedOn: { fixedPx: 96, minPx: 90 },
+  receivedBy: { minPx: 70, maxPx: 180 },
   // Taxes' actions hold Allocate and 🗑 (DF-02): as wide as the buttons, never negotiated down — a
   // dragged-wide Account column once squeezed 🗑 out of view. Short of room, the panel scrolls.
   tax_actions: { minPx: 36, maxPx: 240, fitContent: true },

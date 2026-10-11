@@ -2144,9 +2144,11 @@ export async function bootBillFormPage(api) {
     back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="rec-title">
       <h2 id="rec-title">Received — line ${escapeHtml(String(row.idx || ri + 1))} · ${escapeHtml(row.item_code)}</h2>
       <p class="addr-modal-hint">At Submit, an Item Receipt is made for each person + date, dated the day received, before the bill. Received by is plain text.</p>
-      <label class="addr-modal-hint">Rec'd by <input type="text" data-rec-by data-testid="bill-rec-editor-by" value="${escapeHtml(cur.by || lastReceivedBy)}" autocomplete="off" /></label>
-      <label class="addr-modal-hint">Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-editor-on" value="${escapeHtml(cur.on || defaultOn)}" /></label>
-      <label class="addr-modal-hint"><input type="checkbox" data-rec-all data-testid="bill-rec-editor-all" /> Every line not yet received</label>
+      <div class="rec-fields">
+        <label>Rec'd by <input type="text" data-rec-by data-testid="bill-rec-editor-by" value="${escapeHtml(cur.by || lastReceivedBy)}" autocomplete="off" /></label>
+        <label>Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-editor-on" value="${escapeHtml(cur.on || defaultOn)}" /></label>
+      </div>
+      <label class="rec-all"><input type="checkbox" data-rec-all data-testid="bill-rec-editor-all" /> Every line not yet received</label>
       <p class="addr-modal-hint">The date starts the day before the invoice date, so goods sold the day they are billed are not costed as sold before they arrived.</p>
       <div class="addr-modal-actions">
         <button type="button" data-act="clear" data-testid="bill-rec-editor-clear">Clear</button>
@@ -5196,8 +5198,10 @@ export async function bootBillFormPage(api) {
       back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="rec-missing-title">
         <h2 id="rec-missing-title">${n === 1 ? "1 stock line has" : `${n} stock lines have`} no Rec'd by / Rec'd Date</h2>
         <p class="addr-modal-hint">Lines ${escapeHtml(list)}. This bill gets Item Receipts, so ERPNext will not take Update Stock on it.</p>
-        <label class="addr-modal-hint">Rec'd by <input type="text" data-rec-by data-testid="bill-rec-missing-by" value="${escapeHtml(defaultBy)}" autocomplete="off" /></label>
-        <label class="addr-modal-hint">Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-missing-on" value="${escapeHtml(defaultOn)}" /></label>
+        <div class="rec-fields">
+          <label>Rec'd by <input type="text" data-rec-by data-testid="bill-rec-missing-by" value="${escapeHtml(defaultBy)}" autocomplete="off" /></label>
+          <label>Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-missing-on" value="${escapeHtml(defaultOn)}" /></label>
+        </div>
         <div class="addr-modal-actions">
           <button type="button" data-act="cancel">Cancel</button>
           <button type="button" data-act="bill-only" data-testid="bill-rec-missing-bill-only">Not received yet (bill only)</button>
