@@ -5,7 +5,87 @@
  * Modes: by basket amount (price), by qty, or custom $/line (or % of charge).
  * Rounding remainder → largest basis line; ties → lowest rowIndex (first unique id).
  * If nothing eligible, remainder stays unallocated (cents unadjusted).
+ *
+ * The lines must take *exactly* the charge (5zorro 2026-10-11, DF-02: 14.28 allocated, the lines
+ * rose 14.27). A line's cost moves only in whole cents per unit, so its amount moves in steps of
+ * about qty cents: after rounding each new unit cost, `exactRates` nudges unit costs a cent up or
+ * down until the lines' total rise equals the charge (3 × −1¢ and 4 × +1¢ = +1¢). When no nudge can
+ * reach it (every qty even and an odd cent left), the offset takes what the lines really rose and
+ * the rest is reported as the remainder — the bill still balances.
  */
+
+/**
+ * A line's amount as ERPNext stores it: qty × rate to cents, Banker's Rounding (this site's
+ * System Settings rounding_method; half-cents only arise with fractional quantities).
+ * @param {number} qty
+ * @param {number} rate
+ * @returns {number} cents
+ */
+export function lineAmountCents(qty, rate) {
+  const x = Number(qty) * Number(rate) * 100;
+  if (!Number.isFinite(x)) return 0;
+  const r = Math.round(x * 1e6) / 1e6; // float noise off before deciding a half
+  const f = Math.floor(r);
+  const diff = r - f;
+  if (Math.abs(diff - 0.5) < 1e-9) return f % 2 === 0 ? f : f + 1;
+  return Math.round(r);
+}
+
+/**
+ * New unit costs (whole cents) whose line totals rise by exactly `targetCents` overall, as close to
+ * each line's own share as can be. Only lines with a share move (custom mode leaves others alone).
+ * @param {{ qty: number, rateCents: number, prevCents: number, shareCents: number }[]} lines
+ * @param {number} targetCents
+ * @returns {{ rateCents: number[], riseCents: number[], missCents: number }}
+ */
+export function exactRates(lines, targetCents) {
+  const base = lines.map((l) => {
+    if (!(l.shareCents > 0) || !(Number(l.qty) !== 0)) return l.rateCents;
+    return Math.round((l.prevCents + l.shareCents) / Number(l.qty));
+  });
+  const riseAt = (i, rc) => lineAmountCents(lines[i].qty, rc / 100) - lines[i].prevCents;
+  const rise0 = base.map((rc, i) => (lines[i].shareCents > 0 ? riseAt(i, rc) : 0));
+  const need = targetCents - rise0.reduce((a, b) => a + b, 0);
+  if (need === 0) return { rateCents: base, riseCents: rise0, missCents: 0 };
+  // Smallest set of cent nudges that closes the gap (dynamic programme over the running offset).
+  const STEPS = 6;
+  const span = Math.abs(need) + 400;
+  /** @type {Map<number, { cost: number, ks: number[] }>} */
+  let best = new Map([[0, { cost: 0, ks: [] }]]);
+  for (let i = 0; i < lines.length; i++) {
+    const movable = lines[i].shareCents > 0 && Number(lines[i].qty) !== 0;
+    /** @type {Map<number, { cost: number, ks: number[] }>} */
+    const next = new Map();
+    for (const [off, st] of best) {
+      for (let k = movable ? -STEPS : 0; k <= (movable ? STEPS : 0); k++) {
+        const rise = movable ? riseAt(i, base[i] + k) : 0;
+        if (movable && rise < 0) continue; // never take cost off a line
+        const o = off + (rise - rise0[i]);
+        if (Math.abs(o) > span) continue;
+        const cost = st.cost + Math.abs(k);
+        const cur = next.get(o);
+        if (!cur || cost < cur.cost) next.set(o, { cost, ks: [...st.ks, k] });
+      }
+    }
+    best = next;
+  }
+  let pick = best.get(need);
+  let miss = 0;
+  if (!pick) {
+    // Closest reachable that does not put more into cost than the charge (rise ≤ charge).
+    let bestOff = null;
+    for (const off of best.keys()) {
+      if (off <= need && (bestOff == null || off > bestOff)) bestOff = off;
+    }
+    if (bestOff == null) bestOff = Math.min(...best.keys());
+    pick = best.get(bestOff);
+    miss = need - bestOff;
+  }
+  const ks = pick ? pick.ks : lines.map(() => 0);
+  const rateCents = base.map((rc, i) => rc + (ks[i] || 0));
+  const riseCents = rateCents.map((rc, i) => (lines[i].shareCents > 0 ? riseAt(i, rc) : 0));
+  return { rateCents, riseCents, missCents: miss };
+}
 
 /**
  * @typedef {{
@@ -223,28 +303,47 @@ export function planChargeToStockAllocation(opts) {
     remainder = split.remainder;
   }
 
+  // What each line can actually take: whole-cent unit costs, nudged so the total is exact.
+  const lines = items.map((it, i) => {
+    const qty = Number(it.qty);
+    const rate = Number(it.rate);
+    const prevCents = Math.round(money2(lineAmount(it)) * 100);
+    return {
+      qty: Number.isFinite(qty) ? qty : 0,
+      rateCents: Math.round((Number.isFinite(rate) ? rate : 0) * 100),
+      prevCents,
+      shareCents: Math.round(money2(shares[i] || 0) * 100),
+    };
+  });
+  const sharedCents = lines.reduce((a, l) => a + Math.max(0, l.shareCents), 0);
+  const exact = exactRates(lines, sharedCents);
+
   /** @type {ChargeAllocShare[]} */
   const itemUpdates = [];
   for (let i = 0; i < items.length; i++) {
-    const add = money2(shares[i] || 0);
-    if (!(add > 0)) continue;
+    if (!(lines[i].shareCents > 0)) continue;
     const it = items[i];
-    const qty = Number(it.qty);
-    const prevAmt = money2(lineAmount(it));
-    const nextAmount = money2(prevAmt + add);
-    let nextRate = Number(it.rate);
-    if (Number.isFinite(qty) && qty !== 0) {
-      nextRate = money2(nextAmount / qty);
+    const qty = lines[i].qty;
+    let nextRate;
+    let add;
+    if (qty !== 0) {
+      nextRate = exact.rateCents[i] / 100;
+      add = exact.riseCents[i] / 100;
     } else {
-      nextRate = money2((Number.isFinite(nextRate) ? nextRate : 0) + add);
+      // No qty to spread over: the rate carries the whole share.
+      add = lines[i].shareCents / 100;
+      nextRate = money2((Number.isFinite(Number(it.rate)) ? Number(it.rate) : 0) + add);
     }
+    if (!(add > 0)) continue;
     itemUpdates.push({
       rowIndex: it.rowIndex,
-      addAmount: add,
+      addAmount: money2(add),
       nextRate,
-      nextAmount,
+      nextAmount: money2(lines[i].prevCents / 100 + add),
     });
   }
+  // A cent no unit-cost nudge could place stays with the charge (reported, never hidden).
+  remainder = money2(remainder + exact.missCents / 100);
 
   const allocatedTotal = money2(itemUpdates.reduce((s, u) => s + u.addAmount, 0));
   if (!(allocatedTotal > 0)) {

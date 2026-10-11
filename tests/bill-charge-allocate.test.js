@@ -117,3 +117,79 @@ describe("bill-charge-allocate (OI-140)", () => {
     assert.equal(taxRowDeleteAllowed(true), false);
   });
 });
+
+// 5zorro 2026-10-11, DF-02: 14.28 allocated, the lines rose 14.27 — rates were rounded per unit and
+// nobody checked the total. The lines must take exactly what the offset says.
+import { lineAmountCents, exactRates } from "../src/bill-charge-allocate.js";
+
+describe("allocation is exact to the cent", () => {
+  const rise = (items, plan) =>
+    plan.itemUpdates.reduce((a, u) => {
+      const it = items.find((x) => x.rowIndex === u.rowIndex);
+      return a + lineAmountCents(it.qty, u.nextRate) - lineAmountCents(it.qty, it.rate);
+    }, 0);
+
+  it("DF-02: 3 @ 21.00 and 4 @ 26.50, 14.28 of tax → lines rise exactly 14.28", () => {
+    const items = [
+      { rowIndex: 0, qty: 3, rate: 21, amount: 63 },
+      { rowIndex: 1, qty: 4, rate: 26.5, amount: 106 },
+    ];
+    const plan = planChargeToStockAllocation({ items, chargeAmount: 14.28, mode: "amount", chargeAccount: "5225 - Tax Expense" });
+    assert.equal(plan.ok, true);
+    assert.equal(rise(items, plan), 1428);
+    assert.equal(plan.allocatedTotal, 14.28);
+    assert.equal(plan.offsetTax.tax_amount, 14.28);
+    assert.equal(plan.remainder, 0);
+  });
+
+  it("when no whole-cent unit cost can place the last cent, it stays with the charge, and the offset matches the lines", () => {
+    const items = [
+      { rowIndex: 0, qty: 2, rate: 10, amount: 20 },
+      { rowIndex: 1, qty: 4, rate: 5, amount: 20 },
+    ];
+    const plan = planChargeToStockAllocation({ items, chargeAmount: 1.01, mode: "amount", chargeAccount: "X" });
+    assert.equal(rise(items, plan), 100);
+    assert.equal(plan.offsetTax.tax_amount, 1);
+    assert.equal(plan.remainder, 0.01);
+  });
+
+  it("custom mode never moves a line the clerk left out", () => {
+    const items = [
+      { rowIndex: 0, qty: 3, rate: 10, amount: 30 },
+      { rowIndex: 1, qty: 7, rate: 4, amount: 28 },
+      { rowIndex: 2, qty: 5, rate: 2, amount: 10 },
+    ];
+    const plan = planChargeToStockAllocation({ items, chargeAmount: 10, mode: "custom", custom: [{ rowIndex: 0, dollars: 4 }, { rowIndex: 1, dollars: 6 }], chargeAccount: "X" });
+    assert.deepEqual(plan.itemUpdates.map((u) => u.rowIndex).sort(), [0, 1]);
+    assert.equal(rise(items, plan), 1000);
+  });
+
+  it("a sweep of quantities and charges: the lines always rise by exactly what the offset says", () => {
+    let seed = 7;
+    const rnd = (n) => ((seed = (seed * 1103515245 + 12345) % 2147483648) % n);
+    for (let t = 0; t < 300; t++) {
+      const n = 1 + rnd(5);
+      const items = Array.from({ length: n }, (_, i) => {
+        const qty = 1 + rnd(12);
+        const rate = (100 + rnd(9000)) / 100;
+        return { rowIndex: i, qty, rate, amount: lineAmountCents(qty, rate) / 100 };
+      });
+      const charge = (1 + rnd(5000)) / 100;
+      const plan = planChargeToStockAllocation({ items, chargeAmount: charge, mode: t % 2 ? "qty" : "amount", chargeAccount: "X" });
+      assert.equal(plan.ok, true);
+      assert.equal(rise(items, plan), Math.round(plan.offsetTax.tax_amount * 100), `case ${t}`);
+      assert.equal(Math.round((plan.allocatedTotal + plan.remainder) * 100), Math.round(charge * 100), `case ${t}`);
+      // Line totals move in steps of their quantities' common factor, so less than that is all that can be left.
+      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+      const g = items.reduce((a, it) => gcd(a, it.qty), 0);
+      assert.ok(plan.remainder >= 0 && Math.round(plan.remainder * 100) < g, `case ${t}: remainder ${plan.remainder}, qty factor ${g}`);
+    }
+  });
+
+  it("amounts round the way this site does (Banker's), fractional quantities included", () => {
+    assert.equal(lineAmountCents(3, 22.77), 6831);
+    assert.equal(lineAmountCents(2.5, 0.01), 2); // 2.5¢ → 2 (half to even)
+    assert.equal(lineAmountCents(1.5, 0.01), 2); // 1.5¢ → 2
+    assert.deepEqual(exactRates([{ qty: 3, rateCents: 2100, prevCents: 6300, shareCents: 528 }], 528).missCents, 0);
+  });
+});

@@ -202,5 +202,49 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     }, [..."169*1.0845", "Enter"]);
     await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-tax-amount"]').value`), { timeout: 10_000 }).toBe("183.28");
   });
+
+  // 5zorro 2026-10-11, DF-02: 14.28 of tax allocated, the lines rose 14.27 (submitted with a hardcode).
+  test("Allocate puts exactly the charge into the lines: 3 @ 21.00 + 4 @ 26.50, 14.28 → +14.28", async () => {
+    test.setTimeout(150_000);
+    const { doc } = await billWithDefaultTax(app);
+    const acct = doc.taxes[0].account_head;
+    const items = await inErp(app, `(async () => (await frappe.db.get_list("Item", { filters: { is_stock_item: 1, disabled: 0 }, limit: 2 })).map((x) => x.name))()`);
+    test.skip(items.length < 2, "sandbox needs two stock Items");
+    await inDoc(app, `document.querySelector('[data-testid="bill-remove-all-tax"]').click(); true`);
+    await expect.poll(async () => (await inDoc(app, TAXES)).rows.length, { timeout: 20_000 }).toBe(0);
+    const built = await inDoc(
+      app,
+      `(async () => {
+        const d = window.erpDoc;
+        await d.setItem(0, "item_code", ${JSON.stringify(items[0])});
+        await d.setItem(0, "qty", 3);
+        await d.setItem(0, "rate", 21);
+        let s = await d.getSnapshot();
+        if ((s.doc.items || []).length < 2) await d.addItem();
+        await d.setItem(1, "item_code", ${JSON.stringify(items[1])});
+        await d.setItem(1, "qty", 4);
+        await d.setItem(1, "rate", 26.5);
+        const r = await d.addTax(${JSON.stringify(acct)}, 14.28, "");
+        s = await d.getSnapshot();
+        return { ok: r && r.ok, doc: s.doc, amountDue: s.amountDue };
+      })()`,
+    );
+    expect(built.ok).toBe(true);
+    expect(Number(built.doc.net_total)).toBe(169);
+    await app.evaluate(({ webContents }, snap) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", snap);
+    }, built);
+    const ci = built.doc.taxes.findIndex((t) => Number(t.tax_amount) === 14.28);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-tax-alloc="${ci}"]')`), { timeout: 10_000 }).toBe(true);
+    await inDoc(app, `document.querySelector('[data-tax-alloc="${ci}"]').click(); true`);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-alloc-apply"]')`), { timeout: 10_000 }).toBe(true);
+    await inDoc(app, `document.querySelector('[data-testid="bill-alloc-apply"]').click(); true`);
+    const LINES = `(async () => { const s = await window.erpDoc.getSnapshot(); return { net: s.doc.net_total, gt: s.doc.grand_total, amounts: s.doc.items.map((i) => i.amount), taxes: s.doc.taxes.map((t) => [t.add_deduct_tax, t.tax_amount]) }; })()`;
+    await expect.poll(async () => (await inDoc(app, LINES)).net, { timeout: 20_000 }).toBe(183.28);
+    const after = await inDoc(app, LINES);
+    expect(after.taxes).toContainEqual(["Deduct", 14.28]);
+    expect(after.gt).toBe(183.28); // charge in, offset out: the vendor total stays 169 + the 14.28 charge row
+    expect(await inDoc(app, `document.getElementById("status").textContent`)).toMatch(/exactly/);
+  });
 });
 

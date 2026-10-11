@@ -3288,8 +3288,12 @@ export async function bootBillFormPage(api) {
       if (res && res.ok) {
         noteUserEdit();
         paint(res.doc, amountDue);
+        const left = Number(res.remainder) || 0;
         setStatus(
-          `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added).`,
+          left > 0
+            ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added). ${formatUsdAmountHtml(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`
+            : `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs, exactly (offset Deduct added).`,
+          left > 0 ? "warn" : undefined,
         );
       } else {
         setStatus((res && res.reason) || "Allocate failed.", "err");
