@@ -923,6 +923,46 @@ bill's numbers in the papers" was the idea of marking where the papers' amounts 
 no. match the bill's. 5zorro's longer-term direction instead: link **emailed PDFs** to bills, and
 extract them into a draft bill when approved / received. Far off.
 
+## DF-02 follow-ups (5zorro 2026-10-10 notes)
+
+Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before building.
+
+- **Hang (fixed `a94bdca`).** Save in the unsaved-changes gate asks "Receive these items with this
+  bill?" while the gate is still up; the question sat under the gate (z-index 80 vs 200), so the
+  gate waited on "Saving…" for an answer nobody could see. Questions asked mid-save now use
+  `.over-gate`. App test `e2e/scaffold-receive-gate.spec.js`.
+- **Hatch through text (fixed `06f45ce`).** Every hatched surface names its solid colour
+  (`--hatch-base`); text on it carries `.hatch-clear`. `tests/hatch-clear.test.js` lists the
+  surfaces, so a new hatched page fails until its text is handled.
+- **Esc from create Item (fixed `bd0105f`).** Back in the Item cell it was opened from, holding the
+  new Item when it was saved (`src/peek-return-focus.js`).
+- **Item Code (fixed `cbc98b1`).** Item columns use ERPNext's word. "Description" already is the
+  long description field (it starts as the item name); no Item Name column.
+- **Taxes and charges (building).**
+  - Root cause of "typed 0 in Amount, grand total did not move": **Tab** out of an edited Amount
+    dropped the edit (the move guard also blocked the commit). Clicking away worked. Reproduced live.
+  - Tab order follows ERPNext's own rule: a % row tabs Account → Rate %, a fixed (Actual) row
+    Account → Amount. Amount on a % row is mouse-only; editing it makes the row Actual (the bridge
+    already does), so the typed amount is that row's source of truth; the row says it was n% before.
+  - The table sits in an inner panel like the items table: laid out against its own padding it was
+    28px too wide, so it scrolled sideways and pushed the remove button off-screen.
+  - 🗑 per row; **Remove all** clears the rows and the template field, and stays removed until the
+    bill is saved (a vendor change would otherwise refill them from the template).
+  - **ⓘ Vendor tax template default**: why these taxes (the template marked Default, or a Tax Rule
+    naming this vendor) and how to change it (peek either).
+- **J — just-in-time receipts (un-parked 2026-10-10; next).** No custom fields:
+  - Per line, Received by (plain text) and Received on. On Submit, before the bill: one Item Receipt
+    per person + date, lines from several POs and NIC together, qty and rate from the bill (the bill
+    is the source of truth; PO 3 / bill 5 is the existing over-PO split), dated the day received,
+    submitted; then each bill line points at its receipt line; then the bill submits.
+  - Receipt Remarks carries `Received by: <name>`; a receipt without it falls back to its creator.
+  - A draft keeps the pending who/when in the bill's Remarks as a `[received]` block (line number +
+    item code), hidden from the memo box and removed once the receipts exist.
+  - Any line with who/when, or any line already from a receipt → the receipt route (ERPNext refuses
+    Update Stock on such a bill). Otherwise "Receive with this bill" stays as it is.
+  - Open question to 5zorro: stock lines with no who/when on a receipt-route bill.
+- **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
+
 ## Dogfood residuals
 
 | Family | Residual | State |
