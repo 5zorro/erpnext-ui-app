@@ -972,6 +972,14 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     were received (negative-stock guess, the local notes file "Shipping before receiving").
   - Known gap, v1: the receipt carries no taxes; a bill tax with a Valuation category would not
     reach stock cost through these receipts.
+- **Simplified's Doc-skin defaults (DF-01 Update Stock, DF-02 posting date; built 2026-10-10).** The
+  defaults were a hand-made list (09-03/04) that froze unticked checkboxes and never followed the
+  09-26 posting-date change. Now: an unticked box is never locked; under the Doc-skin profile the
+  Posting Date follows the Supplier Invoice Date and is quiet (stamped at submit). And the list is
+  **generated**: `npm run seeds:simplified` applies `src/simplified-seed-rule.js` to a snapshot of
+  ERPNext's field lists (`tests/fixtures/simplified-seed-meta/`, refresh with `-- --refresh-meta`
+  after an upgrade) and writes `src/simplified-seed-profiles.generated.js`; a drift test fails
+  until it is re-run. Kept Normal pending 5zorro's call: PI `project`, `subscription`, `title`.
 - **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
 
 ## Dogfood residuals

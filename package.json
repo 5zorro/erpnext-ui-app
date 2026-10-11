@@ -15,6 +15,7 @@
     "test:e2e:xvfb": "xvfb-run -a playwright test",
     "seed:sample": "bash ops/sample-data/run-seed.sh",
     "seed:sample:plan": "node ops/sample-data/emit-plan.js",
+    "seeds:simplified": "node scripts/generate-simplified-seeds.js",
     "dogfood:ap-sources": "node ops/sample-data/emit-dogfood-sources.js",
     "dogfood:for-change": "node scripts/dogfood-for-change.js",
     "dogfood:ap-sources:pdf": "node ops/sample-data/emit-dogfood-sources.js --pdf",

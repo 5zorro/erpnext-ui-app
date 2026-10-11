@@ -139,7 +139,7 @@ export const ARCHITECTURE_FAMILIES = [
   {
     id: "simplified",
     label: "Simplified lens — field assumptions injected into Vanilla forms",
-    modules: ["assume-*", "simplified-seed-profiles"],
+    modules: ["assume-*", "simplified-seed-profiles", "simplified-seed-profiles.generated", "simplified-seed-rule"],
     e2e: [],
     noPaper: "the Simplified lens is in progress (plan 2026-09-06 decision) and not part of the dogfood rounds",
   },

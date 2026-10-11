@@ -200,6 +200,13 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
  */
 export const BILL_DERIVED_FIELDS = Object.freeze(["set_posting_time", "posting_date"]);
 
+/**
+ * Fields the clerk sets on the Doc Bill through a question rather than a box: "Receive these items
+ * with this bill?" writes Update Stock and the warehouse (DF-01 R). Simplified keeps them quiet but
+ * clickable (L1) — the clerk's choice, never locked.
+ */
+export const BILL_QUESTION_FIELDS = Object.freeze(["update_stock", "set_warehouse"]);
+
 export const BILL_MEMO_FIELD = "remarks";
 export const BILL_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
 

@@ -1,0 +1,870 @@
+{
+ "doctype": "Purchase Invoice",
+ "erpnextRef": "sandbox-v16.32.1",
+ "source": "erpnext/accounts/doctype/purchase_invoice/purchase_invoice.json",
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supplier_name",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tax_id",
+   "fieldtype": "Read Only",
+   "read_only": 1
+  },
+  {
+   "fieldname": "due_date",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "is_paid",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "is_return",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "apply_tds",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "column_break1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "posting_time",
+   "fieldtype": "Time"
+  },
+  {
+   "fieldname": "set_posting_time",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_14",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "on_hold",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "release_date",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "cb_17",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hold_comment",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "supplier_invoice_details",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "bill_no",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "column_break_15",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bill_date",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "return_against",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "update_billed_amount_in_purchase_order",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "update_billed_amount_in_purchase_receipt",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "section_addresses",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "supplier_address",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "address_display",
+   "fieldtype": "Text Editor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contact_person",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "contact_display",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contact_mobile",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contact_email",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_address",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "shipping_address",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "shipping_address_display",
+   "fieldtype": "Text Editor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "currency_and_price_list",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "conversion_rate",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "column_break2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "buying_price_list",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "price_list_currency",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "plc_conversion_rate",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "ignore_pricing_rule",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "sec_warehouse",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "set_warehouse",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "rejected_warehouse",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "col_break_warehouse",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_subcontracted",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "update_stock",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "scan_barcode",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pricing_rule_details",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "pricing_rules",
+   "fieldtype": "Table",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_materials_supplied",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "supplied_items",
+   "fieldtype": "Table"
+  },
+  {
+   "fieldname": "section_break_26",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "total_qty",
+   "fieldtype": "Float",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_net_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_28",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_net_weight",
+   "fieldtype": "Float",
+   "read_only": 1
+  },
+  {
+   "fieldname": "taxes_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "tax_category",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "column_break_49",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "shipping_rule",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "section_break_51",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "taxes_and_charges",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "taxes",
+   "fieldtype": "Table"
+  },
+  {
+   "fieldname": "sec_tax_breakup",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "other_charges_calculation",
+   "fieldtype": "Text Editor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "totals",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "base_taxes_and_charges_added",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_taxes_and_charges_deducted",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_total_taxes_and_charges",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_40",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "taxes_and_charges_added",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "taxes_and_charges_deducted",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_taxes_and_charges",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_44",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "apply_discount_on",
+   "fieldtype": "Select"
+  },
+  {
+   "fieldname": "base_discount_amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_46",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "additional_discount_percentage",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "base_grand_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_rounding_adjustment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_rounded_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_in_words",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break8",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "grand_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rounding_adjustment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rounded_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "in_words",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_advance",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "disable_rounded_total",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "payments_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "cash_bank_account",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "clearance_date",
+   "fieldtype": "Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_br_payments",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "base_paid_amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "write_off",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "write_off_amount",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "base_write_off_amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_61",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "write_off_account",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "write_off_cost_center",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "advances_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "allocate_advances_automatically",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "get_advances",
+   "fieldtype": "Button"
+  },
+  {
+   "fieldname": "advances",
+   "fieldtype": "Table"
+  },
+  {
+   "fieldname": "payment_schedule_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "payment_terms_template",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "payment_schedule",
+   "fieldtype": "Table"
+  },
+  {
+   "fieldname": "terms_section_break",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "tc_name",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "terms",
+   "fieldtype": "Text Editor"
+  },
+  {
+   "fieldname": "printing_settings",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "letter_head",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "group_same_items",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "column_break_112",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "select_print_heading",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_internal_supplier",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "credit_to",
+   "fieldtype": "Link",
+   "reqd": 1
+  },
+  {
+   "fieldname": "party_account_currency",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_opening",
+   "fieldtype": "Select"
+  },
+  {
+   "fieldname": "against_expense_account",
+   "fieldtype": "Small Text",
+   "hidden": 1
+  },
+  {
+   "fieldname": "column_break_63",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select"
+  },
+  {
+   "fieldname": "inter_company_invoice_reference",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "column_break_114",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "auto_repeat",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "update_auto_repeat_reference",
+   "fieldtype": "Button"
+  },
+  {
+   "fieldname": "accounting_dimensions_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "dimension_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "billing_address",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "billing_address_display",
+   "fieldtype": "Text Editor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "unrealized_profit_loss_account",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "represents_company",
+   "fieldtype": "Link",
+   "read_only": 1
+  },
+  {
+   "fieldname": "set_from_warehouse",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "supplier_warehouse",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "per_received",
+   "fieldtype": "Percent",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "ignore_default_payment_terms_template",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "accounting_details_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_147",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "subscription",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "is_old_subcontracting_flow",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "payments_tab",
+   "fieldtype": "Tab Break"
+  },
+  {
+   "fieldname": "address_and_contact_tab",
+   "fieldtype": "Tab Break"
+  },
+  {
+   "fieldname": "terms_tab",
+   "fieldtype": "Tab Break"
+  },
+  {
+   "fieldname": "more_info_tab",
+   "fieldtype": "Tab Break"
+  },
+  {
+   "fieldname": "connections_tab",
+   "fieldtype": "Tab Break"
+  },
+  {
+   "fieldname": "column_break_6",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_50",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_58",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_shipping_address_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_126",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_billing_address_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_130",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_177",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "additional_info_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "incoterm",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "named_place",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "only_include_allocated_payments",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "use_company_roundoff_cost_center",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "use_transaction_date_exchange_rate",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_group",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "update_outstanding_for_self",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "sender",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "dispatch_address_display",
+   "fieldtype": "Text Editor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dispatch_address",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "last_scanned_warehouse",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "claimed_landed_cost_amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "item_wise_tax_details",
+   "fieldtype": "Table",
+   "hidden": 1
+  },
+  {
+   "fieldname": "section_tax_withholding_entry",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "tax_withholding_group",
+   "fieldtype": "Link"
+  },
+  {
+   "fieldname": "tax_withholding_entries",
+   "fieldtype": "Table"
+  },
+  {
+   "fieldname": "ignore_tax_withholding_threshold",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "override_tax_withholding_entries",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "column_break_hcca",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_ttrv",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_peap",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "base_totals_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "automation_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data"
+  }
+ ]
+}
