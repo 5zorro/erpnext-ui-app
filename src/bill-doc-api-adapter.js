@@ -83,6 +83,8 @@ export function billApiFromErpDoc(api) {
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
     softPeekRoute: (route) => api.softPeekRoute(route || ""),
+    makeJitReceipts: (groups) =>
+      api.makeJitReceipts ? api.makeJitReceipts(groups || []) : Promise.resolve({ ok: false, reason: "Receipts API missing — restart the shell." }),
     taxDefaultFacts: (supplier) =>
       api.taxDefaultFacts ? api.taxDefaultFacts(supplier || "") : Promise.resolve({ ok: false }),
     billReceiveFacts: (codes, company) =>

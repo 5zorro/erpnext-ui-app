@@ -43,6 +43,14 @@ export const PO_LINE_NO_FIELD = "__po_line_no";
 /**
  * @type {readonly { label: string, field: string, displayOnly?: boolean, readOnly?: boolean, sortKey?: string }[]}
  */
+/** DF-02 J: who received a line and when — from its receipt, or pending in the bill's Remarks. */
+export const REC_BY_FIELD = "__rec_by";
+export const REC_ON_FIELD = "__rec_on";
+export const BILL_RECEIVED_COLS = Object.freeze([
+  { label: "Rec'd by", field: REC_BY_FIELD, displayOnly: true, readOnly: true, scratch: true, sortKey: "receivedBy" },
+  { label: "Rec'd Date", field: REC_ON_FIELD, displayOnly: true, readOnly: true, scratch: true, sortKey: "receivedOn" },
+]);
+
 export const BILL_LINE_META_COLS = Object.freeze([
   { label: "Line", field: BILL_LINE_NO_FIELD, displayOnly: true, readOnly: true, sortKey: "lineNo" },
   { label: "Source line", field: PO_LINE_NO_FIELD, displayOnly: true, readOnly: true, sortKey: "poLine" },
@@ -154,7 +162,7 @@ export function mergeAllocationFromPoMeta(alloc, meta) {
  * @param {Record<string|number, import("./bill-line-allocation.js").LineAllocation>} [byRow]
  * @param {Record<string|number, PoLineMeta>} [poMetaByRow]
  */
-export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}) {
+export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}, receivedByRow = {}) {
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
   const multiPo = billHasMultipleSourceDocs(doc);
   return items.map((it, idx) => {
@@ -162,6 +170,7 @@ export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}) {
     const meta = poMetaByRow[idx] ?? poMetaByRow[String(idx)];
     const alloc = mergeAllocationFromPoMeta(lineAllocationForRow(byRow, idx), meta);
     const project = row.project != null ? String(row.project) : "";
+    const received = receivedByRow[idx] ?? receivedByRow[String(idx)] ?? null;
     return {
       rowIndex: idx,
       item: row,
@@ -172,6 +181,8 @@ export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}) {
         row.qty != null ? row.qty : "",
         row.rate != null ? row.rate : "",
         row.amount != null ? row.amount : "",
+        (received && received.by) || "",
+        (received && received.on) || "",
         formatAllocationCustomer(alloc, project),
         formatAllocationSalesOrders(alloc.salesOrders, alloc.bridgePo || row.purchase_order),
         project,
@@ -180,6 +191,7 @@ export function buildBillItemRowModels(doc, byRow = {}, poMetaByRow = {}) {
       poLine: formatPoLineDisplay(row, meta, multiPo),
       alloc,
       meta: meta || null,
+      received,
     };
   });
 }
@@ -244,12 +256,16 @@ function valueForSortKey(model, sortKey) {
       return Number(model.cells[3]) || 0;
     case "amount":
       return Number(model.cells[4]) || 0;
-    case "customer":
+    case "receivedBy":
       return model.cells[5] || "";
-    case "salesOrders":
+    case "receivedOn":
       return model.cells[6] || "";
-    case "project":
+    case "customer":
       return model.cells[7] || "";
+    case "salesOrders":
+      return model.cells[8] || "";
+    case "project":
+      return model.cells[9] || "";
     case "washRole":
       return model.washRole || "";
     default:
@@ -266,6 +282,8 @@ export const BILL_ITEM_SORTABLE_HEADERS = Object.freeze([
   { label: "Qty", sortKey: "qty" },
   { label: "Cost", sortKey: "rate" },
   { label: "Amount", sortKey: "amount" },
+  { label: "Rec'd by", sortKey: "receivedBy" },
+  { label: "Rec'd Date", sortKey: "receivedOn" },
   { label: "Customer", sortKey: "customer" },
   { label: "Sales order(s)", sortKey: "salesOrders" },
   { label: "Project", sortKey: "project" },

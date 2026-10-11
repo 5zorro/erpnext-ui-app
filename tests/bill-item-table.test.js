@@ -50,8 +50,8 @@ describe("bill-item-table", () => {
     );
     assert.equal(rows[0][0], "1");
     assert.equal(rows[0][1], "L4");
-    assert.equal(rows[0][7], "Acme");
-    assert.match(String(rows[0][8]), /SO-1/);
+    assert.equal(rows[0][9], "Acme");
+    assert.match(String(rows[0][10]), /SO-1/);
   });
 
   it("mergeAllocationFromPoMeta hydrates SO from linked PO when scratch empty", () => {

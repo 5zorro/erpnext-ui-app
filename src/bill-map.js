@@ -17,7 +17,8 @@ import {
   JOB_COST_CENTER_FIELD,
   JOB_COST_CENTER_LABEL,
 } from "./bill-line-allocation.js";
-import { BILL_LINE_META_COLS, readBillItemRowsWithAllocation } from "./bill-item-table.js";
+import { BILL_LINE_META_COLS, BILL_RECEIVED_COLS, readBillItemRowsWithAllocation } from "./bill-item-table.js";
+import { receivedByOf } from "./jit-receipt.js";
 
 export const BILL_DOCTYPE = "Purchase Invoice";
 export const BILL_LAYOUT_KEY = "bill";
@@ -168,6 +169,9 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
   const names = uniqueLinkedPurchaseReceiptNames(doc);
   /** @type {Record<string, string>} */
   const byName = {};
+  /** DF-02 J: who received each receipt and when (its Remarks line, else its creator). */
+  /** @type {Record<string, { receivedBy: string, receivedOn: string }>} */
+  const who = {};
   if (refs && typeof refs === "object" && !Array.isArray(refs)) {
     for (const [k, v] of Object.entries(refs)) {
       if (k) byName[k] = v != null ? String(v) : "";
@@ -178,11 +182,14 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
       const n = String(row.name).trim();
       if (!n) continue;
       byName[n] = row.lr_no != null ? String(row.lr_no) : "";
+      who[n] = { receivedBy: receivedByOf(row), receivedOn: row.posting_date ? String(row.posting_date) : "" };
     }
   }
   return names.map((name) => ({
     name,
     lrNo: byName[name] != null ? byName[name] : "",
+    receivedBy: (who[name] && who[name].receivedBy) || "",
+    receivedOn: (who[name] && who[name].receivedOn) || "",
   }));
 }
 
@@ -208,10 +215,11 @@ export const BILL_ITEM_BASE_COLS = [
   { label: "Amount", field: null, displayOnly: true },
 ];
 
-export const BILL_ITEM_COLS = [...BILL_LINE_META_COLS, ...BILL_ITEM_BASE_COLS, ...BILL_ALLOCATION_COLS];
+export const BILL_ITEM_COLS = [...BILL_LINE_META_COLS, ...BILL_ITEM_BASE_COLS, ...BILL_RECEIVED_COLS, ...BILL_ALLOCATION_COLS];
 
 /** ERPNext child fields safe to write via frappe.model.set_value (M3d). */
-export const BILL_ITEM_EDIT_FIELDS = BILL_ITEM_COLS.map((c) => c.field).filter(Boolean);
+// The received columns are the page's (kept in Remarks), never written to an item row.
+export const BILL_ITEM_EDIT_FIELDS = BILL_ITEM_COLS.map((c) => c.field).filter((f) => f && !String(f).startsWith("__rec_"));
 
 /**
  * @param {string} field

@@ -175,6 +175,7 @@ function billDocLineTemplate() {
   const rows = [];
   for (const col of BILL_ITEM_COLS) {
     if (!col.field) continue; // Amount display-only
+    if (String(col.field).startsWith("__rec_")) continue; // one click target, below
     const money = col.field === "qty" || col.field === "rate";
     rows.push({
       id: `bill-line-template:${col.field}`,
@@ -184,6 +185,13 @@ function billDocLineTemplate() {
       notes: `Item col ${col.label}`,
     });
   }
+  rows.push({
+    id: "bill-line-template:received",
+    kind: "button",
+    modeSwitch: "none",
+    synthetic: true,
+    notes: "DF-02 J: Rec'd by / Rec'd Date — one click opens the line's receive editor (mouse)",
+  });
   rows.push({
     id: "bill-line-template:delete",
     kind: "button",

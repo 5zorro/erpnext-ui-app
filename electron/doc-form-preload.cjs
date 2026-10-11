@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
     ),
   softPeekRoute: (route) => ipcRenderer.invoke("soft-peek-route", route || ""),
   billReceiveFacts: (codes, company) => ipcRenderer.invoke("bill-receive-facts", codes || [], company || ""),
+  makeJitReceipts: (groups) => ipcRenderer.invoke("bill-jit-receipts", groups || []),
   taxDefaultFacts: (supplier) => ipcRenderer.invoke("tax-default-facts", supplier || ""),
   setBillReceiveAsk: (on) => ipcRenderer.invoke("set-bill-receive-ask", on !== false),
   detourBack: () => ipcRenderer.send("shell-detour-back"),

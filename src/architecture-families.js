@@ -91,7 +91,7 @@ export const ARCHITECTURE_FAMILIES = [
     label: "Bill Doc skin — taxes, payment terms, receive-with-bill, credits",
     modules: ["bill-*", "credit-memo", "jit-po-bridge", "jit-receipt", "tax-default-why"],
     paths: ["electron/bill-shell.fragment.html", "electron/bill-dashboard.css", "electron/bill.html.old"],
-    e2e: ["scaffold-bill.spec.js", "scaffold-receive-gate.spec.js", "scaffold-bill-taxes.spec.js"],
+    e2e: ["scaffold-bill.spec.js", "scaffold-receive-gate.spec.js", "scaffold-bill-taxes.spec.js", "scaffold-jit-receipt.spec.js"],
   },
   {
     id: "po-ir",

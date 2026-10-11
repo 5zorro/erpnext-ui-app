@@ -29,7 +29,18 @@ import {
   applyHeaderSortClick,
   sortHeaderArrow,
   sortHeaderState,
+  REC_BY_FIELD,
+  REC_ON_FIELD,
 } from "../src/bill-item-table.js";
+import {
+  stripReceivedBlock,
+  parseReceivedBlock,
+  withReceivedBlock,
+  blockEntriesFor,
+  pendingFromBlock,
+  dayBefore,
+  jitPlan,
+} from "../src/jit-receipt.js";
 import {
   billFindPrefillFromDupeWarning,
   billRefCheckHasDupeWarning,
@@ -933,7 +944,7 @@ export async function bootBillFormPage(api) {
     const decision = emptyItemRowCleanupAction(rowCount, itemCode);
     if (decision.action !== "delete") return;
     setStatus("Removing empty line…");
-    const removed = await api.deleteItem(rowIndex);
+    const removed = await deleteLineKeepingReceived(rowIndex);
     if (removed && removed.ok) {
       noteUserEdit();
       paint(removed.doc, amountDue);
@@ -2053,6 +2064,158 @@ export async function bootBillFormPage(api) {
       }
     }
 
+  // ---- DF-02 J: Rec'd by / Rec'd Date. Pending who/when live in the draft's own Remarks block
+  // (src/jit-receipt.js), written on every change, so the draft carries them and the gate guards
+  // them; a line already from an Item Receipt shows that receipt's who/when.
+
+  const truthyFlag = (v) => v === 1 || v === true || v === "1";
+
+  /** A line the clerk can say was received: has an item, no receipt yet, not shipped to a customer. */
+  function lineCanBeReceived(row) {
+    return !!(row && row.item_code && !row.pr_detail && !row.purchase_receipt && !truthyFlag(row.delivered_by_supplier) && !truthyFlag(lastDoc && lastDoc.is_return));
+  }
+
+  /** Pending who/when by item row name, read from the draft's Remarks. */
+  function pendingReceived(doc) {
+    return pendingFromBlock(doc, parseReceivedBlock(doc && doc.remarks)).pending;
+  }
+
+  /** Who/when per row index: the line's receipt, else what is pending. */
+  function receivedRowsFor(doc) {
+    const out = {};
+    const items = Array.isArray(doc && doc.items) ? doc.items : [];
+    const pending = pendingReceived(doc);
+    const byReceipt = new Map((lastLinkedReceipts || []).map((r) => [String(r.name), r]));
+    items.forEach((row, i) => {
+      if (!row) return;
+      if (row.purchase_receipt) {
+        const r = byReceipt.get(String(row.purchase_receipt));
+        if (r && (r.receivedBy || r.receivedOn)) out[i] = { by: r.receivedBy || "", on: r.receivedOn || "", from: "receipt" };
+        return;
+      }
+      const p = row.name ? pending.get(String(row.name)) : null;
+      if (p) out[i] = { by: p.by || "", on: p.on || "", from: "pending" };
+    });
+    return out;
+  }
+
+  /** Remarks to write: the clerk's text plus the current received block. */
+  function remarksKeepingReceived(text) {
+    return withReceivedBlock(text, parseReceivedBlock(lastDoc && lastDoc.remarks));
+  }
+
+  /** Write pending who/when into the draft (one Remarks write), and repaint. */
+  async function writePendingReceived(doc, pending) {
+    const next = withReceivedBlock(stripReceivedBlock(doc && doc.remarks), blockEntriesFor(doc, pending));
+    if (next === String((doc && doc.remarks) || "")) return { ok: true, doc };
+    const res = await api.setHeader("remarks", next);
+    if (res && res.ok) {
+      noteUserEdit();
+      paint(res.doc || doc, amountDue);
+    }
+    return res;
+  }
+
+  /** Deleting a line renumbers the ones after it; carry their who/when across by row name. */
+  async function deleteLineKeepingReceived(ri) {
+    const before = lastDoc ? pendingReceived(lastDoc) : new Map();
+    const res = await api.deleteItem(ri);
+    if (res && res.ok && res.doc && before.size) {
+      const re = await writePendingReceived(res.doc, before);
+      if (re && re.ok && re.doc) return { ...res, doc: re.doc };
+    }
+    return res;
+  }
+
+  /** Remembered for the session: the last name typed, the usual case being one person for the lot. */
+  let lastReceivedBy = "";
+
+  /** Small editor for one line's who/when, with "every line not yet received". */
+  function openReceivedEditor(ri) {
+    const doc = lastDoc;
+    const row = doc && Array.isArray(doc.items) ? doc.items[ri] : null;
+    if (!row || !lineCanBeReceived(row) || !editable()) return;
+    const pending = pendingReceived(doc);
+    const cur = (row.name && pending.get(String(row.name))) || { by: "", on: "" };
+    const defaultOn = dayBefore(String(doc.bill_date || doc.posting_date || ""));
+    const back = document.createElement("div");
+    back.className = "addr-modal-backdrop";
+    back.dataset.testid = "bill-rec-editor";
+    back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="rec-title">
+      <h2 id="rec-title">Received — line ${escapeHtml(String(row.idx || ri + 1))} · ${escapeHtml(row.item_code)}</h2>
+      <p class="addr-modal-hint">At Submit, an Item Receipt is made for each person + date, dated the day received, before the bill. Received by is plain text.</p>
+      <label class="addr-modal-hint">Rec'd by <input type="text" data-rec-by data-testid="bill-rec-editor-by" value="${escapeHtml(cur.by || lastReceivedBy)}" autocomplete="off" /></label>
+      <label class="addr-modal-hint">Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-editor-on" value="${escapeHtml(cur.on || defaultOn)}" /></label>
+      <label class="addr-modal-hint"><input type="checkbox" data-rec-all data-testid="bill-rec-editor-all" /> Every line not yet received</label>
+      <p class="addr-modal-hint">The date starts the day before the invoice date, so goods sold the day they are billed are not costed as sold before they arrived.</p>
+      <div class="addr-modal-actions">
+        <button type="button" data-act="clear" data-testid="bill-rec-editor-clear">Clear</button>
+        <button type="button" data-act="cancel">Cancel</button>
+        <button type="button" class="primary" data-act="apply" data-testid="bill-rec-editor-apply">Apply</button>
+      </div>
+    </div>`;
+    const close = () => {
+      document.removeEventListener("keydown", onKey, true);
+      back.remove();
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        close();
+      } else if (ev.key === "Enter" && ev.target && ev.target.matches && ev.target.matches("input[data-rec-by], input[data-rec-on]")) {
+        ev.preventDefault();
+        void act("apply");
+      }
+    };
+    const act = async (what) => {
+      if (what === "cancel") return close();
+      const by = String(back.querySelector("[data-rec-by]").value || "").trim();
+      const on = String(back.querySelector("[data-rec-on]").value || "");
+      const all = !!back.querySelector("[data-rec-all]").checked;
+      let rows = all ? doc.items.filter(lineCanBeReceived) : [row];
+      // Only stock items are received; a service line never claims a receipt.
+      const facts = api.billReceiveFacts ? await api.billReceiveFacts(rows.map((r) => r.item_code), doc.company || "").catch(() => null) : null;
+      if (facts && facts.ok && Array.isArray(facts.stockCodes)) {
+        const stock = new Set(facts.stockCodes);
+        rows = rows.filter((r) => stock.has(String(r.item_code)));
+        if (!rows.length && what === "apply") {
+          close();
+          setStatus(`${row.item_code} is not a stock item — there is nothing to receive.`, "warn");
+          return;
+        }
+      }
+      const next = new Map(pending);
+      for (const r of rows) {
+        if (!r.name) continue;
+        if (what === "clear") next.delete(String(r.name));
+        else next.set(String(r.name), { by, on });
+      }
+      if (what === "apply" && by) lastReceivedBy = by;
+      close();
+      setStatus(what === "clear" ? "Clearing received…" : "Recording who received…");
+      const res = await writePendingReceived(doc, next);
+      if (res && res.ok) {
+        setStatus(
+          what === "clear"
+            ? "Received cleared."
+            : `Received by ${by || "—"} on ${formatDocDateDisplay(on) || "—"} — ${rows.length} line${rows.length === 1 ? "" : "s"}. An Item Receipt is made at Submit.`,
+        );
+      } else setStatus((res && res.reason) || "Could not record who received.", "err");
+    };
+    back.addEventListener("click", (ev) => {
+      const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+      if (b) void act(b.getAttribute("data-act"));
+    });
+    document.body.appendChild(back);
+    document.addEventListener("keydown", onKey, true);
+    try {
+      back.querySelector("[data-rec-by]").focus();
+    } catch {
+      /* ignore */
+    }
+  }
+
   function paintItemsHead() {
     const thead = document.getElementById("items-head-row");
     if (!thead) return;
@@ -2085,7 +2248,7 @@ export async function bootBillFormPage(api) {
   function paintItems(doc) {
     paintItemsHead();
     const models = sortBillItemRowModels(
-      buildBillItemRowModels(doc, lineAllocations, poLineMeta),
+      buildBillItemRowModels(doc, lineAllocations, poLineMeta, receivedRowsFor(doc)),
       itemSortSpecs,
     );
     const canEdit = editable();
@@ -2112,6 +2275,15 @@ export async function bootBillFormPage(api) {
               ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
               : "";
             return `<td class="alloc-so"><span class="ro alloc-so-text">${escapeHtml(val) || "—"}</span>${assignBtn}</td>`;
+          }
+          if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
+            const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
+            const which = col.field === REC_BY_FIELD ? "by" : "on";
+            if (canEdit && lineCanBeReceived(model.item)) {
+              return `<td class="rec-cell"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
+            }
+            const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
+            return `<td><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
           }
           if (col.scratch && col.readOnly) {
             return `<td><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
@@ -2191,7 +2363,7 @@ export async function bootBillFormPage(api) {
             return;
           }
           setStatus("Removing empty line…");
-          const removed = await api.deleteItem(deleteRi);
+          const removed = await deleteLineKeepingReceived(deleteRi);
           if (removed && removed.ok) {
             noteUserEdit();
             paint(removed.doc, amountDue);
@@ -2468,12 +2640,15 @@ export async function bootBillFormPage(api) {
         await apply(next);
       });
     });
+    el.items.querySelectorAll("button[data-rec]").forEach((btn) => {
+      btn.addEventListener("click", () => openReceivedEditor(Number(btn.getAttribute("data-rec"))));
+    });
     el.items.querySelectorAll("button[data-del]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         if (!api) return;
         const ri = Number(btn.getAttribute("data-del"));
         setStatus("Removing line…");
-        const res = await api.deleteItem(ri);
+        const res = await deleteLineKeepingReceived(ri);
         if (res && res.ok && res.clearedLastRow) {
           noteUserEdit();
           if (lineAllocations && typeof lineAllocations === "object") {
@@ -3851,7 +4026,7 @@ export async function bootBillFormPage(api) {
         ? withBillLinkToken(currentRemarks, name)
         : withSoLinkToken(currentRemarks, name);
     try {
-      const res = await api.setHeader("remarks", next);
+      const res = await api.setHeader("remarks", remarksKeepingReceived(next));
       if (res && res.ok) {
         paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
         return { ok: true, label };
@@ -4397,7 +4572,7 @@ export async function bootBillFormPage(api) {
     if (!opts.linkedPosChanged) return;
     const hint = billRemarksPoSearchHint(poRows);
     if (!hint) return;
-    const res = await api.setHeader("remarks", hint);
+    const res = await api.setHeader("remarks", remarksKeepingReceived(hint));
     if (res && res.ok) {
       noteUserEdit();
       if (el.memo) el.memo.value = hint;
@@ -4560,7 +4735,7 @@ export async function bootBillFormPage(api) {
     if (opts.linkedPos !== undefined) {
       void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
     }
-    paintHeaderInputIfAllowed(el.memo, "remarks", h.Memo ?? "", headerPaintOpts("remarks"));
+    paintHeaderInputIfAllowed(el.memo, "remarks", stripReceivedBlock(h.Memo ?? ""), headerPaintOpts("remarks"));
     paintCreditLinks(doc);
     void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
@@ -4711,7 +4886,7 @@ export async function bootBillFormPage(api) {
   
   function paintedHeaderValue(field) {
     if (!lastDoc) return "";
-    if (field === "remarks") return lastDoc.remarks ?? "";
+    if (field === "remarks") return stripReceivedBlock(lastDoc.remarks ?? "");
     if (field === "terms") return lastDoc.terms ?? "";
     if (field === "supplier") return lastDoc.supplier_name || lastDoc.supplier || "";
     return lastDoc[field] != null ? lastDoc[field] : "";
@@ -4773,7 +4948,8 @@ export async function bootBillFormPage(api) {
       if (field === "bill_no") await runBillRefCheck(next);
       return;
     }
-    const res = await api.setHeader(field, next);
+    // The memo box shows Remarks without the received block; writing it keeps the block (DF-02 J).
+    const res = await api.setHeader(field, field === "remarks" ? remarksKeepingReceived(next) : next);
     if (field === "supplier") {
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "blur",
@@ -4900,7 +5076,7 @@ export async function bootBillFormPage(api) {
    * blocks the save — the question is a help, not a gate.
    * @returns {Promise<{ proceed: boolean, offLines: number }>}
    */
-  async function resolveReceiveBeforeSave() {
+  async function resolveReceiveBeforeSave(submit = false) {
     const go = { proceed: true, offLines: 0 };
     if (!api || !api.billReceiveFacts || !lastDoc || !editable()) return go;
     const codes = (Array.isArray(lastDoc.items) ? lastDoc.items : []).map((r) => r && r.item_code).filter(Boolean);
@@ -4912,6 +5088,10 @@ export async function bootBillFormPage(api) {
       return go;
     }
     if (!facts || !facts.ok) return go;
+    // DF-02 J first: once any line has who/when or comes from a receipt, the bill goes the receipt
+    // route — ERPNext refuses Update Stock on a bill whose lines point at a receipt.
+    const plan = jitPlan({ doc: lastDoc, stockCodes: facts.stockCodes || [], pending: pendingReceived(lastDoc) });
+    if (plan.route === "receipts") return submit ? runJitReceipts(plan, facts) : go;
     const decision = receiveAskDecision({
       doc: lastDoc,
       stockCodes: facts.stockCodes || [],
@@ -4949,6 +5129,116 @@ export async function bootBillFormPage(api) {
     noteUserEdit();
     paint(doc, amountDue);
     return go;
+  }
+
+  /**
+   * Submit on the receipt route: ask about lines with no who/when, save the draft (so the receipts
+   * can name it, and a failure leaves a saved draft), make the receipts, drop their who/when from
+   * the bill's Remarks. The caller then submits the bill.
+   * @returns {Promise<{ proceed: boolean, offLines: number, reason?: string }>}
+   */
+  async function runJitReceipts(plan, facts) {
+    const stop = (reason, kind = "err") => {
+      setStatus(reason, kind);
+      return { proceed: false, offLines: 0, reason };
+    };
+    let p = plan;
+    if (p.missing.length) {
+      const rows = p.missing.map((i) => lastDoc.items[i]).filter(Boolean);
+      const choice = await showMissingReceivedModal({
+        rows,
+        defaultBy: lastReceivedBy || facts.user || "",
+        defaultOn: dayBefore(String(lastDoc.bill_date || lastDoc.posting_date || "")),
+      });
+      if (choice.action === "cancel") return stop("Submit cancelled — nothing saved.", "warn");
+      if (choice.action === "receive") {
+        const pending = pendingReceived(lastDoc);
+        for (const r of rows) if (r.name) pending.set(String(r.name), { by: choice.by, on: choice.on });
+        const w = await writePendingReceived(lastDoc, pending);
+        if (!(w && w.ok)) return stop((w && w.reason) || "Could not record who received.");
+        lastReceivedBy = choice.by;
+        p = jitPlan({ doc: lastDoc, stockCodes: facts.stockCodes || [], pending: pendingReceived(lastDoc) });
+      }
+    }
+    if (!p.groups.length) return { proceed: true, offLines: 0 };
+    if (typeof api.navDebug === "function") api.navDebug("jit-receipts-start", `groups=${p.groups.length}`);
+    setStatus("Saving the draft before making Item Receipts…");
+    const saved = await api.save({ submit: false });
+    if (!(saved && saved.ok)) return stop(formatSaveFailureReason(saved, "Save draft"));
+    paint(saved.doc, amountDue);
+    setStatus(`Making ${p.groups.length} Item Receipt${p.groups.length === 1 ? "" : "s"}…`);
+    const made = await api.makeJitReceipts(p.groups);
+    if (made && made.doc) paint(made.doc, amountDue);
+    if (!(made && made.ok)) {
+      const done = made && Array.isArray(made.made) && made.made.length
+        ? ` Made ${made.made.join(", ")}; their lines are linked.`
+        : "";
+      return stop(`${(made && made.reason) || "Item Receipt failed."}${done} The bill is saved as a draft — fix this and Submit again.`);
+    }
+    // Who/when now live on the receipts; the linked lines drop out of the Remarks block.
+    await writePendingReceived(lastDoc, pendingReceived(lastDoc));
+    setStatus(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made — submitting the bill…`);
+    return { proceed: true, offLines: 0 };
+  }
+
+  /**
+   * At Submit on the receipt route: lines with no Rec'd by / Rec'd Date. Above the commit gate —
+   * the gate's Save & submit reaches here with the gate still up (the DF-02 hang).
+   * @returns {Promise<{ action: "receive"|"bill-only"|"cancel", by: string, on: string }>}
+   */
+  function showMissingReceivedModal({ rows, defaultBy, defaultOn }) {
+    return new Promise((resolve) => {
+      const n = rows.length;
+      const back = document.createElement("div");
+      back.className = "addr-modal-backdrop over-gate";
+      back.dataset.testid = "bill-rec-missing";
+      const list = rows.map((r) => `${r.idx || ""} ${r.item_code}`.trim()).join(", ");
+      back.innerHTML = `<div class="addr-modal" role="dialog" aria-modal="true" aria-labelledby="rec-missing-title">
+        <h2 id="rec-missing-title">${n === 1 ? "1 stock line has" : `${n} stock lines have`} no Rec'd by / Rec'd Date</h2>
+        <p class="addr-modal-hint">Lines ${escapeHtml(list)}. This bill gets Item Receipts, so ERPNext will not take Update Stock on it.</p>
+        <label class="addr-modal-hint">Rec'd by <input type="text" data-rec-by data-testid="bill-rec-missing-by" value="${escapeHtml(defaultBy)}" autocomplete="off" /></label>
+        <label class="addr-modal-hint">Rec'd Date <input type="date" data-rec-on data-testid="bill-rec-missing-on" value="${escapeHtml(defaultOn)}" /></label>
+        <div class="addr-modal-actions">
+          <button type="button" data-act="cancel">Cancel</button>
+          <button type="button" data-act="bill-only" data-testid="bill-rec-missing-bill-only">Not received yet (bill only)</button>
+          <button type="button" class="primary" data-act="receive" data-testid="bill-rec-missing-receive">Receive them now</button>
+        </div>
+      </div>`;
+      const done = (action) => {
+        document.removeEventListener("keydown", onKey, true);
+        const by = String(back.querySelector("[data-rec-by]").value || "").trim();
+        const on = String(back.querySelector("[data-rec-on]").value || "");
+        back.remove();
+        resolve({ action, by, on });
+      };
+      const onKey = (ev) => {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        done("cancel");
+      };
+      back.addEventListener("click", (ev) => {
+        const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+        if (!b) return;
+        const act = b.getAttribute("data-act");
+        if (act === "receive") {
+          const by = String(back.querySelector("[data-rec-by]").value || "").trim();
+          const on = String(back.querySelector("[data-rec-on]").value || "");
+          if (!by || !on) {
+            back.querySelector(by ? "[data-rec-on]" : "[data-rec-by]").focus();
+            return;
+          }
+        }
+        done(/** @type {any} */ (act));
+      });
+      document.body.appendChild(back);
+      document.addEventListener("keydown", onKey, true);
+      try {
+        back.querySelector('[data-act="receive"]').focus();
+      } catch {
+        /* ignore */
+      }
+    });
   }
 
   async function doSave(submit) {
@@ -4991,8 +5281,8 @@ export async function bootBillFormPage(api) {
         announceSaveBlocker(capBlockers[0], capBlockers);
         return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
-      const receive = await resolveReceiveBeforeSave();
-      if (!receive.proceed) return { ok: false, reason: "Save cancelled." };
+      const receive = await resolveReceiveBeforeSave(!!submit);
+      if (!receive.proceed) return { ok: false, reason: receive.reason || "Save cancelled." };
       const nameBeforeSave = String((lastDoc && lastDoc.name) || "");
       const choice = submit ? "submit" : "save";
       setStatus(commitGateProgressLabel(choice));

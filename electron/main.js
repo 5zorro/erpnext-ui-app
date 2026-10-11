@@ -261,6 +261,7 @@ import {
   applySourceSliceToGroups,
 } from "../src/source-list-slices.js";
 import { formatJitPoTitle } from "../src/jit-po-bridge.js";
+import { receiptDocFor } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
 import {
   normalizeLineAllocation,
@@ -3019,8 +3020,11 @@ async function linkedReceiptsForBillDoc(doc) {
       var names = ${JSON.stringify(names)};
       var rows = await frappe.db.get_list("Purchase Receipt", {
         filters: [["name", "in", names]],
-        fields: ["name", "lr_no"],
+        fields: ["name", "lr_no", "remarks", "owner", "posting_date"],
         limit: names.length,
+      });
+      (rows || []).forEach(function (r) {
+        try { r.owner_name = frappe.user.full_name(r.owner); } catch (e) { r.owner_name = r.owner; }
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
@@ -11189,13 +11193,84 @@ ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
           args: { doctype: "Company", filters: { name: co }, fieldname: "enable_perpetual_inventory" } });
         perpetual = !!(c && c.message && Number(c.message.enable_perpetual_inventory));
       }
-      return { ok: true, stockCodes: stock, defaultWarehouse: (wh && wh.message) || "", perpetual: perpetual };
+      var user = (frappe.session && (frappe.session.user_fullname || frappe.session.user)) || "";
+      return { ok: true, stockCodes: stock, defaultWarehouse: (wh && wh.message) || "", perpetual: perpetual, user: user };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
     }
   })()`);
   const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read stock facts." };
   return { ...base, askAtSave: billReceivePrefs.askAtSave };
+});
+
+/**
+ * DF-02 J: make the just-in-time Item Receipts for a bill, then point its lines at them. One
+ * receipt per person + date (src/jit-receipt.js jitPlan), each inserted and submitted, logged on
+ * both sides. A failure stops there: the receipts already made are real (the goods did arrive) and
+ * their lines stay linked, so a retry plans only what is left.
+ * @param {{ by: string, on: string, rows: number[] }[]} groups
+ */
+ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
+  const list = Array.isArray(groups) ? groups : [];
+  const live = await snapshotDocForm();
+  if (!live || !live.ok || !live.doc) return { ok: false, reason: (live && live.reason) || "Could not read the bill." };
+  const whRaw = await erpEval(`(async () => {
+    try {
+      var r = await frappe.call({ method: "frappe.client.get_single_value",
+        args: { doctype: "Stock Settings", field: "default_warehouse" } });
+      return (r && r.message) || "";
+    } catch (e) {
+      return "";
+    }
+  })()`);
+  const defaultWarehouse = typeof whRaw === "string" ? whRaw : "";
+  /** @type {{ rowIndex: number, purchase_receipt: string, pr_detail: string }[]} */
+  const links = [];
+  /** @type {string[]} */
+  const made = [];
+  let failure = "";
+  for (const group of list) {
+    const built = receiptDocFor({ bill: live.doc, group, defaultWarehouse });
+    if (!built.ok) {
+      failure = built.reason;
+      break;
+    }
+    navDebug("jit-receipt-insert", `${live.doc.name} by=${group.by} on=${group.on} lines=${group.rows.map((i) => i + 1).join(",")}`);
+    const raw = await erpEval(`(async () => {
+      try {
+        var ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
+        var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: ins.message } });
+        var d = sub.message;
+        var items = (d.items || []).slice().sort(function (a, b) { return a.idx - b.idx; }).map(function (r) { return r.name; });
+        return { ok: true, name: d.name, items: items };
+      } catch (e) {
+        var msg = (e && e.message) || String(e);
+        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
+        return { ok: false, reason: msg };
+      }
+    })()`);
+    if (!raw || !raw.ok || !raw.name) {
+      failure = (raw && raw.reason) || "Item Receipt failed.";
+      navDebug("jit-receipt-failed", `${live.doc.name} by=${group.by} on=${group.on}: ${failure}`);
+      break;
+    }
+    navDebug("jit-receipt-submitted", `${live.doc.name} → ${raw.name}`);
+    made.push(raw.name);
+    group.rows.forEach((rowIndex, k) => links.push({ rowIndex, purchase_receipt: raw.name, pr_detail: raw.items[k] }));
+  }
+  let doc = live.doc;
+  if (links.length) {
+    await ensureErpFormBridge();
+    const linked = await bridgeCall("linkReceiptLines", links);
+    navDebug("jit-receipt-linked", `${live.doc.name} lines=${links.map((l) => l.rowIndex + 1).join(",")} ok=${!!(linked && linked.ok)}`);
+    if (!linked || !linked.ok) {
+      return { ok: false, made, reason: `Receipts ${made.join(", ")} were made but the bill lines could not be pointed at them: ${(linked && linked.reason) || "unknown"}` };
+    }
+    doc = linked.doc;
+    dirtyState = markUserEdited({ ...dirtyState, doc, isDirty: true });
+  }
+  if (failure) return { ok: false, made, doc, reason: failure };
+  return { ok: true, made, doc };
 });
 
 /** DF-02 "Vendor tax template default ⓘ": the Default purchase template and any Tax Rule naming the vendor. */

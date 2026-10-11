@@ -32,9 +32,12 @@ describe("bill-line-allocation", () => {
       },
       { 0: { customerName: "Acme", salesOrders: ["SO-1"] } },
     );
-    assert.equal(rows[0][7], "Acme");
-    assert.match(String(rows[0][8]), /SO-1/);
-    assert.equal(rows[0][9], "JOB-1");
+    // DF-02 J: Rec'd by / Rec'd Date sit after Amount (7, 8), blank with nothing received.
+    assert.equal(rows[0][7], "");
+    assert.equal(rows[0][8], "");
+    assert.equal(rows[0][9], "Acme");
+    assert.match(String(rows[0][10]), /SO-1/);
+    assert.equal(rows[0][11], "JOB-1");
   });
 
   it("normalizeLineAllocation dedupes SO ids", () => {

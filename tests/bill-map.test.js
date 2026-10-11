@@ -183,7 +183,7 @@ describe("readBillItemRows", () => {
   it("maps item columns including display amount", () => {
     const rows = readBillItemRows(sampleDoc);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0], ["1", "", "SKU-1", "Widget", 2, 10, 20, "", "", "JOB-1"]);
+    assert.deepEqual(rows[0], ["1", "", "SKU-1", "Widget", 2, 10, 20, "", "", "", "", "JOB-1"]);
   });
 });
 

@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 24;
+  var VERSION = 25;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1677,6 +1677,36 @@
     });
   }
 
+  /**
+   * DF-02 J: point bill lines at the just-in-time receipt lines made for them. Update Stock goes
+   * off — ERPNext refuses it on a bill whose lines come from a receipt.
+   * @param {{ rowIndex: number, purchase_receipt: string, pr_detail: string }[]} links
+   */
+  function linkReceiptLines(links) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        if (Number(f.doc.update_stock)) {
+          await f.set_value("update_stock", 0);
+          await afterAjaxQuiet();
+        }
+        for (var i = 0; i < (links || []).length; i++) {
+          var l = links[i];
+          var row = (f.doc.items || [])[l.rowIndex];
+          if (!row) return { ok: false, reason: "Bill line " + (l.rowIndex + 1) + " is gone." };
+          await setValueAsync(row.doctype, row.name, "purchase_receipt", l.purchase_receipt);
+          await setValueAsync(row.doctype, row.name, "pr_detail", l.pr_detail);
+        }
+        await afterAjaxQuiet();
+        await refreshTaxesAndTotals(f);
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
   function setTaxRow(rowIndex, field, value) {
     return (async function () {
       try {
@@ -1853,6 +1883,7 @@
     zeroAllQty: zeroAllQty,
     clearRow: clearRow,
     setTaxRow: setTaxRow,
+    linkReceiptLines: linkReceiptLines,
     addTaxRow: addTaxRow,
     deleteTaxRow: deleteTaxRow,
     afterAjaxQuiet: afterAjaxQuiet,
