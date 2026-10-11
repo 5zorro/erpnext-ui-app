@@ -1035,6 +1035,13 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   load, but what the shell then does mid-errand is unproven. Proposal: no question at the door;
   a dirty gate for the **parked** bill at the moment an errand action would full-load (Save it as a
   draft and continue / Back to the bill / Cancel); Esc / "← Back to bill" returns to the in-memory draft.
+  **Decided (5zorro 2026-10-11): ask at the door instead** — a gate at the moment of danger would
+  not be intuitive. Temp fix: going from an unsaved Doc page to another Doc-skinned document asks
+  first (the unsaved-changes gate); a clean page peeks as today. The real answer is a **new window**
+  for the errand, with its own defaults — OI-040 (multi-window / concurrent Doc skins, parked).
+  Sizing given 2026-10-11: a plain Vanilla pop-out window is small; Doc skins in a second window
+  mean splitting `main.js`'s single-window state (~78 module-level variables; `dirtyState` alone is
+  read ~180 times, one hidden ERP view behind every `erpEval`) into one state object per window.
 - **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
   matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
   no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
