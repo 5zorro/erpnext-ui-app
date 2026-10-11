@@ -223,7 +223,11 @@ export function autoSizeItemColumns(table, opts) {
     // remove, so the header sets the floor.
     const headerPx = (headers[key] || 0) + CELL_CHROME_PX;
     const fixedPx =
-      rule.fixedPx != null ? Math.max(rule.fixedPx, headerPx) : undefined;
+      rule.fixedPx != null
+        ? Math.max(rule.fixedPx, headerPx)
+        : rule.fitContent
+          ? Math.min(rule.maxPx ?? Infinity, Math.max(rule.minPx, (demands[key] || 0) + CELL_CHROME_PX))
+          : undefined;
     return {
       key,
       demandPx: (demands[key] || 0) + CELL_CHROME_PX,
