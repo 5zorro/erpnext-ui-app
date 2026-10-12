@@ -12,6 +12,7 @@ import {
   commitFieldCalc,
   isCalcEligibleField,
 } from "./field-calc.js";
+import { calcRibbonPlacement } from "./calc-ribbon-place.js";
 import { calcHistoryTapeOrder } from "./session-history.js";
 import { copyTableIconHtml, copyTotalIconHtml, uiIconHtml } from "../ui-icons.js";
 import { padDisplayToFooting, stripCalcDisplayPad, footingAlignMetrics, formatAlignedFootingLine } from "./calc-engine.js";
@@ -142,7 +143,7 @@ export function createFieldCalcUi(els) {
   }
 
   /**
-   * Position tape to match the field box (left edge + width). Tape/result
+   * Position tape lined up with the field box, wide enough for its tape. Tape/result
    * text-align follows the input so left-aligned Amount Due and right-aligned
    * rate cells both get decimal columns that match the field.
    * @param {HTMLElement} anchor
@@ -152,16 +153,21 @@ export function createFieldCalcUi(els) {
     const r = anchor.getBoundingClientRect();
     const gap = 6;
     const topPad = 8;
-    const width = Math.max(72, Math.round(r.width));
-    overlay.style.left = `${Math.max(0, r.left)}px`;
-    overlay.style.width = `${width}px`;
-    overlay.style.minWidth = `${width}px`;
-    overlay.style.maxWidth = `${width}px`;
-
     const align =
       anchor instanceof HTMLInputElement || anchor instanceof HTMLTextAreaElement
         ? fieldTextAlign(/** @type {HTMLInputElement} */ (anchor))
         : "right";
+    // The tape's natural width first, then lined up with the field and grown to fit it
+    // (calc-ribbon-place.js — a narrow cell no longer squeezes the tape out of the ribbon).
+    overlay.style.minWidth = "";
+    overlay.style.maxWidth = "";
+    overlay.style.width = "max-content";
+    const natural = overlay.getBoundingClientRect().width;
+    const place = calcRibbonPlacement(r, natural, align, window.innerWidth);
+    overlay.style.left = `${place.left}px`;
+    overlay.style.width = `${place.width}px`;
+    overlay.style.minWidth = `${place.width}px`;
+    overlay.style.maxWidth = `${place.width}px`;
     if (exprEl) applyTapeTextAlign(exprEl, align);
     if (resultEl) applyTapeTextAlign(resultEl, align);
     if (historyEl) {

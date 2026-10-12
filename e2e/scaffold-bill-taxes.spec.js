@@ -246,5 +246,42 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     expect(after.gt).toBe(183.28); // charge in, offset out: the vendor total stays 169 + the 14.28 charge row
     expect(await inDoc(app, `document.getElementById("status").textContent`)).toMatch(/exactly/);
   });
+
+  // 5zorro 2026-10-11: the ribbon was exactly the field's width; a long tape in a narrow cell spilled.
+  test("the calculator ribbon in a narrow Qty cell grows to fit its tape, lined up with the cell", async () => {
+    test.setTimeout(150_000);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 1000));
+    await billWithDefaultTax(app);
+    await inDoc(app, `(() => { const i = document.querySelector('input[data-row="0"][data-field="qty"]'); i.scrollIntoView({ block: "center" }); i.focus(); i.select(); return true; })()`);
+    await app.evaluate(({ webContents }, keys) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.focus();
+      for (const k of keys) {
+        w.sendInputEvent({ type: "keyDown", keyCode: k });
+        w.sendInputEvent({ type: "char", keyCode: k });
+        w.sendInputEvent({ type: "keyUp", keyCode: k });
+      }
+    }, [..."12345.678*3+98765.4"]);
+    await expect.poll(async () => inDoc(app, `(() => { const o = document.getElementById("calc-overlay"); return !!o && !o.hidden; })()`), { timeout: 10_000 }).toBe(true);
+    const m = await inDoc(
+      app,
+      `(() => {
+        const o = document.getElementById("calc-overlay");
+        const i = document.querySelector('input[data-row="0"][data-field="qty"]');
+        const ro = o.getBoundingClientRect(), ri = i.getBoundingClientRect();
+        const spill = [...o.querySelectorAll(".calc-expr, .calc-result")].some((e) => e.scrollWidth > e.clientWidth + 1);
+        const right = /right|end/.test(getComputedStyle(i).textAlign);
+        return { ribbon: Math.round(ro.width), cell: Math.round(ri.width), right, edgeGap: Math.round(right ? ro.right - ri.right : ro.left - ri.left), spill };
+      })()`,
+    );
+    expect(m.ribbon).toBeGreaterThan(m.cell);
+    expect(Math.abs(m.edgeGap)).toBeLessThanOrEqual(1); // lined up with the field's own aligned edge
+    expect(m.spill).toBe(false);
+    await app.evaluate(({ webContents }) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+      w.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+    });
+  });
 });
 
