@@ -102,7 +102,7 @@ export const ARCHITECTURE_FAMILIES = [
   {
     id: "ar",
     label: "A/R Doc skins — Estimate, Sales Order, Invoice, Receive Payment",
-    modules: ["estimate-map", "sales-*", "so-create-*", "receive-payment-map"],
+    modules: ["estimate-map", "sales-*", "so-create-*", "so-line-*", "receive-payment-map"],
     e2e: ["scaffold-ar-doc-skins.spec.js"],
   },
   {

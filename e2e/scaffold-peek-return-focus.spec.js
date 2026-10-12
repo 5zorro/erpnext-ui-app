@@ -869,6 +869,8 @@ test.describe("scaffold: PO source picker", () => {
       .toBe(true);
     await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", ${JSON.stringify(ctx.supplier)}); return true; })()`);
     await expect.poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-select-source"); return !!b && !b.hidden ? b.textContent : ""; })()`), { timeout: 20_000 }).toBe("Select source");
+    // setHeader is a back door: wait for the page to show the vendor before asking for sources.
+    await expect.poll(async () => inDoc(app, `(document.querySelector('[data-field="supplier"]') || {}).value || ""`), { timeout: 20_000 }).toBe(ctx.supplier);
     // A vendor pick may already have opened it; otherwise the toolbar button does.
     const open = `!!document.querySelector('[data-testid="doc-source-modal"]')`;
     if (!(await inDoc(app, open))) await inDoc(app, `document.getElementById("btn-select-source").click(); true`);
@@ -891,5 +893,77 @@ test.describe("scaffold: PO source picker", () => {
     const doc = await inDoc(app, `(async () => { const d = (await window.erpDoc.getSnapshot()).doc; return { supplier: d.supplier, name: d.name }; })()`);
     expect(doc.supplier).toBe(ctx.supplier);
     expect(doc.name).toMatch(/^new-purchase-order/);
+  });
+});
+
+// Plan 2026-10-12 S4: the Sources column on the Sales Order's lines. Writes one draft PO (through
+// Create ▾, for line 1 only) and deletes it.
+test.describe("scaffold: Sales Order Sources column", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("not sourced (with QOH) until a PO exists; then the line shows the PO chip, washed and hatched", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 1 });
+        if (!so[0] || !sup[0]) return null;
+        const d = await frappe.db.get_doc("Sales Order", so[0].name);
+        const pos = await frappe.db.get_list("Purchase Order", { filters: [["Purchase Order Item", "sales_order", "=", so[0].name], ["docstatus", "<", 2]] });
+        return { so: so[0].name, supplier: sup[0].name, lines: d.items.length, clean: !pos.length && d.items.every((i) => !i.delivered_qty) };
+      })()`,
+    );
+    test.skip(!ctx || !ctx.clean || ctx.lines < 2, "needs a submitted Sales Order with two lines, nothing ordered or shipped yet");
+    await e2eCall(app, "setLensPref", "sales-order", "doc");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${ctx.so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    const CELLS = `[...document.querySelectorAll('#items-body td.so-sources, td.so-sources')].map((td) => [...td.querySelectorAll(".src-chip")].map((c) => ({ kind: c.dataset.kind, text: c.textContent })))`;
+    await expect
+      .poll(async () => (await inDoc(app, CELLS)).map((cell) => cell.map((c) => c.kind).join(",")), { timeout: 40_000 })
+      .toEqual(Array(ctx.lines).fill("none"));
+    expect((await inDoc(app, CELLS))[0][0].text).toMatch(/^Not sourced ×\d+(\.\d+)? \(QOH ×\d+(\.\d+)? \S+\)$/);
+
+    let made = [];
+    try {
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="purchase-order"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="so-create-po"] tbody tr').length`), { timeout: 20_000 }).toBeGreaterThan(1);
+      await inDoc(
+        app,
+        `(() => { const rows = [...document.querySelectorAll('[data-testid="so-create-po"] tbody tr')];
+          rows.forEach((tr, i) => { tr.querySelector('[data-sc="tick"]').checked = i === 0; });
+          const v = rows[0].querySelector('[data-sc="vendor"]'); v.value = ${JSON.stringify(ctx.supplier)}; v.dataset.linkCommitted = v.value;
+          document.querySelector('[data-testid="so-create-save"]').click(); return true; })()`,
+      );
+      await expect.poll(async () => inDoc(app, `!document.querySelector('[data-testid="so-create-po"]')`), { timeout: 60_000 }).toBe(true);
+      made = await inErp(app, `(async () => (await frappe.db.get_list("Purchase Order", { filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(ctx.so)}]] })).map((p) => p.name))()`);
+      expect(made.length).toBe(1);
+      await expect
+        .poll(async () => (await inDoc(app, CELLS)).map((cell) => cell.map((c) => c.text).join(" | ")), { timeout: 30_000 })
+        .toEqual([`PO ${made[0]} ×2 (draft)`, ...Array(ctx.lines - 1).fill(expect.stringMatching(/^Not sourced/))]);
+      // The PO chip: a peek to the PO, in the order wash; hatched when the clerk hatches A/P.
+      const chip = await inDoc(
+        app,
+        `(() => { const c = document.querySelector('td.so-sources .src-chip[data-kind="po"]');
+          document.documentElement.dataset.pattern = "ap";
+          const hatched = getComputedStyle(c).backgroundImage;
+          return { route: c.dataset.peekRoute, desk: c.dataset.desk, bg: getComputedStyle(c).backgroundColor, hatched,
+            textBg: getComputedStyle(c.querySelector(".hatch-clear")).backgroundColor }; })()`,
+      );
+      expect(chip.route).toBe(`/app/purchase-order/${made[0]}`);
+      expect(chip.desk).toBe("ap");
+      expect(chip.bg).toBe("rgb(232, 244, 252)");
+      expect(chip.hatched).toContain("repeating-linear-gradient");
+      expect(chip.textBg).toBe("rgb(232, 244, 252)");
+    } finally {
+      for (const n of made) await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: ${JSON.stringify(n)} } }).then(() => true)`).catch(() => {});
+    }
   });
 });

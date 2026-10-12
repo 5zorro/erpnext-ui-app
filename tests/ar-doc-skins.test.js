@@ -96,7 +96,8 @@ describe("sales-doc-map readers", () => {
         { idx: 1, item_code: "A", description: "<p>Widget</p>", qty: 2, rate: 5, delivery_date: "2026-10-01", amount: 10, delivered_qty: 1, billed_amt: 5 },
       ],
     });
-    assert.deepEqual(rows, [["1", "A", "Widget", 2, 5, "2026-10-01", 10, 1, 5]]);
+    // The last cell is Sources (plan 2026-10-12 S4): blank in the row data, filled by the page.
+    assert.deepEqual(rows, [["1", "A", "Widget", 2, 5, "2026-10-01", 10, 1, 5, ""]]);
   });
 
   it("only real, typeable fields are editable", () => {

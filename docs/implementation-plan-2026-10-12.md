@@ -102,7 +102,7 @@ linked back; the vendor stays; nothing saved. **Not run live:** Material Request
 Quotation (the sandbox has none) — their lists and mappers are unit-tested and the methods are the
 ones Vanilla's Get Items From calls.
 
-### S4 — The Sources column on the Sales Order's items table
+### S4 — The Sources column on the Sales Order's items table (built 2026-10-12)
 
 Read from the trace code (`src/trace-links.js` / `src/trace-graph.js`), which already follows
 PO, Material Request, Delivery Note and Sales Invoice lines back to a Sales Order line. **Add
@@ -117,6 +117,33 @@ without it bills but ships nothing). So:
   the quantity on hand beside it.
 
 Each source links to its document (peek), in its own doc wash.
+
+**Built:** `src/so-line-sources.js` (the rule, pure), `src/so-line-sources-ui.js` (chips), IPC
+`so-line-sources` (read-only: PO lines, Work Orders, Material Request lines, Stock Reservation
+Entries, Bins — each read on its own, so one the clerk may not list leaves the rest), a *Sources*
+column on `SALES_ORDER_ITEM_COLS`. Decisions taken while building:
+
+- **Read directly, not through the trace graph.** The trace registry's links all live on line
+  tables; a Work Order records its Sales Order line on its own header (`sales_order_item`), a new
+  shape for the graph. For one order's direct children, five reads are simpler and cheaper. The
+  trace still lacks Work Orders — add them when its pages are built.
+- **No double count.** A Material Request counts only its not-yet-ordered part (the PO made from it
+  is counted as a PO), and a delivery is read as coming from the orders first (ERPNext does not
+  record which goods shipped).
+- **Desk hatch** (5zorro, same day: "apply the hatches like how doc wash on the Home page does"):
+  each chip wears its document's wash; PO and Material Request chips — A/P documents on this A/R
+  page — wear the desk hatch when the clerk hatches A/P (or both); text in a hatch-free box
+  (`tests/hatch-clear.test.js` lists the surface). Work Orders and stock are on no desk.
+- **Room to the right, as on the Bill** (5zorro: "the Bill dashboard allows the item table to
+  overflow to the right"): the line table re-measures once the chips arrive and grows right
+  (stage T's `growSectionToNeed`). Found on the way: the header row left out columns with no sort
+  key, so a non-sortable column had no header and the rows overran it — every column now gets one.
+
+App test (5zorro's submitted order): both lines *Not sourced ×2 (QOH …)*; a draft PO for line 1
+only (through Create ▾) → line 1 *PO …-0001 ×2 (draft)*, line 2 unchanged; the chip peeks to the PO,
+order wash, hatched under the A/P pattern, text on its wash. PO deleted after. **Not run live:**
+Work Orders, Material Requests, reservations, deliveries — none on the sandbox; the rule is
+unit-tested with each.
 
 ### S5 — Create as a list *or* a flowchart, the clerk's choice
 

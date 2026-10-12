@@ -267,6 +267,28 @@
     #items-body tr[data-wash-source] td input,
     #items-body tr[data-wash-source] td .ro { background-color: transparent; }
     #items-body tr[data-wash-source] td.so-cell .hatch-clear { background-color: var(--hatch-base); }
+    /* Sources on the Sales Order's lines (plan 2026-10-12 S4): a chip per source in its document's
+       wash; A/P documents (PO, Material Request) wear the desk hatch when the clerk hatches A/P, as
+       Home's tiles do. The text sits in a hatch-free box. */
+    td.so-sources { white-space: normal; min-width: 180px; }
+    .src-chip {
+      display: inline-flex; align-items: center; margin: 1px 4px 1px 0; padding: 1px 6px;
+      border: 1px solid color-mix(in srgb, var(--role-accent, #94a3b8) 45%, #cbd5e1);
+      border-left: 3px solid var(--role-accent, #94a3b8); border-radius: 5px;
+      --hatch-base: #fff; background-color: var(--hatch-base); color: #1e293b;
+      font-size: 11px; line-height: 1.35; white-space: nowrap;
+    }
+    .src-chip[data-role="order"] { --hatch-base: var(--wash-order); --role-accent: var(--accent-order); }
+    .src-chip[data-role="request"] { --hatch-base: var(--wash-request); --role-accent: var(--accent-request); }
+    .src-chip[data-role="fulfill"] { --hatch-base: var(--wash-fulfill); --role-accent: var(--accent-fulfill); }
+    .src-chip[data-kind="none"] { --hatch-base: #f8fafc; --role-accent: #94a3b8; color: #475569; font-style: italic; }
+    html[data-pattern="ap"] .src-chip[data-desk="ap"],
+    html[data-pattern="both"] .src-chip[data-desk="ap"],
+    html[data-pattern="ar"] .src-chip[data-desk="ar"],
+    html[data-pattern="both"] .src-chip[data-desk="ar"] { background-image: var(--hatch-desk); }
+    .src-chip .hatch-clear { background-color: var(--hatch-base); padding: 0 2px; border-radius: 3px; }
+    button.src-chip { cursor: pointer; font: inherit; font-size: 11px; }
+    button.src-chip:hover, button.src-chip:focus-visible { outline: 2px solid var(--role-accent); outline-offset: 1px; }
     .order-peek {
       display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 1px 5px;
       border: 1px solid color-mix(in srgb, var(--accent-order) 45%, #cbd5e1); border-radius: 5px;

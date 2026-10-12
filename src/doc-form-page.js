@@ -138,6 +138,7 @@ import { mountComparePane } from "./compare-pane-ui.js";
 import { canAttachTo } from "./attachment-list.js";
 import { mountAttachmentList } from "./attachment-list-ui.js";
 import { mountSoCreateMenu } from "./so-create-po-ui.js";
+import { mountLineSources } from "./so-line-sources-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -178,6 +179,8 @@ let comparePane = null;
 let attachList = null;
 /** Create ▾ on the Sales Order (src/so-create-po-ui.js, plan 2026-10-12 S2). */
 let soCreate = null;
+/** The Sources column on the Sales Order (src/so-line-sources-ui.js, plan 2026-10-12 S4). */
+let lineSources = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -1290,9 +1293,15 @@ function paintItemsHead() {
         .join("") + "<th></th>";
     return;
   }
+  // Every column gets a header — a column with no sort key (Sources, plan 2026-10-12 S4) a plain
+  // one — or the header row comes out shorter than the rows under it.
   el.itemsHead.innerHTML =
-    headers
-      .map((h) => {
+    ui.itemCols
+      .map((c) => {
+        if (!c || !c.sortKey) {
+          return `<th data-col-key="${escapeHtml((c && (c.field || c.display || c.label)) || "")}">${escapeHtml((c && c.label) || "")}</th>`;
+        }
+        const h = { label: String(c.label || c.sortKey), sortKey: String(c.sortKey) };
         const st = sortHeaderState(itemSortSpecs, h.sortKey);
         const arrow = sortHeaderArrow(itemSortSpecs, h.sortKey);
         const tip =
@@ -1735,6 +1744,10 @@ function paintItems(doc) {
       const cells = cols
         .map((col, ci) => {
           const val = r[ci] ?? "";
+          if (col.sources) {
+            const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
+            return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
+          }
           if (col.displayOnly || col.field == null) {
             const isLine = col.sortKey === "lineNo" || col.field === "__line_no";
             const isAmount = /^amount$/i.test(col.label || "");
@@ -2738,6 +2751,7 @@ function paint(doc, snapScratch, opts = {}) {
   // Frappe's rule, not the edit lock: a submitted document takes files too (canAttachTo).
   if (el.attach) el.attach.disabled = !canAttachTo(doc);
   if (soCreate) soCreate.paint(!!(ui && ui.features.createMenu), doc);
+  if (lineSources && ui && ui.itemCols && ui.itemCols.some((c) => c.sources)) void lineSources.refresh();
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
@@ -3395,7 +3409,17 @@ export async function bootDocFormPage(injectedApi) {
     // Stay on the order (5zorro): Drafts' yellow and, later, the Sources column are the trail.
     onCreated: async () => {
       await refresh();
+      if (lineSources) await lineSources.refresh(true);
     },
+  });
+  lineSources = mountLineSources({
+    api,
+    getDoc: () => lastDoc,
+    root: () => el.items,
+    onPeek: (route) => {
+      if (route && api && api.softPeekRoute) void api.softPeekRoute(route);
+    },
+    onFilled: () => sizeItemColumns(),
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");
@@ -3415,6 +3439,7 @@ export async function bootDocFormPage(injectedApi) {
       // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
       // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
       if (attachList) void attachList.refresh(true);
+      if (lineSources && snap && snap.softPeekReturn) void lineSources.refresh(true);
     });
   }
 

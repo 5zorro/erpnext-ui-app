@@ -9738,6 +9738,44 @@ ipcMain.handle("so-create-pos", async (_e, req) => {
   return { ok: !!res.ok, reason: res.reason, names, failed: res.failed || [] };
 });
 
+/**
+ * The Sources column (plan 2026-10-12 S4): everything that sources this Sales Order's lines —
+ * PO lines (draft or submitted), Work Orders, Material Request lines, stock reserved on the order —
+ * and the stock on hand for its items. Read-only; each read is on its own, so one the clerk may
+ * not list (a reservation, say) leaves the rest standing. The rule is src/so-line-sources.js.
+ */
+ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
+  const so = normalizeEditableText(soName);
+  if (!so || /^new(-|$)/i.test(so)) return { ok: false, reason: "Save the order first." };
+  const codes = (Array.isArray(itemCodes) ? itemCodes : []).map((c) => String(c || "").trim()).filter(Boolean);
+  const raw = await erpEval(`(async () => {
+    var so = ${JSON.stringify(so)}, codes = ${JSON.stringify([...new Set(codes)])};
+    async function list(args) {
+      try {
+        var r = await frappe.call({ method: "frappe.client.get_list", args: Object.assign({ limit_page_length: 0 }, args) });
+        return (r && r.message) || [];
+      } catch (e) { return null; }
+    }
+    var out = {};
+    out.purchaseOrders = await list({ doctype: "Purchase Order",
+      fields: ["name", "docstatus", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
+      filters: [["Purchase Order Item", "sales_order", "=", so], ["docstatus", "<", 2]] });
+    out.workOrders = await list({ doctype: "Work Order",
+      fields: ["name", "docstatus", "status", "sales_order_item", "qty"],
+      filters: [["sales_order", "=", so], ["docstatus", "<", 2]] });
+    out.materialRequests = await list({ doctype: "Material Request",
+      fields: ["name", "docstatus", "\`tabMaterial Request Item\`.sales_order_item as sales_order_item", "\`tabMaterial Request Item\`.stock_qty as stock_qty", "\`tabMaterial Request Item\`.ordered_qty as ordered_qty"],
+      filters: [["Material Request Item", "sales_order", "=", so], ["docstatus", "<", 2]] });
+    out.reservations = await list({ doctype: "Stock Reservation Entry",
+      fields: ["voucher_detail_no", "reserved_qty", "delivered_qty"],
+      filters: [["voucher_type", "=", "Sales Order"], ["voucher_no", "=", so], ["docstatus", "=", 1]] });
+    out.bins = codes.length ? await list({ doctype: "Bin", fields: ["item_code", "warehouse", "actual_qty"], filters: [["item_code", "in", codes]] }) : [];
+    return { ok: true, data: out };
+  })()`);
+  if (!raw || !raw.ok) return { ok: false, reason: (raw && raw.reason) || "Could not read this order's sources." };
+  return raw;
+});
+
 ipcMain.handle("doc-attach-file", async () => {
   const profile = activeDocProfile();
   if (!profile || profile.shell !== "doc-form") {

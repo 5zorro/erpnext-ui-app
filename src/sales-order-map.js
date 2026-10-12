@@ -91,6 +91,8 @@ export const SALES_ORDER_ITEM_COLS = [
   { label: "Amount", field: null, display: "amount", displayOnly: true, sortKey: "amount" },
   { label: "Delivered", field: null, display: "delivered_qty", displayOnly: true, sortKey: "delivered_qty" },
   { label: "Billed", field: null, display: "billed_amt", displayOnly: true, money: true, sortKey: "billed_amt" },
+  // Where each line comes from — POs, Work Orders, Material Requests, stock (plan 2026-10-12 S4).
+  { label: "Sources", field: null, display: "__sources", displayOnly: true, sources: true },
 ];
 
 /** The read-only progress strip — the first sliver of the Sales Order's dashboard half. */
