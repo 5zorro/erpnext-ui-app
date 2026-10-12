@@ -1117,6 +1117,37 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     (its one file): listed, Peek shows it, Download writes the same bytes (to the OS temp folder).
     Not app-tested on the Bill — the sandbox has no saved draft bill.
 
+## After the dogfood papers — the order of what comes next (5zorro 2026-10-12)
+
+1. **Finish the generated dogfood papers** (DF-01 … DF-26), in order — in progress.
+2. **Sweep the implementation plans**: retire every plan whose work has shipped, folding its
+   lasting rules into `HANDOFF.md` first.
+3. **Maybe promote multi-window** (OI-040) — 5zorro's call after the sweep.
+4. **The first release, one per operating system** — the app as something you install and run
+   directly on Windows (and the others), not started from a WSL terminal.
+
+### First release — what is known now (not started)
+
+- **Nothing is set up for it.** No packaging tool, no build script, no installer. Choosing one
+  (electron-builder is the usual one) and making it produce a Windows installer is step one.
+- **File windows will be the system's own.** Attach (Frappe's uploader, a browser file button) and
+  Download / Save as ZIP / Save as one PDF (Electron's save dialog) both ask the operating system for
+  its dialog, so on Windows they are Explorer's Open and Save As. Under WSL they look like Linux's.
+  Dragging files from Explorer onto Papers should work too (unreliable into WSL today).
+- **Where the ERP server is.** The address comes from the `ERP_URL` environment variable, else
+  `http://localhost:8080` (`src/config.js`). Someone double-clicking an installed app sets no
+  variables, so a release needs a way to enter the address (a setting, or a first-run question).
+- **Printing is the part that differs by system.** Windows has its own path (`osPrintCommand`;
+  SumatraPDF when installed, found by `findSumatraPdf`), written but never run — everything printed
+  so far went through Linux CUPS. Dogfood it early on Windows.
+- **Settings move.** The settings files (`~/.config/erpnext-ui-app/` here) live in each system's own
+  app-data folder (`%APPDATA%` on Windows); nothing carries over from WSL unless copied.
+- **Unsigned builds warn.** Windows SmartScreen (and macOS Gatekeeper) warn on an unsigned app;
+  fine for 5zorro's own use, a decision before anyone else installs it.
+
+**Questions for 5zorro when it starts:** which systems (Windows first? macOS? Linux?); an installer
+or a portable app; signed or not; whether it should update itself.
+
 ## Dogfood residuals
 
 | Family | Residual | State |
