@@ -1107,7 +1107,15 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     uploader closing — the upload done, or closed by hand — now takes the clerk back to the Doc
     skin, as Esc does; Bill and Doc skins share `openOwnFormUploader`, which builds the uploader
     the way the form's own Attach does so the shell holds its dialog. Attached files are seen in
-    the **Papers** pane (toolbar), not beside the Attach button.
+    the **Papers** pane (toolbar) — and, from the next bullet, under the notes too.
+  - *Attached files table (5zorro 2026-10-12):* under the notes, beside Attach, on the Bill and every
+    doc-form skin: one row per file (name, size, date added) with **Peek** (opens Papers scrolled to
+    that file, outlined) and **Download** (save dialog; bytes over the ERP session, logged
+    `paper-download`). Hidden when there are none or the draft is unsaved. Pure rows in
+    `src/attachment-list.js`, the table in `src/attachment-list-ui.js` (Papers family); refreshes on a
+    new document, after Attach returns, and after a drop on Papers. App test on 5zorro's Sales Order
+    (its one file): listed, Peek shows it, Download writes the same bytes (to the OS temp folder).
+    Not app-tested on the Bill — the sandbox has no saved draft bill.
 
 ## Dogfood residuals
 

@@ -7,6 +7,9 @@
  * the "saved" case moves the peek onto an existing Item first, which is the route a just-saved
  * Item leaves the peek on (/app/item/<code>).
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
 
@@ -631,5 +634,57 @@ test.describe("scaffold: Attach on a saved Sales Order draft", () => {
     await expect
       .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`), { timeout: 20_000 })
       .toBe(so);
+  });
+});
+
+// 5zorro 2026-10-12: the attached files as a small table under the notes, each with Peek and
+// Download. Reads 5zorro's saved Sales Order draft and the file already on it; writes only a local
+// copy in the OS temp folder (deleted after). The Papers pane remembers being open — closed at the end.
+test.describe("scaffold: attached files table under the notes", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("lists the order's files; Peek shows it in Papers; Download saves the same bytes", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const found = await inErp(
+      app,
+      `(async () => {
+        const r = await frappe.db.get_list("File", { filters: { attached_to_doctype: "Sales Order", is_folder: 0 },
+          fields: ["attached_to_name", "file_name", "file_url", "file_size"], limit: 1 });
+        if (!r[0]) return null;
+        const so = await frappe.db.get_value("Sales Order", r[0].attached_to_name, "docstatus");
+        return so && so.message && Number(so.message.docstatus) === 0 ? r[0] : null;
+      })()`,
+    );
+    test.skip(!found, "sandbox has no draft Sales Order with a file attached");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${found.attached_to_name}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    const ROWS = `[...document.querySelectorAll('[data-testid="doc-attach-list"] tr[data-file-url]')].map((tr) => ({ url: tr.dataset.fileUrl, name: tr.querySelector(".al-name").textContent }))`;
+    await expect.poll(async () => inDoc(app, ROWS), { timeout: 40_000 }).toContainEqual({ url: found.file_url, name: found.file_name });
+    // It sits in the notes section, with the Attach button.
+    expect(await inDoc(app, `!!document.querySelector('[data-testid="doc-notes-section"] [data-testid="doc-attach-list"]')`)).toBe(true);
+
+    const url = JSON.stringify(found.file_url);
+    const row = `[...document.querySelectorAll('[data-testid="doc-attach-list"] tr[data-file-url]')].find((t) => t.dataset.fileUrl === ${url})`;
+    await inDoc(app, `${row}.querySelector('[data-al="peek"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `(() => { const p = document.querySelector('[data-testid="compare-pane"]'); return !!p && !p.hidden && [...p.querySelectorAll(".cp-paper")].some((b) => b.dataset.fileUrl === ${url}); })()`), { timeout: 20_000 })
+      .toBe(true);
+
+    const out = path.join(os.tmpdir(), `e2e-attach-${Date.now()}-${found.file_name}`);
+    try {
+      await e2eCall(app, "setNextSavePath", out);
+      await inDoc(app, `${row}.querySelector('[data-al="download"]').click(); true`);
+      await expect.poll(() => fs.existsSync(out) && fs.statSync(out).size, { timeout: 20_000 }).toBe(Number(found.file_size));
+    } finally {
+      fs.rmSync(out, { force: true });
+      await inDoc(app, `(() => { const p = document.querySelector('[data-testid="compare-pane"]'); if (p && !p.hidden) p.querySelector('[data-cp="close"]').click(); return true; })()`);
+    }
   });
 });

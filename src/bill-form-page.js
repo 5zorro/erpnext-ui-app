@@ -161,6 +161,7 @@ import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
 import { openPrintDialog } from "../src/print-dialog-ui.js";
 import { mountComparePane } from "../src/compare-pane-ui.js";
+import { mountAttachmentList } from "../src/attachment-list-ui.js";
 import {
   UPDATE_STOCK_DEFAULT_ROUTE,
   receiveAskDecision,
@@ -284,6 +285,8 @@ export async function bootBillFormPage(api) {
   let docNumberUi = null;
   /** @type {{ refresh: () => void } | null} */
   let comparePane = null;
+  /** The attached files under the notes (src/attachment-list-ui.js). */
+  let attachList = null;
   /** Suppress change while Tab keydown commits the item cell. */
   let itemTabGuard = false;
   /** Suppress blur while Tab/arrow moves between tax cells. */
@@ -4912,6 +4915,7 @@ export async function bootBillFormPage(api) {
     setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
     if (docNumberUi) docNumberUi.paint();
     if (comparePane) comparePane.refresh();
+    if (attachList) void attachList.refresh();
     paintDirtyPill();
     paintChip();
     void ensureAtLeastOneItemRow(doc);
@@ -5737,6 +5741,17 @@ export async function bootBillFormPage(api) {
     getDoc: () => lastDoc,
     selfLabel: () => "Bill",
     setStatus,
+    onFilesChanged: () => {
+      if (attachList) void attachList.refresh(true);
+    },
+  });
+  attachList = mountAttachmentList({
+    api,
+    host: document.getElementById("attach-list"),
+    getDoc: () => lastDoc,
+    onPeek: (fileUrl) => (comparePane ? comparePane.peek(fileUrl) : false),
+    setStatus,
+    testidPrefix: "bill",
   });
 
   docCapsUi = wireDocCapsUi({
@@ -6007,6 +6022,8 @@ export async function bootBillFormPage(api) {
       if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
+      // Back from Attach (or any peek): a file may have been added.
+      if (snap && snap.softPeekReturn && attachList) void attachList.refresh(true);
     });
   }
   function paintSnapshot(snap) {

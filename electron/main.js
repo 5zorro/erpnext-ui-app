@@ -11166,6 +11166,31 @@ async function openPaper(req) {
 }
 
 /**
+ * Download one attachment (5zorro 2026-10-12, the attachments table under the notes): the clerk
+ * picks where; the bytes come over the ERP view's session, as for the Papers pane. Writes only the
+ * local file chosen.
+ * @param {{ fileUrl?: string, fileName?: string }} req
+ */
+async function downloadPaper(req) {
+  const r = req || {};
+  const safe = String(r.fileName || "attachment").replace(/[\\/:*?"<>|]+/g, "-");
+  const pick = await askSavePath({ title: "Download attachment", defaultPath: path.join(app.getPath("downloads"), safe) });
+  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
+  const got = await paperBytes(r.fileUrl);
+  if (!got.ok) {
+    navDebug("paper-download", `${r.fileUrl} failed: ${got.reason}`);
+    return got;
+  }
+  try {
+    fs.writeFileSync(pick.filePath, Buffer.from(got.bytes));
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+  navDebug("paper-download", `${r.fileUrl} → ${pick.filePath}`);
+  return { ok: true, path: pick.filePath };
+}
+
+/**
  * "Save all as ZIP" (5zorro 2026-10-03): the papers shown in the pane, and — when asked — the
  * document itself as ERPNext prints it (its PO / receipt too), in one .zip. Printed PDFs go through
  * the self-healing PDF path. Writes only the local file the clerk chooses.
@@ -11265,6 +11290,7 @@ ipcMain.handle("papers-list", async (_e, sources) => listPapers(sources));
 ipcMain.handle("papers-bytes", async (_e, fileUrl) => paperBytes(fileUrl));
 ipcMain.handle("papers-upload", async (_e, req) => uploadPaper(req));
 ipcMain.handle("papers-open", async (_e, req) => openPaper(req));
+ipcMain.handle("papers-download", async (_e, req) => downloadPaper(req));
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
 

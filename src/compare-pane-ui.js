@@ -41,6 +41,7 @@ html.compare-overlay .cp-pane { box-shadow: -12px 0 32px rgba(15,23,42,.22); }
 .cp-actions .cp-act-status.err { color: #b91c1c; }
 .cp-scroll { flex: 1; overflow: auto; padding: 12px; }
 .cp-drop { border: 2px dashed #94a3b8; border-radius: 8px; padding: 10px; text-align: center; color: #475569; font-size: 12px; margin-bottom: 12px; background: #f8fafc; }
+.cp-paper.cp-peeked { outline: 3px solid #2563eb; outline-offset: 2px; }
 .cp-pane.cp-dragging .cp-drop { border-color: #2563eb; background: #eff6ff; color: #1e3a8a; }
 .cp-paper { margin-bottom: 18px; }
 .cp-paper-head { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
@@ -334,6 +335,7 @@ export function mountComparePane(opts) {
       const box = document.createElement("section");
       box.className = "cp-paper";
       box.dataset.testid = "compare-paper";
+      if (p.fileUrl) box.dataset.fileUrl = p.fileUrl;
       box.innerHTML = `<div class="cp-paper-head"><b>${esc(p.fileName)}</b><span class="cp-from">${esc(p.from)}</span><button type="button" data-cp="open" title="Open in its own program">Open</button></div><div data-cp="body"><p class="cp-note">Loading…</p></div>`;
       list.appendChild(box);
       const body = /** @type {HTMLElement} */ (box.querySelector('[data-cp="body"]'));
@@ -518,6 +520,8 @@ export function mountComparePane(opts) {
       setStatus(r && r.ok ? `${f.name} attached to ${doc.name}.` : (r && r.reason) || `Could not attach ${f.name}.`, r && r.ok ? "" : "err");
     }
     await load(true);
+    // The attachments table under the notes lists the same files.
+    if (opts.onFilesChanged) opts.onFilesChanged();
   });
 
   pane.querySelector('[data-cp="close"]').addEventListener("click", () => setOpen(false));
@@ -546,5 +550,26 @@ export function mountComparePane(opts) {
       if (!pane.hidden) void load();
     },
     isOpen: () => !pane.hidden,
+    /**
+     * Open the pane on one attachment (the Peek in the attachments table): scrolled to it and
+     * outlined for a moment. Resolves false when it does not appear (not attached any more).
+     * @param {string} fileUrl
+     */
+    peek: async (fileUrl) => {
+      if (pane.hidden) setOpen(true);
+      else void load(true);
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const box = [...list.querySelectorAll(".cp-paper")].find((b) => b.dataset.fileUrl === fileUrl);
+        if (box) {
+          box.scrollIntoView({ block: "start" });
+          box.classList.add("cp-peeked");
+          setTimeout(() => box.classList.remove("cp-peeked"), 1600);
+          return true;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return false;
+    },
   };
 }

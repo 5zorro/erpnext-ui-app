@@ -383,6 +383,66 @@
   cursor: not-allowed;
 }
 
+/* The attached files under the notes (5zorro 2026-10-12): solid like the notes box, so the desk
+   hatch never runs through the file names. */
+.attach-list-host {
+  margin-top: 8px;
+}
+.attach-list {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.attach-list caption {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  padding: 0 0 4px;
+}
+.attach-list td {
+  padding: 4px 8px;
+  border-top: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+.attach-list tr:first-child td {
+  border-top: 0;
+}
+.attach-list .al-name {
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-list .al-meta {
+  color: #64748b;
+  white-space: nowrap;
+}
+.attach-list .al-act {
+  white-space: nowrap;
+  text-align: right;
+}
+.attach-list .al-act button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.attach-list .al-act button:hover {
+  background: #f1f5f9;
+}
+.attach-list-note.err {
+  color: #b91c1c;
+  font-size: 12px;
+  margin: 0;
+}
+
 .link-wrap {
   position: relative;
   display: flex;

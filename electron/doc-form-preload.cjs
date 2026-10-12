@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   papersBytes: (fileUrl) => ipcRenderer.invoke("papers-bytes", fileUrl || ""),
   papersUpload: (req) => ipcRenderer.invoke("papers-upload", req || {}),
   papersOpen: (req) => ipcRenderer.invoke("papers-open", req || {}),
+  papersDownload: (req) => ipcRenderer.invoke("papers-download", req || {}),
   papersZip: (req) => ipcRenderer.invoke("papers-zip", req || {}),
   papersPrintedPdf: (doc) => ipcRenderer.invoke("papers-printed-pdf", doc || {}),
   papersPdf: (req) => ipcRenderer.invoke("papers-pdf", req || {}),

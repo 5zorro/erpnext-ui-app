@@ -135,6 +135,7 @@ import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
 import { openPrintDialog } from "./print-dialog-ui.js";
 import { mountComparePane } from "./compare-pane-ui.js";
+import { mountAttachmentList } from "./attachment-list-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -171,6 +172,8 @@ let docCapsUi = null;
 let docNumberUi = null;
 /** @type {{ refresh: () => void } | null} */
 let comparePane = null;
+/** The attached files under the notes (src/attachment-list-ui.js). */
+let attachList = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -2740,6 +2743,7 @@ function paint(doc, snapScratch, opts = {}) {
   setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
   if (docNumberUi) docNumberUi.paint();
   if (comparePane) comparePane.refresh();
+  if (attachList) void attachList.refresh();
   if (opts.focusVendor) {
     docCapsOn = true;
     if (docCapsUi) docCapsUi.syncCapsButton();
@@ -3359,6 +3363,17 @@ export async function bootDocFormPage(injectedApi) {
     getDoc: () => lastDoc,
     selfLabel: () => docTitle(),
     setStatus,
+    onFilesChanged: () => {
+      if (attachList) void attachList.refresh(true);
+    },
+  });
+  attachList = mountAttachmentList({
+    api,
+    host: document.getElementById("attach-list"),
+    getDoc: () => lastDoc,
+    onPeek: (fileUrl) => (comparePane ? comparePane.peek(fileUrl) : false),
+    setStatus,
+    testidPrefix: "doc",
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");
@@ -3375,6 +3390,8 @@ export async function bootDocFormPage(injectedApi) {
         userEdited: snap && snap.userEdited,
       });
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
+      // Back from Attach (or any peek): a file may have been added.
+      if (snap && snap.softPeekReturn && attachList) void attachList.refresh(true);
     });
   }
 
