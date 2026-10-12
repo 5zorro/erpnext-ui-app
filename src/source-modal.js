@@ -6,7 +6,7 @@
  */
 
 /**
- * @typedef {{ label: string, kind: "nic" | "po" | "pr", name?: string, draft?: boolean, loading?: boolean }} SourceItem
+ * @typedef {{ label: string, kind: "nic" | "po" | "pr" | "mr" | "sq" | "so", name?: string, draft?: boolean, loading?: boolean }} SourceItem
  * @typedef {{ id?: string, name: string, items: SourceItem[], loading?: boolean, error?: string }} SourceGroup
  */
 
@@ -169,6 +169,8 @@ export function enrichReceiptsWithPurchaseOrders(receipts = [], itemRows = []) {
  * @returns {SourceItem}
  */
 export function sourceItemFromRow(row, kind, draft = false) {
+  // The Purchase Order's sources (plan 2026-10-12 S3) — always submitted, so never a draft row.
+  if (kind === "mr" || kind === "sq" || kind === "so") return poSourceItemFromRow(row, kind);
   const date = kind === "po" ? row.transaction_date : row.posting_date;
   const logbook =
     kind === "po" && row.title != null && String(row.title).trim()
@@ -207,6 +209,39 @@ export function sourceItemFromRow(row, kind, draft = false) {
     kind,
     name: row.name,
   };
+}
+
+/**
+ * A Material Request, Supplier Quotation or Sales Order as a PO source row. What tells them apart
+ * at a glance: an MR's title and when it is needed, a quotation's total and how long it is good
+ * for, a Sales Order's customer and how many lines are still to order.
+ * @param {{ name?: string, title?: string, transaction_date?: string, schedule_date?: string, valid_till?: string,
+ *   grand_total?: number, customer?: string, customer_name?: string, lines_to_order?: number }} row
+ * @param {"mr" | "sq" | "so"} kind
+ * @returns {SourceItem}
+ */
+export function poSourceItemFromRow(row, kind) {
+  const r = row || {};
+  const sep = "   ·   ";
+  const bits = [String(r.name || "")];
+  if (kind === "mr") {
+    const title = r.title != null && String(r.title).trim() && String(r.title).trim() !== r.name ? String(r.title).trim() : "";
+    if (title) bits.push(title);
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    if (r.schedule_date) bits.push(`needed by ${r.schedule_date}`);
+  } else if (kind === "sq") {
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    const money = formatSourceMoney(r.grand_total);
+    if (money) bits.push(money);
+    if (r.valid_till) bits.push(`good till ${r.valid_till}`);
+  } else {
+    const who = String(r.customer_name || r.customer || "").trim();
+    if (who) bits.push(who);
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    const n = Number(r.lines_to_order);
+    if (Number.isFinite(n) && n > 0) bits.push(`${n} line${n === 1 ? "" : "s"} to order`);
+  }
+  return { label: bits.join(sep), kind, name: r.name };
 }
 
 /**

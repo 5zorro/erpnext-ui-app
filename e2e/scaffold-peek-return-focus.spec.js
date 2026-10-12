@@ -836,3 +836,60 @@ test.describe("scaffold: Sales Order Create ▾ › Purchase Order", () => {
     }
   });
 });
+
+// Plan 2026-10-12 S3: the PO's source picker — NIC, Material Request, Supplier Quotation, Sales
+// Order (5zorro). Pulls a submitted Sales Order into a new, unsaved PO; never saves.
+test.describe("scaffold: PO source picker", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("lists the Sales Order still to order and fills the PO with its lines, linked back", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 1 });
+        if (!so[0] || !sup[0]) return null;
+        const d = await frappe.db.get_doc("Sales Order", so[0].name);
+        return { so: so[0].name, supplier: sup[0].name, codes: d.items.filter((i) => i.ordered_qty < i.stock_qty).map((i) => i.item_code) };
+      })()`,
+    );
+    test.skip(!ctx || !ctx.codes.length, "sandbox needs a submitted Sales Order with lines to order, and a vendor");
+    await e2eCall(app, "openPo", "/app/purchase-order/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", ${JSON.stringify(ctx.supplier)}); return true; })()`);
+    await expect.poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-select-source"); return !!b && !b.hidden ? b.textContent : ""; })()`), { timeout: 20_000 }).toBe("Select source");
+    // A vendor pick may already have opened it; otherwise the toolbar button does.
+    const open = `!!document.querySelector('[data-testid="doc-source-modal"]')`;
+    if (!(await inDoc(app, open))) await inDoc(app, `document.getElementById("btn-select-source").click(); true`);
+    await expect.poll(async () => inDoc(app, open), { timeout: 20_000 }).toBe(true);
+    const ITEMS = `[...document.querySelectorAll('[data-testid="doc-source-modal"] .src-item')].map((b) => b.textContent)`;
+    await expect.poll(async () => (await inDoc(app, ITEMS)).some((t) => t.includes(ctx.so)), { timeout: 30_000 }).toBe(true);
+    const items = await inDoc(app, ITEMS);
+    expect(items[0]).toContain("NIC — enter this Purchase Order manually");
+    expect(items.some((t) => /Item Receipt|IR /.test(t))).toBe(false);
+    const groups = await inDoc(app, `[...document.querySelectorAll('[data-testid="doc-source-modal"] .src-group')].map((g) => g.textContent)`);
+    expect(groups.some((g) => g.startsWith("Sales Orders — still to order"))).toBe(true);
+    await inDoc(
+      app,
+      `(() => { const b = [...document.querySelectorAll('[data-testid="doc-source-modal"] .src-item')].find((x) => x.textContent.includes(${JSON.stringify(ctx.so)})); b.click(); document.querySelector('[data-testid="doc-source-modal"] [data-act="pick"]').click(); return true; })()`,
+    );
+    await expect
+      .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.items.map((i) => [i.item_code, i.sales_order]))()`), { timeout: 40_000 })
+      .toEqual(ctx.codes.map((c) => [c, ctx.so]));
+    // The vendor stays the one picked, and nothing was saved.
+    const doc = await inDoc(app, `(async () => { const d = (await window.erpDoc.getSnapshot()).doc; return { supplier: d.supplier, name: d.name }; })()`);
+    expect(doc.supplier).toBe(ctx.supplier);
+    expect(doc.name).toMatch(/^new-purchase-order/);
+  });
+});

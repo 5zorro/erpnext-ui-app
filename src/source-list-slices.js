@@ -5,9 +5,9 @@
 
 import { sourceItemFromRow } from "./source-modal.js";
 
-/** @typedef {"po_submitted"|"pr_submitted"|"po_draft"|"pr_draft"} SourceListSliceId */
+/** @typedef {"po_submitted"|"pr_submitted"|"po_draft"|"pr_draft"|"mr_submitted"|"sq_submitted"|"so_submitted"} SourceListSliceId */
 
-/** @typedef {{ id: SourceListSliceId, baseName: string, kind: "po"|"pr", draft: boolean }} SourceListSliceDef */
+/** @typedef {{ id: SourceListSliceId, baseName: string, kind: "po"|"pr"|"mr"|"sq"|"so", draft: boolean }} SourceListSliceDef */
 
 /** @type {SourceListSliceDef[]} */
 export const SOURCE_LIST_SLICE_DEFS = [
@@ -35,10 +35,53 @@ export const SOURCE_LIST_SLICE_DEFS = [
     kind: "pr",
     draft: true,
   },
+  // The Purchase Order's sources (plan 2026-10-12 S3): what ERPNext can map a PO from.
+  {
+    id: "mr_submitted",
+    baseName: "Material Requests — still to order",
+    kind: "mr",
+    draft: false,
+  },
+  {
+    id: "sq_submitted",
+    baseName: "Supplier Quotations — this vendor",
+    kind: "sq",
+    draft: false,
+  },
+  {
+    id: "so_submitted",
+    baseName: "Sales Orders — still to order",
+    kind: "so",
+    draft: false,
+  },
 ];
 
-/** @type {SourceListSliceId[]} */
-export const SOURCE_LIST_SLICE_ORDER = SOURCE_LIST_SLICE_DEFS.map((d) => d.id);
+/** The Bill's slices — the default, and what the Bill's non-streamed list uses. @type {SourceListSliceId[]} */
+export const SOURCE_LIST_SLICE_ORDER = ["po_submitted", "pr_submitted", "po_draft", "pr_draft"];
+
+/**
+ * Which slices each Doc skin's source picker lists. The Item Receipt is made from a PO only (its
+ * merge refuses anything else, so listing Item Receipts there offered picks that failed); the PO
+ * from a Material Request, a Supplier Quotation or a Sales Order (5zorro 2026-10-12: "NIC, MatReq,
+ * SQ and SO").
+ * @type {Record<string, SourceListSliceId[]>}
+ */
+export const SOURCE_SLICES_BY_SKIN = Object.freeze({
+  bill: SOURCE_LIST_SLICE_ORDER,
+  receipt: ["po_submitted", "po_draft"],
+  po: ["mr_submitted", "sq_submitted", "so_submitted"],
+});
+
+/**
+ * @param {string|null|undefined} skinId
+ * @returns {SourceListSliceId[]}
+ */
+export function sourceSlicesForSkin(skinId) {
+  return SOURCE_SLICES_BY_SKIN[String(skinId || "")] || SOURCE_LIST_SLICE_ORDER;
+}
+
+/** What the NIC row says on each skin ("enter this … manually"). */
+const NIC_NOUN = Object.freeze({ bill: "Bill", receipt: "Item Receipt", po: "Purchase Order" });
 
 /**
  * @param {SourceListSliceId} sliceId
@@ -52,17 +95,18 @@ export function sourceListSliceDef(sliceId) {
  * NIC + loading placeholders (one per slice id).
  * @returns {import("./source-modal.js").SourceGroup[]}
  */
-export function buildBillSourceLoadingGroups() {
+export function buildBillSourceLoadingGroups(skinId = "bill") {
+  const noun = NIC_NOUN[String(skinId || "")] || "Bill";
   /** @type {import("./source-modal.js").SourceGroup[]} */
   const groups = [
     {
       id: "nic",
       name: "Not in computer (NIC)",
-      items: [{ label: "NIC — enter this Bill manually (no source)", kind: "nic" }],
+      items: [{ label: `NIC — enter this ${noun} manually (no source)`, kind: "nic" }],
     },
   ];
-  for (const def of SOURCE_LIST_SLICE_DEFS) {
-    groups.push(loadingGroupForSlice(def.id));
+  for (const id of sourceSlicesForSkin(skinId)) {
+    groups.push(loadingGroupForSlice(id));
   }
   return groups;
 }
@@ -81,7 +125,7 @@ export function loadingGroupForSlice(sliceId) {
     items: [
       {
         label: "Still loading…",
-        kind: "po",
+        kind: def ? def.kind : "po",
         draft: true,
         loading: true,
       },

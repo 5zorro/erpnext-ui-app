@@ -264,6 +264,8 @@ import {
 import { formatJitPoTitle } from "../src/jit-po-bridge.js";
 import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
+import { salesOrdersToOrder, poPendingLines, draftQtyBySoLine } from "../src/so-create-po.js";
+import { docSourceMapper, SOURCE_KIND_NOUN, soSelectedItemsWithoutVendor, trimMappedSoLines } from "../src/po-source.js";
 import {
   normalizeLineAllocation,
   jitPoTitleForSalesOrders,
@@ -7562,6 +7564,33 @@ async function fetchBillSourceSlice(supplier, sliceId) {
       order_by: "posting_date desc",
       limit: 20,
     };
+  } else if (sliceId === "mr_submitted") {
+    // The PO's sources (plan 2026-10-12 S3). A Material Request names no vendor: every open
+    // purchase request is listed, as Vanilla's Get Items From › Material Request does.
+    spec = {
+      doctype: "Material Request",
+      filters: { docstatus: 1, material_request_type: "Purchase", per_ordered: ["<", 100], status: ["not in", ["Stopped", "Cancelled"]] },
+      fields: ["name", "title", "transaction_date", "schedule_date"],
+      order_by: "transaction_date desc",
+      limit: 50,
+    };
+  } else if (sliceId === "sq_submitted") {
+    spec = {
+      doctype: "Supplier Quotation",
+      filters: { supplier: sup, docstatus: 1, status: ["not in", ["Stopped", "Expired", "Cancelled"]] },
+      fields: ["name", "transaction_date", "grand_total", "valid_till"],
+      order_by: "transaction_date desc",
+      limit: 50,
+    };
+  } else if (sliceId === "so_submitted") {
+    // One row per order line (child fields), rolled up by salesOrdersToOrder below.
+    spec = {
+      doctype: "Sales Order",
+      filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed", "Cancelled"]] },
+      fields: ["name", "customer", "customer_name", "transaction_date", "`tabSales Order Item`.stock_qty as stock_qty", "`tabSales Order Item`.ordered_qty as ordered_qty"],
+      order_by: "transaction_date desc",
+      limit: 500,
+    };
   }
   if (!spec) return { ok: false, reason: "Invalid source slice", rows: [] };
 
@@ -7587,6 +7616,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   if (!raw || !raw.ok) {
     return { ok: false, reason: (raw && raw.reason) || "Could not list sources", rows: [] };
   }
+  if (sliceId === "so_submitted") return { ok: true, rows: salesOrdersToOrder(raw.rows).slice(0, 50) };
   return { ok: true, rows: raw.rows || [] };
 }
 
@@ -9984,22 +10014,55 @@ ipcMain.handle("doc-list-sources", async (_e, supplier) => {
 });
 
 ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
-  if (activeDocSkin !== "receipt" || kind !== "po") {
-    return { ok: false, reason: "Invalid source kind for Item Receipt" };
+  // Which ERPNext mapper fills this skin from this kind of source (src/po-source.js): the Item
+  // Receipt from a PO; the PO from a Material Request, Supplier Quotation or Sales Order (S3).
+  const method = docSourceMapper(activeDocSkin, kind);
+  if (!method) {
+    return { ok: false, reason: `A ${SOURCE_KIND_NOUN[kind] || kind || "?"} is not a source for this document.` };
   }
   if (typeof name !== "string" || !name.trim()) {
     return { ok: false, reason: "Source name required" };
   }
+  const source = name.trim();
   await ensureErpFormBridge();
-  const method =
-    "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt";
+  /** @type {Record<string, unknown>} */
+  const args = { source_name: source };
+  /** @type {Record<string, number>|null} Sales Order line → quantity still to order */
+  let soPending = null;
+  if (kind === "so") {
+    // The order's lines still to order, less what is on draft POs (src/so-create-po.js).
+    const ctx = await erpEval(`(async () => {
+      try {
+        var so = await frappe.db.get_doc("Sales Order", ${JSON.stringify(source)});
+        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+          doctype: "Purchase Order",
+          fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
+          filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(source)}], ["docstatus", "=", 0]],
+          limit_page_length: 0 } });
+        return { ok: true, so: so, drafts: (r && r.message) || [] };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })()`);
+    if (!ctx || !ctx.ok) return { ok: false, reason: (ctx && ctx.reason) || `Could not read ${source}.` };
+    const lines = poPendingLines(ctx.so, draftQtyBySoLine(ctx.drafts));
+    const selected = soSelectedItemsWithoutVendor(lines);
+    if (!selected.length) {
+      const drafts = [...new Set(lines.flatMap((l) => l.onDraftPos))];
+      return { ok: false, reason: `Every line of ${source} is already on a purchase order${drafts.length ? ` (drafts: ${drafts.join(", ")})` : ""}.` };
+    }
+    args.selected_items = selected;
+    soPending = Object.fromEntries(lines.map((l) => [l.rowName, l.pendingQty]));
+  }
   const mapped = await erpEval(`(async () => {
     try {
       var r = await frappe.call({
         method: ${JSON.stringify(method)},
-        args: { source_name: ${JSON.stringify(name.trim())} },
+        args: ${JSON.stringify(args)},
       });
-      return { ok: true, src: r && r.message };
+      var m = r && r.message;
+      // The Sales Order mapper returns a list (one PO per vendor; one here, with no vendor).
+      return { ok: true, src: Array.isArray(m) ? m[0] : m };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
     }
@@ -10010,6 +10073,8 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
       reason: (mapped && mapped.reason) || "Could not map source document.",
     };
   }
+  if (soPending) mapped.src.items = trimMappedSoLines(mapped.src.items, soPending);
+  navDebug("doc-merge-source", `${activeDocSkin} ← ${kind} ${source}: ${(mapped.src.items || []).length} line(s)`);
   const raw = await bridgeCall("mergeFromMapped", mapped.src);
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });

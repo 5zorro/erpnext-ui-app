@@ -74,12 +74,33 @@ per vendor, every line linked back; stays on the order with the message; Drafts 
 yellow; Create again says every line is already ordered. The POs are deleted after (ERPNext hands
 the last number back on delete, so the numbering is unchanged).
 
-### S3 — The PO's source picker: NIC, Material Request, Supplier Quotation, Sales Order
+### S3 — The PO's source picker: NIC, Material Request, Supplier Quotation, Sales Order (built 2026-10-12)
 
 As the Bill's picker offers NIC / PO / Item Receipt, the PO's offers every source ERPNext can map
 from: **NIC** (no source), **Material Request** and **Supplier Quotation** (Vanilla's Get Items
 From), and **Sales Order** — beyond Vanilla's PO form, but through ERPNext's own mapper
 (`make_purchase_order` takes a `target_doc`), so Clean Core holds.
+
+**Built:** the slices are now **per skin** (`SOURCE_SLICES_BY_SKIN` in `src/source-list-slices.js`):
+Bill — PO / Item Receipt, submitted and draft (unchanged); **Item Receipt — POs only** (it listed
+Item Receipts too, which its merge refused: a pick that could only fail); **PO — Material Requests
+still to order, this vendor's Supplier Quotations, Sales Orders still to order**. The merge picks
+ERPNext's mapper by skin and kind (`src/po-source.js`) and copies the lines into the open form
+(`mergeFromMapped`), each keeping its link back. Found while building:
+
+- The Sales Order mapper **saves** a PO for any vendor it is given, so the picker asks it with
+  **no vendor** — it then returns the PO unsaved (proven against 5zorro's order, nothing saved) —
+  and the form keeps the vendor already picked. Lines already on draft POs are trimmed, as in S2.
+- A Material Request names no vendor: every open purchase request is listed (as Vanilla's Get Items
+  From does). A Supplier Quotation is this vendor's only.
+- Prices: a Supplier Quotation's lines bring their prices; a Sales Order's do not (ERPNext does not
+  copy a sale price onto a purchase) — the clerk types the vendor's price.
+
+App test: a new PO for a vendor; the picker shows NIC ("this Purchase Order") and 5zorro's order
+under *Sales Orders — still to order*, no Item Receipts; choosing it fills the PO with both lines
+linked back; the vendor stays; nothing saved. **Not run live:** Material Request and Supplier
+Quotation (the sandbox has none) — their lists and mappers are unit-tested and the methods are the
+ones Vanilla's Get Items From calls.
 
 ### S4 — The Sources column on the Sales Order's items table
 

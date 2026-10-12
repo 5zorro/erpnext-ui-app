@@ -2501,12 +2501,13 @@ async function openSourcePicker(supplier, opts = {}) {
  * @param {"link_pick" | "blur" | "toolbar" | "unknown"} trigger
  */
 async function runDocSourcePicker(sup, trigger) {
-  setStatus("Loading open Purchase Orders…");
+  setStatus(ui.profileId === "po" ? "Loading sources (Material Requests, Supplier Quotations, Sales Orders)…" : "Loading open Purchase Orders…");
 
   return runSourcePickerFlow({
     supplier: sup,
     trigger,
     mode: "single",
+    skinId: ui.profileId,
     listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
     log: (event, detail) => logFocus(event, detail || ""),
     mayOpen: (vendor, trig) =>

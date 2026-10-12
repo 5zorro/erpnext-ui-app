@@ -138,3 +138,31 @@ export function createdPosMessage(names, failed = []) {
   }
   return bits.join(" ") || "No purchase order was made.";
 }
+
+/**
+ * The PO source picker's Sales Order list (plan 2026-10-12 S3): ERPNext lists orders one row per
+ * line here (child fields in `get_list`), so roll them up and keep the orders with a line still to
+ * order — stock qty above ordered qty, as `make_purchase_order` filters them.
+ * @param {Array<{ name?: string, customer?: string, customer_name?: string, transaction_date?: string,
+ *   stock_qty?: number|string, ordered_qty?: number|string }>} lineRows
+ * @returns {Array<{ name: string, customer: string, customer_name: string, transaction_date: string, lines_to_order: number }>}
+ */
+export function salesOrdersToOrder(lineRows) {
+  /** @type {Map<string, { name: string, customer: string, customer_name: string, transaction_date: string, lines_to_order: number }>} */
+  const by = new Map();
+  for (const r of Array.isArray(lineRows) ? lineRows : []) {
+    if (!r || !r.name) continue;
+    const name = String(r.name);
+    if (!by.has(name)) {
+      by.set(name, {
+        name,
+        customer: String(r.customer || ""),
+        customer_name: String(r.customer_name || ""),
+        transaction_date: String(r.transaction_date || ""),
+        lines_to_order: 0,
+      });
+    }
+    if (num(r.stock_qty) > num(r.ordered_qty)) by.get(name).lines_to_order += 1;
+  }
+  return [...by.values()].filter((o) => o.lines_to_order > 0);
+}

@@ -18,6 +18,7 @@ import {
 import {
   buildBillSourceLoadingGroups,
   SOURCE_LIST_SLICE_DEFS,
+  SOURCE_LIST_SLICE_ORDER,
 } from "../src/source-list-slices.js";
 
 describe("buildBillSourceGroups", () => {
@@ -178,7 +179,8 @@ describe("buildBillSourceLoadingGroups", () => {
     const g = buildBillSourceLoadingGroups();
     assert.equal(g[0].items[0].kind, "nic");
     assert.equal(isSelectableSourceItem(g[0].items[0]), true);
-    assert.equal(g.length, 1 + SOURCE_LIST_SLICE_DEFS.length);
+    // The Bill's own slices (each skin lists its own — SOURCE_SLICES_BY_SKIN, plan 2026-10-12 S3).
+    assert.equal(g.length, 1 + SOURCE_LIST_SLICE_ORDER.length);
     for (let i = 1; i < g.length; i++) {
       assert.equal(g[i].loading, true);
       assert.equal(g[i].items[0].loading, true);
