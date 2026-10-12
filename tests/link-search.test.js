@@ -105,11 +105,38 @@ describe("withEmptySearchActions", () => {
     assert.equal(withEmptySearchActions([], PAYMENT_TERMS_TEMPLATE_DOCTYPE).length, 1);
   });
 
-  it("leaves non-empty and other doctypes alone", () => {
+  it("leaves doctypes with no create action alone", () => {
     const rows = [{ value: "A", description: "A" }];
-    assert.deepEqual(withEmptySearchActions(rows, "Supplier"), rows);
-    assert.deepEqual(withEmptySearchActions(rows, "Item"), rows);
+    assert.deepEqual(withEmptySearchActions(rows, "Warehouse"), rows);
     assert.deepEqual(withEmptySearchActions([], "Warehouse"), []);
+  });
+
+  // 5zorro 2026-10-11: "SAMPLE" found two items, neither right — Create Item must not wait for no hits.
+  it("puts the create row last even when the search has hits", () => {
+    const rows = [
+      { value: "SAMPLE-1", description: "Sample one" },
+      { value: "SAMPLE-2", description: "Sample two" },
+    ];
+    for (const [dt, isAct, label] of [
+      ["Item", isCreateItemLinkAction, /Create a new Item/],
+      ["Customer", isCreateCustomerLinkAction, /Create a new Customer/],
+      ["Supplier", isCreateSupplierLinkAction, /Vendor add/],
+    ]) {
+      const out = withEmptySearchActions(rows, dt);
+      assert.equal(out.length, 3, dt);
+      assert.deepEqual(out.slice(0, 2), rows, dt);
+      assert.equal(isAct(out[2]), true, dt);
+      assert.match(linkOptionLabel(out[2]), label, dt);
+      assert.doesNotMatch(linkOptionLabel(out[2]), /No .* found/, dt);
+    }
+    assert.equal(rows.length, 2, "the search's own rows are not mutated");
+  });
+
+  it("never adds a second create row", () => {
+    const once = withEmptySearchActions([{ value: "A", description: "A" }], "Item");
+    const twice = withEmptySearchActions(once, "Item");
+    assert.equal(twice.filter((o) => isCreateItemLinkAction(o)).length, 1);
+    assert.equal(isCreateItemLinkAction(twice.at(-1)), true);
   });
 
   // 5zorro 2026-09-30, DF-01 on a blank bench: "No matches for WIDGET" and no way forward.

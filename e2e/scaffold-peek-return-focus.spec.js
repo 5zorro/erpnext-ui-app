@@ -89,6 +89,67 @@ test.describe("scaffold: Esc back from create Item lands in the Item cell (DF-02
     expect(m.visible).toBe(true);
   });
 
+  // 5zorro 2026-10-11: "SAMPLE" found two items, neither right; Create Item only showed once nothing matched.
+  test("Create Item is the last row even when the search has hits; Enter still takes the first hit", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const hits = await inErp(
+      app,
+      `(async () => (await frappe.db.get_list("Item", { filters: { disabled: 0, name: ["like", "%SAMPLE%"] }, limit: 5 })).length)()`,
+    );
+    test.skip(hits < 1, "sandbox has no SAMPLE item");
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 })
+      .toBe(true);
+    const cell = `document.querySelector('input[data-row="0"][data-field="item_code"]')`;
+    await inDoc(app, `(() => { const i = ${cell}; i.focus(); i.value = "SAMPLE"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    const ROWS = `[...document.querySelectorAll('.link-dd:not([hidden]) .link-opt')].map((b) => ({ v: b.dataset.value, t: b.textContent }))`;
+    await expect.poll(async () => (await inDoc(app, ROWS)).length, { timeout: 15_000 }).toBeGreaterThan(1);
+    const rows = await inDoc(app, ROWS);
+    expect(rows.at(-1)).toEqual({ v: "__doc_create_item__", t: "Create a new Item…" });
+    expect(rows.slice(0, -1).every((r) => /SAMPLE/i.test(r.v))).toBe(true);
+    // Enter picks the highlighted first hit, never the create row.
+    const first = rows[0].v;
+    await app.evaluate(({ webContents }) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.focus();
+      w.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+      w.sendInputEvent({ type: "char", keyCode: "Enter" });
+      w.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+    });
+    await expect.poll(async () => inDoc(app, `${cell}.value`), { timeout: 15_000 }).toBe(first);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 5_000 }).toBe("doc");
+    // And the create row, clicked under the hits, opens a new Item with what was typed.
+    // The pick repaints the line (item name, rate), which can replace the cell: type until the
+    // dropdown opens on the cell that is there now.
+    await expect
+      .poll(
+        async () =>
+          inDoc(
+            app,
+            `(async () => { const i = ${cell}; i.focus(); i.value = "SAMPLE"; i.dispatchEvent(new Event("input", { bubbles: true }));
+              await new Promise((r) => setTimeout(r, 1500));
+              return document.querySelectorAll('.link-dd:not([hidden]) .link-opt').length; })()`,
+          ),
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(1);
+    await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]').click()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Item" && cur_frm.is_new())`), { timeout: 30_000 })
+      .toBe(true);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+  });
+
   test("abandoned: cursor back in line 1's Item cell", async () => {
     test.setTimeout(150_000);
     app = await launchShell();

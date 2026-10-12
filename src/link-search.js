@@ -48,62 +48,58 @@ export function normalizeSearchLinkResults(message) {
 }
 
 /**
- * When Link search has no rows (or always for Terms), offer create-via-peek actions.
+ * Create-via-peek actions, always the last row (5zorro 2026-10-11: "SAMPLE" found two items, neither
+ * the right one, and Create Item only appeared once the typing matched nothing). Vanilla's Link does
+ * the same: "Create a new …" sits under the hits. With no hits the row says so.
  * @param {LinkOption[]} rows
  * @param {string} doctype
  * @returns {LinkOption[]}
  */
 export function withEmptySearchActions(rows, doctype) {
-  const list = Array.isArray(rows) ? [...rows] : [];
-  if (doctype === PAYMENT_TERMS_TEMPLATE_DOCTYPE) {
-    // Always offer create — Vanilla Link also lets clerks add Terms when templates already exist.
-    if (!list.some((o) => isCreatePaymentTermsLinkAction(o))) {
-      list.push({
-        value: LINK_ACTION_CREATE_PAYMENT_TERMS,
-        description: "Create new Payment Terms…",
-        action: "create_payment_terms",
-      });
-    }
-    return list;
-  }
-  if (list.length) return list;
-  if (doctype === "Supplier") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_SUPPLIER,
-        description: "Go to Vendor add…",
-        action: "create_supplier",
-      },
-    ];
-  }
-  if (doctype === "Item") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_ITEM,
-        description: "No items found — create Item…",
-        action: "create_item",
-      },
-    ];
-  }
-  if (doctype === "Customer") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_CUSTOMER,
-        description: "No customers found — create Customer…",
-        action: "create_customer",
-      },
-    ];
-  }
-  if (doctype === "Project") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_PROJECT,
-        description: "No projects found — create Project…",
-        action: "create_project",
-      },
-    ];
-  }
-  return list;
+  const list = Array.isArray(rows) ? rows.filter((o) => !isLinkCreateAction(o)) : [];
+  const act = LINK_CREATE_ACTIONS[doctype];
+  if (!act) return list;
+  const description = list.length || !act.empty ? act.label : act.empty;
+  return [...list, { value: act.value, description, action: act.action }];
+}
+
+/** @type {Record<string, { value: string, action: string, label: string, empty?: string }>} */
+const LINK_CREATE_ACTIONS = {
+  [PAYMENT_TERMS_TEMPLATE_DOCTYPE]: {
+    value: LINK_ACTION_CREATE_PAYMENT_TERMS,
+    action: "create_payment_terms",
+    label: "Create new Payment Terms…",
+  },
+  Supplier: { value: LINK_ACTION_CREATE_SUPPLIER, action: "create_supplier", label: "Go to Vendor add…" },
+  Item: {
+    value: LINK_ACTION_CREATE_ITEM,
+    action: "create_item",
+    label: "Create a new Item…",
+    empty: "No items found — create Item…",
+  },
+  Customer: {
+    value: LINK_ACTION_CREATE_CUSTOMER,
+    action: "create_customer",
+    label: "Create a new Customer…",
+    empty: "No customers found — create Customer…",
+  },
+  Project: {
+    value: LINK_ACTION_CREATE_PROJECT,
+    action: "create_project",
+    label: "Create a new Project…",
+    empty: "No projects found — create Project…",
+  },
+};
+
+/** Any of the create-via-peek rows. */
+function isLinkCreateAction(o) {
+  return (
+    isCreateSupplierLinkAction(o) ||
+    isCreatePaymentTermsLinkAction(o) ||
+    isCreateProjectLinkAction(o) ||
+    isCreateItemLinkAction(o) ||
+    isCreateCustomerLinkAction(o)
+  );
 }
 
 /**
