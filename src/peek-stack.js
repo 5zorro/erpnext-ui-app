@@ -477,6 +477,11 @@ export function renameInPeekLinks(links, renamed, erpBase) {
  *    session (`anchorRoute`), which stays the anchor so Esc can always get back to it.
  * 4. Anywhere else that is not a setup page ends the session.
  *
+ * `shellOpened`: the shell itself opened this page, from somewhere that is not the form being left
+ * (Home, a Find page) and decided it has no parent — so rule 2 does not make one out of the
+ * hidden form left behind (5zorro nav incident 2026-10-12: a Material Request opened from Home got
+ * an untouched new Item Receipt from earlier as its "parent", and the Doc tab went back to it).
+ *
  * @param {PeekStack|null|undefined} stack
  * @param {string} fromPath the form just left (from the page's own route history)
  * @param {string} toPath where the hop landed
@@ -487,6 +492,7 @@ export function renameInPeekLinks(links, renamed, erpBase) {
  *   fromLinkParent?: string,
  *   fromLinkTarget?: string,
  *   anchorRoute?: string,
+ *   shellOpened?: boolean,
  * }} [opts]
  * @returns {PeekStack|null}
  */
@@ -516,7 +522,7 @@ export function applyErpHopToPeekStack(stack, fromPath, toPath, opts = {}) {
       toInfo.isNew &&
       (!opts.fromLinkTarget || opts.fromLinkTarget === toInfo.doctype)
     );
-    const leftWork = fromIsForm && (namedByFrappe || !!opts.prevUnsaved);
+    const leftWork = fromIsForm && !opts.shellOpened && (namedByFrappe || !!opts.prevUnsaved);
     const start = () => pushPeekChild(beginPeekParent(null, from, opts), to, opts);
 
     if (isParent(from)) return pushPeekChild(stack, to, opts);

@@ -1291,12 +1291,25 @@ function collapsePeekStackIfLeaving(nextRoute, reason) {
  * @param {string} childRoute
  * @param {boolean} [currentUnsaved] the Vanilla form on screen has unsaved changes
  */
+/**
+ * The shell opened a page and found it no parent (from Home, say): the ERP hops that follow to that
+ * doctype must not adopt the hidden form left behind as one (`applyErpHopToPeekStack` shellOpened;
+ * 5zorro nav incident 2026-10-12). Short-lived: Frappe's `/new` → `new-x-…` reroute follows at once.
+ * @type {{ doctype: string, until: number } | null}
+ */
+let shellOpenedNoParent = null;
+
 function notePeekParentAndChild(childRoute, currentUnsaved = false) {
   const opts = { erpBase: ERP_BASE, history };
+  shellOpenedNoParent = null;
+  const noParent = () => {
+    shellOpenedNoParent = { doctype: routeInfo(childRoute, ERP_BASE).doctype || "", until: Date.now() + 5000 };
+  };
   // A list is somewhere you went: never start a parent-only stack for one (it would keep the
   // Vanilla → Doc hijack switched off, see openDocSkin's self-heal).
   if (!isPeekChildRoute(childRoute, ERP_BASE)) {
     navDebug("peek-none", `${childRoute} (not a record)`);
+    noParent();
     return;
   }
   const parentRoute = resolveSoftPeekParent({
@@ -1309,6 +1322,7 @@ function notePeekParentAndChild(childRoute, currentUnsaved = false) {
   });
   if (!parentRoute) {
     navDebug("peek-none", `${currentRoute || ""} → ${childRoute} (no parent: clean form)`);
+    noParent();
     return;
   }
   peekStack = beginPeekParent(peekStack, parentRoute, opts);
@@ -1339,7 +1353,14 @@ function onErpRouteHop(hop) {
   }
   const had = isActivePeekStack(peekStack);
   const beforeParent = had ? peekStack.parent.route : "";
+  const shellOpened = !!(
+    shellOpenedNoParent &&
+    Date.now() < shellOpenedNoParent.until &&
+    routeInfo(to, ERP_BASE).doctype === shellOpenedNoParent.doctype
+  );
+  if (shellOpenedNoParent && !shellOpened) shellOpenedNoParent = null;
   peekStack = applyErpHopToPeekStack(peekStack, hop.prev, to, {
+    shellOpened,
     erpBase: ERP_BASE,
     history,
     prevUnsaved: hop.prevUnsaved,

@@ -445,3 +445,27 @@ test.describe("scaffold: Attach sits beside the notes on every A/P Doc skin", ()
   });
 });
 
+// 5zorro nav incident 2026-10-12: a new Item Receipt (Doc), then Home, then the Material Request tile.
+// The Material Request has no Doc skin; the hidden untouched Item Receipt became its "peek parent" and
+// the Doc tab lit up as "back to" it. Opened from Home, it has no parent — the Doc tab stays hidden.
+test.describe("scaffold: a page opened from Home has no peek parent", () => {
+  test("Material Request from Home after a new Item Receipt: no Doc tab, no parent", async () => {
+    test.setTimeout(150_000);
+    const app = await launchShell();
+    try {
+      await waitForE2eApi(app);
+      await e2eCall(app, "openReceipt", "/app/purchase-receipt/new");
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+      await expect.poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 }).toBe(true);
+      await e2eCall(app, "showLauncher");
+      await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-mr-new"]').click(); true`);
+      await expect.poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Material Request")`), { timeout: 30_000 }).toBe(true);
+      await new Promise((r) => setTimeout(r, 1500));
+      const docTab = await e2eCall(app, "execInView", "chrome", `(() => { const b = document.querySelector('[data-testid="lens-doc"]'); return { shown: !!b && !b.hidden, title: b ? b.title : "" }; })()`);
+      expect(docTab.shown, `Doc tab should be hidden (title: ${docTab.title})`).toBe(false);
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+});
+

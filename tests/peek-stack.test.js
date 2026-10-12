@@ -218,6 +218,16 @@ describe("applyErpHopToPeekStack — who is a parent (plan 2026-09-26 N1)", () =
     assert.deepEqual(stack.children.map((c) => c.dt), ["account"]);
   });
 
+  // 5zorro nav incident 2026-10-12: Material Request opened from Home; the hidden new Item Receipt
+  // left behind (always "unsaved" in Frappe) became its parent, and the Doc tab returned to it.
+  it("a page the shell opened with no parent does not adopt the hidden form it hopped away from", () => {
+    const newIr = "/app/purchase-receipt/new-purchase-receipt-njuadgpcoe";
+    const mr = "/app/material-request/new-material-request-btrrsfwozk";
+    assert.equal(applyErpHopToPeekStack(null, newIr, mr, { prevUnsaved: true, shellOpened: true }), null);
+    // …while the same hop made by the clerk in Vanilla still parks the unsaved form.
+    assert.equal(applyErpHopToPeekStack(null, newIr, mr, { prevUnsaved: true }).parent.route, newIr);
+  });
+
   it("a clean form left for a setup record is plain navigation, not a peek", () => {
     assert.equal(applyErpHopToPeekStack(null, "/app/purchase-order/PO-1", supplier), null);
   });
