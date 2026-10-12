@@ -611,9 +611,10 @@ test.describe("scaffold: Attach on a saved Sales Order draft", () => {
     await waitForE2eApi(app);
     const so = await inErp(
       app,
-      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 0 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: ["<", 2] }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
     );
-    test.skip(!so, "sandbox has no saved Sales Order draft");
+    // Draft or submitted: Frappe attaches to both, and so does the skin (canAttachTo).
+    test.skip(!so, "sandbox has no saved Sales Order");
     await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${so}`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
     await expect
@@ -659,10 +660,10 @@ test.describe("scaffold: attached files table under the notes", () => {
           fields: ["attached_to_name", "file_name", "file_url", "file_size"], limit: 1 });
         if (!r[0]) return null;
         const so = await frappe.db.get_value("Sales Order", r[0].attached_to_name, "docstatus");
-        return so && so.message && Number(so.message.docstatus) === 0 ? r[0] : null;
+        return so && so.message && Number(so.message.docstatus) < 2 ? r[0] : null;
       })()`,
     );
-    test.skip(!found, "sandbox has no draft Sales Order with a file attached");
+    test.skip(!found, "sandbox has no saved Sales Order with a file attached");
     await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${found.attached_to_name}`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
     const ROWS = `[...document.querySelectorAll('[data-testid="doc-attach-list"] tr[data-file-url]')].map((tr) => ({ url: tr.dataset.fileUrl, name: tr.querySelector(".al-name").textContent }))`;
@@ -685,6 +686,59 @@ test.describe("scaffold: attached files table under the notes", () => {
     } finally {
       fs.rmSync(out, { force: true });
       await inDoc(app, `(() => { const p = document.querySelector('[data-testid="compare-pane"]'); if (p && !p.hidden) p.querySelector('[data-cp="close"]').click(); return true; })()`);
+    }
+  });
+});
+
+// 5zorro 2026-10-12: a file attached to the submitted Sales Order in Vanilla did not show in the
+// table back on the Doc skin (the table only re-read on a new document name), and Attach was grey
+// on a submitted order though Frappe attaches to it. Adds one small text file and deletes it.
+test.describe("scaffold: attached files follow ERPNext, not the page", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("a file attached outside the skin shows when the page gets its document again; Attach is on for a submitted order", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    test.skip(!so, "sandbox has no submitted Sales Order");
+    const route = `/app/sales-order/${so}`;
+    await e2eCall(app, "openDocSkin", "sales-order", route);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })
+      .toBe(so);
+    await expect.poll(async () => inDoc(app, `!document.getElementById("btn-attach").disabled`), { timeout: 20_000 }).toBe(true);
+    const NAMES = `[...document.querySelectorAll('[data-testid="doc-attach-list"] .al-name')].map((td) => td.textContent)`;
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-attach-list"]') ? 1 : 0`), { timeout: 20_000 }).toBeGreaterThanOrEqual(0);
+    const fileName = `zz-e2e-${Date.now()}.txt`;
+    let fileId = "";
+    try {
+      // Attached the way Vanilla's uploader does (upload_file), from the ERP page.
+      fileId = await inErp(
+        app,
+        `(async () => {
+          const fd = new FormData();
+          fd.append("file", new Blob(["e2e"], { type: "text/plain" }), ${JSON.stringify(fileName)});
+          fd.append("doctype", "Sales Order"); fd.append("docname", ${JSON.stringify(so)}); fd.append("is_private", "1");
+          const r = await fetch("/api/method/upload_file", { method: "POST", body: fd, headers: { "X-Frappe-CSRF-Token": frappe.csrf_token } });
+          const j = await r.json(); return (j.message && j.message.name) || "";
+        })()`,
+      );
+      expect(fileId).toBeTruthy();
+      // The page gets the same document again (as on the way back from Vanilla).
+      await e2eCall(app, "openDocSkin", "sales-order", route);
+      await expect.poll(async () => inDoc(app, NAMES), { timeout: 30_000 }).toContain(fileName);
+    } finally {
+      if (fileId) await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "File", name: ${JSON.stringify(fileId)} } }).then(() => true)`);
     }
   });
 });

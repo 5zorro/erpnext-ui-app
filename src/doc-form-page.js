@@ -135,6 +135,7 @@ import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
 import { openPrintDialog } from "./print-dialog-ui.js";
 import { mountComparePane } from "./compare-pane-ui.js";
+import { canAttachTo } from "./attachment-list.js";
 import { mountAttachmentList } from "./attachment-list-ui.js";
 import {
   addressRoleMeta,
@@ -2729,7 +2730,8 @@ function paint(doc, snapScratch, opts = {}) {
   el.addLine.disabled = !canEdit || !linesAreAddable();
   if (el.importItems) el.importItems.disabled = !canEdit || !linesAreAddable();
   if (el.clearQty) el.clearQty.disabled = !canEdit;
-  if (el.attach) el.attach.disabled = !canEdit;
+  // Frappe's rule, not the edit lock: a submitted document takes files too (canAttachTo).
+  if (el.attach) el.attach.disabled = !canAttachTo(doc);
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
@@ -3374,6 +3376,9 @@ export async function bootDocFormPage(injectedApi) {
     onPeek: (fileUrl) => (comparePane ? comparePane.peek(fileUrl) : false),
     setStatus,
     testidPrefix: "doc",
+    onFilesChanged: () => {
+      if (comparePane) comparePane.refresh(true);
+    },
   });
 
   setStatus("Ready — open a Purchase Order or Item Receipt.");
@@ -3390,8 +3395,9 @@ export async function bootDocFormPage(injectedApi) {
         userEdited: snap && snap.userEdited,
       });
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
-      // Back from Attach (or any peek): a file may have been added.
-      if (snap && snap.softPeekReturn && attachList) void attachList.refresh(true);
+      // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
+      // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
+      if (attachList) void attachList.refresh(true);
     });
   }
 

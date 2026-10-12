@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   SIDE_BY_SIDE_MIN_PX,
+  frappeDownloadPath,
   paperKind,
   paperCantShow,
   paperSources,
@@ -113,5 +114,17 @@ describe("one page per picture; Word whole; spreadsheets left to their own progr
     assert.equal(paperKind("export.CSV"), "sheet");
     assert.equal(paperKind("old.xls"), "other");
     assert.match(paperCantShow("other", "old.xls"), /spreadsheet.*Excel/);
+  });
+});
+
+// 5zorro 2026-10-12: an attached private .html answered 403 by its own address (the frappe_docker
+// web server strips ".html"); Frappe's download method serves it.
+describe("frappeDownloadPath", () => {
+  it("asks download_file for the file by its address", () => {
+    assert.equal(
+      frappeDownloadPath("/private/files/DF-03a_purchase_order.html"),
+      "/api/method/download_file?file_url=%2Fprivate%2Ffiles%2FDF-03a_purchase_order.html",
+    );
+    assert.equal(frappeDownloadPath("/files/My Scan.pdf"), "/api/method/download_file?file_url=%2Ffiles%2FMy%20Scan.pdf");
   });
 });

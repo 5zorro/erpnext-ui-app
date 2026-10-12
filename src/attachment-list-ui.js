@@ -3,7 +3,7 @@
  * one row per attached file, with Peek (the Papers pane, on that file) and Download (save it).
  * Rows come from src/attachment-list.js; files travel over the Papers channels.
  */
-import { attachmentSource, attachmentRows } from "./attachment-list.js";
+import { attachmentSource, attachmentRows, attachmentSignature } from "./attachment-list.js";
 
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -16,6 +16,7 @@ const esc = (v) =>
  *   onPeek: (fileUrl: string) => Promise<boolean>|boolean,
  *   setStatus?: (text: string, kind?: string) => void,
  *   testidPrefix?: string,
+ *   onFilesChanged?: () => void,
  * }} opts
  */
 export function mountAttachmentList(opts) {
@@ -24,12 +25,15 @@ export function mountAttachmentList(opts) {
   const tid = opts.testidPrefix || "doc";
   let loadedFor = "";
   let token = 0;
+  /** The files last drawn, for this document — a change (attached in Vanilla) tells Papers. */
+  let shownSignature = null;
 
   async function refresh(force = false) {
     if (!host) return;
     const src = attachmentSource(getDoc());
     const key = src ? `${src.doctype}\u0000${src.name}` : "";
     if (!force && key === loadedFor) return;
+    if (key !== loadedFor) shownSignature = null;
     loadedFor = key;
     const mine = ++token;
     if (!src || !api || !api.papersList) {
@@ -45,6 +49,9 @@ export function mountAttachmentList(opts) {
       return;
     }
     const rows = attachmentRows(res.files);
+    const sig = attachmentSignature(rows);
+    if (shownSignature != null && sig !== shownSignature && opts.onFilesChanged) opts.onFilesChanged();
+    shownSignature = sig;
     host.hidden = !rows.length;
     if (!rows.length) {
       host.innerHTML = "";

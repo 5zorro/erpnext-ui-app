@@ -546,8 +546,8 @@ export function mountComparePane(opts) {
 
   return {
     /** Call when the document on the page changes (a new name, or after a save). */
-    refresh: () => {
-      if (!pane.hidden) void load();
+    refresh: (force = false) => {
+      if (!pane.hidden) void load(force);
     },
     isOpen: () => !pane.hidden,
     /**

@@ -161,6 +161,7 @@ import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
 import { openPrintDialog } from "../src/print-dialog-ui.js";
 import { mountComparePane } from "../src/compare-pane-ui.js";
+import { canAttachTo } from "../src/attachment-list.js";
 import { mountAttachmentList } from "../src/attachment-list-ui.js";
 import {
   UPDATE_STOCK_DEFAULT_ROUTE,
@@ -4906,7 +4907,8 @@ export async function bootBillFormPage(api) {
     if (el.addSource) el.addSource.disabled = !canEdit;
     if (el.importItems) el.importItems.disabled = !canEdit;
     if (el.clearQty) el.clearQty.disabled = !canEdit;
-    if (el.attach) el.attach.disabled = !canEdit;
+    // Frappe's rule, not the edit lock: a submitted document takes files too (canAttachTo).
+    if (el.attach) el.attach.disabled = !canAttachTo(doc);
     if (el.addTax) el.addTax.disabled = !canEdit;
     paintItems(doc);
     paintTaxes(doc);
@@ -5752,6 +5754,9 @@ export async function bootBillFormPage(api) {
     onPeek: (fileUrl) => (comparePane ? comparePane.peek(fileUrl) : false),
     setStatus,
     testidPrefix: "bill",
+    onFilesChanged: () => {
+      if (comparePane) comparePane.refresh(true);
+    },
   });
 
   docCapsUi = wireDocCapsUi({
@@ -6022,8 +6027,10 @@ export async function bootBillFormPage(api) {
       if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
-      // Back from Attach (or any peek): a file may have been added.
-      if (snap && snap.softPeekReturn && attachList) void attachList.refresh(true);
+      // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
+      // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
+      // Not on background-enrich progress: that is the same page filling in.
+      if (attachList && !(snap && snap.enrichProgress)) void attachList.refresh(true);
     });
   }
   function paintSnapshot(snap) {

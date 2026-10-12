@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { attachmentSource, attachmentRows, formatFileSize, formatAddedDate } from "../src/attachment-list.js";
+import { attachmentSource, attachmentRows, formatFileSize, formatAddedDate, canAttachTo, attachmentSignature } from "../src/attachment-list.js";
 
 // 5zorro 2026-10-12: the attached files as a table under the notes, with Peek and Download.
 describe("attachmentSource", () => {
@@ -52,5 +52,29 @@ describe("formatFileSize / formatAddedDate", () => {
   it("dates", () => {
     assert.equal(formatAddedDate("2026-01-05 08:00:00"), "1/5/2026");
     assert.equal(formatAddedDate(""), "");
+  });
+});
+
+// 5zorro 2026-10-12: Attach was grey on a submitted Sales Order, though Vanilla attaches to it.
+describe("canAttachTo (Frappe: any saved document; the edit lock is not the rule)", () => {
+  it("draft, submitted and cancelled all take files", () => {
+    for (const docstatus of [0, 1, 2, "1"]) assert.equal(canAttachTo({ docstatus }), true, String(docstatus));
+    assert.equal(canAttachTo({}), true);
+  });
+  it("no document, no Attach", () => {
+    assert.equal(canAttachTo(null), false);
+  });
+});
+
+describe("attachmentSignature", () => {
+  it("changes when a file is added, not when nothing did", () => {
+    const one = attachmentRows([{ name: "a", file_url: "/private/files/a.pdf", creation: "2026-10-11 20:50:45" }]);
+    const two = attachmentRows([
+      { name: "a", file_url: "/private/files/a.pdf", creation: "2026-10-11 20:50:45" },
+      { name: "b", file_url: "/private/files/a.html", creation: "2026-10-11 21:08:56" },
+    ]);
+    assert.equal(attachmentSignature(one), attachmentSignature(attachmentRows([{ name: "a", file_url: "/private/files/a.pdf" }])));
+    assert.notEqual(attachmentSignature(one), attachmentSignature(two));
+    assert.equal(attachmentSignature([]), "");
   });
 });

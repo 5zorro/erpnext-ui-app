@@ -104,7 +104,7 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
-import { MAX_PAPER_BYTES } from "../src/compare-papers.js";
+import { MAX_PAPER_BYTES, frappeDownloadPath } from "../src/compare-papers.js";
 import { buildZip } from "../src/zip-store.js";
 import {
   MULTI_PDF_SYNC_MAX,
@@ -11095,7 +11095,14 @@ async function paperBytes(fileUrl) {
   if (!/^\/(private\/)?files\//.test(u)) return { ok: false, reason: "Not an ERPNext file address." };
   if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
   try {
-    const res = await erp.webContents.session.fetch(`${ERP_BASE}${encodeURI(decodeURI(u))}`);
+    let res = await erp.webContents.session.fetch(`${ERP_BASE}${encodeURI(decodeURI(u))}`);
+    if (!res.ok) {
+      // The file's own address will not serve it (a private .html — see frappeDownloadPath): ask
+      // Frappe's download method, which checks the same permission.
+      const first = res.status;
+      res = await erp.webContents.session.fetch(`${ERP_BASE}${frappeDownloadPath(u)}`);
+      navDebug("paper-bytes-fallback", `${u} (${first}) → download_file ${res.status}`);
+    }
     if (!res.ok) return { ok: false, reason: `ERPNext could not send the file (${res.status}).` };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };

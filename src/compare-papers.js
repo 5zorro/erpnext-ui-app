@@ -177,3 +177,17 @@ table.sheet{border-collapse:collapse;font-size:11px}table.sheet th,table.sheet t
 </style></head><body>${body}</body></html>`;
 }
 
+/**
+ * Frappe's own download method for an attachment: the fallback when the file's address will not
+ * serve it. The web server that ships with frappe_docker rewrites any address ending in `.html` to
+ * the same address without it (`rewrite ^(.+)\.html$ $1 permanent`; only public `/files/` are
+ * exempt), so a *private* `.html` attachment answers 403 by its own link — in Vanilla too.
+ * `download_file` reads it by `file_url` with the same permission check (frappe/handler.py).
+ * 5zorro 2026-10-12: Download on an attached .html failed.
+ * @param {string} fileUrl e.g. "/private/files/DF-03a_purchase_order.html"
+ * @returns {string}
+ */
+export function frappeDownloadPath(fileUrl) {
+  return `/api/method/download_file?file_url=${encodeURIComponent(String(fileUrl || ""))}`;
+}
+

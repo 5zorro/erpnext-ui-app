@@ -80,3 +80,26 @@ export function attachmentRows(files) {
       isPrivate: Number(f.is_private) === 1,
     }));
 }
+
+/**
+ * Whether Attach is offered — Frappe's rule, not the edit lock (5zorro 2026-10-12: "why is the
+ * attach file button grey if Vanilla allows attaching to submitted sales orders?"). The form's
+ * sidebar (sidebar/attachments.js `refresh`) hides Attach only on an unsaved document; a draft, a
+ * submitted and a cancelled one all take files, because attachments sit beside the document, not
+ * in it. The skin enables it on an unsaved draft too, where a click says to save first.
+ * @param {{ docstatus?: number|string }|null|undefined} doc
+ * @returns {boolean}
+ */
+export function canAttachTo(doc) {
+  return !!doc && [0, 1, 2].includes(Number(doc.docstatus ?? 0));
+}
+
+/**
+ * A fingerprint of the files listed, so the page can tell whether they changed (a file attached in
+ * Vanilla, then back to the Doc skin) and only then redraw the Papers pane.
+ * @param {AttachmentRow[]} rows
+ * @returns {string}
+ */
+export function attachmentSignature(rows) {
+  return (Array.isArray(rows) ? rows : []).map((r) => r.fileUrl).join("\n");
+}

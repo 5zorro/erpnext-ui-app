@@ -1116,6 +1116,18 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     new document, after Attach returns, and after a drop on Papers. App test on 5zorro's Sales Order
     (its one file): listed, Peek shows it, Download writes the same bytes (to the OS temp folder).
     Not app-tested on the Bill — the sandbox has no saved draft bill.
+  - *Same day, after 5zorro submitted the order and attached an .html in Vanilla:* (1) **Attach follows
+    Frappe's rule, not the edit lock** — any saved document takes files, submitted and cancelled
+    included (`canAttachTo`; the sidebar hides Attach only on an unsaved form). (2) The table
+    re-reads the files **every time the page gets its document** (back from Vanilla, a peek), not
+    only on a new name; when the list changed, Papers redraws too. (3) **A private `.html`
+    attachment cannot be fetched by its own address** on this install: frappe_docker's nginx
+    rewrites `….html` to `…` (`rewrite ^(.+)\.html$ $1 permanent`; only public `/files/` exempt) and
+    the stripped address answers 403 — Vanilla's link to it fails the same way. The shell falls back
+    to Frappe's own `download_file` (same permission check) for Peek/Open/Download
+    (`frappeDownloadPath`, breadcrumb `paper-bytes-fallback`). App tests: Attach enabled on the
+    submitted order; a file added outside the skin shows when the page gets its document again
+    (fails with the re-read removed); Download of the .html writes its bytes.
 
 ## After the dogfood papers — the order of what comes next (5zorro 2026-10-12)
 
