@@ -591,3 +591,44 @@ test.describe("scaffold: a page opened from Home has no peek parent", () => {
   });
 });
 
+// 5zorro 2026-10-12: a saved Sales Order draft, Attach "flickered, and nothing else". Attach opens the
+// document's own Vanilla form for Frappe's uploader; the Vanilla → Doc hijack pulled the clerk back
+// at once. Never uploads: the dialog is closed and Esc goes back.
+test.describe("scaffold: Attach on a saved Sales Order draft", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("the uploader stays open in Vanilla; Esc comes back to the Doc skin", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 0 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    test.skip(!so, "sandbox has no saved Sales Order draft");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })
+      .toBe(so);
+    await expect.poll(async () => inDoc(app, `!document.getElementById("btn-attach").disabled`), { timeout: 20_000 }).toBe(true);
+    await inDoc(app, `document.getElementById("btn-attach").click(); true`);
+    const UPLOADER = `!!(window.cur_dialog && cur_dialog.display && cur_frm && cur_frm.doc.name === ${JSON.stringify(so)})`;
+    await expect.poll(async () => inErp(app, UPLOADER), { timeout: 20_000 }).toBe(true);
+    // And it stays: the old code was back on the Doc skin within half a second.
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(await e2eGet(app, "surfaceMode")).toBe("erp");
+    expect(await inErp(app, UPLOADER)).toBe(true);
+    await inErp(app, `cur_dialog.hide(); true`);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`), { timeout: 20_000 })
+      .toBe(so);
+  });
+});

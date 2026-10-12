@@ -45,6 +45,7 @@ import {
   resolveSoftPeekParent,
   shouldCollapsePeekStack,
   syncPeekLinks,
+  ownFormPeekHolds,
 } from "../src/peek-stack.js";
 import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.js";
 import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
@@ -501,6 +502,8 @@ let billPoLineMetaByDoc = {};
  * @type {{ mode: "bill"|"doc", skinId: string|null, route: string }|null}
  */
 let parkedDocSurface = null;
+/** The parked document's own Vanilla form, opened on purpose (Attach) — see ownFormPeekHolds. */
+let ownFormPeekRoute = "";
 /** Bumps on each showBill proceed; stale loads abandon before paint (re-click race). */
 let billLoadGen = 0;
 /** @type {import("../src/bill-load-phase.js").typeof BILL_LOAD_IDLE | import("../src/bill-load-phase.js").typeof BILL_LOAD_LOADING | import("../src/bill-load-phase.js").typeof BILL_LOAD_FAILED | import("../src/bill-load-phase.js").typeof BILL_LOAD_READY} */
@@ -1035,6 +1038,11 @@ function syncE2eApi() {
       showDocForm("receipt", route || "/app/purchase-receipt/new");
       return { surfaceMode, activeDocSkin };
     },
+    // Any doc-form skin by its profile id ("sales-order", "estimate", …).
+    openDocSkin: (skinId, route) => {
+      showDocForm(skinId, route);
+      return { surfaceMode, activeDocSkin };
+    },
     openSiteRoot: () => {
       showErp("/", { forceLoad: true });
       return { showingHome: showingHome() };
@@ -1339,6 +1347,8 @@ function notePeekParentAndChild(childRoute, currentUnsaved = false) {
 function onErpRouteHop(hop) {
   const to = normalizeAppRoute(hop.to, ERP_BASE).path || "";
   if (!to) return;
+  // Left the document the own-form peek was for: the hijack holds for that document only.
+  if (ownFormPeekRoute && !ownFormPeekHolds(ownFormPeekRoute, to, ERP_BASE)) ownFormPeekRoute = "";
   // A page that claims its own address is on screen: the ERP view behind it is not the clerk's.
   if (surfaceOwnsRoute(surfaceMode)) {
     navDebug("route-hop-hidden", `${hop.prev || "-"} → ${to}`);
@@ -2140,6 +2150,9 @@ async function softPeekErp(route) {
     ));
   }
   parkDocSurfaceIfNeeded();
+  ownFormPeekRoute =
+    parkedDocSurface && routesReferToSameDoc(parkedDocSurface.route, path, ERP_BASE) ? path : "";
+  if (ownFormPeekRoute) navDebug("own-form-peek", path);
   notePeekParentAndChild(path, currentUnsaved);
   showErp(path, { softPeek: true, skipDirtyGate: true, forceLoad: false, search });
   armSoftPeekEscHook(true).catch(() => {});
@@ -2339,6 +2352,7 @@ async function resumeParkedDoc(route) {
   if (!routesReferToSameDoc(parkedDocSurface.route, route, ERP_BASE)) return false;
   const park = parkedDocSurface;
   parkedDocSurface = null;
+  ownFormPeekRoute = "";
   // Where the errand ended (e.g. /app/item/SKU-9 once a new Item is saved): the page fills the
   // cell it was opened from (src/peek-return-focus.js).
   const peekReturnFrom = currentRoute;
@@ -2585,6 +2599,10 @@ function maybeHijackErpToDoc(url) {
   }
   if (lensHijackLock || surfaceMode !== "erp") return false;
   if (typeof url !== "string" || !isAllowedErpUrl(ERP_BASE, url)) return false;
+  if (ownFormPeekHolds(ownFormPeekRoute, url, ERP_BASE)) {
+    navDebug("hijack-skip-own-form", url);
+    return false;
+  }
   if (erpNavIntentPath && shouldBlockDocHijackForListIntent(erpNavIntentPath, url, ERP_BASE)) {
     navDebug("hijack-skip-list-intent", url);
     return false;

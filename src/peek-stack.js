@@ -539,3 +539,19 @@ export function applyErpHopToPeekStack(stack, fromPath, toPath, opts = {}) {
   if (live && shouldCollapsePeekStack(stack, to, opts)) return null;
   return keep;
 }
+
+/**
+ * The shell opened the parked document's own Vanilla form on purpose — Attach, whose uploader only
+ * Frappe's form can host (5zorro 2026-10-12: Sales Order Attach "flickered, and nothing else").
+ * While that peek is up, the Vanilla → Doc hijack must leave this document alone, or the form's own
+ * hops (`#details`, the reload after an upload) pull the clerk straight back to the Doc skin and the
+ * uploader goes with it. Esc ends it the usual way (resume the park).
+ * @param {string} ownFormRoute the document the shell peeked at its own form ("" = none)
+ * @param {string} url where Vanilla is now
+ * @param {string} [erpBase]
+ * @returns {boolean} true = do not hijack
+ */
+export function ownFormPeekHolds(ownFormRoute, url, erpBase) {
+  if (!ownFormRoute || !url) return false;
+  return routesReferToSameDoc(ownFormRoute, url, erpBase);
+}

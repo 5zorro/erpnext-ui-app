@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { ownFormPeekHolds } from "../src/peek-stack.js";
 import { pushHistory, splitHistory, RECENT_MAX } from "../src/history.js";
 import {
   PEEK_CHILD_CAP,
@@ -480,5 +481,20 @@ describe("nav incident 2026-10-03 — a Supplier created from the Doc Bill, save
     const stack = beginPeekParent(null, bill);
     assert.equal(renameInPeekStack(stack, {}), stack);
     assert.equal(renameInPeekStack(null, { a: "b" }), null);
+  });
+});
+
+// 5zorro 2026-10-12: Sales Order Attach "flickered, and nothing else" — the Vanilla → Doc hijack
+// pulled the clerk off the document's own form that Attach had opened.
+describe("ownFormPeekHolds", () => {
+  const base = "http://localhost:8080";
+  it("holds the hijack for the same document, however Frappe spells its address", () => {
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", `${base}/desk/sales-order/SAL-ORD-2026-00001#details`, base), true);
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/sales-order/SAL-ORD-2026-00001", base), true);
+  });
+  it("not for another document, and not when no own-form peek is up", () => {
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/sales-order/SAL-ORD-2026-00002", base), false);
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/purchase-order/SAL-ORD-2026-00001", base), false);
+    assert.equal(ownFormPeekHolds("", "/app/sales-order/SAL-ORD-2026-00001", base), false);
   });
 });

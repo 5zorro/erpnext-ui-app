@@ -1094,6 +1094,15 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     clerk's next move. App test (line 2, `ERP_CHAOS_LAG_MS=1200`) fails on the old code with the
     incident's own breadcrumb (`focus-after-items → terms`) and passes with the fix
     (`empty-line-kept`).
+  - *Attach on the PO / Item Receipt / A-R skins (5zorro 2026-10-12, a saved Sales Order draft):*
+    the page "flickered, and nothing else". Attach opens the document's own Vanilla form for
+    Frappe's uploader; that form is not a peek child (only setup records are), so no peek stack
+    held the Vanilla → Doc hijack off, and the form's first hop pulled the clerk back to the Doc
+    skin (`doc-rebind` 0.15 s after `showErp-soft`). The Bill never showed it — its surface is not a
+    hijack target. Fix: a soft peek onto the parked document's own form is an *own-form peek*
+    (`ownFormPeekHolds`); the hijack leaves that document alone until Esc resumes the park or
+    Vanilla moves to another document. App test on 5zorro's draft (no upload; dialog closed, Esc)
+    fails on the old code ("doc" at once) and passes with the fix.
 
 ## Dogfood residuals
 
