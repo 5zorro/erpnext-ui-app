@@ -1062,6 +1062,27 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   the clerk back on the assumption Vendor would take focus; once the guard could decline, nobody did.
   The repaint now restores whenever Vendor did not actually take focus. Proven under 1.2 s lag.
 
+- **2026-10-11, later the same day (all committed, app-tested):**
+  - *Taxes Add amount* has the shared in-field calculator (Bill + Item Receipt; the PO Doc skin has no
+    taxes section), and Add works out a typed / pasted sum (`parseMoneyOrSum`, the calculator's
+    left-to-right math, to cents); an unfinished sum (`5*`) is refused by name.
+  - *Allocate to stock cost* is exact: unit costs are nudged a cent until the lines rise by exactly
+    the charge (`exactRates`, Banker's rounding as this site); when every qty shares a factor the
+    leftover (< that factor in cents) stays on the charge line and the status names it. Leftover
+    cents spread by largest remainder (67¢ over ten $1 lines → seven 7¢, three 6¢), not piled on one
+    line. ACC-PINV-2026-00011 was submitted 1¢ off before this — 5zorro: leave it (sandbox).
+  - *Calculator ribbon* grows to fit its tape, lined up with the field's aligned edge
+    (`calc-ribbon-place.js`); it was exactly the field's width and spilled in narrow cells.
+  - *Attach* sits beside the notes on all three A/P skins — Item Receipt beside its Remarks, PO beside
+    its Freeform comments (terms used as remarks; ERPNext's PO has no Remarks).
+  - *Nav incident 2026-10-12:* a Material Request opened from Home adopted the hidden untouched new
+    Item Receipt as its peek parent (any new Frappe form counts as unsaved), so the Doc tab offered
+    "Back to Item Receipt". The shell's own no-parent decision now holds for the hops that follow
+    (`applyErpHopToPeekStack` `shellOpened`). **Decided (5zorro):** the Doc tab shows only when the
+    page has a Doc skin — hidden, not greyed, otherwise. **No Material Request Doc skin is planned**;
+    decide by dogfood (it would be an A1-style layout-as-data skin; questions: which MR types,
+    make-PO-from-request, trace).
+
 ## Dogfood residuals
 
 | Family | Residual | State |
