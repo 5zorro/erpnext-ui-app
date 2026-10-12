@@ -1,0 +1,96 @@
+# Implementation plan — 2026-10-12
+
+**Tranche:** the Sales Order as the A/R dashboard — what it creates shows up in its own tables, the
+way the Bill is the A/P dashboard. Agreed with 5zorro 2026-10-12 (read back, then confirmed).
+
+**Runs alongside** `implementation-plan-2026-09-26.md` (DF-02 follow-ups; dogfood of the papers
+continues) and `-10-03` (the trace — its link registry and graph are reused here, its pages are
+not built). Nothing here edits the trace pages or the Find pages.
+
+---
+
+## How to handle cross-architecture dogfood
+
+Same as plan 2026-10-03 § *How to handle cross-architecture dogfood*: sort feedback into
+architecture families, one family per slice, `npm test` green per slice.
+
+---
+
+## What 5zorro asked for, with his example
+
+His Sales Order: SAMPLE-SKU-01 × 2, SAMPLE-SKU-02 × 2. SKU-01 is bought on a PO, SKU-02 ships
+from stock. The order's items table says so:
+
+| Line | Item | Qty | Sources |
+|---|---|---|---|
+| 1 | SAMPLE-SKU-01 | 2 | PO PUR-ORD-…-0001 ×2 (draft) |
+| 2 | SAMPLE-SKU-02 | 2 | Stock ×2 |
+
+One line can have two sources — line 1 at 5 units: `PO …-0001 ×3 · Stock ×2`. A Work Order
+reads the same way: `WO-…-0001 ×5 (to build)`. Nothing yet: `Not sourced ×2 (QOH ×7 Nos)`.
+
+## Stages (build order)
+
+### S1 — Drafts wears a yellow border when it holds anything (built 2026-10-12)
+
+The flyout's Drafts section, whenever it shows (it is hidden when empty). A saved draft posts
+nothing; the border is a standing reminder (5zorro: "drafts don't actually post and can confuse if
+you thought you submitted it"). One colour, no count. The collapsed rail shows the same yellow on
+its strip, since that is when the section cannot be seen. `electron/history.html` (`has-drafts` on
+the body). Checked by screenshot (open and collapsed); no app test — it is CSS on a section that
+was already shown and hidden by the shelf.
+
+### S2 — Create ▾ on the Sales Order Doc skin: Purchase Order…
+
+Mirrors Vanilla's Create › Purchase Order (`sales_order.js` `make_purchase_order`):
+
+- Only on a **submitted** order (ERPNext's mapper validates `docstatus = 1`).
+- A picker in the skin: the lines with quantity still to order (stock qty − already ordered), a
+  **Vendor** box for every ticked line, and a per-line override.
+- ERPNext's own `erpnext.selling.doctype.sales_order.sales_order.make_purchase_order` builds one PO
+  per vendor (`selected_items` carries each line's vendor). Each PO line keeps `sales_order` +
+  `sales_order_item`; the sale price is not copied (the vendor's price applies).
+- **Every PO is saved as a draft** and lands on the Drafts shelf (5zorro). The page **stays on the
+  Sales Order** — the yellow Drafts border and the Sources column are the trail.
+- The menu lists only Purchase Order at first; the rest of Create comes with S5.
+
+### S3 — The PO's source picker: NIC, Material Request, Supplier Quotation, Sales Order
+
+As the Bill's picker offers NIC / PO / Item Receipt, the PO's offers every source ERPNext can map
+from: **NIC** (no source), **Material Request** and **Supplier Quotation** (Vanilla's Get Items
+From), and **Sales Order** — beyond Vanilla's PO form, but through ERPNext's own mapper
+(`make_purchase_order` takes a `target_doc`), so Clean Core holds.
+
+### S4 — The Sources column on the Sales Order's items table
+
+Read from the trace code (`src/trace-links.js` / `src/trace-graph.js`), which already follows
+PO, Material Request, Delivery Note and Sales Invoice lines back to a Sales Order line. **Add
+Work Order** to the registry (`Work Order.sales_order` / `sales_order_item`), matching Vanilla.
+
+**The stock rule (agreed):** ERPNext keeps each order line's **Delivered qty**, raised by a Delivery
+Note and by a Sales Invoice with *Update Stock* ticked (billed and shipped in one step; an invoice
+without it bills but ships nothing). So:
+
+- `Stock ×N` — N = the line's delivered qty + any qty reserved on the order (Reserve Stock);
+- `Not sourced (QOH ×N UOM)` — whatever no PO, Work Order, delivery or reservation covers, with
+  the quantity on hand beside it.
+
+Each source links to its document (peek), in its own doc wash.
+
+### S5 — Create as a list *or* a flowchart, the clerk's choice
+
+List first (S2's menu, grown to Vanilla's other Create entries — Delivery Note, Sales Invoice,
+Work Order, Material Request, …), **each entry in its document's wash**. Then a flowchart view,
+drawn from the bowtie mockup (`docs/mockups/bowtie-trace.html`): the Sales Order in the middle,
+Estimate before it, PO / Work Order / Material Request beside, Delivery Note → Invoice → Payment
+after; each box shows what exists and offers *create* where nothing does. A **List ⇄ Flowchart**
+toggle, remembered per clerk. Mockup first for the flowchart.
+
+## Open questions
+
+- None blocking S1–S2.
+
+## Dogfood residuals
+
+| Stage | Residual | State |
+|---|---|---|
