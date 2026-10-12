@@ -1103,6 +1103,11 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     (`ownFormPeekHolds`); the hijack leaves that document alone until Esc resumes the park or
     Vanilla moves to another document. App test on 5zorro's draft (no upload; dialog closed, Esc)
     fails on the old code ("doc" at once) and passes with the fix.
+    Then (5zorro, same day: "after it finished attaching, I was left on the Vanilla page"): the
+    uploader closing — the upload done, or closed by hand — now takes the clerk back to the Doc
+    skin, as Esc does; Bill and Doc skins share `openOwnFormUploader`, which builds the uploader
+    the way the form's own Attach does so the shell holds its dialog. Attached files are seen in
+    the **Papers** pane (toolbar), not beside the Attach button.
 
 ## Dogfood residuals
 

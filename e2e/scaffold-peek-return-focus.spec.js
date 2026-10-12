@@ -602,7 +602,7 @@ test.describe("scaffold: Attach on a saved Sales Order draft", () => {
     app = undefined;
   });
 
-  test("the uploader stays open in Vanilla; Esc comes back to the Doc skin", async () => {
+  test("the uploader stays open in Vanilla; closing it comes back to the Doc skin", async () => {
     test.setTimeout(150_000);
     app = await launchShell();
     await waitForE2eApi(app);
@@ -624,8 +624,9 @@ test.describe("scaffold: Attach on a saved Sales Order draft", () => {
     await new Promise((r) => setTimeout(r, 2500));
     expect(await e2eGet(app, "surfaceMode")).toBe("erp");
     expect(await inErp(app, UPLOADER)).toBe(true);
+    // The uploader closing (after an upload, or closed by hand) is the way back — no Esc
+    // (5zorro 2026-10-12: "after it finished attaching, I was left on the Vanilla page").
     await inErp(app, `cur_dialog.hide(); true`);
-    await inErp(app, `window.erpUiShell.softPeekEsc()`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
     await expect
       .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`), { timeout: 20_000 })

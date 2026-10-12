@@ -8909,6 +8909,51 @@ ipcMain.handle("bill-open-landed-cost", async () => {
 });
 
 /**
+ * Open Frappe's uploader on the Vanilla form the shell just peeked at (Attach, Bill and Doc skins
+ * alike). When the uploader closes — the upload finished, or the clerk closed it — the clerk goes
+ * back to the Doc skin they came from, the same as Esc (5zorro 2026-10-12: "after it finished
+ * attaching, I was left on the Vanilla page").
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+async function openOwnFormUploader() {
+  const opened = await erpEval(`(async () => {
+    try {
+      var f = window.cur_frm;
+      if (!f || !f.doc) return { ok: false, reason: "Vanilla form not ready." };
+      if (!(window.frappe && frappe.ui && frappe.ui.FileUploader)) {
+        return { ok: false, reason: "No attach UI on this Desk build." };
+      }
+      // What the form's own Attach does (sidebar/attachments.js new_attachment), built here so the
+      // shell holds the uploader's dialog and can hear it close.
+      var restrictions = {};
+      if (f.meta && f.meta.max_attachments && f.attachments) {
+        restrictions.max_number_of_files = f.meta.max_attachments - f.attachments.get_attachments().length;
+      }
+      var up = new frappe.ui.FileUploader({
+        doctype: f.doctype, docname: f.docname, frm: f, folder: "Home/Attachments",
+        on_success: function (file) { if (f.attachments) f.attachments.attachment_uploaded(file); },
+        restrictions: restrictions,
+        make_attachments_public: f.meta && f.meta.make_attachments_public,
+      });
+      var d = up && up.dialog;
+      if (d && d.$wrapper && window.erpUiShell && window.erpUiShell.softPeekEsc) {
+        d.$wrapper.one("hidden.bs.modal", function () {
+          setTimeout(function () { window.erpUiShell.softPeekEsc(); }, 0);
+        });
+        return { ok: true, reason: "Attach dialog opened in Vanilla — closing it brings you back." };
+      }
+      return { ok: true, reason: "Attach dialog opened in Vanilla (Esc returns here)." };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  navDebug("attach-uploader", opened && opened.ok ? "open" : `failed: ${(opened && opened.reason) || "?"}`);
+  return opened && typeof opened === "object"
+    ? opened
+    : { ok: false, reason: "Could not open attach dialog." };
+}
+
+/**
  * Attach files via Vanilla FileUploader (OI-005). ERP view must be visible —
  * Bill WebContents cannot host Frappe’s uploader DOM.
  */
@@ -8924,28 +8969,8 @@ ipcMain.handle("bill-attach-file", async () => {
   // A peek onto this bill's own Vanilla form, for Frappe's uploader: Esc comes back to the Doc
   // skin, and the remembered lens is left alone.
   await softPeekErp(route);
-  // Wait for form, then open attach (museum bind.js Attach).
   await waitForPurchaseInvoice(15000);
-  const opened = await erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      if (!f || !f.doc) return { ok: false, reason: "Vanilla form not ready." };
-      if (f.attachments && typeof f.attachments.new_attachment === "function") {
-        f.attachments.new_attachment();
-        return { ok: true, reason: "Attach dialog opened in Vanilla." };
-      }
-      if (window.frappe && frappe.ui && frappe.ui.FileUploader) {
-        new frappe.ui.FileUploader({ doctype: f.doctype, docname: f.doc.name });
-        return { ok: true, reason: "Attach dialog opened in Vanilla." };
-      }
-      return { ok: false, reason: "No attach UI on this Desk build." };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  return opened && typeof opened === "object"
-    ? opened
-    : { ok: false, reason: "Could not open attach dialog." };
+  return openOwnFormUploader();
 });
 
 ipcMain.handle("bill-save", async (_e, opts) =>
@@ -9615,26 +9640,7 @@ ipcMain.handle("doc-attach-file", async () => {
   // A peek onto this document's own Vanilla form, for Frappe's uploader (see bill-attach-file).
   await softPeekErp(route);
   await waitForDocForm(15000);
-  const opened = await erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      if (!f || !f.doc) return { ok: false, reason: "Vanilla form not ready." };
-      if (f.attachments && typeof f.attachments.new_attachment === "function") {
-        f.attachments.new_attachment();
-        return { ok: true, reason: "Attach dialog opened in Vanilla." };
-      }
-      if (window.frappe && frappe.ui && frappe.ui.FileUploader) {
-        new frappe.ui.FileUploader({ doctype: f.doctype, docname: f.doc.name });
-        return { ok: true, reason: "Attach dialog opened in Vanilla." };
-      }
-      return { ok: false, reason: "No attach UI on this Desk build." };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  return opened && typeof opened === "object"
-    ? opened
-    : { ok: false, reason: "Could not open attach dialog." };
+  return openOwnFormUploader();
 });
 
 /** Stamp PO Date Expected (or week-out default) onto line schedule_date.
