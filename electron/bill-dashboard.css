@@ -289,6 +289,27 @@
     .src-chip .hatch-clear { background-color: var(--hatch-base); padding: 0 2px; border-radius: 3px; }
     button.src-chip { cursor: pointer; font: inherit; font-size: 11px; }
     button.src-chip:hover, button.src-chip:focus-visible { outline: 2px solid var(--role-accent); outline-offset: 1px; }
+    /* Create ▾ entries and flowchart boxes on the Sales Order (plan 2026-10-12 S5): each in its
+       document's wash; A/P documents hatched when the clerk hatches A/P, A/R ones when A/R — as on
+       Home. The words sit in a hatch-free box. */
+    .sc-entry {
+      display: block; width: 100%; box-sizing: border-box; text-align: left; margin: 2px 0; padding: 7px 10px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--role-accent, #94a3b8) 40%, #cbd5e1);
+      border-left: 4px solid var(--role-accent, #94a3b8);
+      --hatch-base: #fff; background-color: var(--hatch-base); color: #0f172a; font-size: 13px;
+    }
+    button.sc-entry { cursor: pointer; font: inherit; font-size: 13px; }
+    button.sc-entry:hover, button.sc-entry:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .sc-entry[data-role="request"] { --hatch-base: var(--wash-request); --role-accent: var(--accent-request); }
+    .sc-entry[data-role="order"] { --hatch-base: var(--wash-order); --role-accent: var(--accent-order); }
+    .sc-entry[data-role="fulfill"] { --hatch-base: var(--wash-fulfill); --role-accent: var(--accent-fulfill); }
+    .sc-entry[data-role="invoice"] { --hatch-base: var(--wash-invoice); --role-accent: var(--accent-invoice); }
+    .sc-entry[data-role="payment"] { --hatch-base: var(--wash-payment); --role-accent: var(--accent-payment); }
+    html[data-pattern="ap"] .sc-entry[data-desk="ap"],
+    html[data-pattern="both"] .sc-entry[data-desk="ap"],
+    html[data-pattern="ar"] .sc-entry[data-desk="ar"],
+    html[data-pattern="both"] .sc-entry[data-desk="ar"] { background-image: var(--hatch-desk); }
+    .sc-entry .hatch-clear { background-color: var(--hatch-base); padding: 0 2px; border-radius: 3px; }
     .order-peek {
       display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 1px 5px;
       border: 1px solid color-mix(in srgb, var(--accent-order) 45%, #cbd5e1); border-radius: 5px;

@@ -25,7 +25,7 @@ const SURFACES = {
   "find-doc.html": [/<h1 id="title" class="hatch-clear"/],
   // The Bill's Customer / Sales order(s) cells (5zorro 2026-10-11); their text is in bill-form-page.js.
   // …and the Sales Order's Sources chips (plan 2026-10-12 S4); their text is in so-line-sources-ui.js.
-  "bill-dashboard.css": [/td\.so-cell \.hatch-clear \{ background-color: var\(--hatch-base\)/, /\.src-chip \.hatch-clear \{ background-color: var\(--hatch-base\)/],
+  "bill-dashboard.css": [/td\.so-cell \.hatch-clear \{ background-color: var\(--hatch-base\)/, /\.src-chip \.hatch-clear \{ background-color: var\(--hatch-base\)/, /\.sc-entry \.hatch-clear \{ background-color: var\(--hatch-base\)/],
 };
 
 describe("text on a desk hatch sits in a hatch-free box", () => {

@@ -265,6 +265,7 @@ import { formatJitPoTitle } from "../src/jit-po-bridge.js";
 import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
 import { salesOrdersToOrder, poPendingLines, draftQtyBySoLine } from "../src/so-create-po.js";
+import { SO_CREATE_CATALOG, linkedCounts } from "../src/so-create-menu.js";
 import { docSourceMapper, SOURCE_KIND_NOUN, soSelectedItemsWithoutVendor, trimMappedSoLines } from "../src/po-source.js";
 import {
   normalizeLineAllocation,
@@ -9774,6 +9775,55 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
   })()`);
   if (!raw || !raw.ok) return { ok: false, reason: (raw && raw.reason) || "Could not read this order's sources." };
   return raw;
+});
+
+/** Create ▾'s flowchart (plan 2026-10-12 S5): what already exists, from Frappe's form dashboard. */
+ipcMain.handle("so-create-counts", async (_e, soName) => {
+  const so = normalizeEditableText(soName);
+  if (!so) return { ok: false, reason: "No Sales Order.", counts: {} };
+  const raw = await erpEval(`(async () => {
+    try {
+      var r = await frappe.call({ method: "frappe.desk.notifications.get_open_count", args: { doctype: "Sales Order", name: ${JSON.stringify(so)} } });
+      return { ok: true, message: r && r.message };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  if (!raw || !raw.ok) return { ok: false, reason: (raw && raw.reason) || "Could not count.", counts: {} };
+  return { ok: true, counts: linkedCounts(raw.message) };
+});
+
+/**
+ * Create ▾ › anything but Purchase Order (plan 2026-10-12 S5): Vanilla's own button on the order's
+ * Vanilla form — the same dialogs and ERPNext code. The form is opened as an own-form peek (as
+ * Attach does), so Esc comes back to the Doc skin; the document Vanilla makes opens where Vanilla
+ * puts it (in its Doc skin when it has one and the lens is Doc). Only catalog handlers run.
+ * @param {{ id?: string }} req
+ */
+ipcMain.handle("so-vanilla-create", async (_e, req) => {
+  const entry = SO_CREATE_CATALOG.find((x) => x.id === (req && req.id));
+  if (!entry || !entry.handler) return { ok: false, reason: "Not a Create entry Vanilla runs." };
+  const profile = activeDocProfile();
+  const doc = dirtyState.doc;
+  if (!profile || profile.id !== "sales-order" || !doc || !doc.name || Number(doc.docstatus) !== 1) {
+    return { ok: false, reason: "Open a submitted Sales Order first." };
+  }
+  navDebug("so-vanilla-create", `${doc.name} → ${entry.label} (${entry.handler})`);
+  await softPeekErp(`/app/sales-order/${doc.name}`);
+  await waitForDocForm(15000);
+  const ran = await erpEval(`(async () => {
+    try {
+      var f = window.cur_frm;
+      if (!f || !f.doc || f.doc.name !== ${JSON.stringify(doc.name)}) return { ok: false, reason: "Vanilla form not ready." };
+      var cs = f.cscript;
+      if (!cs || typeof cs[${JSON.stringify(entry.handler)}] !== "function") return { ok: false, reason: "This ERPNext has no ${entry.label} button here." };
+      cs[${JSON.stringify(entry.handler)}].apply(cs, ${JSON.stringify(entry.args || [])});
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return ran && typeof ran === "object" ? ran : { ok: false, reason: `Could not start ${entry.label}.` };
 });
 
 ipcMain.handle("doc-attach-file", async () => {

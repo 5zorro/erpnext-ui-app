@@ -145,7 +145,7 @@ order wash, hatched under the A/P pattern, text on its wash. PO deleted after. *
 Work Orders, Material Requests, reservations, deliveries — none on the sandbox; the rule is
 unit-tested with each.
 
-### S5 — Create as a list *or* a flowchart, the clerk's choice
+### S5 — Create as a list *or* a flowchart, the clerk's choice (built 2026-10-12)
 
 List first (S2's menu, grown to Vanilla's other Create entries — Delivery Note, Sales Invoice,
 Work Order, Material Request, …), **each entry in its document's wash**. Then a flowchart view,
@@ -154,9 +154,42 @@ Estimate before it, PO / Work Order / Material Request beside, Delivery Note →
 after; each box shows what exists and offers *create* where nothing does. A **List ⇄ Flowchart**
 toggle, remembered per clerk. Mockup first for the flowchart.
 
+**Built** (5zorro: "go ahead and do S5" — the flowchart went straight in, its look checked by
+screenshot, to be shaped by dogfood): `src/so-create-menu.js` (pure: Vanilla's entries in its
+order and under its conditions — `sales_order.js` `refresh` — with each entry's wash, desk and flow
+column; the flowchart model; Frappe's form-dashboard counts), the menu in `src/so-create-po-ui.js`,
+IPC `so-create-counts` (`frappe.desk.notifications.get_open_count`, the form's Connections counts)
+and `so-vanilla-create`.
+
+- **Every entry but Purchase Order runs Vanilla's own button** (`cur_frm.cscript[handler]` —
+  `create_pick_list`, `make_delivery_note_based_on_delivery_date(true)`, `make_work_order`,
+  `make_production_plan`, `make_sales_invoice`, `make_material_request`,
+  `make_raw_material_request`, `make_project`, `make_payment_request_with_schedule`,
+  `make_payment_entry`, the maintenance two) on the order's Vanilla form, opened as an own-form
+  peek (as Attach). Same dialogs, same ERPNext code; only catalog handlers run. What Vanilla makes
+  opens where Vanilla puts it — a Sales Invoice in its Doc skin when the lens is Doc (read in place,
+  unsaved), a Delivery Note in Vanilla. Esc comes back to the order. Purchase Order stays the
+  shell's own picker (S2).
+- **List** (default): Vanilla's entries, each in its document's wash, A/P ones (PO, Material
+  Request) hatched under the A/P pattern and A/R ones (Pick List, Delivery Note, Sales Invoice,
+  Payment Request, Payment) under the A/R pattern, words on a hatch-free box.
+- **Flowchart**: Before (Estimate) → This order → Buy or make → Ship → Bill → Get paid, plus Also
+  (Project, maintenance). Each box says how many exist ("2 made" / "none yet") and has *Create*
+  when Vanilla would offer it now; others are greyed. **List ⇄ Flowchart** toggle at the top of the
+  menu, remembered on the machine (`localStorage` `so-create-view` — a per-clerk convenience).
+- Not done: clicking a count to see the documents behind it; dialogs closed without making
+  anything leave the clerk on the order's Vanilla form (Esc returns), unlike Attach, because a
+  finished dialog also closes and must not pull the clerk off the new document.
+
+App tests (5zorro's order, nothing saved): the list in Vanilla's order with each wash; Sales Invoice
+→ an unsaved invoice in its Doc skin holding the order's lines; Delivery Note → an unsaved Delivery
+Note in Vanilla; the flowchart's columns, the order in the middle, Purchase Order with Create, the
+choice remembered. **Not run live:** Pick List, Work Order, Production Plan, Material Request,
+Raw Materials, Project, Payment Request, Payment — they are Vanilla's buttons, called by name.
+
 ## Open questions
 
-- None blocking S1–S2.
+- None blocking. Dogfood decides: the flowchart's look, and whether a count should open the documents behind it.
 
 ## Dogfood residuals
 

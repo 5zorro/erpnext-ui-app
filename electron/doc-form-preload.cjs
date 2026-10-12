@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
   soCreatePoContext: (soName) => ipcRenderer.invoke("so-create-po-context", soName || ""),
   soCreatePos: (req) => ipcRenderer.invoke("so-create-pos", req || {}),
   soLineSources: (soName, itemCodes) => ipcRenderer.invoke("so-line-sources", soName || "", itemCodes || []),
+  soCreateCounts: (soName) => ipcRenderer.invoke("so-create-counts", soName || ""),
+  soVanillaCreate: (id) => ipcRenderer.invoke("so-vanilla-create", { id: id || "" }),
   papersZip: (req) => ipcRenderer.invoke("papers-zip", req || {}),
   papersPrintedPdf: (doc) => ipcRenderer.invoke("papers-printed-pdf", doc || {}),
   papersPdf: (req) => ipcRenderer.invoke("papers-pdf", req || {}),

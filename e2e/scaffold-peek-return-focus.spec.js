@@ -967,3 +967,91 @@ test.describe("scaffold: Sales Order Sources column", () => {
     }
   });
 });
+
+// Plan 2026-10-12 S5: the rest of Create — Vanilla's entries, each in its wash, as a list or a
+// flowchart. Never saves: the documents Vanilla makes are left unsaved.
+test.describe("scaffold: Sales Order Create ▾ — list and flowchart", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  async function openSo(a) {
+    const so = await e2eCall(a, "execInView", "erp", `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, per_billed: ["<", 100], per_delivered: ["<", 100], status: ["not in", ["Closed", "On Hold"]] }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`);
+    if (!so) return "";
+    await e2eCall(a, "setLensPref", "sales-order", "doc");
+    await e2eCall(a, "openDocSkin", "sales-order", `/app/sales-order/${so}`);
+    await expect.poll(async () => e2eGet(a, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(a, `(() => { const b = document.getElementById("btn-create"); return !!b && !b.hidden && !b.disabled; })()`), { timeout: 40_000 }).toBe(true);
+    // The list is the default; a previous run (or the clerk) may have left the flowchart on.
+    await inDoc(a, `(() => { try { localStorage.setItem("so-create-view", "list"); } catch {} return true; })()`);
+    return so;
+  }
+
+  test("the list: Vanilla's entries in order, each washed; Sales Invoice opens unsaved in its Doc skin", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    await e2eCall(app, "setLensPref", "sales-invoice", "doc");
+    await inDoc(app, `document.getElementById("btn-create").click(); true`);
+    const entries = await inDoc(app, `[...document.querySelectorAll('[data-testid="doc-create-menu"] [data-create]')].map((b) => ({ id: b.dataset.create, bg: getComputedStyle(b).backgroundColor }))`);
+    expect(entries.map((e) => e.id)).toEqual([
+      "pick-list", "delivery-note", "work-order", "production-plan", "sales-invoice",
+      "material-request", "raw-materials", "purchase-order", "project", "payment-request", "payment",
+    ]);
+    const bg = Object.fromEntries(entries.map((e) => [e.id, e.bg]));
+    expect(bg["delivery-note"]).toBe("rgb(255, 244, 224)"); // fulfill
+    expect(bg["sales-invoice"]).toBe("rgb(246, 234, 242)"); // invoice
+    expect(bg["purchase-order"]).toBe("rgb(232, 244, 252)"); // order
+    expect(bg["payment"]).toBe("rgb(230, 245, 240)"); // payment
+    await inDoc(app, `document.querySelector('[data-create="sales-invoice"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); const d = s && s.doc; return d ? { doctype: d.doctype, name: d.name, so: (d.items || []).map((i) => i.sales_order) } : null; })()`), { timeout: 40_000 })
+      .toMatchObject({ doctype: "Sales Invoice", name: expect.stringMatching(/^new-sales-invoice/), so: expect.arrayContaining([so]) });
+    expect(await e2eGet(app, "surfaceMode")).toBe("doc");
+  });
+
+  test("Delivery Note runs Vanilla's button and lands on an unsaved Delivery Note", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="delivery-note"]').click(); true`);
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Delivery Note" && cur_frm.is_new() && (cur_frm.doc.items || []).some((i) => i.against_sales_order === ${JSON.stringify(so)}))`), { timeout: 40_000 })
+      .toBe(true);
+    expect(await e2eGet(app, "surfaceMode")).toBe("erp");
+  });
+
+  test("the flowchart: stages in order, the order in the middle, counts, Create where it can", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    try {
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-testid="doc-create-menu"] [data-view="flow"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="doc-create-flow"] .sc-col').length`), { timeout: 20_000 }).toBeGreaterThan(4);
+      const flow = await inDoc(
+        app,
+        `[...document.querySelectorAll('[data-testid="doc-create-flow"] .sc-col')].map((c) => ({ stage: c.dataset.stage,
+          boxes: [...c.querySelectorAll(".sc-box")].map((b) => ({ id: b.dataset.box, made: (b.querySelector(".sc-made") || {}).textContent || "", create: !!b.querySelector("[data-create]") })) }))`,
+      );
+      expect(flow.map((c) => c.stage)).toEqual(["before", "order", "make", "ship", "bill", "paid", "also"]);
+      expect(flow[1].boxes[0].id).toBe("sales-order");
+      const po = flow[2].boxes.find((b) => b.id === "purchase-order");
+      expect(po).toMatchObject({ create: true });
+      expect(po.made).toMatch(/none yet|\d+ made/);
+      // The choice sticks: the menu opens as a flowchart next time.
+      await inDoc(app, `document.body.click(); document.getElementById("btn-create").click(); true`);
+      expect(await inDoc(app, `document.querySelector('[data-testid="doc-create-menu"]').dataset.view`)).toBe("flow");
+    } finally {
+      await inDoc(app, `(() => { try { localStorage.setItem("so-create-view", "list"); } catch {} return true; })()`);
+    }
+  });
+});

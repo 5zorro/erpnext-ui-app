@@ -5,6 +5,7 @@
  * the Sales Order. Logic in src/so-create-po.js.
  */
 import { SO_CREATE_ENTRIES, canCreatePoFrom, poPendingLines, draftQtyBySoLine, poSelection, createdPosMessage } from "./so-create-po.js";
+import { soCreateEntries, soCreateFlow, CREATE_VIEW_KEY, normalizeCreateView } from "./so-create-menu.js";
 import { DOC_WASH_BY_PROFILE, DOC_WASH_COLORS, DOC_WASH_ACCENTS } from "./doc-wash.js";
 
 const esc = (v) =>
@@ -16,11 +17,21 @@ function ensureStyle() {
   const st = document.createElement("style");
   st.id = STYLE_ID;
   st.textContent = `
-.sc-menu { position: fixed; z-index: 70; min-width: 220px; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(15,23,42,.18); padding: 6px; }
-.sc-menu button { display: block; width: 100%; text-align: left; border: 1px solid transparent; border-left-width: 4px;
-  border-radius: 6px; padding: 8px 10px; margin: 2px 0; font-size: 13px; cursor: pointer; color: #0f172a; }
-.sc-menu button:hover, .sc-menu button:focus { outline: 2px solid #2563eb; outline-offset: -2px; }
+.sc-menu { position: fixed; z-index: 70; min-width: 240px; max-width: calc(100vw - 48px); max-height: calc(100vh - 80px); overflow: auto;
+  background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 8px 24px rgba(15,23,42,.18); padding: 6px; }
+.sc-view { display: flex; gap: 0; margin: 0 0 6px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; width: max-content; }
+.sc-view button { border: 0; background: #fff; padding: 3px 10px; font-size: 12px; cursor: pointer; color: #334155; }
+.sc-view button[aria-pressed="true"] { background: #1e293b; color: #fff; }
+.sc-menu[data-view="flow"] { width: max-content; }
+.sc-flow { display: flex; gap: 6px; align-items: stretch; }
+.sc-col { display: flex; flex-direction: column; gap: 4px; min-width: 112px; max-width: 150px; }
+.sc-col h4 { margin: 0 0 2px; font-size: 10px; letter-spacing: .4px; text-transform: uppercase; color: #64748b; }
+.sc-arrow { align-self: center; color: #94a3b8; font-size: 16px; }
+.sc-box { font-size: 12px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.sc-box .sc-made { font-size: 11px; color: #475569; }
+.sc-box.sc-current { outline: 2px solid #1e293b; }
+.sc-box.sc-off { opacity: .55; }
+.sc-box button { align-self: flex-start; font-size: 11px; padding: 1px 8px; border: 1px solid #94a3b8; border-radius: 5px; background: #fff; cursor: pointer; }
 .sc-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(15,23,42,.35); display: flex; align-items: flex-start;
   justify-content: center; padding: 48px 16px; overflow: auto; }
 .sc-panel { background: #fff; border-radius: 10px; width: min(860px, 100%); box-shadow: 0 16px 40px rgba(15,23,42,.3); }
@@ -37,7 +48,7 @@ function ensureStyle() {
 .sc-table td { padding: 6px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
 .sc-table td.sc-qty { text-align: right; white-space: nowrap; }
 .sc-table tr.sc-done td { color: #94a3b8; }
-.sc-note { font-size: 11px; color: #64748b; }
+.sc-note { font-size: 11px; color: #64748b; margin: 4px; }
 .sc-foot { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid #e2e8f0; }
 .sc-foot .sc-msg { margin-right: auto; font-size: 12px; color: #b91c1c; }
 .sc-foot button { padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-size: 13px; }
@@ -47,7 +58,7 @@ function ensureStyle() {
   document.head.appendChild(st);
 }
 
-/** The entry's wash: background + accent edge, from the Doc skin it opens. */
+/** The picker header's wash: background + accent edge, from the Doc skin it opens. */
 function washFor(entry) {
   const w = DOC_WASH_BY_PROFILE[entry.washProfile];
   return w ? { bg: DOC_WASH_COLORS[w.role], accent: DOC_WASH_ACCENTS[w.role] } : { bg: "#fff", accent: "#cbd5e1" };
@@ -76,34 +87,114 @@ export function mountSoCreateMenu(opts) {
     button.setAttribute("aria-expanded", "false");
   }
 
+  /** List or flowchart — the clerk's choice, remembered on this machine (a convenience only). */
+  function readView() {
+    try {
+      return normalizeCreateView(localStorage.getItem(CREATE_VIEW_KEY));
+    } catch {
+      return "list";
+    }
+  }
+  function writeView(v) {
+    try {
+      localStorage.setItem(CREATE_VIEW_KEY, v);
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }
+
+  /** Run one Create entry: Purchase Order is the shell's picker; the rest are Vanilla's buttons. */
+  async function runEntry(id, label) {
+    closeMenu();
+    if (id === "purchase-order") {
+      void openPoPicker();
+      return;
+    }
+    setStatus(`Opening Vanilla's ${label} — Esc comes back here.`);
+    const r = await api.soVanillaCreate(id).catch((e) => ({ ok: false, reason: String(e) }));
+    if (!r || !r.ok) setStatus((r && r.reason) || `Could not start ${label}.`, "err");
+  }
+
   function openMenu() {
     closeMenu();
+    const doc = getDoc();
+    const view = readView();
     menu = document.createElement("div");
     menu.className = "sc-menu";
     menu.setAttribute("role", "menu");
     menu.dataset.testid = "doc-create-menu";
-    for (const entry of SO_CREATE_ENTRIES) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.setAttribute("role", "menuitem");
-      b.dataset.create = entry.id;
-      const w = washFor(entry);
-      b.style.background = w.bg;
-      b.style.borderLeftColor = w.accent;
-      b.textContent = entry.label;
-      b.addEventListener("click", () => {
-        closeMenu();
-        if (entry.id === "purchase-order") void openPoPicker();
-      });
-      menu.appendChild(b);
+    menu.dataset.view = view;
+    menu.innerHTML = `<div class="sc-view" role="group" aria-label="Show Create as">
+        <button type="button" data-view="list" aria-pressed="${view === "list"}">List</button>
+        <button type="button" data-view="flow" aria-pressed="${view === "flow"}">Flowchart</button></div>
+      <div data-sc="body"></div>`;
+    const body = /** @type {HTMLElement} */ (menu.querySelector('[data-sc="body"]'));
+    const entryHtml = (e, extra = "") =>
+      `<button type="button" role="menuitem" class="sc-entry" data-create="${esc(e.id)}" data-role="${esc(e.role)}" data-desk="${esc(e.desk)}"${extra}><span class="hatch-clear">${esc(e.label)}</span></button>`;
+    if (view === "list") {
+      const { entries, reason } = soCreateEntries(doc);
+      body.innerHTML = entries.length
+        ? entries.map((e) => entryHtml({ ...e, label: e.id === "purchase-order" ? "Purchase Order…" : e.label })).join("")
+        : `<p class="sc-note">${esc(reason || "Nothing to create from this order.")}</p>`;
+    } else {
+      body.innerHTML = `<div class="sc-flow" data-testid="doc-create-flow"><p class="sc-note">Counting what exists…</p></div>`;
+      void paintFlow(body, doc);
     }
+    menu.querySelectorAll("[data-view]").forEach((b) =>
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        writeView(/** @type {HTMLElement} */ (b).dataset.view === "flow" ? "flow" : "list");
+        openMenu();
+      }),
+    );
+    body.addEventListener("click", (ev) => {
+      const b = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (ev.target).closest("[data-create]"));
+      if (!b || b.hasAttribute("disabled")) return;
+      ev.stopPropagation();
+      void runEntry(b.dataset.create || "", (b.dataset.label || b.textContent || "").replace(/…$/, "").trim());
+    });
     document.body.appendChild(menu);
+    placeMenu();
+    button.setAttribute("aria-expanded", "true");
+    const first = /** @type {HTMLButtonElement|null} */ (menu.querySelector("[data-create]") || menu.querySelector("button"));
+    if (first) first.focus();
+  }
+
+  /** The flowchart: Before → This order → Buy or make → Ship → Bill → Get paid (→ Also). */
+  async function paintFlow(body, doc) {
+    const res = doc && doc.name && api.soCreateCounts ? await api.soCreateCounts(doc.name).catch(() => null) : null;
+    if (!menu || !body.isConnected) return;
+    const cols = soCreateFlow(doc, (res && res.counts) || {});
+    const flow = /** @type {HTMLElement} */ (body.querySelector(".sc-flow"));
+    flow.innerHTML = cols
+      .map((col, i) => {
+        const boxes = col.boxes
+          .map((b) => {
+            const made = b.current ? "" : `<span class="sc-made">${b.made ? `${b.made} made` : "none yet"}</span>`;
+            const act = b.canCreate
+              ? `<button type="button" data-create="${esc(b.id)}" data-label="${esc(b.label)}">Create</button>`
+              : "";
+            return `<div class="sc-box sc-entry${b.current ? " sc-current" : ""}${!b.canCreate && !b.current && !b.made ? " sc-off" : ""}" data-box="${esc(b.id)}" data-role="${esc(b.role)}" data-desk="${esc(b.desk)}"><span class="hatch-clear">${esc(b.label)}</span>${made}${act}</div>`;
+          })
+          .join("");
+        const arrow = i < cols.length - 1 && col.stage !== "paid" ? `<span class="sc-arrow" aria-hidden="true">→</span>` : "";
+        return `<div class="sc-col" data-stage="${esc(col.stage)}"><h4>${esc(col.label)}</h4>${boxes}</div>${arrow}`;
+      })
+      .join("");
+    placeMenu();
+  }
+
+  /**
+   * Under the button, slid left as far as needed to fit the window (16px gutter). Measured at the
+   * left edge first: a fixed box measured where it stands is only as wide as the room to its right.
+   */
+  function placeMenu() {
+    if (!menu) return;
     const r = button.getBoundingClientRect();
     menu.style.top = `${Math.round(r.bottom + 4)}px`;
-    menu.style.left = `${Math.round(Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)))}px`;
-    button.setAttribute("aria-expanded", "true");
-    const first = /** @type {HTMLButtonElement|null} */ (menu.querySelector("button"));
-    if (first) first.focus();
+    menu.style.left = "16px";
+    const w = menu.offsetWidth;
+    menu.style.left = `${Math.round(Math.max(16, Math.min(r.left, window.innerWidth - w - 16)))}px`;
   }
 
   button.addEventListener("click", (ev) => {
@@ -261,9 +352,9 @@ export function mountSoCreateMenu(opts) {
         closeMenu();
         return;
       }
-      const can = canCreatePoFrom(doc);
+      const can = soCreateEntries(doc);
       button.disabled = !can.ok;
-      button.title = can.ok ? "Create documents from this order" : can.reason || "";
+      button.title = can.ok ? "Create documents from this order — as a list or a flowchart" : can.reason || "";
     },
   };
 }
