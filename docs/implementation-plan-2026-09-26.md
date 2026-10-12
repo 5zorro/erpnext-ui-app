@@ -1082,6 +1082,18 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
     page has a Doc skin — hidden, not greyed, otherwise. **No Material Request Doc skin is planned**;
     decide by dogfood (it would be an A1-style layout-as-data skin; questions: which MR types,
     make-PO-from-request, trace).
+  - *Create row always last* (5zorro: "SAMPLE" found two items, neither right): Create Item /
+    Customer / Project and Vendor add now sit under the hits, not only when nothing matched (as
+    Vanilla's Link does). Enter still takes the first hit.
+  - *Nav incident 2026-10-12:* line 2 of a new Sales Order → create Item → Save → Esc removed the
+    line instead of filling it. Picking "create …" empties the cell, and the empty-line cleanup (an
+    Item cell left empty drops its line, 180 ms after blur) fired on the return before the new Item
+    landed — under chaos lag. Line 1 never showed it (the last line is never dropped), so the Bill's
+    line-1 tests could not catch it; the Bill had the same hole. Fix, both pages:
+    `peekErrandHoldsRow` holds the line while the errand is out and after the return until the
+    clerk's next move. App test (line 2, `ERP_CHAOS_LAG_MS=1200`) fails on the old code with the
+    incident's own breadcrumb (`focus-after-items → terms`) and passes with the fix
+    (`empty-line-kept`).
 
 ## Dogfood residuals
 

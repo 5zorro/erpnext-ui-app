@@ -43,3 +43,21 @@ export function peekReturnPlan(target, leftFrom) {
   }
   return { row: target.row, field: target.field, fill };
 }
+
+/**
+ * Whether the empty-line cleanup must leave this line alone (5zorro nav incident 2026-10-12: line 2
+ * of a Sales Order, create Item, Save, Esc — the line was removed instead of filled). Picking
+ * "create …" puts the cell back to empty, and coming back blurs it, so the cleanup that drops a
+ * line left empty saw an empty cell and removed the very line the new Item was about to land on.
+ * The line is held while the errand is out (`pending`), and after the return until the clerk's
+ * next move (`hold`), so an abandoned errand still lets them leave the line and have it dropped.
+ * @param {{ row: number|null }|null|undefined} pending the target recorded when the peek opened
+ * @param {{ row: number|null }|null|undefined} hold the line the return came back to
+ * @param {number} rowIndex
+ * @param {boolean} movedSinceHold the clerk has pressed a move key or clicked since the return
+ */
+export function peekErrandHoldsRow(pending, hold, rowIndex, movedSinceHold) {
+  const ri = Number(rowIndex);
+  if (pending && pending.row === ri) return true;
+  return !!(hold && hold.row === ri && !movedSinceHold);
+}

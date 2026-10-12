@@ -257,6 +257,67 @@ test.describe("scaffold: create Customer from the Sales Order's Customer box (DF
   });
 });
 
+// 5zorro nav incident 2026-10-12: line 2 of a new Sales Order, create Item, Save, Esc — the line
+// was removed (the empty-line cleanup saw the cell the create pick had emptied) instead of filled.
+// Line 1 is never removed (the last line stays), which is why the Bill's line-1 cases never saw it.
+test.describe("scaffold: create Item from line 2 of a Sales Order", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("saved: line 2 holds the new Item, not removed", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const items = await inErp(
+      app,
+      `(async () => (await frappe.db.get_list("Item", { filters: { disabled: 0, is_sales_item: 1 }, limit: 2 })).map((r) => r.name))()`,
+    );
+    test.skip(items.length < 2, "sandbox needs two sales Items");
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-so-new"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    // Line 1 holds an Item; line 2 is the new, empty line the clerk is typing in (Add line, as a
+    // clerk would — its repaint also shows line 1's Item).
+    await inDoc(
+      app,
+      `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem();
+        await window.erpDoc.setItem(0, "item_code", ${JSON.stringify(items[0])}); return true; })()`,
+    );
+    await inDoc(app, `document.querySelector('[data-testid="doc-add-line"]').click(); true`);
+    const cell = `document.querySelector('input[data-row="1"][data-field="item_code"]')`;
+    await expect.poll(async () => inDoc(app, `!!${cell}`), { timeout: 20_000 }).toBe(true);
+    const lines = async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.items.map((r) => r.item_code || ""))()`);
+    expect((await lines()).length).toBe(2);
+    await inDoc(app, `(() => { const i = ${cell}; i.focus(); i.value = "ZZ-NO-SUCH-ITEM-E2E"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]')`), { timeout: 15_000 })
+      .toBe(true);
+    await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]').click()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+    await expect.poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Item")`), { timeout: 30_000 }).toBe(true);
+    // Stand-in for Save on the new Item: Frappe then shows /app/item/<code>.
+    await inErp(app, `frappe.set_route("Form", "Item", ${JSON.stringify(items[1])})`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/item/");
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doc.name === ${JSON.stringify(items[1])})`), { timeout: 20_000 })
+      .toBe(true);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(lines, { timeout: 20_000 }).toEqual([items[0], items[1]]);
+    // And it stays: give the cleanup's timer its chance to fire.
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(await lines()).toEqual([items[0], items[1]]);
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ row: "1", field: "item_code", value: items[1] });
+  });
+});
+
 // 5zorro 2026-10-11: the Bill's Customer / Sales order(s) columns — PO wash on the header, Sales
 // Order wash (+ A/R hatch) on the cells, and a peek for the PO the link lives on. Never saves: the
 // line's PO is set in the hidden form only (this site has no POs), so the peek lands on "not found".

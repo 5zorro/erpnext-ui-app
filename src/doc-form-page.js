@@ -98,7 +98,7 @@ import {
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
 import { mountLinkPicker } from "./link-picker-ui.js";
-import { peekReturnTarget, peekReturnPlan } from "./peek-return-focus.js";
+import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { taxDefaultWhy } from "./tax-default-why.js";
 import { uiIconHtml } from "./ui-icons.js";
 import { taxRowNavFields } from "./bill-tax-table-nav.js";
@@ -371,11 +371,19 @@ document.addEventListener("pointerdown", () => userMoves.bump(), true);
 
 /** The line cell a "create …" peek was opened from (DF-02). */
 let peekReturn = null;
+/** The line a create peek came back to; held from the empty-line cleanup until the clerk moves. */
+let peekHold = null;
+
+/** True while a create errand (out, or just back) owns this line — see peekErrandHoldsRow. */
+function peekHoldsRow(ri) {
+  return peekErrandHoldsRow(peekReturn, peekHold, ri, !!peekHold && userMoves.movedSince(peekHold.mark));
+}
 
 /** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
 async function comeBackFromPeek(leftFrom) {
   const plan = peekReturnPlan(peekReturn, leftFrom);
   const what = (peekReturn && peekReturn.doctype) || "";
+  peekHold = plan && plan.row != null ? { row: plan.row, mark: userMoves.mark() } : null;
   peekReturn = null;
   if (!plan) return;
   if (plan.row == null) {
@@ -1070,6 +1078,10 @@ async function ensureAtLeastOneItemRow(doc) {
  */
 async function cleanupEmptyItemRow(rowIndex, itemCode) {
   if (!api || !editable() || painting || itemTabGuard) return;
+  if (peekHoldsRow(rowIndex)) {
+    logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
+    return;
+  }
   const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
   const decision = emptyItemRowCleanupAction(rowCount, itemCode);
   if (decision.action !== "delete") return;

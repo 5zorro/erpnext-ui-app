@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { peekReturnTarget, peekReturnPlan } from "../src/peek-return-focus.js";
+import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
 
 const cell = (row, field) => ({ dataset: { row: String(row), field } });
 
@@ -44,5 +44,26 @@ describe("peekReturnPlan (DF-03: Esc back from create Customer)", () => {
   });
   it("abandoned → focus only", () => {
     assert.equal(peekReturnPlan(t, "/app/customer/new-customer-abcdefghij").fill, "");
+  });
+});
+
+// 5zorro nav incident 2026-10-12: Sales Order line 2, create Item, Save, Esc — the line was removed
+// by the empty-line cleanup instead of filled with the new Item.
+describe("peekErrandHoldsRow", () => {
+  const out = { doctype: "Item", row: 1, field: "item_code" };
+  it("holds the line while its create errand is out", () => {
+    assert.equal(peekErrandHoldsRow(out, null, 1, false), true);
+    assert.equal(peekErrandHoldsRow(out, null, 0, false), false);
+  });
+  it("after the return, holds the line until the clerk's next move", () => {
+    const back = { row: 1, mark: 3 };
+    assert.equal(peekErrandHoldsRow(null, back, 1, false), true);
+    assert.equal(peekErrandHoldsRow(null, back, 1, true), false);
+    assert.equal(peekErrandHoldsRow(null, back, 2, false), false);
+  });
+  it("a header errand (row null) holds no line; nothing pending holds nothing", () => {
+    assert.equal(peekErrandHoldsRow({ doctype: "Customer", row: null, field: "customer" }, null, 0, false), false);
+    assert.equal(peekErrandHoldsRow(null, { row: null }, 0, false), false);
+    assert.equal(peekErrandHoldsRow(null, null, 0, false), false);
   });
 });
