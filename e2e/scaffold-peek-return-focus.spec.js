@@ -415,3 +415,33 @@ test.describe("scaffold: a late post-edit move never overrides the clerk's Tab",
   });
 });
 
+// 5zorro 2026-10-11: Attach in the same spot on Bill, PO and Item Receipt — beside the notes. The PO has
+// no Remarks; its terms box ("Freeform comments") is the stand-in, so Attach sits there.
+test.describe("scaffold: Attach sits beside the notes on every A/P Doc skin", () => {
+  test("PO beside Freeform comments, Item Receipt beside its Remarks; no toolbar copy", async () => {
+    test.setTimeout(150_000);
+    const app = await launchShell();
+    try {
+      await waitForE2eApi(app);
+      const want = { openPo: ["/app/purchase-order/new", "terms-head", "Freeform comments", "purchase order"], openReceipt: ["/app/purchase-receipt/new", "memo-entry", "Remarks", "item receipt"] };
+      for (const [hook, [route, home, label, noun]] of Object.entries(want)) {
+        await e2eCall(app, hook, route);
+        await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+        await expect
+          .poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-attach"); return b ? b.textContent.trim() : ""; })()`), { timeout: 40_000 })
+          .toBe(`Attach file to this ${noun}`);
+        const at = await inDoc(
+          app,
+          `(() => { const b = document.getElementById("btn-attach"); const t = document.getElementById("btn-attach-toolbar");
+            return { visible: b.getClientRects().length > 0, home: b.closest("#terms-head, #memo-entry") && b.closest("#terms-head, #memo-entry").id,
+              label: (b.parentElement.querySelector("label") || {}).textContent || "", toolbar: !!t && !t.hidden }; })()`,
+        );
+        expect(at).toMatchObject({ visible: true, home, toolbar: false });
+        expect(at.label).toContain(label);
+      }
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+});
+

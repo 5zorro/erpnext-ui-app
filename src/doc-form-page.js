@@ -330,6 +330,7 @@ function buildDocFormEl() {
     memoBlock: document.getElementById("memo-block"),
     memoLabel: document.getElementById("memo-label"),
     memoEntry: document.getElementById("memo-entry"),
+    termsHead: document.getElementById("terms-head"),
     memo: document.getElementById("f-memo"),
     termsBlock: document.getElementById("terms-block"),
     termsText: document.getElementById("f-terms-text"),
@@ -3065,20 +3066,28 @@ function applyUiConfig(config) {
     if (ui.sourceLabel) el.selectSource.textContent = ui.sourceLabel;
   }
 
+  // Attach sits beside the notes, as on the Bill (5zorro 2026-10-11): the memo's head, or — on a
+  // doctype with no Remarks (the PO) — the terms box's head. The toolbar copy is only for a page
+  // with neither.
   const attachTitle = ui.attachTitle || "Attach file";
+  const memoHead = el.memoEntry && el.memoEntry.querySelector(".memo-head");
+  const attachHome = ui.features.memo ? memoHead : ui.features.termsField ? el.termsHead : null;
   if (el.attach) {
-    el.attach.textContent = ui.features.memo
-      ? `Attach file to this ${ui.title.toLowerCase()}`
-      : "Attach file";
+    if (attachHome && el.attach.parentElement !== attachHome) attachHome.appendChild(el.attach);
+    el.attach.innerHTML = `${ATTACH_ICON_SVG} Attach file to this ${escapeHtml(ui.title.toLowerCase())}`;
     el.attach.title = attachTitle;
   }
   if (el.attachToolbar) {
-    el.attachToolbar.hidden = !!ui.features.memo;
+    el.attachToolbar.hidden = !!attachHome;
     el.attachToolbar.title = attachTitle;
   }
 
   if (ui.features.expensesTab) buildExpenseNote();
 }
+
+/** The paperclip the Bill's Attach button wears (bill-shell.fragment.html). */
+const ATTACH_ICON_SVG =
+  '<svg class="attach-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1.5 1.5 0 0 1-3 0V6h-1.5v9.5a3 3 0 0 0 6 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/></svg>';
 
 async function attachFileAction() {
   if (!api || !api.attachFile) {
