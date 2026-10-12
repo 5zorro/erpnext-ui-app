@@ -243,7 +243,8 @@ export const DOC_SKIN_PROFILES = {
     shell: "doc-form",
     desk: "ar",
     partyField: "customer",
-    features: { ...AR_FEATURES, progress: true },
+    // createMenu: Create ▾ (plan 2026-10-12 S2) — the Sales Order is the A/R dashboard.
+    features: { ...AR_FEATURES, progress: true, createMenu: true },
   },
   invoice: {
     id: "invoice",

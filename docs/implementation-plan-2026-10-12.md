@@ -40,7 +40,7 @@ its strip, since that is when the section cannot be seen. `electron/history.html
 the body). Checked by screenshot (open and collapsed); no app test — it is CSS on a section that
 was already shown and hidden by the shelf.
 
-### S2 — Create ▾ on the Sales Order Doc skin: Purchase Order…
+### S2 — Create ▾ on the Sales Order Doc skin: Purchase Order… (built 2026-10-12)
 
 Mirrors Vanilla's Create › Purchase Order (`sales_order.js` `make_purchase_order`):
 
@@ -53,6 +53,26 @@ Mirrors Vanilla's Create › Purchase Order (`sales_order.js` `make_purchase_ord
 - **Every PO is saved as a draft** and lands on the Drafts shelf (5zorro). The page **stays on the
   Sales Order** — the yellow Drafts border and the Sources column are the trail.
 - The menu lists only Purchase Order at first; the rest of Create comes with S5.
+
+**Built:** `src/so-create-po.js` (pure: which lines, how much, what to send, the message),
+`src/so-create-po-ui.js` (the menu — each entry in its document's wash — and the picker), IPC
+`so-create-po-context` / `so-create-pos`, `createMenu` on the Sales Order profile. Found while
+building:
+
+- **ERPNext's mapper saves the POs itself** (v16 `make_purchase_order`: `if doc.supplier:
+  doc.insert()`), so Vanilla's Create leaves drafts too. The first cut saved them again and made
+  four POs for two — the app test caught it.
+- **Draft POs count as ordered here.** ERPNext raises a line's `ordered_qty` only on PO *submit*;
+  with every PO a draft, a second Create would order the same goods again. The picker subtracts
+  quantity on draft POs that point at this order (and names them); a line partly on an older draft
+  is trimmed on the new PO after ERPNext saves it.
+- ERPNext picks the vendor **per item code** — the same item on two lines takes one vendor (the
+  picker says so). The whole remaining quantity is ordered, as in Vanilla; bundles are skipped.
+
+App test (5zorro's submitted order, two vendors): menu entry in the order wash; two draft POs, one
+per vendor, every line linked back; stays on the order with the message; Drafts shows them in
+yellow; Create again says every line is already ordered. The POs are deleted after (ERPNext hands
+the last number back on delete, so the numbering is unchanged).
 
 ### S3 — The PO's source picker: NIC, Material Request, Supplier Quotation, Sales Order
 

@@ -742,3 +742,97 @@ test.describe("scaffold: attached files follow ERPNext, not the page", () => {
     }
   });
 });
+
+// Plan 2026-10-12 S2: Create ▾ › Purchase Order… on a submitted Sales Order. Writes: one draft PO
+// per vendor, deleted at the end (the PO numbers they used are not reused by ERPNext).
+test.describe("scaffold: Sales Order Create ▾ › Purchase Order", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("saves one draft PO per vendor, stays on the order, and does not offer the same lines twice", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 2 });
+        return { so: (so[0] && so[0].name) || "", suppliers: sup.map((s) => s.name) };
+      })()`,
+    );
+    test.skip(!ctx.so || ctx.suppliers.length < 1, "sandbox needs a submitted, open Sales Order and a vendor");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${ctx.so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-create"); return !!b && !b.hidden && !b.disabled; })()`), { timeout: 40_000 }).toBe(true);
+
+    // The menu: Purchase Order…, in the PO's order wash.
+    await inDoc(app, `document.getElementById("btn-create").click(); true`);
+    const entry = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-create-menu"] [data-create="purchase-order"]'); return b ? { text: b.textContent, bg: getComputedStyle(b).backgroundColor } : null; })()`);
+    expect(entry).toEqual({ text: "Purchase Order…", bg: "rgb(232, 244, 252)" });
+    await inDoc(app, `document.querySelector('[data-create="purchase-order"]').click(); true`);
+    await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="so-create-po"] tbody tr').length`), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    // Two vendors when there are two lines and two vendors: line 1 → first, the rest → the second.
+    const vendors = ctx.suppliers;
+    const lineCount = await inDoc(
+      app,
+      `(() => {
+        const rows = [...document.querySelectorAll('[data-testid="so-create-po"] tbody tr')];
+        rows.forEach((tr, i) => { const v = tr.querySelector('[data-sc="vendor"]'); const name = ${JSON.stringify(vendors)}[Math.min(i, ${vendors.length - 1})]; v.value = name; v.dataset.linkCommitted = name; });
+        return rows.length;
+      })()`,
+    );
+    expect(lineCount).toBeGreaterThan(0);
+    const before = await inErp(app, `(async () => (await frappe.db.get_list("Purchase Order", { limit: 0 })).map((p) => p.name))()`);
+    let made = [];
+    try {
+      await inDoc(app, `document.querySelector('[data-testid="so-create-save"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `!document.querySelector('[data-testid="so-create-po"]')`), { timeout: 60_000 }).toBe(true);
+      made = await inErp(
+        app,
+        `(async () => (await frappe.db.get_list("Purchase Order", { limit: 0, fields: ["name", "supplier", "docstatus"] })).filter((p) => !${JSON.stringify(before)}.includes(p.name)))()`,
+      );
+      const wantVendors = [...new Set(Array.from({ length: lineCount }, (_, i) => vendors[Math.min(i, vendors.length - 1)]))];
+      expect(made.map((p) => p.supplier).sort()).toEqual(wantVendors.sort());
+      expect(made.every((p) => p.docstatus === 0)).toBe(true);
+      // Each PO line points back at the order.
+      const links = await inErp(
+        app,
+        `(async () => { const out = []; for (const n of ${JSON.stringify(made.map((p) => p.name))}) { const d = await frappe.db.get_doc("Purchase Order", n); out.push(...d.items.map((it) => it.sales_order)); } return out; })()`,
+      );
+      expect(links.length).toBe(lineCount);
+      expect(new Set(links)).toEqual(new Set([ctx.so]));
+      // Stayed on the order; the status names the drafts.
+      expect(await e2eGet(app, "surfaceMode")).toBe("doc");
+      expect(await inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`)).toBe(ctx.so);
+      const status = await inDoc(app, `document.getElementById("status") ? document.getElementById("status").textContent : document.body.innerText`);
+      expect(status).toContain("saved as");
+      // On the Drafts shelf, which wears its yellow border.
+      await expect
+        .poll(
+          async () =>
+            app.evaluate(async ({ webContents }) => {
+              const w = webContents.getAllWebContents().find((x) => /history\.html/.test(x.getURL()));
+              return w ? w.executeJavaScript(`(() => { const s = document.getElementById("sec-drafts"); return s && !s.hidden ? s.innerText + "|" + getComputedStyle(s).borderTopColor : ""; })()`) : "";
+            }),
+          { timeout: 20_000 },
+        )
+        .toMatch(/PUR-ORD[\s\S]*\|rgb\(234, 179, 8\)/);
+      // Create again: every line is already on a draft PO — nothing offered twice.
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="purchase-order"]').click(); true`);
+      await expect
+        .poll(async () => inDoc(app, `document.body.innerText.includes("Every line is already on a purchase order")`), { timeout: 20_000 })
+        .toBe(true);
+      expect(await inDoc(app, `!!document.querySelector('[data-testid="so-create-po"]')`)).toBe(false);
+    } finally {
+      for (const p of made) {
+        await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: ${JSON.stringify(p.name)} } }).then(() => true)`).catch(() => {});
+      }
+    }
+  });
+});

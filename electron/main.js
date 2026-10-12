@@ -9624,6 +9624,90 @@ ipcMain.handle("doc-delete-tax", async (_e, rowIndex) => {
   return raw;
 });
 
+/**
+ * Create ▾ › Purchase Order… (plan 2026-10-12 S2): the draft POs already made for this Sales Order,
+ * line by line — ERPNext counts a line as ordered only once its PO is submitted, and here every PO
+ * is saved as a draft, so the picker subtracts these itself (src/so-create-po.js).
+ */
+ipcMain.handle("so-create-po-context", async (_e, soName) => {
+  const so = normalizeEditableText(soName);
+  if (!so) return { ok: false, reason: "No Sales Order." };
+  const raw = await erpEval(`(async () => {
+    try {
+      var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        doctype: "Purchase Order",
+        fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
+        filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(so)}], ["docstatus", "=", 0]],
+        limit_page_length: 0 } });
+      return { ok: true, rows: (r && r.message) || [] };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read the draft purchase orders." };
+});
+
+/**
+ * ERPNext's own mapper builds one PO per vendor **and saves each as a draft itself** (v16
+ * `make_purchase_order`: `if doc.supplier: doc.insert()` — so Vanilla's Create leaves drafts too);
+ * the shell puts them on the Drafts shelf. A write — logged both sides. `pending` (by Sales Order
+ * line) trims a saved line to what is not already on an older draft PO (the mapper only counts
+ * submitted ones); a PO left with no lines is deleted.
+ * @param {{ soName?: string, selectedItems?: Array<Record<string, any>>, pending?: Record<string, number> }} req
+ */
+ipcMain.handle("so-create-pos", async (_e, req) => {
+  const r = req || {};
+  const so = normalizeEditableText(r.soName);
+  const selected = Array.isArray(r.selectedItems) ? r.selectedItems : [];
+  if (!so || !selected.length) return { ok: false, reason: "Nothing to order." };
+  navDebug("so-create-pos", `${so}: ${selected.length} line(s) → ${[...new Set(selected.map((x) => x.supplier))].join(", ")} start`);
+  const raw = await erpEval(`(async () => {
+    var pending = ${JSON.stringify(r.pending || {})};
+    try {
+      var m = await frappe.call({ method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
+        args: { source_name: ${JSON.stringify(so)}, selected_items: ${JSON.stringify(selected)} } });
+      var docs = (m && m.message) || [];
+      var saved = [], failed = [];
+      for (var d of docs) {
+        if (!d.name || d.__islocal) {
+          failed.push({ supplier: d.supplier || "", reason: "ERPNext did not save this purchase order." });
+          continue;
+        }
+        var trimmed = false;
+        (d.items || []).forEach(function (it) {
+          var left = pending[it.sales_order_item];
+          if (left != null && Number(left) < Number(it.qty)) {
+            it.qty = Number(left);
+            it.stock_qty = Number(left) * (Number(it.conversion_factor) || 1);
+            trimmed = true;
+          }
+        });
+        if (!trimmed) { saved.push(d); continue; }
+        d.items = (d.items || []).filter(function (it) { return Number(it.qty) > 0; });
+        try {
+          if (!d.items.length) {
+            await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: d.name } });
+            continue;
+          }
+          var sv = await frappe.call({ method: "frappe.client.save", args: { doc: d } });
+          saved.push(sv.message);
+        } catch (e) {
+          saved.push(d);
+          failed.push({ supplier: d.supplier || "", reason: d.name + " is saved, but trimming lines already on other drafts failed: " + String((e && e.message) || e) });
+        }
+      }
+      return { ok: true, saved: saved, failed: failed };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  const res = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not create the purchase orders." };
+  for (const doc of res.saved || []) noteShelvedFromSave("purchase-order", doc);
+  const names = (res.saved || []).map((d) => d.name);
+  navDebug("so-create-pos", `${so}: ${res.ok ? `saved ${names.join(", ") || "none"}${(res.failed || []).length ? `; failed ${res.failed.length}` : ""}` : `failed: ${res.reason}`}`);
+  return { ok: !!res.ok, reason: res.reason, names, failed: res.failed || [] };
+});
+
 ipcMain.handle("doc-attach-file", async () => {
   const profile = activeDocProfile();
   if (!profile || profile.shell !== "doc-form") {

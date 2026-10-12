@@ -137,6 +137,7 @@ import { openPrintDialog } from "./print-dialog-ui.js";
 import { mountComparePane } from "./compare-pane-ui.js";
 import { canAttachTo } from "./attachment-list.js";
 import { mountAttachmentList } from "./attachment-list-ui.js";
+import { mountSoCreateMenu } from "./so-create-po-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -175,6 +176,8 @@ let docNumberUi = null;
 let comparePane = null;
 /** The attached files under the notes (src/attachment-list-ui.js). */
 let attachList = null;
+/** Create ▾ on the Sales Order (src/so-create-po-ui.js, plan 2026-10-12 S2). */
+let soCreate = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -2638,6 +2641,7 @@ function paint(doc, snapScratch, opts = {}) {
     if (el.importItems) el.importItems.disabled = true;
     if (el.clearQty) el.clearQty.disabled = true;
     if (el.attach) el.attach.disabled = true;
+    if (soCreate) soCreate.paint(false, null);
     if (el.addTax) el.addTax.disabled = true;
     return;
   }
@@ -2732,6 +2736,7 @@ function paint(doc, snapScratch, opts = {}) {
   if (el.clearQty) el.clearQty.disabled = !canEdit;
   // Frappe's rule, not the edit lock: a submitted document takes files too (canAttachTo).
   if (el.attach) el.attach.disabled = !canAttachTo(doc);
+  if (soCreate) soCreate.paint(!!(ui && ui.features.createMenu), doc);
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
@@ -3378,6 +3383,17 @@ export async function bootDocFormPage(injectedApi) {
     testidPrefix: "doc",
     onFilesChanged: () => {
       if (comparePane) comparePane.refresh(true);
+    },
+  });
+  soCreate = mountSoCreateMenu({
+    api,
+    button: /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-create")),
+    getDoc: () => lastDoc,
+    setStatus,
+    mountSupplierPicker: (input, onPicked) => mountDocLinkPicker(input, "Supplier", onPicked, { refocusAfterPick: false }),
+    // Stay on the order (5zorro): Drafts' yellow and, later, the Sources column are the trail.
+    onCreated: async () => {
+      await refresh();
     },
   });
 
