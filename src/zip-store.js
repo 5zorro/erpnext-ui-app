@@ -20,6 +20,38 @@ function crc32(bytes) {
 }
 
 /**
+ * A file name as it really is, for showing and saving (architecture review 2026-10-19). Invisible
+ * format characters go — U+202E (right-to-left override) makes `invoice\u202Efdp.exe` *display* as
+ * `invoiceexe.pdf` — and so do control characters; long runs of spaces shrink to one, so
+ * `scan.pdf      .exe` cannot push its real extension out of sight.
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function plainFileName(name) {
+  return String(name ?? "")
+    .replace(/[\p{Cf}\p{Cc}]+/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * The first of `name`, `name (2)`, `name (3)` … that is not taken — for saving beside files that
+ * may already be there.
+ * @param {string} name
+ * @param {(candidate: string) => boolean} isTaken
+ * @returns {string}
+ */
+export function freeFileName(name, isTaken) {
+  let candidate = name;
+  let n = 2;
+  while (isTaken(candidate)) {
+    candidate = name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext || ""}`);
+    n += 1;
+  }
+  return candidate;
+}
+
+/**
  * Names inside one ZIP must differ: "scan.pdf" twice becomes "scan.pdf" and "scan (2).pdf".
  * Path separators are flattened so nothing unpacks outside its folder.
  * @param {string[]} names
@@ -28,7 +60,7 @@ function crc32(bytes) {
 export function uniqueZipNames(names) {
   const used = new Set();
   return (names || []).map((raw) => {
-    const clean = String(raw || "file").replace(/[\\/]+/g, "-").replace(/^\.+/, "") || "file";
+    const clean = plainFileName(raw || "file").replace(/[\\/]+/g, "-").replace(/^\.+/, "") || "file";
     let name = clean;
     let n = 2;
     while (used.has(name.toLowerCase())) {

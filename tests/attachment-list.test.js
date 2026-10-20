@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { attachmentSource, attachmentRows, formatFileSize, formatAddedDate, canAttachTo, attachmentSignature } from "../src/attachment-list.js";
+import { pdfFileName } from "../src/print-service.js";
 
 // 5zorro 2026-10-12: the attached files as a table under the notes, with Peek and Download.
 describe("attachmentSource", () => {
@@ -76,5 +77,19 @@ describe("attachmentSignature", () => {
     assert.equal(attachmentSignature(one), attachmentSignature(attachmentRows([{ name: "a", file_url: "/private/files/a.pdf" }])));
     assert.notEqual(attachmentSignature(one), attachmentSignature(two));
     assert.equal(attachmentSignature([]), "");
+  });
+});
+
+// Architecture review 2026-10-19: an attachment's shown name and a saved PDF's name are the real ones.
+describe("disguised file names", () => {
+  it("rows show the name without invisible characters", () => {
+    const [row] = attachmentRows([{ name: "F1", file_name: "invoice\u202Efdp.exe", file_url: "/private/files/x" }]);
+    assert.equal(row.fileName, "invoicefdp.exe");
+    const [fromUrl] = attachmentRows([{ name: "F2", file_url: "/files/scan%E2%80%AEfdp.exe" }]);
+    assert.equal(fromUrl.fileName, "scanfdp.exe");
+  });
+
+  it("a saved PDF's name cannot carry them either", () => {
+    assert.equal(pdfFileName("ACC\u202E-PINV-1"), "ACC-PINV-1.pdf");
   });
 });

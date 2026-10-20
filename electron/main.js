@@ -16,7 +16,7 @@ import {
 } from "../src/nav-prune.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
 import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
-import { isAllowedErpUrl, erpUrl, isShellNavAllowed } from "../src/nav-guard.js";
+import { isAllowedErpUrl, erpUrl, isShellNavAllowed, offBaseNavigation, offBaseWarning } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
   classifyHistoryOpen,
@@ -104,8 +104,8 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
-import { MAX_PAPER_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK } from "../src/compare-papers.js";
-import { buildZip } from "../src/zip-store.js";
+import { MAX_PAPER_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK, isErpFilePath, isStaleTempCopy } from "../src/compare-papers.js";
+import { buildZip, plainFileName, freeFileName } from "../src/zip-store.js";
 import {
   MULTI_PDF_SYNC_MAX,
   addToPrintQueue,
@@ -1404,7 +1404,7 @@ function onErpRouteHop(hop) {
 async function ensureErpRouteHopReporter() {
   if (!erp || erp.webContents.isDestroyed()) return false;
   try {
-    return !!(await erp.webContents.executeJavaScript(buildRouteHopReporterJs()));
+    return !!(await erpExec(buildRouteHopReporterJs()));
   } catch {
     return false;
   }
@@ -2311,7 +2311,7 @@ async function armSoftPeekEscHook(armed) {
   try {
     // The gate itself is the pure, unit-tested predicate — serialized in rather than
     // hand-copied, so tests/history-nav.test.js covers the rule that actually ships.
-    await erp.webContents.executeJavaScript(`(function(){
+    await erpExec(`(function(){
       window.__erpUiSoftPeekArmed = ${armed ? "true" : "false"};
       if (window.__erpUiSoftPeekEscBound) return true;
       window.__erpUiSoftPeekEscBound = true;
@@ -2483,7 +2483,7 @@ async function erpSoftSetRoute(appPath, opts = {}) {
       ? Object.fromEntries(new URLSearchParams(opts.search.replace(/^\?/, "")))
       : null;
   try {
-    const result = await erp.webContents.executeJavaScript(
+    const result = await erpExec(
       `(async () => {
         try {
           if (typeof frappe === "undefined" || !frappe.set_route) {
@@ -2702,6 +2702,20 @@ function erpSessionFetchImpl() {
   return (url, init) => session.fetch(url, init);
 }
 
+/**
+ * Every script the shell runs in the ERP view goes through here, and never into a page that is not
+ * ERPNext — the clerk may have chosen to continue to another website in that view (review
+ * 2026-10-19, R1-3). Rejects like a failed `executeJavaScript`, so callers' error paths apply.
+ * @param {string} js
+ */
+function erpExec(js) {
+  const url = erp.webContents.getURL();
+  if (url && !isAllowedErpUrl(ERP_BASE, url)) {
+    return Promise.reject(new Error("The ERP view is showing another website, not ERPNext."));
+  }
+  return erp.webContents.executeJavaScript(js);
+}
+
 async function erpEval(js, chaosChannel = "erpEval") {
   if (!erp || erp.webContents.isDestroyed()) {
     return { ok: false, reason: "ERP view not ready" };
@@ -2709,7 +2723,7 @@ async function erpEval(js, chaosChannel = "erpEval") {
   const chaosMs = await maybeChaosLag(chaosChannel);
   if (chaosMs > 0) navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
   try {
-    return await erp.webContents.executeJavaScript(js);
+    return await erpExec(js);
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
   }
@@ -2806,7 +2820,7 @@ function blurNonErpWebContents() {
 async function dismissOnboardingAndSettle() {
   if (!erp || erp.webContents.isDestroyed()) return;
   try {
-    await erp.webContents.executeJavaScript(`(function(){
+    await erpExec(`(function(){
       var panel = document.querySelector(".onb-panel");
       if (!panel) return false;
       try {
@@ -2830,7 +2844,7 @@ async function dismissOnboardingAndSettle() {
 async function installFindFocusKeeper(fieldname, ms = 2200) {
   if (!erp || erp.webContents.isDestroyed()) return;
   try {
-    await erp.webContents.executeJavaScript(`(function(){
+    await erpExec(`(function(){
       var field = ${JSON.stringify(fieldname)};
       var until = Date.now() + ${Number(ms) || 2200};
       window.__docFindFocusKeep = { field: field, until: until };
@@ -2871,7 +2885,7 @@ async function waitForListFilterField(fieldname, timeoutMs = BILL_FIND_TIMEOUT_M
       return { ok: false, reason: "ERP view not ready" };
     }
     try {
-      last = await erp.webContents.executeJavaScript(`(function(){
+      last = await erpExec(`(function(){
         var field = ${JSON.stringify(fieldname)};
         try {
           if (!window.cur_list || !cur_list.page) {
@@ -2926,7 +2940,7 @@ async function ensureErpFormBridge() {
     `(function(){ try { return window.__docFormBridge && window.__docFormBridge.version || 0; } catch(e) { return 0; } })()`,
   );
   if (typeof ver === "number" && ver >= DOC_FORM_BRIDGE_VERSION) return true;
-  await erp.webContents.executeJavaScript(ERP_BRIDGE_PAGE_JS);
+  await erpExec(ERP_BRIDGE_PAGE_JS);
   const ver2 = await erpEval(
     `(function(){ try { return window.__docFormBridge && window.__docFormBridge.version || 0; } catch(e) { return 0; } })()`,
   );
@@ -2948,7 +2962,7 @@ async function removeSimplifiedSkin() {
   simplifiedSkinInstalled = false;
   if (!erp || erp.webContents.isDestroyed()) return;
   try {
-    await erp.webContents.executeJavaScript(buildSimplifiedTeardown());
+    await erpExec(buildSimplifiedTeardown());
     navDebug("simplified-skin", "removed");
   } catch (e) {
     navDebug("simplified-skin-err", `remove: ${String(e && e.message ? e.message : e)}`);
@@ -2971,7 +2985,7 @@ async function ensureSimplifiedSkin() {
   }
   try {
     const payload = buildSimplifiedPayload();
-    await erp.webContents.executeJavaScript(payload);
+    await erpExec(payload);
     simplifiedSkinInstalled = true;
   } catch (e) {
     navDebug("simplified-skin-err", String(e && e.message ? e.message : e));
@@ -6909,6 +6923,40 @@ function diagnoseSnapshot() {
   };
 }
 
+/** True after the clerk chose "Continue here" — the ERP view may then roam that site. */
+let erpLeftBase = false;
+let offBasePrompt = null;
+
+/**
+ * The ERP view was about to leave ERPNext: say where, and let the clerk go back, open it in
+ * their browser, or continue here (5zorro 2026-10-19). Logged both sides.
+ * @param {string} url
+ * @param {"link"|"redirect"} how
+ */
+function warnOffBase(url, how) {
+  const d = offBaseNavigation(ERP_BASE, url);
+  if (d.kind === "erp") return;
+  navDebug("erp-off-base", `${how} ${String(url).slice(0, 200)}`);
+  if (offBasePrompt || !win || win.isDestroyed()) return;
+  const w = offBaseWarning(d);
+  offBasePrompt = dialog
+    .showMessageBox(win, { type: "warning", title: w.title, message: w.message, detail: w.detail, buttons: w.buttons, defaultId: 0, cancelId: 0, noLink: true })
+    .then(({ response }) => {
+      const action = w.actions[response] || "back";
+      navDebug("erp-off-base-choice", `${action} ${d.kind === "web" ? d.host : d.scheme}`);
+      if (d.kind !== "web") return;
+      if (action === "browser") shell.openExternal(d.url);
+      if (action === "continue" && erp && !erp.webContents.isDestroyed()) {
+        erpLeftBase = true;
+        erp.webContents.loadURL(d.url);
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      offBasePrompt = null;
+    });
+}
+
 function createWindow() {
   loadPrefs();
   win = new BrowserWindow({
@@ -7027,10 +7075,23 @@ function createWindow() {
     return isAllowedErpUrl(ERP_BASE, url) ? { action: "allow" } : { action: "deny" };
   });
   erp.webContents.on("will-navigate", (e, url) => {
-    if (!isAllowedErpUrl(ERP_BASE, url)) e.preventDefault();
+    if (isAllowedErpUrl(ERP_BASE, url)) return;
+    if (erpLeftBase && offBaseNavigation(ERP_BASE, url).kind === "web") return;
+    e.preventDefault();
+    warnOffBase(url, "link");
+  });
+  // A server redirect is not a will-navigate (review 2026-10-19 R1-3): without this an ERPNext
+  // address that redirects elsewhere landed the ERP view there, unannounced.
+  erp.webContents.on("will-redirect", (e, url) => {
+    const mainFrame = e && typeof e.isMainFrame === "boolean" ? e.isMainFrame : true;
+    if (!mainFrame || isAllowedErpUrl(ERP_BASE, url)) return;
+    if (erpLeftBase && offBaseNavigation(ERP_BASE, url).kind === "web") return;
+    e.preventDefault();
+    warnOffBase(url, "redirect");
   });
   erp.webContents.on("will-prevent-unload", onErpWillPreventUnload);
   erp.webContents.on("did-navigate", (_e, url) => {
+    if (isAllowedErpUrl(ERP_BASE, url)) erpLeftBase = false;
     trackNav(url, { fromBrowser: true });
     // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
     tickLogin("navigate").catch(() => {});
@@ -9189,7 +9250,7 @@ async function focusListStandardFilter(fieldname) {
 
   let loc;
   try {
-    loc = await erp.webContents.executeJavaScript(locateJs);
+    loc = await erpExec(locateJs);
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
   }
@@ -9228,7 +9289,7 @@ async function focusListStandardFilter(fieldname) {
 
   let selectResult = null;
   try {
-    selectResult = await erp.webContents.executeJavaScript(`(function(){
+    selectResult = await erpExec(`(function(){
       var field = ${JSON.stringify(fieldname)};
       var el = document.querySelector('.standard-filter-section [data-fieldname="' + field + '"] input')
         || document.querySelector('[data-fieldname="' + field + '"] input')
@@ -11198,6 +11259,7 @@ async function savePdfsEach(list, folder) {
   const files = [];
   let worker = null;
   let healed = 0;
+  const used = new Set();
   try {
     for (const item of list) {
       const got = await pdfForItem(worker, item);
@@ -11207,7 +11269,10 @@ async function savePdfsEach(list, folder) {
         continue;
       }
       if (got.healed) healed += 1;
-      const file = path.join(folder, pdfFileName(item.name));
+      // Never over a file already there, nor over another document of this batch (R11-5).
+      const name = freeFileName(pdfFileName(item.name), (c) => used.has(c.toLowerCase()) || fs.existsSync(path.join(folder, c)));
+      used.add(name.toLowerCase());
+      const file = path.join(folder, name);
       fs.writeFileSync(file, got.bytes);
       files.push(file);
       results.push({ item, ok: true });
@@ -11331,7 +11396,7 @@ async function listPapers(sources) {
 /** One attachment's bytes over the ERP view's session (private files need it). */
 async function paperBytes(fileUrl) {
   const u = String(fileUrl || "");
-  if (!/^\/(private\/)?files\//.test(u)) return { ok: false, reason: "Not an ERPNext file address." };
+  if (!isErpFilePath(u)) return { ok: false, reason: "Not an ERPNext file address." };
   if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
   try {
     let res = await erp.webContents.session.fetch(`${ERP_BASE}${encodeURI(decodeURI(u))}`);
@@ -11343,6 +11408,8 @@ async function paperBytes(fileUrl) {
       navDebug("paper-bytes-fallback", `${u} (${first}) → download_file ${res.status}`);
     }
     if (!res.ok) return { ok: false, reason: `ERPNext could not send the file (${res.status}).` };
+    // Refuse a big file before reading it, when the server says its size (R11-4).
+    if (Number(res.headers.get("content-length")) > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };
     return { ok: true, bytes: new Uint8Array(buf), type: res.headers.get("content-type") || "" };
@@ -11440,7 +11507,7 @@ async function openPaper(req) {
  */
 async function downloadPaper(req) {
   const r = req || {};
-  const safe = String(r.fileName || "attachment").replace(/[\\/:*?"<>|]+/g, "-");
+  const safe = plainFileName(r.fileName || "attachment").replace(/[\\/:*?"<>|]+/g, "-") || "attachment";
   const pick = await askSavePath({ title: "Download attachment", defaultPath: path.join(app.getPath("downloads"), safe) });
   if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
   const got = await paperBytes(r.fileUrl);
@@ -12473,7 +12540,25 @@ app.on("web-contents-created", (_e, contents) => {
   });
 });
 
-app.whenReady().then(createWindow);
+/** R11-5: Open's copies and the print spool's PDFs a day old or more. Best effort, never blocks. */
+function sweepOldTempCopies() {
+  const dir = app.getPath("temp");
+  fs.readdir(dir, (err, names) => {
+    if (err) return;
+    const now = Date.now();
+    for (const name of names) {
+      if (!name.startsWith("erpnext-ui-")) continue;
+      fs.stat(path.join(dir, name), (e, st) => {
+        if (!e && st.isFile() && isStaleTempCopy(name, st.mtimeMs, now)) fs.rm(path.join(dir, name), () => {});
+      });
+    }
+  });
+}
+
+app.whenReady().then(() => {
+  sweepOldTempCopies();
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -5,6 +5,8 @@
  * The files themselves come over the Papers pane's channels (`papers-list`, `papers-bytes`).
  */
 
+import { plainFileName } from "./zip-store.js";
+
 /**
  * @typedef {{ name?: string, file_name?: string, file_url?: string, is_private?: number|string,
  *   creation?: string, file_size?: number|string }} FileRecord
@@ -48,14 +50,14 @@ export function formatAddedDate(stamp) {
 
 /** The file's own name: `file_name`, else the last part of its address. */
 function fileNameOf(f) {
-  const own = f.file_name != null ? String(f.file_name).trim() : "";
+  const own = f.file_name != null ? plainFileName(f.file_name) : "";
   if (own) return own;
   const url = String(f.file_url || "");
   const last = url.split("/").pop() || "";
   try {
-    return decodeURIComponent(last);
+    return plainFileName(decodeURIComponent(last));
   } catch {
-    return last;
+    return plainFileName(last);
   }
 }
 

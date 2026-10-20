@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedErpUrl, erpUrl, isShellNavAllowed } from "../src/nav-guard.js";
+import { isAllowedErpUrl, erpUrl, isShellNavAllowed, offBaseNavigation, offBaseWarning } from "../src/nav-guard.js";
 
 describe("isAllowedErpUrl", () => {
   const base = "http://localhost:8080";
@@ -73,5 +73,42 @@ describe("main.js wires the shell navigation guard for every page", () => {
     assert.match(body, /contents === erp\.webContents\) return;/);
     assert.match(body, /isShellNavAllowed\(contents\.getURL\(\), url\)/);
     assert.ok(start < main.indexOf("app.whenReady()"), "registered before the first view exists");
+  });
+});
+
+// Architecture review 2026-10-19, R1-3 (5zorro: warn, let the clerk click through).
+describe("leaving ERPNext from the ERP view", () => {
+  const base = "http://localhost:8080";
+
+  it("sorts addresses: ERPNext, another website, or never opened", () => {
+    assert.deepEqual(offBaseNavigation(base, "http://localhost:8080/app"), { kind: "erp" });
+    assert.deepEqual(offBaseNavigation(base, "https://accounts.example.com/x?y=1"), { kind: "web", host: "accounts.example.com", url: "https://accounts.example.com/x?y=1" });
+    assert.equal(offBaseNavigation(base, "http://localhost:8080.evil.com/").kind, "refuse"); // not a valid address at all
+    assert.equal(offBaseNavigation(base, "http://localhost.evil.com:8080/").kind, "web");
+    assert.equal(offBaseNavigation(base, "file:///etc/passwd").kind, "refuse");
+    assert.equal(offBaseNavigation(base, "ms-msdt:/id").kind, "refuse");
+    assert.equal(offBaseNavigation(base, "javascript:alert(1)").kind, "refuse");
+    assert.equal(offBaseNavigation(base, "not a url").kind, "refuse");
+  });
+
+  it("a website gets go back (default) / browser / continue; anything else only OK", () => {
+    const web = offBaseWarning(offBaseNavigation(base, "https://example.com/"));
+    assert.deepEqual(web.actions, ["back", "browser", "continue"]);
+    assert.equal(web.buttons.length, 3);
+    assert.match(web.message, /example\.com/);
+    const refused = offBaseWarning(offBaseNavigation(base, "file:///x"));
+    assert.deepEqual(refused.actions, ["back"]);
+    assert.match(refused.message, /"file:"/);
+  });
+
+  it("main.js guards redirects as well as links, and every injection goes through erpExec", async () => {
+    const { readFileSync } = await import("node:fs");
+    const main = readFileSync(new URL("../electron/main.js", import.meta.url), "utf8");
+    assert.match(main, /erp\.webContents\.on\("will-redirect"[\s\S]{0,400}warnOffBase\(url, "redirect"\)/);
+    assert.match(main, /erp\.webContents\.on\("will-navigate"[\s\S]{0,300}warnOffBase\(url, "link"\)/);
+    const direct = main.match(/erp\.webContents\.executeJavaScript\(/g) || [];
+    assert.equal(direct.length, 1, "only erpExec itself may call executeJavaScript on the ERP view");
+    const exec = main.slice(main.indexOf("function erpExec("), main.indexOf("function erpExec(") + 400);
+    assert.match(exec, /!isAllowedErpUrl\(ERP_BASE, url\)/);
   });
 });

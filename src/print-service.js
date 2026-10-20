@@ -11,6 +11,8 @@
  * 3. Printer: `/printview` without `trigger_print`, printed by Electron. File: ERPNext's PDF.
  */
 
+import { plainFileName } from "./zip-store.js";
+
 /** Frappe's own cap on one bulk print (`list/bulk_operations.js` MAX_PRINT_LIMIT). */
 export const PRINT_QUEUE_MAX = 500;
 /** Above this, Frappe's list view moves a merged PDF to a background job. */
@@ -308,7 +310,7 @@ export function groupPrintQueue(queue) {
  * @param {string} name
  */
 export function pdfFileName(name) {
-  const safe = str(name).replace(/[\s/\\:*?"<>|]+/g, "-").replace(/^-+|-+$/g, "");
+  const safe = plainFileName(name).replace(/[\s/\\:*?"<>|]+/g, "-").replace(/^-+|-+$/g, "");
   return `${safe || "document"}.pdf`;
 }
 

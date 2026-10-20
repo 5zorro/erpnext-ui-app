@@ -1156,6 +1156,11 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   app-data folder (`%APPDATA%` on Windows); nothing carries over from WSL unless copied.
 - **Unsigned builds warn.** Windows SmartScreen (and macOS Gatekeeper) warn on an unsigned app;
   fine for 5zorro's own use, a decision before anyone else installs it.
+- **Security items owed to the first build** (architecture review, plan 2026-10-19): turn on
+  Electron's fuses that stop a shipped app being run as plain Node or opened with an inspector
+  (R1-4); pass the printer name to PowerShell through an environment variable, not the command
+  text (R11-6); and check that **Open** / **Download** on Windows mark a paper as "from the
+  internet" (file Properties → *This file came from another computer*) — written, never run (R11-2).
 
 **Questions for 5zorro when it starts:** which systems (Windows first? macOS? Linux?); an installer
 or a portable app; signed or not; whether it should update itself.

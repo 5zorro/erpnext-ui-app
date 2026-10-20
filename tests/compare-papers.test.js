@@ -14,6 +14,8 @@ import {
   onePdfHtml,
   inertWordHtml,
   openablePaper,
+  isErpFilePath,
+  isStaleTempCopy,
 } from "../src/compare-papers.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -174,5 +176,29 @@ describe("frappeDownloadPath", () => {
     assert.ok(body.indexOf("openablePaper(r.fileName)") > 0 && body.indexOf("openablePaper(") < body.indexOf("shell.openPath"));
     assert.match(body, /allowed\.localName/);
     assert.match(body, /markFromInternet\(file\)/);
+  });
+
+  it("Open sees through a right-to-left override", () => {
+    assert.equal(openablePaper("invoice\u202Efdp.exe").ok, false);
+    assert.deepEqual(openablePaper("scan\u200B.pdf"), { ok: true, localName: "scan.pdf" });
+  });
+
+  // R11-3: main fetches these with the clerk's session.
+  it("only ERPNext file addresses, with nothing that climbs out", () => {
+    assert.equal(isErpFilePath("/files/My Scan.pdf"), true);
+    assert.equal(isErpFilePath("/private/files/a%20b.pdf"), true);
+    for (const bad of ["/files/../api/method/x", "/files/%2e%2e/api/method/x", "/files/..\\api", "/files/./x", "/api/method/x", "https://evil/files/x", "/files/%E0%A4%A", ""]) {
+      assert.equal(isErpFilePath(bad), false, bad);
+    }
+  });
+
+  // R11-5
+  it("temp copies a day old are swept; newer ones and other files are not", () => {
+    const now = Date.parse("2026-10-20T12:00:00Z");
+    const day = 24 * 60 * 60 * 1000;
+    assert.equal(isStaleTempCopy("erpnext-ui-paper-1-a.pdf", now - day - 1, now), true);
+    assert.equal(isStaleTempCopy("erpnext-ui-print-1-a.pdf", now - day - 1, now), true);
+    assert.equal(isStaleTempCopy("erpnext-ui-paper-1-a.pdf", now - 1000, now), false);
+    assert.equal(isStaleTempCopy("someone-else.pdf", now - 9 * day, now), false);
   });
 });

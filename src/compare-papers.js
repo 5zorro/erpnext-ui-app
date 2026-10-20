@@ -4,6 +4,8 @@
  * as if a single PDF. Pure: what a file is, where it came from, the order, the layout.
  */
 
+import { plainFileName } from "./zip-store.js";
+
 /** Window width from which the pane sits beside the document instead of over it. */
 export const SIDE_BY_SIDE_MIN_PX = 1700;
 /** The narrowest pane worth showing beside the document. */
@@ -51,7 +53,7 @@ export const OPENABLE_PAPER_EXTS = Object.freeze([
  * @returns {{ ok: true, localName: string } | { ok: false, reason: string }}
  */
 export function openablePaper(fileName) {
-  const name = str(fileName);
+  const name = plainFileName(fileName);
   const m = /^(.*)\.([A-Za-z0-9]+)$/.exec(name);
   const ext = m ? m[2].toLowerCase() : "";
   if (!m || !OPENABLE_PAPER_EXTS.includes(ext)) {
@@ -62,6 +64,41 @@ export function openablePaper(fileName) {
   }
   const stem = m[1].replace(/[\\/:*?"<>|\x00-\x1f]+/g, "-").replace(/[. ]+$/g, "").replace(/^[. ]+/, "") || "paper";
   return { ok: true, localName: `${stem}.${ext}` };
+}
+
+/**
+ * Is this an address of a file ERPNext stores — `/files/…` or `/private/files/…` and nothing that
+ * climbs out of it? Main fetches it with the clerk's session, so `/files/../api/method/…` must not
+ * pass (review 2026-10-19, R11-3). Backslashes are refused too: a URL parser reads them as `/`.
+ * @param {string} fileUrl
+ * @returns {boolean}
+ */
+export function isErpFilePath(fileUrl) {
+  const u = str(fileUrl);
+  if (!/^\/(private\/)?files\//.test(u) || u.includes("\\")) return false;
+  let decoded;
+  try {
+    decoded = decodeURI(u);
+  } catch {
+    return false;
+  }
+  if (decoded.includes("\\")) return false;
+  return decoded.split(/[?#]/)[0].split("/").every((seg) => seg !== ".." && seg !== ".");
+}
+
+/** Copies the app leaves in the temp folder: Open's papers and the print spool's PDFs. */
+export const TEMP_COPY_PREFIXES = Object.freeze(["erpnext-ui-paper-", "erpnext-ui-print-"]);
+
+/**
+ * A temp copy old enough to delete at startup (review 2026-10-19, R11-5): whatever opened it has
+ * had a day; anything newer may still be open in its program.
+ * @param {string} name
+ * @param {number} mtimeMs
+ * @param {number} nowMs
+ * @returns {boolean}
+ */
+export function isStaleTempCopy(name, mtimeMs, nowMs) {
+  return TEMP_COPY_PREFIXES.some((p) => String(name || "").startsWith(p)) && nowMs - mtimeMs > 24 * 60 * 60 * 1000;
 }
 
 /** Windows' "downloaded from the internet" mark (Zone 3), written beside a paper Open saves. */

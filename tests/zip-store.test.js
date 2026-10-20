@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { buildZip, uniqueZipNames } from "../src/zip-store.js";
+import { buildZip, uniqueZipNames, plainFileName, freeFileName } from "../src/zip-store.js";
 
 // 5zorro 2026-10-03: "save all attachments as zip".
 describe("zip-store", () => {
@@ -34,5 +34,24 @@ describe("zip-store", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// Architecture review 2026-10-19: names shown and saved are the real ones.
+describe("plainFileName / freeFileName", () => {
+  it("drops the right-to-left override and other invisible characters, so the real extension shows", () => {
+    assert.equal(plainFileName("invoice\u202Efdp.exe"), "invoicefdp.exe");
+    assert.equal(plainFileName("a\u200B.pdf\u2066"), "a.pdf");
+    assert.equal(plainFileName("scan.pdf          .exe"), "scan.pdf .exe");
+    assert.equal(plainFileName("tab\tname\u0007.pdf"), "tabname.pdf");
+    assert.equal(plainFileName(null), "");
+    assert.deepEqual(uniqueZipNames(["x\u202Egpj.exe"]), ["xgpj.exe"]);
+  });
+
+  it("numbers a name already taken, in the folder or the batch", () => {
+    const taken = new Set(["a.pdf", "a (2).pdf"]);
+    assert.equal(freeFileName("a.pdf", (c) => taken.has(c)), "a (3).pdf");
+    assert.equal(freeFileName("b.pdf", (c) => taken.has(c)), "b.pdf");
+    assert.equal(freeFileName("noext", (c) => c === "noext"), "noext (2)");
   });
 });

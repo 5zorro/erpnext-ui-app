@@ -20,6 +20,7 @@ import {
   openablePaper,
 } from "./compare-papers.js";
 import { parseCsv, readXlsxFirstSheet, sheetFitsOnePage, sheetTableHtml, sheetTooBigNote } from "./sheet-preview.js";
+import { plainFileName } from "./zip-store.js";
 
 const OPEN_KEY = "compare-pane-open";
 const SOURCES_KEY = "compare-pane-include-sources";
@@ -308,16 +309,16 @@ export function mountComparePane(opts) {
       const src = bySource(f);
       return {
         key: f.name,
-        fileName: f.file_name || f.file_url,
+        fileName: plainFileName(f.file_name || f.file_url),
         fileUrl: f.file_url,
         from: paperFromLabel(src, selfLabel()),
         role: src ? src.role : "self",
-        kind: paperKind(f.file_name || f.file_url),
+        kind: paperKind(plainFileName(f.file_name || f.file_url)),
         creation: f.creation,
       };
     });
     for (const [k, v] of localOnly) {
-      papers.push({ key: k, fileName: v.name, from: "Dropped here — not attached (save first)", role: "dropped", kind: paperKind(v.name), local: true });
+      papers.push({ key: k, fileName: plainFileName(v.name), from: "Dropped here — not attached (save first)", role: "dropped", kind: paperKind(plainFileName(v.name)), local: true });
     }
     const ordered = orderPapers(papers);
     currentPapers = ordered;
