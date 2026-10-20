@@ -66,13 +66,13 @@ into `HANDOFF.md`); read a deleted one with `git show <commit>^:<path>`, by sect
 | Plan | Tranche | State | Durable rules now in | Read with |
 |------|---------|-------|----------------------|-----------|
 | `implementation-plan.md` (undated) | first scaffold | deleted 2026-07-16 | HANDOFF rule 1 (no undated plan) | `git show b101d7a^:docs/implementation-plan.md` |
-| 07-15 | Scaffold POC + parity ladder | deleted | HANDOFF § Layers, § Test strategy | `git show 3279b53^:docs/implementation-plan-2026-07-15.md` |
-| 07-18 | Doc usability + shared patterns | deleted | HANDOFF § Extension points | `git show 754b53f^:docs/implementation-plan-2026-07-18.md` |
-| 07-29 | Vanilla Simplified lens (OI-086) | deleted 2026-09-08 | HANDOFF § Simplified lens | `git show 9972857^:docs/implementation-plan-2026-07-29.md` |
+| 07-15 | Scaffold POC + parity ladder | deleted | not named in HANDOFF's registry (check the deleting commit) | `git show 3279b53^:docs/implementation-plan-2026-07-15.md` |
+| 07-18 | Doc usability + shared patterns | closed 2026-07-29 (T1–T4 MVP) | HANDOFF read order names no fold | `git show 754b53f^:docs/implementation-plan-2026-07-18.md` |
+| 07-29 | Vanilla Simplified lens (OI-086) + calculator (OI-018) | deleted 2026-09-08 | HANDOFF § Simplified lens; calculator split on museum OI-018 | `git show 9972857^:docs/implementation-plan-2026-07-29.md` |
 | 08-19 | Nav instrumentation + map (OI-126/127) | deleted 2026-09-04 | HANDOFF § Navigation spine | `git show 10419bf^:docs/implementation-plan-2026-08-19.md` |
-| 08-30 | AP Doc skin backlog | deleted 2026-09-02 | HANDOFF § Extension points | `git show d9d590b^:docs/implementation-plan-2026-08-30.md` |
+| 08-30 | AP Doc skin T0–T6 | deleted 2026-09-02 | `docs/gotchas.md`; remaining OIs museum only | `git show d9d590b^:docs/implementation-plan-2026-08-30.md` |
 | 09-03 | Doc Pay skin, economic batching (OI-138/161) | deleted 2026-09-08 | HANDOFF § Pay Outstanding flow; gotchas G7–G8 | `git show 5c02bb8^:docs/implementation-plan-2026-09-03.md` |
-| 09-08 | Payment terms as data; the assumptions | **superseded**, still on disk | not folded yet (slice R20) | `docs/…-09-08.md` |
+| 09-08 | Payment terms as data; the assumptions | **superseded**, still on disk | not folded yet (slice R15) | `docs/…-09-08.md` |
 | 09-16 | Pay Outstanding fixes; void-and-amend | built; dogfood residuals | HANDOFF § Editing a submitted document | `docs/…-09-16.md` |
 | 09-21 | Receiving scanner, phase 1 | **parked** 2026-09-25 | **not registered in HANDOFF** (its *Registration owed*) | `docs/…-09-21.md` |
 | 09-26 | Nav audit, Find pages, A/R skins, DF-01/02 follow-ups, printing, Papers | built; being dogfooded | HANDOFF § Printing, invariants 6 & 8 | `docs/…-09-26.md` |
@@ -321,7 +321,7 @@ what reading the family whole would cost, for reference. Questions are **leads t
 - **Code:** `electron/pay-outstanding.src.html` (3,907 — by question only; never the generated
   `pay-outstanding.html`), `scripts/assemble-pay-outstanding-html.js`, `check-*.js`.
 - **Questions:**
-  1. With the full reselling year loaded (25 vendors, ~1,300 bills): how many requests to draw the
+  1. With the full reselling year loaded (25 vendors, a bill a month each, plus the 60-day rotation): how many requests to draw the
      board, and does a re-render rebuild everything?
   2. One exception in a render loop blanks the board (G13): is every loop guarded now?
   3. A 3,907-line HTML page: what should be in `src/` with tests?
@@ -392,12 +392,12 @@ what reading the family whole would cost, for reference. Questions are **leads t
      though the tranche is parked. What does it expose, to which network, and should it stay on?
   2. `sandbox-guard.js`: could the 15-minute seed ever run against a site that is not the sandbox?
      What does it actually check?
-  3. Scripts with the DB root password (`-padmin`) — sandbox only, and nowhere a real site could
+  3. Scripts that carry the sandbox DB root password — sandbox only, and nowhere a real site could
      inherit it?
 - **Do first** — the most exposed.
 - **Reviewed through:** — **Findings:** none yet.
 
-### R20 — The process documents themselves (M) — read ~8k
+### R15 — The process documents themselves (M) — read ~8k
 
 - **Not a code family.** This is the review of the plans and handoff files, because they are what
   every session pays for in context.
@@ -409,6 +409,8 @@ what reading the family whole would cost, for reference. Questions are **leads t
      under 09-16 P3/P4? If so: fold, delete (saves 26k for anyone who opens it).
   3. Plan 09-16: everything built; what stops closeout besides the dogfood residuals?
   4. Plan 09-21: *Registration owed* in HANDOFF — still owed.
+  4b. HANDOFF's *Read order* still calls 09-16 "the active plan", and its closed-plan registry has
+     no fold named for 07-15 / 07-18 — bring both up to date.
   5. Plan 09-26 at 24k: which sections are done and could fold into HANDOFF now?
 - **Do last**, after the code slices, so it can also fold this plan's own conclusions.
 - **Reviewed through:** — **Findings:** none yet.
@@ -428,7 +430,7 @@ money first, structure later.
 | 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |
 | 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
 | 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
-| 7 | R13 + R20 | ~32k | — | small tools, then fold everything and close this plan | |
+| 7 | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | |
 
 Rules that fall out of the numbers:
 
@@ -451,7 +453,7 @@ review what changed since the last review, not the whole app.**
    handoff updates.
 4. Record findings in that slice's table here, and move its *Reviewed through* forward.
 
-When this plan closes (R20), move the slice table and the *Reviewed through* column into
+When this plan closes (R15), move the slice table and the *Reviewed through* column into
 `HANDOFF.md` so the incremental review outlives the plan.
 
 ---

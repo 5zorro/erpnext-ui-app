@@ -10,6 +10,9 @@
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
 3. Dated working plans (create new when a museum OI tranche is promoted):
+   `implementation-plan-2026-10-19.md` (architecture review — security / stability,
+   maintainability, performance, in slices; read only its *How to
+   run one review session* and your session's slices) — **active**.
    `implementation-plan-2026-09-26.md` (navigation audit + Find pages as Doc skins, OI-056) —
    **active**; its Part B is the audit of the nav code and history, Part D the architecture.
    `implementation-plan-2026-09-16.md` (Pay Outstanding corrections, the delay calendar panel,
