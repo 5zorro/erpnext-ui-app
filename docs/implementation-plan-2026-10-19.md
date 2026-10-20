@@ -23,7 +23,10 @@ built, being dogfooded). It edits no code.
 > fixes themselves were then reviewed (the *After the first pass* step) — two gaps found and fixed
 > (R1-6, R11-7). The durable rules are HANDOFF invariant 9. **Still open and high: R14-1** —
 > 5zorro's infrastructure (stop the proxy; bind 8080 to `127.0.0.1` in `~/erpnext/frappe_docker/pwd-custom.yml`), museum
-> OI-183. Next: session 2 (R9 + R10c + R6c).
+> OI-183. **Session 2 ✅** (R9, R10c, R6c): no high findings. The two medium findings that matter most are
+> R9-1 / R9-2 (void-and-amend misreports a half-done write), R6c-1 (one bill's source limits
+> stored under the next bill) and R10c-2 (payment creates leave no log line); all are open, and none
+> is fixed yet. Next: session 3 (R2 + R3 + R4).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -276,7 +279,16 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
      overwrite newer data.
   3. Receive-with-bill / JIT receipt: two writes (receipt then bill). If the second fails, what is
      left behind, and does the clerk see it?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R6c-1 | S | med | `main.js` `enrichBillLineContext()` | It works out which bill to store the source-line limits under (`currentBillDocKey()`) **after** the fetch returns, not before. The 15 s `raceTimeout` abandons a slow fetch but does not cancel it. So if the clerk has moved to bill B by the time bill A's fetch lands, A's per-row limits and allocations are written under B. Both are keyed by **row index**, so B's row 1 gets A's row-1 PO limit, and the over-billing split at save can cap or split B's line by the wrong quantity. This can also wipe B's already-finished limits and leave B stuck on "line limit still loading". Read from the code, not reproduced. The window is the fetch time (500 ms settle plus the HTTP calls), and it is much longer under chaos lag or a busy ERP | Take the key from `doc.name` before the await, and drop the result if that bill is no longer the one on screen (the background loop already checks `docName` between rounds; the slice itself does not) | open |
+| R6c-2 | S | low | `main.js` `scheduleBillEnrichBackground()`; `bill-po-qty-split.js` message | When the background retry gives up (15 rounds, about 2 min), it logs `bill-enrich-stop max_rounds` and tells the page nothing. The page keeps showing "Still loading…", and Save keeps saying "wait for source columns to finish, then retry Save" — waiting for something that will never come. Refresh does recover it | Push one last snapshot flagged as given up, and have the page say "Couldn't load the PO/receipt limits — Refresh to try again" | open |
+| R6c-3 | P | low | `main.js` `enrichBillSnapshotExtrasInner()` | **Q1:** there are no per-line calls. Each Bill snapshot makes one full-document GET per linked PO and per linked receipt, plus two list calls (PO titles, receipt refs), so a 20-line Bill from one PO costs 3–4 requests. But a sourced bill pays this on **every** snapshot (open, Refresh, after each merge), behind a fixed 500 ms sleep and an `ensureErpFormBridge()` that the HTTP path does not need. It also never reuses the limits it already holds, and fetches PO titles twice (the PO GET already carries `title`) | Skip the line-context fetch when the cached limits already cover every sourced row of the same bill; drop the settle sleep and the bridge wait when the HTTP path is used; take titles from the PO documents | open |
+| R6c-4 | S | low | `main.js` `bill-jit-receipts` handler | Each just-in-time receipt is an insert then a submit inside one `try`. If the submit is refused, a **draft** receipt is left, the failure line names no receipt, and the "reuse what an earlier Submit made" lookup only matches submitted receipts **of a saved bill**. A retry therefore makes a second one. If the ERP page dies mid-script on an **unsaved** bill (the R9-2 mechanism), the retry can receive the goods twice | Return the draft's name and delete it when its submit is refused (it never touched stock); log the name either way | open |
+
+Checked and fine: **Q2's overwrite inside one bill**: the background loop stops on a different bill, and stops when the bill is submitted. **Q3:** *receive with the bill* is ERPNext's own `update_stock` on the bill, so it is one write. For a just-in-time receipt, the receipts are submitted before the bill lines are pointed at them. If the pointing fails, the result names the receipts that were made ("were made but the bill lines could not be pointed at them"), and a saved bill's retry reuses them through the remarks token. A just-in-time line also gets an exact limit, its receipt's own quantity, as a backstop.
 
 ### R7 — Sources, Purchase Order, Item Receipt (S, M) — read ~21k
 
@@ -317,7 +329,16 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
   3. Auto re-link: can it fire twice for one payment (two windows of the event, retry)?
   4. Every write here: is there a `navDebug` line on both sides (local notes: a write with no log
      line was undiagnosable once)?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R9-1 | S | med | `main.js` `voidAndAmendDoc()`, the failure return at its end | The failure return rebuilds the result from `ok`, `cancelled`, `name`, `step`, `reason` and **drops `amendedName`**. Only stage 3 (`run-mode-change`, `submit: true`) can fail *after* the insert — when the submit is refused — and then the amended draft exists but the clerk is told the bill "was cancelled without a replacement". A retry is answered "already amended once" (`is_document_amended` counts drafts), which contradicts what they were just told; re-entering the bill would make it exist twice | Carry `amendedName`, `droppedRows` and `patched` through the failure return, and have `describeVoidAndAmendResult` say "cancelled; the amendment `<name>` was created but not submitted — open it" when `amendedName` is set | open |
+| R9-2 | S | med | `main.js` `erpEval()` → `voidAndAmendDoc()`, `run-mode-change` | `voidAndAmendDoc` treats a non-object result as "may already be cancelled" — but `erpEval` turns a thrown `executeJavaScript` (the ERP page reloading or navigating mid-script, a renderer crash) into `{ ok: false, reason }` with **no `cancelled` key**, which becomes `cancelled: false` → "Nothing was changed." The cancel may well have landed. In `run-mode-change` the same misreport means the loop does **not** stop and goes on to cancel the next bill. Every return from the injected script sets `cancelled` explicitly, so a missing key always means the script did not finish. Not reproduced live (would need the ERP page to reload between cancel and insert) | Read a missing `cancelled` as unknown and report it like the lost-contact case (and stop the batch); have `erpEval` mark the refusals that happen *before* anything runs (view not ready, off ERPNext) as `notRun: true` so those still say nothing changed. Unit-test the result mapping by pulling it into a pure helper | open |
+| R9-3 | S | low | `bill-form-page.js` / `doc-form-page.js` / `payment-doc.src.html` void-amend buttons; `doc-void-and-amend` handler | No in-flight guard: the button stays live while the write runs, and main does not refuse a second run for the same document. A second click asks again (the facts may not show the first amendment yet); if confirmed, under Amend Counter the second insert collides on `<name>-1` and is reported as "cancelled but not amended" while the first succeeded; under "Default Naming" two amendments could be created | Disable the button while `runVoidAndAmend` is pending, and keep a `Set` of names being voided in main that refuses a second start | open |
+| R9-4 | S | low | `main.js` `auto-relink` handler, `relinkPayment()`, `flagRelinkForReview()` | The `auto-relink` summary line logs `ok=0` without the reason, and a failed provenance Comment or review flag is returned to the page but never written to `nav-debug.log` — so "why is this auto-link not flagged / has no source comment" leaves no trace | Add `reason=` to the summary line and `provenance=` / `flagged=` to the per-link and `payment-relink` lines | open |
+
+Checked and fine: **Q3** — two auto re-link runs for one payment cannot both post. `relinkPayment` re-reads the open payments before each post, and ERPNext's `check_if_advance_entry_modified` (`accounts/utils.py:581`) refuses an allocation whose unallocated amount has changed ("Payment Entry has been modified after you pulled it"). The board swallows that refusal, so the second run is silent. **Off ERPNext** (after R1-3's *Continue here*), `erpExec` refuses before anything runs and void-and-amend correctly says nothing changed. **Stage 3's submit** sends the inserted document back to `frappe.client.submit`, which rebuilds it with `get_doc(dict)` and submits it, and that is sound. **Q4** — void-and-amend, `run-mode-change` and `payment-relink` log both sides; the gaps are R9-4.
 
 ### R10a — Pay Outstanding: the pure math (M, S) — read ~25k (family full ~172k)
 
@@ -354,7 +375,15 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
   1. A batch of N payments: if payment k fails, what happened to 1…k−1 and does the clerk see which?
   2. Submit clicked twice; the board refreshed mid-batch.
   3. `createPaymentTermDocs`: never run live — read it as if it were about to be.
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R10c-1 | S | low | `main.js` `insertAndSubmitPaymentEntry()`; `check-doc-mount.js` submit click | When the insert lands and the submit is refused, the result carries the draft's `name`, but the drawer shows only ERPNext's reason and does not refresh *Draft payments*. The clerk fixes the cause and clicks again, which makes a second payment, and the first is left as an unexplained draft against the same bills. The same thing happens if the ERP page dies mid-script (the R9-2 mechanism): the result has no name at all | On `step: "submit"` with a name, say "Saved as draft `<name>` but not submitted: … — finish or delete it under Draft payments", and reload the drafts panel | open |
+| R10c-2 | S | med | `main.js` `create-batch-payment-entry`, `create-blank-payment-entry`, `create-payment-term` handlers | The payment and term **creates** write nothing to `nav-debug.log` — no start line and no outcome line — although the draft submit/delete, void-and-amend and re-link paths log both sides. A failed or doubled payment would leave no trace (the local notes' rule) | `navDebug` before and after each, with the bills, the amount, the step, the name and the reason | open |
+| R10c-3 | S | low | `main.js` `createPaymentTermDocs()`; `payment-term-plan.js` | **Never run live.** A Payment Term is inserted, then the Template. If the Template insert fails, the term stays. A retry of the same plan is then refused with "A Payment Term called … already exists" (the planner treats any existing name as a collision), so the modal can never finish the job, and the clerk has to build the Template in Vanilla. The failure message also leaves out the names of the terms that landed when it is the Template that failed (`made` is not returned on that branch). The document shapes themselves match ERPNext: `invoice_portion` and `due_date_based_on` are required on the detail, the template's portions must total 100 at 2 dp, and no two rows may repeat (payment_term, days, months, basis) — checked against `payment_terms_template.py` and both JSONs | Since a term's name encodes its numbers, an existing term with that name **is** that term: reuse it (after checking that its fields match) instead of refusing, and on the Template-failure branch return `made` | open |
+
+Checked and fine: **Q1** — a batch is **one** Payment Entry covering N bills (`mergeSinglePaymentEntries`), so it is a single insert; there is no payment k of N. **Q2** — the drawer's Submit is disabled while the write runs. Even two concurrent submits cannot pay a bill twice, because `PaymentEntry.validate_allocated_amount_with_latest_data` (`payment_entry.py:419`, run on every validate for a Supplier) refuses an allocation above the bill's current outstanding — the worst case is R10c-1's stray draft. The draft Submit/Delete re-reads the payment and refuses anything that is no longer a draft. **Q3** — see R10c-3. Noted, not a finding: `resolveErpCompany()` prefers a company whose name contains "sandbox" (a seed-era rule); on a single-company site it falls through to the only company, so it is harmless here — fold into R2 if production ever runs multi-company.
 
 ### R11 — Printing and Papers (S) — read ~24k
 
@@ -473,7 +502,7 @@ money first, structure later.
 | # | Slices | Listed | Don't add | Why together | Done |
 |---|--------|--------|-----------|--------------|------|
 | 1 ✅ | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | done |
-| 2 | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | |
+| 2 ✅ | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | done |
 | 3 | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | |
 | 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |
 | 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
