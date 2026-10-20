@@ -13,6 +13,7 @@ import {
   printedDocsFor,
   onePdfHtml,
   inertWordHtml,
+  openablePaper,
 } from "../src/compare-papers.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -150,5 +151,28 @@ describe("frappeDownloadPath", () => {
     const uses = ui.match(/inertWordHtml\(out\.value\)/g) || [];
     assert.ok(converts.length >= 1);
     assert.equal(uses.length, converts.length);
+  });
+
+  // Architecture review 2026-10-19, R11-2: Open hands the file to the OS, which picks the program
+  // by extension — on Windows an attached .exe would run.
+  it("Open takes documents only, under a name whose extension cannot be disguised", () => {
+    assert.deepEqual(openablePaper("Scan 1.PDF  "), { ok: true, localName: "Scan 1.pdf" });
+    assert.deepEqual(openablePaper("DF-03a_purchase_order.html"), { ok: true, localName: "DF-03a_purchase_order.html" });
+    assert.deepEqual(openablePaper("a/b\\c.docx"), { ok: true, localName: "a-b-c.docx" });
+    for (const bad of ["invoice.pdf.exe", "x.exe.", "run.lnk", "pay.bat", "fix.js", "note.hta", "noext", "", "a.pdf. "]) {
+      const r = openablePaper(bad);
+      assert.equal(r.ok, false, bad);
+      assert.match(r.reason, /download it/);
+    }
+    assert.match(paperCantShow("other", "setup.exe"), /download it/);
+  });
+
+  it("main.js gates Open on openablePaper and marks Windows copies as from the internet", () => {
+    const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
+    const start = main.indexOf("async function openPaper(");
+    const body = main.slice(start, main.indexOf("\n}\n", start));
+    assert.ok(body.indexOf("openablePaper(r.fileName)") > 0 && body.indexOf("openablePaper(") < body.indexOf("shell.openPath"));
+    assert.match(body, /allowed\.localName/);
+    assert.match(body, /markFromInternet\(file\)/);
   });
 });

@@ -31,6 +31,42 @@ export function paperKind(fileName, mime = "") {
   return "other";
 }
 
+/**
+ * The kinds of paper **Open** hands to the operating system (architecture review 2026-10-19,
+ * R11-2). Documents only: the OS picks the program by extension, and on Windows an attached
+ * `.exe`, `.bat`, `.js`, `.lnk`, `.hta` … would *run*. Office's macro formats are allowed because
+ * main also marks the copy as downloaded from the internet, which keeps Office's own macro block on;
+ * `.html` / `.svg` open in a browser, which sandboxes them. Anything else: Download, look, decide.
+ */
+export const OPENABLE_PAPER_EXTS = Object.freeze([
+  "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "svg",
+  "docx", "doc", "odt", "rtf", "xlsx", "xlsm", "xls", "ods", "csv", "tsv", "txt", "html", "htm",
+]);
+
+/**
+ * May **Open** hand this paper to the operating system, and under what local name? The name is
+ * rebuilt from a cleaned stem and the checked extension, so trailing dots, spaces or a second
+ * extension cannot change which program Windows picks.
+ * @param {string} fileName
+ * @returns {{ ok: true, localName: string } | { ok: false, reason: string }}
+ */
+export function openablePaper(fileName) {
+  const name = str(fileName);
+  const m = /^(.*)\.([A-Za-z0-9]+)$/.exec(name);
+  const ext = m ? m[2].toLowerCase() : "";
+  if (!m || !OPENABLE_PAPER_EXTS.includes(ext)) {
+    return {
+      ok: false,
+      reason: `${name || "This file"} is not a document type the app opens for you — download it from the attachments list and check it before opening it.`,
+    };
+  }
+  const stem = m[1].replace(/[\\/:*?"<>|\x00-\x1f]+/g, "-").replace(/[. ]+$/g, "").replace(/^[. ]+/, "") || "paper";
+  return { ok: true, localName: `${stem}.${ext}` };
+}
+
+/** Windows' "downloaded from the internet" mark (Zone 3), written beside a paper Open saves. */
+export const INTERNET_ZONE_MARK = "[ZoneTransfer]\r\nZoneId=3\r\n";
+
 /** What the pane says about a file it cannot draw. */
 export function paperCantShow(kind, fileName) {
   // 5zorro 2026-10-03: Excel does not turn into pages consistently — its own program prints it right.
@@ -39,6 +75,7 @@ export function paperCantShow(kind, fileName) {
   }
   if (kind === "heic") return `${fileName} is an iPhone photo (HEIC), which this app cannot draw — open it, or save it as JPG.`;
   if (/\.doc$/i.test(fileName)) return `${fileName} is an old Word file (.doc) — open it, or save it as .docx.`;
+  if (!openablePaper(fileName).ok) return openablePaper(fileName).reason;
   return `${fileName} cannot be shown here — open it in its own program.`;
 }
 

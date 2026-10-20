@@ -16,7 +16,7 @@ import {
 } from "../src/nav-prune.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
 import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
-import { isAllowedErpUrl, erpUrl } from "../src/nav-guard.js";
+import { isAllowedErpUrl, erpUrl, isShellNavAllowed } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
   classifyHistoryOpen,
@@ -104,7 +104,7 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
-import { MAX_PAPER_BYTES, frappeDownloadPath } from "../src/compare-papers.js";
+import { MAX_PAPER_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK } from "../src/compare-papers.js";
 import { buildZip } from "../src/zip-store.js";
 import {
   MULTI_PDF_SYNC_MAX,
@@ -11395,8 +11395,29 @@ async function uploadPaper(req) {
 }
 
 /** Open a paper in the system's own viewer (a temp copy). */
+/**
+ * Windows: mark a file written from ERPNext's bytes as downloaded from the internet, as a browser
+ * would, so SmartScreen and Office's Protected View / macro block treat it that way (review
+ * 2026-10-19, R11-2). Elsewhere, and if the disk refuses the mark, nothing changes.
+ * @param {string} file
+ */
+function markFromInternet(file) {
+  if (process.platform !== "win32") return;
+  try {
+    fs.writeFileSync(`${file}:Zone.Identifier`, INTERNET_ZONE_MARK);
+  } catch (e) {
+    navDebug("paper-zone-mark-err", `${file}: ${String(e && e.message ? e.message : e)}`);
+  }
+}
+
 async function openPaper(req) {
   const r = req || {};
+  // Documents only: the OS picks the program by extension, and an attached .exe would run.
+  const allowed = openablePaper(r.fileName);
+  if (!allowed.ok) {
+    navDebug("paper-open-refused", String(r.fileName || ""));
+    return { ok: false, reason: allowed.reason };
+  }
   let bytes = r.bytes ? Buffer.from(r.bytes) : null;
   if (!bytes && r.fileUrl) {
     const got = await paperBytes(r.fileUrl);
@@ -11404,9 +11425,9 @@ async function openPaper(req) {
     bytes = Buffer.from(got.bytes);
   }
   if (!bytes) return { ok: false, reason: "Nothing to open." };
-  const safe = String(r.fileName || "paper").replace(/[\\/:*?"<>|]+/g, "-");
-  const file = path.join(app.getPath("temp"), `erpnext-ui-paper-${Date.now()}-${safe}`);
+  const file = path.join(app.getPath("temp"), `erpnext-ui-paper-${Date.now()}-${allowed.localName}`);
   fs.writeFileSync(file, bytes);
+  markFromInternet(file);
   const err = await shell.openPath(file);
   return err ? { ok: false, reason: err } : { ok: true };
 }
@@ -11429,6 +11450,7 @@ async function downloadPaper(req) {
   }
   try {
     fs.writeFileSync(pick.filePath, Buffer.from(got.bytes));
+    markFromInternet(pick.filePath);
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
   }
@@ -12434,6 +12456,21 @@ ipcMain.on("open-devtools", (_e, target) => {
   if (view && !view.webContents.isDestroyed()) {
     view.webContents.openDevTools({ mode: "detach" });
   }
+});
+
+// Review 2026-10-19 R1-1: the shell's own pages carry preloads that can save, pay and print, so
+// none of them may be steered elsewhere (a dropped file, a link in a preview) or open a window.
+// The ERP view sets its own window-open handler and navigation guard in createWindow(), which
+// replace these for it.
+app.on("web-contents-created", (_e, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (e, url) => {
+    if (erp && contents === erp.webContents) return;
+    if (!isShellNavAllowed(contents.getURL(), url)) {
+      e.preventDefault();
+      navDebug("shell-nav-refused", `${contents.getURL()} -> ${String(url).slice(0, 200)}`);
+    }
+  });
 });
 
 app.whenReady().then(createWindow);

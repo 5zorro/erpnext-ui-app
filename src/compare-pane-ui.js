@@ -17,6 +17,7 @@ import {
   printedDocsFor,
   onePdfHtml,
   inertWordHtml,
+  openablePaper,
 } from "./compare-papers.js";
 import { parseCsv, readXlsxFirstSheet, sheetFitsOnePage, sheetTableHtml, sheetTooBigNote } from "./sheet-preview.js";
 
@@ -340,9 +341,19 @@ export function mountComparePane(opts) {
       box.innerHTML = `<div class="cp-paper-head"><b>${esc(p.fileName)}</b><span class="cp-from">${esc(p.from)}</span><button type="button" data-cp="open" title="Open in its own program">Open</button></div><div data-cp="body"><p class="cp-note">Loading…</p></div>`;
       list.appendChild(box);
       const body = /** @type {HTMLElement} */ (box.querySelector('[data-cp="body"]'));
-      box.querySelector('[data-cp="open"]').addEventListener("click", () => {
+      const openBtn = /** @type {HTMLButtonElement} */ (box.querySelector('[data-cp="open"]'));
+      const openable = openablePaper(p.fileName);
+      if (!openable.ok) {
+        // Review 2026-10-19 R11-2: not a document type — main refuses it too; say why on the button.
+        openBtn.disabled = true;
+        openBtn.title = openable.reason;
+      }
+      openBtn.addEventListener("click", async () => {
         const local = localOnly.get(p.key);
-        void api.papersOpen(local ? { fileName: local.name, bytes: local.bytes } : { fileName: p.fileName, fileUrl: p.fileUrl });
+        const r = await api
+          .papersOpen(local ? { fileName: local.name, bytes: local.bytes } : { fileName: p.fileName, fileUrl: p.fileUrl })
+          .catch((e) => ({ ok: false, reason: String(e) }));
+        if (r && r.ok === false && r.reason) say(r.reason, true);
       });
       await renderPaper(p, body, token);
     }
