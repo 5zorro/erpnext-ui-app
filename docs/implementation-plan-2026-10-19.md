@@ -17,10 +17,13 @@ session (or a slice of whichever plan owns that area), except a one-line fix wit
 **Runs alongside** plan 09-26 (dogfood of the papers continues) and 10-12 (Sales Order dashboard,
 built, being dogfooded). It edits no code.
 
-> **Status 2026-10-19:** session 1 ✅ (R14, R1, R11 — reviewed through `7611ee9`).
-> Fixed with tests: R1-5, R11-1, and afterwards R1-1 and R11-2 (5zorro asked for the serious
-> ones). **Still open and high: R14-1** — 5zorro's infrastructure; the steps are in museum OI-183.
-> Next: session 2 (R9 + R10c + R6c).
+> **Status 2026-10-19:** session 1 ✅ (R14, R1, R11). Then, at 5zorro's request,
+> every code finding of it was fixed with tests except R1-2 (session 3), R1-4 / R11-6 (release
+> checklist in plan 09-26) and R14-5 (won't fix); R1-1 and R1-3 were proven in the real app. The
+> fixes themselves were then reviewed (the *After the first pass* step) — two gaps found and fixed
+> (R1-6, R11-7). The durable rules are HANDOFF invariant 9. **Still open and high: R14-1** —
+> 5zorro's infrastructure (stop the proxy; bind 8080 to `127.0.0.1` in `~/erpnext/frappe_docker/pwd-custom.yml`), museum
+> OI-183. Next: session 2 (R9 + R10c + R6c).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -142,7 +145,7 @@ what reading the family whole would cost, for reference. Questions are **leads t
      configured ERP base (invariant 4)?
   7. Test hooks: is everything under `__erpE2e` unreachable without `E2E=1`, and could a packaged
      build be launched with it?
-- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+- **Reviewed through:** `7611ee9` (session 1), and the fixes after it through the commit that adds this line (2026-10-19 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -151,6 +154,7 @@ what reading the family whole would cost, for reference. Questions are **leads t
 | R1-3 | S | low | `main.js` ERP view | No `will-redirect` guard: a server redirect is not a `will-navigate`, so an ERP address that redirects off the base lands the ERP view elsewhere, and `did-navigate` then injects the bridge and Simplified payload into that page | 5zorro: warn, let the clerk click through. `will-redirect` now guards like `will-navigate`; leaving ERPNext by either shows *Go back* (default) / *Open in my browser* / *Continue here* (`offBaseWarning`, `src/nav-guard.js`); non-web addresses are never opened. Every script the shell injects goes through `erpExec()`, which refuses a page that is not ERPNext. Proven live with a throwaway probe (back stays, continue goes and injects nothing, back on ERPNext the bridge returns). A **redirect** off the base was not reproduced live — no ERPNext address that does it was found — only links | fixed (2026-10-19) |
 | R1-4 | S | low | no packaging config yet | Before the first release per OS: the Electron fuses that stop a shipped app being run as plain Node or opened with an inspector (`RunAsNode`, `EnableNodeCliInspectArguments`, `OnlyLoadAppFromAsar`). Without them `__erpE2e`'s `E2E=1` gate is the least of it | Add to plan 09-26 *After the dogfood papers* (release checklist) | open — release |
 | R1-5 | S | — | ERP view `webPreferences` | No `sandbox: true` written; Electron ≥ 20 sandboxes it by default, so behaviour was already right | Made explicit, and `tests/view-sandbox-wiring.test.js` now fails if any view or window loses sandbox / isolation / no-Node (checked: fails on the old file) | fixed (this session) |
+| R1-6 | S | med | `main.js` `erp-route-hop` handler | **Introduced by R1-3's *Continue here*:** another website in the ERP view keeps the ERP preload, and its route-hop messages passed the sender check (right view) and reached the nav history | The handler also requires the view to be on ERPNext; `ensureErpFormBridge` answers no off ERPNext, so bridge calls return `{ ok: false }` rather than throw. Pinned in `tests/nav-guard.test.js` | fixed (2026-10-19, review of the fixes) |
 
 Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks its sender and sanitizes, `soft-peek-esc` only closes a peek; all 74 `erpEval` / `executeJavaScript` templates splice values through `JSON.stringify` or build them from numbers / booleans / constants; all four `openExternal` calls open only `http(s)` (the notify URL is filtered by `isSafeNotifyUrl` when prefs load; the feedback URL comes from env); `isAllowedErpUrl` needs `/` or `?` right after the base, so `…:8080.evil` and `…:8080@evil` fail; `__erpE2e` lives on the main process's `globalThis`, which no page can reach, and is only built under `E2E=1`. Shell pages have **no Content-Security-Policy**; escaping is by convention (`escapeHtml` / `moneyTextHtml` — spot checks on the pay board and Home were clean). Whether every `innerHTML` in the Bill and Doc form pages escapes server text is R6a / R5's question.
 
@@ -367,7 +371,7 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
   3. `.html` attachments fetched through `download_file`: where are they shown, and with what
      `webPreferences`?
   4. Temp files (raster pages, print copies): removed on failure as well as success?
-- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+- **Reviewed through:** `7611ee9` (session 1), and the fixes after it through the commit that adds this line (2026-10-19 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -377,6 +381,8 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
 | R11-4 | P | low | `paperBytes()` | `MAX_PAPER_BYTES` (25 MB) is checked after the whole file is in memory | `content-length` checked before the body is read; the after-check stays | fixed (2026-10-19) |
 | R11-5 | S / P | low | `openPaper()`; `savePdfsEach()` | Every **Open** leaves a copy in the temp folder that is never removed. "One PDF per document" overwrites a same-named file in the chosen folder without asking, and two documents whose names clean to the same file name overwrite each other | Startup sweep of `erpnext-ui-paper-*` / `erpnext-ui-print-*` over a day old (`isStaleTempCopy`); "one PDF per document" numbers a clashing name (`freeFileName`) instead of overwriting | fixed (2026-10-19) |
 | R11-6 | S | low | `main.js` `printerPaper()` (Windows) | The printer name is spliced into a PowerShell command in single quotes with `'` doubled — but PowerShell also treats curly quotes (‘ ’ ‚ ‛) as single quotes. Printer names are set by the computer's admin, so low | Pass the name through an environment variable (`$env:P`) instead of the command text | open — before the first Windows release (cannot be tested here) |
+| R11-7 | S | low | `main.js` `paperBytes()` | The 25 MB preview cap also applied to **Open**, **Download** and **Save as ZIP**, so a big scan could be neither shown, opened nor saved — and the message said "open it instead" | `MAX_OPEN_BYTES` (250 MB) for those three; the preview keeps 25 MB. Pinned in `tests/compare-papers.test.js` | fixed (2026-10-19, review of the fixes) |
+| R11-8 | S | — | `inertWordHtml()` | Could mammoth emit an `<img>` pointing *outside* the file (a Word "linked picture", `r:link`)? | Checked: the browser build the pane loads replaces `docx/files.js` with one that refuses every linked file (`mammoth/browser/docx/files.js`), and embedded images arrive as `data:` | no change needed |
 
 **Also fixed 2026-10-19 (5zorro asked about disguised names):** a right-to-left override (U+202E)
 makes `invoice‮fdp.exe` *display* as `invoiceexe.pdf`. Open was already safe (it reads the real last
@@ -427,7 +433,7 @@ Checked and fine: `lp` / SumatraPDF / `lpoptions` run as argument arrays (`execF
   3. Scripts that carry the sandbox DB root password — sandbox only, and nowhere a real site could
      inherit it?
 - **Do first** — the most exposed.
-- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+- **Reviewed through:** `7611ee9` (session 1), and the fixes after it through the commit that adds this line (2026-10-19 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|

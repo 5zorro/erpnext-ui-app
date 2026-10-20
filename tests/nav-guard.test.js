@@ -110,5 +110,8 @@ describe("leaving ERPNext from the ERP view", () => {
     assert.equal(direct.length, 1, "only erpExec itself may call executeJavaScript on the ERP view");
     const exec = main.slice(main.indexOf("function erpExec("), main.indexOf("function erpExec(") + 400);
     assert.match(exec, /!isAllowedErpUrl\(ERP_BASE, url\)/);
+    // The ERP preload is on any page in that view, so its messages count only from ERPNext.
+    const hop = main.slice(main.indexOf('ipcMain.on("erp-route-hop"'), main.indexOf('ipcMain.on("erp-route-hop"') + 400);
+    assert.match(hop, /if \(!isAllowedErpUrl\(ERP_BASE, erp\.webContents\.getURL\(\)\)\) return;/);
   });
 });

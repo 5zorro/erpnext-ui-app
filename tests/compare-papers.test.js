@@ -201,4 +201,13 @@ describe("frappeDownloadPath", () => {
     assert.equal(isStaleTempCopy("erpnext-ui-paper-1-a.pdf", now - 1000, now), false);
     assert.equal(isStaleTempCopy("someone-else.pdf", now - 9 * day, now), false);
   });
+
+  it("Open, Download and Save as ZIP use the larger cap; only the preview keeps 25 MB", () => {
+    const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
+    const calls = main.match(/paperBytes\([^)]*\)/g) || [];
+    const withCap = calls.filter((c) => /MAX_OPEN_BYTES/.test(c));
+    assert.equal(withCap.length, 3, calls.join(" | "));
+    assert.match(main, /ipcMain\.handle\("papers-bytes", async \(_e, fileUrl\) => paperBytes\(fileUrl\)\)/);
+  });
 });
+

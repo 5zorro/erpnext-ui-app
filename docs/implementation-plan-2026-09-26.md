@@ -1161,6 +1161,7 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   (R1-4); pass the printer name to PowerShell through an environment variable, not the command
   text (R11-6); and check that **Open** / **Download** on Windows mark a paper as "from the
   internet" (file Properties → *This file came from another computer*) — written, never run (R11-2).
+  macOS has its own mark (the `com.apple.quarantine` attribute), which is **not** written yet.
 
 **Questions for 5zorro when it starts:** which systems (Windows first? macOS? Linux?); an installer
 or a portable app; signed or not; whether it should update itself.

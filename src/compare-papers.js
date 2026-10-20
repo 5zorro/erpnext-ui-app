@@ -12,6 +12,8 @@ export const SIDE_BY_SIDE_MIN_PX = 1700;
 export const PANE_MIN_PX = 520;
 /** One dropped file at most — ERPNext's own default upload limit is 10 MB; this stays under 25. */
 export const MAX_PAPER_BYTES = 25 * 1024 * 1024;
+/** Open / Download read the whole file into memory too, so they have a cap — a far higher one. */
+export const MAX_OPEN_BYTES = 250 * 1024 * 1024;
 
 const str = (v) => (v == null ? "" : String(v).trim());
 

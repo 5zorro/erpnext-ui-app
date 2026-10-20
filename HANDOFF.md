@@ -133,6 +133,27 @@ flowchart LR
    door that is missing from the table or does not use the call its kind says. Born of nav
    incident 2026-10-03, where a July-era door navigated away while its neighbour peeked.
 
+9. **The trust boundary** (architecture review, plan 2026-10-19). Only the ERP view shows remote
+   content; every shell page is a local file whose preload can save, pay and print. So:
+   - **Every view and window is sandboxed, isolated and Node-free, written out explicitly**
+     (`tests/view-sandbox-wiring.test.js`).
+   - **Shell pages never leave their own file and never open a window** — one
+     `app.on("web-contents-created")` guard in `main.js`, decision in `isShellNavAllowed`
+     (`src/nav-guard.js`). The ERP view replaces it with its own handlers.
+   - **The ERP view warns before leaving ERPNext**, for links and server redirects alike: *Go back*
+     (default) / *Open in my browser* / *Continue here* (5zorro: warn, let the clerk click through);
+     non-web addresses are never opened (`offBaseNavigation` / `offBaseWarning`).
+   - **Every script injected into the ERP view goes through `erpExec()`**, which refuses a page that
+     is not ERPNext; the ERP preload's messages count only while the view is on ERPNext. Never call
+     `erp.webContents.executeJavaScript` directly — `tests/nav-guard.test.js` fails if you do.
+   - **Server text reaches shell pages escaped** (`escapeHtml`, `moneyTextHtml`, `esc`); a converted
+     Word file goes through `inertWordHtml()` (mammoth does no sanitising). Shell pages carry no CSP
+     yet, so escaping is the only wall.
+   - **Files from ERPNext:** only `/files/…` or `/private/files/…` addresses with nothing climbing out
+     (`isErpFilePath`); **Open** hands only document types to the OS (`openablePaper`) and marks the
+     copy as from the internet on Windows; every name shown or saved goes through `plainFileName()`
+     (no right-to-left-override disguises).
+
 ### Editing a submitted document (OI-171, built 2026-09-22…26)
 
 ERPNext cannot edit a submitted document, so *edit* means **void and amend**: cancel it, then insert

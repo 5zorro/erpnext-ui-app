@@ -104,7 +104,7 @@ import { normalizeDraftPayments } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
-import { MAX_PAPER_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK, isErpFilePath, isStaleTempCopy } from "../src/compare-papers.js";
+import { MAX_PAPER_BYTES, MAX_OPEN_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK, isErpFilePath, isStaleTempCopy } from "../src/compare-papers.js";
 import { buildZip, plainFileName, freeFileName } from "../src/zip-store.js";
 import {
   MULTI_PDF_SYNC_MAX,
@@ -2936,6 +2936,8 @@ async function waitForListFilterField(fieldname, timeoutMs = BILL_FIND_TIMEOUT_M
  */
 async function ensureErpFormBridge() {
   if (!erp || erp.webContents.isDestroyed()) return false;
+  // Off ERPNext (R1-3): say no, so bridgeCall's erpEval answers { ok: false } instead of throwing.
+  if (!isAllowedErpUrl(ERP_BASE, erp.webContents.getURL() || ERP_BASE)) return false;
   const ver = await erpEval(
     `(function(){ try { return window.__docFormBridge && window.__docFormBridge.version || 0; } catch(e) { return 0; } })()`,
   );
@@ -10274,6 +10276,8 @@ ipcMain.on("open-doc-skin", () => openDocSkin());
 ipcMain.on("soft-peek-esc", () => dismissSoftPeekFromEsc());
 ipcMain.on("erp-route-hop", (e, raw) => {
   if (!erp || erp.webContents.isDestroyed() || e.sender !== erp.webContents) return;
+  // After "Continue here" another website is in this view, with the same preload (R1-3).
+  if (!isAllowedErpUrl(ERP_BASE, erp.webContents.getURL())) return;
   const hop = sanitizeRouteHop(raw);
   if (hop) onErpRouteHop(hop);
 });
@@ -11394,7 +11398,18 @@ async function listPapers(sources) {
 }
 
 /** One attachment's bytes over the ERP view's session (private files need it). */
-async function paperBytes(fileUrl) {
+/** @param {number} maxBytes */
+function tooLargeReason(maxBytes) {
+  return maxBytes > MAX_PAPER_BYTES
+    ? `Too large for the app (over ${Math.round(maxBytes / 1048576)} MB) — download it from ERPNext in a browser.`
+    : "Too large to show here — open it instead.";
+}
+
+/**
+ * The bytes of an ERPNext file over the clerk's session. The 25 MB default is the pane's preview
+ * limit; Open and Download pass MAX_OPEN_BYTES, or a 30 MB scan could be neither shown nor opened.
+ */
+async function paperBytes(fileUrl, maxBytes = MAX_PAPER_BYTES) {
   const u = String(fileUrl || "");
   if (!isErpFilePath(u)) return { ok: false, reason: "Not an ERPNext file address." };
   if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
@@ -11409,9 +11424,9 @@ async function paperBytes(fileUrl) {
     }
     if (!res.ok) return { ok: false, reason: `ERPNext could not send the file (${res.status}).` };
     // Refuse a big file before reading it, when the server says its size (R11-4).
-    if (Number(res.headers.get("content-length")) > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };
+    if (Number(res.headers.get("content-length")) > maxBytes) return { ok: false, reason: tooLargeReason(maxBytes) };
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large to show here — open it instead." };
+    if (buf.length > maxBytes) return { ok: false, reason: tooLargeReason(maxBytes) };
     return { ok: true, bytes: new Uint8Array(buf), type: res.headers.get("content-type") || "" };
   } catch (e) {
     return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -11487,7 +11502,7 @@ async function openPaper(req) {
   }
   let bytes = r.bytes ? Buffer.from(r.bytes) : null;
   if (!bytes && r.fileUrl) {
-    const got = await paperBytes(r.fileUrl);
+    const got = await paperBytes(r.fileUrl, MAX_OPEN_BYTES);
     if (!got.ok) return got;
     bytes = Buffer.from(got.bytes);
   }
@@ -11510,7 +11525,7 @@ async function downloadPaper(req) {
   const safe = plainFileName(r.fileName || "attachment").replace(/[\\/:*?"<>|]+/g, "-") || "attachment";
   const pick = await askSavePath({ title: "Download attachment", defaultPath: path.join(app.getPath("downloads"), safe) });
   if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
-  const got = await paperBytes(r.fileUrl);
+  const got = await paperBytes(r.fileUrl, MAX_OPEN_BYTES);
   if (!got.ok) {
     navDebug("paper-download", `${r.fileUrl} failed: ${got.reason}`);
     return got;
@@ -11561,7 +11576,7 @@ async function zipPapers(req) {
       files.push({ name: p.fileName, bytes: new Uint8Array(p.bytes) });
       continue;
     }
-    const got = await paperBytes(p.fileUrl);
+    const got = await paperBytes(p.fileUrl, MAX_OPEN_BYTES);
     if (got.ok) files.push({ name: p.fileName, bytes: got.bytes });
     else missed.push(`${p.fileName}: ${got.reason}`);
   }
