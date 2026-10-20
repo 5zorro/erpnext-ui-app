@@ -6956,6 +6956,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // Electron's default since 20, said out loud: this is the one view that runs remote pages.
+      sandbox: true,
       preload: path.join(__dirname, "erp-preload.cjs"),
       // Avoid auto-stealing focus on every Desk nav (Electron #42578 / focusOnNavigation).
       focusOnNavigation: false,

@@ -16,6 +16,7 @@ import {
   hasPaperSources,
   printedDocsFor,
   onePdfHtml,
+  inertWordHtml,
 } from "./compare-papers.js";
 import { parseCsv, readXlsxFirstSheet, sheetFitsOnePage, sheetTableHtml, sheetTooBigNote } from "./sheet-preview.js";
 
@@ -231,7 +232,7 @@ export function mountComparePane(opts) {
         } else if (p.kind === "docx") {
           const mammoth = await loadMammoth();
           const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
-          sections.push({ title: p.fileName, from: p.from, html: out.value || "<p>(empty)</p>" });
+          sections.push({ title: p.fileName, from: p.from, html: inertWordHtml(out.value) || "<p>(empty)</p>" });
         }
       }
       if (!sections.length) {
@@ -383,7 +384,7 @@ export function mountComparePane(opts) {
       } else if (p.kind === "docx") {
         const mammoth = await loadMammoth();
         const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
-        body.innerHTML = `<div class="cp-docx">${out.value || "<p>(empty)</p>"}</div><p class="cp-note">Word file shown as text and tables — Open for its exact layout.</p>`;
+        body.innerHTML = `<div class="cp-docx">${inertWordHtml(out.value) || "<p>(empty)</p>"}</div><p class="cp-note">Word file shown as text and tables — Open for its exact layout.</p>`;
       } else if (p.kind === "pdf") {
         await renderPdf(bytes, body, token);
       } else if (p.kind === "sheet") {

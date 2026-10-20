@@ -147,6 +147,22 @@ const escHtml = (v) =>
 export const ONE_PAGE_CM = 24;
 
 /**
+ * A Word file's HTML (from mammoth), made inert before it goes on a page. Mammoth does no
+ * sanitising: a link in the document keeps its target, `javascript:` included, and the Doc form
+ * page it lands in can save, pay and print (architecture review 2026-10-19, R11-1). So every link
+ * that leaves the document loses its address and keeps its words; links within it (footnotes,
+ * comments, `#…`) stay. Mammoth always writes attributes double-quoted with `"` escaped, which is
+ * what makes a pattern safe here — this is not a general HTML sanitiser.
+ * @param {string} html
+ * @returns {string}
+ */
+export function inertWordHtml(html) {
+  return String(html || "")
+    .replace(/ href="(?!#)[^"]*"/g, "")
+    .replace(/ target="[^"]*"/g, "");
+}
+
+/**
  * One printable page holding every paper, page after page — what "Save as one PDF" prints
  * (5zorro 2026-10-03). PDF pages and photos arrive as images; a Word file as HTML; a paper that
  * cannot be drawn as a note saying so, never silently dropped.

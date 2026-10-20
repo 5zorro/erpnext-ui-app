@@ -17,8 +17,10 @@ session (or a slice of whichever plan owns that area), except a one-line fix wit
 **Runs alongside** plan 09-26 (dogfood of the papers continues) and 10-12 (Sales Order dashboard,
 built, being dogfooded). It edits no code.
 
-> **Status 2026-10-19:** plan written, **no slice reviewed yet**. Code baseline is `4c10e30`.
-> Re-sized the same day (7 sessions, not 20). Start with session 1.
+> **Status 2026-10-19:** session 1 ✅ (R14, R1, R11 — reviewed through `7611ee9`). Two
+> one-line fixes landed with tests (R1-5, R11-1); **three high findings are open** (R14-1, R11-2,
+> and R1-1 behind R11-1), all detailed in museum OI-183. Next: session 2 (R9 + R10c + R6c).
+> Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
 
@@ -139,7 +141,17 @@ what reading the family whole would cost, for reference. Questions are **leads t
      configured ERP base (invariant 4)?
   7. Test hooks: is everything under `__erpE2e` unreachable without `E2E=1`, and could a packaged
      build be launched with it?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R1-1 | S | med | `main.js` `createWindow()` — every shell view | Only the ERP view has a `will-navigate` / `setWindowOpenHandler` guard. The shell views (doc form, Home, Find, pay board, payment page, toolbar, history) have none, and none of their pages handles `drop` — so a file dropped on the Doc form navigates that view to the file, which then runs with the view's full preload bridge (saves, payments, printing). No shell page renders a server link today (checked), so a drop is the only door found. **This is also the answer to Q3:** the ~10 sender checks are enough *only while* shell views never leave their own file | One `app.on("web-contents-created")` guard: shell views refuse every navigation but their own page and deny every `window.open`; test it like `view-sandbox-wiring.test.js` | open |
+| R1-2 | S | low | `main.js` `setWindowOpenHandler` (≈7017) | A `window.open` (or Ctrl+click) to an ERP address is **allowed**, which makes a real second window — against invariant 6 — and that window has no `will-navigate` guard of its own | Deny and route it through `openTargetFor()` (the nav spine), as printing already is | open |
+| R1-3 | S | low | `main.js` ERP view | No `will-redirect` guard: a server redirect is not a `will-navigate`, so an ERP address that redirects off the base lands the ERP view elsewhere, and `did-navigate` then injects the bridge and Simplified payload into that page | Add `will-redirect` with the same `isAllowedErpUrl` test, and have the `ensure*` injectors return early when `getURL()` is off the base | open |
+| R1-4 | S | low | no packaging config yet | Before the first release per OS: the Electron fuses that stop a shipped app being run as plain Node or opened with an inspector (`RunAsNode`, `EnableNodeCliInspectArguments`, `OnlyLoadAppFromAsar`). Without them `__erpE2e`'s `E2E=1` gate is the least of it | Add to plan 09-26 *After the dogfood papers* (release checklist) | open — release |
+| R1-5 | S | — | ERP view `webPreferences` | No `sandbox: true` written; Electron ≥ 20 sandboxes it by default, so behaviour was already right | Made explicit, and `tests/view-sandbox-wiring.test.js` now fails if any view or window loses sandbox / isolation / no-Node (checked: fails on the old file) | fixed (this session) |
+
+Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks its sender and sanitizes, `soft-peek-esc` only closes a peek; all 74 `erpEval` / `executeJavaScript` templates splice values through `JSON.stringify` or build them from numbers / booleans / constants; all four `openExternal` calls open only `http(s)` (the notify URL is filtered by `isSafeNotifyUrl` when prefs load; the feedback URL comes from env); `isAllowedErpUrl` needs `/` or `?` right after the base, so `…:8080.evil` and `…:8080@evil` fail; `__erpE2e` lives on the main process's `globalThis`, which no page can reach, and is only built under `E2E=1`. Shell pages have **no Content-Security-Policy**; escaping is by convention (`escapeHtml` / `moneyTextHtml` — spot checks on the pay board and Home were clean). Whether every `innerHTML` in the Bill and Doc form pages escapes server text is R6a / R5's question.
 
 ### R2 — `main.js` as a file: size, duplication, the long-running process (M, P) — read ~22k
 
@@ -354,7 +366,18 @@ what reading the family whole would cost, for reference. Questions are **leads t
   3. `.html` attachments fetched through `download_file`: where are they shown, and with what
      `webPreferences`?
   4. Temp files (raster pages, print copies): removed on failure as well as success?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R11-1 | S | **high** | `src/compare-pane-ui.js` (both `convertToHtml` sites) | A Word paper was converted by mammoth and pasted into the Doc form page as is. Mammoth's own README: it does **no sanitising**, and links keep their targets. Papers come from outside (vendors), and that page can save, pay and print. Details: museum **OI-183** | `inertWordHtml()` (`src/compare-papers.js`): outside links lose their address, `#…` links stay; tests pin it and fail if a new conversion skips it | fixed (this session) |
+| R11-2 | S | **high** (on Windows) | `main.js` `openPaper()` (≈11398) | **Open** hands *any* attachment to the operating system, whatever its type, from a temp copy. Details: museum **OI-183** | Open only the kinds the pane knows (PDF, images, Word, sheets, text); everything else gets Download only. Must land before the first Windows release | open |
+| R11-3 | S | low | `main.js` `paperBytes()` (≈11332) | Checks the address *starts* with `/files/` or `/private/files/` but not that it has no `..` segment, so `/files/../api/method/…` would be fetched with the clerk's session. The addresses come from ERPNext's own File records today | Refuse any `..` segment (one line, with a test in `compare-papers.test.js` if the check moves to `src/`) | open |
+| R11-4 | P | low | `paperBytes()` | `MAX_PAPER_BYTES` (25 MB) is checked after the whole file is in memory | Check `content-length` first; keep the after-check for servers that omit it | open |
+| R11-5 | S / P | low | `openPaper()`; `savePdfsEach()` | Every **Open** leaves a copy in the temp folder that is never removed. "One PDF per document" overwrites a same-named file in the chosen folder without asking, and two documents whose names clean to the same file name overwrite each other | Sweep `erpnext-ui-paper-*` older than a day at startup; reuse `uniqueZipNames` for the folder save | open |
+| R11-6 | S | low | `main.js` `printerPaper()` (Windows) | The printer name is spliced into a PowerShell command in single quotes with `'` doubled — but PowerShell also treats curly quotes (‘ ’ ‚ ‛) as single quotes. Printer names are set by the computer's admin, so low | Pass the name through an environment variable (`$env:P`) instead of the command text | open |
+
+Checked and fine: `lp` / SumatraPDF / `lpoptions` run as argument arrays (`execFile`, no shell); `pdfFileName` and `uniqueZipNames` strip path separators (and leading dots), so nothing in a ZIP or a saved PDF can land outside the chosen folder; the print temp copy is removed 30 s after `lp` returns, whether it succeeded or failed, and the raster worker is destroyed in a `finally`; the raster window has no preload and is sandboxed; pdf.js is 6.3 (past the 2024 font-eval hole); sheet previews escape every cell. **Q3:** a `.html` attachment comes through `download_file` as bytes only; the pane shows it as "can't show" plus **Open**, which is R11-2.
 
 ### R12 — Simplified lens (S, M) — read ~20k
 
@@ -395,7 +418,17 @@ what reading the family whole would cost, for reference. Questions are **leads t
   3. Scripts that carry the sandbox DB root password — sandbox only, and nowhere a real site could
      inherit it?
 - **Do first** — the most exposed.
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `7611ee9` (2026-10-19, session 1).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R14-1 | S | **high** | `ops/receiving-proxy/compose.yml` ports; frappe_docker's 8080 | ERPNext's login is reachable from the Wi-Fi on two ports — frappe_docker's own (plan 09-21 *Waiting on* #8, open since 09-24) and the parked proxy's, which restarts with Docker. The 09-28 reinstall made #8 worse. Details: museum **OI-183** | 5zorro's infrastructure: stop the proxy while the scanner is parked, then #8's own fixes | open — 5zorro |
+| R14-2 | M | low | `src/sample-data/sandbox-guard.js:1-3` | Says it is the guard's single source for the runner, but only tests call it. The guards that run are two untested copies: `run-seed.sh` (preflight) and `seed_corpus.py` `_assert_sandbox` (re-checked inside every write — the one that matters) | Correct the comment to "the rule, mirrored by…", or test the Python guard against the same cases | open |
+| R14-3 | S | low | `seed_corpus.py` `_assert_sandbox` | The site half of the check admits `frontend`, which is frappe_docker's default name for *every* site, so the guard rests on the company name containing "sandbox". Safe today (the runner can only reach this machine's container, and the company is `ui-app sandbox erpnext`) | Note it in the guard's comment; no code change while seeding is local-only | open |
+| R14-4 | S | low | `ops/sample-data/run-seed.sh` purge banner | The 🔴 purge banner names one company, but `purge_ap()` deletes AP documents for **every** company that looks like a sandbox | Make the banner say "every sandbox company", or print the list `_sandbox_companies()` will purge before it starts | open |
+| R14-5 | S | low | `ops/trace/export-trace-fixture.js:26` | Carries the DB root password as a literal. It is frappe_docker's default, the DB port is bound to `127.0.0.1`, and the call is an argument array (no shell) — so no exposure, but it breaks the day the password changes | Read it from an env variable, defaulting to today's value | won't fix now (dev tool, local only) |
+
+Checked and fine: the proxy's Caddyfile (scanner files static, `.js` only from `lib/`, CSP + `frame-ancestors 'none'`, no path climbing; `:8081` hands out only the public CA certificate); `pwa/receiving/sw.js` caches same-origin GETs under its own scope and skips `/api/`; the trace exporter refuses the live DB by name.
 
 ### R15 — The process documents themselves (M) — read ~8k
 
@@ -424,7 +457,7 @@ money first, structure later.
 
 | # | Slices | Listed | Don't add | Why together | Done |
 |---|--------|--------|-----------|--------------|------|
-| 1 | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | |
+| 1 ✅ | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | done |
 | 2 | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | |
 | 3 | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | |
 | 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |

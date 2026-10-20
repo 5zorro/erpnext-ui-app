@@ -12,7 +12,10 @@ import {
   hasPaperSources,
   printedDocsFor,
   onePdfHtml,
+  inertWordHtml,
 } from "../src/compare-papers.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // 5zorro 2026-10-03: compare a bill against scanned / photographed / written .png .pdf .docx, all as
 // if one PDF, to the right of the bill.
@@ -126,5 +129,26 @@ describe("frappeDownloadPath", () => {
       "/api/method/download_file?file_url=%2Fprivate%2Ffiles%2FDF-03a_purchase_order.html",
     );
     assert.equal(frappeDownloadPath("/files/My Scan.pdf"), "/api/method/download_file?file_url=%2Ffiles%2FMy%20Scan.pdf");
+  });
+
+  // Architecture review 2026-10-19, R11-1: mammoth keeps a Word file's link targets, javascript:
+  // included, and the preview lands in the Doc form page.
+  it("a Word file's outside links lose their address and keep their words", () => {
+    const html =
+      '<p><a href="javascript:alert(1)">Pay here</a> and <a href="https://example.com/x?a=1&amp;b=&quot;2&quot;" target="_blank">site</a>' +
+      '<sup><a href="#footnote-1" id="footnote-ref-1">[1]</a></sup></p>';
+    const out = inertWordHtml(html);
+    assert.doesNotMatch(out, /javascript:|example\.com|target=/);
+    assert.match(out, /<a>Pay here<\/a>/);
+    assert.match(out, /<a href="#footnote-1" id="footnote-ref-1">\[1\]<\/a>/);
+    assert.equal(inertWordHtml(undefined), "");
+  });
+
+  it("every Word conversion in the pane goes through inertWordHtml", () => {
+    const ui = readFileSync(fileURLToPath(new URL("../src/compare-pane-ui.js", import.meta.url)), "utf8");
+    const converts = ui.match(/convertToHtml\(/g) || [];
+    const uses = ui.match(/inertWordHtml\(out\.value\)/g) || [];
+    assert.ok(converts.length >= 1);
+    assert.equal(uses.length, converts.length);
   });
 });
