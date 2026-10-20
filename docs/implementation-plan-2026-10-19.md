@@ -18,7 +18,7 @@ session (or a slice of whichever plan owns that area), except a one-line fix wit
 built, being dogfooded). It edits no code.
 
 > **Status 2026-10-19:** plan written, **no slice reviewed yet**. Code baseline is `4c10e30`.
-> Start with session 1 in the *Session schedule* below.
+> Re-sized the same day (7 sessions, not 20). Start with session 1.
 
 ---
 
@@ -36,20 +36,19 @@ Same as plan 2026-10-03 § *How to handle cross-architecture dogfood*. For this 
    section, then your slice only:
    `grep -n '^### R' docs/implementation-plan-2026-10-19.md`, then `sed -n` that slice's range.
    Each slice names the HANDOFF section and plan sections to read — read **those sections**, by
-   `grep -n` + `sed -n`, nothing more.
+   `grep -n` + `sed -n`, nothing more. A session covers several slices — read them one at a time,
+   and write each slice's findings before opening the next.
 2. **Ask the slice's questions; don't read files top to bottom.** Grep for the thing the question
-   is about, then read the ranges that come back. Never open a file over ~1,500 lines whole
-   (`electron/main.js`, `src/bill-form-page.js`, `src/doc-form-page.js`,
-   `electron/pay-outstanding.src.html`, `electron/erp-form-bridge-page.js`).
+   is about, then read the ranges that come back. Never open `electron/main.js` or `src/bill-form-page.js`
+   whole. Other large files only when the slice says so.
 3. **Check a finding before writing it down.** Per the "don't match buggy code" rule: if a finding
    depends on what ERPNext does, read the ERPNext source (`~/erpnext/erpnext` at the sandbox tag —
    see the local notes) rather than trusting this repo's comments.
 4. **Write findings into the slice's table** (one row each, template below). A **security** finding
    with enough detail to exploit goes in the museum (`open_items.md`, a new OI), with a one-line
    row here pointing at the OI — this file is public.
-5. **Close the session:** fill *Reviewed through* (the commit you reviewed at), mark the session ✅
-   in the schedule, and stop. Do not roll into the next slice — that is exactly what the budget
-   rule is for.
+5. **Close the session:** fill *Reviewed through* for each slice (the commit you reviewed at), mark
+   the session ✅ in the schedule, and stop. Do not roll into the next session's slices.
 
 **Finding row template:**
 
@@ -116,8 +115,8 @@ drift, so re-find with `grep -n` on the function or channel name.
 
 ## The slices
 
-Read cost = the grep-driven pass this slice needs. Full = what reading the family whole would
-cost, for reference. Questions are **leads to check**, not findings — several may turn out fine.
+Read cost = the grep-driven pass this slice needs, in listed units (bytes ÷ 4). Full =
+what reading the family whole would cost, for reference. Questions are **leads to check**, not findings — several may turn out fine.
 
 ### R1 — The trust boundary: what remote content can reach (S) — read ~25k
 
@@ -140,7 +139,6 @@ cost, for reference. Questions are **leads to check**, not findings — several 
      configured ERP base (invariant 4)?
   7. Test hooks: is everything under `__erpE2e` unreachable without `E2E=1`, and could a packaged
      build be launched with it?
-- **Do not pair with:** R2 (both live in `main.js`; together ≈ 45k).
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R2 — `main.js` as a file: size, duplication, the long-running process (M, P) — read ~22k
@@ -157,7 +155,6 @@ cost, for reference. Questions are **leads to check**, not findings — several 
      does any get created per open rather than reused? `src/web-contents-listener-budget.js`
      exists — is every `on(...)` in `main.js` paired with a removal?
   5. Log files (`nav-debug.log`, `focus-*.log`, `nav-incidents.log`): do any grow without a cap?
-- **Do not pair with:** R1.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R3 — Navigation spine (S, M, P) — read ~25k (full ~49k)
@@ -204,7 +201,7 @@ cost, for reference. Questions are **leads to check**, not findings — several 
   2. Work done on every keystroke or every `input` event: what is debounced, what is not?
   3. Resize / scroll listeners (G11): one per page, or one per table / per open?
   4. How much of `doc-form-page.js` duplicates `bill-form-page.js`? (Feeds R6a.)
-- **Do not pair with:** R6 (any part) — together they exceed the budget.
+- **Same session as R5b and R6a** — question 4 needs both pages in view.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R5b — Doc-form machinery: tables, pickers, import (S, P) — read ~22k
@@ -232,7 +229,7 @@ cost, for reference. Questions are **leads to check**, not findings — several 
      through `doc-form-page.js`? List them; size the move.
   2. `electron/bill.html.old` — still referenced anywhere? If not, delete.
   3. The biggest functions in the file: which could be split pure → `src/` with tests?
-- **Do not pair with:** R5, R6b, R6c.
+- **Same session as R5 / R5b** — question 1 needs both pages in view.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R6b — Bill skin: money (taxes, terms, charges) (S, M) — read ~22k
@@ -303,7 +300,6 @@ cost, for reference. Questions are **leads to check**, not findings — several 
   3. Auto re-link: can it fire twice for one payment (two windows of the event, retry)?
   4. Every write here: is there a `navDebug` line on both sides (local notes: a write with no log
      line was undiagnosable once)?
-- **Alone** — the stakes justify the whole budget.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R10a — Pay Outstanding: the pure math (M, S) — read ~25k (family full ~172k)
@@ -329,7 +325,6 @@ cost, for reference. Questions are **leads to check**, not findings — several 
      board, and does a re-render rebuild everything?
   2. One exception in a render loop blanks the board (G13): is every loop guarded now?
   3. A 3,907-line HTML page: what should be in `src/` with tests?
-- **Do not pair with:** anything.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R10c — Pay Outstanding: the write paths (S) — read ~20k
@@ -399,7 +394,7 @@ cost, for reference. Questions are **leads to check**, not findings — several 
      What does it actually check?
   3. Scripts with the DB root password (`-padmin`) — sandbox only, and nowhere a real site could
      inherit it?
-- **Do first** — small and the most exposed. Alone: at ~15k nothing else fits under ~25k.
+- **Do first** — the most exposed.
 - **Reviewed through:** — **Findings:** none yet.
 
 ### R20 — The process documents themselves (M) — read ~8k
@@ -422,35 +417,24 @@ cost, for reference. Questions are **leads to check**, not findings — several 
 
 ## Session schedule
 
-Ordered by risk: what is exposed or writes money first, structure later. One row = one session.
-"Don't add" is the budget rule made concrete.
+Grouped by **what the reviewer needs in view at once**, ordered by risk: what is exposed or writes
+money first, structure later.
 
-| # | Slices | Read cost | Don't add | Why this order | Done |
-|---|--------|-----------|-----------|----------------|------|
-| 1 | R14 | ~15k | anything (R7 would make ~36k) | network exposure and the sandbox guard first | |
-| 2 | R1 | ~25k | R2 (both are `main.js`; ~47k together) | what remote content can reach | |
-| 3 | R9 | ~22k | anything | the cancel-then-insert write | |
-| 4 | R10c | ~20k | R10a / R10b | payment writes, one never run live | |
-| 5 | R11 | ~24k | anything | spawned processes, file names from the server | |
-| 6 | R6c | ~20k | R6a / R6b | two-write receive-with-bill | |
-| 7 | R6b | ~22k | R6a / R6c | money rounding and dates | |
-| 8 | R8 | ~22k | anything | newest code, doubles on Create | |
-| 9 | R2 | ~22k | R1 | `main.js` size, listeners, logs | |
-| 10 | R3 | ~25k | anything (nav is the breaking family) | | |
-| 11 | R5 | ~25k | R5b, any R6 | | |
-| 12 | R5b | ~22k | R5 | | |
-| 13 | R6a | ~25k | any other R6 | the 6k-line page | |
-| 14 | R10a | ~25k | R10b / R10c | | |
-| 15 | R10b | ~25k | anything | the 3.9k-line board | |
-| 16 | R4 | ~22k | anything | | |
-| 17 | R7 | ~21k | anything | | |
-| 18 | R12 | ~20k | R13 | | |
-| 19 | R13 | ~24k | R12 | | |
-| 20 | R20 | ~8k | — | fold everything; close this plan | |
+| # | Slices | Listed | Don't add | Why together | Done |
+|---|--------|--------|-----------|--------------|------|
+| 1 | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | |
+| 2 | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | |
+| 3 | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | |
+| 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |
+| 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
+| 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
+| 7 | R13 + R20 | ~32k | — | small tools, then fold everything and close this plan | |
 
-Rule of thumb that falls out of the numbers: **one slice per session, two only when both are
-under ~12k** (none of the slices are, today). Any slice whose name ends in a letter (R5/R5b, R6a–c, R10a–c) is one part of a
-family that does not fit in a session — never put two parts of the same family together.
+Rules that fall out of the numbers:
+
+- **Three slices per session, four only if all are under ~20k listed.**
+- The ~25k-per-slice sizing still holds on its own: the slices are not bigger because the window
+  is, only more of them fit.
 
 ---
 
