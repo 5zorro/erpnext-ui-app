@@ -56,4 +56,9 @@
  *    they typed. xvfb-run replaces DISPLAY, but WSLg also exports WAYLAND_DISPLAY, which
  *    Electron can use instead — the likely route (not proven). Clear both:
  *    `WAYLAND_DISPLAY= DISPLAY= xvfb-run -a npx playwright test …`.
+ *
+ * 13. `webContents.forcefullyCrashRenderer()` crashes nothing under xvfb here (2026-10-20)
+ *    No `render-process-gone`, and the page kept running — so a "crash" test built on it proves
+ *    nothing. Kill the renderer instead: `process.kill(wc.getOSProcessId(), "SIGKILL")` fires
+ *    `render-process-gone` with reason `killed` (review 10-19 R2-1 was proven that way).
  */
