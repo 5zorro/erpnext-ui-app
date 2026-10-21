@@ -43,7 +43,14 @@ built, being dogfooded). It edits no code.
 > logging in) shared the earlier, possibly stale answer and could leave *Log in* showing; it now
 > runs once more after. Session Expiry itself is ERPNext's setting: recommended `05:00` or shorter
 > (HANDOFF's site-settings table), never set by the shell.
-> Next: session 4 (R5 + R5b + R6a).
+> **Session 4 ✅ 2026-10-20** (R5, R5b, R6a): 6 findings, all open, none high. Two are medium and
+> S/P: **R5b-1**, a link field can commit an option from the *previous* search when the clerk
+> Tabs or presses Enter before the latest answer is back (no stale-answer check, the old list is
+> kept). **R5-1**: every repaint adds three page-wide listeners per link cell that are never
+> removed, all day. **R6a-1** measures the Bill / doc-form duplication (1,295 identical lines in
+> 55 same-named functions) and gives a three-step order for sharing it. **R6a-3**:
+> `electron/bill.html.old` is dead, and deleting it is 5zorro's call (untracked).
+> Next: session 5 (R6b + R10a + R10b).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -286,7 +293,21 @@ the next fresh login prunes Recent / Drafts / Submitted rows the server no longe
   3. Resize / scroll listeners (G11): one per page, or one per table / per open?
   4. How much of `doc-form-page.js` duplicates `bill-form-page.js`? (Feeds R6a.)
 - **Same session as R5b and R6a** — question 4 needs both pages in view.
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `05b6aec` (2026-10-20, session 4).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R5-1 | P | med | `src/link-picker-ui.js:114`, `:116`, `:320`; mounted per cell on every paint at `doc-form-page.js:1545` / `:1929`, `bill-form-page.js:1834` / `:2524` | Every link picker adds three page-wide listeners (window `resize`, window `scroll` in capture, document `click`) and never removes them. The line and tax tables are rebuilt with `innerHTML` on every paint, and a paint follows every committed edit, so each paint adds 3 listeners per link cell, and each one keeps its thrown-away row alive. The page is reloaded only when the Bill and doc-form controllers swap (`needsDocShellReload`), so a day of Bills in a row only grows: a 20-line Bill with 3 tax rows adds ~70 listeners per edit, and every scroll or click in the page runs all of them | One `resize` / `scroll` / `click` listener per page over a set of *open* dropdowns: add on show, remove on hide, and skip any whose `wrap` is no longer in the page | open |
+
+**Checked and fine:** (1) Every server value the page writes as HTML (item codes, descriptions,
+accounts, tax descriptions, Sales Order progress, the tax-default note) goes through `escapeHtml`.
+Amounts go through `formatUsdAmountHtml`, which escapes each part. `sourcesCellHtml` escapes
+labels, routes and names. `doc-chrome.js` and `doc-form-boot.js` build no HTML strings. The Bill
+page's one unescaped interpolation (`openInformalLinkPicker`'s title) is a constant. (2) On a
+keystroke the page only copies the value into the cell's resting text and filters date
+characters. Line and header values commit on `change` / blur, never on `input`. (3) Column resize
+binds one debounced (120 ms) window `resize` per table (`__relayoutBound`). The only leak is the
+pickers' listeners (R5-1). (4) How much the Bill page duplicates: see R6a-1.
 
 ### R5b — Doc-form machinery: tables, pickers, import (S, P) — read ~22k
 
@@ -299,7 +320,24 @@ the next fresh login prunes Recent / Drafts / Submitted rows the server no longe
   2. Link search: debounce, cancel of the previous request, result cap.
   3. Dragged column widths live in the page's localStorage (local notes, trap 2): any bound or
      cleanup when a column is removed?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `05b6aec` (2026-10-20, session 4).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R5b-1 | S | med | `src/link-picker-ui.js` `runSearch` (223) and the `keydown` handler (277) | A link field can commit a value the clerk did not type. `runSearch` has no sequence check, so a slow answer for `ABC-1` that lands after the one for `ABC-12` replaces it. And `opts` keeps the *previous* list while a new search runs (the box says "Searching…") or waits out the 280 ms debounce. Tab or Enter then picks that list's highlighted (or first) option and writes it into the field. A fast typist (5zorro's chaos-mode dogfood) who types `ABC-12` and Tabs can get `ABC-1` on the line, with nothing said | Number each search and drop any answer that is not the latest. Clear `opts` / `hi` when the text changes. On Tab / Enter while the latest search is not back, wait for it (or pick only an exact match of the typed text) | open |
+| R5b-2 | S | low | `src/item-import-ui.js` `applyImportedItemRows` (348), `wireItemImportButton` (450) | An import that fails on line 7 returns `ok: false` without the document, so the page is not repainted. Lines 1–6 are on the ERPNext form (and a later Save keeps them) but not on the page, and the message says only what failed. The Import button also stays live while the rows are written one by one by row number, so a second import, or a line the clerk deletes meanwhile, shifts what the later writes land on | On failure return the last document and say "Lines 1–6 imported; line 7 stopped: …", and repaint. Block the line table (or at least the Import button) until the import ends | open |
+
+**Checked and fine:** (1) Item import takes pasted text or a `.csv` / `.tsv` file only, and
+`parseGridText` never touches Word or PDF. `mammoth` and `pdfjs-dist` are used by Papers alone,
+which R11-1 / R11-8 already reviewed. Every pasted cell, header and warning in the preview goes
+through `esc`, and an import is capped at `MAX_ITEM_IMPORT_ROWS` = 100. (2) Link search is
+debounced at 280 ms and capped at 25 results (`page_length` / `limit`). It runs as the clerk
+through `search_link` with its arguments JSON-encoded, so it is ERPNext's permission check. The
+dropdown escapes every value and label. The flaws are the stale answer and stale list (R5b-1).
+(3) Column widths are one localStorage entry per table and column field, clamped to 40–900 px.
+A column that leaves a layout leaves a few bytes behind, which match no header and are never
+applied. Double-click resets a column. Clearing them between tests is a test-isolation chore
+(local notes, trap 2), not a product bug. The address picker escapes every address field.
 
 ### R6a — Bill skin: the page file (M) — read ~25k (family full ~166k)
 
@@ -314,7 +352,19 @@ the next fresh login prunes Recent / Drafts / Submitted rows the server no longe
   2. `electron/bill.html.old` — still referenced anywhere? If not, delete.
   3. The biggest functions in the file: which could be split pure → `src/` with tests?
 - **Same session as R5 / R5b** — question 1 needs both pages in view.
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `05b6aec` (2026-10-20, session 4).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R6a-1 | M | med | `src/bill-form-page.js` ↔ `src/doc-form-page.js` | 55 functions have the same name in both pages. Measured by trimmed non-blank lines, those functions are 2,193 lines in the Bill and 1,831 in doc-form, and **1,295 lines are identical**. The largest: `paintItems` (464 / 454, 76% the same), `resolveCommitGate` (80%), `beginAmountBackIn` (80%), `focusItemCell` (90%), `paintMoneyStack` (89%), `removeAllTaxes` (79%). The tax-default note, `wireDateField`, `setLineTab`, `setItemCellMode`, `keepTaxesRemoved` and the tax "fixed amount" note are 100%. The differences are mostly words ("Bill" vs `docTitle()`), the paint signature (`paint(doc, amountDue)` vs `paint(doc, scratch)`) and features one side has (Bill: account-company blockers, `announceSaveBlocker`, Find continuing after a gated save; doc-form: direct save). The drift already costs: R3-1 needed two different fixes, and R5-1 / R5b-1 sit under both pages | Don't merge the pages. Move shared code into modules that take a small deps object, as `item-import-ui.js` / `address-picker-ui.js` already do, in this order: **(1)** the identical leaves (~120 lines); **(2)** the commit gate (`openGate` … `resolveCommitGate`, ~150 lines at 80–100%), with hooks for title, blockers and paint; **(3)** `paintItems`' cell builder (~350 identical lines), with the Bill-only cells (Rec'd editor, Assign, ref chip) as hooks. Steps 1–2 are one session. Step 3 is its own session, with both skins' smoke specs. It is independent of R2-5 | open |
+| R6a-2 | M | low | `src/bill-form-page.js:275–6087` | The whole Bill page is one 5,800-line closure, `bootBillFormPage(api)`, with all state held inside it, so no inner function can be imported or tested, and every extraction must thread state through. The doc-form page is module-level functions. The biggest functions: `paintItems` 472, `openLineAllocationPicker` 318, `paintTaxes` 315, `openInformalLinkPicker` 209, `paint` 201, `runBillSourcePicker` 173, `openAllocateChargeModal` 163, `paintLinkedSources` 139, `doSave` 126 | Four of them are self-contained dialogs (Assign, informal link, source picker, allocate charge: ~860 lines) that read only `lastDoc`, `api`, `setStatus` and `paint`. Move each to its own `src/bill-*-modal-ui.js` taking deps. Assign's steps (customer → Sales Orders → project) become a pure reducer with tests. `paintItems` / `paintTaxes` go with R6a-1 step 3 | open |
+| R6a-3 | M | low | `electron/bill.html.old` | 180 KB, dated 2026-08-29, untracked and ignored (`.gitignore` `*.old` and `electron/bill.html*`). Nothing loads it. Its only mention is the `bill-skin` family's `paths` (`src/architecture-families.js:93`), which makes the coverage map treat a dead file as part of the Bill | 5zorro deletes the file. It is untracked, so git keeps no copy: his call, not an agent's. Then drop it from the family's paths | open |
+
+**Checked and fine:** the Bill's own pickers debounce their searches (Assign 180 ms, informal
+link 220 ms; Sales Orders are fetched once and filtered locally). Assign's customer search has
+the same missing stale-answer check as R5b-1, but it only fills a list the clerk must still click,
+and it should take the same sequence fix. The Bill page's HTML strings escape server values the
+same way as doc-form (R5 checked).
 
 ### R6b — Bill skin: money (taxes, terms, charges) (S, M) — read ~22k
 
@@ -589,7 +639,7 @@ money first, structure later.
 | 1 ✅ | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | done |
 | 2 ✅ | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | done |
 | 3 ✅ | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | done |
-| 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |
+| 4 ✅ | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | done |
 | 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
 | 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
 | 7 | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | |
