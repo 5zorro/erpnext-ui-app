@@ -42,6 +42,19 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   modeChangeFacts: (invoices) =>
     ipcRenderer.invoke("mode-change-facts", Array.isArray(invoices) ? invoices : []),
   runModeChange: (work) => ipcRenderer.invoke("run-mode-change", Array.isArray(work) ? work : []),
+  // Review 10-19: one event before and after each bill, for the panel's per-bill chips. Returns
+  // the unsubscribe.
+  onModeChangeProgress: (cb) => {
+    const handler = (_e, payload) => {
+      try {
+        cb(payload);
+      } catch {
+        /* a chip that fails to paint must not break the batch */
+      }
+    };
+    ipcRenderer.on("mode-change-progress", handler);
+    return () => ipcRenderer.removeListener("mode-change-progress", handler);
+  },
   // OI-171 after-effects: what this vendor has loose, and one re-link posted through ERPNext's own
   // Payment Reconciliation.
   paymentRelinkFacts: (supplier) => ipcRenderer.invoke("payment-relink-facts", supplier || ""),

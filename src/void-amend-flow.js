@@ -46,6 +46,15 @@ import {
  * }} VoidAmendRunResult
  */
 
+/**
+ * Documents this page is voiding right now (review 10-19 R9-3). The button stays clickable while
+ * the write runs, and a second run confirmed before the first lands would cancel nothing new but
+ * could insert a second amendment — so a second click for the same document is refused here,
+ * before anything is read or asked.
+ * @type {Set<string>}
+ */
+const voidingNow = new Set();
+
 /** @param {string} reason */
 function stopped(reason) {
   return { ran: false, ok: false, amendedName: "", strandedName: "", reason };
@@ -82,6 +91,26 @@ export async function runVoidAndAmend(deps) {
     return stopped(why);
   }
 
+  const busyKey = `${doctype}\u0000${name}`;
+  if (voidingNow.has(busyKey)) {
+    const why = `${name} is already being voided — wait for that to finish.`;
+    setStatus(why, "warn");
+    return stopped(why);
+  }
+  voidingNow.add(busyKey);
+  try {
+    return await runVoidAndAmendOnce(deps, { doctype, name, setStatus, noun });
+  } finally {
+    voidingNow.delete(busyKey);
+  }
+}
+
+/**
+ * @param {VoidAmendRunDeps} deps
+ * @param {{ doctype: string, name: string, setStatus: (text: string, cls?: string) => void, noun: string }} ctx
+ * @returns {Promise<VoidAmendRunResult>}
+ */
+async function runVoidAndAmendOnce(deps, { doctype, name, setStatus, noun }) {
   const api = deps && deps.api;
   if (!api || !api.voidAndAmend || !api.voidAmendFacts) {
     // Not "restart the shell": this is a wiring gap (each skin's preload and API adapter has to
@@ -151,11 +180,65 @@ export async function runVoidAndAmend(deps) {
   const told = describeVoidAndAmendResult(result);
   setStatus(`${told.headline}${told.detail ? ` ${told.detail}` : ""}`, told.ok ? "" : "err");
   return {
-    ran: true,
+    // A refusal before anything was sent (view not ready, already being voided) ran nothing.
+    ran: !(result && result.notRun),
     ok: told.ok,
     amendedName: (result && String(result.amendedName || "")) || "",
     strandedName: told.strandedName,
     reason: told.ok ? "" : `${told.headline} ${told.detail}`.trim(),
+  };
+}
+
+/**
+ * What a void-and-amend attempt actually did, from whatever the ERP page sent back (review 10-19
+ * R9-1, R9-2). Lives here, not in main, so every branch is testable.
+ *
+ * - Every return the injected script makes says `cancelled: true|false` explicitly. So a result
+ *   **without** that key did not come from the script finishing — the page reloaded or died
+ *   mid-way, and the cancel may well have landed. That is reported like losing contact, never as
+ *   "nothing was changed".
+ * - The exception is a refusal made *before* anything was sent (the ERP view not ready, or showing
+ *   another website, or this document already being voided): those carry `notRun: true`.
+ * - A failure after the insert keeps `amendedName`: the amended copy exists (only its submit was
+ *   refused), and saying otherwise sends the clerk to re-enter a bill that is already there.
+ *
+ * @param {unknown} raw
+ * @param {string} name the document that was asked for
+ * @param {(reason: unknown) => string} [formatReason]
+ */
+export function voidAmendOutcome(raw, name, formatReason = (r) => String(r || "")) {
+  const nm = String(name || "");
+  const lostContact =
+    "The shell lost contact with ERP during the void and amend. Check the document in ERPNext before retrying.";
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, cancelled: true, uncertain: true, name: nm, amendedName: "", step: "unknown", reason: lostContact };
+  }
+  const r = /** @type {Record<string, any>} */ (raw);
+  if (r.ok) return r;
+  const reason = formatReason(r.reason || r) || "Void and amend failed.";
+  if (r.notRun) {
+    return { ok: false, cancelled: false, notRun: true, name: nm, amendedName: "", step: r.step || "not-run", reason };
+  }
+  if (r.cancelled === undefined) {
+    return {
+      ok: false,
+      cancelled: true,
+      uncertain: true,
+      name: nm,
+      amendedName: "",
+      step: r.step || "unknown",
+      reason: `${reason} ${lostContact}`.trim(),
+    };
+  }
+  return {
+    ok: false,
+    cancelled: !!r.cancelled,
+    name: String(r.name || nm),
+    amendedName: String(r.amendedName || ""),
+    step: r.step,
+    reason,
+    droppedRows: r.droppedRows,
+    patched: r.patched,
   };
 }
 

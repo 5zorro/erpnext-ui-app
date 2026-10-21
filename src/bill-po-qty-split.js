@@ -26,18 +26,26 @@ export const OVERBILL_CAP_CACHE_BLOCKER =
  * Save/split blockers when sourced rows lack cached maxBillableQty (OI-151).
  * @param {object[]|null|undefined} items
  * @param {(rowIndex: number) => number|null|undefined} capForRow
+ * @param {{ gaveUp?: boolean }} [opts]
  * @returns {string[]}
  */
-export function listOverbillCapCacheBlockers(items, capForRow) {
+export function listOverbillCapCacheBlockers(items, capForRow, opts = {}) {
   const rows = Array.isArray(items) ? items : [];
   const capFn = typeof capForRow === "function" ? capForRow : () => null;
   for (let ri = 0; ri < rows.length; ri += 1) {
     const row = rows[ri];
     if (!billRowHasSource(row)) continue;
-    if (capFn(ri) == null) return [OVERBILL_CAP_CACHE_BLOCKER];
+    if (capFn(ri) == null) return [opts && opts.gaveUp ? OVERBILL_CAP_GAVE_UP_BLOCKER : OVERBILL_CAP_CACHE_BLOCKER];
   }
   return [];
 }
+
+/**
+ * Review 10-19 R6c-2: the limits stopped loading for good (main gave up retrying), so "wait" would
+ * be a wait for nothing. Refresh starts the fetch again.
+ */
+export const OVERBILL_CAP_GAVE_UP_BLOCKER =
+  "Couldn't load the PO/receipt line limits from ERPNext — press Refresh to try again, then Save.";
 
 /**
  * ERP over-billing validation (save or setRow).

@@ -550,3 +550,27 @@ describe("predictAmendedName — what ERPNext will actually call it", () => {
     assert.match(text, /The copy gets a new ERPNext ID\./);
   });
 });
+
+describe("review 10-19 — describeVoidAndAmendResult for the new half-done cases", () => {
+  it("R9-1: an amended copy that exists but was not submitted is not 'stranded'", () => {
+    const r = describeVoidAndAmendResult({
+      ok: false,
+      cancelled: true,
+      name: "ACC-PINV-2026-00231",
+      amendedName: "ACC-PINV-2026-00231-1",
+      reason: "Accounting period is closed.",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.strandedName, "");
+    assert.match(r.headline, /ACC-PINV-2026-00231-1 was created but not submitted/);
+    assert.match(r.detail, /Open ACC-PINV-2026-00231-1 and submit it/);
+    assert.match(r.detail, /Accounting period is closed/);
+  });
+
+  it("R9-2: lost contact mid-way says it may already be cancelled, never 'nothing was changed'", () => {
+    const r = describeVoidAndAmendResult({ ok: false, cancelled: true, uncertain: true, name: "ACC-PINV-2026-00231" });
+    assert.match(r.headline, /may already be cancelled/);
+    assert.doesNotMatch(r.headline, /Nothing was changed/);
+    assert.equal(r.strandedName, "ACC-PINV-2026-00231");
+  });
+});

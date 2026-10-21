@@ -4,6 +4,7 @@ import {
   paymentTermName,
   planPaymentTermCreate,
   planPaymentTermsCreate,
+  paymentTermFieldMismatch,
   AFFECTS_COPY,
   DAY_BASED_DUE_DATE_BASES,
 } from "../src/payment-term-plan.js";
@@ -335,5 +336,58 @@ describe("payment-term-plan: installments (P4e)", () => {
     const plan = planPaymentTermsCreate(thirds);
     const renames = plan.warnings.filter((w) => /Renaming a Payment Term/.test(w));
     assert.equal(renames.length, 1);
+  });
+});
+
+describe("review 10-19 R10c-3 — an existing term with the same numbers is reused, not refused", () => {
+  const input = { contractDays: 30, graceDays: -3, method: "USPS_Check" };
+  const asStored = (plan) => ({ name: plan.name, ...plan.fields });
+
+  it("reuses a matching term, so a half-finished create (term in, template not) can be finished", () => {
+    const fresh = planPaymentTermCreate(input);
+    const p = planPaymentTermCreate(input, { existingTerms: [asStored(fresh)] });
+    assert.equal(p.ok, true);
+    assert.equal(p.reuse, true);
+    const plan = planPaymentTermsCreate(input, { existingTerms: [asStored(fresh)] });
+    assert.equal(plan.ok, true);
+    assert.deepEqual(plan.terms, []);
+    assert.deepEqual(plan.reused, [fresh.name]);
+    assert.equal(plan.template.terms[0].payment_term, fresh.name);
+  });
+
+  it("refuses, naming the field, when a same-named term says something different", () => {
+    const fresh = planPaymentTermCreate(input);
+    const p = planPaymentTermCreate(input, { existingTerms: [{ ...asStored(fresh), credit_days: 31 }] });
+    assert.equal(p.ok, false);
+    assert.match(p.errors.join(" "), /credit period \(days\) is 31, not 27/);
+  });
+
+  it("in a multi-payment plan, inserts only the terms that are not there yet", () => {
+    const rows = [
+      { contractDays: 30, portion: 50 },
+      { contractDays: 60, portion: 50 },
+    ];
+    const first = planPaymentTermsCreate({ method: "USPS_Check", installments: rows });
+    const p = planPaymentTermsCreate(
+      { method: "USPS_Check", installments: rows },
+      { existingTerms: [{ name: first.plans[0].name, ...first.plans[0].fields }] },
+    );
+    assert.equal(p.ok, true);
+    assert.deepEqual(p.reused, [first.plans[0].name]);
+    assert.deepEqual(p.terms.map((t) => t.payment_term_name), [first.plans[1].name]);
+    assert.equal(p.template.terms.length, 2);
+  });
+
+  it("bare names still refuse (no numbers to compare)", () => {
+    const p = planPaymentTermCreate(input, { existingNames: [planPaymentTermCreate(input).name] });
+    assert.equal(p.ok, false);
+    assert.equal(p.reuse, false);
+  });
+
+  it("compares what decides a due date, a method or a discount — not the description", () => {
+    const f = planPaymentTermCreate(input).fields;
+    assert.equal(paymentTermFieldMismatch({ ...f, description: "other words" }, f), null);
+    assert.equal(paymentTermFieldMismatch({ ...f, mode_of_payment: null }, f).label, "method of payment");
+    assert.equal(paymentTermFieldMismatch({ ...f, credit_months: null }, f), null);
   });
 });

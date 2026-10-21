@@ -65,6 +65,8 @@ import {
   APPLY_AMEND_PATCH_JS,
   voidAmendProbes,
 } from "../src/doc-actions.js";
+import { voidAmendOutcome } from "../src/void-amend-flow.js";
+import { modeChangeShouldStop } from "../src/mode-change-plan.js";
 import {
   FOCUS_INCIDENT_NOTE_MAX,
   buildFocusIncident,
@@ -1545,6 +1547,11 @@ async function fetchBillPoLineMetaViaHttp(doc, poDetails, prDetails, poNames, pr
     poDetails,
   );
   const prItemsByName = prItemsFromParentDocs(prParentsRes.docs, prDetails);
+  // Review 10-19 R6c-3: the PO documents already carry `title`, so the logbook column needs no
+  // second request when this path answers.
+  const poTitles = (poParentsRes.docs || [])
+    .filter((d) => d && d.name)
+    .map((d) => ({ name: String(d.name), title: d.title != null ? String(d.title) : "" }));
   if (needPoItems && !Object.keys(poItemsByName).length) {
     navDebug(
       "bill-po-meta-fetch",
@@ -1559,28 +1566,36 @@ async function fetchBillPoLineMetaViaHttp(doc, poDetails, prDetails, poNames, pr
     );
     return null;
   }
-  return indexPoLineMeta(doc, poItemsByName, poHeadersByName, prItemsByName);
+  return { meta: indexPoLineMeta(doc, poItemsByName, poHeadersByName, prItemsByName), poTitles };
 }
 
+/**
+ * @param {object} doc
+ * @returns {Promise<{ meta: Record<string, object>, poTitles: { name: string, title: string }[]|null }>}
+ *   `poTitles` only when the HTTP path answered (it is a by-product of that fetch).
+ */
 async function fetchBillPoLineMeta(doc) {
   const { poDetails, prDetails, poNames, prNames } = poFetchKeysForBillDoc(doc);
-  if (!poDetails.length && !prDetails.length && !poNames.length) return {};
-  const httpMeta = await fetchBillPoLineMetaViaHttp(
+  if (!poDetails.length && !prDetails.length && !poNames.length) return { meta: {}, poTitles: null };
+  const http = await fetchBillPoLineMetaViaHttp(
     doc,
     poDetails,
     prDetails,
     poNames,
     prNames,
   );
-  if (httpMeta) {
-    const capRows = Object.values(httpMeta).filter((m) => m && m.maxBillableQty != null).length;
+  if (http) {
+    const capRows = Object.values(http.meta).filter((m) => m && m.maxBillableQty != null).length;
     navDebug(
       "bill-po-meta-fetch",
       `via=http parents=${poNames.length} caps=${capRows}`,
     );
-    return httpMeta;
+    return http;
   }
+  // Review 10-19 R6c-3: only the bridge fallback reads through the ERP form, so only it waits for
+  // the bridge and lets the form's own requests settle first.
   await ensureErpFormBridge();
+  await sleep(BILL_LINE_CONTEXT_SETTLE_MS);
   const raw = await bridgeCall("fetchPoLineMeta", poDetails, prDetails, poNames, "billEnrich");
   /** @type {Record<string, object>} */
   const poItemsByName = {};
@@ -1605,7 +1620,7 @@ async function fetchBillPoLineMeta(doc) {
       ? `via=bridge poItems=${((raw && raw.poItems) || []).length} caps=${capRows}`
       : `via=bridge fail ${(raw && raw.reason) || "unknown"}`,
   );
-  return meta;
+  return { meta, poTitles: null };
 }
 
 /**
@@ -1613,12 +1628,19 @@ async function fetchBillPoLineMeta(doc) {
  * @param {object|null|undefined} doc
  */
 async function enrichBillLineContext(doc) {
-  const poLineMeta = await fetchBillPoLineMeta(doc);
-  const key = currentBillDocKey();
+  // Review 10-19 R6c-1: decide whose limits these are BEFORE the fetch. Both maps are keyed by row
+  // index, so a slow answer for bill A stored under whichever bill is open when it lands would give
+  // bill B A's per-row limits — and the save's over-billing split would cut B's lines by them.
+  const key = doc && doc.name ? String(doc.name) : currentBillDocKey();
+  const { meta: poLineMeta, poTitles } = await fetchBillPoLineMeta(doc);
+  const lineAllocations = hydrateBillLineAllocations(doc, billLineAllocationsByDoc[key] || {}, poLineMeta);
+  if (currentBillDocKey() !== key) {
+    navDebug("bill-enrich-stale", `dropped limits for ${key}; ${currentBillDocKey()} is open now`);
+    return { poLineMeta, lineAllocations, poTitles, stale: true };
+  }
   billPoLineMetaByDoc[key] = poLineMeta;
-  const lineAllocations = hydrateBillLineAllocations(doc, getBillLineAllocations(), poLineMeta);
   billLineAllocationsByDoc[key] = lineAllocations;
-  return { poLineMeta, lineAllocations };
+  return { poLineMeta, lineAllocations, poTitles };
 }
 
 /** Per-slice enrich attempt ceiling — background retry continues while UI shows Still loading…. */
@@ -1684,8 +1706,6 @@ async function enrichBillSnapshotExtrasInner(doc) {
   let enrichPending = defaultEnrichPendingForDoc(doc);
 
   if (enrichPending.lineContext) {
-    await ensureErpFormBridge();
-    await sleep(BILL_LINE_CONTEXT_SETTLE_MS);
     const enrichRaw = await raceTimeout(
       enrichBillLineContext(doc),
       BILL_LINE_CONTEXT_TIMEOUT_MS,
@@ -1697,6 +1717,10 @@ async function enrichBillSnapshotExtrasInner(doc) {
       poLineMeta = enrichRaw.poLineMeta || {};
       lineAllocations = enrichRaw.lineAllocations || {};
       enrichPending.lineContext = false;
+      if (enrichPending.linkedPos && Array.isArray(enrichRaw.poTitles)) {
+        linkedPos = linkedPurchaseOrdersForBill(doc, enrichRaw.poTitles);
+        enrichPending.linkedPos = false;
+      }
     }
   } else {
     poLineMeta = getBillPoLineMeta();
@@ -1791,8 +1815,6 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
         }
 
         if (enrichPending.lineContext) {
-          await ensureErpFormBridge();
-          await sleep(round === 1 ? BILL_LINE_CONTEXT_SETTLE_MS : 300);
           const enrichRaw = await raceTimeout(
             enrichBillLineContext(liveDoc),
             BILL_LINE_CONTEXT_TIMEOUT_MS,
@@ -1800,10 +1822,14 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           );
           if (enrichRaw && enrichRaw.timedOut) {
             navDebug("bill-enrich-slice", `lineContext timeout round=${round}`);
-          } else if (enrichRaw && typeof enrichRaw === "object") {
+          } else if (enrichRaw && typeof enrichRaw === "object" && !enrichRaw.stale) {
             poLineMeta = enrichRaw.poLineMeta || {};
             lineAllocations = enrichRaw.lineAllocations || {};
             enrichPending.lineContext = false;
+            if (enrichPending.linkedPos && Array.isArray(enrichRaw.poTitles)) {
+              linkedPos = linkedPurchaseOrdersForBill(liveDoc, enrichRaw.poTitles);
+              enrichPending.linkedPos = false;
+            }
             navDebug("bill-enrich-slice", `lineContext ok round=${round}`);
           }
         }
@@ -1871,6 +1897,22 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
             "bill-enrich-stop",
             `max_rounds=${BILL_ENRICH_MAX_ROUNDS} ${formatEnrichPendingLog(enrichPending, round)}`,
           );
+          // Review 10-19 R6c-2: say so. Without this the page keeps "Still loading…" and Save keeps
+          // saying "wait", for something that is no longer being fetched.
+          if (surfaceMode === "doc" && activeDocSkin === "bill") {
+            pushBillSnapshot({
+              ok: true,
+              doc: liveDoc,
+              amountDue: amountDueScratch,
+              linkedPos,
+              linkedReceipts,
+              poLineMeta,
+              lineAllocations,
+              enrichPending: { ...enrichPending, gaveUp: true },
+              userEdited: !!dirtyState.userEdited,
+              enrichProgress: true,
+            });
+          }
           break;
         }
         navDebug("bill-enrich-round", formatEnrichPendingLog(enrichPending, round));
@@ -2711,21 +2753,28 @@ function erpSessionFetchImpl() {
 function erpExec(js) {
   const url = erp.webContents.getURL();
   if (url && !isAllowedErpUrl(ERP_BASE, url)) {
-    return Promise.reject(new Error("The ERP view is showing another website, not ERPNext."));
+    const refused = new Error("The ERP view is showing another website, not ERPNext.");
+    /** @type {any} */ (refused).notRun = true;
+    return Promise.reject(refused);
   }
   return erp.webContents.executeJavaScript(js);
 }
 
+/**
+ * Review 10-19 R9-2: `notRun: true` marks a refusal made before anything was sent. Any other
+ * failure here (the page reloading or dying mid-script) says nothing about what the script got
+ * done, so a write path must not read it as "nothing happened" — see `voidAmendOutcome`.
+ */
 async function erpEval(js, chaosChannel = "erpEval") {
   if (!erp || erp.webContents.isDestroyed()) {
-    return { ok: false, reason: "ERP view not ready" };
+    return { ok: false, notRun: true, reason: "ERP view not ready" };
   }
   const chaosMs = await maybeChaosLag(chaosChannel);
   if (chaosMs > 0) navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
   try {
     return await erpExec(js);
   } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
+    return { ok: false, notRun: !!(e && /** @type {any} */ (e).notRun), reason: String(e && e.message ? e.message : e) };
   }
 }
 
@@ -5578,6 +5627,12 @@ async function fetchPaymentEntryDraftsForInvoices(invoices, opts = {}) {
   };
 }
 
+/** One nav-debug line for a payment write's outcome: the name it made, or the step and reason. */
+function paymentWriteOutcomeLog(out) {
+  if (out && out.ok) return `ok name=${out.name || "?"}${out.paid_amount != null ? ` paid=${out.paid_amount}` : ""}`;
+  return `failed step=${(out && out.step) || "?"}${out && out.name ? ` draft=${out.name}` : ""} reason=${(out && out.reason) || "?"}`;
+}
+
 /**
  * Insert + submit an already-fully-populated Payment Entry doc. Shared tail of the single-
  * invoice JIT path (createJitPaymentEntryForBill above) and the batch path below -- identical
@@ -5791,9 +5846,16 @@ async function createPaymentTermDocs(input = {}) {
   const existing = await erpEval(`(async () => {
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
+      // The numbers too, not just the names (review 10-19 R10c-3): a term with this name is reused
+      // when its numbers match, so a half-finished create can be finished.
       var r = await frappe.call({
         method: "frappe.client.get_list",
-        args: { doctype: "Payment Term", fields: ["name"], limit_page_length: 0 },
+        args: {
+          doctype: "Payment Term",
+          fields: ["name", "mode_of_payment", "due_date_based_on", "credit_days", "credit_months",
+            "discount_type", "discount", "discount_validity", "discount_validity_based_on"],
+          limit_page_length: 0,
+        },
       });
       // Template names too (P4e): an installment plan gets a name of its own, and a collision on
       // it is worth a sentence rather than a unique:1 traceback.
@@ -5803,7 +5865,7 @@ async function createPaymentTermDocs(input = {}) {
       });
       return {
         ok: true,
-        names: ((r && r.message) || []).map(function (x) { return x.name; }),
+        terms: (r && r.message) || [],
         templateNames: ((rt && rt.message) || []).map(function (x) { return x.name; }),
       };
     } catch (e) {
@@ -5815,7 +5877,7 @@ async function createPaymentTermDocs(input = {}) {
   }
 
   const plan = planPaymentTermsCreate(input, {
-    existingNames: existing.names || [],
+    existingTerms: existing.terms || [],
     existingTemplateNames: existing.templateNames || [],
   });
   if (!plan.ok) return { ok: false, reason: plan.errors[0], errors: plan.errors, plan };
@@ -5842,27 +5904,30 @@ async function createPaymentTermDocs(input = {}) {
       }
       try {
         var tp = await frappe.call({ method: "frappe.client.insert", args: { doc: i.template } });
-        if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template" };
+        if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template", made: made };
       } catch (eTpl) {
-        return { ok: false, reason: reasonFrom(eTpl), step: "insert-template" };
+        return { ok: false, reason: reasonFrom(eTpl), step: "insert-template", made: made };
       }
-      if (!made.length) return { ok: false, reason: "Payment Term insert returned nothing." };
-      return { ok: true, name: made[0], names: made, template: i.template.template_name };
+      if (i.terms.length && !made.length) return { ok: false, reason: "Payment Term insert returned nothing." };
+      return { ok: true, names: made, template: i.template.template_name };
     } catch (e) {
       return { ok: false, reason: reasonFrom(e), step: "unknown" };
     }
   })()`);
 
-  if (raw && raw.ok && raw.name) {
-    return { ok: true, name: raw.name, names: raw.names || [raw.name], template: raw.template, plan };
+  if (raw && raw.ok) {
+    // `names` is every term the template names — the ones made now and the ones reused.
+    const names = plan.plans.map((p) => p.name).filter((n, k, all) => all.indexOf(n) === k);
+    return { ok: true, name: names[0], names, made: raw.names || [], reused: plan.reused || [], template: raw.template, plan };
   }
-  // A partial insert is worth naming precisely: the terms that did land are real masters, and the
-  // clerk needs to know they exist before retrying into a name collision with their own work.
+  // A partial insert is worth naming precisely: the terms that did land are real masters. A retry
+  // of the same plan reuses them (R10c-3), so saying so is the whole recovery.
   const landed = (raw && raw.made) || [];
-  const partial = landed.length ? ` Created so far: ${landed.join(", ")}.` : "";
   const step = raw && raw.step === "insert-template"
-    ? ` The Payment Term${plan.terms.length > 1 ? "s were" : ` "${plan.templateName}" was`} created, but the Template was not — a Supplier cannot link a term until one exists.`
-    : partial;
+    ? ` ${landed.length ? `Created ${landed.join(", ")}, but` : "The terms are in place, but"} the Template was not created — a Supplier cannot use a term until one names it. Try again: the existing terms will be reused.`
+    : landed.length
+      ? ` Created so far: ${landed.join(", ")} — trying again reuses them.`
+      : "";
   return { ok: false, reason: `${(raw && raw.reason) || "Could not create the payment term."}${step}`, plan };
 }
 
@@ -6460,7 +6525,9 @@ async function saveBillFromErp(opts = {}) {
     if (submit) cancelBillEnrichBackground("submitted");
 
     if (submit && jitIntent && raw.doc && raw.doc.name) {
+      navDebug("payment-create-jit", `start bill=${raw.doc.name} via=${(jitIntent && jitIntent.modeOfPayment) || ""}`);
       const pe = await createJitPaymentEntryForBill(raw.doc.name, jitIntent);
+      navDebug("payment-create-jit", paymentWriteOutcomeLog(pe));
       if (pe && pe.ok) {
         const reloaded = await reloadBillDocAfterPayment(raw.doc.name);
         if (reloaded && reloaded.ok && reloaded.doc) {
@@ -8000,10 +8067,27 @@ async function voidAndAmendFacts(doctype, name) {
  *
  * @param {string} doctype @param {string} name
  */
+/** Review 10-19 R9-3: documents being voided right now, so a second start is refused, not run. */
+const voidingDocs = new Set();
+
 async function voidAndAmendDoc(doctype, name, opts = {}) {
   const dt = normalizeEditableText(doctype);
   const nm = normalizeEditableText(name);
-  if (!dt || !nm) return { ok: false, cancelled: false, reason: "Document name required." };
+  if (!dt || !nm) return { ok: false, cancelled: false, notRun: true, reason: "Document name required." };
+  const busyKey = `${dt}\u0000${nm}`;
+  if (voidingDocs.has(busyKey)) {
+    return { ok: false, cancelled: false, notRun: true, name: nm, step: "busy", reason: `${nm} is already being voided — wait for that to finish.` };
+  }
+  voidingDocs.add(busyKey);
+  try {
+    return await voidAndAmendDocOnce(dt, nm, opts);
+  } finally {
+    voidingDocs.delete(busyKey);
+  }
+}
+
+/** @param {string} dt @param {string} nm @param {{ patch?: object|null, submit?: boolean }} opts */
+async function voidAndAmendDocOnce(dt, nm, opts) {
   await ensureErpFormBridge();
   const payload = JSON.stringify({
     doctype: dt,
@@ -8173,25 +8257,9 @@ async function voidAndAmendDoc(doctype, name, opts = {}) {
     }
   })()`);
 
-  if (!(raw && typeof raw === "object")) {
-    // An erpEval that returns nothing tells us nothing about whether the cancel landed, and
-    // guessing "nothing happened" is the guess that gets a bill entered twice.
-    return {
-      ok: false,
-      cancelled: true,
-      name: nm,
-      reason: "The shell lost contact with ERP during the void and amend. Check the document in ERPNext before retrying.",
-      step: "unknown",
-    };
-  }
-  if (raw.ok) return raw;
-  return {
-    ok: false,
-    cancelled: !!raw.cancelled,
-    name: raw.name || nm,
-    step: raw.step,
-    reason: formatClientErrorReason(raw.reason || raw, "Void and amend failed."),
-  };
+  // Guessing "nothing happened" from a result that does not say is the guess that gets a bill
+  // entered twice — `voidAmendOutcome` (src/void-amend-flow.js) reads it, including R9-1/R9-2.
+  return voidAmendOutcome(raw, nm, (r) => formatClientErrorReason(r, "Void and amend failed."));
 }
 
 /**
@@ -11747,22 +11815,48 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
       break;
     }
     navDebug("jit-receipt-insert", `${live.doc.name} by=${group.by} on=${group.on} lines=${group.rows.map((i) => i + 1).join(",")}`);
+    // Review 10-19 R6c-4: insert and submit are separate steps. A draft receipt never touched stock,
+    // so when ERPNext refuses its submit the draft is deleted rather than left for a retry to
+    // duplicate (the reuse lookup above only finds submitted receipts) — and named if even that fails.
     const raw = await erpEval(`(async () => {
+      var serverMsg = function (e) {
+        var msg = (e && e.message) || String(e);
+        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
+        return msg;
+      };
+      var ins;
       try {
-        var ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
+        ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
+      } catch (e) {
+        return { ok: false, cancelled: false, step: "insert", reason: serverMsg(e) };
+      }
+      var draft = ins && ins.message && ins.message.name;
+      if (!draft) return { ok: false, cancelled: false, step: "insert", reason: "The receipt insert returned no name." };
+      try {
         var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: ins.message } });
         var d = sub.message;
         var items = (d.items || []).slice().sort(function (a, b) { return a.idx - b.idx; }).map(function (r) { return r.name; });
         return { ok: true, name: d.name, items: items };
-      } catch (e) {
-        var msg = (e && e.message) || String(e);
-        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
-        return { ok: false, reason: msg };
+      } catch (eSub) {
+        var why = serverMsg(eSub);
+        try {
+          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Receipt", name: draft } });
+          return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: true, reason: why };
+        } catch (eDel) {
+          return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: false, reason: why };
+        }
       }
     })()`);
     if (!raw || !raw.ok || !raw.name) {
-      failure = (raw && raw.reason) || "Item Receipt failed.";
-      navDebug("jit-receipt-failed", `${live.doc.name} by=${group.by} on=${group.on}: ${failure}`);
+      const why = (raw && raw.reason) || "Item Receipt failed.";
+      failure =
+        raw && raw.draft && raw.draftDeleted === false
+          ? `${why} The draft receipt ${raw.draft} could not be removed — delete it in ERPNext before trying again.`
+          : why;
+      navDebug(
+        "jit-receipt-failed",
+        `${live.doc.name} by=${group.by} on=${group.on} step=${(raw && raw.step) || "?"}${raw && raw.draft ? ` draft=${raw.draft} deleted=${raw.draftDeleted ? 1 : 0}` : ""}${raw && raw.cancelled === undefined && !raw.notRun ? " uncertain=1" : ""}: ${why}`,
+      );
       break;
     }
     navDebug("jit-receipt-submitted", `${live.doc.name} → ${raw.name}`);
@@ -11877,7 +11971,15 @@ ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
   paymentDocDirty = !!dirty;
 });
 ipcMain.handle("save-payment-entry", async (_e, name, patch) => savePaymentEntryFields(name, patch));
-ipcMain.handle("create-blank-payment-entry", async (_e, intent) => createBlankPaymentEntryDoc(intent));
+// Review 10-19 R10c-2: every payment / term create logs both sides, so a failed or doubled payment
+// leaves a trail in nav-debug.log (a write with no log line was once undiagnosable).
+ipcMain.handle("create-blank-payment-entry", async (_e, intent) => {
+  const i = intent || {};
+  navDebug("payment-create-blank", `start party=${i.party || ""} amount=${i.amount} on=${i.payOn || ""} via=${i.modeOfPayment || ""}`);
+  const out = await createBlankPaymentEntryDoc(intent);
+  navDebug("payment-create-blank", paymentWriteOutcomeLog(out));
+  return out;
+});
 /**
  * Delay calendar (P3b/P3c). `exists` is load-bearing, not informational: the renderer only passes
  * the ratified-calendar probe into the date walk when a calendar file exists, because with no file
@@ -11926,7 +12028,19 @@ ipcMain.handle("import-delay-calendar", async () => {
     return { ok: false, error: String((err && err.message) || err) };
   }
 });
-ipcMain.handle("create-payment-term", async (_e, input) => createPaymentTermDocs(input));
+ipcMain.handle("create-payment-term", async (_e, input) => {
+  const i = input || {};
+  const n = Array.isArray(i.installments) && i.installments.length ? i.installments.length : 1;
+  navDebug("payment-term-create", `start installments=${n} via=${i.method || ""} template=${i.templateName || "(default)"}`);
+  const out = await createPaymentTermDocs(input);
+  navDebug(
+    "payment-term-create",
+    out && out.ok
+      ? `ok terms=${(out.names || [out.name]).join(",")}${out.reused && out.reused.length ? ` reused=${out.reused.join(",")}` : ""} template=${out.template || ""}`
+      : `failed: ${(out && out.reason) || "?"}`,
+  );
+  return out;
+});
 ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefaultsFacts(supplier));
 
 /**
@@ -12357,6 +12471,11 @@ async function autoRelinkForSupplier(supplier) {
       return { ok: false, reason: res.reason, posted, cappedOut };
     }
     const flag = await flagRelinkForReview(p.payment, relinkReviewNote(p));
+    // Review 10-19 R9-4: an auto-link with no review flag or no provenance comment must leave a trace.
+    navDebug(
+      "auto-relink",
+      `${p.payment} provenance=${res.provenanceRecorded ? 1 : `0 (${res.provenanceReason || "?"})`} flagged=${flag.ok ? 1 : `0 (${flag.reason || "?"})`}`,
+    );
     posted.push({ ...p, flagged: flag.ok, flagReason: flag.reason || "" });
   }
   return { ok: true, posted, cappedOut };
@@ -12364,7 +12483,10 @@ async function autoRelinkForSupplier(supplier) {
 
 ipcMain.handle("auto-relink", async (_e, supplier) => {
   const out = await autoRelinkForSupplier(supplier);
-  navDebug("auto-relink", `${supplier} posted=${(out.posted || []).length} ok=${out.ok ? 1 : 0}`);
+  navDebug(
+    "auto-relink",
+    `${supplier} posted=${(out.posted || []).length} ok=${out.ok ? 1 : 0}${out.reason ? ` reason=${out.reason}` : ""}`,
+  );
   return out;
 });
 
@@ -12373,7 +12495,7 @@ ipcMain.handle("payment-relink", async (_e, req) => {
   const out = await relinkPayment(req);
   navDebug(
     "payment-relink",
-    `${req && req.payment} ok=${out.ok ? 1 : 0}${out.reason ? ` reason=${out.reason}` : ""}`,
+    `${req && req.payment} ok=${out.ok ? 1 : 0}${out.ok ? ` provenance=${out.provenanceRecorded ? 1 : `0 (${out.provenanceReason || "?"})`}` : ""}${out.reason ? ` reason=${out.reason}` : ""}`,
   );
   return out;
 });
@@ -12472,16 +12594,20 @@ ipcMain.handle("mode-change-facts", async (_e, invoices) => {
 /**
  * P1 stage 3 — run the plan, one bill at a time, and report one outcome per bill.
  *
- * 🔴 **Sequential, and it stops at the first stranding.** Each bill is its own cancel-then-insert,
- * and the outcome that needs a human immediately is a document cancelled with no replacement.
- * Carrying on past one would pile a second irreversible half-step on top of an unresolved first,
- * so the loop stops and the remaining bills are reported as untouched — which they are.
+ * 🔴 **Sequential, and it stops at the first bill that did not go as asked** (`modeChangeShouldStop`;
+ * review 10-19, 5zorro 2026-10-20). Each bill is its own cancel-then-insert-then-submit, and
+ * whatever made ERPNext refuse one usually refuses the next — carrying on would pile up cancelled
+ * originals to sort out by hand. The rest are reported as not attempted, which they are, and the
+ * panel offers "Try again" on them (`modeChangeRemainder`).
+ *
+ * Progress goes to the asking page as `mode-change-progress` events, one before and one after each
+ * bill, so the panel's per-bill chips move while the batch runs.
  *
  * Every bill is submitted after the amend. An amended bill sitting as a draft is not outstanding,
  * so a batch that left drafts behind would take the vendor's bills *off* the very dashboard the
  * clerk is standing on.
  */
-ipcMain.handle("run-mode-change", async (_e, work) => {
+ipcMain.handle("run-mode-change", async (e, work) => {
   const items = (Array.isArray(work) ? work : [])
     .map((w) => ({
       invoice: normalizeEditableText(w && w.invoice),
@@ -12490,23 +12616,34 @@ ipcMain.handle("run-mode-change", async (_e, work) => {
     .filter((w) => w.invoice && w.patch);
   if (!items.length) return { ok: false, reason: "Nothing to change.", results: [] };
 
+  const progress = (payload) => {
+    try {
+      if (e && e.sender && !e.sender.isDestroyed()) e.sender.send("mode-change-progress", payload);
+    } catch {
+      /* the panel's chips are a courtesy; the returned results are the record */
+    }
+  };
   navDebug("run-mode-change", `start ${items.length} bill(s): ${items.map((i) => i.invoice).join(",")}`);
   const results = [];
   let stopped = "";
   for (const item of items) {
     if (stopped) {
-      results.push({ invoice: item.invoice, ok: false, cancelled: false, reason: `Not attempted — stopped after ${stopped}.` });
+      const skipped = { invoice: item.invoice, ok: false, cancelled: false, notAttempted: true, reason: `Not attempted — stopped after ${stopped}.` };
+      results.push(skipped);
+      progress(skipped);
       continue;
     }
+    progress({ invoice: item.invoice, phase: "working" });
     const r = await voidAndAmendDoc("Purchase Invoice", item.invoice, { patch: item.patch, submit: true });
     navDebug(
       "run-mode-change",
-      `${item.invoice} ok=${r && r.ok ? 1 : 0} cancelled=${r && r.cancelled ? 1 : 0} step=${(r && r.step) || ""} amended=${(r && r.amendedName) || ""} verified=${r && r.verified ? (r.verified.ok ? 1 : 0) : "?"}${r && r.reason ? ` reason=${r.reason}` : ""}`,
+      `${item.invoice} ok=${r && r.ok ? 1 : 0} cancelled=${r && r.cancelled ? 1 : 0}${r && r.uncertain ? " uncertain=1" : ""} step=${(r && r.step) || ""} amended=${(r && r.amendedName) || ""} verified=${r && r.verified ? (r.verified.ok ? 1 : 0) : "?"}${r && r.reason ? ` reason=${r.reason}` : ""}`,
     );
-    results.push({
+    const one = {
       invoice: item.invoice,
       ok: !!(r && r.ok),
       cancelled: !!(r && r.cancelled),
+      uncertain: !!(r && r.uncertain),
       amendedName: (r && r.amendedName) || "",
       // `undefined` when nothing was read back; `false` only when ERP was read and disagreed.
       verified: r && r.verified ? r.verified.ok === true : undefined,
@@ -12514,8 +12651,10 @@ ipcMain.handle("run-mode-change", async (_e, work) => {
       missedRows: (r && r.patched && r.patched.missed) || [],
       reason: (r && r.reason) || "",
       step: (r && r.step) || "",
-    });
-    if (r && !r.ok && r.cancelled && !r.amendedName) stopped = `${item.invoice} was cancelled without a replacement`;
+    };
+    results.push(one);
+    progress(one);
+    if (modeChangeShouldStop(one)) stopped = item.invoice;
   }
   navDebug("run-mode-change", `done ok=${results.filter((r) => r.ok).length}/${results.length}${stopped ? ` stopped=${stopped}` : ""}`);
   // The dashboard is now describing documents that no longer exist under those names.
@@ -12528,9 +12667,19 @@ ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
 ipcMain.handle("pay-outstanding-search-link", async (_e, doctype, txt, filters) =>
   searchLink(doctype, txt, await withResolvedCompany(doctype, filters)),
 );
-ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) =>
-  createBatchPaymentEntryForBills(bills, intent),
-);
+ipcMain.handle("create-batch-payment-entry", async (_e, bills, intent) => {
+  const rows = Array.isArray(bills) ? bills : [];
+  const i = intent || {};
+  const invoices = [...new Set(rows.map((b) => (b && b.invoice) || "").filter(Boolean))];
+  const total = rows.reduce((sum, b) => sum + (Number(b && b.outstanding) || 0), 0);
+  navDebug(
+    "payment-create-batch",
+    `start bills=${invoices.join(",")} outstanding=${total.toFixed(2)} on=${i.payOn || ""} via=${i.modeOfPayment || ""} from=${i.cashBankAccount || ""}`,
+  );
+  const out = await createBatchPaymentEntryForBills(bills, intent);
+  navDebug("payment-create-batch", paymentWriteOutcomeLog(out));
+  return out;
+});
 ipcMain.on("open-devtools", (_e, target) => {
   const map = { erp, chrome, home, hist, docForm, payOutstanding, paymentDoc, findDoc };
   const key = typeof target === "string" && map[target] ? target : "erp";

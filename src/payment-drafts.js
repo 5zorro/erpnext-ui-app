@@ -136,3 +136,22 @@ export function draftPaymentConfirmText(draft, action) {
     `${covers}\n\nSubmitting posts it to the ledger. Undoing it afterwards means cancelling the payment.`
   );
 }
+
+/**
+ * What the payment drawer says when a create fails (review 10-19 R10c-1). When ERPNext saved the
+ * Payment Entry and then refused to submit it, the draft exists — say its name and where it is, or
+ * the clerk fixes the cause, clicks again, and leaves the first as an unexplained second payment.
+ *
+ * @param {{ ok?: boolean, reason?: string, step?: string, name?: string|null }|null|undefined} result
+ * @returns {{ text: string, draftLeft: string }}
+ */
+export function paymentCreateFailureText(result) {
+  const r = result || {};
+  const reason = String(r.reason || "").trim() || "Payment Entry create failed.";
+  const draft = r.step === "submit" && r.name ? String(r.name) : "";
+  if (!draft) return { text: reason, draftLeft: "" };
+  return {
+    text: `Saved as draft ${draft} but not submitted: ${reason} Finish or delete it under Draft payments before trying again.`,
+    draftLeft: draft,
+  };
+}

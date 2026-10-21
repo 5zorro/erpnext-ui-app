@@ -14,6 +14,7 @@ import { mountLinkPicker } from "./link-picker-ui.js";
 import { checkDocLinkFilters } from "./payment-entry-link-filters.js";
 import { formatUsdAmountHtml } from "./money.js";
 import { uiIconHtml } from "./ui-icons.js";
+import { paymentCreateFailureText } from "./payment-drafts.js";
 
 /**
  * What the write-mode submit button acts on -- set by setCheckDocBatchSource, read by
@@ -361,6 +362,7 @@ export function closeCheckDoc(root) {
  *   linkMounted?: WeakMap<Element, true>,
  *   onDirty?: (dirty: boolean) => void,
  *   onSubmitted?: (result: { ok: true, name: string|null }, intent: { modeOfPayment?: string }) => void,
+ *   onDraftLeft?: (name: string) => void,
  *   onFieldEdited?: (testid: string) => void,
  * }} [deps] `onFieldEdited` (C9) fires after the clerk types into or picks one of the four
  *   write fields — the page re-proposes the others from it (a new method changes the account and
@@ -455,7 +457,9 @@ export function mountCheckDocWrite(root, deps = {}) {
     }));
     submitBtn.disabled = false;
     if (!result || !result.ok) {
-      if (statusEl) statusEl.textContent = (result && result.reason) || "Payment Entry create failed.";
+      const told = paymentCreateFailureText(result);
+      if (statusEl) statusEl.textContent = told.text;
+      if (told.draftLeft && deps.onDraftLeft) deps.onDraftLeft(told.draftLeft);
       return;
     }
     if (statusEl) statusEl.textContent = `Created ${result.name || "Payment Entry"}.`;

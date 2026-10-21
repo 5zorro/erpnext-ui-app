@@ -367,6 +367,15 @@
     .method-panel-status.warn { color: #b45309; }
     .method-panel-outcome { margin: 0; padding-left: 18px; font-size: 12px; color: #334155; }
     .method-panel-outcome[hidden] { display: none; }
+    .mc-chip { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e2e8f0; color: #334155; white-space: nowrap; }
+    .mc-chip[hidden] { display: none; }
+    .mc-chip.working { background: #dbeafe; color: #1e40af; }
+    .mc-chip.done { background: #dcfce7; color: #166534; }
+    .mc-chip.check, .mc-chip.half { background: #fef3c7; color: #92400e; font-weight: 600; }
+    .mc-chip.stranded { background: #fee2e2; color: #991b1b; font-weight: 600; }
+    .mc-chip.unchanged, .mc-chip.skipped { background: #f1f5f9; color: #475569; }
+    .method-panel-after { display: flex; gap: 8px; flex-wrap: wrap; }
+    .method-panel-after[hidden] { display: none; }
     .relink-panel { background: #faf5ff; border-bottom: 1px solid #d8b4fe; }
     .relink-row {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1073,6 +1082,8 @@
       planModeChange,
       describeModeChange,
       summarizeModeChange,
+      modeChangeChip,
+      modeChangeRemainder,
     } from "../src/mode-change-plan.js";
     import { proposeRelinks, describeRelink } from "../src/payment-relink.js";
     import { openPrintDialog } from "../src/print-dialog-ui.js";
@@ -1429,6 +1440,11 @@
       linkMounted,
       onDirty: setDrawerDirty,
       onFieldEdited: () => refreshDrawerDefaults(),
+      // Review 10-19 R10c-1: a refused submit leaves a draft — show it where the drawer says it is.
+      onDraftLeft: async () => {
+        await loadDraftPayments();
+        paintDraftPayments();
+      },
       onSubmitted: async (result, intent) => {
         // Printing convention: a check run's checks go straight into the print queue.
         if (result && result.name && isCheckModeOfPayment(intent && intent.modeOfPayment) && api && api.printQueueAdd) {
@@ -2750,6 +2766,9 @@
       list.className = "method-panel-rows";
       /** @type {HTMLInputElement[]} */
       const boxes = [];
+      /** Review 10-19: each bill's status chip, by invoice (a bill's installments share one). */
+      /** @type {Map<string, HTMLElement[]>} */
+      const chipsByInvoice = new Map();
       for (const b of bills) {
         const row = document.createElement("label");
         row.className = "method-panel-row";
@@ -2767,6 +2786,13 @@
           `${moneyHtml(b.outstanding)} · ${escapeHtml(b.modeOfPayment || "no method set")}`;
         row.appendChild(box);
         row.appendChild(text);
+        const chip = document.createElement("span");
+        chip.className = "mc-chip";
+        chip.dataset.testid = "method-panel-chip";
+        chip.hidden = true;
+        row.appendChild(chip);
+        const inv = String(b.invoice || "");
+        chipsByInvoice.set(inv, [...(chipsByInvoice.get(inv) || []), chip]);
         list.appendChild(row);
       }
       panel.appendChild(list);
@@ -2782,10 +2808,101 @@
       outcome.hidden = true;
       panel.appendChild(outcome);
 
+      // After a stop: "Try again" on what is left, and "Done" to re-read the board.
+      const after = document.createElement("div");
+      after.className = "method-panel-after";
+      after.hidden = true;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "btn-primary";
+      retry.dataset.testid = "method-panel-retry";
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btn-secondary";
+      done.dataset.testid = "method-panel-done";
+      done.textContent = "Done — refresh the board";
+      after.appendChild(retry);
+      after.appendChild(done);
+      panel.appendChild(after);
+
       const setStatus = (text, cls) => {
         status.textContent = text || "";
         status.className = `method-panel-status${cls ? ` ${cls}` : ""}`;
       };
+
+      /** @param {string} invoice @param {object} entry */
+      const paintChip = (invoice, entry) => {
+        const c = modeChangeChip(entry);
+        for (const chip of chipsByInvoice.get(String(invoice || "")) || []) {
+          chip.hidden = false;
+          chip.className = `mc-chip ${c.state}`;
+          chip.textContent = c.text;
+          chip.title = c.title || "";
+        }
+      };
+
+      /**
+       * Run one batch, moving each bill's chip as main reports it. On a full success the board is
+       * re-read (the rows now name documents that were renamed). On a stop the panel stays up so
+       * the chips can be read, with "Try again" on the bills that are safe to retry.
+       * @param {{ invoice: string, patch: object }[]} work @param {string} targetMode
+       */
+      const runBatch = async (work, targetMode) => {
+        apply.disabled = true;
+        after.hidden = true;
+        for (const b of boxes) b.disabled = true;
+        for (const w of work) paintChip(w.invoice, { phase: "waiting" });
+        setStatus(`Changing ${work.length} bill${work.length === 1 ? "" : "s"} to ${targetMode}…`);
+        const unsubscribe =
+          api && typeof api.onModeChangeProgress === "function"
+            ? api.onModeChangeProgress((p) => p && p.invoice && paintChip(p.invoice, p))
+            : null;
+        let res;
+        try {
+          res = await api.runModeChange(work);
+        } catch (err) {
+          for (const w of work) paintChip(w.invoice, { invoice: w.invoice, ok: false, cancelled: true, uncertain: true });
+          setStatus(
+            `Lost contact partway through: ${String(err && err.message ? err.message : err)}. ` +
+              "Check these bills in ERPNext before retrying — some may already be cancelled.",
+            "err",
+          );
+          done.hidden = false;
+          after.hidden = false;
+          retry.hidden = true;
+          return;
+        } finally {
+          if (typeof unsubscribe === "function") unsubscribe();
+        }
+        const results = (res && res.results) || [];
+        for (const r of results) paintChip(r.invoice, r);
+        const told = summarizeModeChange(results);
+        setStatus(told.headline, told.ok ? "" : "err");
+        outcome.hidden = !told.lines.length;
+        outcome.innerHTML = "";
+        for (const line of told.lines) {
+          const li = document.createElement("li");
+          li.textContent = line;
+          outcome.appendChild(li);
+        }
+        if (told.ok) {
+          await reloadBills();
+          return;
+        }
+        // Stopped. Apply stays off: the rows above may name bills that were just cancelled.
+        const rest = modeChangeRemainder(work, results);
+        retry.hidden = !rest.length;
+        retry.textContent = `Try again on the remaining ${rest.length}`;
+        retry.onclick = () => {
+          const ask =
+            `Try again on ${rest.length} bill${rest.length === 1 ? "" : "s"}? ` +
+            `Each is cancelled and amended to ${targetMode}, one at a time, stopping at the first refusal.`;
+          if (window.confirm(ask)) void runBatch(rest, targetMode);
+        };
+        done.hidden = false;
+        after.hidden = false;
+      };
+      done.onclick = () => void reloadBills();
 
       toggleAll.onclick = () => {
         const turningOff = boxes.some((b) => b.checked);
@@ -2830,31 +2947,10 @@
         const body = warning.lines.map((l) => l.replace(/\*\*/g, "")).join("\n\n");
         if (!window.confirm(`${warning.title}\n\n${body}`)) return;
 
-        apply.disabled = true;
-        setStatus(`Changing ${plan.amendCount} bill${plan.amendCount === 1 ? "" : "s"} to ${targetMode}…`);
-        let res;
-        try {
-          res = await api.runModeChange(plan.work.map((w) => ({ invoice: w.invoice, patch: w.patch })));
-        } catch (err) {
-          apply.disabled = false;
-          return setStatus(
-            `Lost contact partway through: ${String(err && err.message ? err.message : err)}. ` +
-              "Check these bills in ERPNext before retrying — some may already be cancelled.",
-            "err",
-          );
-        }
-        apply.disabled = false;
-        const told = summarizeModeChange((res && res.results) || []);
-        setStatus(told.headline, told.ok ? "" : "err");
-        outcome.hidden = !told.lines.length;
-        for (const line of told.lines) {
-          const li = document.createElement("li");
-          li.textContent = line;
-          outcome.appendChild(li);
-        }
-        // The rows on screen now name documents that were renamed or cancelled, so re-read rather
-        // than patching the board in place.
-        await reloadBills();
+        await runBatch(
+          plan.work.map((w) => ({ invoice: w.invoice, patch: w.patch })),
+          targetMode,
+        );
       };
 
       return panel;
@@ -3572,7 +3668,9 @@
         // Deliberately does NOT re-render the dashboard. Nothing behind this modal changed --
         // saying otherwise by repainting would imply the new term touched the bills on screen.
         const made = (r.names && r.names.length > 1 ? `${r.names.length} terms and the template ${r.template}` : r.name) || r.name;
-        termModal.msg.textContent = `Created ${made}. It applies to bills entered from now on.`;
+        // Review 10-19 R10c-3: a term already in ERPNext with the same numbers is reused, not doubled.
+        const reused = Array.isArray(r.reused) && r.reused.length ? ` (reusing the existing ${r.reused.join(", ")})` : "";
+        termModal.msg.textContent = `Created ${made}${reused}. It applies to bills entered from now on.`;
         termModal.msg.className = "msg good";
       } else {
         termModal.msg.textContent = (r && r.reason) || "Could not create the payment term.";

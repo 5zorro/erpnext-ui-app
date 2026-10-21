@@ -257,7 +257,10 @@ import { installFocusRing, logFocus } from "../src/focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "../src/user-move-guard.js";
 import { captureBillFocus, restoreBillFocus, isBillFormFocusTarget } from "../src/bill-focus-guard.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
-import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../src/bill-enrich-pending.js";
+import {
+  LINKED_SOURCE_LOADING_PLACEHOLDER,
+  LINKED_SOURCE_GAVE_UP_PLACEHOLDER,
+} from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
@@ -395,6 +398,7 @@ export async function bootBillFormPage(api) {
     return listOverbillCapCacheBlockers(
       lastDoc && lastDoc.items,
       (ri) => cachedMaxBillableForRow(ri),
+      { gaveUp: !!(lastEnrichPending && lastEnrichPending.gaveUp) },
     );
   }
 
@@ -4518,8 +4522,11 @@ export async function bootBillFormPage(api) {
     const value = opts.value != null ? String(opts.value) : "";
     input.value = opts.pending ? "" : value;
     if (opts.pending) {
-      input.placeholder = LINKED_SOURCE_LOADING_PLACEHOLDER;
-      input.title = "Loading from linked source document…";
+      const gaveUp = !!(lastEnrichPending && lastEnrichPending.gaveUp);
+      input.placeholder = gaveUp ? LINKED_SOURCE_GAVE_UP_PLACEHOLDER : LINKED_SOURCE_LOADING_PLACEHOLDER;
+      input.title = gaveUp
+        ? "ERPNext did not answer in time, and the shell stopped asking. Refresh to try again."
+        : "Loading from linked source document…";
       input.classList.add("source-field-loading");
       input.dataset.enrichPending = "1";
     } else {

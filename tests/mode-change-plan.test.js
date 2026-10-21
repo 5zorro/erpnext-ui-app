@@ -4,6 +4,9 @@ import {
   planModeChange,
   describeModeChange,
   summarizeModeChange,
+  modeChangeShouldStop,
+  modeChangeChip,
+  modeChangeRemainder,
 } from "../src/mode-change-plan.js";
 import { applyAmendPatch, verifyAmendPatch } from "../src/doc-actions.js";
 
@@ -290,5 +293,59 @@ describe("the batch confirm names the amendments correctly too", () => {
     const text = describeModeChange(plan, { amendCounter: false }).lines.join("\n");
     assert.match(text, /a new ERPNext ID\. The vendor's own numbers/);
     assert.doesNotMatch(text, /→/);
+  });
+});
+
+describe("review 10-19 / 5zorro 2026-10-20 — the batch stops at the first bill that did not go as asked", () => {
+  it("stops on a refusal, a half-done bill, an unknown, and a method that did not stick", () => {
+    assert.equal(modeChangeShouldStop({ ok: true, verified: true }), false);
+    assert.equal(modeChangeShouldStop({ ok: true }), false);
+    assert.equal(modeChangeShouldStop({ ok: false, cancelled: false }), true);
+    assert.equal(modeChangeShouldStop({ ok: false, cancelled: true, amendedName: "B-1" }), true);
+    assert.equal(modeChangeShouldStop({ ok: false, cancelled: true, uncertain: true }), true);
+    assert.equal(modeChangeShouldStop({ ok: true, verified: false }), true);
+    assert.equal(modeChangeShouldStop(null), true);
+  });
+
+  it("each bill's chip says where it stands", () => {
+    assert.equal(modeChangeChip({ phase: "waiting" }).state, "waiting");
+    assert.equal(modeChangeChip({ phase: "working" }).state, "working");
+    assert.deepEqual(
+      [modeChangeChip({ ok: true, amendedName: "B-1" }).state, modeChangeChip({ ok: true, amendedName: "B-1" }).text],
+      ["done", "✓ → B-1"],
+    );
+    assert.equal(modeChangeChip({ ok: true, verified: false, amendedName: "B-1" }).state, "check");
+    assert.equal(modeChangeChip({ ok: false, cancelled: true, amendedName: "B-1" }).state, "half");
+    assert.equal(modeChangeChip({ ok: false, cancelled: true }).text, "CANCELLED, not replaced");
+    assert.equal(modeChangeChip({ ok: false, cancelled: true, uncertain: true }).text, "May be cancelled — check");
+    assert.equal(modeChangeChip({ ok: false, cancelled: false, reason: "Linked receipt" }).title, "Linked receipt");
+    assert.equal(modeChangeChip({ ok: false, notAttempted: true }).state, "skipped");
+  });
+
+  it("'Try again' offers the bills never attempted and the ones refused before anything changed — not the cancelled ones", () => {
+    const work = ["A", "B", "C", "D", "E"].map((invoice) => ({ invoice, patch: { x: invoice } }));
+    const results = [
+      { invoice: "A", ok: true, amendedName: "A-1" },
+      { invoice: "B", ok: false, cancelled: false, reason: "refused" },
+      { invoice: "C", ok: false, cancelled: false, notAttempted: true },
+    ];
+    assert.deepEqual(modeChangeRemainder(work, results).map((w) => w.invoice), ["B", "C", "D", "E"]);
+    const halfDone = [{ invoice: "A", ok: false, cancelled: true, amendedName: "A-1" }];
+    assert.deepEqual(modeChangeRemainder(work.slice(0, 2), halfDone).map((w) => w.invoice), ["B"]);
+    // The patch travels with the retried work unchanged.
+    assert.deepEqual(modeChangeRemainder(work, results)[0].patch, { x: "B" });
+  });
+
+  it("the summary names an unsubmitted amended copy separately from a stranded bill", () => {
+    const told = summarizeModeChange([
+      { invoice: "A", ok: true, amendedName: "A-1" },
+      { invoice: "B", ok: false, cancelled: true, amendedName: "B-1", reason: "Period closed." },
+      { invoice: "C", ok: false, cancelled: false, notAttempted: true, reason: "Not attempted — stopped after B." },
+    ]);
+    assert.equal(told.ok, false);
+    assert.deepEqual(told.halfDone, ["B"]);
+    assert.deepEqual(told.stranded, []);
+    assert.match(told.headline, /1 amended copy was created but not submitted/);
+    assert.match(told.lines[1], /B → B-1 — created but NOT submitted/);
   });
 });

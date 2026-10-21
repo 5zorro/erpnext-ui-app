@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runVoidAndAmend, confirmBodyFromLines } from "../src/void-amend-flow.js";
+import { runVoidAndAmend, confirmBodyFromLines, voidAmendOutcome } from "../src/void-amend-flow.js";
 
 /**
  * The whole point of extracting this flow (P1 stage 2) is that four skins now run it, and the
@@ -181,5 +181,93 @@ describe("confirmBodyFromLines", () => {
   it("strips markdown emphasis and blank-line separates", () => {
     assert.equal(confirmBodyFromLines(["a **b**", "c"]), "a b\n\nc");
     assert.equal(confirmBodyFromLines(null), "");
+  });
+});
+
+describe("review 10-19 R9-1 / R9-2 — reading what a void-and-amend actually did", () => {
+  const name = "ACC-PINV-2026-00231";
+
+  it("a result without `cancelled` did not come from the script finishing: it may be cancelled", () => {
+    // erpEval's own catch: the ERP page reloaded or died between the cancel and the insert.
+    const out = voidAmendOutcome({ ok: false, reason: "Script failed to execute" }, name);
+    assert.equal(out.cancelled, true);
+    assert.equal(out.uncertain, true);
+    assert.match(out.reason, /Script failed to execute/);
+    assert.match(out.reason, /Check the document in ERPNext/);
+  });
+
+  it("nothing at all back is the same unknown", () => {
+    const out = voidAmendOutcome(undefined, name);
+    assert.equal(out.cancelled, true);
+    assert.equal(out.uncertain, true);
+  });
+
+  it("a refusal made before anything was sent still says nothing changed", () => {
+    const out = voidAmendOutcome({ ok: false, notRun: true, reason: "ERP view not ready" }, name);
+    assert.equal(out.cancelled, false);
+    assert.equal(out.notRun, true);
+    assert.ok(!out.uncertain);
+  });
+
+  it("a refused submit after the insert keeps the amended copy's name", () => {
+    const out = voidAmendOutcome(
+      { ok: false, cancelled: true, name, amendedName: `${name}-1`, step: "submit", reason: "Period closed" },
+      name,
+    );
+    assert.equal(out.amendedName, `${name}-1`);
+    assert.equal(out.cancelled, true);
+    assert.equal(out.step, "submit");
+  });
+
+  it("the script's own refusals keep their cancelled flag", () => {
+    const out = voidAmendOutcome({ ok: false, cancelled: false, step: "cancel", reason: "Linked receipt" }, name);
+    assert.equal(out.cancelled, false);
+    assert.ok(!out.uncertain);
+  });
+
+  it("success passes through untouched", () => {
+    const ok = { ok: true, cancelled: true, name, amendedName: `${name}-1` };
+    assert.equal(voidAmendOutcome(ok, name), ok);
+  });
+
+  it("formats the reason with the caller's formatter", () => {
+    const out = voidAmendOutcome({ ok: false, cancelled: false, reason: "raw" }, name, (r) => `fmt:${r}`);
+    assert.equal(out.reason, "fmt:raw");
+  });
+});
+
+describe("review 10-19 R9-3 — one void-and-amend per document at a time", () => {
+  it("a second click while the first is writing is refused before reading or asking", async () => {
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const h = harness({
+      api: {
+        voidAndAmend: async (doctype, nm) => {
+          h.calls.push(["write", doctype, nm]);
+          await gate;
+          return { ok: true, name: nm, amendedName: `${nm}-1`, cancelled: true };
+        },
+      },
+    });
+    const first = runVoidAndAmend(h.deps);
+    await new Promise((r) => setTimeout(r, 0));
+    const second = await runVoidAndAmend(h.deps);
+    assert.equal(second.ran, false);
+    assert.match(second.reason, /already being voided/);
+    release();
+    const one = await first;
+    assert.equal(one.ok, true);
+    assert.equal(h.calls.filter((c) => c[0] === "write").length, 1);
+    assert.equal(h.confirms.length, 1);
+    // …and once it is done, the document can be voided again (the guard is released).
+    const third = await runVoidAndAmend(h.deps);
+    assert.equal(third.ran, true);
+  });
+
+  it("main's own refusal (already being voided there) is reported as not run", async () => {
+    const h = harness({ result: { ok: false, cancelled: false, notRun: true, reason: "already being voided" } });
+    const out = await runVoidAndAmend(h.deps);
+    assert.equal(out.ran, false);
+    assert.equal(out.strandedName, "");
   });
 });

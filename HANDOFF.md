@@ -175,6 +175,13 @@ Four things about it are worth knowing before touching the code:
 3. **The half-done state is the dangerous one.** Cancel can succeed and the insert still fail,
    leaving a cancelled document with no replacement. Every result distinguishes that case and names
    the document, because "it failed" would get the bill re-entered and it would then exist twice.
+   `voidAmendOutcome` (`src/void-amend-flow.js`) is the one reader of a result, and it knows three
+   half-done shapes (review 2026-10-19): cancelled with no copy; cancelled with a copy whose
+   **submit** was refused (the copy's name is kept); and **unknown** — a result without
+   `cancelled` means the script did not finish, so it is "may already be cancelled", never "nothing
+   changed". Only a refusal before anything was sent (`erpEval`'s `notRun`) says nothing changed.
+   One void per document at a time (page and main). The batch method change stops at the first
+   bill that did not go exactly as asked and offers Try again on the untouched rest.
 4. **The amendment's name is not `<name>-1` in general.** `_set_amended_name` (`naming.py:549`)
    increments a trailing counter, so amending `…-1` gives `…-2`; and under
    `Document Naming Settings.default_amend_naming = "Default Naming"` no prediction is possible at

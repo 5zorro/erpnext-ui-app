@@ -9,8 +9,12 @@ import {
 
 export const LINKED_SOURCE_LOADING_PLACEHOLDER = "Still loading…";
 
+/** Review 10-19 R6c-2: the background retry stopped; only a Refresh starts it again. */
+export const LINKED_SOURCE_GAVE_UP_PLACEHOLDER = "Couldn't load — press Refresh";
+
 /**
- * @typedef {{ linkedPos?: boolean, linkedReceipts?: boolean, lineContext?: boolean }} BillEnrichPending
+ * @typedef {{ linkedPos?: boolean, linkedReceipts?: boolean, lineContext?: boolean, gaveUp?: boolean }} BillEnrichPending
+ *   `gaveUp`: main stopped retrying the slices still marked pending (review 10-19 R6c-2).
  */
 
 /**
