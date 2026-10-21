@@ -1,6 +1,6 @@
 /**
  * Link picker keyboard / highlight policy (Bill Vendor/Terms/Item/Project).
- * Pure — no DOM. bill.html / doc-form-page must call these so Tab/Enter behavior stays tested.
+ * Pure — no DOM. bill-form-page / doc-form-page must call these so Tab/Enter behavior stays tested.
  */
 
 /** Default Bill (and Item Receipt) editable cell order for Tab / Excel nav. */

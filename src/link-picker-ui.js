@@ -25,6 +25,13 @@ import {
 import { logFocus } from "./focus-debug-client.js";
 import { linkDropdownPlacement } from "./link-dropdown-place.js";
 import { uiIconHtml } from "./ui-icons.js";
+import { createOpenPickerSet } from "./link-picker-open-set.js";
+
+/** One set of page-wide listeners for every picker on the page (review 10-19 R5-1). */
+const openPickers = createOpenPickerSet(
+  typeof window !== "undefined" ? window : null,
+  typeof document !== "undefined" ? document : null,
+);
 
 /**
  * @typedef {{
@@ -109,11 +116,9 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   }
   function showDropdown() {
     dd.hidden = false;
+    openPickers.opened({ wrap, dd, place: placeDropdown });
     placeDropdown();
   }
-  window.addEventListener("resize", placeDropdown);
-  // Any scroller (the line table, the page) moves the box; the dropdown follows it.
-  window.addEventListener("scroll", placeDropdown, true);
 
   let timer = null;
   /** @type {HTMLButtonElement[]} */
@@ -316,8 +321,5 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     // Not `input.value`: a committed value is not a filter, or the field's own dropdown offers
     // only the value it already has. See linkPickerOpenQuery.
     runSearch(linkPickerOpenQuery(input.value, input.dataset.linkCommitted));
-  });
-  document.addEventListener("click", (ev) => {
-    if (!wrap.contains(/** @type {Node} */ (ev.target))) dd.hidden = true;
   });
 }

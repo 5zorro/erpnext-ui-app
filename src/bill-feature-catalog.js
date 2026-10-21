@@ -40,7 +40,7 @@ export const BILL_FEATURE_CATALOG = Object.freeze([
     alpha: true,
     coverage: "tested",
     pureModule: "link-search.js + link-picker-policy.js",
-    notes: "DOM in bill.html; policy + search pure-tested",
+    notes: "DOM in bill-form-page.js; policy + search pure-tested",
   },
   {
     id: "vendor-idle-rank",

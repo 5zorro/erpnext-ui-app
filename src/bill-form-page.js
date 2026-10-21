@@ -1,5 +1,5 @@
 /**
- * Bill Doc page controller — tranche 10 (from bill.html).
+ * Bill Doc page controller — tranche 10 (moved out of the retired bill.html).
  */
 
 import {
@@ -6002,6 +6002,7 @@ export async function bootBillFormPage(api) {
       paint(result.doc || lastDoc, amountDue);
     },
     setStatus,
+    lockWhileRunning: [el.items, document.getElementById("btn-add-line")],
     testId: "bill-import",
   });
   if (el.clearQty) {

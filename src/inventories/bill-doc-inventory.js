@@ -167,7 +167,7 @@ const BILL_DOC_STATIC = Object.freeze([
 ]);
 
 /**
- * One representative item line (runtime-rendered; not in static bill.html).
+ * One representative item line (runtime-rendered; not in the static fragment).
  * @returns {CuratedInteractable[]}
  */
 function billDocLineTemplate() {

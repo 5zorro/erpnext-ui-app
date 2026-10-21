@@ -1,6 +1,6 @@
 /**
  * Shared Doc skin chrome — Bill, PO, Item Receipt (toolbar, gate, dirty pill, memo, link picker).
- * Bill-only dashboard styles stay in bill.html; PO/IR-specific layout stays in doc-form.html.
+ * Bill-only dashboard styles stay in bill-dashboard.css; PO/IR-specific layout stays in doc-form.html.
  */
 
 /* Inline SVG icons — SSoT: src/ui-icons.js (no Unicode emoji in product chrome). */

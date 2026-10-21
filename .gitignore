@@ -5,8 +5,8 @@ yarn-error.log*
 *.swp
 *~
 # Hand-made backups. `*~` and `*.swp` covered the editor's own, but not the ones people make by
-# renaming — electron/bill.html.old sat untracked-but-not-ignored because the rule below names
-# electron/bill.html exactly and gitignore does no suffix matching.
+# renaming — a renamed copy of the retired Bill shell once sat untracked-but-not-ignored, because
+# gitignore does no suffix matching.
 *.old
 *.bak
 *.orig

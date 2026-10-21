@@ -27,9 +27,8 @@ export const PRODUCTION_HTML_ENTRYPOINTS = Object.freeze({
   "find-doc.html": "DOC_SKIN_INDEX find:* rows → a document list's Find page (OI-056, plan 2026-09-26)",
 });
 
-/** Legacy shells retained for reference; not loaded at runtime (tranche 10). */
+/** Partials and sources assembled into the entry points above; not loaded on their own. */
 export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
-  "bill.html": "Legacy Bill shell — superseded by doc-form.html (shared chrome + bill body)",
   "bill-shell.fragment.html": "Bill body partial — assembled with doc-chrome.fragment.html",
   "doc-chrome.fragment.html": "Shared AP entry chrome (banner, toolbar, commit gate)",
   "doc-form-body.fragment.html": "PO/IR body partial — assembled into doc-form.html",
@@ -41,7 +40,7 @@ export const PRODUCTION_HTML_ALLOWLIST_EXTRA = Object.freeze({
 });
 
 /**
- * @param {string} basename e.g. bill.html
+ * @param {string} basename e.g. doc-form.html
  * @returns {string|null} reason or null if unknown
  */
 export function productionHtmlReachReason(basename) {

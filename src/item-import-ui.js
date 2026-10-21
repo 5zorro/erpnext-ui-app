@@ -341,10 +341,33 @@ export function openItemImportModal(itemCols, opts = {}) {
 }
 
 /**
+ * What a stopped import says (review 10-19 R5b-2): the lines before the failure are on the form,
+ * so a later Save keeps them — the message must say so, not only what failed.
+ * @param {{ lineNo?: number, total?: number, linesDone: number, rowTouched?: boolean, removed?: number, reason: string }} s
+ */
+export function importStoppedText(s) {
+  const why = String(s.reason || "unknown error").replace(/\.?\s*$/, "");
+  if (!s.lineNo) {
+    const removed = s.removed ? ` ${s.removed} extra line(s) were already removed.` : "";
+    return `Import stopped before any line was written: ${why}.${removed}`;
+  }
+  const done =
+    s.linesDone > 1
+      ? ` Lines 1–${s.linesDone} are on the form.`
+      : s.linesDone === 1
+        ? " Line 1 is on the form."
+        : "";
+  const check = s.rowTouched ? ` Check line ${s.lineNo}.` : "";
+  return `Import stopped at line ${s.lineNo} of ${s.total}: ${why}.${done}${check}`;
+}
+
+/**
+ * Writes the rows one by one. On a refusal it stops and returns the form as it now is (`doc`),
+ * so the page can repaint the lines that did land.
  * @param {{ setItem: Function, addItem: Function, deleteItem: Function }} api
  * @param {Record<string, string>[]} records
  * @param {{ replace?: boolean, currentRowCount?: number, onProgress?: (msg: string) => void }} [opts]
- * @returns {Promise<{ ok: boolean, doc?: object, scratch?: object, reason?: string }>}
+ * @returns {Promise<{ ok: boolean, doc?: object, scratch?: object, reason?: string, linesDone?: number }>}
  */
 export async function applyImportedItemRows(api, records, opts = {}) {
   if (!api || !records.length) {
@@ -360,14 +383,25 @@ export async function applyImportedItemRows(api, records, opts = {}) {
   const progress = (msg) => {
     if (opts.onProgress) opts.onProgress(msg);
   };
+  let linesDone = 0;
+  let removed = 0;
+  /** @param {{ lineNo?: number, rowTouched?: boolean }} at @param {string} reason */
+  const stopped = (at, reason) => ({
+    ok: false,
+    reason: importStoppedText({ ...at, total: records.length, linesDone, removed, reason }),
+    doc: lastDoc || undefined,
+    scratch: lastScratch,
+    linesDone,
+  });
 
   if (replace) {
     while (rowCount > records.length && rowCount > 1) {
       progress(`Removing extra line ${rowCount}…`);
       const del = await api.deleteItem(rowCount - 1);
       if (!(del && del.ok)) {
-        return { ok: false, reason: (del && del.reason) || "Could not remove extra lines." };
+        return stopped({}, (del && del.reason) || "Could not remove extra lines.");
       }
+      removed++;
       lastDoc = del.doc;
       lastScratch = del.scratch;
       rowCount = del.doc && Array.isArray(del.doc.items) ? del.doc.items.length : rowCount - 1;
@@ -378,14 +412,17 @@ export async function applyImportedItemRows(api, records, opts = {}) {
     const raw = records[i];
     const { writes, appendDescription } = resolveImportRecord(raw);
     let ri = i;
+    // Replace mode writes over an existing line: it is touched from the first write.
+    let rowTouched = replace && i < rowCount;
 
     if (replace) {
       if (i >= rowCount) {
         progress(`Adding line ${i + 1} of ${records.length}…`);
         const added = await api.addItem();
         if (!(added && added.ok)) {
-          return { ok: false, reason: (added && added.reason) || "Add line failed during import." };
+          return stopped({ lineNo: i + 1, rowTouched }, (added && added.reason) || "Add line failed during import.");
         }
+        rowTouched = true;
         lastDoc = added.doc;
         lastScratch = added.scratch;
         rowCount = added.doc && Array.isArray(added.doc.items) ? added.doc.items.length : rowCount + 1;
@@ -395,8 +432,9 @@ export async function applyImportedItemRows(api, records, opts = {}) {
       progress(`Adding line ${i + 1} of ${records.length}…`);
       const added = await api.addItem();
       if (!(added && added.ok)) {
-        return { ok: false, reason: (added && added.reason) || "Add line failed during import." };
+        return stopped({ lineNo: i + 1, rowTouched }, (added && added.reason) || "Add line failed during import.");
       }
+      rowTouched = true;
       lastDoc = added.doc;
       lastScratch = added.scratch;
       ri = added.doc && Array.isArray(added.doc.items) ? added.doc.items.length - 1 : rowCount;
@@ -409,7 +447,7 @@ export async function applyImportedItemRows(api, records, opts = {}) {
       progress(`Line ${i + 1}: ${field}…`);
       const res = await api.setItem(ri, field, value);
       if (!(res && res.ok)) {
-        return { ok: false, reason: (res && res.reason) || `Could not set ${field} on line ${i + 1}.` };
+        return stopped({ lineNo: i + 1, rowTouched }, (res && res.reason) || `Could not set ${field}.`);
       }
       lastDoc = res.doc;
       lastScratch = res.scratch;
@@ -423,15 +461,13 @@ export async function applyImportedItemRows(api, records, opts = {}) {
         progress(`Line ${i + 1}: append description…`);
         const res = await api.setItem(ri, "description", merged);
         if (!(res && res.ok)) {
-          return {
-            ok: false,
-            reason: (res && res.reason) || `Could not append description on line ${i + 1}.`,
-          };
+          return stopped({ lineNo: i + 1, rowTouched }, (res && res.reason) || "Could not append the description.");
         }
         lastDoc = res.doc;
         lastScratch = res.scratch;
       }
     }
+    linesDone++;
   }
 
   return { ok: true, doc: lastDoc || undefined, scratch: lastScratch };
@@ -447,6 +483,7 @@ export async function applyImportedItemRows(api, records, opts = {}) {
  *   getCurrentRowCount: () => number,
  *   onApplied: (result: { doc?: object, scratch?: object }) => void,
  *   setStatus: (msg: string, kind?: string) => void,
+ *   lockWhileRunning?: Array<HTMLElement|null>,
  *   testId?: string,
  * }} opts
  */
@@ -454,7 +491,14 @@ export function wireItemImportButton(opts) {
   const btn = opts.button;
   if (!btn) return;
   btn.tabIndex = -1;
+  // The rows are written one by one by row number: a second import, or a line deleted meanwhile,
+  // would shift where the later writes land (review 10-19 R5b-2).
+  let running = false;
+  const lock = (on) => {
+    for (const n of opts.lockWhileRunning || []) if (n) n.inert = on;
+  };
   btn.onclick = async () => {
+    if (running) return;
     if (!opts.isEditable()) {
       opts.setStatus("Import is only available while the document is editable.", "warn");
       return;
@@ -465,17 +509,30 @@ export function wireItemImportButton(opts) {
     const choice = await openItemImportModal(itemCols, { testId: opts.testId });
     if (choice.cancelled) return;
     opts.setStatus("Applying import…");
-    const applied = await applyImportedItemRows(api, choice.records, {
-      replace: choice.replace,
-      currentRowCount: opts.getCurrentRowCount(),
-      onProgress: (msg) => opts.setStatus(msg),
-    });
+    running = true;
+    const wasDisabled = btn.disabled;
+    btn.disabled = true;
+    lock(true);
+    let applied;
+    try {
+      applied = await applyImportedItemRows(api, choice.records, {
+        replace: choice.replace,
+        currentRowCount: opts.getCurrentRowCount(),
+        onProgress: (msg) => opts.setStatus(msg),
+      });
+    } finally {
+      running = false;
+      btn.disabled = wasDisabled;
+      lock(false);
+    }
     if (applied.ok) {
       opts.onApplied(applied);
       opts.setStatus(
         `Imported ${choice.records.length} line(s)${choice.replace ? " (replaced existing)" : ""}.`,
       );
     } else {
+      // Repaint first: the lines that did land are on the form and must be on the page too.
+      if (applied.doc) opts.onApplied(applied);
       opts.setStatus(applied.reason || "Import failed.", "err");
     }
   };

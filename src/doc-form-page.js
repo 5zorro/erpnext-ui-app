@@ -3324,6 +3324,7 @@ function wireStaticControls() {
       paint(result.doc || lastDoc, result.scratch || scratch);
     },
     setStatus,
+    lockWhileRunning: [el.items, document.getElementById("btn-add-line")],
     testId: "doc-import",
   });
 
