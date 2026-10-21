@@ -148,6 +148,13 @@ export function draftPaymentConfirmText(draft, action) {
 export function paymentCreateFailureText(result) {
   const r = result || {};
   const reason = String(r.reason || "").trim() || "Payment Entry create failed.";
+  if (r.step === "uncertain") {
+    // The page died mid-write (review 10-19): the payment may exist, drafted or even submitted.
+    return {
+      text: `${reason} Lost contact mid-way — the payment may already be saved. Check Draft payments and this vendor's payments before trying again.`,
+      draftLeft: "",
+    };
+  }
   const draft = r.step === "submit" && r.name ? String(r.name) : "";
   if (!draft) return { text: reason, draftLeft: "" };
   return {

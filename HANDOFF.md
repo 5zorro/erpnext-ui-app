@@ -181,7 +181,11 @@ Four things about it are worth knowing before touching the code:
    `cancelled` means the script did not finish, so it is "may already be cancelled", never "nothing
    changed". Only a refusal before anything was sent (`erpEval`'s `notRun`) says nothing changed.
    One void per document at a time (page and main). The batch method change stops at the first
-   bill that did not go exactly as asked and offers Try again on the untouched rest.
+   bill that did not go exactly as asked and offers Try again on the untouched rest. **The same
+   reading holds for every write driven through `erpEval`:** a script reports each failure with
+   its step (or `cancelled`); a result without one means the script did not finish, so the write
+   may have landed — the payment inserts (`step: "uncertain"`, worded by
+   `paymentCreateFailureText`) and the just-in-time receipts say so, never a bare "failed".
 4. **The amendment's name is not `<name>-1` in general.** `_set_amended_name` (`naming.py:549`)
    increments a trailing counter, so amending `…-1` gives `…-2`; and under
    `Document Naming Settings.default_amend_naming = "Default Naming"` no prediction is possible at

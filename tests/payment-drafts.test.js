@@ -116,3 +116,11 @@ describe("review 10-19 R10c-1 — a refused submit leaves a draft, and the drawe
     assert.equal(paymentCreateFailureText(null).text, "Payment Entry create failed.");
   });
 });
+
+describe("review 10-19 — a payment create that lost contact mid-way says it may exist", () => {
+  it("does not read as a plain failure", () => {
+    const t = paymentCreateFailureText({ ok: false, step: "uncertain", reason: "Script failed to execute" });
+    assert.match(t.text, /may already be saved/);
+    assert.equal(t.draftLeft, "");
+  });
+});

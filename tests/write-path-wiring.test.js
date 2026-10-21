@@ -149,3 +149,16 @@ describe("R6c-4: a just-in-time receipt whose submit is refused is not left behi
     assert.match(body, /could not be removed — delete it in ERPNext/);
   });
 });
+
+describe("Review of the fixes: the payment insert and the JIT receipt read a mid-way death as uncertain", () => {
+  it("insertAndSubmitPaymentEntry maps a missing or catch-all step to 'uncertain'", () => {
+    // Up to the function's closing line: its injected script holds braces the matcher would miscount.
+    const at = main.indexOf("async function insertAndSubmitPaymentEntry(");
+    const body = main.slice(at, main.indexOf("\n}\n", at));
+    assert.match(body, /const finished = !!r\.step && r\.step !== "unknown";/);
+    assert.match(body, /"uncertain"/);
+  });
+  it("bill-jit-receipts says the receipt may already have been made", () => {
+    assert.match(handlerBody(main, "bill-jit-receipts"), /the receipt may already have been made/);
+  });
+});

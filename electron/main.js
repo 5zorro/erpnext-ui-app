@@ -102,7 +102,7 @@ import {
   relinkReviewNote,
   relinkProvenanceNote,
 } from "../src/payment-relink.js";
-import { normalizeDraftPayments } from "../src/payment-drafts.js";
+import { normalizeDraftPayments, paymentCreateFailureText } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
@@ -5491,15 +5491,17 @@ async function createJitPaymentEntryForBill(billName, intent) {
       return { ok: false, reason: reasonFrom(e), step: "unknown" };
     }
   })()`);
-  if (!(raw && typeof raw === "object")) {
-    return { ok: false, reason: "Payment Entry create failed." };
-  }
-  if (raw.ok) return raw;
+  if (raw && typeof raw === "object" && raw.ok) return raw;
+  // Review 10-19 (the R9-2 mechanism, found reviewing the session-2 fixes): every failure the script
+  // reports names its step. No step — or its own catch-all — means it did not finish, so the payment
+  // may already be saved or submitted; `paymentCreateFailureText` says so instead of a bare reason.
+  const r = raw && typeof raw === "object" ? raw : {};
+  const finished = !!r.step && r.step !== "unknown";
   return {
     ok: false,
-    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
-    step: raw.step,
-    name: raw.name || null,
+    reason: formatClientErrorReason(r.reason || "Payment Entry create failed.", "Payment Entry create failed."),
+    step: finished ? r.step : r.notRun ? "not-run" : "uncertain",
+    name: r.name || null,
   };
 }
 
@@ -5681,15 +5683,16 @@ async function insertAndSubmitPaymentEntry(pe) {
       return { ok: false, reason: reasonFrom(e), step: "unknown" };
     }
   })()`);
-  if (!(raw && typeof raw === "object")) {
-    return { ok: false, reason: "Payment Entry create failed." };
-  }
-  if (raw.ok) return raw;
+  if (raw && typeof raw === "object" && raw.ok) return raw;
+  // Same reading as createJitPaymentEntryForBill: no step, or the catch-all, means the script did not
+  // finish and the payment may exist.
+  const r = raw && typeof raw === "object" ? raw : {};
+  const finished = !!r.step && r.step !== "unknown";
   return {
     ok: false,
-    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
-    step: raw.step,
-    name: raw.name || null,
+    reason: formatClientErrorReason(r.reason || "Payment Entry create failed.", "Payment Entry create failed."),
+    step: finished ? r.step : r.notRun ? "not-run" : "uncertain",
+    name: r.name || null,
   };
 }
 
@@ -6565,9 +6568,12 @@ async function saveBillFromErp(opts = {}) {
         overbillRepaired: repair.repaired,
         jitPayment: {
           ok: false,
+          // Review 10-19: a refused submit leaves a draft, and a mid-way death may leave a payment —
+          // both are named, as in the payment drawer.
           reason:
-            (pe && pe.reason) ||
-            "Bill submitted, but Payment Entry failed — pay from Payment Entry / Pay Bills.",
+            pe && pe.reason
+              ? `Bill submitted, but its payment did not go through: ${paymentCreateFailureText(pe).text}`
+              : "Bill submitted, but Payment Entry failed — pay from Payment Entry / Pay Bills.",
         },
       };
     }
@@ -11849,8 +11855,13 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     })()`);
     if (!raw || !raw.ok || !raw.name) {
       const why = (raw && raw.reason) || "Item Receipt failed.";
-      failure =
-        raw && raw.draft && raw.draftDeleted === false
+      // The script's own failures all say `cancelled: false`; without it the page died mid-way and
+      // the receipt may already be submitted (on a saved bill a retry reuses it; see the plan's
+      // R6c-4 note for the unsaved one).
+      const uncertain = !raw || (raw.cancelled === undefined && !raw.notRun);
+      failure = uncertain
+        ? `${why} Lost contact mid-way — the receipt may already have been made. Check this vendor's Item Receipts before trying again.`
+        : raw.draft && raw.draftDeleted === false
           ? `${why} The draft receipt ${raw.draft} could not be removed — delete it in ERPNext before trying again.`
           : why;
       navDebug(

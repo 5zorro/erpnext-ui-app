@@ -25,7 +25,9 @@ built, being dogfooded). It edits no code.
 > 5zorro's infrastructure (stop the proxy; bind 8080 to `127.0.0.1` in `~/erpnext/frappe_docker/pwd-custom.yml`), museum
 > OI-183. **Session 2 ✅** (R9, R10c, R6c): no high findings; all 11 fixed 2026-10-20 with tests
 > (`tests/write-path-wiring.test.js` pins the main.js half), and the batch method change now stops at
-> the first refusal with per-bill chips and Try again. Not proven live: see *Dogfood residuals*.
+> the first refusal with per-bill chips and Try again. The fixes were reviewed before the session ended
+> (two more found and fixed: R10c-4, R6c-5). Not proven live: see *Dogfood residuals*. Session 2 plus
+> its fixes and the OI-184 discussion ended.
 > Next: session 3 (R2 + R3 + R4).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
@@ -279,7 +281,7 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
      overwrite newer data.
   3. Receive-with-bill / JIT receipt: two writes (receipt then bill). If the second fails, what is
      left behind, and does the clerk see it?
-- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+- **Reviewed through:** `e422410` (session 2, 2026-10-19), and its fixes `b87a096` plus the commit that adds this line (2026-10-20 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -287,6 +289,7 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
 | R6c-2 | S | low | `main.js` `scheduleBillEnrichBackground()`; `bill-po-qty-split.js` message | When the background retry gives up (15 rounds, about 2 min), it logs `bill-enrich-stop max_rounds` and tells the page nothing. The page keeps showing "Still loading…", and Save keeps saying "wait for source columns to finish, then retry Save" — waiting for something that will never come. Refresh does recover it | Push one last snapshot flagged as given up, and have the page say "Couldn't load the PO/receipt limits — Refresh to try again" | fixed 2026-10-20 — `enrichPending.gaveUp`; the source fields say "Couldn't load — press Refresh" and Save says the same |
 | R6c-3 | P | low | `main.js` `enrichBillSnapshotExtrasInner()` | **Q1:** there are no per-line calls. Each Bill snapshot makes one full-document GET per linked PO and per linked receipt, plus two list calls (PO titles, receipt refs), so a 20-line Bill from one PO costs 3–4 requests. But a sourced bill pays this on **every** snapshot (open, Refresh, after each merge), behind a fixed 500 ms sleep and an `ensureErpFormBridge()` that the HTTP path does not need. It also never reuses the limits it already holds, and fetches PO titles twice (the PO GET already carries `title`) | Skip the line-context fetch when the cached limits already cover every sourced row of the same bill; drop the settle sleep and the bridge wait when the HTTP path is used; take titles from the PO documents | fixed 2026-10-20 (the safe two) — the bridge wait and 500 ms settle now happen only on the bridge fallback, and PO titles come from the PO documents; reusing stored limits across refreshes was **not** done (a stale limit is the wrong kind of fast) |
 | R6c-4 | S | low | `main.js` `bill-jit-receipts` handler | Each just-in-time receipt is an insert then a submit inside one `try`. If the submit is refused, a **draft** receipt is left, the failure line names no receipt, and the "reuse what an earlier Submit made" lookup only matches submitted receipts **of a saved bill**. A retry therefore makes a second one. If the ERP page dies mid-script on an **unsaved** bill (the R9-2 mechanism), the retry can receive the goods twice | Return the draft's name and delete it when its submit is refused (it never touched stock); log the name either way | fixed 2026-10-20 — insert and submit split; a refused submit deletes the draft (or names it if the delete fails). The unsaved-bill crash case is left as is (see below) |
+| R6c-5 | S | low | `main.js` `bill-jit-receipts` | Found reviewing the fixes: a receipt script that died mid-way (no `cancelled` key) was shown as a plain failure; the receipt may already be submitted | Say "Lost contact mid-way — the receipt may already have been made; check this vendor's Item Receipts"; log `uncertain=1` | fixed 2026-10-20 |
 
 **R6c-4, what was left as is (5zorro 2026-10-20):** on an **unsaved** bill, if the ERP page dies
 after a receipt is submitted, a retry can receive the goods again — guarding it would mean saving
@@ -336,7 +339,7 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
   3. Auto re-link: can it fire twice for one payment (two windows of the event, retry)?
   4. Every write here: is there a `navDebug` line on both sides (local notes: a write with no log
      line was undiagnosable once)?
-- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+- **Reviewed through:** `e422410` (session 2, 2026-10-19), and its fixes `b87a096` plus the commit that adds this line (2026-10-20 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -394,13 +397,14 @@ Checked and fine: **Q3** — two auto re-link runs for one payment cannot both p
   1. A batch of N payments: if payment k fails, what happened to 1…k−1 and does the clerk see which?
   2. Submit clicked twice; the board refreshed mid-batch.
   3. `createPaymentTermDocs`: never run live — read it as if it were about to be.
-- **Reviewed through:** `e422410` (session 2, 2026-10-19).
+- **Reviewed through:** `e422410` (session 2, 2026-10-19), and its fixes `b87a096` plus the commit that adds this line (2026-10-20 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
 | R10c-1 | S | low | `main.js` `insertAndSubmitPaymentEntry()`; `check-doc-mount.js` submit click | When the insert lands and the submit is refused, the result carries the draft's `name`, but the drawer shows only ERPNext's reason and does not refresh *Draft payments*. The clerk fixes the cause and clicks again, which makes a second payment, and the first is left as an unexplained draft against the same bills. The same thing happens if the ERP page dies mid-script (the R9-2 mechanism): the result has no name at all | On `step: "submit"` with a name, say "Saved as draft `<name>` but not submitted: … — finish or delete it under Draft payments", and reload the drafts panel | fixed 2026-10-20 — `paymentCreateFailureText`, and the Draft payments panel reloads |
 | R10c-2 | S | med | `main.js` `create-batch-payment-entry`, `create-blank-payment-entry`, `create-payment-term` handlers | The payment and term **creates** write nothing to `nav-debug.log` — no start line and no outcome line — although the draft submit/delete, void-and-amend and re-link paths log both sides. A failed or doubled payment would leave no trace (the local notes' rule) | `navDebug` before and after each, with the bills, the amount, the step, the name and the reason | fixed 2026-10-20 — batch, blank, term and the just-in-time payment at bill submit; pinned by `tests/write-path-wiring.test.js` |
 | R10c-3 | S | low | `main.js` `createPaymentTermDocs()`; `payment-term-plan.js` | **Never run live.** A Payment Term is inserted, then the Template. If the Template insert fails, the term stays. A retry of the same plan is then refused with "A Payment Term called … already exists" (the planner treats any existing name as a collision), so the modal can never finish the job, and the clerk has to build the Template in Vanilla. The failure message also leaves out the names of the terms that landed when it is the Template that failed (`made` is not returned on that branch). The document shapes themselves match ERPNext: `invoice_portion` and `due_date_based_on` are required on the detail, the template's portions must total 100 at 2 dp, and no two rows may repeat (payment_term, days, months, basis) — checked against `payment_terms_template.py` and both JSONs | Since a term's name encodes its numbers, an existing term with that name **is** that term: reuse it (after checking that its fields match) instead of refusing, and on the Template-failure branch return `made` | fixed 2026-10-20 — `paymentTermFieldMismatch`; a matching existing term is reused, a different one is refused naming the field; the template-failure message names the terms that landed. Still never run live |
+| R10c-4 | S | low | `main.js` `insertAndSubmitPaymentEntry()`, `createJitPaymentEntryForBill()`, the bill's "already paid" result | Found reviewing the fixes (the R9-2 mechanism, missed in session 2): a payment write whose script died mid-way (no `step`, or its catch-all `unknown`) was shown as a plain failure, although the payment may already be saved or submitted. The bill's own just-in-time payment showed only ERPNext's reason, not the draft a refused submit leaves | Map a missing / catch-all step to `step: "uncertain"`; `paymentCreateFailureText` says "may already be saved — check Draft payments"; the bill's payment failure goes through the same text | fixed 2026-10-20 |
 
 Checked and fine: **Q1** — a batch is **one** Payment Entry covering N bills (`mergeSinglePaymentEntries`), so it is a single insert; there is no payment k of N. **Q2** — the drawer's Submit is disabled while the write runs. Even two concurrent submits cannot pay a bill twice, because `PaymentEntry.validate_allocated_amount_with_latest_data` (`payment_entry.py:419`, run on every validate for a Supplier) refuses an allocation above the bill's current outstanding — the worst case is R10c-1's stray draft. The draft Submit/Delete re-reads the payment and refuses anything that is no longer a draft. **Q3** — see R10c-3. Noted, not a finding: `resolveErpCompany()` prefers a company whose name contains "sandbox" (a seed-era rule); on a single-company site it falls through to the only company, so it is harmless here — fold into R2 if production ever runs multi-company.
 
