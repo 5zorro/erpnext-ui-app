@@ -142,3 +142,35 @@ export function loginRouteFor(pathname) {
   const back = /^\/(app|desk)(\/|$)/.test(p) ? p : "/desk";
   return { path: "/login", search: `redirect-to=${encodeURIComponent(back)}` };
 }
+
+/**
+ * When the shell asks whether the clerk is still logged in (review 10-19 R4-1, 5zorro 2026-10-20).
+ * Frappe extends a session on **every** signed-in request, so asking on a timer meant the site's
+ * Session Expiry never ran out while the app was open. The health ping carries no cookies and keeps
+ * its 5 s beat; the login question is asked only on an event — never on a timer.
+ *
+ * @typedef {"launch"|"health"|"focus"|"navigate"|"refused"} LoginCheckReason
+ */
+export const LOGIN_CHECK_REASONS = Object.freeze(["launch", "health", "focus", "navigate", "refused"]);
+
+/**
+ * After a health tick: ask only when the server's state changed (the first answer at launch, the
+ * server coming back, or going away — which makes the login state unknown without a request).
+ * @param {string} prev
+ * @param {string} next
+ * @returns {boolean}
+ */
+export function loginCheckOnHealthChange(prev, next) {
+  return String(prev || "") !== String(next || "");
+}
+
+/**
+ * A signed-in read the server refused: the session may have expired, so ask. The login check's own
+ * request is excluded — its 403 is the answer, not a new question.
+ * @param {number|null|undefined} status
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function loginCheckAfterRefusal(status, url) {
+  return (status === 401 || status === 403) && !String(url || "").includes(LOGIN_PROBE_PATH);
+}

@@ -137,7 +137,6 @@ contextBridge.exposeInMainWorld("erpDoc", {
   listProjectsForPicker: (customer) => ipcRenderer.invoke("bill-list-projects", customer || ""),
   applyLineAllocation: (rowIndex, payload) =>
     ipcRenderer.invoke("bill-apply-line-allocation", rowIndex, payload || {}),
-  bridgeSalesOrderToPo: (payload) => ipcRenderer.invoke("bill-so-bridge-po", payload || {}),
   openSupplierForm: (supplier) => ipcRenderer.invoke("bill-open-supplier-form", supplier || ""),
   openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
   onSnapshot: (cb) => onProfileSnapshot(cb),

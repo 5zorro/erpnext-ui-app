@@ -3702,7 +3702,12 @@ export async function bootBillFormPage(api) {
     } catch {
       /* ignore */
     }
+    // Review 10-19 R3-1 (G18): the retries below run after the clerk may have moved or started
+    // typing — a move key or click since now, or already being in the date, ends them (a second
+    // select() would let the next keystroke replace what they typed).
+    const moveMark = userMoves.mark();
     const tryFocus = () => {
+      if (userMoves.movedSince(moveMark) || (el.date && document.activeElement === el.date)) return;
       if (!shouldScheduleInvoiceDateFocus(document.activeElement)) return;
       try {
         if (!el.date) return;
@@ -3985,7 +3990,9 @@ export async function bootBillFormPage(api) {
           poLineMeta: res.poLineMeta,
         });
         const poNote = res.bridgePo ? ` · PO ${res.bridgePo}` : "";
-        setStatus(`Line ${rowIndex + 1} assigned${poNote}.`);
+        // Review 10-19 R2-2: the line is assigned either way; a missing PO is said, not hidden.
+        if (res.bridgeFailure) setStatus(`Line ${rowIndex + 1} assigned${poNote}. ${res.bridgeFailure}`, "warn");
+        else setStatus(`Line ${rowIndex + 1} assigned${poNote}.`);
       } else {
         setStatus((res && res.reason) || "Could not apply allocation.", "err");
         await refresh();

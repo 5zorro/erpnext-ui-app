@@ -127,3 +127,23 @@ export function jitPoTitleForSalesOrders(salesOrders, supplierRef) {
   if (!ref) return `JIT-${soBit}`;
   return `JIT-${soBit}-${ref}`;
 }
+
+/**
+ * What the clerk reads when a line's bridge Purchase Order was not made (review 10-19 R2-2). The
+ * allocation itself still lands; this says what is missing and whether anything was left behind.
+ * A reply with no `step` means the ERP page died mid-script, so the PO may already exist.
+ * @param {{ ok?: boolean, step?: string, reason?: string, draft?: string, draftDeleted?: boolean, notRun?: boolean }|null|undefined} r
+ * @returns {string}
+ */
+export function bridgePoFailureText(r) {
+  const why = (r && r.reason) || "no reason given";
+  const lead = "The Purchase Order for it was not made";
+  if (!r || (!r.step && !r.notRun)) {
+    return `${lead} — lost contact mid-way (${why}), so it may already exist. Check this vendor's Purchase Orders before assigning again.`;
+  }
+  if (r.step === "submit" && r.draft && r.draftDeleted === false) {
+    return `${lead}: ERPNext refused to submit it (${why}), and the draft ${r.draft} could not be removed — delete it in ERPNext before assigning again.`;
+  }
+  if (r.step === "submit") return `${lead}: ERPNext refused to submit it (${why}). Nothing was left behind.`;
+  return `${lead}: ${why}`;
+}

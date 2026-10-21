@@ -5,7 +5,13 @@ import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, clipboard 
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loginRouteFor, pingHealth, probeLogin } from "../src/health.js";
+import {
+  loginRouteFor,
+  pingHealth,
+  probeLogin,
+  loginCheckOnHealthChange,
+  loginCheckAfterRefusal,
+} from "../src/health.js";
 import {
   PRUNE_BATCH_MAX,
   existenceQueryPath,
@@ -48,7 +54,7 @@ import {
   ownFormPeekHolds,
 } from "../src/peek-stack.js";
 import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.js";
-import { appendNavDebug, formatNavDebugLines } from "../src/nav-debug.js";
+import { appendNavDebug, formatNavDebugLines, debugLogNeedsRotation } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
 import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent, resolveErpNavIntent } from "../src/erp-nav-intent.js";
@@ -263,7 +269,6 @@ import {
   buildBillSourceLoadingGroups,
   applySourceSliceToGroups,
 } from "../src/source-list-slices.js";
-import { formatJitPoTitle } from "../src/jit-po-bridge.js";
 import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
 import { salesOrdersToOrder, poPendingLines, draftQtyBySoLine } from "../src/so-create-po.js";
@@ -273,6 +278,7 @@ import {
   normalizeLineAllocation,
   jitPoTitleForSalesOrders,
   splitQtyAcrossSalesOrders,
+  bridgePoFailureText,
 } from "../src/bill-line-allocation.js";
 import {
   indexPoLineMeta,
@@ -1074,6 +1080,11 @@ function syncE2eApi() {
       }
       return view.webContents.executeJavaScript(js);
     },
+    /** Through the real `erpEval` (review 10-19 R2-1: a reload mid-script must end the wait). */
+    erpEval: (js) => erpEval(js),
+    reloadErp: () => {
+      if (erp && !erp.webContents.isDestroyed()) erp.webContents.reload();
+    },
   };
   if (win && !win.isDestroyed()) {
     win.setTitle(`erpnext-ui-app [health=${lastHealth}]`);
@@ -1091,7 +1102,20 @@ function sendLoginState() {
  * reachable: when it is down, a Log in button would send the clerk after the wrong problem.
  * @param {string} [why]
  */
-async function tickLogin(why = "tick") {
+/** One login question at a time; a second ask while one is out shares its answer. */
+let tickLoginInflight = null;
+
+/** @param {import("../src/health.js").LoginCheckReason} why */
+function tickLogin(why) {
+  if (!tickLoginInflight) {
+    tickLoginInflight = tickLoginOnce(why).finally(() => {
+      tickLoginInflight = null;
+    });
+  }
+  return tickLoginInflight;
+}
+
+async function tickLoginOnce(why) {
   const r =
     lastHealth === "ok"
       ? await probeLogin({ erpBase: ERP_BASE, fetchImpl: erpSessionFetchImpl() })
@@ -1105,7 +1129,7 @@ async function tickLogin(why = "tick") {
   const becameIn = r.state === "in" && lastLogin.state !== "in";
   lastLogin = { state: r.state, user: r.user };
   sendLoginState();
-  // Every fresh login (and the first tick after launch) re-checks the rail against ERP: a
+  // Every fresh login (and the first check after launch) re-checks the rail against ERP: a
   // reinstalled site, or a draft deleted elsewhere, otherwise stays in Recent forever.
   if (becameIn) pruneVanishedNavEntries(why).catch((e) => navDebug("nav-prune", `failed: ${e && e.message}`));
 }
@@ -2741,7 +2765,12 @@ function erpSessionFetchImpl() {
   if (!erp || erp.webContents.isDestroyed()) return null;
   const session = erp.webContents.session;
   if (!session || typeof session.fetch !== "function") return null;
-  return (url, init) => session.fetch(url, init);
+  return async (url, init) => {
+    const res = await session.fetch(url, init);
+    // A refused signed-in read may mean the session expired: ask now (R4-1), not on a timer.
+    if (loginCheckAfterRefusal(res && res.status, url)) tickLogin("refused").catch(() => {});
+    return res;
+  };
 }
 
 /**
@@ -2771,11 +2800,38 @@ async function erpEval(js, chaosChannel = "erpEval") {
   }
   const chaosMs = await maybeChaosLag(chaosChannel);
   if (chaosMs > 0) navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
-  try {
-    return await erpExec(js);
-  } catch (e) {
-    return { ok: false, notRun: !!(e && /** @type {any} */ (e).notRun), reason: String(e && e.message ? e.message : e) };
-  }
+  return new Promise((resolve) => {
+    let done = false;
+    /** @param {any} value */
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      pendingErpEvals.delete(interrupt);
+      resolve(value);
+    };
+    /** @param {string} why */
+    const interrupt = (why) => finish({ ok: false, reason: `The ERPNext page ${why} before the step finished.` });
+    pendingErpEvals.add(interrupt);
+    erpExec(js).then(finish, (e) =>
+      finish({ ok: false, notRun: !!(e && /** @type {any} */ (e).notRun), reason: String(e && e.message ? e.message : e) }),
+    );
+  });
+}
+
+/**
+ * Review 10-19 R2-1: a script running in a page that navigates, reloads or crashes never settles —
+ * Electron leaves `executeJavaScript`'s promise pending for good (proven on Electron 43). Every
+ * `erpEval` still waiting is ended here instead, without `notRun`: the script may have got part way,
+ * so a write path reads this as "may already be done", never as "nothing changed".
+ * @type {Set<(why: string) => void>}
+ */
+const pendingErpEvals = new Set();
+
+/** @param {string} why */
+function interruptPendingErpEvals(why) {
+  if (!pendingErpEvals.size) return;
+  navDebug("erp-eval-interrupted", `${pendingErpEvals.size} pending: ${why}`);
+  for (const interrupt of [...pendingErpEvals]) interrupt(why);
 }
 
 /**
@@ -6956,8 +7012,12 @@ async function tickHealth() {
     code: result.code,
     latencyMs: result.latencyMs,
   });
+  const prevHealth = lastHealth;
   sendHealth(result.status);
-  tickLogin().catch(() => {});
+  // Review 10-19 R4-1: no login question on the beat — it would keep the session from idling out.
+  if (loginCheckOnHealthChange(prevHealth, result.status)) {
+    tickLogin(prevHealth === "unknown" ? "launch" : "health").catch(() => {});
+  }
 }
 
 function diagnoseSnapshot() {
@@ -7039,6 +7099,10 @@ function createWindow() {
     height: 840,
     title: "erpnext-ui-app",
     backgroundColor: "#2c3e50",
+  });
+  // Review 10-19 R4-1: coming back to the app is when "am I still logged in?" matters.
+  win.on("focus", () => {
+    if (lastHealth === "ok") tickLogin("focus").catch(() => {});
   });
 
   const pref = {
@@ -7165,10 +7229,15 @@ function createWindow() {
     warnOffBase(url, "redirect");
   });
   erp.webContents.on("will-prevent-unload", onErpWillPreventUnload);
+  // A committed main-frame load replaced the document any pending script ran in (R2-1). A failed
+  // load keeps the old document, and an in-page route change (Frappe's own) keeps it too.
+  erp.webContents.on("render-process-gone", (_e, d) => interruptPendingErpEvals(`stopped (${(d && d.reason) || "gone"})`));
+  erp.webContents.on("destroyed", () => interruptPendingErpEvals("closed"));
   erp.webContents.on("did-navigate", (_e, url) => {
+    interruptPendingErpEvals("reloaded");
     if (isAllowedErpUrl(ERP_BASE, url)) erpLeftBase = false;
     trackNav(url, { fromBrowser: true });
-    // Logging in (or out) is a hard navigation — re-ask now rather than on the next 5s tick.
+    // Logging in (or out) is a hard navigation — re-ask now.
     tickLogin("navigate").catch(() => {});
     ensureErpFormBridge().catch(() => {});
     ensureErpRouteHopReporter().catch(() => {});
@@ -8476,130 +8545,6 @@ ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
   return { ok: true, orders: ranked, supplier, customer: customer || null };
 });
 
-ipcMain.handle("bill-so-bridge-po", async (_e, payload) => {
-  const supplier = normalizeEditableText(payload && payload.supplier);
-  const salesOrder = normalizeEditableText(payload && payload.salesOrder);
-  if (!supplier) return { ok: false, reason: "Vendor required." };
-  if (!salesOrder) return { ok: false, reason: "Sales Order required." };
-
-  const supplierRef =
-    payload && payload.supplierRef != null
-      ? normalizeEditableText(payload.supplierRef)
-      : normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no);
-  const company =
-    payload && payload.company
-      ? normalizeEditableText(payload.company)
-      : normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
-  const title = formatJitPoTitle(salesOrder, supplierRef);
-
-  const raw = await erpEval(`(async () => {
-    try {
-      if (!window.frappe || !frappe.db) {
-        return { ok: false, reason: "ERP Desk not ready" };
-      }
-      var supplier = ${JSON.stringify(supplier)};
-      var salesOrder = ${JSON.stringify(salesOrder)};
-      var title = ${JSON.stringify(title)};
-      var company = ${JSON.stringify(company || "")};
-
-      var openPos = await frappe.db.get_list("Purchase Order", {
-        filters: { supplier: supplier, docstatus: 1, per_billed: ["<", 100] },
-        fields: ["name", "supplier", "per_billed", "docstatus", "title"],
-        limit: 50,
-      });
-      var poNames = (openPos || []).map(function (p) { return p.name; }).filter(Boolean);
-      var poItems = [];
-      if (poNames.length) {
-        poItems = await frappe.db.get_list("Purchase Order Item", {
-          filters: [["parent", "in", poNames], ["sales_order", "=", salesOrder]],
-          fields: ["parent", "sales_order"],
-          limit: 50,
-        });
-      }
-      var existing = null;
-      var parents = {};
-      for (var i = 0; i < (poItems || []).length; i++) {
-        var it = poItems[i];
-        if (it && it.parent) parents[it.parent] = true;
-      }
-      for (var j = 0; j < (openPos || []).length; j++) {
-        var po = openPos[j];
-        if (po && po.name && parents[po.name]) {
-          existing = { name: po.name, title: po.title || "" };
-          break;
-        }
-      }
-      if (existing) {
-        return { ok: true, poName: existing.name, title: existing.title, created: false };
-      }
-
-      var soDoc = await frappe.db.get_doc("Sales Order", salesOrder);
-      if (!soDoc) return { ok: false, reason: "Sales Order not found." };
-      if (Number(soDoc.docstatus) !== 1) {
-        return { ok: false, reason: "Sales Order must be submitted." };
-      }
-      var co = company || soDoc.company;
-      if (!co) return { ok: false, reason: "Company missing on Bill and Sales Order." };
-
-      var today = frappe.datetime.get_today();
-      var sched = frappe.datetime.add_days(today, 7);
-      var po = frappe.model.get_new_doc("Purchase Order");
-      po.supplier = supplier;
-      po.company = co;
-      po.transaction_date = today;
-      po.schedule_date = sched;
-      po.title = title;
-      if (soDoc.customer) {
-        po.customer = soDoc.customer;
-        po.customer_name = soDoc.customer_name || soDoc.customer;
-      }
-      var lines = soDoc.items || [];
-      for (var k = 0; k < lines.length; k++) {
-        var line = lines[k];
-        if (!line || !line.item_code) continue;
-        var qty = Number(line.qty);
-        if (!Number.isFinite(qty) || qty <= 0) continue;
-        var child = frappe.model.add_child(po, "items");
-        child.item_code = line.item_code;
-        child.qty = qty;
-        child.schedule_date = sched;
-        child.sales_order = salesOrder;
-        if (line.name) child.sales_order_item = line.name;
-        if (line.uom) child.uom = line.uom;
-      }
-      if (!po.items || !po.items.length) {
-        return { ok: false, reason: "Sales Order has no lines to buy." };
-      }
-
-      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
-      var saved = inserted && inserted.message ? inserted.message : null;
-      if (!saved || !saved.name) {
-        return { ok: false, reason: "Could not create bridge Purchase Order." };
-      }
-      var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
-      var finalDoc = submitted && submitted.message ? submitted.message : saved;
-      return {
-        ok: true,
-        poName: finalDoc.name,
-        title: finalDoc.title || title,
-        created: true,
-      };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-
-  if (!raw || !raw.ok || !raw.poName) {
-    return { ok: false, reason: (raw && raw.reason) || "Could not bridge Sales Order to PO." };
-  }
-  return {
-    ok: true,
-    poName: raw.poName,
-    title: raw.title || title,
-    created: !!raw.created,
-  };
-});
-
 ipcMain.handle("bill-list-projects", async (_e, customer) => {
   const cust = customer != null ? normalizeEditableText(customer) : "";
   const raw = await erpEval(`(async () => {
@@ -8665,13 +8610,23 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
   }
 
   let bridgePo = "";
+  let bridgeFailure = "";
   if (salesOrders.length && supplier && line && line.item_code) {
     const qtyParts = splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length);
     const title = jitPoTitleForSalesOrders(salesOrders, supplierRef);
+    navDebug("bill-bridge-po", `start line=${ri + 1} supplier=${supplier} sos=${salesOrders.join(",")}`);
+    // Review 10-19 R2-2: build, insert and submit are separate steps (as R6c-4). A refused submit
+    // deletes the draft — nothing links to it yet — and names it if even that fails; a script that
+    // died mid-way says nothing about what landed, so it reads as "may already exist".
     const bridge = await erpEval(`(async () => {
+      var serverMsg = function (e) {
+        var msg = (e && e.message) || String(e);
+        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
+        return msg;
+      };
       try {
         if (!window.frappe || !frappe.db) {
-          return { ok: false, reason: "ERP Desk not ready" };
+          return { ok: false, step: "build", reason: "ERP Desk not ready" };
         }
         var supplier = ${JSON.stringify(supplier)};
         var sos = ${JSON.stringify(salesOrders)};
@@ -8707,26 +8662,50 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
           if (rate) child.rate = rate;
         }
         if (!po.items || !po.items.length) {
-          return { ok: false, reason: "Could not build PO lines." };
+          return { ok: false, step: "build", reason: "Could not build PO lines." };
         }
-        var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
-        var saved = inserted && inserted.message ? inserted.message : null;
-        if (!saved || !saved.name) {
-          return { ok: false, reason: "Could not create bridge Purchase Order." };
-        }
+      } catch (eBuild) {
+        return { ok: false, step: "build", reason: serverMsg(eBuild) };
+      }
+      var inserted;
+      try {
+        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
+      } catch (eIns) {
+        return { ok: false, step: "insert", reason: serverMsg(eIns) };
+      }
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved || !saved.name) {
+        return { ok: false, step: "insert", reason: "The Purchase Order insert returned no name." };
+      }
+      try {
         var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
         var finalDoc = submitted && submitted.message ? submitted.message : saved;
         return { ok: true, poName: finalDoc.name, title: finalDoc.title || title };
-      } catch (e) {
-        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      } catch (eSub) {
+        var why = serverMsg(eSub);
+        try {
+          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: saved.name } });
+          return { ok: false, step: "submit", draft: saved.name, draftDeleted: true, reason: why };
+        } catch (eDel) {
+          return { ok: false, step: "submit", draft: saved.name, draftDeleted: false, reason: why };
+        }
       }
     })()`);
     if (bridge && bridge.ok && bridge.poName) {
       bridgePo = bridge.poName;
+      navDebug("bill-bridge-po", `line=${ri + 1} made=${bridgePo}`);
       const linkPo = await bridgeCall("setRow", ri, "purchase_order", bridgePo);
       if (linkPo && linkPo.ok) {
         dirtyState = markUserEdited({ ...dirtyState, doc: linkPo.doc, isDirty: true });
+      } else {
+        bridgeFailure = `Purchase Order ${bridgePo} was made, but line ${ri + 1} could not be pointed at it: ${(linkPo && linkPo.reason) || "unknown"}.`;
       }
+    } else {
+      bridgeFailure = bridgePoFailureText(bridge);
+      navDebug(
+        "bill-bridge-po",
+        `line=${ri + 1} failed step=${(bridge && bridge.step) || "?"}${bridge && bridge.draft ? ` draft=${bridge.draft} deleted=${bridge.draftDeleted ? 1 : 0}` : ""}: ${(bridge && bridge.reason) || ""}`,
+      );
     }
   }
 
@@ -8745,6 +8724,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
     lineAllocations: snap.lineAllocations || getBillLineAllocations(),
     poLineMeta: snap.poLineMeta || getBillPoLineMeta(),
     bridgePo: bridgePo || undefined,
+    bridgeFailure: bridgeFailure || undefined,
     amountDue: amountDueScratch,
     linkedPos: snap.linkedPos || [],
     linkedReceipts: snap.linkedReceipts || [],
@@ -8761,20 +8741,25 @@ ipcMain.handle("bill-fetch-po-line-cap", async (_e, rowIndex) =>
 );
 ipcMain.handle("bill-add-item", async () => addBillItem());
 ipcMain.handle("bill-delete-item", async (_e, rowIndex) => deleteBillItem(Number(rowIndex)));
-ipcMain.handle("bill-clear-all-qty", async () => {
+// Review 10-19 R2-4: the Bill and doc-form channels for these actions were copies of each other.
+// Each action is one function now; a doc-form channel adds only what differs (taxes are on the
+// Item Receipt only, and the PO's Date expected rides back where the Bill's Amount Due does).
+
+async function clearAllQtyAction() {
   const raw = await bridgeCall("zeroAllQty");
   if (raw && raw.ok) {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
   }
   return raw;
-});
+}
 
-ipcMain.handle("bill-set-tax", async (_e, rowIndex, field, value) => {
+/** @param {number} rowIndex @param {string} field @param {unknown} value */
+async function setTaxRowAction(rowIndex, field, value) {
   if (!Number.isInteger(rowIndex) || rowIndex < 0) {
     return { ok: false, reason: "Invalid tax row" };
   }
   if (!isEditableBillTaxField(field)) {
-    return { ok: false, reason: "Tax field not editable on Bill" };
+    return { ok: false, reason: "Tax field not editable" };
   }
   const kind = dirtyCompareKindForField(field);
   const next =
@@ -8784,9 +8769,10 @@ ipcMain.handle("bill-set-tax", async (_e, rowIndex, field, value) => {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
   }
   return raw;
-});
+}
 
-ipcMain.handle("bill-add-tax", async (_e, accountHead, taxAmount, description) => {
+/** @param {unknown} accountHead @param {unknown} taxAmount @param {unknown} description */
+async function addTaxRowAction(accountHead, taxAmount, description) {
   dirtyState = markUserEdited(dirtyState);
   const raw = await bridgeCall(
     "addTaxRow",
@@ -8798,9 +8784,10 @@ ipcMain.handle("bill-add-tax", async (_e, accountHead, taxAmount, description) =
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
   }
   return raw && typeof raw === "object" ? raw : { ok: false, reason: "Add tax failed." };
-});
+}
 
-ipcMain.handle("bill-delete-tax", async (_e, rowIndex) => {
+/** @param {number} rowIndex */
+async function deleteTaxRowAction(rowIndex) {
   if (!Number.isInteger(rowIndex) || rowIndex < 0) {
     return { ok: false, reason: "Invalid tax row" };
   }
@@ -8810,7 +8797,19 @@ ipcMain.handle("bill-delete-tax", async (_e, rowIndex) => {
     dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
   }
   return raw;
-});
+}
+
+/** Taxes are edited on the Item Receipt's doc form only; null when this one has them. */
+function docFormTaxesRefusal() {
+  return activeDocSkin === "receipt" ? null : { ok: false, reason: "Taxes not used on this Doc form" };
+}
+
+ipcMain.handle("bill-clear-all-qty", async () => clearAllQtyAction());
+ipcMain.handle("bill-set-tax", async (_e, rowIndex, field, value) => setTaxRowAction(rowIndex, field, value));
+ipcMain.handle("bill-add-tax", async (_e, accountHead, taxAmount, description) =>
+  addTaxRowAction(accountHead, taxAmount, description),
+);
+ipcMain.handle("bill-delete-tax", async (_e, rowIndex) => deleteTaxRowAction(rowIndex));
 
 /** Applied Payment Entries for this Bill (OI-139). */
 ipcMain.handle("bill-list-payments", async () => {
@@ -9032,14 +9031,33 @@ ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => 
     return { ok: false, reason: plan.reason || "Allocation failed." };
   }
 
+  // Review 10-19 R2-7: a step that fails part way puts the rates already raised back, so the form
+  // never holds a share of the charge without its offset (a Save would post a bill total too high).
+  /** @type {Array<{ rowIndex: number, rate: unknown }>} */
+  const raised = [];
+  const undoRaised = async (why) => {
+    const stuck = [];
+    for (const r of raised.reverse()) {
+      const back = await setBillItemField(r.rowIndex, "rate", String(r.rate ?? ""));
+      if (!(back && back.ok)) stuck.push(r.rowIndex + 1);
+    }
+    navDebug("bill-allocate-charge", `undo after "${why}" stuck=${stuck.join(",") || "-"}`);
+    return stuck.length
+      ? {
+          ok: false,
+          partial: true,
+          doc: dirtyState.doc,
+          reason: `${why} Line${stuck.length === 1 ? "" : "s"} ${stuck.join(", ")} still carr${stuck.length === 1 ? "ies" : "y"} part of the charge with no offset — Revert, or fix the cost before saving.`,
+        }
+      : { ok: false, doc: dirtyState.doc, reason: `${why} Nothing was changed.` };
+  };
   for (const u of plan.itemUpdates) {
+    const was = items[u.rowIndex] ? items[u.rowIndex].rate : "";
     const setRes = await setBillItemField(u.rowIndex, "rate", String(u.nextRate));
     if (!(setRes && setRes.ok)) {
-      return {
-        ok: false,
-        reason: (setRes && setRes.reason) || `Could not update item rate on line ${u.rowIndex + 1}.`,
-      };
+      return undoRaised((setRes && setRes.reason) || `Could not update item rate on line ${u.rowIndex + 1}.`);
     }
+    raised.push({ rowIndex: u.rowIndex, rate: was });
   }
 
   const offset = plan.offsetTax;
@@ -9051,14 +9069,7 @@ ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => 
     offset.add_deduct_tax,
   );
   if (!(addRes && addRes.ok)) {
-    return {
-      ok: false,
-      reason:
-        (addRes && addRes.reason) ||
-        "Item costs updated, but offset Deduct charge failed — check Taxes and Charges.",
-      doc: dirtyState.doc,
-      partial: true,
-    };
+    return undoRaised(`The offset Deduct charge could not be added: ${(addRes && addRes.reason) || "unknown"}.`);
   }
   dirtyState = markUserEdited({ ...dirtyState, doc: addRes.doc, isDirty: true });
   return {
@@ -9436,7 +9447,13 @@ ipcMain.handle("bill-new", async () => {
  * Museum bind.js Revert: new → frappe.new_doc; else frm.reload_doc.
  * Resets Amount Due scratch to empty (user re-enters).
  */
-ipcMain.handle("bill-revert-unsaved", async () => {
+/**
+ * Throw away unsaved edits (review 10-19 R2-4: one body for the Bill and the doc forms): reload a
+ * saved document, or start a fresh one. `resetScratch(doc)` clears the skin's own scratch field
+ * before the lens is re-applied.
+ * @param {(doc: any) => void} resetScratch
+ */
+async function revertUnsavedAction(resetScratch) {
   const raw = await erpEval(`(async () => {
     try {
       var f = window.cur_frm;
@@ -9471,9 +9488,7 @@ ipcMain.handle("bill-revert-unsaved", async () => {
       ? raw
       : { ok: false, reason: "Revert failed." };
   }
-  // Revert clears Amount Due scratch — user re-enters after reload.
-  amountDueScratch = "";
-  amountDueCommitted = "";
+  resetScratch(raw.doc);
   dirtyState = finishLensApply(
     {
       doc: raw.doc,
@@ -9484,12 +9499,16 @@ ipcMain.handle("bill-revert-unsaved", async () => {
     },
     true,
   );
-  return {
-    ok: true,
-    isNew: !!raw.isNew,
-    doc: raw.doc,
-    amountDue: amountDueScratch,
-  };
+  return { ok: true, isNew: !!raw.isNew, doc: raw.doc };
+}
+
+ipcMain.handle("bill-revert-unsaved", async () => {
+  const out = await revertUnsavedAction(() => {
+    // Revert clears Amount Due scratch — user re-enters after reload.
+    amountDueScratch = "";
+    amountDueCommitted = "";
+  });
+  return out && out.ok ? { ...out, amountDue: amountDueScratch } : out;
 });
 
 ipcMain.handle("bill-search-link", async (_e, doctype, txt, filters) => searchLink(doctype, txt, filters));
@@ -9734,65 +9753,14 @@ ipcMain.handle("doc-delete-item", async (_e, rowIndex) => {
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
     : raw;
 });
-ipcMain.handle("doc-clear-all-qty", async () => {
-  const raw = await bridgeCall("zeroAllQty");
-  if (raw && raw.ok) {
-    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
-  }
-  return raw;
-});
-
-ipcMain.handle("doc-set-tax", async (_e, rowIndex, field, value) => {
-  if (activeDocSkin !== "receipt") {
-    return { ok: false, reason: "Taxes not used on this Doc form" };
-  }
-  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
-    return { ok: false, reason: "Invalid tax row" };
-  }
-  if (!isEditableBillTaxField(field)) {
-    return { ok: false, reason: "Tax field not editable" };
-  }
-  const kind = dirtyCompareKindForField(field);
-  const next =
-    kind === "number" ? (value == null ? "" : String(value)) : normalizeEditableText(value);
-  const raw = await bridgeCall("setTaxRow", rowIndex, field, next);
-  if (raw && raw.ok) {
-    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
-  }
-  return raw;
-});
-
-ipcMain.handle("doc-add-tax", async (_e, accountHead, taxAmount, description) => {
-  if (activeDocSkin !== "receipt") {
-    return { ok: false, reason: "Taxes not used on this Doc form" };
-  }
-  dirtyState = markUserEdited(dirtyState);
-  const raw = await bridgeCall(
-    "addTaxRow",
-    accountHead == null ? "" : String(accountHead),
-    taxAmount,
-    description == null ? "" : String(description),
-  );
-  if (raw && raw.ok) {
-    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
-  }
-  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Add tax failed." };
-});
-
-ipcMain.handle("doc-delete-tax", async (_e, rowIndex) => {
-  if (activeDocSkin !== "receipt") {
-    return { ok: false, reason: "Taxes not used on this Doc form" };
-  }
-  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
-    return { ok: false, reason: "Invalid tax row" };
-  }
-  dirtyState = markUserEdited(dirtyState);
-  const raw = await bridgeCall("deleteTaxRow", rowIndex);
-  if (raw && raw.ok) {
-    dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
-  }
-  return raw;
-});
+ipcMain.handle("doc-clear-all-qty", async () => clearAllQtyAction());
+ipcMain.handle("doc-set-tax", async (_e, rowIndex, field, value) =>
+  docFormTaxesRefusal() || setTaxRowAction(rowIndex, field, value),
+);
+ipcMain.handle("doc-add-tax", async (_e, accountHead, taxAmount, description) =>
+  docFormTaxesRefusal() || addTaxRowAction(accountHead, taxAmount, description),
+);
+ipcMain.handle("doc-delete-tax", async (_e, rowIndex) => docFormTaxesRefusal() || deleteTaxRowAction(rowIndex));
 
 /**
  * Create ▾ › Purchase Order… (plan 2026-10-12 S2): the draft POs already made for this Sales Order,
@@ -10130,65 +10098,18 @@ ipcMain.handle("doc-new", async () => {
 
 
 ipcMain.handle("doc-revert-unsaved", async () => {
-  const raw = await erpEval(`(async () => {
-    try {
-      var f = window.cur_frm;
-      if (!f) return { ok: false, reason: "No form." };
-      if (f.is_new && f.is_new()) {
-        try { f.doc.__unsaved = 0; } catch (e) {}
-        try { frappe.model.clear_doc(f.doctype, f.doc.name); } catch (e) {}
-        frappe.new_doc(f.doctype);
-        await new Promise(function (r) { setTimeout(r, 250); });
-        f = window.cur_frm;
-        return {
-          ok: true,
-          isNew: true,
-          doc: f && f.doc ? JSON.parse(JSON.stringify(f.doc)) : null,
-        };
-      }
-      if (typeof f.reload_doc === "function") {
-        await f.reload_doc();
-        return {
-          ok: true,
-          isNew: !!(f.is_new && f.is_new()),
-          doc: JSON.parse(JSON.stringify(f.doc)),
-        };
-      }
-      return { ok: false, reason: "Cannot reload document." };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  if (!raw || !raw.ok) {
-    return raw && typeof raw === "object"
-      ? raw
-      : { ok: false, reason: "Revert failed." };
-  }
-  dateExpectedScratch = "";
-  if (raw.doc && Array.isArray(raw.doc.items)) {
-    for (const it of raw.doc.items) {
-      if (it && it.schedule_date) {
-        dateExpectedScratch = String(it.schedule_date);
-        break;
+  const out = await revertUnsavedAction((doc) => {
+    dateExpectedScratch = "";
+    if (doc && Array.isArray(doc.items)) {
+      for (const it of doc.items) {
+        if (it && it.schedule_date) {
+          dateExpectedScratch = String(it.schedule_date);
+          break;
+        }
       }
     }
-  }
-  dirtyState = finishLensApply(
-    {
-      doc: raw.doc,
-      isDirty: false,
-      isNew: !!raw.isNew,
-      userEdited: false,
-      baselineJson: null,
-    },
-    true,
-  );
-  return {
-    ok: true,
-    isNew: !!raw.isNew,
-    doc: raw.doc,
-    scratch: { dateExpected: dateExpectedScratch },
-  };
+  });
+  return out && out.ok ? { ...out, scratch: { dateExpected: dateExpectedScratch } } : out;
 });
 
 ipcMain.handle("doc-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
@@ -12730,7 +12651,19 @@ function sweepOldTempCopies() {
   });
 }
 
+/** Review 10-19 R2-6: a dogfood log past DEBUG_LOG_ROTATE_BYTES moves to `.1` at startup and starts afresh. */
+function rotateDebugLogs() {
+  for (const file of [navDebugLogPath(), focusDebugLogPath(), navIncidentLogPath(), focusIncidentLogPath()]) {
+    try {
+      if (debugLogNeedsRotation(fs.statSync(file).size)) fs.renameSync(file, `${file}.1`);
+    } catch {
+      /* missing or unreadable — nothing to rotate */
+    }
+  }
+}
+
 app.whenReady().then(() => {
+  rotateDebugLogs();
   sweepOldTempCopies();
   createWindow();
 });

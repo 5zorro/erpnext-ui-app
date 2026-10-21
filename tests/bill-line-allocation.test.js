@@ -5,6 +5,7 @@ import {
   formatAllocationSalesOrders,
   splitQtyAcrossSalesOrders,
   jitPoTitleForSalesOrders,
+  bridgePoFailureText,
 } from "../src/bill-line-allocation.js";
 import { readBillItemRowsWithAllocation } from "../src/bill-item-table.js";
 
@@ -43,5 +44,24 @@ describe("bill-line-allocation", () => {
   it("normalizeLineAllocation dedupes SO ids", () => {
     const a = normalizeLineAllocation({ salesOrders: [" SO-1 ", "SO-1", "SO-2"] });
     assert.deepEqual(a.salesOrders, ["SO-1", "SO-2"]);
+  });
+});
+
+describe("bridgePoFailureText (review 10-19 R2-2)", () => {
+  it("a refused submit whose draft was deleted says nothing was left", () => {
+    const t = bridgePoFailureText({ ok: false, step: "submit", draft: "PUR-ORD-1", draftDeleted: true, reason: "Closed period" });
+    assert.match(t, /refused to submit it \(Closed period\)\. Nothing was left behind/);
+  });
+  it("a draft that could not be removed is named", () => {
+    const t = bridgePoFailureText({ ok: false, step: "submit", draft: "PUR-ORD-1", draftDeleted: false, reason: "x" });
+    assert.match(t, /draft PUR-ORD-1 could not be removed/);
+  });
+  it("no step means the page died mid-way: it may already exist", () => {
+    assert.match(bridgePoFailureText({ ok: false, reason: "ERPNext page reloaded" }), /may already exist/);
+    assert.match(bridgePoFailureText(null), /may already exist/);
+  });
+  it("a refusal before anything was sent, or at insert, is just the reason", () => {
+    assert.equal(bridgePoFailureText({ ok: false, notRun: true, reason: "ERP view not ready" }), "The Purchase Order for it was not made: ERP view not ready");
+    assert.equal(bridgePoFailureText({ ok: false, step: "insert", reason: "Mandatory" }), "The Purchase Order for it was not made: Mandatory");
   });
 });

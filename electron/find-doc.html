@@ -176,6 +176,7 @@
       <div id="results"></div>
       <div class="more-row" id="more-row" hidden>
         <button type="button" class="btn" id="btn-more" data-testid="find-doc-more">Show more</button>
+        <div class="empty" id="more-error" data-testid="find-doc-more-error" hidden></div>
       </div>
     </div>
   </section>
@@ -227,6 +228,7 @@
       more: false,
       loading: false,
       error: "",
+      moreError: "",
       sort: findSortFor(doctypeKey, null),
     };
 
@@ -371,10 +373,17 @@
         : { ok: false, reason: "Shell bridge unavailable." };
       if (seq !== querySeq) return;
       state.loading = false;
-      state.error = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
-      const got = res && res.ok ? res.rows : [];
-      state.rows = append && !state.error ? [...state.rows, ...got] : got;
-      state.more = !!(res && res.more);
+      const failed = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
+      state.moreError = "";
+      if (append && failed) {
+        // Review 10-19 R4-2: a failed Show more keeps the rows already read; the button stays to retry.
+        state.moreError = failed;
+      } else {
+        state.error = failed;
+        const got = res && res.ok ? res.rows : [];
+        state.rows = append ? [...state.rows, ...got] : got;
+        state.more = !!(res && res.more);
+      }
       paintResults();
     }
 
@@ -401,7 +410,9 @@
       const host = $("results");
       $("btn-clear").hidden = searchIsDefault();
       $("more-row").hidden = !(state.more && !state.error);
-      $("btn-more").textContent = `Show ${FIND_LIST_LIMIT} more`;
+      $("btn-more").textContent = state.moreError ? "Try again" : `Show ${FIND_LIST_LIMIT} more`;
+      $("more-error").hidden = !state.moreError;
+      $("more-error").textContent = state.moreError ? `Could not read more from ERPNext: ${state.moreError}` : "";
       if (state.error) {
         host.innerHTML = `<div class="empty" data-testid="find-doc-error">Could not read the list from ERPNext: ${esc(state.error)}</div>`;
         return;

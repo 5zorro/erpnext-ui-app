@@ -186,6 +186,12 @@ Four things about it are worth knowing before touching the code:
    its step (or `cancelled`); a result without one means the script did not finish, so the write
    may have landed — the payment inserts (`step: "uncertain"`, worded by
    `paymentCreateFailureText`) and the just-in-time receipts say so, never a bare "failed".
+   The Bill line's bridge Purchase Order follows the same rules (`bridgePoFailureText`; a refused
+   submit deletes the draft). And a script whose page **reloads, navigates or crashes** never
+   settles on its own — Electron leaves the promise pending for good — so `erpEval` ends every
+   pending call when the ERP view commits a load, its renderer goes, or it closes, with a reason
+   and no `notRun` (review 10-19 R2-1). Never wrap an `erpEval` write in a time limit instead: a
+   timeout cannot say whether the write landed, and the interruption already does.
 4. **The amendment's name is not `<name>-1` in general.** `_set_amended_name` (`naming.py:549`)
    increments a trailing counter, so amending `…-1` gives `…-2`; and under
    `Document Naming Settings.default_amend_naming = "Default Naming"` no prediction is possible at
@@ -270,7 +276,7 @@ into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printi
 
 | Capability | Pure module(s) | Electron surface |
 |------------|----------------|------------------|
-| DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only |
+| DB / reachability | `health.js`, `diagnose.js`, `health-remediation.js` | Toolbar health + diagnose; IT notify/autofix prefs in userData only. The health ping (5 s, no cookies) is not the login check: "still logged in?" is asked only at launch, when health changes, on window focus, on an ERP page load and after a refused signed-in read (`loginCheckOnHealthChange`, `loginCheckAfterRefusal`) — every signed-in request extends a Frappe session, so a timer would stop the site's *Session Expiry* ever running out (review 10-19 R4-1) |
 | Recent history | `route-info.js`, `history.js`, `history-nav.js`, `peek-stack.js`, `doctype-labels.js` | Left `history.html` rail (peeks fold under their parent's row as a dropdown, OI-128 A; collapsible) |
 | Submitted this session | `submitted-docs.js` | One rail row + running count → `submitted-dropdown.html` panel; the way back after submit-and-move-on (Drafts is `docstatus 0` only, Recent keeps one row per doctype). OI-162 — shipped 2026-09-05 |
 | Allowed navigation | `nav-guard.js` | `main.js` will-navigate / window-open |

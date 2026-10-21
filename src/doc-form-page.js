@@ -2640,6 +2640,10 @@ function paintedScratchDateExpected() {
 }
 
 function paint(doc, snapScratch, opts = {}) {
+  // Review 10-19 R3-1 (G18, as the Bill's paint): `keepFocus` takes the clerk's place right before
+  // the repaint — after whatever the caller waited on — so a box rebuilt under them is refocused,
+  // and a clerk who already moved on is left where they are.
+  const focusAnchor = opts.keepFocus ? captureFocusAnchor() : null;
   painting = true;
   try {
   calcUi.clear();
@@ -2774,10 +2778,14 @@ function paint(doc, snapScratch, opts = {}) {
   void ensureAtLeastOneItemRow(doc);
   } finally {
     painting = false;
+    // Only when the repaint dropped focus: a box that survived keeps the clerk's typing untouched.
+    const now = document.activeElement;
+    if (focusAnchor && (!now || now === document.body)) restoreFocusAnchor(focusAnchor);
   }
 }
 
-async function refresh() {
+/** @param {{ keepFocus?: boolean }} [opts] */
+async function refresh(opts = {}) {
   if (!api) return;
   collapseTaxDefaultNote();
   setStatus("Refreshing…");
@@ -2786,14 +2794,13 @@ async function refresh() {
     reason: snap && snap.reason,
     focusVendor: false,
     userEdited: snap && snap.userEdited,
+    keepFocus: !!opts.keepFocus,
   });
   if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
 }
 
 async function onHeaderBlur(input) {
   if (!api || painting || !editable()) return;
-  const focusAnchor = captureFocusAnchor();
-
   if (input.dataset.scratch === "dateExpected") {
     const raw = filterDateInputValue(input.value).trim();
     if (
@@ -2822,12 +2829,10 @@ async function onHeaderBlur(input) {
     if (res && res.ok) {
       noteUserEdit();
       scratch = res.scratch || { dateExpected: parsed.iso };
-      paint(res.doc || lastDoc, scratch);
-      restoreFocusAnchor(focusAnchor);
+      paint(res.doc || lastDoc, scratch, { keepFocus: true });
     } else {
       setStatus((res && res.reason) || "Date Expected update failed.", "err");
-      await refresh();
-      restoreFocusAnchor(focusAnchor);
+      await refresh({ keepFocus: true });
     }
     return;
   }
@@ -2857,8 +2862,7 @@ async function onHeaderBlur(input) {
     const res = await api.setHeader(field, parsed.iso);
     if (res && res.skipped) return;
     if (res && res.ok) noteUserEdit();
-    await refresh();
-    restoreFocusAnchor(focusAnchor);
+    await refresh({ keepFocus: true });
     return;
   }
 
@@ -2892,9 +2896,8 @@ async function onHeaderBlur(input) {
 
   if (res && res.skipped) return;
   if (res && res.ok) noteUserEdit();
-  await refresh();
+  await refresh({ keepFocus: true });
   if (res && res.warning) setStatus(res.warning, "warn");
-  restoreFocusAnchor(focusAnchor);
 }
 
 async function flushDateExpectedFromInput() {

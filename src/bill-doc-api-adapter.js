@@ -67,7 +67,6 @@ export function billApiFromErpDoc(api) {
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>
       api.applyLineAllocation(rowIndex, payload || {}),
-    bridgeSalesOrderToPo: (payload) => api.bridgeSalesOrderToPo(payload || {}),
     retryLoad: () => api.retryLoad(),
     openVanilla: () => api.openVanilla(),
     openVendorAdd: () => api.openVendorAdd(),

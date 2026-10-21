@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendNavDebug, formatNavDebugLines, NAV_DEBUG_NOISE_EVENTS } from "../src/nav-debug.js";
+import {
+  appendNavDebug,
+  formatNavDebugLines,
+  NAV_DEBUG_NOISE_EVENTS,
+  debugLogNeedsRotation,
+  DEBUG_LOG_ROTATE_BYTES,
+} from "../src/nav-debug.js";
 
 describe("appendNavDebug", () => {
   it("caps length and keeps newest", () => {
@@ -85,5 +91,15 @@ describe("formatNavDebugLines", () => {
     ]);
     assert.match(lines.join("\n"), /hist-click/);
     assert.match(lines.join("\n"), /tax-category/);
+  });
+});
+
+describe("debugLogNeedsRotation (review 10-19 R2-6)", () => {
+  it("rotates only past the cap, and never on a missing size", () => {
+    assert.equal(debugLogNeedsRotation(DEBUG_LOG_ROTATE_BYTES), false);
+    assert.equal(debugLogNeedsRotation(DEBUG_LOG_ROTATE_BYTES + 1), true);
+    assert.equal(debugLogNeedsRotation(16_887_610), true);
+    assert.equal(debugLogNeedsRotation(undefined), false);
+    assert.equal(debugLogNeedsRotation(Number.NaN), false);
   });
 });
