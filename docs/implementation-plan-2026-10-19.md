@@ -28,7 +28,13 @@ built, being dogfooded). It edits no code.
 > the first refusal with per-bill chips and Try again. The fixes were reviewed before the session ended
 > (two more found and fixed: R10c-4, R6c-5). Not proven live: see *Dogfood residuals*. Session 2 plus
 > its fixes and the OI-184 discussion ended.
-> Next: session 3 (R2 + R3 + R4).
+> **Session 3 ✅ 2026-10-20** (R2, R3, R4): 10 findings, all open — two medium. **R2-1**: a script
+> in the ERP page never returns if that page reloads or crashes, so a button can spin forever and a
+> document's "already running" guard holds until restart. **R2-2**: assigning a Bill line to Sales
+> Orders makes and submits a Purchase Order and hides it when that fails. Also R2-4, the Bill and
+> doc-form handlers are copies, which comes before any split of `main.js` (R2-5 gives the order).
+> R4-1 is 5zorro's call: the login check keeps the session from ever idling out.
+> Next: session 4 (R5 + R5b + R6a).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -177,7 +183,24 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
      does any get created per open rather than reused? `src/web-contents-listener-budget.js`
      exists — is every `on(...)` in `main.js` paired with a removal?
   5. Log files (`nav-debug.log`, `focus-*.log`, `nav-incidents.log`): do any grow without a cap?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `37cf078` (2026-10-20, session 3).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R2-1 | S | med | `main.js` `erpEval` (2768) | A script running in the ERP page **never settles** if that page navigates, reloads or crashes — proven on Electron 43 (all three cases still pending after 11 s). 63 of 72 `erpEval` callers have no time limit, so the clerk's button spins forever, R9-2's "may already be done" never shows, and the in-flight guards (`voidingDocs`, `billNewInflight`, `billSnapshotEnrichInflight`) stay held until restart. Reachable: a session expiry redirect to `/login`, a lens click that reloads the ERP view, a renderer crash | `erpEval` keeps a set of pending calls; the ERP view's `did-start-navigation` (main frame, not same-document), `render-process-gone` and `destroyed` settle them all with `{ ok: false, reason: "ERPNext page reloaded mid-script" }` — no `notRun`, so writes read it as uncertain. No blanket timeout on writes | open |
+| R2-2 | S | med | `main.js` `bill-apply-line-allocation` (8635) | Assigning a Bill line to Sales Orders creates **and submits** a bridge Purchase Order in one try with no step, and **drops a failure silently**: the clerk reads "Line 1 assigned." with no PO. A refused submit leaves an unnamed draft PO. No `navDebug` either side — session 2's write-path rules (R6c-4, R10c-2) not applied here | Split insert and submit (as R6c-4), say in the status when the PO was not made, name a leftover draft, log both sides | open |
+| R2-3 | M | low | `main.js` `bill-so-bridge-po` (8479) | Dead write path: the preload and `bill-doc-api-adapter.js` expose it, nothing calls it. It is a second copy of R2-2's PO rules (schedule +7 days, logbook title, customer copied from the SO) | Delete it with its preload/adapter lines; if a bridge PO is ever needed again, build the PO shape once in `src/` | open |
+| R2-4 | M | med | `main.js` 7553–10345 | ~15 `bill-*` / `doc-*` handler pairs are copies (item/tax add/set/delete, clear qty, revert-unsaved, save, mandatory, find, new, search, merge-source, open-vanilla …). They differ only in which scratch field rides along (Amount Due vs Date expected) and the receipt-only tax gate. A fix to one is easily missed in the other | One implementation per action with a per-skin scratch hook; register both channel names to it. Do this before splitting the file (R2-5) | open |
+| R2-5 | M | low | `main.js` as a whole | 12,744 lines, 187 handlers, 264 functions, **82 module-level `let`s** — the shared state, not the handler count, is what stops a split. Blocks by state touched: print IPC 2 vars, Papers 3, Find 2, payment settings 7, re-link/method change 9, health/incidents 15, doc-form 9, Bill 16 | Move in that order, each to `electron/ipc/<family>.js` taking a `deps` object; Bill and doc-form last, after R2-4 gives `dirtyState` and the scratch fields one owner. No behavior change per step; `tests/write-path-wiring.test.js` must follow the moved code | open |
+| R2-6 | P | low | `main.js` `navDebug` / `focusDebug` (539, 573) | The debug logs have no cap: `nav-debug.log` is 16.9 MB / 105k lines since 2026-09-07 on this machine, `focus-debug.log` 4.2 MB. Each line is an `appendFileSync` on the main process. (The in-memory rings are capped; nothing reads the files whole) | At startup, rename a log past ~5 MB to `.1` (one generation kept), so "read the last line" still works | open |
+| R2-7 | S | low | `main.js` `bill-allocate-charge` (9002) | If setting line N's rate fails mid-loop, lines 1…N-1 keep their raised rates on the ERP form but the offset Deduct row is never added, and the reply carries no `doc` — the page does not repaint, so it shows the old rates while a Save would post a bill total too high by the part already allocated | Return `doc: dirtyState.doc, partial: true` from the loop failure too, and say which lines changed | open |
+
+**Checked and fine:** every shell view is created once in `createWindow()` and reused; the five
+popups are singletons; every listener added outside `createWindow()` is removed (`did-finish-load`
+waiters, focus/blur, print worker `did-navigate`). Business logic sampled in the ten largest
+handlers is mostly already in `src/` (`planChargeToStockAllocation`, `splitQtyAcrossSalesOrders`,
+`mode-change-plan`); the exceptions are the bridge-PO shape (R2-2/R2-3) and the injected write
+scripts, which by nature live in `main.js`.
 
 ### R3 — Navigation spine (S, M, P) — read ~25k (full ~49k)
 
@@ -193,7 +216,21 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
      `src/doc-doors.js`)?
   4. Focus guards (`user-move-guard`, `stale-focus-guard`, `peek-return-focus`): three modules —
      do they overlap or disagree?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `37cf078` (2026-10-20, session 3).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R3-1 | M | low | `src/stale-focus-guard.js`; `src/doc-form-page.js` `restoreFocusAnchor` (1145, called at 2826–2897); `src/bill-form-page.js` `scheduleFocusInvoiceDateField` (3694) | Two modules answer "has the clerk moved on?" differently. `user-move-guard` counts the clerk's Tab/Enter/arrow keys and clicks; `stale-focus-guard` looks at where focus is now and treats focus on the page body as "not moved". G18 says any focus move made **after waiting** on ERPNext must ask the first; the doc-form header blur paths (after `await api.setHeader` / `setDateExpected` / `refresh`) and the Bill's Invoice-date move ask only the second. So a clerk whose box was rebuilt by the repaint, or who clicked blank space, is moved back — G18's incident on the PO/IR/A-R pages | One question for both: `shouldMoveFocusAfterWait(mark, active, anchor)` = not moved since `mark` **and** the position test; take the mark before each await. `peek-return-focus` is separate (where to land after a peek) and already takes the mark | open |
+
+**Checked and fine:** Recent (7 shown, capped list), Drafts (100 soft cap), peek children and
+peek links (capped in `peek-stack.js`), Submitted (capped) are all bounded. The nav intent
+(G6) clears on every branch, its 15 s timer is cleared on clear; `lensHijackLock` is released in
+a `finally`; a pending dirty gate is superseded by the next click ("last click wins"), so a
+crashed Doc renderer cannot leave it stuck. Every `navigate` door that passes
+`skipDirtyGate: true` (Find, New) runs after the page's own commit gate, and the credit memo
+replaces the form only from a submitted bill or an untouched draft (`planCreditMemoSource`).
+The one way a nav still dies is R2-1: `gateDirtyThen` awaits a snapshot through `erpEval`, so a
+reload mid-snapshot leaves that click doing nothing — fixed by R2-1's fix.
 
 ### R4 — Chrome, health, Find pages (S, P) — read ~22k
 
@@ -209,7 +246,23 @@ Checked and fine: the ERP preload exposes two messages, `erp-route-hop` checks i
   3. Find "show more": page size, and what happens at 2,000+ rows (the reselling corpus).
   4. Login / cookie handling after a server reinstall (`health.js:75` comment) — any path that
      keeps using a dead session silently?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `37cf078` (2026-10-20, session 3).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R4-1 | S | low | `main.js` `tickLogin` (every `HEALTH_PING_MS` = 5 s) | The login check is a signed-in request every 5 s, and Frappe extends a session on **every** signed-in request (`sessions.py` `Session.update`, run after each response; expiry is idle time since `last_updated`). So while the app is open the site's *Session Expiry* never fires — an unattended, signed-in shell stays signed in indefinitely, which a plain Desk tab would not | **5zorro decides:** keep (convenience), or check login only when health changes, on window focus, and after a request fails, so idle time counts again | open |
+| R4-2 | S | low | `electron/find-doc.html` `runQuery` (376) | If **Show more** fails (server slow, session gone), the rows already on screen are thrown away and replaced by the error, so the clerk loses the list they were reading | On an append failure keep `state.rows` and show the error on the *Show more* row | open |
+
+**Checked and fine:** Find reads go only to registry doctypes (`findListQuery` returns null
+otherwise); fields, the sort and the status are all taken from the registry, and the page's typed
+values only ever become `like` values on registry search fields — nothing the page sends names a
+field or doctype. Saved searches and the peek are re-checked against the registry too. Reads run
+as the clerk over `/api/resource`, so ERPNext's permissions apply. Typing is debounced (250 ms)
+and stale answers are dropped (`querySeq`). Show more fetches 200 at a time by offset, so a
+long list (the 2,700-document reselling corpus) costs one page per click, and the redraw is one
+`innerHTML`. Health: ping and login check each time out at 3 s on a 5 s interval, so they cannot
+stack. A dead session (the 2026-09-28 reinstall) flips the toolbar to *Log in* within 5 s, and
+the next fresh login prunes Recent / Drafts / Submitted rows the server no longer has.
 
 ### R5 — Doc-form machinery, the page (M, P) — read ~25k (family full ~131k)
 
@@ -526,7 +579,7 @@ money first, structure later.
 |---|--------|--------|-----------|--------------|------|
 | 1 ✅ | R14 + R1 + R11 | ~64k | anything | everything remote content, the network or a spawned process can reach | done |
 | 2 ✅ | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | done |
-| 3 | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | |
+| 3 ✅ | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | done |
 | 4 | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | |
 | 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
 | 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
