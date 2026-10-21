@@ -146,8 +146,10 @@ describe("R4-1: the login question is asked on events, never on the health beat"
     assert.match(fnText(main, "erpSessionFetchImpl"), /loginCheckAfterRefusal\(res && res\.status, url\)\) tickLogin\("refused"\)/);
     assert.match(main, /tickLogin\("navigate"\)/);
   });
-  it("one question at a time", () => {
-    assert.match(fnText(main, "tickLogin"), /if \(!tickLoginInflight\)/);
+  it("one question at a time, and an ask during one runs once more after it", () => {
+    const body = fnText(main, "tickLogin");
+    assert.match(body, /if \(tickLoginInflight\) \{\s*tickLoginAgain = why;/);
+    assert.match(body, /if \(again\) tickLogin\(/);
   });
   it("nothing else in main sets a timer that asks", () => {
     assert.doesNotMatch(main, /setInterval\(tickLogin/);

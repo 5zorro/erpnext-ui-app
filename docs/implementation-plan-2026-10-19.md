@@ -38,6 +38,11 @@ built, being dogfooded). It edits no code.
 > `tests/review-session3-wiring.test.js` pins them (20 of 22 fail on the old code). R2-1 proven in
 > the app; Bill smoke specs pass. Find and A/R specs fail the same way before and after — they need
 > the SAMPLE parties the blank sandbox does not have. Session 3 ended.
+> **The fixes were reviewed** before the session ended (*After the first pass*): one gap, fixed — with
+> no timer behind the login check, a check asked for while one was out (the load right after
+> logging in) shared the earlier, possibly stale answer and could leave *Log in* showing; it now
+> runs once more after. Session Expiry itself is ERPNext's setting: recommended `05:00` or shorter
+> (HANDOFF's site-settings table), never set by the shell.
 > Next: session 4 (R5 + R5b + R6a).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
@@ -254,7 +259,7 @@ reload mid-snapshot leaves that click doing nothing — fixed by R2-1's fix.
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
-| R4-1 | S | low | `main.js` `tickLogin` (every `HEALTH_PING_MS` = 5 s) | The login check is a signed-in request every 5 s, and Frappe extends a session on **every** signed-in request (`sessions.py` `Session.update`, run after each response; expiry is idle time since `last_updated`). So while the app is open the site's *Session Expiry* never fires — an unattended, signed-in shell stays signed in indefinitely, which a plain Desk tab would not | **5zorro decides:** keep (convenience), or check login only when health changes, on window focus, and after a request fails, so idle time counts again | fixed `5e9fb6a` — 5zorro chose events only (2026-10-20): launch, health change, window focus, ERP load, refused read |
+| R4-1 | S | low | `main.js` `tickLogin` (every `HEALTH_PING_MS` = 5 s) | The login check is a signed-in request every 5 s, and Frappe extends a session on **every** signed-in request (`sessions.py` `Session.update`, run after each response; expiry is idle time since `last_updated`). So while the app is open the site's *Session Expiry* never fires — an unattended, signed-in shell stays signed in indefinitely, which a plain Desk tab would not | **5zorro decides:** keep (convenience), or check login only when health changes, on window focus, and after a request fails, so idle time counts again | fixed `5e9fb6a` — 5zorro chose events only (2026-10-20): launch, health change, window focus, ERP load, refused read. The idle limit itself is ERPNext's `System Settings.session_expiry` (stock `170:00`); the recommendation is `05:00` or shorter, recorded in HANDOFF's site-settings table — a site setting, not app code |
 | R4-2 | S | low | `electron/find-doc.html` `runQuery` (376) | If **Show more** fails (server slow, session gone), the rows already on screen are thrown away and replaced by the error, so the clerk loses the list they were reading | On an append failure keep `state.rows` and show the error on the *Show more* row | fixed `5e9fb6a` — rows kept, error on the Show more row, button reads Try again |
 
 **Checked and fine:** Find reads go only to registry doctypes (`findListQuery` returns null

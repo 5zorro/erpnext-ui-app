@@ -1102,16 +1102,28 @@ function sendLoginState() {
  * reachable: when it is down, a Log in button would send the clerk after the wrong problem.
  * @param {string} [why]
  */
-/** One login question at a time; a second ask while one is out shares its answer. */
+/** One login question at a time. */
 let tickLoginInflight = null;
+/** An ask that came in while one was out — e.g. the load right after logging in. */
+let tickLoginAgain = "";
 
-/** @param {import("../src/health.js").LoginCheckReason} why */
+/**
+ * A second ask while one is out is not answered by it: that request may have left before the
+ * login (or logout) it is asking about, and with no timer behind it a stale "out" would stand until
+ * the next event. So it runs once more, after (review of the session-3 fixes).
+ * @param {import("../src/health.js").LoginCheckReason} why
+ */
 function tickLogin(why) {
-  if (!tickLoginInflight) {
-    tickLoginInflight = tickLoginOnce(why).finally(() => {
-      tickLoginInflight = null;
-    });
+  if (tickLoginInflight) {
+    tickLoginAgain = why;
+    return tickLoginInflight;
   }
+  tickLoginInflight = tickLoginOnce(why).finally(() => {
+    tickLoginInflight = null;
+    const again = tickLoginAgain;
+    tickLoginAgain = "";
+    if (again) tickLogin(/** @type {any} */ (again)).catch(() => {});
+  });
   return tickLoginInflight;
 }
 
