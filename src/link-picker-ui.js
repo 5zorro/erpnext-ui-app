@@ -114,9 +114,11 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     dd.style.top = p.top == null ? "auto" : `${p.top}px`;
     dd.style.bottom = p.bottom == null ? "auto" : `${p.bottom}px`;
   }
+  // One entry per picker, so re-opening (every search does) cannot add it twice.
+  const openEntry = { wrap, dd, place: placeDropdown };
   function showDropdown() {
     dd.hidden = false;
-    openPickers.opened({ wrap, dd, place: placeDropdown });
+    openPickers.opened(openEntry);
     placeDropdown();
   }
 

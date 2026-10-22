@@ -370,28 +370,45 @@ export function importStoppedText(s) {
  * @returns {Promise<{ ok: boolean, doc?: object, scratch?: object, reason?: string, linesDone?: number }>}
  */
 export async function applyImportedItemRows(api, records, opts = {}) {
+  /** Where the import is, so a call that throws (not refuses) still stops with the form as it was. */
+  const at = { lineNo: 0, rowTouched: false, linesDone: 0, removed: 0, lastDoc: null, lastScratch: undefined };
+  try {
+    return await applyImportedItemRowsAt(api, records, opts, at);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: importStoppedText({
+        lineNo: at.lineNo || undefined,
+        total: records.length,
+        linesDone: at.linesDone,
+        rowTouched: at.rowTouched,
+        removed: at.removed,
+        reason: String((e && e.message) || e),
+      }),
+      doc: at.lastDoc || undefined,
+      scratch: at.lastScratch,
+      linesDone: at.linesDone,
+    };
+  }
+}
+
+async function applyImportedItemRowsAt(api, records, opts, at) {
   if (!api || !records.length) {
     return { ok: false, reason: "Nothing to import." };
   }
   const replace = !!opts.replace;
   let rowCount = Math.max(0, Number(opts.currentRowCount) || 0);
-  /** @type {object|null} */
-  let lastDoc = null;
-  /** @type {object|undefined} */
-  let lastScratch = undefined;
 
   const progress = (msg) => {
     if (opts.onProgress) opts.onProgress(msg);
   };
-  let linesDone = 0;
-  let removed = 0;
-  /** @param {{ lineNo?: number, rowTouched?: boolean }} at @param {string} reason */
-  const stopped = (at, reason) => ({
+  /** @param {{ lineNo?: number, rowTouched?: boolean }} where @param {string} reason */
+  const stopped = (where, reason) => ({
     ok: false,
-    reason: importStoppedText({ ...at, total: records.length, linesDone, removed, reason }),
-    doc: lastDoc || undefined,
-    scratch: lastScratch,
-    linesDone,
+    reason: importStoppedText({ ...where, total: records.length, linesDone: at.linesDone, removed: at.removed, reason }),
+    doc: at.lastDoc || undefined,
+    scratch: at.lastScratch,
+    linesDone: at.linesDone,
   });
 
   if (replace) {
@@ -401,9 +418,9 @@ export async function applyImportedItemRows(api, records, opts = {}) {
       if (!(del && del.ok)) {
         return stopped({}, (del && del.reason) || "Could not remove extra lines.");
       }
-      removed++;
-      lastDoc = del.doc;
-      lastScratch = del.scratch;
+      at.removed++;
+      at.lastDoc = del.doc;
+      at.lastScratch = del.scratch;
       rowCount = del.doc && Array.isArray(del.doc.items) ? del.doc.items.length : rowCount - 1;
     }
   }
@@ -414,6 +431,8 @@ export async function applyImportedItemRows(api, records, opts = {}) {
     let ri = i;
     // Replace mode writes over an existing line: it is touched from the first write.
     let rowTouched = replace && i < rowCount;
+    at.lineNo = i + 1;
+    at.rowTouched = rowTouched;
 
     if (replace) {
       if (i >= rowCount) {
@@ -422,9 +441,9 @@ export async function applyImportedItemRows(api, records, opts = {}) {
         if (!(added && added.ok)) {
           return stopped({ lineNo: i + 1, rowTouched }, (added && added.reason) || "Add line failed during import.");
         }
-        rowTouched = true;
-        lastDoc = added.doc;
-        lastScratch = added.scratch;
+        rowTouched = at.rowTouched = true;
+        at.lastDoc = added.doc;
+        at.lastScratch = added.scratch;
         rowCount = added.doc && Array.isArray(added.doc.items) ? added.doc.items.length : rowCount + 1;
         ri = rowCount - 1;
       }
@@ -434,9 +453,9 @@ export async function applyImportedItemRows(api, records, opts = {}) {
       if (!(added && added.ok)) {
         return stopped({ lineNo: i + 1, rowTouched }, (added && added.reason) || "Add line failed during import.");
       }
-      rowTouched = true;
-      lastDoc = added.doc;
-      lastScratch = added.scratch;
+      rowTouched = at.rowTouched = true;
+      at.lastDoc = added.doc;
+      at.lastScratch = added.scratch;
       ri = added.doc && Array.isArray(added.doc.items) ? added.doc.items.length - 1 : rowCount;
       rowCount = added.doc && Array.isArray(added.doc.items) ? added.doc.items.length : rowCount + 1;
     }
@@ -449,12 +468,12 @@ export async function applyImportedItemRows(api, records, opts = {}) {
       if (!(res && res.ok)) {
         return stopped({ lineNo: i + 1, rowTouched }, (res && res.reason) || `Could not set ${field}.`);
       }
-      lastDoc = res.doc;
-      lastScratch = res.scratch;
+      at.lastDoc = res.doc;
+      at.lastScratch = res.scratch;
     }
 
-    if (appendDescription && lastDoc && Array.isArray(lastDoc.items) && lastDoc.items[ri]) {
-      const existing = lastDoc.items[ri].description;
+    if (appendDescription && at.lastDoc && Array.isArray(at.lastDoc.items) && at.lastDoc.items[ri]) {
+      const existing = at.lastDoc.items[ri].description;
       const merged = mergeImportDescription(existing, appendDescription, writes.description);
       const prev = String(existing ?? "").trim();
       if (merged !== prev) {
@@ -463,14 +482,14 @@ export async function applyImportedItemRows(api, records, opts = {}) {
         if (!(res && res.ok)) {
           return stopped({ lineNo: i + 1, rowTouched }, (res && res.reason) || "Could not append the description.");
         }
-        lastDoc = res.doc;
-        lastScratch = res.scratch;
+        at.lastDoc = res.doc;
+        at.lastScratch = res.scratch;
       }
     }
-    linesDone++;
+    at.linesDone++;
   }
 
-  return { ok: true, doc: lastDoc || undefined, scratch: lastScratch };
+  return { ok: true, doc: at.lastDoc || undefined, scratch: at.lastScratch };
 }
 
 /**

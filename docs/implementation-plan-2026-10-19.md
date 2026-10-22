@@ -52,7 +52,10 @@ built, being dogfooded). It edits no code.
 > `electron/bill.html.old` is dead, and deleting it is 5zorro's call (untracked).
 > Same day, 5zorro's answers: R5-1, R5b-2 and R6a-3 **fixed** with tests and proven in the app;
 > R6a-1 / R6a-2 agreed (own sessions); R5b-1 needs the read-back in its row first.
-> *After the first pass* for these fixes is **not yet run**: do it first next time.
+> **The fixes were reviewed 2026-10-21** (*After the first pass*): two gaps, fixed — a dropdown
+> re-opened by each search was added to the open set again each time (now one entry per picker),
+> and an import call that *throws* rather than refuses skipped the new message and repaint (now the
+> same stop). Re-proven in the app.
 > Smoke: `scaffold-peek-return-focus` fails 5 Sales Order / Customer tests with or without the
 > fixes (6 on the old code): the blank sandbox has no sample parties.
 > Next: session 5 (R6b + R10a + R10b).

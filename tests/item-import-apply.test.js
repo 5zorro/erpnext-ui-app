@@ -46,6 +46,20 @@ describe("applyImportedItemRows: stopping part way", () => {
     assert.equal(res.reason, "Import stopped at line 1 of 2: Item NOPE not found. Check line 1.");
   });
 
+  it("a call that throws (not refuses) stops the same way, with the form as it was", async () => {
+    const f = fakeForm();
+    const setItem = f.api.setItem;
+    f.api.setItem = async (ri, field, value) => {
+      if (ri === 1 && field === "qty") throw new Error("IPC channel closed");
+      return setItem(ri, field, value);
+    };
+    const res = await applyImportedItemRows(f.api, rows(3));
+    assert.equal(res.ok, false);
+    assert.equal(res.linesDone, 1);
+    assert.equal(res.doc.items[0].item_code, "SKU-1");
+    assert.equal(res.reason, "Import stopped at line 2 of 3: IPC channel closed. Line 1 is on the form. Check line 2.");
+  });
+
   it("a whole import still answers ok with the last form", async () => {
     const res = await applyImportedItemRows(fakeForm().api, rows(3));
     assert.equal(res.ok, true);

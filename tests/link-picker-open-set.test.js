@@ -37,6 +37,14 @@ describe("createOpenPickerSet", () => {
     assert.deepEqual(doc.calls.map((c) => c.type), ["click"]);
   });
 
+  it("re-opening the same picker keeps one entry", () => {
+    const set = createOpenPickerSet(fakeTarget(), fakeTarget());
+    const p = picker();
+    for (let i = 0; i < 30; i++) set.opened(p);
+    set.placeAll();
+    assert.equal(p.placed, 1);
+  });
+
   it("places only open, connected dropdowns and forgets the rest", () => {
     const set = createOpenPickerSet(fakeTarget(), fakeTarget());
     const open = picker();
@@ -68,6 +76,7 @@ describe("link-picker-ui uses the shared set", () => {
   const ui = readFileSync(fileURLToPath(new URL("../src/link-picker-ui.js", import.meta.url)), "utf8");
   it("mountLinkPicker adds no window or document listener of its own", () => {
     assert.doesNotMatch(ui, /window\.addEventListener|document\.addEventListener/);
-    assert.match(ui, /openPickers\.opened\(\{ wrap, dd, place: placeDropdown \}\)/);
+    assert.match(ui, /const openEntry = \{ wrap, dd, place: placeDropdown \};/);
+    assert.match(ui, /openPickers\.opened\(openEntry\)/);
   });
 });
