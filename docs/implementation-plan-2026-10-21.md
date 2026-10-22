@@ -83,6 +83,33 @@ typed, which list was on screen, or why that option was chosen. Now:
 | W3 | Picker: "Vendors as of 10:42 · Refresh" under the dropdown when the copy answered; 40 ms pause after a copy answer; breadcrumbs | built 2026-10-21 |
 | W4 | Prove in the app (copy answers with ERPNext's order; a vendor added in Vanilla shows after a changed-since; Refresh) | done 2026-10-21 on the blank sandbox: the copy and ERPNext's live search gave the same rows in the same order for 6 lists × 9 texts (54/54; misses went live and agreed too); a vendor added through ERPNext was found live at once, was in the copy after the next page-open check, left it once disabled (then deleted); the dropdown read "Vendors as of 22:34 · Refresh" and Refresh reloaded; loads took 16–132 ms for these small lists. The R5b-1 probe passed again with the copy answering, and its trail named each rule. **Not proven:** a list of the production size (~20k items) — the trail's `loaded dt=Item rows=… ms=…` line on the first run will say |
 
+## Dogfood round 1 — 5zorro 2026-10-21 (chaos mode), read from the trail
+
+5zorro: "I think I saw the deleted vendor on the list after I deleted it." The trail says what
+happened (`nav-debug.log` / `focus-debug.log`, 04:39–04:43 UTC):
+
+- **Loads were clean:** the 8 lists loaded 2 s after the Bill opened, 44–515 ms each under chaos.
+- **Not the copy.** He added *test add vendor* through Create Vendor… (04:40:21–32); his next
+  search missed the copy and asked ERPNext (`miss dt=Supplier -> live`), as designed. That list,
+  fetched live for "TES", **stayed open** while he went to Vanilla, deleted the vendor
+  (`Deleted Document` 22:41:44 site time = 04:41:44 UTC) and came back to a *different* new Bill;
+  13 s after the delete he clicked the vendor in it (`link-pick … list="TES" src=live`, box empty).
+  → finding **D1** below.
+- **The pick of a vanished vendor took ~38 s to undo itself:** the source picker opened for it at
+  once, the vendor write waited (`bridge-supplier-wait meta_only_deadline`, 04:42:23), and ERPNext
+  cleared the vendor box at 04:42:35. → **D2**.
+- **Two gaps in W2, fixed the same day:** "changed since" ran only when the Doc *page* booted
+  (`doc-get-ui`), and he opened Bills in place four times — only the first checked. It now runs on
+  every Doc open, and right after returning from a peek (Create Vendor…, an edit in Vanilla), where
+  what was just made is what gets typed next. Proven: add a vendor in ERPNext, open a Bill again →
+  `check dt=Supplier via=doc-open changed=1`, and a search the copy could answer ("s") then lists
+  it. Before the fix that search answered without it until a minute's search check.
+
+| # | Finding | Proposed | Status |
+|---|---------|----------|--------|
+| D1 | A picker's dropdown stays open, list and all, when the clerk leaves the page (Vanilla, another view) or the page swaps to another document; coming back, it is still clickable. Older than warm lists — the list here was live | Close every open dropdown when the page loses focus to another view (`window` blur) or paints a different document; its next search starts fresh | open — for 5zorro |
+| D2 | Picking a vendor that no longer exists: the source picker opens for it, and the box clears ~38 s later under chaos (unclear what the clerk is told) | Check what the status line said; then either validate the pick first or say "*X* no longer exists in ERPNext" at once. Related to plan 10-19 R5b-4 (an unknown vendor on a new PO stalls instead) | open — for 5zorro |
+
 ## Dogfood
 
 | What to try | Expect |

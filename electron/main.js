@@ -2260,6 +2260,9 @@ async function softPeekErp(route) {
  */
 function dismissSoftPeekFromEsc() {
   if (surfaceMode !== "erp") return;
+  // Back from a peek (Create Vendor…, an edit in Vanilla): what was just made or changed there
+  // is what the clerk types next, so check the warm lists now rather than in a minute.
+  setTimeout(() => warmLinkLists("peek-return", 0), 1500);
   const here = currentErpPathname() || currentRoute || "";
   const decision = resolveSoftPeekEscAction({
     parked: parkedDocSurface,
@@ -5094,6 +5097,9 @@ async function showDocForm(skinId, route, opts = {}) {
     // to Doc, everything comes along).
     const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
     if (inPlace) navDebug("doc-open-in-place", currentRoute);
+    // Every Doc open checks the warm pick lists, not only a page boot (doc-get-ui): 5zorro's
+    // dogfood 2026-10-21 opened Bills four times in place and only the first checked.
+    setTimeout(() => warmLinkLists("doc-open"), 2000);
     const loaded = inPlace
       ? true
       : openingFreshNew
