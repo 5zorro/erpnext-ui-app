@@ -68,5 +68,14 @@
  *    10-19 R5-1: 9 → 37 per kind over 4 repaints on the old code). A failure ERPNext will not
  *    give you (it accepts an unknown item code on set_value): wrap the handler in place via the
  *    private `ipcMain._invokeHandlers` Map (`m.set(ch, (e, ...a) => cond ? refusal : orig(e, ...a))`).
- *    Test-only; it is Electron internals and may move between versions.
+ *    Test-only; it is Electron internals and may move between versions. The same wrap with a
+ *    `setTimeout` makes one search slow, which is how a race is made to happen every run.
+ *
+ * 15. Typing like a clerk, and where the keys actually land (2026-10-21)
+ *    Real keystrokes: `wc.sendInputEvent` keyDown / char / keyUp per character, and keyDown "Tab"
+ *    — trusted events, so the page's own Tab handlers run. Two traps from review 10-19 R5b-1:
+ *    a new Purchase Order with no vendor sends focus to the Vendor box, so keys meant for an item
+ *    cell typed a vendor search instead (set the vendor first, then check `document.activeElement`);
+ *    and typing an item within ~1 s of setting the vendor races its repaint (plan 10-19 R5b-3) —
+ *    wait ~3 s unless that race is the subject.
  */

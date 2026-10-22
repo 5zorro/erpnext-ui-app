@@ -17,9 +17,9 @@ import {
 import {
   initialLinkHighlightIndex,
   nextLinkHighlightIndex,
-  resolveLinkPickIndex,
   linkPickerKeyAction,
   linkPickerOpenQuery,
+  linkPickerCommitPlan,
   scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
 import { logFocus } from "./focus-debug-client.js";
@@ -126,6 +126,16 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   /** @type {HTMLButtonElement[]} */
   let opts = [];
   let hi = -1;
+  // Review 10-19 R5b-1: which text the list on screen was fetched for, so Tab / Enter never
+  // commits an option from an earlier search. Only the newest search may paint.
+  /** @type {string|null} */
+  let listFor = null;
+  /** @type {Array<string|null>} option values, null for a "Create…" row */
+  let optValues = [];
+  let searchSeq = 0;
+  /** A Tab / Enter waiting for the list of the text it was pressed on. */
+  /** @type {{ key: string, shiftKey: boolean, text: string }|null} */
+  let held = null;
 
   function setHi(i) {
     opts.forEach((b) => b.classList.remove("active"));
@@ -208,6 +218,10 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       null;
     if (onBeforePick) onBeforePick(v, doctype, btnOpt);
     logFocus("link-pick", doctype);
+    // A search still waiting (typing pause or in flight) is for text this pick replaces.
+    clearTimeout(timer);
+    searchSeq++;
+    held = null;
     input.value = v;
     input.dataset.linkCommitted = v;
     dd.hidden = true;
@@ -237,18 +251,25 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       dd.innerHTML = `<div class="link-muted">Search API missing — restart the shell.</div>`;
       return;
     }
+    const seq = ++searchSeq;
+    const forText = input.value;
     showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
     const res = await api.searchLink(doctype, q || "");
+    // A newer search owns the box; this answer is for text no longer there.
+    if (seq !== searchSeq) return;
+    listFor = forText;
+    opts = [];
+    optValues = [];
     if (!res || !res.ok) {
       dd.innerHTML = `<div class="link-muted">${escapeHtml((res && res.reason) || "Search failed — is Vanilla logged in?")}</div>`;
-      opts = [];
+      replayHeld();
       return;
     }
     const rows = withEmptySearchActions(res.results || [], doctype);
     if (!rows.length) {
       dd.innerHTML = `<div class="link-muted">No matches${q ? ` for “${escapeHtml(q)}”` : ""}</div>`;
-      opts = [];
+      replayHeld();
       return;
     }
     dd.innerHTML = rows
@@ -259,6 +280,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       })
       .join("");
     opts = [...dd.querySelectorAll(".link-opt")];
+    optValues = rows.map((o) => (o && o.action ? null : String(o.value ?? "")));
     hi = initialLinkHighlightIndex(opts.length);
     if (hi === 0) {
       opts[0].classList.add("active");
@@ -272,9 +294,26 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
         await pickValue(b.getAttribute("data-value") || "", b);
       };
     });
+    replayHeld();
+  }
+
+  /**
+   * The list for the held key's text is in: press the key again, so it does what it would have
+   * done had the clerk waited — the picker picks, then the line cell moves on as usual.
+   */
+  function replayHeld() {
+    const h = held;
+    held = null;
+    if (!h || h.text !== input.value || listFor !== input.value) return;
+    if (document.activeElement !== input) return;
+    logFocus("link-held-replay", doctype);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: h.key, shiftKey: h.shiftKey, bubbles: true, cancelable: true }),
+    );
   }
 
   input.addEventListener("input", () => {
+    held = null;
     clearTimeout(timer);
     timer = setTimeout(() => runSearch(input.value), 280);
   });
@@ -287,6 +326,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       optionCount: opts.length,
     });
     if (act === "close") {
+      held = null;
       dd.hidden = true;
       hi = -1;
       return;
@@ -300,7 +340,17 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     if (act === "none") return;
     if (act === "pick") {
       ev.preventDefault();
-      const idx = resolveLinkPickIndex(hi, opts.length);
+      const plan = linkPickerCommitPlan({ typed: input.value, listFor, values: optValues, hi });
+      if (plan.kind === "hold") {
+        // The line cell's own Tab would commit the half-typed text: this key is the picker's.
+        ev.stopImmediatePropagation();
+        held = { key: ev.key, shiftKey: !!ev.shiftKey, text: input.value };
+        logFocus("link-held", doctype);
+        clearTimeout(timer);
+        runSearch(input.value);
+        return;
+      }
+      const idx = plan.kind === "pick" ? plan.index : -1;
       const pick = idx >= 0 ? opts[idx] : null;
       if (pick) await pickValue(pick.getAttribute("data-value") || "", pick);
       else {
@@ -317,6 +367,9 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       ev.preventDefault();
       setHi(nextLinkHighlightIndex(hi, opts.length, "up"));
     }
+  });
+  input.addEventListener("blur", () => {
+    held = null;
   });
   btn.addEventListener("click", (ev) => {
     ev.preventDefault();

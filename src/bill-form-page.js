@@ -4016,16 +4016,23 @@ export async function bootBillFormPage(api) {
     }
   
     let searchTimer = null;
+    // Only the newest search may paint: a slow answer for older text must not replace it (R5b-1).
+    let searchSeq = 0;
     searchEl.oninput = () => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
         if (step === "customer") {
-          customerRows = await loadCustomers(searchEl.value);
+          const rows = await loadCustomers(searchEl.value);
+          if (seq !== searchSeq || step !== "customer") return;
+          customerRows = rows;
           ci = Math.min(ci, customerRows.length);
           drawCustomers();
         } else if (step === "project") {
           const q = normalizeEditableText(searchEl.value).toLowerCase();
-          projectRows = (await loadProjects(customerFilter)).filter((p) => {
+          const rows = await loadProjects(customerFilter);
+          if (seq !== searchSeq || step !== "project") return;
+          projectRows = rows.filter((p) => {
             const blob = `${p.name} ${p.project_name || ""} ${p.customer_name || ""}`.toLowerCase();
             return !q || blob.includes(q);
           });

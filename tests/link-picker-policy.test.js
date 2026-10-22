@@ -6,6 +6,7 @@ import {
   resolveLinkPickIndex,
   linkPickerKeyAction,
   linkPickerOpenQuery,
+  linkPickerCommitPlan,
   nextFieldAfterLinkPick,
   nextItemFieldAfterEdit,
   nextItemFocusAfterEdit,
@@ -225,5 +226,30 @@ describe("linkPickerOpenQuery", () => {
   it("does not throw on junk", () => {
     assert.equal(linkPickerOpenQuery(null, null), "");
     assert.equal(linkPickerOpenQuery(undefined, undefined), "");
+  });
+});
+
+describe("linkPickerCommitPlan (review 10-19 R5b-1)", () => {
+  const list = ["ABC-1", "ABC-10", "ABC-12"];
+  it("a list fetched for the typed text picks its highlighted option, as before", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: "ABC", values: list, hi: 2 }), { kind: "pick", index: 2 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: "ABC", values: list, hi: -1 }), { kind: "pick", index: 0 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ZZ", listFor: "ZZ", values: [], hi: -1 }), { kind: "none" });
+  });
+  it("an older list never commits its highlighted option for other text", () => {
+    // Typed ABC-12 fast; the list on screen is still ABC-1's with ABC-1 highlighted.
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-12", listFor: "ABC-1", values: ["ABC-1"], hi: 0 }), { kind: "hold" });
+  });
+  it("the typed text naming an option of an older list picks it at once (5zorro's fast Tab)", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-12", listFor: "ABC-1", values: list, hi: 0 }), { kind: "pick", index: 2 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: " abc-1 ", listFor: "AB", values: list, hi: 1 }), { kind: "pick", index: 0 });
+  });
+  it("a Create… row is never an exact match, and no list yet means hold", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-9", listFor: "ABC", values: list.concat([null]), hi: 0 }), { kind: "hold" });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: null, values: [], hi: -1 }), { kind: "hold" });
+  });
+  it("chevron-opened on a committed value: the list is current, the arrowed option wins", () => {
+    // linkPickerOpenQuery searches "" but the box still holds the committed text it started from.
+    assert.deepEqual(linkPickerCommitPlan({ typed: "Net 30", listFor: "Net 30", values: ["Net 30", "Net 60"], hi: 1 }), { kind: "pick", index: 1 });
   });
 });

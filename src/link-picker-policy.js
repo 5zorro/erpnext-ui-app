@@ -114,6 +114,40 @@ export function linkPickerKeyAction(key, state) {
 }
 
 /**
+ * Tab / Enter on an open dropdown: pick from the list on screen, or hold the key until the list
+ * for the typed text is in (review 10-19 R5b-1).
+ *
+ * 🔴 The list on screen can be from an earlier search: it stays during the typing pause and while
+ * the next search runs. Picking its highlighted option once committed `ABC-1` for a typed `ABC-12`.
+ * Rules, as 5zorro read them back (2026-10-21):
+ * - the list was fetched for exactly the text in the box → pick its highlighted option, as before;
+ * - else the typed text names one of its options (case aside) → pick that one at once — his fast
+ *   Tab on a number he knows has one match must not wait for the network;
+ * - else hold the key and search now. The answer replays the key, so a held Tab does what a slow
+ *   Tab would have done (pick the first match, choice "a"). Typing or leaving the box cancels it.
+ * Never pick from a list fetched for other text.
+ *
+ * @param {{ typed: string, listFor: string|null, values: Array<string|null>, hi: number }} state
+ *   `listFor` = the text in the box when the list's search started (null: no list yet);
+ *   `values` = the options' values in order, null for a "Create…" row
+ * @returns {{ kind: "pick", index: number } | { kind: "hold" } | { kind: "none" }}
+ */
+export function linkPickerCommitPlan(state) {
+  const typed = String((state && state.typed) ?? "");
+  const values = Array.isArray(state && state.values) ? state.values : [];
+  if (state && state.listFor != null && String(state.listFor) === typed) {
+    const index = resolveLinkPickIndex(state.hi, values.length);
+    return index >= 0 ? { kind: "pick", index } : { kind: "none" };
+  }
+  const want = typed.trim().toLowerCase();
+  if (want) {
+    const index = values.findIndex((v) => v != null && String(v).trim().toLowerCase() === want);
+    if (index >= 0) return { kind: "pick", index };
+  }
+  return { kind: "hold" };
+}
+
+/**
  * What to search for when the clerk **opens** the dropdown, as opposed to typing in it.
  *
  * 🔴 Opening a picker on a field that already holds a value used to search for that value, so the
