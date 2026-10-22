@@ -19,6 +19,27 @@ export const FOCUS_INCIDENT_KIND = "focus-incident";
 export const sanitizeFocusIncidentNote = sanitizeNavIncidentNote;
 
 /**
+ * The picker's trail lines name what was typed and picked (`typed="…" list="…" picked="…"`, plan
+ * 2026-10-21) — useful in the local `focus-debug.log`, but an incident promises no field values.
+ * In an incident they keep their shape and lose their text: `typed=(12 chars)`.
+ * @param {string} event @param {string} detail
+ */
+export function redactFocusDetail(event, detail) {
+  const d = String(detail ?? "");
+  if (event === "vendor-missing") return d.replace(/:(.*)$/s, (_m, v) => `:(${v.length} chars)`);
+  if (!/^link-/.test(String(event ?? ""))) return d;
+  return d.replace(/\b(typed|list|picked)=("(?:[^"\\]|\\.)*")/g, (_m, key, quoted) => {
+    let len = quoted.length - 2;
+    try {
+      len = String(JSON.parse(quoted)).length;
+    } catch {
+      /* keep the rough length */
+    }
+    return `${key}=(${len} chars)`;
+  });
+}
+
+/**
  * @param {unknown} entries
  * @returns {Array<{ at: string, event: string, surfaceMode: string, surface: string, detail: string, active: string }>}
  */
@@ -29,7 +50,7 @@ export function slimFocusTrail(entries) {
     event: e && e.event != null ? String(e.event) : "",
     surfaceMode: e && e.surfaceMode != null ? String(e.surfaceMode) : "",
     surface: e && e.surface != null ? String(e.surface) : "",
-    detail: e && e.detail != null ? String(e.detail) : "",
+    detail: e && e.detail != null ? redactFocusDetail(String(e.event ?? ""), String(e.detail)) : "",
     active: e && e.active ? formatFocusActive(e.active) : "",
   }));
 }

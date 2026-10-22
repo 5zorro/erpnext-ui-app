@@ -6993,7 +6993,7 @@ function loadLinkList(doctype, why) {
   const started = Date.now();
   let retryLater = false;
   const run = (async () => {
-    const raw = await erpEval(`(async () => {
+    const evalLoad = erpEval(`(async () => {
       try {
         if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
         ${LINK_LIST_ERP_HELPERS}
@@ -7021,6 +7021,8 @@ function loadLinkList(doctype, why) {
         return { ok: false, reason: String((e && e.message) || e) };
       }
     })()`);
+    // A deadline: a stalled ERPNext page must not hold this list's load (and its Refresh) for good.
+    const raw = await raceTimeout(evalLoad, 30_000, `${doctype} list load`);
     if (gen !== linkListGeneration) return;
     if (!raw || !raw.ok) {
       navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
@@ -7071,7 +7073,7 @@ function checkLinkListChanged(doctype, why) {
   linkListCopies.set(doctype, { ...copy, checkedAt: Date.now() });
   let reload = false;
   const run = (async () => {
-    const raw = await erpEval(`(async () => {
+    const evalCheck = erpEval(`(async () => {
       try {
         if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
         ${LINK_LIST_ERP_HELPERS}
@@ -7099,6 +7101,7 @@ function checkLinkListChanged(doctype, why) {
         return { ok: false, reason: String((e && e.message) || e) };
       }
     })()`);
+    const raw = await raceTimeout(evalCheck, 20_000, `${doctype} list check`);
     if (gen !== linkListGeneration) return;
     if (!raw || !raw.ok) {
       navDebug("link-list", `check-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
@@ -10413,7 +10416,7 @@ ipcMain.handle("doc-link-exists", async (_e, doctype, name) => {
   const dt = String(doctype || "").trim();
   const n = normalizeEditableText(name);
   if (!dt || !n) return { ok: true, exists: null };
-  const raw = await erpEval(`(async () => {
+  const evalExists = erpEval(`(async () => {
     try {
       var dt = ${JSON.stringify(dt)};
       var n = ${JSON.stringify(n)};
@@ -10428,6 +10431,8 @@ ipcMain.handle("doc-link-exists", async (_e, doctype, name) => {
       return { ok: false, reason: String((e && e.message) || e) };
     }
   })()`);
+  // 5 s at most: a vendor pick waits on this before anything opens, and "could not tell" never blocks.
+  const raw = await raceTimeout(evalExists, 5_000, "vendor check");
   if (!raw || !raw.ok) return { ok: true, exists: null };
   if (!raw.exists) {
     navDebug("link-missing", `dt=${dt} name=${n.slice(0, 60)}`);

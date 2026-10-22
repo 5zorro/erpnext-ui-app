@@ -271,7 +271,12 @@ search for two (the search, then the vendors' last POs). Rules, with the numbers
 - **Trail:** `focus-debug.log` `link-pick` / `link-pick-key` / `link-held` / `link-held-replay` /
   `link-held-cancel` carry `typed=… list=… rule=current|exact|held|chosen picked=… src=copy|live`;
   `nav-debug.log` `link-list` lines for load, check, reload, refresh, miss (once per run of
-  misses), drop and failure; `link-missing` for a vendor checked and not found.
+  misses), drop and failure; `link-missing` for a vendor checked and not found. A focus *incident*
+  copies the trail with those values redacted to lengths (`typed=(12 chars)`,
+  `redactFocusDetail`) — incidents promise no field values; the local log keeps them.
+- **Deadlines:** every ERPNext-page call here is raced — list load 30 s, check 20 s, the vendor
+  check 5 s (then "could not tell", which never blocks). A vendor pick waits on that check before
+  anything opens, so without one a stalled page would make the pick do nothing.
 
 Fixes from its first dogfood (D1–D3):
 
