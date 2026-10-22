@@ -46,3 +46,6 @@ ops/sample-data/dogfood-sources/generated/
 # Legacy Bill shell (tranche 10) — SSoT: electron/bill-shell.fragment.html + doc-form.html.
 # Globbed so a renamed copy cannot slip back in; the real history is in git (see d625ec5).
 electron/bill.html*
+
+# Unit-test run log (npm test → scripts/run-tests.js; plan 2026-10-19 § Test-run log)
+test-logs/

@@ -160,9 +160,9 @@ export const ARCHITECTURE_FAMILIES = [
   },
   {
     id: "repo",
-    label: "Repo process — the coverage map itself, the commit-attribution hook",
-    modules: ["architecture-families"],
-    paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "package.json", "package-lock.json", "playwright.config.js"],
+    label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log",
+    modules: ["architecture-families", "test-run-log"],
+    paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "scripts/run-tests.js", "scripts/test-flaky.js", "package.json", "package-lock.json", "playwright.config.js"],
     e2e: [],
     noPaper: "process, not product",
   },

@@ -678,6 +678,30 @@ When this plan closes (R15), move the slice table and the *Reviewed through* col
 
 ---
 
+## Test-run log — so a flaky failure can be looked at later (5zorro 2026-10-21)
+
+Why: on 2026-10-21 one `npm test` run failed one test, the next five passed, and nothing was
+left to say which test it was. Failures seen while "getting the thing to work" are exactly the
+ones nobody scrutinizes.
+
+- `npm test` runs `scripts/run-tests.js`: the same tests and the same screen output, plus a TAP
+  copy of the run in `test-logs/runs/<time>-<commit>.tap`. `test-logs/` sits in the repo and is
+  **untracked** (`.gitignore`).
+- One line per run in `test-logs/runs.tsv`: time, commit, whether the tree had changes, a
+  fingerprint of the code (commit + uncommitted diff + untracked files), pass / fail counts,
+  duration, the log's name, the failing tests' names, and the scope (`all`, or the files named
+  after `npm test --`: a run of other files never ran a test, so it is not compared with a full run). Kept whole: it is what the flaky report
+  reads, so history outlives the logs.
+- `npm run test:flaky` lists tests that both failed and passed **at the same fingerprint**:
+  flaky, as opposed to broken and then fixed.
+- The last **50** run logs are kept. **Before** any is deleted, one entry is appended to
+  `test-logs/flaky-history.md`: the time, which logs are going, and the `test:flaky` report at
+  that moment. That file is cut from the top, by whole entries, once past **64 KB**.
+- Pure parts (TAP failure parsing, the fingerprint grouping, the capped append) in
+  `src/test-run-log.js` with tests. **Built 2026-10-21**; rotation proven with 50 dummy logs (entry
+  written first, then the 3 oldest removed). The e2e specs are not logged here; they keep their failures
+  in `test-results/`.
+
 ## Open questions for 5zorro
 
 1. Fix in the same session when a finding is a one-liner with a test, or always a separate
