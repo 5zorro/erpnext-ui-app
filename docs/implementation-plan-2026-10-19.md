@@ -55,7 +55,8 @@ built, being dogfooded). It edits no code.
 > **The fixes were reviewed 2026-10-21** (*After the first pass*): two gaps, fixed — a dropdown
 > re-opened by each search was added to the open set again each time (now one entry per picker),
 > and an import call that *throws* rather than refuses skipped the new message and repaint (now the
-> same stop). Re-proven in the app.
+> same stop). Re-proven in the app. Then the **test-run log** was built (§ *Test-run log*,
+> `ebe5a63`) and reviewed the same day: a Ctrl+C now logs the run as aborted instead of nothing.
 > Smoke: `scaffold-peek-return-focus` fails 5 Sales Order / Customer tests with or without the
 > fixes (6 on the old code): the blank sandbox has no sample parties.
 > Next: session 5 (R6b + R10a + R10b).
@@ -698,7 +699,8 @@ ones nobody scrutinizes.
   `test-logs/flaky-history.md`: the time, which logs are going, and the `test:flaky` report at
   that moment. That file is cut from the top, by whole entries, once past **64 KB**.
 - Pure parts (TAP failure parsing, the fingerprint grouping, the capped append) in
-  `src/test-run-log.js` with tests. **Built 2026-10-21**; rotation proven with 50 dummy logs (entry
+  `src/test-run-log.js` with tests. Known limit: `runs.tsv` is never trimmed (~300 bytes a run;
+  it is what makes old flakes findable). **Built 2026-10-21**; rotation proven with 50 dummy logs (entry
   written first, then the 3 oldest removed). The e2e specs are not logged here; they keep their failures
   in `test-results/`.
 
@@ -724,6 +726,8 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R2-1 | Under `npm run start:chaos`, click Save on a Bill and log out in a browser tab before it finishes, or restart Docker mid-save | The button comes back with "The ERPNext page reloaded before the step finished" — it never spins forever; Edit / New work without restarting |
 | R4-1 | Leave the app open and idle past the site's *Session Expiry* (170 h here; shorten it in System Settings to try) | On returning to the window the toolbar offers *Log in*; the health dot stayed green throughout |
 | R4-2 | Find on a list over 200 rows, stop ERPNext, click Show more | The rows already shown stay; "Could not read more…" under them and the button reads Try again |
+| R5b-2 | Import 10+ lines on a Bill and stop ERPNext (or log out in a browser tab) part way | "Import stopped at line N of M: … Lines 1–(N−1) are on the form." — those lines show on the page; the line table and Import were locked while it ran |
+| R5-1 | Enter a long Bill (20+ lines, many edits), then scroll the line table | Scrolling stays smooth all day; an open dropdown follows its cell |
 | R2-7 | Allocate a charge to stock where one line's rate cannot be set | "… Nothing was changed." — the other lines keep their old rates |
 
 ## Validate

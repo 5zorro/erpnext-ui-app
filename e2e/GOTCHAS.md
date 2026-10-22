@@ -61,4 +61,12 @@
  *    No `render-process-gone`, and the page kept running — so a "crash" test built on it proves
  *    nothing. Kill the renderer instead: `process.kill(wc.getOSProcessId(), "SIGKILL")` fires
  *    `render-process-gone` with reason `killed` (review 10-19 R2-1 was proven that way).
+ *
+ * 14. Counting a page's listeners, and making one IPC call fail, from a probe (2026-10-21)
+ *    Listeners: from `app.evaluate`, attach `wc.debugger` ("1.3"), `Runtime.evaluate` "window" /
+ *    "document" for an objectId, then `DOMDebugger.getEventListeners` — counts by type (review
+ *    10-19 R5-1: 9 → 37 per kind over 4 repaints on the old code). A failure ERPNext will not
+ *    give you (it accepts an unknown item code on set_value): wrap the handler in place via the
+ *    private `ipcMain._invokeHandlers` Map (`m.set(ch, (e, ...a) => cond ? refusal : orig(e, ...a))`).
+ *    Test-only; it is Electron internals and may move between versions.
  */

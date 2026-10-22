@@ -304,7 +304,7 @@ into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printi
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |
 | In-field calculator | `src/calc/` (`calc-engine.js`, `attach-field-calc.js`, `field-calc.js`, `back-in-amount.js`, `session-history.js`) | Doc form numeric fields (Bill / PO / IR) + left-rail Calculator history; 24h prune in `nav-state.json` |
-| Link search (T1) | `link-search.js`, `vendor-activity.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131) |
+| Link search (T1) | `link-search.js`, `vendor-activity.js`, `link-picker-open-set.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131). A picker adds **no** page-wide listener of its own: the line tables are rebuilt on every paint, so per-picker `window`/`document` listeners piled up all day (review 10-19 R5-1). Page-wide resize / scroll / click-outside go through the one open-dropdown set |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`4c8f72b`) |
 | **Fixed** Setup peek return (OI-112 class) | `docs/bug-bounty-setup-peek-return.md` | Vanilla Create-new-Account; Esc/Recent parent now in-SPA |
@@ -508,7 +508,7 @@ and a live ERPNext dependency.
 
 | Layer | Role | Tool | CI gate? |
 |-------|------|------|----------|
-| **1. Pure unit** | Business logic in `src/` | `node --test` (`npm test`) | **Yes — required** |
+| **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope); `npm run test:flaky` lists tests that failed and passed on the same code; the last 50 logs are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
 | **2. ERP workflow e2e** (bulk of “full suite”) | Doc/Desk paths against unmodified ERP | Playwright **as a browser** → `ERP_BASE` | Optional; **skip-OK** if ERP down |
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
 | **4. Manual** | Feel / dogfood | You (+ **ERP console**) | Never a substitute for layer 1 |

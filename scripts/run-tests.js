@@ -92,6 +92,9 @@ const child = spawn(
   { cwd: ROOT, stdio: "inherit" },
 );
 
+// Ctrl+C reaches the test process too (same terminal); this one stays up to log the run as aborted.
+process.on("SIGINT", () => {});
+
 child.on("exit", (status, signal) => {
   let tap = "";
   try {
