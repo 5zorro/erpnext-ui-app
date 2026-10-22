@@ -49,6 +49,8 @@ export function billApiFromErpDoc(api) {
     printQueueClear: () => api.printQueueClear(),
     printQueueRun: (req) => api.printQueueRun(req),
     searchLink: (doctype, txt, filters) => api.searchLink(doctype, txt || "", filters || null),
+    refreshLinkList: (doctype) =>
+      api.refreshLinkList ? api.refreshLinkList(doctype || "") : Promise.resolve({ ok: false }),
     checkAccountCompanies: () => api.checkAccountCompanies(),
     listSources: (supplier) => api.listSources(supplier || ""),
     listSourceSlice: (supplier, sliceId) =>

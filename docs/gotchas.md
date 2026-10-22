@@ -712,3 +712,14 @@ A focus-skipping path must hand the clerk's place back: a repaint that skipped i
 "Vendor will take focus" lost the clerk when Vendor declined. Skip the restore only when the other
 focus actually happened (`vendorFocused` in the Bill's `paint`).
 
+
+## G19 — `frappe.db.get_list` never settles when the server raises (2026-10-21)
+
+Run inside the ERPNext page (the shell's `erpEval`), `frappe.db.get_list` (and the other
+`frappe.db.*` helpers built on `frappe.call` with a callback) returns a promise that is **never
+resolved or rejected** when the server answers with an error — asking for a field that does not
+exist hung past 8 s, while the same request through `frappe.xcall` rejected at once (probe,
+2026-10-21). An `erpEval` awaiting it never returns, and the shell's later calls wait behind it
+until the page reloads — the likely mechanism of review 10-19 **R5b-4**. New ERP-page code uses
+`frappe.xcall` (warm pick lists do, plan 2026-10-21); the existing `frappe.db.*` calls are R5b-4's
+to sweep.

@@ -78,4 +78,11 @@
  *    cell typed a vendor search instead (set the vendor first, then check `document.activeElement`);
  *    and typing an item within ~1 s of setting the vendor races its repaint (plan 10-19 R5b-3) —
  *    wait ~3 s unless that race is the subject.
+ *
+ * 16. Asking main a question without a page (2026-10-21)
+ *    `ipcMain._invokeHandlers.get(channel)({ sender: null }, ...args)` from `app.evaluate` calls a
+ *    handler directly — how the warm-list probe compared answers. A search with a filter that
+ *    matches every row (`{ name: ["like", "%"] }`) skips the warm copy, so the same call gives
+ *    ERPNext's live answer to compare with (plan 2026-10-21 W4). A probe that adds a record to
+ *    the sandbox deletes it in `finally`.
  */

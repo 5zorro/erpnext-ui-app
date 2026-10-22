@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
+  refreshLinkList: (doctype) => ipcRenderer.invoke("link-list-refresh", doctype || ""),
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
   listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
   listSourceSlice: (supplier, sliceId) =>

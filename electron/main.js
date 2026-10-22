@@ -262,6 +262,15 @@ import {
 import { formatClientErrorReason } from "../src/frappe-error.js";
 import { mergeSinglePaymentEntries } from "../src/payment-entry-batch.js";
 import { rankSupplierLinkOptions, utcYmd } from "../src/vendor-activity.js";
+import {
+  WARM_LINK_DOCTYPES,
+  LINK_LIST_MAX_ROWS,
+  buildLinkListCopy,
+  searchLinkListCopy,
+  mergeChangedSince,
+  linkListCheckDue,
+  linkListCopyable,
+} from "../src/link-list-cache.js";
 import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders, combineMappedBillSources } from "../src/source-modal.js";
 import {
   SOURCE_LIST_SLICE_ORDER,
@@ -1139,6 +1148,10 @@ async function tickLoginOnce(why) {
     );
   }
   const becameIn = r.state === "in" && lastLogin.state !== "in";
+  // A health blip reads "unknown" and keeps the copies; logging out, or someone else in, drops them.
+  if (r.state === "out" || (r.state === "in" && linkListUser && r.user !== linkListUser)) {
+    dropLinkLists(`login ${lastLogin.state}->${r.state}`);
+  }
   lastLogin = { state: r.state, user: r.user };
   sendLoginState();
   // Every fresh login (and the first check after launch) re-checks the rail against ERP: a
@@ -6794,6 +6807,24 @@ async function searchLink(doctype, txt, filters) {
     return { ok: false, reason: "doctype required", results: [] };
   }
   const q = txt == null ? "" : String(txt);
+  // Warm pick lists (plan 2026-10-21): an unfiltered search of a copied list is answered here.
+  const dt = doctype.trim();
+  if (linkListCopyable(dt, filters)) {
+    const copy = linkListCopies.get(dt);
+    if (copy) {
+      if (linkListCheckDue(copy, Date.now())) void checkLinkListChanged(dt, "search");
+      const hit = searchLinkListCopy(copy, q, { asOf: utcYmd() });
+      if (!hit.miss) {
+        linkListMissing.delete(dt);
+        return { ok: true, results: hit.results, source: "copy", asOf: copy.checkedAt };
+      }
+      // One line per run of misses (a name typed letter by letter), not one per keystroke.
+      if (!linkListMissing.has(dt)) navDebug("link-list", `miss dt=${dt} len=${q.trim().length} -> live`);
+      linkListMissing.add(dt);
+    } else if (lastLogin.state === "in") {
+      void loadLinkList(dt, "search");
+    }
+  }
   const filterPairs =
     filters && typeof filters === "object" && !Array.isArray(filters)
       ? Object.entries(filters).filter(([, v]) => v != null && v !== "")
@@ -6868,10 +6899,237 @@ async function searchLink(doctype, txt, filters) {
     results = await enrichAccountLinkResults(results);
   }
   if (doctype.trim() !== "Supplier" || !results.length) {
-    return { ok: true, results };
+    return { ok: true, results, source: "live" };
   }
   const ranked = await rankSupplierSearchResults(results);
-  return { ok: true, results: ranked };
+  return { ok: true, results: ranked, source: "live" };
+}
+
+/*
+ * ── Warm pick lists (plan 2026-10-21, OI-185) ──────────────────────────────────────────────────
+ * One copy per list, for the user logged in; searched by `searchLinkListCopy` in ERPNext's order.
+ * 🔴 Only `frappe.xcall` in here: `frappe.db.get_list` never settles when the server raises
+ * (proven 2026-10-21), and a load that never settled would hold an erpEval for good (review 10-19
+ * R5b-4). A failed or oversized load leaves the list live, as before.
+ */
+/** @type {Map<string, import("../src/link-list-cache.js").LinkListCopy>} */
+const linkListCopies = new Map();
+/** One load or check per list at a time. @type {Map<string, Promise<unknown>>} */
+const linkListBusy = new Map();
+/** Bumped when the copies are dropped, so a load started for the last user is thrown away. */
+let linkListGeneration = 0;
+/** Whose permissions the copies were read with. */
+let linkListUser = "";
+/** Lists whose last search missed the copy, so the trail logs a miss once per run. */
+const linkListMissing = new Set();
+
+/** The ERP-page side of a load or check: meta, the active-row filters, vendors' last POs. */
+const LINK_LIST_ERP_HELPERS = `
+  var withTimeout = function (p, ms) {
+    return Promise.race([p, new Promise(function (_, no) { setTimeout(function () { no(new Error("timed out")); }, ms); })]);
+  };
+  var metaOf = async function (dt) {
+    try { await withTimeout(frappe.model.with_doctype(dt), 5000); } catch (e) {}
+    var m = (frappe.get_meta && frappe.get_meta(dt)) || {};
+    var check = function (f) {
+      return (m.fields || []).some(function (d) { return d.fieldname === f && d.fieldtype === "Check"; });
+    };
+    var active = [];
+    if (check("enabled")) active.push([dt, "enabled", "=", 1]);
+    if (check("disabled")) active.push([dt, "disabled", "!=", 1]);
+    return { order: "idx desc, " + (m.sort_field || "modified") + " " + (m.sort_order || "DESC"), active: active };
+  };
+  var vendorsLastPo = async function () {
+    var rows = await frappe.xcall("frappe.client.get_list", {
+      doctype: "Purchase Order",
+      fields: ["supplier", { MAX: "transaction_date", as: "last_po" }],
+      filters: [["docstatus", "=", 1]],
+      group_by: "supplier",
+      limit_page_length: 0
+    });
+    var out = {};
+    (rows || []).forEach(function (r) { if (r && r.supplier) out[r.supplier] = String(r.last_po || ""); });
+    var fyStart = "";
+    try {
+      var fy = frappe.defaults && frappe.defaults.get_user_default ? frappe.defaults.get_user_default("fiscal_year") : "";
+      if (fy) {
+        var v = await frappe.xcall("frappe.client.get_value", { doctype: "Fiscal Year", filters: fy, fieldname: "year_start_date" });
+        fyStart = (v && v.year_start_date) || "";
+      }
+    } catch (e) {}
+    return { lastPo: out, fyStart: fyStart };
+  };
+`;
+
+/**
+ * The whole list, as `search_link` returns it, plus each row's rank. Answers live meanwhile.
+ * @param {string} doctype
+ * @param {string} why for the trail
+ */
+function loadLinkList(doctype, why) {
+  if (linkListBusy.has(doctype)) return linkListBusy.get(doctype);
+  const gen = linkListGeneration;
+  const started = Date.now();
+  let retryLater = false;
+  const run = (async () => {
+    const raw = await erpEval(`(async () => {
+      try {
+        if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
+        ${LINK_LIST_ERP_HELPERS}
+        var dt = ${JSON.stringify(doctype)};
+        var meta = await metaOf(dt);
+        var rows = await frappe.xcall("frappe.desk.search.search_link", {
+          txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: ${LINK_LIST_MAX_ROWS + 1}
+        });
+        if ((rows || []).length > ${LINK_LIST_MAX_ROWS}) return { ok: true, tooMany: rows.length };
+        var ranked = await frappe.xcall("frappe.client.get_list", {
+          doctype: dt, fields: ["name", "modified"], order_by: meta.order, limit_page_length: 0
+        });
+        var newest = "";
+        (ranked || []).forEach(function (r) { if (r.modified > newest) newest = r.modified; });
+        var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null, fyStart: "" };
+        return {
+          ok: true,
+          rows: rows || [],
+          rank: (ranked || []).map(function (r) { return r.name; }),
+          newest: newest,
+          lastPo: po.lastPo,
+          fyStart: po.fyStart
+        };
+      } catch (e) {
+        return { ok: false, reason: String((e && e.message) || e) };
+      }
+    })()`);
+    if (gen !== linkListGeneration) return;
+    if (!raw || !raw.ok) {
+      navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
+      // Opening a Doc page moves the ERPNext page too, which can cut a load off: try once more.
+      if (!/-retry$/.test(why)) retryLater = true;
+      return;
+    }
+    if (raw.tooMany) {
+      navDebug("link-list", `too-many dt=${doctype} rows=${raw.tooMany} -> stays live`);
+      return;
+    }
+    // Raw rows, not normalized: a title shown as the label (Project, tax templates) is searched too.
+    const copy = buildLinkListCopy(doctype, raw.rows, raw.rank, {
+      now: Date.now(),
+      newestModified: raw.newest,
+      lastPo: raw.lastPo,
+      fyStart: raw.fyStart,
+    });
+    linkListCopies.set(doctype, copy);
+    linkListUser = lastLogin.user || "";
+    navDebug("link-list", `loaded dt=${doctype} rows=${copy.rows.length} ms=${Date.now() - started} via=${why}`);
+  })()
+    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${e && e.message}`))
+    .finally(() => {
+      linkListBusy.delete(doctype);
+      if (retryLater) {
+        setTimeout(() => {
+          if (gen === linkListGeneration && !linkListCopies.has(doctype)) void loadLinkList(doctype, `${why}-retry`);
+        }, 3000);
+      }
+    });
+  linkListBusy.set(doctype, run);
+  return run;
+}
+
+/**
+ * "Anything changed since?" — re-read the rows modified since the copy's newest, then compare
+ * counts: a delete or a rename leaves a different count, and the whole list is reloaded.
+ * @param {string} doctype
+ * @param {string} why
+ */
+function checkLinkListChanged(doctype, why) {
+  const copy = linkListCopies.get(doctype);
+  if (!copy) return loadLinkList(doctype, why);
+  if (linkListBusy.has(doctype)) return linkListBusy.get(doctype);
+  const gen = linkListGeneration;
+  // Marked checked now, so a burst of searches asks once.
+  linkListCopies.set(doctype, { ...copy, checkedAt: Date.now() });
+  let reload = false;
+  const run = (async () => {
+    const raw = await erpEval(`(async () => {
+      try {
+        if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
+        ${LINK_LIST_ERP_HELPERS}
+        var dt = ${JSON.stringify(doctype)};
+        var meta = await metaOf(dt);
+        var changed = await frappe.xcall("frappe.client.get_list", {
+          doctype: dt, fields: ["name", "modified"],
+          filters: [["modified", ">", ${JSON.stringify(copy.newestModified || "1900-01-01")}]],
+          limit_page_length: 501
+        });
+        if ((changed || []).length > 500) return { ok: true, tooMany: true };
+        var names = (changed || []).map(function (r) { return r.name; });
+        var newest = "";
+        (changed || []).forEach(function (r) { if (r.modified > newest) newest = r.modified; });
+        var fresh = names.length
+          ? await frappe.xcall("frappe.desk.search.search_link", {
+              txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: names.length + 1,
+              filters: { name: ["in", names] }
+            })
+          : [];
+        var count = await frappe.xcall("frappe.client.get_count", { doctype: dt, filters: meta.active });
+        var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null };
+        return { ok: true, names: names, fresh: fresh || [], newest: newest, count: count, lastPo: po.lastPo };
+      } catch (e) {
+        return { ok: false, reason: String((e && e.message) || e) };
+      }
+    })()`);
+    if (gen !== linkListGeneration) return;
+    if (!raw || !raw.ok) {
+      navDebug("link-list", `check-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
+      return;
+    }
+    if (raw.tooMany) {
+      reload = true;
+      navDebug("link-list", `check dt=${doctype} via=${why} changed=500+ -> reload`);
+      return;
+    }
+    const now = linkListCopies.get(doctype) || copy;
+    const merged = mergeChangedSince(now, raw.names, raw.fresh, {
+      now: Date.now(),
+      newestModified: raw.newest,
+      ...(doctype === "Supplier" ? { lastPo: raw.lastPo } : {}),
+    });
+    linkListCopies.set(doctype, merged.copy);
+    if (Number(raw.count) !== merged.copy.rows.length) {
+      reload = true;
+      navDebug("link-list", `check dt=${doctype} via=${why} count=${raw.count} copy=${merged.copy.rows.length} -> reload`);
+    } else if (merged.changed) {
+      navDebug("link-list", `check dt=${doctype} via=${why} changed=${merged.changed} removed=${merged.removed}`);
+    }
+  })()
+    .catch((e) => navDebug("link-list", `check-failed dt=${doctype} via=${why} reason=${e && e.message}`))
+    .finally(() => {
+      linkListBusy.delete(doctype);
+      if (reload) void loadLinkList(doctype, `${why}-reload`);
+    });
+  linkListBusy.set(doctype, run);
+  return run;
+}
+
+/** Load what is missing; check what is older than `minAgeMs`. In the background. */
+function warmLinkLists(why, minAgeMs = 10_000) {
+  if (lastLogin.state !== "in") return;
+  const now = Date.now();
+  for (const dt of WARM_LINK_DOCTYPES) {
+    const copy = linkListCopies.get(dt);
+    if (!copy) void loadLinkList(dt, why);
+    else if (now - copy.checkedAt >= minAgeMs) void checkLinkListChanged(dt, why);
+  }
+}
+
+/** Another user's permissions are not this one's: drop every copy. */
+function dropLinkLists(why) {
+  linkListGeneration += 1;
+  linkListUser = "";
+  linkListMissing.clear();
+  if (!linkListCopies.size) return;
+  navDebug("link-list", `dropped ${linkListCopies.size} via=${why}`);
+  linkListCopies.clear();
 }
 
 /**
@@ -9583,6 +9841,9 @@ ipcMain.on("bill-resolve-nav-gate", (_e, token, proceed) => {
 
 ipcMain.handle("doc-get-ui", () => {
   if (!activeDocSkin) return null;
+  // A Doc page opening is when its pickers are about to be typed into (plan 2026-10-21). Not at
+  // once: the ERPNext page is moving to the same document, which would cut the loads off.
+  setTimeout(() => warmLinkLists("doc-open"), 2000);
   return docFormUiPayload(activeDocSkin);
 });
 
@@ -10125,6 +10386,16 @@ ipcMain.handle("doc-revert-unsaved", async () => {
 });
 
 ipcMain.handle("doc-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+ipcMain.handle("link-list-refresh", async (_e, doctype) => {
+  const dt = String(doctype || "").trim();
+  if (!WARM_LINK_DOCTYPES.includes(dt)) return { ok: false, reason: "Not a copied list." };
+  navDebug("link-list", `refresh dt=${dt}`);
+  if (linkListBusy.has(dt)) await linkListBusy.get(dt);
+  linkListCopies.delete(dt);
+  await loadLinkList(dt, "refresh");
+  const copy = linkListCopies.get(dt);
+  return copy ? { ok: true, asOf: copy.checkedAt } : { ok: false, reason: "Could not reload the list — searching ERPNext directly." };
+});
 
 ipcMain.handle("doc-list-sources", async (_e, supplier) => {
   if (activeDocSkin !== "receipt") {
