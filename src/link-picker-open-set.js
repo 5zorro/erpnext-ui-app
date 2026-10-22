@@ -39,6 +39,15 @@ export function createOpenPickerSet(win, doc) {
     for (const p of live()) p.place();
   }
 
+  /**
+   * Plan 2026-10-21 D1: leaving the page (another view takes focus — Vanilla, the toolbar) or the
+   * page showing another document closes every dropdown. One left open kept its old list, and
+   * 5zorro clicked a vendor in it that had been deleted meanwhile.
+   */
+  function closeAll() {
+    for (const p of live()) p.dd.hidden = true;
+  }
+
   /** @param {{ target?: unknown }} ev */
   function closeOutside(ev) {
     for (const p of live()) {
@@ -53,6 +62,7 @@ export function createOpenPickerSet(win, doc) {
       win.addEventListener("resize", placeAll);
       // Any scroller (the line table, the page) moves the box; the dropdown follows it.
       win.addEventListener("scroll", placeAll, true);
+      win.addEventListener("blur", closeAll);
     }
     if (doc) doc.addEventListener("click", closeOutside);
   }
@@ -66,5 +76,6 @@ export function createOpenPickerSet(win, doc) {
     size: () => live().length,
     placeAll,
     closeOutside,
+    closeAll,
   };
 }

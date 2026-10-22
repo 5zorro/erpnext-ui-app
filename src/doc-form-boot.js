@@ -6,6 +6,7 @@
 import { bootDocFormPage } from "./doc-form-page.js";
 import { bootBillFormPage } from "./bill-form-page.js";
 import { billApiFromErpDoc } from "./bill-doc-api-adapter.js";
+import { closeAllLinkDropdowns } from "./link-picker-ui.js";
 import { shouldEscReturnFromDetour } from "./shell-detour.js";
 
 /** @type {"bill"|"doc-form"|null} */
@@ -76,6 +77,9 @@ async function bootForProfile(profileId) {
 async function boot() {
   const api = window.erpDoc;
   if (!api?.getUi) return;
+  // Main says when the Doc surface is left (Vanilla, Home, a peek): no dropdown stays open behind
+  // it with an old list (plan 2026-10-21 D1). Both skins share this page, so it is wired once here.
+  api.onSurfaceLeft?.(() => closeAllLinkDropdowns());
 
   const ui = await api.getUi();
   if (ui?.profileId) {

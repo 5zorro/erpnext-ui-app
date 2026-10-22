@@ -723,3 +723,15 @@ exist hung past 8 s, while the same request through `frappe.xcall` rejected at o
 until the page reloads — the likely mechanism of review 10-19 **R5b-4**. New ERP-page code uses
 `frappe.xcall` (warm pick lists do, plan 2026-10-21); the existing `frappe.db.*` calls are R5b-4's
 to sweep.
+
+## G20 — `frappe.after_ajax` calls back at once when nothing is in flight (2026-10-21)
+
+`frappe.after_ajax(fn)` (`frappe/public/js/frappe/request.js`, v16.31.0) runs `fn` **synchronously**
+when `frappe.request.ajax_count` is 0. A "wait until ERPNext is quiet" helper that resolves there,
+inside `while (…) { …; await helper(); }`, never yields to the event loop: the loop spins on
+microtasks until its deadline, the page freezes (an `executeJavaScript` of `document.title` got no
+answer), and ERPNext's own replies cannot land — so the condition being waited for never comes
+true and the wait always runs to its deadline. The Bill's vendor write did exactly this for
+seven weeks (`afterAjaxQuiet` in `electron/erp-form-bridge-page.js`, plan 2026-10-21 D3): ~12 s
+frozen per vendor, ~38 s under chaos, and a timing entry logged per spin. Every wait inside the
+ERPNext page must yield a real turn (`setTimeout`), even when it is already quiet.

@@ -403,6 +403,21 @@ let paymentDoc = null;
 let findDoc = null;
 /** @type {SurfaceMode} */
 let surfaceMode = "home";
+
+/**
+ * Every surface switch goes through here. Leaving the Doc surface tells its page, which closes
+ * any open link dropdown: one left open kept a stale list, and 5zorro picked a vendor from it that
+ * had been deleted meanwhile (plan 2026-10-21 D1). The page's own window blur does not fire when
+ * another view takes over inside an unfocused window, so main says it.
+ * @param {SurfaceMode} next
+ */
+function setSurfaceMode(next) {
+  const prev = surfaceMode;
+  surfaceMode = next;
+  if (prev === "doc" && next !== "doc" && docForm && !docForm.webContents.isDestroyed()) {
+    docForm.webContents.send("doc-surface-left", next);
+  }
+}
 /** @type {DocFormSkinId|null} */
 let activeDocSkin = null;
 /** Path on ERP site, e.g. /app/purchase-invoice/new */
@@ -2480,7 +2495,7 @@ async function resumeParkedDoc(route) {
   }
   if (park.mode === "doc" && park.skinId) {
     const priorSkin = activeDocSkin;
-    surfaceMode = "doc";
+    setSurfaceMode("doc");
     activeDocSkin = park.skinId;
     // The page may be running the other controller (Item Receipt → Doc tab → Bill); without
     // a reload the Bill is painted by PO/IR code (focus incidents 2026-10-01T03:55 / 04:01).
@@ -3596,7 +3611,7 @@ function onErpUnloadRefused() {
   clearErpNavIntent("unload-refused");
   const live = currentErpPathname();
   const n = live ? normalizeAppRoute(live, ERP_BASE) : null;
-  surfaceMode = "erp";
+  setSurfaceMode("erp");
   if (n && n.path) currentRoute = n.path;
   place();
   sendUiState();
@@ -4403,7 +4418,7 @@ function showHome() {
     collapsePeekStackHard("home");
     parkedDocSurface = null;
     armSoftPeekEscHook(false).catch(() => {});
-    surfaceMode = "home";
+    setSurfaceMode("home");
     place();
     sendUiState();
     sendHistory();
@@ -4443,7 +4458,7 @@ function enterShellSurface(mode) {
   collapsePeekStackHard(mode);
   parkedDocSurface = null;
   armSoftPeekEscHook(false).catch(() => {});
-  surfaceMode = mode;
+  setSurfaceMode(mode);
 }
 
 /**
@@ -4657,7 +4672,7 @@ function showErp(route = "/desk", opts = {}) {
       armSoftPeekEscHook(false).catch(() => {});
       sendHistory();
     }
-    surfaceMode = "erp";
+    setSurfaceMode("erp");
     const info = routeInfo(path, ERP_BASE);
     // Do not claim the destination until the SPA actually moves (OI-127 desync).
     if (!inSpa) currentRoute = info.path || path;
@@ -5034,7 +5049,7 @@ async function showDocForm(skinId, route, opts = {}) {
 
   const proceed = async () => {
     parkedDocSurface = null;
-    surfaceMode = "doc";
+    setSurfaceMode("doc");
     activeDocSkin = skinId;
     if (needsDocShellReload(priorSkin, skinId)) {
       await reloadDocFormShell();
@@ -7561,7 +7576,7 @@ function createWindow() {
   });
   hist.webContents.on("did-finish-load", () => sendHistory());
 
-  surfaceMode = "home";
+  setSurfaceMode("home");
   place();
   healthTimer = setInterval(tickHealth, HEALTH_PING_MS);
   routePollTimer = setInterval(pollErpRoute, 750);
@@ -10392,6 +10407,35 @@ ipcMain.handle("doc-revert-unsaved", async () => {
 });
 
 ipcMain.handle("doc-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
+// Plan 2026-10-21 D2: does this record still exist? Asked live, never from the warm copy — the
+// copy is exactly what can be stale. `exists: null` = could not tell; the caller does not block.
+ipcMain.handle("doc-link-exists", async (_e, doctype, name) => {
+  const dt = String(doctype || "").trim();
+  const n = normalizeEditableText(name);
+  if (!dt || !n) return { ok: true, exists: null };
+  const raw = await erpEval(`(async () => {
+    try {
+      var dt = ${JSON.stringify(dt)};
+      var n = ${JSON.stringify(n)};
+      var or = [[dt, "name", "=", n]];
+      if (dt === "Supplier") or.push([dt, "supplier_name", "=", n]);
+      if (dt === "Customer") or.push([dt, "customer_name", "=", n]);
+      var rows = await frappe.xcall("frappe.client.get_list", {
+        doctype: dt, fields: ["name"], or_filters: or, limit_page_length: 1
+      });
+      return { ok: true, exists: (rows || []).length > 0 };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e) };
+    }
+  })()`);
+  if (!raw || !raw.ok) return { ok: true, exists: null };
+  if (!raw.exists) {
+    navDebug("link-missing", `dt=${dt} name=${n.slice(0, 60)}`);
+    // The copy offered it, so the copy is stale: catch it up.
+    if (linkListCopies.has(dt)) void checkLinkListChanged(dt, "missing");
+  }
+  return { ok: true, exists: !!raw.exists };
+});
 ipcMain.handle("link-list-refresh", async (_e, doctype) => {
   const dt = String(doctype || "").trim();
   if (!WARM_LINK_DOCTYPES.includes(dt)) return { ok: false, reason: "Not a copied list." };

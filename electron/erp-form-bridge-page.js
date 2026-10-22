@@ -598,6 +598,12 @@
 
   function afterAjaxQuiet(maxWaitMs) {
     maxWaitMs = maxWaitMs || 12000;
+    // 🔴 `frappe.after_ajax` calls back at once when no request is out. Resolving there let a
+    // `while (…) await afterAjaxQuiet()` loop spin on microtasks without ever yielding: the page
+    // froze for the loop's whole deadline, ERPNext's own replies could not land (so the wait
+    // always ran out), and each spin logged a timing entry (plan 2026-10-21 D3: vendor writes took
+    // ~38 s under chaos and could freeze the ERPNext page). Quiet now still waits a real turn.
+    var minMs = Math.min(50, maxWaitMs);
     return new Promise(function (resolve) {
       var done = false;
       function finish() {
@@ -605,15 +611,18 @@
         done = true;
         resolve();
       }
+      function quiet() {
+        setTimeout(finish, minMs);
+      }
       try {
         if (window.frappe && typeof frappe.after_ajax === "function") {
-          frappe.after_ajax(finish);
+          frappe.after_ajax(quiet);
         } else {
-          finish();
+          quiet();
           return;
         }
       } catch (e) {
-        finish();
+        quiet();
         return;
       }
       setTimeout(finish, maxWaitMs);
@@ -913,7 +922,7 @@
             return;
           }
           var slice = supplierSnapshotWaitSliceMs(deadline, Date.now());
-          timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
+          if (timing.length < 100) timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
           await afterAjaxQuiet(slice);
         }
         if (!done) finish(tryReady());

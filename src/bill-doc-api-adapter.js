@@ -51,6 +51,8 @@ export function billApiFromErpDoc(api) {
     searchLink: (doctype, txt, filters) => api.searchLink(doctype, txt || "", filters || null),
     refreshLinkList: (doctype) =>
       api.refreshLinkList ? api.refreshLinkList(doctype || "") : Promise.resolve({ ok: false }),
+    linkExists: (doctype, name) =>
+      api.linkExists ? api.linkExists(doctype || "", name || "") : Promise.resolve({ ok: true, exists: null }),
     checkAccountCompanies: () => api.checkAccountCompanies(),
     listSources: (supplier) => api.listSources(supplier || ""),
     listSourceSlice: (supplier, sliceId) =>

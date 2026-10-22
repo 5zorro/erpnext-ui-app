@@ -38,6 +38,11 @@ const openPickers = createOpenPickerSet(
   typeof document !== "undefined" ? document : null,
 );
 
+/** Close every open dropdown — the page now shows another document (plan 2026-10-21 D1). */
+export function closeAllLinkDropdowns() {
+  openPickers.closeAll();
+}
+
 /**
  * @typedef {{
  *   searchLink?: (doctype: string, query: string) => Promise<{ ok?: boolean, reason?: string, results?: unknown[], source?: "copy"|"live", asOf?: number }>,

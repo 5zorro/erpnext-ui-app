@@ -78,6 +78,12 @@ contextBridge.exposeInMainWorld("erpDoc", {
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
   refreshLinkList: (doctype) => ipcRenderer.invoke("link-list-refresh", doctype || ""),
+  linkExists: (doctype, name) => ipcRenderer.invoke("doc-link-exists", doctype || "", name || ""),
+  onSurfaceLeft: (cb) => {
+    const handler = (_e, next) => cb(next);
+    ipcRenderer.on("doc-surface-left", handler);
+    return () => ipcRenderer.removeListener("doc-surface-left", handler);
+  },
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
   listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
   listSourceSlice: (supplier, sliceId) =>

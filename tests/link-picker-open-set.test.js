@@ -32,7 +32,7 @@ describe("createOpenPickerSet", () => {
     for (let i = 0; i < 50; i++) set.opened(picker());
     assert.deepEqual(
       win.calls.map((c) => [c.type, !!c.capture]),
-      [["resize", false], ["scroll", true]],
+      [["resize", false], ["scroll", true], ["blur", false]],
     );
     assert.deepEqual(doc.calls.map((c) => c.type), ["click"]);
   });
@@ -78,5 +78,18 @@ describe("link-picker-ui uses the shared set", () => {
     assert.doesNotMatch(ui, /window\.addEventListener|document\.addEventListener/);
     assert.match(ui, /const openEntry = \{ wrap, dd, place: placeDropdown \};/);
     assert.match(ui, /openPickers\.opened\(openEntry\)/);
+  });
+
+  it("leaving the page closes every open dropdown (plan 2026-10-21 D1)", () => {
+    const win = fakeTarget();
+    const set = createOpenPickerSet(win, fakeTarget());
+    const a = picker();
+    const b = picker();
+    set.opened(a);
+    set.opened(b);
+    win.calls.find((c) => c.type === "blur").fn();
+    assert.equal(a.dd.hidden, true);
+    assert.equal(b.dd.hidden, true);
+    assert.equal(set.size(), 0);
   });
 });

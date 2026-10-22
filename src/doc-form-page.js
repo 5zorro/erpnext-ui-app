@@ -97,7 +97,7 @@ import {
   runSourcePickerFlow,
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
-import { mountLinkPicker } from "./link-picker-ui.js";
+import { mountLinkPicker, closeAllLinkDropdowns } from "./link-picker-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { taxDefaultWhy } from "./tax-default-why.js";
 import { uiIconHtml } from "./ui-icons.js";
@@ -2647,6 +2647,8 @@ function paint(doc, snapScratch, opts = {}) {
   painting = true;
   try {
   calcUi.clear();
+  // Another document (or none): a dropdown left open holds the old one's list (plan 2026-10-21 D1).
+  if (String((doc && doc.name) || "") !== String((lastDoc && lastDoc.name) || "")) closeAllLinkDropdowns();
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
   if (opts.userEdited != null) userEdited = !!opts.userEdited;

@@ -905,3 +905,29 @@
   color: #64748b;
   margin: 8px 0;
 }
+
+/* Plan 2026-10-21 D2: across the top while the vendor named is not in ERPNext. */
+.doc-alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+.doc-alert-banner[hidden] {
+  display: none;
+}
+.doc-alert-text {
+  flex: 1;
+}
+.doc-alert-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
