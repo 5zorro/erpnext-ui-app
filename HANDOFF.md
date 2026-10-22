@@ -20,7 +20,11 @@
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**, closing; its two unfinished build items are carried
    into the active plan.
-   **Closed:** `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086 + Calculator
+   **Closed:** `implementation-plan-2026-10-21.md` (warm pick lists, OI-185, plus the picker / vendor
+   fixes D1–D3 its dogfood found; built and retired 2026-10-21) — folded into **Warm pick lists**
+   below; code comments citing "plan 2026-10-21" mean that section. Its open dogfood rows moved to
+   plan 10-19 *Dogfood residuals*.
+   `implementation-plan-2026-07-29.md` (Vanilla Simplified / OI-086 + Calculator
    OI-018, closed 2026-09-08) — lens architecture folded into **Simplified lens** below; the
    calculator's shipped/remaining split (C0–C3 landed, C4–C5 open) lives on museum **OI-018**;
    the AP credit-memo thread (OI-082 / OI-147 / OI-164 / OI-166 / OI-167) was promoted into the
@@ -240,6 +244,52 @@ the loose money against the wrong one and leaves the amended bill outstanding �
 *and* still exposed to paying twice. The shell proposes the pairing instead (`payment-relink.js`),
 using the one fact the allocator ignores: an amendment carries `amended_from`.
 
+### Warm pick lists (folded from plan 2026-10-21, OI-185, built 2026-10-21)
+
+Why: every keystroke in a link field waited for a round trip through the ERPNext page, and a vendor
+search for two (the search, then the vendors' last POs). Rules, with the numbers chosen:
+
+- **What is copied:** Supplier, Customer, Item, Payment Terms Template, Mode of Payment, Project,
+  Sales / Purchase Taxes and Charges Template (`WARM_LINK_DOCTYPES`). Not Account (re-labelled by
+  company per Bill), not Sales Order (changes all day). Over 50,000 rows a list stays live. A search
+  with **any** filter is never answered from the copy. Copy ≈20 MB and a search ≈2 ms at 20k rows.
+- **Same order as ERPNext**, or a practised clerk's fast Tab (review 10-19 R5b-1, choice "a")
+  picks something else depending on which source answered. Mirrored from `frappe/desk/search.py`
+  v16.31.0: which 25 = name/title/search fields contain the text, ranked by where the text first
+  appears in the **name**, then `idx desc`, then the list's `sort_field`/`sort_order`; shown as
+  names starting with the text first, then the rest, each in plain string order (capitals first);
+  vendors then re-ranked by PO activity (OI-131). The copy is `search_link` itself (empty text, no
+  page limit) plus each row's rank from one ordered `get_list`. Proven 54/54 against live.
+- **Freshness:** loaded 2 s after a Doc open (the ERPNext page is moving to the same document at
+  that moment and cut every load off; a cut-off load retries once 3 s later); "changed since" on
+  every Doc open (≥ 10 s apart), right after a peek returns (Create Vendor…), and at most once a
+  minute while searching; a count mismatch reloads the list; *Refresh* under the dropdown reloads
+  it; a miss asks ERPNext at once; logging out or another user drops every copy.
+- **Only `frappe.xcall`** in ERPNext-page code: `frappe.db.get_list` never settles on a server
+  error (gotchas G19, the likely mechanism of plan 10-19 R5b-4).
+- **Typing pause:** 280 ms before a live search, 40 ms after a copy answer.
+- **Trail:** `focus-debug.log` `link-pick` / `link-pick-key` / `link-held` / `link-held-replay` /
+  `link-held-cancel` carry `typed=… list=… rule=current|exact|held|chosen picked=… src=copy|live`;
+  `nav-debug.log` `link-list` lines for load, check, reload, refresh, miss (once per run of
+  misses), drop and failure; `link-missing` for a vendor checked and not found.
+
+Fixes from its first dogfood (D1–D3):
+
+- **D1 — an open dropdown never outlives its page.** Leaving the Doc surface (every switch goes
+  through main's `setSurfaceMode`, which sends `doc-surface-left`; the page's own window blur does
+  not fire for a view switch inside an unfocused window), painting a different document, or the
+  window losing focus closes it. One left open kept its old list, and a vendor deleted meanwhile
+  was picked from it.
+- **D2 — a vendor is checked live before the Bill uses it** (`doc-link-exists`; never the copy,
+  which is what can be stale): on a vendor pick, a typed vendor's commit, and Select PO. Missing →
+  a banner across the top (`bill-missing-vendor.js`), the box goes back, nothing opens or is
+  written, and the copy runs a check. A vendor write that answers after the clerk has *typed in
+  another field* no longer opens the source picker.
+- **D3 — waits inside the ERPNext page yield a real turn.** `frappe.after_ajax` calls back at once
+  when idle (gotchas G20), so `afterAjaxQuiet` let the vendor-settle loop spin for its whole 12 s
+  deadline with the page frozen, since 2026-09-02. One-off waits now yield with `setTimeout` 0; the
+  two polling loops pace themselves (50 / 100 ms).
+
 ### Printing (folded from plan 2026-09-26 "Printing" / "Printer hardening", built 2026-10-03)
 
 How Frappe prints, read from v16: its **Print** button `window.open`s `/printview?…&trigger_print=1`
@@ -304,7 +354,7 @@ into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printi
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |
 | In-field calculator | `src/calc/` (`calc-engine.js`, `attach-field-calc.js`, `field-calc.js`, `back-in-amount.js`, `session-history.js`) | Doc form numeric fields (Bill / PO / IR) + left-rail Calculator history; 24h prune in `nav-state.json` |
-| Link search (T1) | `link-search.js`, `vendor-activity.js`, `link-picker-open-set.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131). A picker adds **no** page-wide listener of its own: the line tables are rebuilt on every paint, so per-picker `window`/`document` listeners piled up all day (review 10-19 R5-1). Page-wide resize / scroll / click-outside go through the one open-dropdown set. **Tab / Enter never commits from a list fetched for other text** (review 10-19 R5b-1, `linkPickerCommitPlan`): only the newest search paints; an exact match of the typed text is taken at once; otherwise the key is held and replayed when the list for the typed text is in, so a fast Tab does what a slow one would. **Warm pick lists** (plan 2026-10-21, `link-list-cache.js`): main keeps a copy of 8 rarely-changed lists (vendors, customers, items, terms, methods, projects, tax templates) per logged-in user and answers *unfiltered* searches from it **in ERPNext's own order** (which 25: where the text sits in the name, then `idx`, then the list's sort; shown prefix-first then string order; vendors re-ranked by PO activity) — a copy that ordered differently would change what a fast Tab picks. A miss asks ERPNext; a Doc page opening runs "changed since" (count mismatch → reload); *Refresh* under the dropdown reloads; a login change drops the copies. ERP-page calls there use `frappe.xcall` only (`docs/gotchas.md` G19). **An open dropdown never outlives its page:** leaving the Doc surface (main's `setSurfaceMode` → `doc-surface-left`), a different document painted, or the window losing focus closes it (plan 2026-10-21 D1). **A vendor is checked live before the Bill uses it** (`doc-link-exists`, not the copy): a missing one gets a banner and opens no sources (D2). Waits inside the ERPNext page yield a real turn — `frappe.after_ajax` calls back synchronously when idle (G20) |
+| Link search (T1) | `link-search.js`, `vendor-activity.js`, `link-picker-open-set.js`, `link-list-cache.js`, `bill-missing-vendor.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131). A picker adds **no** page-wide listener of its own: the line tables are rebuilt on every paint, so per-picker `window`/`document` listeners piled up all day (review 10-19 R5-1). Page-wide resize / scroll / click-outside go through the one open-dropdown set. **Tab / Enter never commits from a list fetched for other text** (review 10-19 R5b-1, `linkPickerCommitPlan`): only the newest search paints; an exact match of the typed text is taken at once; otherwise the key is held and replayed when the list for the typed text is in, so a fast Tab does what a slow one would. **Warm pick lists** (plan 2026-10-21, `link-list-cache.js`): main keeps a copy of 8 rarely-changed lists (vendors, customers, items, terms, methods, projects, tax templates) per logged-in user and answers *unfiltered* searches from it **in ERPNext's own order** (which 25: where the text sits in the name, then `idx`, then the list's sort; shown prefix-first then string order; vendors re-ranked by PO activity) — a copy that ordered differently would change what a fast Tab picks. A miss asks ERPNext; a Doc page opening runs "changed since" (count mismatch → reload); *Refresh* under the dropdown reloads; a login change drops the copies. ERP-page calls there use `frappe.xcall` only (`docs/gotchas.md` G19). **An open dropdown never outlives its page:** leaving the Doc surface (main's `setSurfaceMode` → `doc-surface-left`), a different document painted, or the window losing focus closes it (plan 2026-10-21 D1). **A vendor is checked live before the Bill uses it** (`doc-link-exists`, not the copy): a missing one gets a banner and opens no sources (D2). Waits inside the ERPNext page yield a real turn — `frappe.after_ajax` calls back synchronously when idle (G20) |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`4c8f72b`) |
 | **Fixed** Setup peek return (OI-112 class) | `docs/bug-bounty-setup-peek-return.md` | Vanilla Create-new-Account; Esc/Recent parent now in-SPA |

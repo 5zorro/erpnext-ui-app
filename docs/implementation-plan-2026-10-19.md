@@ -736,6 +736,11 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R4-2 | Find on a list over 200 rows, stop ERPNext, click Show more | The rows already shown stay; "Could not read more…" under them and the button reads Try again |
 | R5b-2 | Import 10+ lines on a Bill and stop ERPNext (or log out in a browser tab) part way | "Import stopped at line N of M: … Lines 1–(N−1) are on the form." — those lines show on the page; the line table and Import were locked while it ran |
 | R5b-1 | Under `npm run start:chaos`, type an item number you know fast and Tab; then a partial number and Tab at once | The exact number is taken at once; the partial one waits a beat, then takes the first match and moves on. Never an item from the list you typed past |
+| Warm lists (HANDOFF § Warm pick lists) | Open a Bill under `npm run start:chaos`; type a vendor, then an item | Lists appear without "Searching…"; the order is the one you know. **First run at production size:** `nav-debug.log` `link-list loaded dt=Item rows=… ms=…` says what the item copy costs |
+| Warm lists | Add a vendor through Create Vendor…, come back, type part of it | It is listed at once (a check runs on the peek's return) |
+| D1 | Open a vendor dropdown, go to Vanilla, come back | The dropdown is closed |
+| D2 | Pick a vendor deleted in another window (or type one that never existed and leave the box) | Banner across the top naming it; no source picker; the box shows the bill's old vendor |
+| D3 | Set a vendor on a new Bill under chaos | The page stays responsive; sources open within ~10 s for a vendor with no address on file, sooner for one with |
 | R5-1 | Enter a long Bill (20+ lines, many edits), then scroll the line table | Scrolling stays smooth all day; an open dropdown follows its cell |
 | R2-7 | Allocate a charge to stock where one line's rate cannot be set | "… Nothing was changed." — the other lines keep their old rates |
 
