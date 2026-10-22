@@ -596,14 +596,20 @@
     }
   }
 
-  function afterAjaxQuiet(maxWaitMs) {
+  /**
+   * @param {number} [maxWaitMs]
+   * @param {number} [minMs] a polling loop passes its pace here; one-off waits leave it at 0
+   */
+  function afterAjaxQuiet(maxWaitMs, minMs) {
     maxWaitMs = maxWaitMs || 12000;
     // 🔴 `frappe.after_ajax` calls back at once when no request is out. Resolving there let a
     // `while (…) await afterAjaxQuiet()` loop spin on microtasks without ever yielding: the page
     // froze for the loop's whole deadline, ERPNext's own replies could not land (so the wait
     // always ran out), and each spin logged a timing entry (plan 2026-10-21 D3: vendor writes took
-    // ~38 s under chaos and could freeze the ERPNext page). Quiet now still waits a real turn.
-    var minMs = Math.min(50, maxWaitMs);
+    // ~38 s under chaos and could freeze the ERPNext page). Quiet now still waits a real turn —
+    // `setTimeout` 0 for a one-off wait (31 callers; a floor on each would slow every cell write),
+    // and the polling loops pass their own pace.
+    minMs = Math.min(minMs || 0, maxWaitMs);
     return new Promise(function (resolve) {
       var done = false;
       function finish() {
@@ -923,7 +929,7 @@
           }
           var slice = supplierSnapshotWaitSliceMs(deadline, Date.now());
           if (timing.length < 100) timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
-          await afterAjaxQuiet(slice);
+          await afterAjaxQuiet(slice, 50);
         }
         if (!done) finish(tryReady());
       })();
@@ -1054,7 +1060,7 @@
           return { ok: true, rows: sched.length };
         }
       } catch (eW) {}
-      await afterAjaxQuiet(400);
+      await afterAjaxQuiet(400, 100);
     }
     return { ok: false, rows: 0, reason: "payment_schedule empty (timeout)" };
   }

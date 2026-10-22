@@ -335,7 +335,7 @@ pickers' listeners (R5-1). (4) How much the Bill page duplicates: see R6a-1.
   2. Link search: debounce, cancel of the previous request, result cap.
   3. Dragged column widths live in the page's localStorage (local notes, trap 2): any bound or
      cleanup when a column is removed?
-- **Reviewed through:** `05b6aec` (2026-10-20, session 4).
+- **Reviewed through:** `05b6aec` (2026-10-20, session 4); then the picker and Bill changes through the commit that adds this note (2026-10-21 *After the first pass* over `cebf807..`: R5b-1, warm pick lists, D1–D3 — one gap, fixed: D3's 50 ms floor sat on all 31 `afterAjaxQuiet` callers and would have slowed every cell write; now only the two polling loops pace themselves, one-off waits yield with `setTimeout` 0. Measured: a search of a 20k-row copy ≈2 ms, the copy ≈20 MB. Smoke: scaffold-bill, -bill-taxes, -pure-wiring, -views, -typed-dates, -receive-gate all pass).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
