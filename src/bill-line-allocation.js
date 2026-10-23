@@ -98,38 +98,43 @@ export function lineAllocationForRow(byRow, rowIndex) {
 /**
  * Split a Bill line's qty across the N Sales Orders it is assigned to, for the bridge PO's lines.
  *
- * Whole units when the qty is whole (review 10-19 R6b-4): the extra units go to the earliest
- * orders, so 7 over 3 is 3 / 2 / 2. The old even split to thousandths (2 over 3 = 0.666 / 0.666 /
- * 0.668) was refused by ERPNext for any whole-number unit such as Nos (`purchase_order.py`
- * `validate_uom_is_integer`). Fewer units than orders, or no qty at all, is refused here with the
- * reason, instead of the old 1 per order. A fractional qty (a unit that allows fractions) splits to
- * thousandths, the last order taking the rest.
+ * ERPNext's qty is a decimal everywhere; only a unit with *Must be Whole Number* ticked (Nos, Box,
+ * Pair, Set, Unit — 5 of the 239 units here) refuses fractions (`validate_uom_is_integer`). So:
+ * - **whole-number unit**: whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2);
+ *   fewer units than orders, or a qty that is not whole, is refused with the reason;
+ * - **any other unit**: thousandths (ERPNext's qty precision here), the extra thousandths to the
+ *   earliest orders (1 plate over 2 = 0.5 / 0.5; 1 over 3 = 0.334 / 0.333 / 0.333).
+ * `wholeUnits` null (the unit could not be read): whole when the qty is whole, as a guess.
+ * Review 10-19 R6b-4; the unit rule from 5zorro's plate example, 2026-10-22.
  * @param {number} qty
  * @param {number} n
+ * @param {{ wholeUnits?: boolean|null }} [opts]
  * @returns {{ ok: true, parts: number[] } | { ok: false, reason: string }}
  */
-export function splitQtyAcrossSalesOrders(qty, n) {
+export function splitQtyAcrossSalesOrders(qty, n, opts = {}) {
   const total = Number(qty);
   const count = Math.max(1, Math.floor(Number(n)) || 1);
   const orders = `${count} Sales Order${count === 1 ? "" : "s"}`;
   if (!Number.isFinite(total) || total <= 0) {
     return { ok: false, reason: `the line has no quantity to split across ${orders}.` };
   }
-  if (Number.isInteger(total)) {
-    if (total < count) {
-      return {
-        ok: false,
-        reason: `${total} unit${total === 1 ? "" : "s"} can't be split across ${orders} — assign fewer orders or split the line.`,
-      };
-    }
-    const base = Math.floor(total / count);
-    const extra = total % count;
-    return { ok: true, parts: Array.from({ length: count }, (_, i) => base + (i < extra ? 1 : 0)) };
+  const whole = opts.wholeUnits == null ? Number.isInteger(total) : !!opts.wholeUnits;
+  if (whole && !Number.isInteger(total)) {
+    return { ok: false, reason: `${total} is not a whole number, and this item's unit allows only whole units.` };
   }
-  const base = Math.floor((total / count) * 1000) / 1000;
-  const parts = Array.from({ length: count }, () => base);
-  parts[count - 1] = Math.round((total - base * (count - 1)) * 1000) / 1000;
-  return { ok: true, parts };
+  const step = whole ? 1 : 1000; // units of 1, or thousandths
+  const units = Math.round(total * step);
+  if (units < count) {
+    return {
+      ok: false,
+      reason: whole
+        ? `${total} unit${total === 1 ? "" : "s"} can't be split across ${orders} — assign fewer orders or split the line.`
+        : `${total} is too little to split across ${orders}.`,
+    };
+  }
+  const base = Math.floor(units / count);
+  const extra = units % count;
+  return { ok: true, parts: Array.from({ length: count }, (_, i) => (base + (i < extra ? 1 : 0)) / step) };
 }
 
 /**

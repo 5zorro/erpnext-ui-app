@@ -15,22 +15,31 @@ describe("bill-line-allocation", () => {
     assert.equal(formatAllocationSalesOrders(["SO-1"], "PO-9"), "SO-1 · PO PO-9");
   });
 
-  it("splits a whole qty in whole units, the extra to the earliest orders (R6b-4)", () => {
+  it("a whole-number unit splits in whole units, the extra to the earliest orders (R6b-4)", () => {
+    const w = { wholeUnits: true };
+    assert.deepEqual(splitQtyAcrossSalesOrders(7, 3, w), { ok: true, parts: [3, 2, 2] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(10, 3, w), { ok: true, parts: [4, 3, 3] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(5, 1, w), { ok: true, parts: [5] });
+  });
+  it("a whole-number unit refuses fewer units than orders, a fraction, or no qty", () => {
+    const w = { wholeUnits: true };
+    assert.match(splitQtyAcrossSalesOrders(2, 3, w).reason, /2 units can't be split across 3 Sales Orders/);
+    assert.match(splitQtyAcrossSalesOrders(2.5, 2, w).reason, /not a whole number/);
+    assert.equal(splitQtyAcrossSalesOrders(0, 2, w).ok, false);
+    assert.equal(splitQtyAcrossSalesOrders(-1, 2, w).ok, false);
+  });
+  it("a unit that allows fractions splits to thousandths — 5zorro's plates", () => {
+    const f = { wholeUnits: false };
+    assert.deepEqual(splitQtyAcrossSalesOrders(1, 2, f), { ok: true, parts: [0.5, 0.5] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(3, 2, f), { ok: true, parts: [1.5, 1.5] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(3.75, 2, f), { ok: true, parts: [1.875, 1.875] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(1, 3, f), { ok: true, parts: [0.334, 0.333, 0.333] });
+    const sum = splitQtyAcrossSalesOrders(2.5, 3, f).parts.reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(sum - 2.5) < 1e-9);
+  });
+  it("unit unknown: whole when the qty is whole", () => {
     assert.deepEqual(splitQtyAcrossSalesOrders(7, 3), { ok: true, parts: [3, 2, 2] });
-    assert.deepEqual(splitQtyAcrossSalesOrders(10, 3), { ok: true, parts: [4, 3, 3] });
-    assert.deepEqual(splitQtyAcrossSalesOrders(3, 3), { ok: true, parts: [1, 1, 1] });
-    assert.deepEqual(splitQtyAcrossSalesOrders(5, 1), { ok: true, parts: [5] });
-  });
-  it("refuses fewer units than orders, or no qty, with the reason", () => {
-    const few = splitQtyAcrossSalesOrders(2, 3);
-    assert.equal(few.ok, false);
-    assert.match(few.reason, /2 units can't be split across 3 Sales Orders/);
-    assert.equal(splitQtyAcrossSalesOrders(0, 2).ok, false);
-    assert.equal(splitQtyAcrossSalesOrders(-1, 2).ok, false);
-  });
-  it("a fractional qty splits to thousandths and adds up", () => {
-    const r = splitQtyAcrossSalesOrders(2.5, 3);
-    assert.deepEqual(r, { ok: true, parts: [0.833, 0.833, 0.834] });
+    assert.deepEqual(splitQtyAcrossSalesOrders(2.5, 2), { ok: true, parts: [1.25, 1.25] });
   });
 
   it("jit title joins multiple SOs", () => {

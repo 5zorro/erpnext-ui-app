@@ -6705,6 +6705,26 @@ async function listBillMandatoryMissing() {
   };
 }
 
+/**
+ * Does ERPNext refuse fractions of this unit (UOM *Must be Whole Number*)? null when it could not
+ * tell. Review 10-19 R6b-4: qty is a decimal; only some units are whole-number.
+ * @param {unknown} uom
+ * @returns {Promise<boolean|null>}
+ */
+async function uomIsWholeNumber(uom) {
+  const name = normalizeEditableText(uom);
+  if (!name) return null;
+  const r = await erpEval(`(async () => {
+    try {
+      var v = await frappe.xcall("frappe.client.get_value", { doctype: "UOM", filters: ${JSON.stringify(name)}, fieldname: "must_be_whole_number" });
+      return { ok: true, whole: !!(v && Number(v.must_be_whole_number)) };
+    } catch (e) {
+      return { ok: false };
+    }
+  })()`);
+  return r && r.ok ? r.whole : null;
+}
+
 async function setBillItemField(rowIndex, field, value) {
   if (!Number.isInteger(rowIndex) || rowIndex < 0) {
     return { ok: false, reason: "Invalid row" };
@@ -8913,10 +8933,12 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
 
   let bridgePo = "";
   let bridgeFailure = "";
-  const split =
-    salesOrders.length && supplier && line && line.item_code
-      ? splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length)
-      : null;
+  const bridgeWanted = !!(salesOrders.length && supplier && line && line.item_code);
+  const split = bridgeWanted
+    ? splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length, {
+        wholeUnits: await uomIsWholeNumber(line.uom || line.stock_uom),
+      })
+    : null;
   if (split && !split.ok) {
     // Review 10-19 R6b-4: refused before ERPNext would refuse it; the allocation itself still lands.
     bridgeFailure = bridgePoFailureText({ step: "build", reason: split.reason });
