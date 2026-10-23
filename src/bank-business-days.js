@@ -2,9 +2,15 @@
  * "Not a processing day" calendar for payment scheduling (OI-161 Packet 1b).
  *
  * Deliberately loose scope (5zorro 2026-09-05): not a regulated-bank-grade calendar — weekends,
- * the 11 US federal holidays (same list the Federal Reserve uses for ACH/wire processing), and a
- * **bridge day** rule for the lone workday stranded between a holiday and a weekend. No external
- * data, no per-year maintenance — everything is computed algorithmically.
+ * the 11 US federal holidays, and a **bridge day** rule for the lone workday stranded between a
+ * holiday and a weekend. No external data, no per-year maintenance — everything is computed
+ * algorithmically.
+ *
+ * A rule of thumb, not the Federal Reserve's calendar (5zorro 2026-10-22, review 10-19 R10a-2):
+ * a Saturday holiday closes the Friday before here, though the Fed itself stays open that day —
+ * the clerk's bank is probably closed and the post probably not running, and "good enough" is
+ * what matters. Company, regional or foreign holidays are out of scope on purpose; that is a
+ * calendar engine's job, and the ratified delay calendar (`delay-calendar.js`) covers the rest.
  *
  * Confirmed via Vanilla ERPNext's own data model (2026-09-05, read-only MariaDB): there is no
  * structured per-vendor postage-buffer or "next business day after" field anywhere (Payment Term's
@@ -54,7 +60,7 @@ function lastWeekdayOfMonth(year, month, weekday) {
   return addDaysUtc(last, -diff);
 }
 
-/** Standard federal observed-date rule: Saturday → Friday, Sunday → Monday. */
+/** Federal observed-date rule: Saturday → Friday, Sunday → Monday (Friday kept closed — see module doc). */
 function observed(d) {
   const dow = d.getUTCDay();
   if (dow === 6) return addDaysUtc(d, -1);
