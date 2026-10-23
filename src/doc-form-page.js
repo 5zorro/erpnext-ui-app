@@ -98,6 +98,13 @@ import {
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
 import { mountLinkPicker, closeAllLinkDropdowns } from "./link-picker-ui.js";
+import { missingVendorBannerText, lateVendorMayOpenSources } from "./bill-missing-vendor.js";
+import {
+  showMissingVendorBanner,
+  hideMissingVendorBanner,
+  watchTypingElsewhere,
+  focusIsInOtherField,
+} from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { taxDefaultWhy } from "./tax-default-why.js";
 import { uiIconHtml } from "./ui-icons.js";
@@ -2413,6 +2420,32 @@ function buildHeaderFields(fields) {
   wireDocAddressPickers();
 }
 
+/**
+ * The Bill's D2 check (plan 2026-10-21), on this page since review 10-19 R5b-5: ask ERPNext (live,
+ * not the warm copy) whether this vendor exists. A missing one gets the banner and the vendor box
+ * goes back to the document's vendor; "could not tell" never blocks.
+ * @param {string} name @param {"vendor"|"sources"} attempt
+ * @returns {Promise<boolean>} true when the vendor is missing
+ */
+async function vendorIsMissing(name, attempt) {
+  const n = normalizeEditableText(name);
+  if (!n || !api || !api.linkExists) return false;
+  const r = await api.linkExists("Supplier", n);
+  if (!r || r.exists !== false) return false;
+  logFocus("vendor-missing", `${attempt}:${n.slice(0, 60)}`);
+  showMissingVendorBanner(missingVendorBannerText(n, attempt, { doc: docTitle() }));
+  if (attempt === "vendor") {
+    const box = supplierInput();
+    const kept = String(paintedHeaderValue("supplier") ?? "");
+    if (box) {
+      box.value = kept;
+      box.dataset.linkCommitted = kept;
+    }
+  }
+  setStatus(`Vendor “${n}” is not in ERPNext.`, "err");
+  return true;
+}
+
 function ensureHeaderLinkPickers() {
   if (!ui) return;
   for (const meta of ui.headerFields) {
@@ -2426,6 +2459,7 @@ function ensureHeaderLinkPickers() {
           setStatus(`${docTitle()} is not a draft — cannot set vendor.`, "warn");
           return;
         }
+        if (await vendorIsMissing(v, "vendor")) return;
         const decision =
           ui.features.sourceModal &&
           shouldOpenSourceModalAfterVendorPick({
@@ -2444,6 +2478,7 @@ function ensureHeaderLinkPickers() {
           onHeaderSuccess: (res) => {
             noteUserEdit();
             paint(res.doc || lastDoc, res.scratch || scratch);
+            hideMissingVendorBanner();
             if (decision && decision.open) setStatus("Choose a source (or NIC).");
           },
           onHeaderFailure: (res) => {
@@ -2483,6 +2518,10 @@ async function openSourcePicker(supplier, opts = {}) {
   if (!sup) {
     setStatus(`Pick a vendor before ${ui.sourceLabel || "Select PO"}.`, "warn");
     return { ok: false, reason: "no_supplier" };
+  }
+  // The vendor pick checked already; the toolbar and a vendor typed then left were not (R5b-5).
+  if (trigger !== "link_pick" && (await vendorIsMissing(sup, "sources"))) {
+    return { ok: false, reason: "vendor_missing" };
   }
 
   if (trigger === "toolbar") {
@@ -2648,7 +2687,10 @@ function paint(doc, snapScratch, opts = {}) {
   try {
   calcUi.clear();
   // Another document (or none): a dropdown left open holds the old one's list (plan 2026-10-21 D1).
-  if (String((doc && doc.name) || "") !== String((lastDoc && lastDoc.name) || "")) closeAllLinkDropdowns();
+  if (String((doc && doc.name) || "") !== String((lastDoc && lastDoc.name) || "")) {
+    closeAllLinkDropdowns();
+    hideMissingVendorBanner();
+  }
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
   if (opts.userEdited != null) userEdited = !!opts.userEdited;
@@ -2877,9 +2919,31 @@ async function onHeaderBlur(input) {
     return;
   }
 
-  const res = await api.setHeader(field, next);
+  if (field === "supplier" && (await vendorIsMissing(next, "vendor"))) return;
+  // While a vendor write is out, note whether the clerk types somewhere else (D2's late guard).
+  const typing = field === "supplier" ? watchTypingElsewhere(input) : null;
+  let res;
+  try {
+    res = await api.setHeader(field, next);
+  } finally {
+    typing?.stop();
+  }
+  if (field === "supplier" && res && res.ok) hideMissingVendorBanner();
 
-  if (field === "supplier" && ui && ui.features.sourceModal) {
+  // The answer can come long after the clerk moved on (5zorro's dogfood 2026-10-22: 10 s, and he
+  // was in Title): then it opens nothing (R5b-5).
+  const late =
+    field === "supplier"
+      ? lateVendorMayOpenSources({
+          wanted: next,
+          boxNow: normalizeEditableText(input.value),
+          activeIsOtherField: focusIsInOtherField(input),
+          modalOpen: sourceModalOpenRef.current,
+          typedElsewhere: !!typing?.typed(),
+        })
+      : { open: false };
+  if (field === "supplier" && !late.open) logFocus("source-modal-skip", `blur:${late.reason}`);
+  if (field === "supplier" && late.open && ui && ui.features.sourceModal) {
     const decision = shouldOpenSourceModalAfterVendorPick({
       trigger: "blur",
       hasSupplier: !!normalizeEditableText(next),

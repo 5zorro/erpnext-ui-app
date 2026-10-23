@@ -12,6 +12,10 @@ describe("missingVendorBannerText", () => {
     );
     assert.match(missingVendorBannerText("X", "sources"), /Its sources \(and NIC\) cannot be chosen/);
   });
+  it("names the purchase order, which has no NIC (R5b-5)", () => {
+    assert.match(missingVendorBannerText("X", "vendor", { doc: "Purchase Order" }), /the purchase order keeps its old one\.$/);
+    assert.match(missingVendorBannerText("X", "sources", { doc: "Purchase Order" }), /Its sources cannot be chosen/);
+  });
 });
 
 describe("lateVendorMayOpenSources", () => {

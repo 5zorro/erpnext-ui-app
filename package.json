@@ -12,6 +12,7 @@
   "scripts": {
     "test": "node scripts/run-tests.js",
     "test:flaky": "node scripts/test-flaky.js",
+    "probe": "node scripts/run-probe.js",
     "test:e2e": "playwright test",
     "test:e2e:xvfb": "xvfb-run -a playwright test",
     "seed:sample": "bash ops/sample-data/run-seed.sh",

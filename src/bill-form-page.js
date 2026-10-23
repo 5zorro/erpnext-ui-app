@@ -171,6 +171,12 @@ import {
 } from "../src/bill-receive-ask.js";
 import { mountLinkPicker, closeAllLinkDropdowns } from "../src/link-picker-ui.js";
 import { missingVendorBannerText, lateVendorMayOpenSources } from "./bill-missing-vendor.js";
+import {
+  showMissingVendorBanner,
+  hideMissingVendorBanner,
+  watchTypingElsewhere,
+  focusIsInOtherField,
+} from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
 import { taxDefaultWhy } from "../src/tax-default-why.js";
 import {
@@ -3353,30 +3359,6 @@ export async function bootBillFormPage(api) {
     setStatus("Enter = Apply to items · Esc = cancel. Tax row delete is frozen while this is open.");
   }
   
-  /** Plan 2026-10-21 D2: a banner across the top while the vendor named is not in ERPNext. */
-  function showMissingVendorBanner(text) {
-    let b = document.getElementById("doc-missing-vendor");
-    if (!b) {
-      b = document.createElement("div");
-      b.id = "doc-missing-vendor";
-      b.className = "doc-alert-banner";
-      b.setAttribute("role", "alert");
-      b.dataset.testid = "doc-missing-vendor";
-      b.innerHTML = `<span class="doc-alert-text"></span><button type="button" class="doc-alert-close" tabindex="-1" title="Dismiss">×</button>`;
-      b.querySelector(".doc-alert-close").onclick = () => hideMissingVendorBanner();
-      const head = document.querySelector("#doc-chrome .banner");
-      if (head && head.parentNode) head.parentNode.insertBefore(b, head.nextSibling);
-      else document.body.prepend(b);
-    }
-    b.querySelector(".doc-alert-text").textContent = text;
-    b.hidden = false;
-  }
-
-  function hideMissingVendorBanner() {
-    const b = document.getElementById("doc-missing-vendor");
-    if (b) b.hidden = true;
-  }
-
   /**
    * Ask ERPNext (live, not the warm copy) whether this vendor exists. A missing one gets the
    * banner and the vendor box goes back to the bill's vendor; "could not tell" never blocks.
@@ -5154,29 +5136,23 @@ export async function bootBillFormPage(api) {
     }
     if (field === "supplier" && (await vendorIsMissing(next, "vendor"))) return;
     // While a vendor write is out, note whether the clerk types somewhere else (D2's late guard).
-    let typedElsewhere = false;
-    const noteTyping = (ev) => {
-      if (ev.target !== el.vendor && ev.key && ev.key.length === 1) typedElsewhere = true;
-    };
-    if (field === "supplier") document.addEventListener("keydown", noteTyping, true);
+    const typing = field === "supplier" ? watchTypingElsewhere(el.vendor) : null;
     // The memo box shows Remarks without the received block; writing it keeps the block (DF-02 J).
     let res;
     try {
       res = await api.setHeader(field, field === "remarks" ? remarksKeepingReceived(next) : next);
     } finally {
-      document.removeEventListener("keydown", noteTyping, true);
+      typing?.stop();
     }
     if (field === "supplier") {
       if (res && res.ok) hideMissingVendorBanner();
       // The answer can come long after the clerk moved on (chaos dogfood: 37 s): then it opens nothing.
-      const active = document.activeElement;
       const late = lateVendorMayOpenSources({
         wanted: next,
         boxNow: normalizeEditableText(el.vendor.value),
-        activeIsOtherField:
-          !!active && active !== el.vendor && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName || ""),
+        activeIsOtherField: focusIsInOtherField(el.vendor),
         modalOpen: sourceModalOpenRef.current || informalLinkPickerOpen,
-        typedElsewhere,
+        typedElsewhere: !!typing?.typed(),
       });
       if (!late.open) logFocus("source-modal-skip", `blur:${late.reason}`);
       const decision = late.open ? shouldOpenSourceModalAfterVendorPick({
