@@ -20,6 +20,26 @@ right before the run, runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared
 the backup and removes any prefs file the run created — Ctrl+C included (proven 2026-10-22). It does **not** cover the Doc page's Local
 Storage (dragged column widths) — a probe that drags columns puts them back.
 
+## Probes that leave records — `leaves-records/`
+
+Some questions need a **submitted** document (a paid bill, a posted payment). ERPNext will not
+delete a submitted document once it is cancelled — its ledger entries link to it — so those probes
+leave cancelled records behind every run. They live in `tests/probes/leaves-records/`, and run only
+with `--leaves-records`:
+
+```bash
+npm run probe -- r10a-installment-part-paid --leaves-records
+```
+
+5zorro 2026-10-22: fine on this sandbox; on a site with company data, think twice before running
+one. Each such probe:
+
+- says in its header, under 🔴 LEAVES RECORDS, exactly what stays behind per run;
+- calls `assertSandboxSite(app)` before writing anything (every company's name must contain
+  "sandbox", or it stops);
+- names its records `ZZ…` and cancels what it submitted, so nothing stays open on the A/P side;
+- reuses its `ZZ…` vendor instead of making a new one each run.
+
 ## Writing one
 
 - `<review-id or topic>-<what>.probe.js`; the header comment states the question and what the

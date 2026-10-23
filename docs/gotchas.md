@@ -39,7 +39,7 @@ PO line qty **1**, bill qty **2** — skin should cap sourced row and NIC the ex
 | **ERP webview `executeJavaScript`** | `frappe.db.get_list` / bridge eval **hangs** under form ajax + chaos; `raceTimeout` abandons the waiter but the browser may still hold the eval. |
 | **`erpEval` serialize queue (removed)** | Chained promises behind abandoned evals → background enrich never logged the next round. |
 | **POST `frappe.client.get_list` + manual Cookie** | Frappe returned **400** — wrong shape for this session. |
-| **GET `/api/resource/Purchase Order Item?filters=…`** | **417** / permission quirks — **child doctypes are a bad list target**. |
+| **GET `/api/resource/Purchase Order Item?filters=…`** | **417** / permission quirks — **child doctypes are a bad list target**. Exception (2026-10-22, checked live): `frappe.client.get_list` **with `parent: "<Parent DocType>"`** returns a child doctype's fields; without `parent` it returns only `name`. Pay Outstanding reads Payment Schedule that way in one call. |
 | **GET `/api/resource/Purchase Order` (header only)** | Works for logbook — **misleading green** when child cap cache is still empty. |
 
 ### Fix (current SSoT)

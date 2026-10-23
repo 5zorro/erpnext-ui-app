@@ -465,3 +465,96 @@ describe("attachTermFields (A1)", () => {
     assert.deepEqual(attachTermFields(BASE, null), { ...BASE });
   });
 });
+
+import {
+  buildBillRowsFromTermReport,
+  scheduleWithReportOutstanding,
+  OUTSTANDING_SCHEDULE_FIELDS,
+} from "../src/outstanding-bills.js";
+
+// Review 10-19 R10a-1: the A/P report run with `based_on_payment_terms: 1` gives one row per unpaid
+// term with ERPNext's own outstanding (field names as seen live 2026-10-22: voucher_no, due_date,
+// invoiced = the term's share, invoice_grand_total, outstanding, payment_term).
+describe("buildBillRowsFromTermReport (R10a-1)", () => {
+  const term = (due, outstanding, extra = {}) => ({
+    voucher_type: "Purchase Invoice",
+    voucher_no: "ACC-PINV-2026-00400",
+    party: "ALPINE SUPPLY CO",
+    posting_date: "2026-08-01",
+    due_date: due,
+    invoiced: 500,
+    invoice_grand_total: 1000,
+    outstanding,
+    currency: "USD",
+    ...extra,
+  });
+  // Stale rows, as ERPNext leaves them when the template does not allocate by term: both still 500.
+  const staleSchedule = {
+    "ACC-PINV-2026-00400": [
+      { parent: "ACC-PINV-2026-00400", due_date: "2026-08-15", outstanding: 500, mode_of_payment: "DOM_WIRE", payment_term: "A" },
+      {
+        parent: "ACC-PINV-2026-00400",
+        due_date: "2026-09-15",
+        outstanding: 500,
+        mode_of_payment: "ACH",
+        payment_term: "B",
+        discount_type: "Percentage",
+        discount: 2,
+        discount_date: "2026-09-05",
+      },
+    ],
+  };
+
+  it("a part payment the schedule never saw: what is owed is ERPNext's, not the stale rows' 1000", () => {
+    // 600 paid with no term: the report puts 500 on the first term and 100 on the second.
+    const rows = buildBillRowsFromTermReport([term("2026-09-15", 400)], staleSchedule);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outstanding, 400);
+    assert.equal(rows[0].dueDate, "2026-09-15");
+    // The term and discount are the remaining installment's, not the paid one's.
+    assert.equal(rows[0].modeOfPayment, "ACH");
+    assert.equal(rows[0].paymentTerm, "B");
+    assert.equal(rows[0].discountAmount, 20, "2% of the bill's 1000, not of the term's 500");
+    assert.equal(rows[0].invoiced, 1000);
+  });
+
+  it("two unpaid terms still split, each with ERPNext's outstanding", () => {
+    const rows = buildBillRowsFromTermReport([term("2026-08-15", 300), term("2026-09-15", 500)], staleSchedule);
+    assert.deepEqual(rows.map((r) => [r.installmentKey, r.outstanding, r.modeOfPayment]), [
+      ["ACC-PINV-2026-00400#1", 300, "DOM_WIRE"],
+      ["ACC-PINV-2026-00400#2", 500, "ACH"],
+    ]);
+  });
+
+  it("a credit row (unallocated payment, overpaid invoice) passes through for the engine to set aside", () => {
+    const rows = buildBillRowsFromTermReport(
+      [
+        { voucher_type: "Payment Entry", voucher_no: "ACC-PAY-2026-00009", party: "ALPINE SUPPLY CO", outstanding: -50, invoiced: 0 },
+        term("2026-08-15", 500),
+      ],
+      staleSchedule,
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].invoice, "ACC-PAY-2026-00009");
+    assert.equal(rows[0].outstanding, -50);
+    assert.equal(rows[0].dueDate, "");
+  });
+
+  it("an invoice with no schedule is one row, as before", () => {
+    const rows = buildBillRowsFromTermReport([term("2026-08-15", 169, { invoiced: 169, invoice_grand_total: 169 })], {});
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].installmentKey, "ACC-PINV-2026-00400");
+    assert.equal(rows[0].outstanding, 169);
+  });
+
+  it("scheduleWithReportOutstanding: unlisted terms are paid, and only owed rows come back", () => {
+    const out = scheduleWithReportOutstanding(staleSchedule["ACC-PINV-2026-00400"], [term("2026-09-15", 400)]);
+    assert.deepEqual(out.map((s) => [s.due_date, s.outstanding]), [["2026-09-15", 400]]);
+  });
+
+  it("the one schedule query asks for every field the rows read", () => {
+    for (const f of ["parent", "due_date", "discount_date", "discount_type", "discount", "mode_of_payment", "payment_term", "credit_days"]) {
+      assert.ok(OUTSTANDING_SCHEDULE_FIELDS.includes(f), f);
+    }
+  });
+});

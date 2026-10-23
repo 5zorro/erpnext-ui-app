@@ -95,7 +95,7 @@ import {
   hasSimplifiedLens,
   paymentEntryRoute,
 } from "../src/lens-context.js";
-import { buildOutstandingBillRows } from "../src/outstanding-bills.js";
+import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -6266,7 +6266,7 @@ async function fetchPaymentEntry(name) {
 
 /**
  * List Payment Entries allocated to this Purchase Invoice (OI-139).
- * Prefer parent PE filtered by child reference (child DocType get_list is often empty/denied).
+ * Prefer parent PE filtered by child reference; the fallback lists the child rows, with `parent` set.
  * @param {string} billName
  */
 async function listBillPaymentEntries(billName) {
@@ -6303,6 +6303,8 @@ async function listBillPaymentEntries(billName) {
             method: "frappe.client.get_list",
             args: {
               doctype: "Payment Entry Reference",
+              // A child doctype's fields come back only when \`parent\` names its parent (R10b-1).
+              parent: "Payment Entry",
               filters: {
                 reference_doctype: "Purchase Invoice",
                 reference_name: billName,
@@ -6389,16 +6391,14 @@ async function listBillPaymentEntries(billName) {
  * OI-161 Packet 4: outstanding Bills across all AP vendors.
  * Runs the existing Accounts Payable report (same engine Vanilla's report page uses — Clean
  * Core, no reimplemented ageing math), then fetches each returned invoice's full document to
- * read its `payment_schedule` child table. `buildOutstandingBillRows` (Packet 1) does the actual
- * normalize/explode/discount-window work here in the main process — the erpEval script below
- * only fetches raw rows.
+ * read their `payment_schedule` rows. `buildBillRowsFromTermReport` does the normalize / explode /
+ * discount-window work here in the main process — the erpEval script below only fetches raw rows.
  *
- * **Not a single batched query, found live 2026-09-05**: `frappe.client.get_list` on a child
- * doctype ("Payment Schedule") silently strips every requested field except `name` — a known
- * class of gotcha already flagged in this file (see `listBillPaymentEntries`'s comment on
- * Payment Entry Reference). Fetching the *parent* document via `frappe.client.get` returns its
- * child table fully populated, so this issues one `get` per invoice — concurrently, not
- * sequentially — rather than the one-query design originally planned.
+ * Review 10-19: the report runs **by payment term** (`based_on_payment_terms`), so ERPNext itself
+ * says what each installment still owes (R10a-1). The schedule rows come in **one** query
+ * (R10b-1): `frappe.client.get_list` on a child doctype returns its fields when `parent` names the
+ * parent doctype (checked live 2026-10-22). Without `parent` it returned only `name`, which is why
+ * this used to fetch every invoice whole, one request each, on every open and detour return.
  * @returns {Promise<{ ok: boolean, bills: import("../src/outstanding-bills.js").OutstandingBillRow[], reason?: string }>}
  */
 async function fetchOutstandingBills() {
@@ -6423,25 +6423,37 @@ async function fetchOutstandingBills() {
         (companies.length === 1 ? companies[0] : "") ||
         (frappe.defaults && frappe.defaults.get_user_default && frappe.defaults.get_user_default("Company")) ||
         "";
-      var reportArgs = { report_name: "Accounts Payable", filters: { party_type: "Supplier" } };
+      var reportArgs = {
+        report_name: "Accounts Payable",
+        filters: { party_type: "Supplier", based_on_payment_terms: 1 },
+      };
       if (company) reportArgs.filters.company = company;
       var report = await frappe.call({ method: "frappe.desk.query_report.run", args: reportArgs });
       var rows = ((report && report.message && report.message.result) || []).filter(
         function (r) { return r && r.voucher_no; },
       );
-      var vouchers = rows.map(function (r) { return r.voucher_no; });
+      var vouchers = [];
+      rows.forEach(function (r) {
+        if (r.voucher_type === "Purchase Invoice" && vouchers.indexOf(r.voucher_no) === -1) vouchers.push(r.voucher_no);
+      });
       var schedulesByInvoice = {};
-      await Promise.all(vouchers.map(async function (name) {
-        try {
-          var doc = await frappe.call({
-            method: "frappe.client.get",
-            args: { doctype: "Purchase Invoice", name: name },
-          });
-          schedulesByInvoice[name] = (doc && doc.message && doc.message.payment_schedule) || [];
-        } catch (eDoc) {
-          schedulesByInvoice[name] = [];
-        }
-      }));
+      var fields = ${JSON.stringify(OUTSTANDING_SCHEDULE_FIELDS)};
+      for (var at = 0; at < vouchers.length; at += 200) {
+        var sched = await frappe.call({
+          method: "frappe.client.get_list",
+          args: {
+            doctype: "Payment Schedule",
+            parent: "Purchase Invoice",
+            fields: fields,
+            filters: [["parent", "in", vouchers.slice(at, at + 200)]],
+            order_by: "parent asc, idx asc",
+            limit_page_length: 0,
+          },
+        });
+        ((sched && sched.message) || []).forEach(function (row) {
+          (schedulesByInvoice[row.parent] = schedulesByInvoice[row.parent] || []).push(row);
+        });
+      }
       return { ok: true, rows: rows, schedulesByInvoice: schedulesByInvoice };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e), rows: [], schedulesByInvoice: {} };
@@ -6450,12 +6462,7 @@ async function fetchOutstandingBills() {
   if (!(raw && raw.ok)) {
     return { ok: false, reason: (raw && raw.reason) || "Could not load outstanding bills.", bills: [] };
   }
-  const schedulesByInvoice = raw.schedulesByInvoice || {};
-  const bills = [];
-  for (const reportRow of raw.rows || []) {
-    bills.push(...buildOutstandingBillRows(reportRow, schedulesByInvoice[reportRow.voucher_no] || []));
-  }
-  return { ok: true, bills };
+  return { ok: true, bills: buildBillRowsFromTermReport(raw.rows || [], raw.schedulesByInvoice || {}) };
 }
 
 /**

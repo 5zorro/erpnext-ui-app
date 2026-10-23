@@ -325,6 +325,7 @@
       border: 1px solid #fca5a5; background: #fff; color: #b91c1c; border-radius: 6px;
       padding: 6px 12px; font-size: 12px; cursor: pointer;
     }
+    .vendor-card.vendor-card-failed { padding: 10px 12px; color: #991b1b; background: #fef2f2; border-color: #fecaca; }
     .vendor-card {
       background: #fff; border: 1px solid #d6dee6; border-radius: 10px;
       box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 18px;
@@ -1116,15 +1117,18 @@
       readDrawerStop,
       writeDrawerStop,
     } from "../src/check-drawer-height.js";
+    import {
+      ROW_HEIGHT,
+      BRACE_ZONE,
+      rowCenterY,
+      stackSpans,
+      strokeForShare,
+      placeStrands,
+      bracePath,
+      ribbonPath,
+    } from "../src/pay-flow-geometry.js";
 
     const api = window.erpPayOutstanding;
-    const ROW_HEIGHT = 34;
-    const MIN_STROKE = 2;
-    const MAX_STROKE = 16;
-    /** Horizontal gutter reserved for the brace, so it never overlaps the strands. */
-    const BRACE_ZONE = 20;
-    /** A two-strand bundle is only ~8px tall; a brace that small reads as a smudge. */
-    const MIN_BRACE_H = 18;
     const REASON_COLOR = {
       batch: "var(--flow-batch)",
       "discount-capture": "var(--flow-discount)",
@@ -2319,39 +2323,6 @@
     }
 
     /**
-     * A `{` gathering a span's whole height back to the single node beside it (5zorro 2026-09-08:
-     * "there should be a bracket like { that directs it to the single row in the invoice column").
-     * The spine runs the span's height on the aggregate's side, curls toward the many rows at top
-     * and bottom, and sends one stem to the node — so "these ten installments are that one
-     * invoice" is legible even before you trace a ribbon.
-     * @param {number} y0 @param {number} y1 @param {number} width flow-column width
-     * @param {"left"|"right"} spanSide which side the aggregate node is on
-     */
-    function bracePath(y0, y1, width, spanSide) {
-      const onLeft = spanSide === "left";
-      const tipX = onLeft ? 2 : width - 2;      // stem tip, pointing at the node
-      const spineX = onLeft ? 9 : width - 9;
-      const curlX = onLeft ? 15 : width - 15;   // curls lean toward the many rows
-      const mid = (y0 + y1) / 2;
-      const r = Math.min(5, Math.max(2, (y1 - y0) / 8));
-      return [
-        `M ${curlX} ${y0}`,
-        `Q ${spineX} ${y0} ${spineX} ${y0 + r}`,
-        `L ${spineX} ${mid - r}`,
-        `Q ${spineX} ${mid} ${tipX} ${mid}`,
-        `Q ${spineX} ${mid} ${spineX} ${mid + r}`,
-        `L ${spineX} ${y1 - r}`,
-        `Q ${spineX} ${y1} ${curlX} ${y1}`,
-      ].join(" ");
-    }
-
-    /** Ribbon path: horizontal-ish cubic bezier from (x1,y1) to (x2,y2). */
-    function ribbonPath(x1, y1, x2, y2) {
-      const midX = (x1 + x2) / 2;
-      return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-    }
-
-    /**
      * A ribbon layer between a set of aggregate "spans" (each fanning its members out/in across
      * its own y0..y1) and a set of discrete row points keyed by installmentKey. Used for both
      * ribbon layers (invoice -> schedule, spans on the left; schedule -> groups, spans on the
@@ -2377,49 +2348,13 @@
       svg.style.height = `${height}px`;
 
       for (const span of spans) {
-        // The links converge into a **bundle** centred in the aggregate row, each strand as thick as
-        // its own amount -- so the bundle's total thickness reads as the group's size and each
-        // strand's share stays legible. It is deliberately NOT spread to fill the span's height:
-        // a first pass distributed attachment points proportionally, which made every strand a
-        // near-horizontal straight line and erased the convergence entirely ("I now see no flow
-        // at all for the stress test of 90 small payments" -- 5zorro 2026-09-08, reverted).
-        // The bundle being shorter than, or not centred on, the node it feeds is expected; the
-        // brace below is what ties it back to the single row.
-        // Pass 1: where each strand meets the aggregate. Computed before anything is drawn so
-        // the brace can be sized to the bundle's real extent rather than the row's -- bracing an
-        // 8-row cell when the flow occupies its top fifth implies there is something to catch in
-        // the other four fifths (5zorro 2026-09-08).
-        const strands = [];
-        // Option B, chosen 2026-09-08: the bundle is centred in its row rather than pinned to the
-        // top edge. 5zorro's reasoning -- "it keeps the ribbon height, and because they are not
-        // forced to move as far, there is less overlap that could be confusing to a user." Total
-        // strand travel is the lowest of the shapes considered, which is what keeps the crossings
-        // legible on the sort where one side cannot line up (see docs/mockups/pay-flow-shapes.html).
-        const bundleH = span.keys.reduce(
-          (t, k) => t + Math.max(strokeFor(amountByKey.get(k) || 0), 4),
-          0,
-        );
-        let used = (span.y0 + span.y1) / 2 - bundleH / 2;
-        for (const key of span.keys) {
-          const py = pointY.has(key) ? pointY.get(key) : (span.y0 + span.y1) / 2;
-          const stroke = strokeFor(amountByKey.get(key) || 0);
-          const sy = Math.min(span.y1, used + stroke / 2);
-          used += Math.max(stroke, 4);
-          strands.push({ sy, stroke, py, key });
-        }
-
-        if (strands.length > 1) {
-          let top = Math.min(...strands.map((st) => st.sy - st.stroke / 2));
-          let bot = Math.max(...strands.map((st) => st.sy + st.stroke / 2));
-          if (bot - top < MIN_BRACE_H) {
-            const mid = (top + bot) / 2;
-            top = mid - MIN_BRACE_H / 2;
-            bot = mid + MIN_BRACE_H / 2;
-          }
+        // Where the strands meet the aggregate, and the brace around them: src/pay-flow-geometry.js.
+        const { strands, brace: extent } = placeStrands(span, pointY, amountByKey, strokeFor);
+        if (extent) {
           const brace = document.createElementNS(svgNs, "path");
           brace.setAttribute("class", "flow-brace");
           if (aggIdOf) brace.dataset.agg = aggIdOf(span);
-          brace.setAttribute("d", bracePath(top, bot, width, spanSide));
+          brace.setAttribute("d", bracePath(extent.top, extent.bot, width, spanSide));
           brace.setAttribute("fill", "none");
           brace.setAttribute("stroke", colorFor(span));
           brace.setAttribute("stroke-width", "1");
@@ -3081,18 +3016,14 @@
         const next = sortedBills[i + 1];
         if (next && groupOfKey.get(next.installmentKey) !== mine) row.classList.add("group-edge");
         colBills.appendChild(row);
-        billY.set(bill.installmentKey, i * ROW_HEIGHT + ROW_HEIGHT / 2);
+        billY.set(bill.installmentKey, rowCenterY(i));
       });
 
       const scheduleHeight = sortedBills.length * ROW_HEIGHT;
       const vendorTotal = bills.reduce((s, b) => s + b.outstanding, 0) || 1;
       // installmentKey -> outstanding, for ribbon stroke width on both ribbon layers below.
       const billAmountByKey = new Map(bills.map((b) => [b.installmentKey, b.outstanding]));
-      function strokeFor(amount) {
-        const share = vendorTotal > 0 ? amount / vendorTotal : 0;
-        const scaled = share * MAX_STROKE * 4; // heuristic scale; clamped below regardless
-        return Math.min(MAX_STROKE, Math.max(MIN_STROKE, scaled));
-      }
+      const strokeFor = (amount) => strokeForShare(amount, vendorTotal);
 
       // Invoice column — one node per unique invoice, ordered to match the active schedule sort
       // (groupByInvoiceInOrder derives order from `sortedBills`, so date vs invoice sort both
@@ -3111,15 +3042,11 @@
       // Row-count sizing also makes all three columns exactly `scheduleHeight` tall, and lines
       // an aggregate row up with its own block of rows whenever its members are contiguous
       // under the current sort (date-windowed groups always are).
-      const invoiceSpans = []; // { y0, y1, invoice: invoiceListEntry }
-      {
-        let cur = 0;
-        for (const entry of invoiceList) {
-          const h = Math.max(ROW_HEIGHT, entry.rows.length * ROW_HEIGHT);
-          invoiceSpans.push({ y0: cur, y1: cur + h, invoice: entry });
-          cur += h;
-        }
-      }
+      // { y0, y1, invoice: invoiceListEntry } — member count, not dollar share (stackSpans).
+      const invoiceSpans = stackSpans(invoiceList.map((e) => e.rows.length)).map((sp, i) => ({
+        ...sp,
+        invoice: invoiceList[i],
+      }));
       const invoiceColHeight = invoiceSpans.reduce((m, s) => Math.max(m, s.y1), 0);
       for (const span of invoiceSpans) {
         const wrap = document.createElement("div");
@@ -3135,16 +3062,12 @@
       // Groups column (right) — unchanged shape, still keyed off installmentKey.
       const colGroups = document.createElement("div");
       colGroups.className = "col-groups";
-      const groupSpans = []; // { y0, y1, group, aggId }
-      {
-        let cur = 0;
-        sortedGroups.forEach((g, i) => {
-          // Same rule as invoiceSpans above: member count, not dollar share.
-          const h = Math.max(ROW_HEIGHT, (g.bills || []).length * ROW_HEIGHT);
-          groupSpans.push({ y0: cur, y1: cur + h, group: g, aggId: groupIdOf(g, i) });
-          cur += h;
-        });
-      }
+      // { y0, y1, group, aggId } — same rule as invoiceSpans above.
+      const groupSpans = stackSpans(sortedGroups.map((g) => (g.bills || []).length)).map((sp, i) => ({
+        ...sp,
+        group: sortedGroups[i],
+        aggId: groupIdOf(sortedGroups[i], i),
+      }));
       const groupColHeight = groupSpans.reduce((m, s) => Math.max(m, s.y1), 0);
       for (const span of groupSpans) {
         const h = span.y1 - span.y0;
@@ -3277,6 +3200,26 @@
       loadErrorEl.textContent = message || "";
     }
 
+    /** What stands in for a vendor card that threw (R10b-2): who, and why, so it can be reported. */
+    function failedVendorCardEl(supplier, err) {
+      const card = document.createElement("section");
+      card.className = "vendor-card vendor-card-failed";
+      card.dataset.testid = "vendor-card-failed";
+      card.textContent =
+        `${supplier}: this vendor's card could not be drawn (${String((err && err.message) || err)}). ` +
+        "The other vendors are unaffected — file a nav incident so it can be fixed.";
+      console.error("pay-outstanding: vendor card failed", supplier, err);
+      return card;
+    }
+
+    // Anything else that throws outside a card (an init step, an event handler) says so on the page
+    // instead of failing silently — G13 sat for days because nothing surfaced it.
+    window.addEventListener("error", (ev) => showError(`Something on this page failed: ${ev.message || "unknown error"}.`));
+    window.addEventListener("unhandledrejection", (ev) => {
+      const r = ev.reason;
+      showError(`Something on this page failed: ${String((r && r.message) || r || "unknown error")}.`);
+    });
+
     function render() {
       paintDraftPayments();
       vendorsEl.innerHTML = "";
@@ -3328,30 +3271,36 @@
       const runBreaks = checkRunSplits(run);
       const shownGroups = [];
       for (const supplier of suppliers) {
-        const bills = bySupplier.get(supplier);
-        const { groups, unschedulable } = paymentBatchEconomics({
-          bills,
-          perPaymentFee: feeForMethod(null), // fallback for bills with no mode_of_payment recorded
-          apr: prefs.apr,
-          feeForMethod,
-          runBreaks, // C8: no batch crosses the check run
-          today: todayIso(), // P2a / OI-172: an overdue proposal can't be backdated, only the past can
-          ...delayOpt(), // P3d: the ratified calendar, once there is one
-        });
-        shownGroups.push(...groups);
-        // 🔴 The engine hands back what it could not schedule, and this is where it becomes
-        // visible. An unallocated payment (negative outstanding, no due date) is real money sitting
-        // against the vendor — and P1's amend *creates* them, since cancelling a paid bill detaches
-        // its payment. Dropping them quietly would hide a credit the clerk is owed.
-        vendorsEl.appendChild(
-          renderVendorCard(
-            supplier,
-            bills.filter((b) => !unschedulable.includes(b)),
-            groups,
-            run,
-            unschedulable,
-          ),
-        );
+        // G13 / review 10-19 R10b-2: the vendor is the unit of failure, not the board. A throw in
+        // one card draws a note in its place and the rest of the board still draws.
+        try {
+          const bills = bySupplier.get(supplier);
+          const { groups, unschedulable } = paymentBatchEconomics({
+            bills,
+            perPaymentFee: feeForMethod(null), // fallback for bills with no mode_of_payment recorded
+            apr: prefs.apr,
+            feeForMethod,
+            runBreaks, // C8: no batch crosses the check run
+            today: todayIso(), // P2a / OI-172: an overdue proposal can't be backdated, only the past can
+            ...delayOpt(), // P3d: the ratified calendar, once there is one
+          });
+          shownGroups.push(...groups);
+          // 🔴 The engine hands back what it could not schedule, and this is where it becomes
+          // visible. An unallocated payment (negative outstanding, no due date) is real money sitting
+          // against the vendor — and P1's amend *creates* them, since cancelling a paid bill detaches
+          // its payment. Dropping them quietly would hide a credit the clerk is owed.
+          vendorsEl.appendChild(
+            renderVendorCard(
+              supplier,
+              bills.filter((b) => !unschedulable.includes(b)),
+              groups,
+              run,
+              unschedulable,
+            ),
+          );
+        } catch (err) {
+          vendorsEl.appendChild(failedVendorCardEl(supplier, err));
+        }
       }
       paintRunStrip(run, summarizeCheckRun(shownGroups, run));
     }

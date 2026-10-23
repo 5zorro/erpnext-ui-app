@@ -72,3 +72,15 @@ export const docState = (app) =>
 
 /** What a probe saw, on one line a later reader can grep for. */
 export const report = (label, obj) => console.log(`PROBE ${label} ${JSON.stringify(obj)}`);
+
+/**
+ * For probes in `leaves-records/`: refuse to write unless every company on the site looks like the
+ * sandbox ("sandbox" in its name). Throws, so the probe stops before making anything.
+ */
+export async function assertSandboxSite(app) {
+  const cos = await inErp(app, `(async () => (await frappe.xcall("frappe.client.get_list", { doctype: "Company", fields: ["name"], limit_page_length: 0 })).map((c) => c.name))()`, 15_000);
+  if (!Array.isArray(cos) || !cos.length || !cos.every((c) => /sandbox/i.test(c))) {
+    throw new Error(`not the sandbox (companies: ${JSON.stringify(cos)}) — this probe leaves records and will not run here`);
+  }
+  return cos;
+}

@@ -9,6 +9,11 @@
  *    desktop steals his keyboard);
  * 4. restores the backup and removes any prefs file the run created — pass or fail.
  * Environment passes through, so `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- x` works.
+ *
+ * Probes in `tests/probes/leaves-records/` leave records in ERPNext they cannot delete (a submitted
+ * document, once cancelled, stays — its ledger entries link to it). They run only with
+ * `--leaves-records` (5zorro 2026-10-22: fine on this sandbox; on company data, think twice), and
+ * each one checks it is on the sandbox before writing (`assertSandboxSite`).
  */
 import { spawnSync, execSync } from "node:child_process";
 import fs from "node:fs";
@@ -22,16 +27,32 @@ const PREFS = path.join(os.homedir(), ".config", "erpnext-ui-app");
 
 const args = process.argv.slice(2);
 const withAppOpen = args.includes("--with-app-open");
+const leavesRecords = args.includes("--leaves-records");
 const names = args.filter((a) => !a.startsWith("--"));
+const LEAVES = path.join(PROBES, "leaves-records");
+const probesIn = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".probe.js")).map((f) => f.replace(/\.probe\.js$/, "")) : []);
 if (!names.length) {
-  const have = fs.readdirSync(PROBES).filter((f) => f.endsWith(".probe.js")).map((f) => f.replace(/\.probe\.js$/, ""));
-  console.log(`usage: npm run probe -- <name> [--with-app-open]\nprobes: ${have.join(", ") || "(none)"}`);
+  console.log(
+    `usage: npm run probe -- <name> [--with-app-open] [--leaves-records]\nprobes: ${probesIn(PROBES).join(", ") || "(none)"}\n` +
+      `leave records in ERPNext (need --leaves-records): ${probesIn(LEAVES).join(", ") || "(none)"}`,
+  );
   process.exit(2);
 }
-const files = names.map((n) => path.join("tests", "probes", n.endsWith(".probe.js") ? n : `${n}.probe.js`));
-for (const f of files) {
-  if (!fs.existsSync(path.join(ROOT, f))) {
-    console.error(`no such probe: ${f}`);
+const files = [];
+for (const n of names) {
+  const base = n.replace(/^leaves-records\//, "").replace(/\.probe\.js$/, "");
+  const plain = path.join("tests", "probes", `${base}.probe.js`);
+  const leaving = path.join("tests", "probes", "leaves-records", `${base}.probe.js`);
+  if (fs.existsSync(path.join(ROOT, plain))) {
+    files.push(plain);
+  } else if (fs.existsSync(path.join(ROOT, leaving))) {
+    if (!leavesRecords) {
+      console.error(`${base} leaves records in ERPNext it cannot delete (its header says which). Pass --leaves-records to run it — on the sandbox only.`);
+      process.exit(4);
+    }
+    files.push(leaving);
+  } else {
+    console.error(`no such probe: ${base}`);
     process.exit(2);
   }
 }

@@ -343,7 +343,7 @@ into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printi
 | Nav incident log | `nav-incident.js` | DB ping diagnose → **Nav issue** (Ctrl+Shift+M); `userData/nav-incidents.log` |
 | Chrome UI state | `chrome-state.js` | Toolbar lens chip (from the **live** ERP path, not the believed route) + Recent rail width/collapse |
 | Money helpers | `money.js` (e.g. nickel) | Later Doc tools |
-| Pay Outstanding flow | `outstanding-bills.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
+| Pay Outstanding flow | `outstanding-bills.js`, `pay-flow-geometry.js`, `payment-batch-economics.js`, `payment-batch-prefs.js`, `check-run-schedule.js`, `bank-business-days.js`, `pay-flow-sort.js`, `pay-flow-focus.js`, `flow-node-density.js` | `pay-outstanding.html` (vendor cards: invoices → schedule → suggested payments) + `payment-doc.html`; check drawer via `check-doc-*` |
 | **What a skin can *do* to a document** | `doc-actions.js` (the registry: which actions a doctype has, whether each applies now, and what cancelling one costs), `void-amend-flow.js` (the single-document sequence, shared by four skins) | Edit (void and amend) on the Bill / PO / Item Receipt chrome (`btn-void-amend`) and on the Payment Entry check face (`check-doc-void-amend`) |
 | Changing a vendor's payment method after the fact | `mode-change-plan.js` (collapses an installment selection into one amend per *invoice*, and says what the batch will cost) | **Method…** panel on each Pay Outstanding vendor card |
 | Payments an amendment detached | `payment-relink.js` (proposes which bill a loose payment belongs to, from `amended_from` + an exact amount match; decides what may post unasked) | The vendor card's *unapplied* chip and *auto-linked · review* badge |
@@ -512,7 +512,14 @@ interactable count against the skin's, and CI holds \(N_v > N_d\). Growing Simpl
 
 Vendor card = five columns: **invoices → (ribbon) → payment schedule → (ribbon) → suggested
 payments**. Four rules were each paid for with a bug; break one and the picture silently stops
-matching the table.
+matching the table. The arithmetic lives in `src/pay-flow-geometry.js` with tests (review 10-19
+R10b-3); the page only draws it.
+
+**What each bill owes comes from ERPNext's A/P report run by payment term**
+(`based_on_payment_terms`, which assigns part payments and debit notes to installments, earliest
+due first) — never from a schedule row's own `outstanding`, which ERPNext maintains only when the
+terms template allocates by term (review 10-19 R10a-1). One vendor card that throws draws a note in
+its place; the rest of the board still draws (G13, R10b-2).
 
 - **The SVG owns the geometry, and the DOM is told to match.** Row *i*'s centre is
   `i * ROW_HEIGHT + ROW_HEIGHT/2`; an aggregate's span is `memberCount * ROW_HEIGHT` (member count,
