@@ -58,6 +58,8 @@ one. Each such probe:
   both: `r6b-due-date-schedule.probe.js` (it failed until R6b-1 was fixed, and is the regression check now).
 - Sandbox records a probe makes are named `ZZ…` and deleted in `finally`. It saves a document only
   when that is the question, and deletes it after.
+- To see a page without opening a window, capture it (`wc.capturePage()` from `app.evaluate`) into
+  a folder the run names — `r6b4-split-by-need` does it when `PROBE_SHOTS=<dir>` is set.
 - Print what was seen with `report(label, obj)` (`PROBE <label> {…}`) as well as asserting, so a
   run is readable later.
 - **A probe that passes proves nothing until it has failed on the old code** — put the old file

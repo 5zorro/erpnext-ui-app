@@ -282,6 +282,8 @@
     .src-chip[data-role="request"] { --hatch-base: var(--wash-request); --role-accent: var(--accent-request); }
     .src-chip[data-role="fulfill"] { --hatch-base: var(--wash-fulfill); --role-accent: var(--accent-fulfill); }
     .src-chip[data-kind="none"] { --hatch-base: #f8fafc; --role-accent: #94a3b8; color: #475569; font-style: italic; }
+    /* Costing: how a Bill's split filled this line (plan 10-19 R6b-4 step 8) — amber, as the box's title. */
+    .src-chip[data-kind="costing"] { --hatch-base: #fffbeb; --role-accent: #f59e0b; color: #92400e; }
     html[data-pattern="ap"] .src-chip[data-desk="ap"],
     html[data-pattern="both"] .src-chip[data-desk="ap"],
     html[data-pattern="ar"] .src-chip[data-desk="ar"],

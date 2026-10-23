@@ -4,6 +4,8 @@
  * Questions: does the dialog stop on "Costing Assumptions!" with 4 / 1; does ticking SO-B "from
  * stock" make it 5 / 0; after Okay, is the bridge PO's line linked to SO-A's *line* (so ERPNext's
  * ordered qty on it is 5), and is the decision written on the PO and SO-A ("Costing assumptions:")?
+ * Then the Sales Order's look-back (plan 10-19 R6b-4 step 8): opened in its Doc skin, does each
+ * order's line show a *Costing* chip, and does it open the same box, read-only, this order in bold?
  * The Bill itself is never saved.
  *
  * 🔴 LEAVES RECORDS (run with --leaves-records, sandbox only): each run submits two Sales Orders
@@ -12,9 +14,10 @@
  * Frappe's *Deleted Document* log and the next numbers used. Anything ERPNext refuses to delete
  * stays, cancelled. The customer stays and is reused.
  */
+import { writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
-import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
+import { launchShell, waitForE2eApi, e2eCall } from "../../../e2e/helpers.js";
+import { sleep, inDoc, inErp, keys, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
 import { parseCostingNote } from "../../../src/costing-assumptions.js";
 
 const CUSTOMER = "ZZ R6B4 CUSTOMER";
@@ -180,6 +183,47 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     report("read-back", back && { po: back.po, rows: back.rows.map((r) => [r.salesOrder, r.open, r.gets, r.fromStock]), toStock: back.toStock });
     expect(back && back.po).toBe(po);
     expect(back.rows.map((r) => r.gets).sort()).toEqual([0, 5]);
+
+    // The look-back: each Sales Order in its Doc skin; the Bill is left unsaved.
+    for (const [so, gets, note] of [[A, "5", "1 from stock"], [B, "0", "all from stock (ticked)"]]) {
+      await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${so.name}`, { skipDirtyGate: true });
+      await expect
+        .poll(() => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })
+        .toBe(so.name);
+      await expect.poll(() => inDoc(app, `document.querySelectorAll('[data-testid="so-costing-chip"]').length`), { timeout: 20_000 }).toBe(1);
+      const chipLine = await inDoc(app, `document.querySelector('[data-testid="so-costing-chip"]').closest("td").dataset.sourcesLine`);
+      expect(chipLine).toBe(so.line);
+      await inDoc(app, `(() => { document.querySelector('[data-testid="so-costing-chip"]').click(); return true; })()`);
+      await sleep(300);
+      const look = await inDoc(
+        app,
+        `(() => { const d = document.querySelector('[data-testid="costing-lookback"]'); if (!d) return null;
+          return { head: d.querySelector("h2").textContent, caption: d.querySelector(".costing-caption").textContent,
+            here: [...d.querySelectorAll(".costing-here td")].map((c) => c.textContent), ticks: d.querySelectorAll('input[type="checkbox"]').length,
+            focus: document.activeElement && document.activeElement.dataset.testid }; })()`,
+      );
+      report("look-back", { so: so.name, ...look });
+      // PROBE_SHOTS=<dir>: a picture of the look-back, to see it without opening a window.
+      if (process.env.PROBE_SHOTS) {
+        const png = await app.evaluate(async ({ webContents }) => {
+          const wc = webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL()));
+          return (await wc.capturePage()).toPNG().toString("base64");
+        });
+        writeFileSync(`${process.env.PROBE_SHOTS}/costing-lookback-${so.name}.png`, Buffer.from(png, "base64"));
+      }
+      expect(look && look.caption).toContain(`Bill ${TAG} line 1: SAMPLE-SKU-01 × 5 Nos → ${po}`);
+      expect(look.here.slice(0, 4)).toEqual([so.name, String(so.qty), gets, note]);
+      expect(look.ticks).toBe(0);
+      expect(look.focus).toBe("costing-lookback-close");
+      await keys(app, "\x1b");
+      await sleep(300);
+      const after = await inDoc(app, `({ open: !!document.querySelector('[data-testid="costing-lookback"]'), focus: document.activeElement && document.activeElement.dataset.testid })`);
+      report("look-back-esc", after);
+      expect(after.open).toBe(false);
+      expect(after.focus).toBe("so-costing-chip");
+      // Esc closed the box only — it did not also take the page back (the detour's Esc).
+      expect(await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`)).toBe(so.name);
+    }
   } finally {
     report("cleanup", await cleanup(app));
     await app.close().catch(() => {});

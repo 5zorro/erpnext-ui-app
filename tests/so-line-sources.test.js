@@ -115,6 +115,12 @@ describe("sourcesCellHtml (chips: wash, desk hatch, hatch-free text, peek)", () 
     assert.match(html, /<span class="src-chip" data-role="fulfill" data-desk="" data-kind="stock"><span class="hatch-clear">Stock ×2<\/span>/);
     assert.match(sourcesCellHtml(res.r2, false), /data-kind="none"><span class="hatch-clear">Not sourced ×2 \(QOH ×0 Nos\)/);
   });
+  it("a line a Bill's split filled ends with a Costing chip (plan 10-19 R6b-4 step 8)", () => {
+    const res = soLineSources({ items: [line({ qty: 5, stock_qty: 5 })], purchaseOrders: [], bins: [] });
+    assert.doesNotMatch(sourcesCellHtml(res.r1, false), /costing/);
+    assert.match(sourcesCellHtml(res.r1, false, 1), /data-kind="costing" data-costing-open[^>]*><span class="hatch-clear">Costing<\/span><\/button>$/);
+    assert.match(sourcesCellHtml(res.r1, false, 2), />Costing ×2</);
+  });
   it("while loading: an ellipsis; nothing known: empty", () => {
     assert.match(sourcesCellHtml(undefined, true), /…/);
     assert.equal(sourcesCellHtml(undefined, false), "");

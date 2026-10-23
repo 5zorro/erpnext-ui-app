@@ -353,6 +353,12 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
   the shell finds them by it) on the bridge PO and each Sales Order that took part, with a `data:`
   line `parseCostingNote` reads back — so the same box (`src/costing-box-ui.js`) can be drawn from
   the Sales Order later. An order's open qty at that moment cannot be worked out afterwards.
+- **The Sales Order's look-back** (step 8): a line a Bill's split filled ends its Sources cell with
+  a *Costing* chip (×N when several bills split onto it), which opens each note's box read-only,
+  newest first, this order's row in bold, with a peek at the bridge PO. The notes are read through
+  `frappe.desk.form.load.get_docinfo` — anyone who can read the order may read its Comments there,
+  while listing the Comment doctype needs System Manager. `costingNotesByLine` places a note by the
+  `salesOrderItem` its rows name; a note on an order with no line for the item places nothing.
 
 ### Extension points (where new work plugs in)
 

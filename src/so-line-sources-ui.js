@@ -2,8 +2,12 @@
  * The Sources column's cells on the Sales Order (plan 2026-10-12 S4): one chip per source, in its
  * document's wash, A/P documents hatched when the clerk hatches A/P (as Home and the Bill's
  * Sales order(s) cells do), each a peek to its document. The rule is src/so-line-sources.js.
+ * A line a Bill's split filled also gets a *Costing* chip that opens the box the clerk said Okay to
+ * (plan 10-19 R6b-4 step 8; src/costing-assumptions.js).
  */
 import { soLineSources, SOURCE_PART_WASH_ROLE, SOURCE_PART_DESK } from "./so-line-sources.js";
+import { costingNotesByLine } from "./costing-assumptions.js";
+import { showCostingLookback } from "./costing-box-ui.js";
 
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -11,10 +15,16 @@ const esc = (v) =>
 /**
  * @param {import("./so-line-sources.js").LineSources|undefined} entry
  * @param {boolean} loading
+ * @param {number} [costingNotes] how many costing notes split onto this line
  * @returns {string}
  */
-export function sourcesCellHtml(entry, loading) {
+export function sourcesCellHtml(entry, loading, costingNotes = 0) {
   if (!entry) return loading ? `<span class="ro src-chip-wait">…</span>` : "";
+  const costing =
+    costingNotes > 0
+      ? `<button type="button" class="src-chip" data-kind="costing" data-costing-open data-testid="so-costing-chip" title="How a bill's split filled this line">` +
+        `<span class="hatch-clear">Costing${costingNotes > 1 ? ` ×${costingNotes}` : ""}</span></button>`
+      : "";
   return entry.parts
     .map((p) => {
       const role = SOURCE_PART_WASH_ROLE[p.kind] || "";
@@ -25,7 +35,7 @@ export function sourcesCellHtml(entry, loading) {
       }
       return `<span class="src-chip" data-role="${role}" data-desk="${desk}" data-kind="${p.kind}">${text}</span>`;
     })
-    .join("");
+    .join("") + costing;
 }
 
 /**
@@ -40,6 +50,8 @@ export function sourcesCellHtml(entry, loading) {
 export function mountLineSources(opts) {
   /** @type {Record<string, import("./so-line-sources.js").LineSources>} */
   let byLine = {};
+  /** @type {Record<string, import("./costing-assumptions.js").CostingLookback[]>} */
+  let costingByLine = {};
   let loadedFor = "";
   let loading = false;
   let token = 0;
@@ -48,10 +60,13 @@ export function mountLineSources(opts) {
     const host = opts.root();
     if (!host) return;
     host.querySelectorAll("td[data-sources-line]").forEach((td) => {
-      td.innerHTML = sourcesCellHtml(byLine[td.getAttribute("data-sources-line") || ""], loading);
+      td.innerHTML = cellHtml(td.getAttribute("data-sources-line") || "");
     });
     host.querySelectorAll("td[data-sources-line] [data-peek-route]").forEach((b) => {
       /** @type {HTMLElement} */ (b).onclick = () => opts.onPeek(b.getAttribute("data-peek-route") || "");
+    });
+    host.querySelectorAll("td[data-sources-line] [data-costing-open]").forEach((b) => {
+      /** @type {HTMLElement} */ (b).onclick = () => openCosting(/** @type {HTMLElement} */ (b));
     });
     // The chips arrive after the table was laid out: let it measure again (and grow to the right,
     // as the Bill's does, when they need the room).
@@ -65,6 +80,7 @@ export function mountLineSources(opts) {
     const key = `${name}\u0000${(doc && doc.modified) || ""}`;
     if (!name || /^new(-|$)/i.test(name)) {
       byLine = {};
+      costingByLine = {};
       loadedFor = "";
       fill();
       return;
@@ -82,8 +98,31 @@ export function mountLineSources(opts) {
     if (mine !== token) return;
     loading = false;
     byLine = res && res.ok ? soLineSources({ items, ...res.data }) : {};
+    costingByLine = res && res.ok ? costingNotesByLine(res.data.costingNotes, name) : {};
     fill();
   }
 
-  return { refresh, fill, cellHtml: (lineName) => sourcesCellHtml(byLine[lineName], loading) };
+  /** @param {string} lineName */
+  function cellHtml(lineName) {
+    return sourcesCellHtml(byLine[lineName], loading, (costingByLine[lineName] || []).length);
+  }
+
+  /** @param {HTMLElement} chip */
+  function openCosting(chip) {
+    const td = chip.closest("td[data-sources-line]");
+    const lineName = (td && td.getAttribute("data-sources-line")) || "";
+    const entries = costingByLine[lineName] || [];
+    if (!entries.length) return;
+    const doc = opts.getDoc();
+    const items = doc && Array.isArray(doc.items) ? doc.items : [];
+    const it = items.find((i) => i && i.name === lineName);
+    showCostingLookback(entries, {
+      salesOrder: String((doc && doc.name) || ""),
+      lineLabel: it ? `line ${it.idx || items.indexOf(it) + 1} · ${it.item_code || ""}` : "this line",
+      onPeek: opts.onPeek,
+      returnFocus: chip,
+    });
+  }
+
+  return { refresh, fill, cellHtml };
 }

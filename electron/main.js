@@ -96,7 +96,7 @@ import {
   paymentEntryRoute,
 } from "../src/lens-context.js";
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
-import { costingNote } from "../src/costing-assumptions.js";
+import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -1075,9 +1075,10 @@ function syncE2eApi() {
       showDocForm("receipt", route || "/app/purchase-receipt/new");
       return { surfaceMode, activeDocSkin };
     },
-    // Any doc-form skin by its profile id ("sales-order", "estimate", …).
-    openDocSkin: (skinId, route) => {
-      showDocForm(skinId, route);
+    // Any doc-form skin by its profile id ("sales-order", "estimate", …); opts.skipDirtyGate leaves an
+    // unsaved document without the gate (a probe that never saves it).
+    openDocSkin: (skinId, route, opts) => {
+      showDocForm(skinId, route, opts || {});
       return { surfaceMode, activeDocSkin };
     },
     openSiteRoot: () => {
@@ -10345,7 +10346,7 @@ ipcMain.handle("so-create-pos", async (_e, req) => {
 /**
  * The Sources column (plan 2026-10-12 S4): everything that sources this Sales Order's lines —
  * PO lines (draft or submitted), Work Orders, Material Request lines, stock reserved on the order —
- * and the stock on hand for its items. Read-only; each read is on its own, so one the clerk may
+ * and the stock on hand for its items, plus its costing notes (the Costing chip). Read-only; each read is on its own, so one the clerk may
  * not list (a reservation, say) leaves the rest standing. The rule is src/so-line-sources.js.
  */
 ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
@@ -10374,6 +10375,14 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
       fields: ["voucher_detail_no", "reserved_qty", "delivered_qty"],
       filters: [["voucher_type", "=", "Sales Order"], ["voucher_no", "=", so], ["docstatus", "=", 1]] });
     out.bins = codes.length ? await list({ doctype: "Bin", fields: ["item_code", "warehouse", "actual_qty"], filters: [["item_code", "in", codes]] }) : [];
+    // Costing notes (plan 10-19 R6b-4 step 8) come from the form's own docinfo: anyone who can read
+    // the order may read its Comments there, while listing Comment needs System Manager.
+    try {
+      var di = await frappe.call({ method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
+      var cs = (di && di.docinfo && di.docinfo.comments) || [];
+      out.costingNotes = cs.filter(function (c) { return String(c.content || "").indexOf(${JSON.stringify(COSTING_TOKEN)}) >= 0; })
+        .map(function (c) { return { name: c.name, creation: c.creation, content: c.content }; });
+    } catch (e) { out.costingNotes = null; }
     return { ok: true, data: out };
   })()`);
   if (!raw || !raw.ok) return { ok: false, reason: (raw && raw.reason) || "Could not read this order's sources." };

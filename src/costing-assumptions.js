@@ -112,3 +112,48 @@ export function parseCostingNote(content) {
     return null;
   }
 }
+
+/**
+ * @typedef {{ comment: string, when: string, note: NonNullable<ReturnType<typeof parseCostingNote>> }} CostingLookback
+ */
+
+/**
+ * The Sales Order's look-back (plan 10-19 R6b-4 step 8): its costing Comments, by the order line
+ * each one split — newest first. A note that names this order only without a line (the order had no
+ * line for the item) splits nothing here and is left out; so is anything that does not parse.
+ * @param {unknown} comments ERPNext's Comment rows (`name`, `content`, `creation`)
+ * @param {string} salesOrder
+ * @returns {Record<string, CostingLookback[]>} by Sales Order line name
+ */
+export function costingNotesByLine(comments, salesOrder) {
+  /** @type {Record<string, CostingLookback[]>} */
+  const out = {};
+  const so = String(salesOrder || "");
+  const seen = new Set();
+  const list = Array.isArray(comments) ? [...comments] : [];
+  list.sort((a, b) => String((b && b.creation) || "").localeCompare(String((a && a.creation) || "")));
+  for (const c of list) {
+    const id = String((c && c.name) || "");
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    const note = parseCostingNote(c && c.content);
+    if (!note) continue;
+    const lines = new Set(note.rows.filter((r) => r && r.salesOrder === so && r.salesOrderItem).map((r) => String(r.salesOrderItem)));
+    for (const line of lines) {
+      (out[line] = out[line] || []).push({ comment: id, when: String((c && c.creation) || ""), note });
+    }
+  }
+  return out;
+}
+
+/**
+ * One line over a looked-back box: which bill line made the split, and when.
+ * @param {CostingLookback} e
+ * @returns {string}
+ */
+export function costingLookbackCaption(e) {
+  const n = e.note;
+  const unit = n.uom ? ` ${n.uom}` : "";
+  const when = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(e.when) ? `${e.when.slice(0, 16)} · ` : "";
+  return `${when}Bill ${n.bill} line ${n.line}: ${n.item} × ${qtyText(n.qty)}${unit} → ${n.po}`;
+}

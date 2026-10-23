@@ -933,7 +933,7 @@
 }
 
 /* "Costing Assumptions!" (review 10-19 R6b-4) — src/costing-box-ui.js; the Bill's assign dialog,
-   and later the Sales Order's look-back. */
+   and the Sales Order's look-back (the Costing chip in its Sources column). */
 .costing-box { padding: 10px 14px; }
 .costing-title { font-weight: 700; color: #92400e; margin-bottom: 4px; }
 .costing-lead { margin: 0 0 8px; font-size: 12px; color: #475569; line-height: 1.4; }
@@ -941,3 +941,7 @@
 .costing-table th, .costing-table td { padding: 4px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
 .costing-table th:nth-child(n + 2):nth-child(-n + 3), .costing-table td:nth-child(n + 2):nth-child(-n + 3) { text-align: right; }
 .costing-stock-row td { color: #92400e; font-style: italic; }
+.costing-here td { font-weight: 700; }
+.costing-lookback { max-width: 640px; }
+.costing-caption { margin-top: 12px; font-size: 12px; color: #334155; }
+.costing-peek { font-size: 11px; padding: 1px 6px; margin-left: 4px; cursor: pointer; }

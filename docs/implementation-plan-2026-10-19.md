@@ -88,7 +88,8 @@ built, being dogfooded). It edits no code.
 > (`7ff23e7`, `04f182d`; § R6b's follow-up — next for it: the Sales Order's *Costing* look-back), whose
 > probe found R6b-5 / R6b-6 (Assign to Sales Orders could never finish here). **End-of-session review
 > done** (`53c0a05`): the split moved to stock units, the costing note escaped; G21 written.
-> Next: the Sales Order look-back (step 8), then session 6 (R7 + R8 + R12).
+> The Sales Order look-back (step 8) was built after it, the same day.
+> Next: session 6 (R7 + R8 + R12).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -466,10 +467,15 @@ weighted by need is exactly what 99% of the use cases will want").**
 7. ✅ **The decision is kept** as a `Costing assumptions:` Comment on the bridge PO and each Sales
    Order that took part (`src/costing-assumptions.js`), readable back into the same box
    (`src/costing-box-ui.js`). HANDOFF § *A Bill line assigned to Sales Orders*.
-8. **Next — the Sales Order's look-back** (5zorro: "if a person was looking at the sales order …
+8. ✅ **The Sales Order's look-back** (5zorro: "if a person was looking at the sales order …
    they could click a costing box to see how it got allocated, and it would be substantially the
-   same box"): on the Sales Order dashboard (plan 10-12's skin), a *Costing* chip when the order has
-   `Costing assumptions:` Comments, opening `renderCostingBox` read-only from `parseCostingNote`.
+   same box"): built 2026-10-22 as a *Costing* chip at the end of the line's Sources cell
+   (`so-line-sources-ui.js`), opening `showCostingLookback` — each note's box read-only, newest
+   first, this order's row in bold, *Peek at* the bridge PO; Esc closes the box only. The notes ride
+   the Sources read (`so-line-sources` IPC) through `get_docinfo`, because listing Comment needs
+   System Manager and a sales clerk may not have it. Proven by the same probe (both orders: chip on
+   the right line, the box's row, no ticks, focus back on the chip after Esc; 0 chips on the code
+   before it).
 
 The end-of-session review the same day moved the whole split to the item's **stock unit** (the open
 qty is `stock_qty − ordered_qty`, as ERPNext tracks it; PO lines say the stock unit at the per-unit
@@ -849,7 +855,7 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R6c-4 | A just-in-time receipt whose submit ERPNext refuses | No draft Purchase Receipt left behind |
 | R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (e.g. a closed period) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
 | R6b-1 / R6b-2 | A Bill for a vendor made with *Create Vendor…* (no terms): type the due date first, then the lines; Save; change a qty; Save | Both saves go through. Any refusal on the status line is ERPNext's one sentence — no traceback, no "Message … Confirm" |
-| R6b-4 | Two Sales Orders for one item (needing 6 and 2); a Bill line of 8, then 5, then 10, each *Assign…*ed to both | 8: no box, PO 6 / 2. 5: "Costing Assumptions!" 4 / 1 — tick one *Fill from stock* and it redraws; Okay makes the PO. 10: 6 / 2 and "2 more … → into stock". Each PO line opens its Sales Order line; the PO and orders carry a *Costing assumptions:* comment |
+| R6b-4 | Two Sales Orders for one item (needing 6 and 2); a Bill line of 8, then 5, then 10, each *Assign…*ed to both | 8: no box, PO 6 / 2. 5: "Costing Assumptions!" 4 / 1 — tick one *Fill from stock* and it redraws; Okay makes the PO. 10: 6 / 2 and "2 more … → into stock". Each PO line opens its Sales Order line; the PO and orders carry a *Costing assumptions:* comment. Open each Sales Order: its line's Sources cell ends with *Costing* (×2 after the second bill), and it opens the same box, read-only, that order in bold |
 | R10a-1 / R10b-1 | Pay Outstanding with an installment bill that was part-paid in Vanilla | The vendor card owes what ERPNext's A/P report says, on the later installment; the board opens without a pause per bill |
 | R10a-3 | Pay Outstanding prefs: next check run 2026-12-25, every 14 days | Run strip: "… That day is a weekend or bank holiday — “Do this run today” runs it before." |
 | R2-1 | Under `npm run start:chaos`, click Save on a Bill and log out in a browser tab before it finishes, or restart Docker mid-save | The button comes back with "The ERPNext page reloaded before the step finished" — it never spins forever; Edit / New work without restarting |

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { costingBoxModel, costingNote, parseCostingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
+import { costingBoxModel, costingNote, parseCostingNote, costingNotesByLine, costingLookbackCaption, COSTING_TOKEN } from "../src/costing-assumptions.js";
 
 const plan = {
   rows: [
@@ -47,5 +47,32 @@ describe("costing assumptions (review 10-19 R6b-4)", () => {
     assert.equal(parseCostingNote("Allocation source: PERSON"), null);
     assert.equal(parseCostingNote(`${COSTING_TOKEN} broken\ndata: {nope`), null);
     assert.equal(parseCostingNote(null), null);
+  });
+});
+
+describe("the Sales Order's look-back (plan 10-19 R6b-4 step 8)", () => {
+  const note = (bill, created, name) => ({
+    name,
+    creation: created,
+    content: costingNote({ bill, line: 1, item: "SKU", qty: 5, uom: "Nos", po: `PO-${bill}`, by: "Clerk", plan }),
+  });
+  it("puts each note on the order lines it split, newest first", () => {
+    const by = costingNotesByLine(
+      [note("B1", "2026-10-01 09:00:00.1", "c1"), note("B2", "2026-10-02 09:00:00.1", "c2"), note("B2", "2026-10-02 09:00:00.1", "c2")],
+      "SO-A",
+    );
+    assert.deepEqual(Object.keys(by), ["a1"]);
+    assert.deepEqual(by.a1.map((e) => e.note.bill), ["B2", "B1"]);
+    assert.equal(costingLookbackCaption(by.a1[0]), "2026-10-02 09:00 · Bill B2 line 1: SKU × 5 Nos → PO-B2");
+  });
+  it("an order the note names without a line, other comments and junk are left out", () => {
+    assert.deepEqual(costingNotesByLine([note("B1", "x", "c1")], "SO-C"), {});
+    assert.deepEqual(costingNotesByLine([{ name: "c9", content: "Looks fine" }, null], "SO-A"), {});
+    assert.deepEqual(costingNotesByLine(null, "SO-A"), {});
+  });
+  it("reads a note after ERPNext's sanitizer has turned its quotes back into plain text", () => {
+    const c = note("B1", "2026-10-01 09:00:00", "c1");
+    c.content = `<p>${c.content.replace(/&quot;/g, '"')}</p>`;
+    assert.deepEqual(Object.keys(costingNotesByLine([c], "SO-B")), ["b1"]);
   });
 });
