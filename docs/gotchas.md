@@ -735,3 +735,20 @@ true and the wait always runs to its deadline. The Bill's vendor write did exact
 seven weeks (`afterAjaxQuiet` in `electron/erp-form-bridge-page.js`, plan 2026-10-21 D3): ~12 s
 frozen per vendor, ~38 s under chaos, and a timing entry logged per spin. Every wait inside the
 ERPNext page must yield a real turn (`setTimeout`), even when it is already quiet.
+
+## G21 — Building another doctype's document in the ERPNext page needs its meta first (2026-10-22)
+
+**Observed:** *Assign…* on a Bill line to Sales Orders never made its bridge Purchase Order —
+"Cannot read properties of null (reading 'options')". No test had run that path to the end.
+
+**Cause:** `frappe.model.get_new_doc("Purchase Order")` / `frappe.model.add_child(po, "items")` read
+the doctype's meta from the page's cache, and the page was showing a Bill, so Purchase Order's meta
+had never loaded. **Fix:** `await frappe.model.with_doctype("<Doctype>")` before building, as opening
+that form would. Or build a plain `{ doctype, items: [...] }` and let `frappe.client.insert` fill it
+server-side.
+
+**Related, same day:** `frappe.xcall` sends its args as form text, so a whitelisted method that does
+arithmetic on a typed-as-number argument gets a string (`get_payment_entry(party_amount=600)` →
+"bad operand type for abs(): 'str'"). Set the number on the returned document instead. And a list
+that asks for a field the doctype does not have is refused — with `frappe.db.get_list` that refusal
+never comes back (G19): Assign's Project step hung on `customer_name`, which Project lacks on v16.

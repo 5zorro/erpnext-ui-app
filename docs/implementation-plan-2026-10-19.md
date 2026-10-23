@@ -84,7 +84,11 @@ built, being dogfooded). It edits no code.
 > silently (G13's loop was never guarded). **All fixed the same day** at 5zorro's request (`4ad94c5`,
 > `0c8b1e7`; R10a-2 won't fix — the calendar is a rule of thumb), each proven by a probe that failed
 > on the old code where one could be made. Probes that leave records now live apart
-> (`tests/probes/leaves-records/`, `--leaves-records`). Next: session 6 (R7 + R8 + R12).
+> (`tests/probes/leaves-records/`, `--leaves-records`). R6b-4 then grew into **split by need**
+> (`7ff23e7`, `04f182d`; § R6b's follow-up — next for it: the Sales Order's *Costing* look-back), whose
+> probe found R6b-5 / R6b-6 (Assign to Sales Orders could never finish here). **End-of-session review
+> done** (`53c0a05`): the split moved to stock units, the costing note escaped; G21 written.
+> Next: the Sales Order look-back (step 8), then session 6 (R7 + R8 + R12).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -426,14 +430,14 @@ same way as doc-form (R5 checked).
   2. Floating-point sums over many lines (bill 00011 is 1¢ off — known, left; is the cause known?).
   3. Dates: due dates and posting dates built from `new Date()` — local time or UTC, and could a
      save just after midnight land on the wrong day?
-- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22); its fixes and the split-by-need build reviewed through `53c0a05` (end-of-session review, 2026-10-22).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
 | R6b-1 | S | med | `erp-form-bridge-page.js` `syncScheduleFromHeaderDueDate()` / `ensurePaymentScheduleBeforeSave()` | **Proven by probe** (`r6b-due-date-schedule`): a Bill for a vendor with **no payment terms** whose due date is typed before the lines can **never be saved** — "Total Payment Amount in Payment Schedule must be equal to Grand / Rounded Total". The bridge adds the schedule row itself with a fixed `payment_amount` (the grand total *at that moment*, 0.00 on an empty bill) and no `invoice_portion`; ERPNext's `set_payment_schedule` rescales only rows that have a portion and builds no row of its own once one exists. A due date typed after the lines saves once, then the next line change is refused the same way. Vanilla never adds the row: its `due_date` handler only moves an existing single row, and the server builds a 100 % row from the header due date. Every sandbox vendor has terms today, but a vendor made with *Create Vendor…* has none | Give the row `invoice_portion = 100` (then ERPNext rescales it on every save — the probe's first run shows a 100 % row going 0 → 10 → 30), or stop adding a row and let the server build it. Re-run the probe; its two asserts fail until then | fixed 2026-10-22 — the row gets `invoice_portion = 100`; the probe failed on `adcf495` (first save refused) and passes now (0 → 10 → 30, both saves through) |
 | R6b-2 | S | low | `erp-form-bridge-page.js` save callback (`reason: … stripHtml(String(r.exc))`) | The same probe's first refused save came back with no `_server_messages`, so the status line got the **whole Python traceback** (~3,000 characters) as the reason; the second refusal read "… Message … Confirm" scraped from an ERPNext dialog left open in the hidden page | When falling back to `r.exc`, keep only the last `frappe.exceptions.<Name>: <message>` line (what `flattenFrappeMessage` already does for `exception`), and close the scraped dialog | fixed 2026-10-22 — the refusal came through the **error** callback (HTTP 417), not the one the row named, and carried an info note too ("Expense Head changed…"). Both callbacks now read ERPNext's raised message first (`refusalText`), then the traceback's last line (`frappeExcMessage`), then the dialog, and close the dialog. Proven with R6b-1 put back: both refusals read just "Total Payment Amount … Grand / Rounded Total" |
 | R6b-3 | S, M | low | `main.js` `bill-allocate-charge`; `bill-charge-allocate.js` `lineAmountCents()` | The offset Deduct is the shell's own **prediction** of how much the lines rose, not what ERPNext computed after the rates were set. The prediction hard-codes Banker's Rounding (this site's System Settings `rounding_method`; ERPNext also offers Commercial Rounding and a legacy Banker's). On a site rounding another way, a fractional-qty line can rise a cent more or less than planned and the bill's grand total moves by that cent with nothing said — the 1¢ class 5zorro found on 00011 | After the rates are set, take the rise from the returned document (Σ new amount − old amount) for the offset, and say so if it differs from the plan | fixed 2026-10-22 — the offset takes ERPNext's line amounts (`allocatedFromDoc`); a drift is logged and reported as remainder (or "ERPNext's rounding put … more"). Unit-tested; not run live (needs a site that rounds another way) |
-| R6b-4 | S | low | `bill-line-allocation.js` `splitQtyAcrossSalesOrders()`; `main.js` bridge PO (≈8909) | A Bill line assigned to N Sales Orders makes a bridge PO with the qty split evenly to 3 decimals: 2 over 3 orders is 0.666 / 0.666 / 0.668. Every item here is in **Nos**, a whole-number unit, and `purchase_order.py:211` refuses fractions — so the bridge PO fails whenever the qty does not divide by N (R2-2's fix now says so instead of hiding it). A qty of 0 or less becomes 1 per order. The split also ignores what each order actually asked for | Split in whole units when the UOM is whole-number (and say so when there are fewer units than orders); better, take each order's open qty for the item | fixed 2026-10-22 — whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2); fewer units than orders or no qty is refused with the reason before any PO is built. 5zorro: "fewer than orders" is only a mistake; the fractions (any qty not divisible by N) were the real failure. Each order's own open qty is not read (not asked for). Corrected the same day after 5zorro's plate example: qty is a decimal in ERPNext and only a unit with *Must be Whole Number* (5 of 239 here) refuses fractions, so the split now reads the line's unit (`uomIsWholeNumber`) — whole units for those, thousandths otherwise (1 plate over 2 = 0.5 / 0.5). Not handled: a fractional unit over a whole-number stock unit (Box of 12 over Nos) |
+| R6b-4 | S | low | `bill-line-allocation.js` `splitQtyAcrossSalesOrders()`; `main.js` bridge PO (≈8909) | A Bill line assigned to N Sales Orders makes a bridge PO with the qty split evenly to 3 decimals: 2 over 3 orders is 0.666 / 0.666 / 0.668. Every item here is in **Nos**, a whole-number unit, and `purchase_order.py:211` refuses fractions — so the bridge PO fails whenever the qty does not divide by N (R2-2's fix now says so instead of hiding it). A qty of 0 or less becomes 1 per order. The split also ignores what each order actually asked for | Split in whole units when the UOM is whole-number (and say so when there are fewer units than orders); better, take each order's open qty for the item | fixed 2026-10-22 — whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2); fewer units than orders or no qty is refused with the reason before any PO is built. 5zorro: "fewer than orders" is only a mistake; the fractions (any qty not divisible by N) were the real failure. Each order's own open qty is not read (not asked for). Corrected the same day after 5zorro's plate example: qty is a decimal in ERPNext and only a unit with *Must be Whole Number* (5 of 239 here) refuses fractions, so the split now reads the line's unit (`uomIsWholeNumber`) — whole units for those, thousandths otherwise (1 plate over 2 = 0.5 / 0.5). Not handled: a fractional unit over a whole-number stock unit (Box of 12 over Nos). **Superseded the same day by *split by need*** (below): weights are each order line's open qty, in the item's stock unit, which also settles the Box-over-Nos case |
 | R6b-5 | S | med | `main.js` `bill-list-projects` | Found by the R6b-4 probe: Assign's Project step sat on "Loading projects…" for ever. The list asked for `customer_name`, which Project does not have on v16; the server refused, and `frappe.db.get_list` never settles on a refusal (G19) | `frappe.xcall("frappe.client.get_list")`, without `customer_name` | fixed 2026-10-22 |
 | R6b-6 | S | med | `main.js` bridge PO build (`frappe.model.get_new_doc` / `add_child`) | Found by the R6b-4 probe: on a Bill, Purchase Order's meta has never loaded in the ERPNext page, so `add_child` read the items field from null — "Cannot read properties of null (reading 'options')" — and the bridge PO was never made. R2-2's fix made it say so; nothing had run it to the end | `await frappe.model.with_doctype("Purchase Order")` first | fixed 2026-10-22 — the probe makes the PO |
 
@@ -466,6 +470,12 @@ weighted by need is exactly what 99% of the use cases will want").**
    they could click a costing box to see how it got allocated, and it would be substantially the
    same box"): on the Sales Order dashboard (plan 10-12's skin), a *Costing* chip when the order has
    `Costing assumptions:` Comments, opening `renderCostingBox` read-only from `parseCostingNote`.
+
+The end-of-session review the same day moved the whole split to the item's **stock unit** (the open
+qty is `stock_qty − ordered_qty`, as ERPNext tracks it; PO lines say the stock unit at the per-unit
+rate; the box headers show it) — a Bill line in Box against orders in Nos had compared 1 box with 1
+each — and **HTML-escaped** the costing note (the vendor's typed bill no. went into Desk's timeline
+as HTML). Re-proven with the same probe.
 
 Proven by probe `leaves-records/r6b4-split-by-need` (2026-10-22), through the real Assign dialog:
 SO-A needs 6, SO-B needs 2, a Bill line of 5 → the box says 4 / 1; SO-B ticked from stock → 5 / 0;
@@ -581,7 +591,7 @@ Checked and fine: **Q3** — two auto re-link runs for one payment cannot both p
   2. Dates and holidays: local vs UTC, year-end, a bank holiday falling on the run day.
   3. Rows that are not bills (unallocated payments, negative outstanding, no due date) — every
      consumer guarded, not only the one that broke the board on 2026-09-26?
-- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22); its fixes and the split-by-need build reviewed through `53c0a05` (end-of-session review, 2026-10-22).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -601,7 +611,7 @@ Checked and fine: **Q1** — the two copies P2 found are gone. Both directions o
      board, and does a re-render rebuild everything?
   2. One exception in a render loop blanks the board (G13): is every loop guarded now?
   3. A 3,907-line HTML page: what should be in `src/` with tests?
-- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22); its fixes and the split-by-need build reviewed through `53c0a05` (end-of-session review, 2026-10-22).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|

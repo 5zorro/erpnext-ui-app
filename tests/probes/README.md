@@ -55,7 +55,7 @@ one. Each such probe:
 - When the question is what ERPNext does with the data rather than what the keys do, drive the
   page's own calls (`window.erpDoc.setHeader` / `setItem` / `save`) through `inDoc`. When the
   sandbox lacks the case (every vendor here has terms), make a `ZZ…` record for it. Example of
-  both: `r6b-due-date-schedule.probe.js`, which fails while its finding is open.
+  both: `r6b-due-date-schedule.probe.js` (it failed until R6b-1 was fixed, and is the regression check now).
 - Sandbox records a probe makes are named `ZZ…` and deleted in `finally`. It saves a document only
   when that is the question, and deletes it after.
 - Print what was seen with `report(label, obj)` (`PROBE <label> {…}`) as well as asserting, so a
