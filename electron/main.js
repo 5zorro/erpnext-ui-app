@@ -6708,8 +6708,9 @@ async function listBillMandatoryMissing() {
 
 /**
  * The open Sales Order lines for one item across the orders a Bill line is assigned to: what each
- * still needs ordered, `qty − ordered_qty / conversion_factor` (ERPNext's own `make_purchase_order`
- * figure). An order with no line for the item comes back as `salesOrderItem: ""`, `open: 0`.
+ * still needs ordered, in the item's **stock unit** — `stock_qty − ordered_qty`, the figure ERPNext
+ * itself tracks (`make_purchase_order` shows the same in the order's own unit). An order with no
+ * line for the item comes back as `salesOrderItem: ""`, `open: 0`.
  * @param {string[]} salesOrders @param {string} itemCode
  * @returns {Promise<{ ok: true, lines: import("../src/bill-line-allocation.js").SalesOrderOpenLine[] } | { ok: false, reason: string }>}
  */
@@ -6719,7 +6720,7 @@ async function readSalesOrderOpenLines(salesOrders, itemCode) {
       var rows = await frappe.xcall("frappe.client.get_list", {
         doctype: "Sales Order Item",
         parent: "Sales Order",
-        fields: ["name", "parent", "idx", "qty", "ordered_qty", "conversion_factor"],
+        fields: ["name", "parent", "idx", "stock_qty", "ordered_qty"],
         filters: [["parent", "in", ${JSON.stringify(salesOrders)}], ["item_code", "=", ${JSON.stringify(itemCode)}], ["docstatus", "=", 1]],
         order_by: "parent asc, idx asc",
         limit_page_length: 0,
@@ -6735,8 +6736,8 @@ async function readSalesOrderOpenLines(salesOrders, itemCode) {
     const mine = raw.rows.filter((r) => r.parent === so);
     if (!mine.length) lines.push({ salesOrder: so, salesOrderItem: "", open: 0 });
     for (const r of mine) {
-      const cf = Number(r.conversion_factor) || 1;
-      const open = Math.round((Number(r.qty) - Number(r.ordered_qty || 0) / cf) * 1000) / 1000;
+      // In the item's stock unit, as ERPNext keeps ordered_qty (the PO → SO updater compares stock_qty).
+      const open = Math.round((Number(r.stock_qty) - Number(r.ordered_qty || 0)) * 1000) / 1000;
       lines.push({ salesOrder: so, salesOrderItem: r.name, open: Math.max(0, open) });
     }
   }
@@ -6753,12 +6754,18 @@ async function planBillLineSplit(ri, salesOrders, fromStock) {
   if (!line || !line.item_code) return { ok: false, reason: "The line has no item." };
   const open = await readSalesOrderOpenLines(salesOrders, String(line.item_code));
   if (!open.ok) return open;
-  return planSalesOrderSplit({
-    qty: Number(line.qty) || 0,
-    wholeUnits: await uomIsWholeNumber(line.uom || line.stock_uom),
+  // Everything in the item's stock unit (end-of-session review 2026-10-22): a Bill line in Box
+  // against orders in Nos compared 1 box with 1 each. `stockQty` is the line's qty in that unit.
+  const cf = Number(line.conversion_factor) || 1;
+  const stockQty = Number(line.stock_qty) || Math.round((Number(line.qty) || 0) * cf * 1000) / 1000;
+  const stockUom = normalizeEditableText(line.stock_uom) || normalizeEditableText(line.uom);
+  const plan = planSalesOrderSplit({
+    qty: stockQty,
+    wholeUnits: await uomIsWholeNumber(stockUom),
     lines: open.lines,
     fromStock,
   });
+  return plan.ok ? { ...plan, uom: stockUom, ratePerStockUnit: (Number(line.rate) || 0) / cf } : plan;
 }
 
 /**
@@ -9069,7 +9076,8 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         var sos = ${JSON.stringify(salesOrders)};
         var itemCode = ${JSON.stringify(String(line.item_code))};
         var poLines = ${JSON.stringify(poLines)};
-        var rate = ${Number(line.rate) || 0};
+        var rate = ${Number(split.ratePerStockUnit) || 0};
+        var stockUom = ${JSON.stringify(split.uom || "")};
         var title = ${JSON.stringify(title)};
         var company = ${JSON.stringify(company || "")};
 
@@ -9098,6 +9106,11 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         for (var si = 0; si < poLines.length; si++) {
           var child = frappe.model.add_child(po, "items");
           child.item_code = itemCode;
+          // The split is in the stock unit; the line says so rather than taking the item's purchase unit.
+          if (stockUom) {
+            child.uom = stockUom;
+            child.conversion_factor = 1;
+          }
           child.qty = poLines[si].qty;
           child.schedule_date = sched;
           if (poLines[si].sales_order) {
@@ -9148,7 +9161,8 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
           bill: normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || normalizeEditableText(dirtyState.doc && dirtyState.doc.name),
           line: ri + 1,
           item: String(line.item_code),
-          qty: Number(line.qty) || 0,
+          qty: Number(line.stock_qty) || (Number(line.qty) || 0) * (Number(line.conversion_factor) || 1),
+          uom: split.uom,
           po: bridgePo,
           by: typeof by === "string" ? by : "",
           plan: split,

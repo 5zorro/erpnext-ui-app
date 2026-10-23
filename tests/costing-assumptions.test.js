@@ -20,19 +20,27 @@ describe("costing assumptions (review 10-19 R6b-4)", () => {
       ["SO-C", "0", "0", "no line for this item", false],
     ]);
     assert.equal(m.stockRow, "1.5 more than the orders need → into stock");
+    assert.equal(costingBoxModel({ ...plan, uom: "Nos" }).stockRow, "1.5 Nos more than the orders need → into stock");
   });
   it("the note opens with the token, reads as text, and round-trips its data", () => {
-    const note = costingNote({ bill: "INV-9", line: 2, item: "SKU", qty: 6.5, po: "PO-1", by: "Clerk", plan });
-    assert.ok(note.startsWith(`${COSTING_TOKEN} INV-9 line 2, SKU × 6.5 → PO-1`));
-    assert.match(note, /^SO-A: needed 6, from this bill 5 — 1 from stock$/m);
+    const note = costingNote({ bill: "INV-9", line: 2, item: "SKU", qty: 6.5, uom: "Nos", po: "PO-1", by: "Clerk", plan });
+    assert.ok(note.startsWith(`${COSTING_TOKEN} INV-9 line 2, SKU × 6.5 Nos → PO-1`));
+    assert.ok(note.split("<br>").includes("SO-A: needed 6, from this bill 5 — 1 from stock"));
     const back = parseCostingNote(note);
     assert.equal(back.po, "PO-1");
     assert.deepEqual(back.rows, plan.rows);
     assert.equal(back.toStock, 1.5);
+    assert.equal(back.uom, "Nos");
+  });
+  it("a typed bill no. cannot put HTML into ERPNext's timeline", () => {
+    const note = costingNote({ bill: '<img src=x onerror="alert(1)">', line: 1, item: "SKU", qty: 1, po: "PO-1", by: "Clerk", plan });
+    assert.doesNotMatch(note, /<img/);
+    assert.equal(parseCostingNote(note).bill, '<img src=x onerror="alert(1)">');
   });
   it("reads the note back as ERPNext may store it — HTML and escaped quotes", () => {
     const note = costingNote({ bill: "INV-9", line: 2, item: "SKU", qty: 6.5, po: "PO-1", by: "Clerk", plan });
-    const html = "<div><p>" + note.replace(/&/g, "&amp;").replace(/"/g, "&quot;").split("\n").join("</p><p>") + "</p></div>";
+    // The note is already escaped with <br> lines; a Text Editor may wrap it in its own markup.
+    const html = "<div class=\"ql-editor read-mode\"><p>" + note + "</p></div>";
     assert.deepEqual(parseCostingNote(html).rows, plan.rows);
   });
   it("anything else is not a costing note", () => {

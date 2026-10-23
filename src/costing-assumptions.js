@@ -27,10 +27,12 @@ function qtyText(n) {
 
 /**
  * The box's rows, as text — the same for the Bill's confirm and the Sales Order's look-back.
- * @param {{ rows: Array<{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }>, toStock: number }} plan
- * @returns {{ rows: Array<{ salesOrder: string, open: string, gets: string, fromStockQty: string, note: string, fromStock: boolean, canTick: boolean }>, stockRow: string|null }}
+ * Quantities are in the item's stock unit (`plan.uom`).
+ * @param {{ rows: Array<{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }>, toStock: number, uom?: string }} plan
+ * @returns {{ unit: string, rows: Array<{ salesOrder: string, open: string, gets: string, fromStockQty: string, note: string, fromStock: boolean, canTick: boolean }>, stockRow: string|null }}
  */
 export function costingBoxModel(plan) {
+  const unit = plan && plan.uom ? String(plan.uom) : "";
   const rows = (plan && Array.isArray(plan.rows) ? plan.rows : []).map((r) => {
     const short = r.diff < 0 ? -r.diff : 0;
     let note = "";
@@ -49,34 +51,46 @@ export function costingBoxModel(plan) {
     };
   });
   const extra = Number(plan && plan.toStock) || 0;
-  return { rows, stockRow: extra > 0 ? `${qtyText(extra)} more than the orders need → into stock` : null };
+  return {
+    unit,
+    rows,
+    stockRow: extra > 0 ? `${qtyText(extra)}${unit ? ` ${unit}` : ""} more than the orders need → into stock` : null,
+  };
 }
 
 /**
  * The Comment that keeps the decision.
- * @param {{ bill: string, line: number, item: string, qty: number, po: string, by: string,
+ * @param {{ bill: string, line: number, item: string, qty: number, uom?: string, po: string, by: string,
  *   plan: { rows: Array<{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }>, toStock: number } }} c
  * @returns {string}
  */
 export function costingNote(c) {
-  const box = costingBoxModel(c.plan);
+  const box = costingBoxModel({ ...c.plan, uom: c.uom || c.plan.uom });
+  const unit = box.unit ? ` ${box.unit}` : "";
   const lines = [
-    `${COSTING_TOKEN} ${c.bill} line ${c.line}, ${c.item} × ${qtyText(c.qty)} → ${c.po} (Doc shell; ${c.by || "a person"} said Okay)`,
+    `${COSTING_TOKEN} ${c.bill} line ${c.line}, ${c.item} × ${qtyText(c.qty)}${unit} → ${c.po} (Doc shell; ${c.by || "a person"} said Okay)`,
     "",
     ...box.rows.map((r) => `${r.salesOrder}: needed ${r.open}, from this bill ${r.gets} — ${r.note}`),
     ...(box.stockRow ? [box.stockRow] : []),
     "",
     COSTING_LEAD,
     "",
-    `data: ${JSON.stringify({ v: 1, bill: c.bill, line: c.line, item: c.item, qty: c.qty, po: c.po, rows: c.plan.rows, toStock: c.plan.toStock })}`,
+    `data: ${JSON.stringify({ v: 1, bill: c.bill, line: c.line, item: c.item, qty: c.qty, uom: box.unit, po: c.po, rows: c.plan.rows, toStock: c.plan.toStock })}`,
   ];
-  return lines.join("\n");
+  // Desk shows a Comment as HTML: the text is escaped (the vendor's bill no. is typed by a person)
+  // and its lines are <br>s, so it reads as written; parseCostingNote undoes both.
+  return lines.map(escapeHtml).join("<br>");
+}
+
+/** @param {string} s */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /**
  * Read a costing Comment back (its content as ERPNext stores it — maybe HTML, maybe escaped).
  * @param {unknown} content
- * @returns {{ bill: string, line: number, item: string, qty: number, po: string, rows: any[], toStock: number }|null}
+ * @returns {{ bill: string, line: number, item: string, qty: number, uom?: string, po: string, rows: any[], toStock: number }|null}
  */
 export function parseCostingNote(content) {
   const text = String(content == null ? "" : content)

@@ -26,7 +26,8 @@ export function renderCostingBox(plan, opts = {}) {
   const table = document.createElement("table");
   table.className = "costing-table";
   const head = table.createTHead().insertRow();
-  for (const h of ["Sales Order", "Needs", "From this bill", "From stock", ...(opts.onToggleStock ? ["Fill from stock"] : [])]) {
+  const u = box.unit ? ` (${box.unit})` : "";
+  for (const h of ["Sales Order", `Needs${u}`, `From this bill${u}`, "From stock", ...(opts.onToggleStock ? ["Fill from stock"] : [])]) {
     const th = document.createElement("th");
     th.textContent = h;
     head.appendChild(th);
