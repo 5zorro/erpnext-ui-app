@@ -73,7 +73,15 @@ built, being dogfooded). It edits no code.
 > their cause. The end-of-session review the same day probed an answer given to 5zorro and found
 > **R5b-6** (a fast first Tab in a box beat R5b-1's hold) and **R5b-7** (a pick wrote the vendor
 > twice; the late repaint dropped the clerk out of the line) — both fixed and proven. Plans now
-> close by sorting their residuals (HANDOFF § *Closing a plan*). Next: session 5 (R6b + R10a + R10b).
+> close by sorting their residuals (HANDOFF § *Closing a plan*).
+> **Session 5 ✅ 2026-10-22** (R6b, R10a, R10b): 11 findings, all open, four medium. **R6b-1**
+> (proven by probe): a Bill for a vendor with no payment terms and a typed due date can never be
+> saved — the bridge adds a schedule row with a fixed 0.00 amount that ERPNext never rescales.
+> **R10a-1**: an installment bill's part payment or debit note is not subtracted, so the board
+> overstates what is owed; ERPNext's A/P report already splits by term correctly. **R10b-1**: the
+> board fetches every outstanding invoice whole, one request each, on every open and detour
+> return; one query does it. **R10b-2**: a throw in one vendor's card still blanks the board
+> silently (G13's loop was never guarded). Next: session 6 (R7 + R8 + R12).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -415,7 +423,16 @@ same way as doc-form (R5 checked).
   2. Floating-point sums over many lines (bill 00011 is 1¢ off — known, left; is the cause known?).
   3. Dates: due dates and posting dates built from `new Date()` — local time or UTC, and could a
      save just after midnight land on the wrong day?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R6b-1 | S | med | `erp-form-bridge-page.js` `syncScheduleFromHeaderDueDate()` / `ensurePaymentScheduleBeforeSave()` | **Proven by probe** (`r6b-due-date-schedule`): a Bill for a vendor with **no payment terms** whose due date is typed before the lines can **never be saved** — "Total Payment Amount in Payment Schedule must be equal to Grand / Rounded Total". The bridge adds the schedule row itself with a fixed `payment_amount` (the grand total *at that moment*, 0.00 on an empty bill) and no `invoice_portion`; ERPNext's `set_payment_schedule` rescales only rows that have a portion and builds no row of its own once one exists. A due date typed after the lines saves once, then the next line change is refused the same way. Vanilla never adds the row: its `due_date` handler only moves an existing single row, and the server builds a 100 % row from the header due date. Every sandbox vendor has terms today, but a vendor made with *Create Vendor…* has none | Give the row `invoice_portion = 100` (then ERPNext rescales it on every save — the probe's first run shows a 100 % row going 0 → 10 → 30), or stop adding a row and let the server build it. Re-run the probe; its two asserts fail until then | open |
+| R6b-2 | S | low | `erp-form-bridge-page.js` save callback (`reason: … stripHtml(String(r.exc))`) | The same probe's first refused save came back with no `_server_messages`, so the status line got the **whole Python traceback** (~3,000 characters) as the reason; the second refusal read "… Message … Confirm" scraped from an ERPNext dialog left open in the hidden page | When falling back to `r.exc`, keep only the last `frappe.exceptions.<Name>: <message>` line (what `flattenFrappeMessage` already does for `exception`), and close the scraped dialog | open |
+| R6b-3 | S, M | low | `main.js` `bill-allocate-charge`; `bill-charge-allocate.js` `lineAmountCents()` | The offset Deduct is the shell's own **prediction** of how much the lines rose, not what ERPNext computed after the rates were set. The prediction hard-codes Banker's Rounding (this site's System Settings `rounding_method`; ERPNext also offers Commercial Rounding and a legacy Banker's). On a site rounding another way, a fractional-qty line can rise a cent more or less than planned and the bill's grand total moves by that cent with nothing said — the 1¢ class 5zorro found on 00011 | After the rates are set, take the rise from the returned document (Σ new amount − old amount) for the offset, and say so if it differs from the plan | open |
+| R6b-4 | S | low | `bill-line-allocation.js` `splitQtyAcrossSalesOrders()`; `main.js` bridge PO (≈8909) | A Bill line assigned to N Sales Orders makes a bridge PO with the qty split evenly to 3 decimals: 2 over 3 orders is 0.666 / 0.666 / 0.668. Every item here is in **Nos**, a whole-number unit, and `purchase_order.py:211` refuses fractions — so the bridge PO fails whenever the qty does not divide by N (R2-2's fix now says so instead of hiding it). A qty of 0 or less becomes 1 per order. The split also ignores what each order actually asked for | Split in whole units when the UOM is whole-number (and say so when there are fewer units than orders); better, take each order's open qty for the item | open |
+
+Checked and fine: **Q2** — the 1¢ on bill 00011 has a known cause: unit costs move only in whole cents, so 14.28 spread over 3 + 4 units rose the lines 14.27. Fixed by `exactRates` in `f68d42d` (2026-10-11 11:51); 00011 was saved at 11:45, before it — its offset Deduct is 14.27, matching what the lines took, so the bill balances. **Q3** — the Bill's posting-date stamp uses `frappe.datetime.get_today()`, which is the **site's** time zone, the same day the server's own `validate_posting_time` uses; both are America/Denver here, as is this PC. The pure date math (`dayBefore`, `addUtcDays`, …) works on `Date.UTC` dates, so it cannot slip a day. **Q1** — the tax Rate % shown on an Actual row (`displayTaxRateForRow`) is display only and never written back. After a write, the page paints from ERPNext's returned document. R6b-3 is the one place that does not.
 
 ### R6c — Bill skin: loading and enrich (P, S) — read ~20k
 
@@ -522,7 +539,15 @@ Checked and fine: **Q3** — two auto re-link runs for one payment cannot both p
   2. Dates and holidays: local vs UTC, year-end, a bank holiday falling on the run day.
   3. Rows that are not bills (unallocated payments, negative outstanding, no due date) — every
      consumer guarded, not only the one that broke the board on 2026-09-26?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R10a-1 | S, M | med | `outstanding-bills.js` `explodeInstallments()`; `main.js` `fetchOutstandingBills()` | A bill with installments is split into one row per installment using **each schedule row's own `outstanding`**. ERPNext keeps those rows up to date only when the terms template has *Allocate payment based on payment terms*. The shell switches that on for templates it makes (`payment-term-plan.js`), but not for templates made in Vanilla or already there, nor for a schedule edited by hand. On such a bill, a part payment, or a debit note against it, leaves every row at its full amount. The board then **overstates what the vendor is owed** and proposes paying it; ERPNext refuses the over-allocation at submit, so no money moves, but the totals finance reads are wrong. ERPNext's own A/P report already does this split right: with `based_on_payment_terms: 1` it assigns paid amounts and credit notes to the terms, earliest due first (`accounts_receivable.py:545`, `allocate_outstanding_based_on_payment_terms`) | Run the report with `based_on_payment_terms: 1` and take its per-term rows and outstanding. Keep only the discount and method fields from the schedule (one query, R10b-1). At the least, cap the installments at the invoice's report outstanding, earliest due first | open |
+| R10a-2 | S | low | `bank-business-days.js` `usFederalHolidays()` / `observed()` | A holiday on a **Saturday** is observed on the Friday before, and that Friday is treated as closed. The Federal Reserve, whose list the module says it follows for ACH and wire, stays **open** that Friday: 2026-07-03, 2027-12-24 and 2027-12-31 (New Year's 2028 is a Saturday). Payments that walk past those Fridays land a banking day earlier than needed. "Earlier, always" means nothing is ever late, but the claim in the comment is wrong | 5zorro's call: keep the conservative Friday and correct the comment, or skip the Saturday→Friday shift (the Sunday→Monday shift is right) | open |
+| R10a-3 | S | low | `check-run-schedule.js` `resolveCheckRun()` | A run schedule (next date + every N days) can roll onto a bank holiday (every 14 days from a Friday reaches 2026-12-25). The board then calls the holiday "run day" and says nothing. Each payment is still dated its own banking day, so nothing is mis-dated; only the run day itself is not a day anyone pays on | Say so on the run strip ("the run falls on a bank holiday — run early?"), reusing `isBankHoliday`; don't move the date | open |
+
+Checked and fine: **Q1** — the two copies P2 found are gone. Both directions of the calendar walk share `walkToPayableDay`, and the audit (`explainGroupMembership`) reads the dates the engine wrote down (`payByOf`, `clampedTo`) rather than walking again. The board's derivation balloon calls `derivePaymentDate` with the same delay probe and the same `today` as the engine, so its table ends on the node's date. **Q2** — all walking is on `Date.UTC` dates. Year-end is covered: holidays are taken from the year before and after, so a New Year's observed on Dec 31 is seen. The board's `todayIso()` is the PC's local date, which is the site's (America/Denver) here; a PC in another time zone would differ around midnight. **Q3** — `paymentBatchEconomics` hands back any row without a valid due date or with `outstanding ≤ 0` as `unschedulable`, and the vendor card shows them. `derivePaymentDate` and `billAdvisories` both cope with a missing due date. The batch payment's total is rounded to cents (`payment-entry-batch.js`).
 
 ### R10b — Pay Outstanding: the board page (P, M) — read ~25k
 
@@ -534,7 +559,16 @@ Checked and fine: **Q3** — two auto re-link runs for one payment cannot both p
      board, and does a re-render rebuild everything?
   2. One exception in a render loop blanks the board (G13): is every loop guarded now?
   3. A 3,907-line HTML page: what should be in `src/` with tests?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `adcf495` (session 5, 2026-10-22).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R10b-1 | P | med | `main.js` `fetchOutstandingBills()` | Drawing the board costs **one request per outstanding invoice**, on top of the company list and the A/P report. Each is a full `frappe.client.get` of the Purchase Invoice (items, taxes and all), fired all at once with no limit, just to read `payment_schedule`. It happens on every open of the board and **every return from a detour** (`shell-detour-return` → `reloadBills`), and again after an auto re-link. The comment that ruled out one query ("`get_list` on a child doctype strips every field but `name`") is wrong for this Frappe: `frappe.client.get_list` on *Payment Schedule* with `parent: "Purchase Invoice"` returns every field (checked live, read-only, 2026-10-22) | One `get_list` on Payment Schedule with `parent` set and `filters: [["parent", "in", vouchers]]` (in chunks of a few hundred), or the report's term rows (R10a-1). Check `listBillPaymentEntries`, which cites the same "gotcha", for the same fix | open |
+| R10b-2 | S | med | `pay-outstanding.src.html` `render()` per-vendor loop; `init()` | G13's lesson ("the item is the unit of failure, not the page") was fixed in the data, not the loop. `render()` still empties the board, then builds each vendor card with no `try`. `init()` is called bare, so a throw becomes an unhandled rejection, and the page has no `window.onerror`. Any new throw in one vendor's card (a malformed date reaching `parseIso`, a missing field) again blanks every vendor after it, silently — the failure that sat for days as "flaky smokes" | Wrap each vendor's card in `try`/`catch` and draw a small "this vendor's card failed: …" box in its place. Add `window.onerror` / `unhandledrejection` → `showError` | open |
+| R10b-3 | M | low | `pay-outstanding.src.html` `buildRibbonSvg()`, the row-Y arithmetic | The HANDOFF names four geometry rules for the board, "each paid for with a bug" (span by member count, never dollar share; row centre `i × ROW_HEIGHT + ROW_HEIGHT/2`; bundle centred; brace at least `MIN_BRACE_H`). They live only in page code with no test. The rest of the page's logic is already in `src/` (22 imported modules: engine, derivation, advisories, prefs, check run, delay calendar, term plan) | Move the strand and brace placement (`buildRibbonSvg`'s pass 1) and the row-Y maths into `src/pay-flow-geometry.js` with tests pinning those rules; the page keeps only the SVG drawing | open |
+| R10b-4 | M | low | `scripts/assemble-pay-outstanding-html.js`; `electron/pay-outstanding.html` | The page the app loads is generated from `pay-outstanding.src.html` + `check-doc.fragment.html`, and nothing checks that the committed copy is current. Forgetting to re-run the script ships the old board with green tests. Today it is current (re-assembled: no diff) | A unit test that assembles in memory and compares it with the committed file ("run `node scripts/assemble-pay-outstanding-html.js`") | open |
+
+Checked and fine / noted: **Q1** — requests to draw the board: `getNumberLead`, `getPrefs`, the delay calendar, then 2 + N for the bills (R10b-1). After that, the relink reviews and the draft payments, plus one re-link read per vendor holding a credit (usually none). A re-render **does** rebuild every vendor card from scratch: the pref inputs recompute the batching for every shown vendor, client-side, with no refetch, and so does each keystroke in the filter box. Not measured slow at sandbox size. Debounce the filter (~150 ms) only if dogfood at production size shows lag; `delayProbe()` rebuilding the calendar index per bill is the same kind of cost. **Q2** — see R10b-2. **Q3** — see R10b-3; `methodPanelEl` (230 lines) and `renderVendorCard` (285) are DOM building over `src/` logic and can stay. The HTML injection points take escaped text (`escapeHtml`, `moneyHtml`, `moneyTextHtml`) or constants.
 
 ### R10c — Pay Outstanding: the write paths (S) — read ~20k
 
@@ -681,7 +715,7 @@ money first, structure later.
 | 2 ✅ | R9 + R10c + R6c | ~62k | R8 (would make ~84k listed) | every multi-step write: what is left behind when step 2 fails | done |
 | 3 ✅ | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | done |
 | 4 ✅ | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | done |
-| 5 | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | |
+| 5 ✅ | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | done |
 | 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
 | 7 | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | |
 
