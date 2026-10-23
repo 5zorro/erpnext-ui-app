@@ -81,6 +81,15 @@ Same as plan 2026-10-03 § *How to handle cross-architecture dogfood*. For this 
 "families" are the slices below, which are the coverage map's families
 (`src/architecture-families.js`), split where a family is too big to read in one session.
 
+### Closeout (before deleting this plan)
+
+Follow `HANDOFF.md` § *Closing a plan* (5zorro 2026-10-22): fold the durable rules, list every
+residual, and sort each one with 5zorro — **promoted** into the plan in flight it fits best (a new
+plan only when none fits and it has a goal of its own), **parked** in museum `open_items.md`
+(`Status: parked`), or **dropped** in the decision log. Then update HANDOFF's registry, the OI
+statuses and the local notes file, and delete this file. **Never** open a plan that holds only this one's
+residuals.
+
 ---
 
 ## How to run one review session (read this, then only your slice)
@@ -642,11 +651,15 @@ Checked and fine: the proxy's Caddyfile (scanner files static, `.js` only from `
      win in the project.)
   2. Plan 09-08 is superseded; are its last two items (C2 panel, C6 second launch point) shipped
      under 09-16 P3/P4? If so: fold, delete (saves 26k for anyone who opens it).
-  3. Plan 09-16: everything built; what stops closeout besides the dogfood residuals?
+  3. Plan 09-16: everything built; what stops closeout? Its dogfood residuals do not — they are
+     sorted at closeout (HANDOFF § *Closing a plan*, 5zorro 2026-10-22).
   4. Plan 09-21: *Registration owed* in HANDOFF — still owed.
   4b. HANDOFF's *Read order* still calls 09-16 "the active plan", and its closed-plan registry has
      no fold named for 07-15 / 07-18 — bring both up to date.
   5. Plan 09-26 at 24k: which sections are done and could fold into HANDOFF now?
+  6. Every plan this review closes (its own included) goes through HANDOFF § *Closing a plan*:
+     its residuals are listed and sorted with 5zorro — promoted into a plan in flight, parked in
+     the museum, or dropped — never carried in a residuals-only plan.
 - **Do last**, after the code slices, so it can also fold this plan's own conclusions.
 - **Reviewed through:** — **Findings:** none yet.
 

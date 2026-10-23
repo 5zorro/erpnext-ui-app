@@ -642,7 +642,7 @@ npm run test:e2e:xvfb # same under Xvfb (WSL/CI-friendly)
 
 | Home | Role |
 |------|------|
-| `docs/implementation-plan-YYYY-MM-DD.md` | **Working how** for one build tranche: modules, flows, business rules being coded to, tests. 5zorro audits this before/during implementation. **First section** must include cross-architecture dogfood handling (group by architecture family; residual table — do not reopen Done batches; promote decisions before delete). |
+| `docs/implementation-plan-YYYY-MM-DD.md` | **Working how** for one build tranche: modules, flows, business rules being coded to, tests. 5zorro audits this before/during implementation. **First section** must include cross-architecture dogfood handling (group by architecture family; residual table — do not reopen Done batches) and a short *Closeout* that points at **Closing a plan** below. |
 
 Rules:
 
@@ -653,11 +653,36 @@ Rules:
    into the top of every new dated plan.
 4. Mid-tranche dogfood that spans Bill / PO / IR / chrome goes in that plan’s **Dogfood residuals**
    table (by architecture family / error class) — **not** as a dump into museum `open_items.md`.
-5. After the tranche ships and durable facts are copied to
-   `~/agent-harness/memory/decisions.md` (via `append-decision.sh`) / ADR / CHANGELOG / OI status,
-   **delete** that dated plan file.
+5. When the tranche ships, close it as **Closing a plan** below says, then **delete** the dated
+   plan file.
 6. High-level milestone maps may stay sparse in an early draft; **how** is required before coding
    a promoted OI (or when 5zorro asks to review architecture).
+
+### Closing a plan — sort the residuals, never carry them in a new plan (5zorro 2026-10-22)
+
+Why: building and dogfooding a plan turns up more than it set out to do — findings, ideas argued
+out and agreed, checks not yet tried. Closing a plan by writing a new one that holds only those
+leftovers carried the whole pile forward under a new date and let the scope grow every tranche.
+Now each leftover is sorted and goes where it belongs; a plan never exists just to hold residuals.
+
+1. **Fold what must outlive the plan.** Rules and invariants into this file (a section, or a row
+   in the registry above); gotchas into `docs/gotchas.md`; the decision into
+   `~/agent-harness/memory/decisions.md` via `~/agent-harness/scripts/append-decision.sh`.
+2. **List the residuals** — everything in the plan that is not done: open findings, *Dogfood
+   residuals* rows not yet tried, ideas agreed but not built, "revisit after dogfood" notes,
+   items marked parked. One list, each with a one-line *why it matters*.
+3. **Sort each one — 5zorro decides, the agent proposes:**
+   - **Promoted** (wanted soon) → the plan already in flight that it fits best — e.g. a picker
+     bug into the open architecture review's slice for pickers — or, only when none fits and it is
+     ready to build, a new dated plan that has its own goal.
+   - **Parked** (valuable, not soon) → museum `open_items.md`: a new OI, or a note on the OI it
+     came from, with what is needed to pick it up cold (what was decided and why, where the code
+     is, how to reproduce). `Status: parked`. Public files name it only as `OI-NNN` plus one line.
+   - **Dropped** (no longer wanted) → one line in the decision log, so it is not rediscovered.
+4. **Each moved item says where it came from** ("from plan 10-21 D2"), so its history can be read
+   with `git show <deleting commit>^:<plan path>`.
+5. **Then** update the read-order registry above ("Closed" entry, where its rules now live), the
+   OI statuses, and the local notes file pointer, and delete the plan file.
 
 ## Communication (what 5zorro wants from agents)
 

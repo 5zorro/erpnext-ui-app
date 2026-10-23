@@ -14,6 +14,15 @@ not built). Nothing here edits the trace pages or the Find pages.
 Same as plan 2026-10-03 § *How to handle cross-architecture dogfood*: sort feedback into
 architecture families, one family per slice, `npm test` green per slice.
 
+### Closeout (before deleting this plan)
+
+Follow `HANDOFF.md` § *Closing a plan* (5zorro 2026-10-22): fold the durable rules, list every
+residual, and sort each one with 5zorro — **promoted** into the plan in flight it fits best (a new
+plan only when none fits and it has a goal of its own), **parked** in museum `open_items.md`
+(`Status: parked`), or **dropped** in the decision log. Then update HANDOFF's registry, the OI
+statuses and the local notes file, and delete this file. **Never** open a plan that holds only this one's
+residuals.
+
 ---
 
 ## What 5zorro asked for, with his example

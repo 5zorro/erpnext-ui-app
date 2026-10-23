@@ -43,9 +43,12 @@ treated as one blob. Prefer **error classes / architecture families**, not a sin
 
 ### Closeout (before deleting this plan)
 
-1. Append durable **decisions** via `~/agent-harness/scripts/append-decision.sh`.
-2. Update museum **OI status** — set `done` or note what promoted.
-3. **Delete** this dated plan; open a **new** dated plan for the next tranche.
+Follow `HANDOFF.md` § *Closing a plan* (5zorro 2026-10-22): fold the durable rules, list every
+residual, and sort each one with 5zorro — **promoted** into the plan in flight it fits best (a new
+plan only when none fits and it has a goal of its own), **parked** in museum `open_items.md`
+(`Status: parked`), or **dropped** in the decision log. Then update HANDOFF's registry, the OI
+statuses and the local notes file, and delete this file. **Never** open a plan that holds only this one's
+residuals.
 
 ---
 
@@ -1132,8 +1135,9 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
 ## After the dogfood papers — the order of what comes next (5zorro 2026-10-12)
 
 1. **Finish the generated dogfood papers** (DF-01 … DF-26), in order — in progress.
-2. **Sweep the implementation plans**: retire every plan whose work has shipped, folding its
-   lasting rules into `HANDOFF.md` first.
+2. **Sweep the implementation plans**: retire every plan whose work has shipped, as `HANDOFF.md`
+   § *Closing a plan* says — fold its lasting rules first, then sort its residuals (promoted into
+   a plan in flight, parked in the museum, or dropped); no plan made of residuals alone.
 3. **Maybe promote multi-window** (OI-040) — 5zorro's call after the sweep.
 4. **The first release, one per operating system** — the app as something you install and run
    directly on Windows (and the others), not started from a WSL terminal.
