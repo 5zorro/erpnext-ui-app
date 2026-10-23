@@ -435,6 +435,26 @@ same way as doc-form (R5 checked).
 | R6b-3 | S, M | low | `main.js` `bill-allocate-charge`; `bill-charge-allocate.js` `lineAmountCents()` | The offset Deduct is the shell's own **prediction** of how much the lines rose, not what ERPNext computed after the rates were set. The prediction hard-codes Banker's Rounding (this site's System Settings `rounding_method`; ERPNext also offers Commercial Rounding and a legacy Banker's). On a site rounding another way, a fractional-qty line can rise a cent more or less than planned and the bill's grand total moves by that cent with nothing said — the 1¢ class 5zorro found on 00011 | After the rates are set, take the rise from the returned document (Σ new amount − old amount) for the offset, and say so if it differs from the plan | fixed 2026-10-22 — the offset takes ERPNext's line amounts (`allocatedFromDoc`); a drift is logged and reported as remainder (or "ERPNext's rounding put … more"). Unit-tested; not run live (needs a site that rounds another way) |
 | R6b-4 | S | low | `bill-line-allocation.js` `splitQtyAcrossSalesOrders()`; `main.js` bridge PO (≈8909) | A Bill line assigned to N Sales Orders makes a bridge PO with the qty split evenly to 3 decimals: 2 over 3 orders is 0.666 / 0.666 / 0.668. Every item here is in **Nos**, a whole-number unit, and `purchase_order.py:211` refuses fractions — so the bridge PO fails whenever the qty does not divide by N (R2-2's fix now says so instead of hiding it). A qty of 0 or less becomes 1 per order. The split also ignores what each order actually asked for | Split in whole units when the UOM is whole-number (and say so when there are fewer units than orders); better, take each order's open qty for the item | fixed 2026-10-22 — whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2); fewer units than orders or no qty is refused with the reason before any PO is built. 5zorro: "fewer than orders" is only a mistake; the fractions (any qty not divisible by N) were the real failure. Each order's own open qty is not read (not asked for). Corrected the same day after 5zorro's plate example: qty is a decimal in ERPNext and only a unit with *Must be Whole Number* (5 of 239 here) refuses fractions, so the split now reads the line's unit (`uomIsWholeNumber`) — whole units for those, thousandths otherwise (1 plate over 2 = 0.5 / 0.5). Not handled: a fractional unit over a whole-number stock unit (Box of 12 over Nos) |
 
+**R6b-4 follow-up — split by need (5zorro 2026-10-22: "same code is better for maintainability and
+weighted by need is exactly what 99% of the use cases will want").**
+
+1. ✅ **One rule.** `src/split-by-weights.js` `splitUnitsByWeights` (rounded down, then leftover units
+   to the shares nearest their next unit, ties to the earlier) is used by the charge allocator
+   (cents) and the Sales Order split (thousandths, or whole units). No behavior change.
+2. **Link the Sales Order *line*.** The bridge PO sets only `sales_order`, so ERPNext never counts
+   it as ordered against the order (`Sales Order Item.ordered_qty` moves only through a PO line's
+   `sales_order_item`, `purchase_order.py` `update_status_updater`). Set `sales_order_item`, one
+   PO line per open Sales Order line for the item, as ERPNext's own *Create → Purchase Order* does.
+3. **Weights = each line's open qty**: `qty − ordered_qty / conversion_factor` (the same figure
+   `make_purchase_order` uses), split with step 2's rule in the line's unit.
+4. **Warn when the Bill qty ≠ the total open qty.** A table per Sales Order line — open, gets,
+   difference — and "Okay, I still want to do this"; Cancel changes nothing.
+5. **Open — 5zorro's call: where the extra goes** when the Bill qty is *more* than the orders need.
+   Once a PO line is linked to a Sales Order line, ERPNext refuses ordering past that line's qty
+   (`status_updater.py` `check_overflow_with_allowance`; *Over Delivery/Receipt Allowance* is 0 %
+   here). Proposed (a): the extra goes on one more PO line for the item linked to no order (bought
+   for stock). Alternatives: (b) refuse and ask to split the Bill line first.
+
 Checked and fine: **Q2** — the 1¢ on bill 00011 has a known cause: unit costs move only in whole cents, so 14.28 spread over 3 + 4 units rose the lines 14.27. Fixed by `exactRates` in `f68d42d` (2026-10-11 11:51); 00011 was saved at 11:45, before it — its offset Deduct is 14.27, matching what the lines took, so the bill balances. **Q3** — the Bill's posting-date stamp uses `frappe.datetime.get_today()`, which is the **site's** time zone, the same day the server's own `validate_posting_time` uses; both are America/Denver here, as is this PC. The pure date math (`dayBefore`, `addUtcDays`, …) works on `Date.UTC` dates, so it cannot slip a day. **Q1** — the tax Rate % shown on an Actual row (`displayTaxRateForRow`) is display only and never written back. After a write, the page paints from ERPNext's returned document. R6b-3 is the one place that does not.
 
 ### R6c — Bill skin: loading and enrich (P, S) — read ~20k

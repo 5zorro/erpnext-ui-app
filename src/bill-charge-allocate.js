@@ -14,6 +14,8 @@
  * the rest is reported as the remainder — the bill still balances.
  */
 
+import { splitUnitsByWeights } from "./split-by-weights.js";
+
 /**
  * A line's amount as ERPNext stores it: qty × rate to cents, Banker's Rounding (this site's
  * System Settings rounding_method; half-cents only arise with fractional quantities).
@@ -149,7 +151,8 @@ export function allocationBasisWeights(items, mode) {
 }
 
 /**
- * Split `chargeAmount` across weights, to the cent, as evenly as the cents allow (5zorro 2026-10-11):
+ * Split `chargeAmount` across weights, to the cent (`splitUnitsByWeights`, the rule shared with the
+ * Sales Order qty split), as evenly as the cents allow (5zorro 2026-10-11):
  * every line starts rounded down, then the leftover cents go one at a time to the lines whose share
  * was closest to the next cent (the largest-remainder method; ties → the earlier line). 67¢ over ten
  * equal lines is seven 7¢ and three 6¢ — not 13¢ on the first line, as the old rule gave; 3.33 over
@@ -160,26 +163,9 @@ export function allocationBasisWeights(items, mode) {
  */
 export function splitByWeights(chargeAmount, weights) {
   const total = money2(chargeAmount);
-  const w = (Array.isArray(weights) ? weights : []).map((x) => {
-    const n = Number(x);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  });
-  const sumW = w.reduce((a, b) => a + b, 0);
-  if (!(total > 0) || !(sumW > 0)) {
-    return { shares: w.map(() => 0), remainder: total > 0 ? total : 0 };
-  }
-  const totalCents = Math.round(total * 100);
-  const rawCents = w.map((wi) => (wi / sumW) * totalCents);
-  // Float noise off before flooring (0.29 × 100 is 28.999…).
-  const cents = rawCents.map((x) => Math.floor(x + 1e-9));
-  let left = totalCents - cents.reduce((a, b) => a + b, 0);
-  const order = rawCents
-    .map((x, i) => ({ i, frac: w[i] > 0 ? x - Math.floor(x + 1e-9) : -1 }))
-    .filter((o) => o.frac >= 0)
-    .sort((a, b) => (Math.abs(b.frac - a.frac) > 1e-9 ? b.frac - a.frac : a.i - b.i));
-  for (let k = 0; left > 0 && order.length; k = (k + 1) % order.length) {
-    cents[order[k].i] += 1;
-    left -= 1;
+  const cents = splitUnitsByWeights(Math.round(Math.max(0, total) * 100), weights);
+  if (!(total > 0) || !cents.some((c) => c > 0)) {
+    return { shares: cents.map(() => 0), remainder: total > 0 ? total : 0 };
   }
   return { shares: cents.map((c) => c / 100), remainder: 0 };
 }

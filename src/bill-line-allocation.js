@@ -12,6 +12,8 @@
  * }} LineAllocation
  */
 
+import { splitUnitsByWeights } from "./split-by-weights.js";
+
 export const ALLOC_CUSTOMER_FIELD = "__alloc_customer";
 export const ALLOC_SALES_ORDERS_FIELD = "__alloc_sales_orders";
 export const JOB_COST_CENTER_FIELD = "project";
@@ -132,9 +134,7 @@ export function splitQtyAcrossSalesOrders(qty, n, opts = {}) {
         : `${total} is too little to split across ${orders}.`,
     };
   }
-  const base = Math.floor(units / count);
-  const extra = units % count;
-  return { ok: true, parts: Array.from({ length: count }, (_, i) => (base + (i < extra ? 1 : 0)) / step) };
+  return { ok: true, parts: splitUnitsByWeights(units, Array(count).fill(1)).map((u) => u / step) };
 }
 
 /**
