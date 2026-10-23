@@ -208,3 +208,30 @@ describe("leftover cents spread evenly (largest remainder)", () => {
     assert.deepEqual(splitByWeights(0.1, [3, 2, 1]).shares, [0.05, 0.03, 0.02]);
   });
 });
+
+import { allocatedFromDoc } from "../src/bill-charge-allocate.js";
+
+describe("allocatedFromDoc (review 10-19 R6b-3)", () => {
+  const before = [
+    { rowIndex: 0, qty: 3, rate: 20, amount: 60 },
+    { rowIndex: 1, qty: 2.5, rate: 10, amount: 25 },
+  ];
+  const updates = [
+    { rowIndex: 0, addAmount: 6, nextRate: 22, nextAmount: 66 },
+    { rowIndex: 1, addAmount: 2.53, nextRate: 11.01, nextAmount: 27.53 },
+  ];
+  it("takes ERPNext's line amounts, not the plan's", () => {
+    // A site rounding the half cent up: 2.5 × 11.01 = 27.525 → 27.53 planned; ERPNext says 27.52.
+    const r = allocatedFromDoc(before, [{ amount: 66 }, { amount: 27.52 }], updates, 8.53);
+    assert.equal(r.allocatedTotal, 8.52);
+    assert.equal(r.driftCents, 1);
+  });
+  it("no drift when ERPNext agrees", () => {
+    const r = allocatedFromDoc(before, [{ amount: 66 }, { amount: 27.53 }], updates, 8.53);
+    assert.deepEqual(r, { allocatedTotal: 8.53, driftCents: 0 });
+  });
+  it("a line ERPNext did not report keeps the plan's figure", () => {
+    const r = allocatedFromDoc(before, [{ amount: 66 }], updates, 8.53);
+    assert.deepEqual(r, { allocatedTotal: 8.53, driftCents: 0 });
+  });
+});

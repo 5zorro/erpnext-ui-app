@@ -108,8 +108,10 @@ describe("R2-6: the dogfood logs are rotated at startup", () => {
 
 describe("R2-7: a charge allocation that fails part way puts the raised rates back", () => {
   const body = handlerText(main, "bill-allocate-charge");
-  it("both failure paths go through the undo, which answers with the form as it now is", () => {
-    assert.equal((body.match(/return undoRaised\(/g) || []).length, 2);
+  it("every failure path goes through the undo, which answers with the form as it now is", () => {
+    // Three since R6b-3: a rate refused, the lines not rising in ERPNext, the offset refused.
+    assert.equal((body.match(/return undoRaised\(/g) || []).length, 3);
+    assert.match(body, /tax_amount: actual\.allocatedTotal/);
     assert.match(body, /doc: dirtyState\.doc, reason: `\$\{why\} Nothing was changed\.`/);
     assert.match(body, /partial: true/);
   });

@@ -47,7 +47,9 @@ test("Bill without terms: typed due date, save, change a line, save again", asyn
     save2 = await call(app, `window.erpDoc.save({})`);
     report("save2", brief(save2));
     report("after-save2", await schedule(app));
-    // Fails while R6b-1 is open: the first save is refused — the bridge's row is 0.00 and never rescaled.
+    // A refusal reads as ERPNext's one line, never a traceback or a dialog's chrome (R6b-2).
+    for (const r of [save1, save2]) if (r && !r.ok) expect(String(r.reason || "")).not.toMatch(/Traceback|Confirm$|Expense Head changed/);
+    // Failed on adcf495 (R6b-1): the first save was refused — the bridge's row was 0.00 and never rescaled.
     expect(save1 && save1.ok).toBe(true);
     expect(save2 && save2.ok).toBe(true);
   } finally {

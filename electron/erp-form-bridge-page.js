@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 26;
+  var VERSION = 27;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -19,6 +19,58 @@
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  /**
+   * The last `SomeError: message` line of a Frappe traceback (`r.exc`, a JSON list of them) — what
+   * the clerk should read when a refused save carries no `_server_messages` (review 10-19 R6b-2:
+   * the status line once got the whole ~3,000-character traceback). Mirrors
+   * `frappeExcMessage` in src/erp-form-bridge.js.
+   */
+  function frappeExcMessage(exc) {
+    var text = String(exc == null ? "" : exc);
+    try {
+      var parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) text = parsed.join("\n");
+      else if (typeof parsed === "string") text = parsed;
+    } catch (eParse) {}
+    var lines = text.split(/\r?\n/);
+    for (var i = lines.length - 1; i >= 0; i--) {
+      var m = /^\s*(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*(?:Error|Exception))\s*:\s*(.+?)\s*$/.exec(lines[i]);
+      if (m) return stripHtml(m[2]);
+    }
+    return "";
+  }
+
+  /** ERPNext's reason for a refused call: its messages, else the traceback's last line. */
+  function refusalText(r) {
+    var msg = "";
+    try {
+      if (r && r._server_messages) {
+        var parsed = JSON.parse(r._server_messages);
+        if (Array.isArray(parsed)) {
+          var all = parsed.map(function (m) {
+            try {
+              return typeof m === "string" ? JSON.parse(m) : m;
+            } catch (eMap) {
+              return { message: m };
+            }
+          });
+          // The reply also carries notes ERPNext printed on the way ("Expense Head changed…");
+          // the refusal is the one it raised.
+          var raised = all.filter(function (o) {
+            return o && (o.raise_exception || o.indicator === "red");
+          });
+          msg = (raised.length ? raised : all)
+            .map(function (o) {
+              return stripHtml((o && o.message) || "");
+            })
+            .filter(Boolean)
+            .join(" · ");
+        }
+      }
+    } catch (eMsg) {}
+    return msg || frappeExcMessage(r && r.exc);
   }
 
   function clearSaveLocks() {
@@ -464,32 +516,18 @@
               callback: function (r) {
                 clearTimeout(timer);
                 if (r && r.exc) {
-                  var msg = "";
-                  try {
-                    if (r._server_messages) {
-                      var parsed = JSON.parse(r._server_messages);
-                      if (Array.isArray(parsed)) {
-                        msg = parsed
-                          .map(function (m) {
-                            try {
-                              var o = typeof m === "string" ? JSON.parse(m) : m;
-                              return stripHtml((o && o.message) || m);
-                            } catch (eMap) {
-                              return stripHtml(m);
-                            }
-                          })
-                          .filter(Boolean)
-                          .join(" ");
-                      }
-                    }
-                  } catch (eMsg) {}
+                  var msg = refusalText(r);
                   if (!msg) {
                     var scrapedExc = collectVisibleVanillaErrors();
                     if (scrapedExc.length) msg = scrapedExc.join(" · ");
                   }
+                  // The refusal's dialog would stay open in the hidden page; its text is in hand.
+                  try {
+                    if (msg && frappe.msg_dialog && frappe.msg_dialog.display) frappe.msg_dialog.hide();
+                  } catch (eHide) {}
                   finish({
                     ok: false,
-                    reason: msg || stripHtml(String(r.exc)) || "Save failed.",
+                    reason: msg || "Save failed — ERPNext gave no reason.",
                     blockers: msg ? [msg] : undefined,
                   });
                   return;
@@ -545,15 +583,21 @@
               },
               error: function (r) {
                 clearTimeout(timer);
-                var scrapedErr = collectVisibleVanillaErrors();
-                var errMsg = stripHtml((r && (r.message || r.exc)) || "");
+                // A refusal (HTTP 417) lands here, not in `callback`: read ERPNext's own message
+                // first — the scraped dialog carries its chrome ("Message … Confirm") — R6b-2.
+                var errMsg = refusalText(r);
+                var scrapedErr = errMsg ? [] : collectVisibleVanillaErrors();
+                if (!errMsg && !scrapedErr.length) errMsg = stripHtml((r && typeof r.message === "string" && r.message) || "");
+                try {
+                  if (errMsg && frappe.msg_dialog && frappe.msg_dialog.display) frappe.msg_dialog.hide();
+                } catch (eHide2) {}
                 finish({
                   ok: false,
                   reason:
-                    (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
                     errMsg ||
+                    (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
                     "Save request failed.",
-                  blockers: scrapedErr.length ? scrapedErr : errMsg ? [errMsg] : undefined,
+                  blockers: errMsg ? [errMsg] : scrapedErr.length ? scrapedErr : undefined,
                 });
               },
               always: function () {
@@ -1133,10 +1177,11 @@
         var child = frappe.model.add_child(f.doc, "Payment Schedule", "payment_schedule");
         if (child) {
           child.due_date = due;
-          child.payment_amount =
-            f.doc.grand_total != null && f.doc.grand_total !== ""
-              ? f.doc.grand_total
-              : f.doc.rounded_total || 0;
+          // 🔴 A portion, not only an amount (review 10-19 R6b-1): ERPNext's set_payment_schedule
+          // rescales only rows with an invoice_portion, so a bare amount (0.00 on an empty bill)
+          // stayed and every save was refused "must be equal to Grand / Rounded Total".
+          child.invoice_portion = 100;
+          child.payment_amount = f.doc.rounded_total || f.doc.grand_total || 0;
         }
       } else if (sched.length === 1) {
         sched[0].due_date = due;

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   formMatchesDoctype,
   stripHtmlPlain,
+  frappeExcMessage,
   rowNeedsItemEnrichment,
   pickItemAutofillFields,
   DOC_FORM_BRIDGE_VERSION,
@@ -75,7 +76,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 26);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 27);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -291,7 +292,7 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 26/);
+    assert.match(page, /var VERSION = 27/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     // A mapped doc's party fields must be applied through set_value, and before the item
     // merge — see src/mapped-header-fields.js and the 2026-09-09 vendor-dropped dogfood.
@@ -309,5 +310,31 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /collectVisibleVanillaErrors/);
     assert.match(page, /description:\s*true/);
     assert.match(page, /frappe\.desk\.form\.save\.savedocs/);
+  });
+});
+
+describe("frappeExcMessage (review 10-19 R6b-2)", () => {
+  const tb = JSON.stringify([
+    'Traceback (most recent call last):\n  File "apps/frappe/frappe/app.py", line 121, in application\n    response = frappe.api.handle(request)\n  File "apps/frappe/frappe/utils/messages.py", line 59, in _raise_exception\n    raise exc\nfrappe.exceptions.ValidationError: Total Payment Amount in Payment Schedule must be equal to Grand / Rounded Total\n',
+  ]);
+  it("keeps only the last exception line of a JSON traceback list", () => {
+    assert.equal(frappeExcMessage(tb), "Total Payment Amount in Payment Schedule must be equal to Grand / Rounded Total");
+  });
+  it("reads a bare traceback and strips HTML", () => {
+    assert.equal(frappeExcMessage("x\nfrappe.exceptions.LinkValidationError: Could not find <b>Supplier</b>: ZZ"), "Could not find Supplier : ZZ");
+    assert.equal(frappeExcMessage("KeyError: 'items'"), "'items'");
+  });
+  it("is empty when there is no exception line", () => {
+    assert.equal(frappeExcMessage(""), "");
+    assert.equal(frappeExcMessage(null), "");
+    assert.equal(frappeExcMessage("Traceback (most recent call last):\n  File x"), "");
+  });
+  it("the page copy is the same rule", () => {
+    const page = readFileSync(fileURLToPath(new URL("../electron/erp-form-bridge-page.js", import.meta.url)), "utf8");
+    assert.match(page, /function frappeExcMessage\(exc\)/);
+    assert.match(page, /return msg \|\| frappeExcMessage\(r && r\.exc\);/);
+    // Both the 200-with-exc callback and the 417 error callback read ERPNext's reason first.
+    assert.equal((page.match(/= refusalText\(r\);/g) || []).length, 2);
+    assert.match(page, /child\.invoice_portion = 100;/);
   });
 });

@@ -386,6 +386,37 @@ export function planChargeToStockAllocation(opts) {
 }
 
 /**
+ * What the lines **actually** rose once ERPNext worked out their amounts, for the offset Deduct
+ * (review 10-19 R6b-3). The plan predicts each line's amount with this site's rounding
+ * (`lineAmountCents`); ERPNext's own figure is the one the bill posts, so the offset takes that,
+ * and the difference — a cent on a site that rounds another way — goes back to the charge.
+ * @param {ChargeAllocItem[]} before the lines as they were (amount, or qty × rate)
+ * @param {Array<{ amount?: unknown }>|null|undefined} afterItems the document's lines after the rates were set
+ * @param {ChargeAllocShare[]} updates the lines the plan raised
+ * @param {number} planned the plan's `allocatedTotal`
+ * @returns {{ allocatedTotal: number, driftCents: number }} driftCents = planned − actual
+ */
+export function allocatedFromDoc(before, afterItems, updates, planned) {
+  const after = Array.isArray(afterItems) ? afterItems : [];
+  let riseCents = 0;
+  for (const u of Array.isArray(updates) ? updates : []) {
+    const was = (Array.isArray(before) ? before : []).find((it) => it && it.rowIndex === u.rowIndex);
+    const now = after[u.rowIndex];
+    const nowAmt = Number(now && now.amount);
+    if (!was || !Number.isFinite(nowAmt)) {
+      // ERPNext's figure is missing for a line: keep the plan's own number for it.
+      riseCents += Math.round(money2(u.addAmount) * 100);
+      continue;
+    }
+    riseCents += Math.round(money2(nowAmt) * 100) - Math.round(money2(lineAmount(was)) * 100);
+  }
+  return {
+    allocatedTotal: riseCents / 100,
+    driftCents: Math.round(money2(planned) * 100) - riseCents,
+  };
+}
+
+/**
  * Eligible Add charges (positive amount) for “allocate to stock” button.
  * @param {object|null|undefined} taxRow
  */

@@ -242,6 +242,7 @@ import {
 } from "../src/doc-address.js";
 import {
   isAllocatableChargeRow,
+  allocatedFromDoc,
   planChargeToStockAllocation,
 } from "../src/bill-charge-allocate.js";
 import {
@@ -8905,8 +8906,17 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
 
   let bridgePo = "";
   let bridgeFailure = "";
-  if (salesOrders.length && supplier && line && line.item_code) {
-    const qtyParts = splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length);
+  const split =
+    salesOrders.length && supplier && line && line.item_code
+      ? splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length)
+      : null;
+  if (split && !split.ok) {
+    // Review 10-19 R6b-4: refused before ERPNext would refuse it; the allocation itself still lands.
+    bridgeFailure = bridgePoFailureText({ step: "build", reason: split.reason });
+    navDebug("bill-bridge-po", `line=${ri + 1} not made: ${split.reason}`);
+  }
+  if (split && split.ok) {
+    const qtyParts = split.parts;
     const title = jitPoTitleForSalesOrders(salesOrders, supplierRef);
     navDebug("bill-bridge-po", `start line=${ri + 1} supplier=${supplier} sos=${salesOrders.join(",")}`);
     // Review 10-19 R2-2: build, insert and submit are separate steps (as R6c-4). A refused submit
@@ -9354,7 +9364,20 @@ ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => 
     raised.push({ rowIndex: u.rowIndex, rate: was });
   }
 
-  const offset = plan.offsetTax;
+  // Review 10-19 R6b-3: the offset is what ERPNext says the lines rose, not the plan's prediction.
+  const actual = allocatedFromDoc(
+    items,
+    dirtyState.doc && dirtyState.doc.items,
+    plan.itemUpdates,
+    plan.allocatedTotal,
+  );
+  if (actual.driftCents) {
+    navDebug("bill-allocate-charge", `ERPNext rounded the lines ${-actual.driftCents}c off the plan (planned=${plan.allocatedTotal} actual=${actual.allocatedTotal})`);
+  }
+  if (!(actual.allocatedTotal > 0)) {
+    return undoRaised("ERPNext's line amounts did not rise.");
+  }
+  const offset = { ...plan.offsetTax, tax_amount: actual.allocatedTotal };
   const addRes = await bridgeCall(
     "addTaxRow",
     offset.account_head,
@@ -9369,8 +9392,8 @@ ipcMain.handle("bill-allocate-charge", async (_e, taxRowIndex, mode, custom) => 
   return {
     ok: true,
     doc: addRes.doc,
-    allocatedTotal: plan.allocatedTotal,
-    remainder: plan.remainder,
+    allocatedTotal: actual.allocatedTotal,
+    remainder: Math.round((plan.remainder * 100 + actual.driftCents)) / 100,
   };
 });
 

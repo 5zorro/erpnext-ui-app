@@ -3333,8 +3333,10 @@ export async function bootBillFormPage(api) {
         setStatus(
           left > 0
             ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added). ${formatUsdAmountHtml(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`
-            : `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs, exactly (offset Deduct added).`,
-          left > 0 ? "warn" : undefined,
+            : left < 0
+              ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmountHtml(-left) || -left} more into them than the charge. The bill total is unchanged.`
+              : `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs, exactly (offset Deduct added).`,
+          left === 0 ? undefined : "warn",
         );
       } else {
         setStatus((res && res.reason) || "Allocate failed.", "err");
