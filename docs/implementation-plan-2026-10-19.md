@@ -81,7 +81,10 @@ built, being dogfooded). It edits no code.
 > overstates what is owed; ERPNext's A/P report already splits by term correctly. **R10b-1**: the
 > board fetches every outstanding invoice whole, one request each, on every open and detour
 > return; one query does it. **R10b-2**: a throw in one vendor's card still blanks the board
-> silently (G13's loop was never guarded). Next: session 6 (R7 + R8 + R12).
+> silently (G13's loop was never guarded). **All fixed the same day** at 5zorro's request (`4ad94c5`,
+> `0c8b1e7`; R10a-2 won't fix — the calendar is a rule of thumb), each proven by a probe that failed
+> on the old code where one could be made. Probes that leave records now live apart
+> (`tests/probes/leaves-records/`, `--leaves-records`). Next: session 6 (R7 + R8 + R12).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -796,6 +799,10 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R10c-3 | Create a term that already exists with the same numbers (the never-run-live path) | "Created … (reusing the existing …)" — and a term with different numbers is refused naming the field |
 | R6c-4 | A just-in-time receipt whose submit ERPNext refuses | No draft Purchase Receipt left behind |
 | R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (e.g. a closed period) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
+| R6b-1 / R6b-2 | A Bill for a vendor made with *Create Vendor…* (no terms): type the due date first, then the lines; Save; change a qty; Save | Both saves go through. Any refusal on the status line is ERPNext's one sentence — no traceback, no "Message … Confirm" |
+| R6b-4 | Assign one Bill line (qty 7) to three Sales Orders; then a line of qty 2 to three | 7 → a bridge PO with 3 / 2 / 2; 2 → "2 units can't be split across 3 Sales Orders — assign fewer orders or split the line", no PO made |
+| R10a-1 / R10b-1 | Pay Outstanding with an installment bill that was part-paid in Vanilla | The vendor card owes what ERPNext's A/P report says, on the later installment; the board opens without a pause per bill |
+| R10a-3 | Pay Outstanding prefs: next check run 2026-12-25, every 14 days | Run strip: "… That day is a weekend or bank holiday — “Do this run today” runs it before." |
 | R2-1 | Under `npm run start:chaos`, click Save on a Bill and log out in a browser tab before it finishes, or restart Docker mid-save | The button comes back with "The ERPNext page reloaded before the step finished" — it never spins forever; Edit / New work without restarting |
 | R4-1 | Leave the app open and idle past the site's *Session Expiry* (170 h here; shorten it in System Settings to try) | On returning to the window the toolbar offers *Log in*; the health dot stayed green throughout |
 | R4-2 | Find on a list over 200 rows, stop ERPNext, click Show more | The rows already shown stay; "Could not read more…" under them and the button reads Try again |
