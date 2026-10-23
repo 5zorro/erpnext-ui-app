@@ -434,6 +434,8 @@ same way as doc-form (R5 checked).
 | R6b-2 | S | low | `erp-form-bridge-page.js` save callback (`reason: … stripHtml(String(r.exc))`) | The same probe's first refused save came back with no `_server_messages`, so the status line got the **whole Python traceback** (~3,000 characters) as the reason; the second refusal read "… Message … Confirm" scraped from an ERPNext dialog left open in the hidden page | When falling back to `r.exc`, keep only the last `frappe.exceptions.<Name>: <message>` line (what `flattenFrappeMessage` already does for `exception`), and close the scraped dialog | fixed 2026-10-22 — the refusal came through the **error** callback (HTTP 417), not the one the row named, and carried an info note too ("Expense Head changed…"). Both callbacks now read ERPNext's raised message first (`refusalText`), then the traceback's last line (`frappeExcMessage`), then the dialog, and close the dialog. Proven with R6b-1 put back: both refusals read just "Total Payment Amount … Grand / Rounded Total" |
 | R6b-3 | S, M | low | `main.js` `bill-allocate-charge`; `bill-charge-allocate.js` `lineAmountCents()` | The offset Deduct is the shell's own **prediction** of how much the lines rose, not what ERPNext computed after the rates were set. The prediction hard-codes Banker's Rounding (this site's System Settings `rounding_method`; ERPNext also offers Commercial Rounding and a legacy Banker's). On a site rounding another way, a fractional-qty line can rise a cent more or less than planned and the bill's grand total moves by that cent with nothing said — the 1¢ class 5zorro found on 00011 | After the rates are set, take the rise from the returned document (Σ new amount − old amount) for the offset, and say so if it differs from the plan | fixed 2026-10-22 — the offset takes ERPNext's line amounts (`allocatedFromDoc`); a drift is logged and reported as remainder (or "ERPNext's rounding put … more"). Unit-tested; not run live (needs a site that rounds another way) |
 | R6b-4 | S | low | `bill-line-allocation.js` `splitQtyAcrossSalesOrders()`; `main.js` bridge PO (≈8909) | A Bill line assigned to N Sales Orders makes a bridge PO with the qty split evenly to 3 decimals: 2 over 3 orders is 0.666 / 0.666 / 0.668. Every item here is in **Nos**, a whole-number unit, and `purchase_order.py:211` refuses fractions — so the bridge PO fails whenever the qty does not divide by N (R2-2's fix now says so instead of hiding it). A qty of 0 or less becomes 1 per order. The split also ignores what each order actually asked for | Split in whole units when the UOM is whole-number (and say so when there are fewer units than orders); better, take each order's open qty for the item | fixed 2026-10-22 — whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2); fewer units than orders or no qty is refused with the reason before any PO is built. 5zorro: "fewer than orders" is only a mistake; the fractions (any qty not divisible by N) were the real failure. Each order's own open qty is not read (not asked for). Corrected the same day after 5zorro's plate example: qty is a decimal in ERPNext and only a unit with *Must be Whole Number* (5 of 239 here) refuses fractions, so the split now reads the line's unit (`uomIsWholeNumber`) — whole units for those, thousandths otherwise (1 plate over 2 = 0.5 / 0.5). Not handled: a fractional unit over a whole-number stock unit (Box of 12 over Nos) |
+| R6b-5 | S | med | `main.js` `bill-list-projects` | Found by the R6b-4 probe: Assign's Project step sat on "Loading projects…" for ever. The list asked for `customer_name`, which Project does not have on v16; the server refused, and `frappe.db.get_list` never settles on a refusal (G19) | `frappe.xcall("frappe.client.get_list")`, without `customer_name` | fixed 2026-10-22 |
+| R6b-6 | S | med | `main.js` bridge PO build (`frappe.model.get_new_doc` / `add_child`) | Found by the R6b-4 probe: on a Bill, Purchase Order's meta has never loaded in the ERPNext page, so `add_child` read the items field from null — "Cannot read properties of null (reading 'options')" — and the bridge PO was never made. R2-2's fix made it say so; nothing had run it to the end | `await frappe.model.with_doctype("Purchase Order")` first | fixed 2026-10-22 — the probe makes the PO |
 
 **R6b-4 follow-up — split by need (5zorro 2026-10-22: "same code is better for maintainability and
 weighted by need is exactly what 99% of the use cases will want").**
@@ -441,19 +443,36 @@ weighted by need is exactly what 99% of the use cases will want").**
 1. ✅ **One rule.** `src/split-by-weights.js` `splitUnitsByWeights` (rounded down, then leftover units
    to the shares nearest their next unit, ties to the earlier) is used by the charge allocator
    (cents) and the Sales Order split (thousandths, or whole units). No behavior change.
-2. **Link the Sales Order *line*.** The bridge PO sets only `sales_order`, so ERPNext never counts
+2. ✅ **Link the Sales Order *line*.** The bridge PO sets only `sales_order`, so ERPNext never counts
    it as ordered against the order (`Sales Order Item.ordered_qty` moves only through a PO line's
    `sales_order_item`, `purchase_order.py` `update_status_updater`). Set `sales_order_item`, one
    PO line per open Sales Order line for the item, as ERPNext's own *Create → Purchase Order* does.
-3. **Weights = each line's open qty**: `qty − ordered_qty / conversion_factor` (the same figure
+3. ✅ **Weights = each line's open qty**: `qty − ordered_qty / conversion_factor` (the same figure
    `make_purchase_order` uses), split with step 2's rule in the line's unit.
-4. **Warn when the Bill qty ≠ the total open qty.** A table per Sales Order line — open, gets,
+4. ✅ **Warn when the Bill qty ≠ the total open qty.** A table per Sales Order line — open, gets,
    difference — and "Okay, I still want to do this"; Cancel changes nothing.
-5. **Open — 5zorro's call: where the extra goes** when the Bill qty is *more* than the orders need.
+5. ✅ **Where the extra goes** (built as (a); 5zorro's notes were on the warning) when the Bill qty is *more* than the orders need.
    Once a PO line is linked to a Sales Order line, ERPNext refuses ordering past that line's qty
    (`status_updater.py` `check_overflow_with_allowance`; *Over Delivery/Receipt Allowance* is 0 %
    here). Proposed (a): the extra goes on one more PO line for the item linked to no order (bought
    for stock). Alternatives: (b) refuse and ask to split the Bill line first.
+6. ✅ **The warning is "Costing Assumptions!"** (5zorro: the split makes costing explicit — an order
+   filled partly from stock is costed at stock's rate, or a fallback when stock runs negative), with
+   a *Fill from stock* tick per order (his "pull from stock on this last one").
+7. ✅ **The decision is kept** as a `Costing assumptions:` Comment on the bridge PO and each Sales
+   Order that took part (`src/costing-assumptions.js`), readable back into the same box
+   (`src/costing-box-ui.js`). HANDOFF § *A Bill line assigned to Sales Orders*.
+8. **Next — the Sales Order's look-back** (5zorro: "if a person was looking at the sales order …
+   they could click a costing box to see how it got allocated, and it would be substantially the
+   same box"): on the Sales Order dashboard (plan 10-12's skin), a *Costing* chip when the order has
+   `Costing assumptions:` Comments, opening `renderCostingBox` read-only from `parseCostingNote`.
+
+Proven by probe `leaves-records/r6b4-split-by-need` (2026-10-22), through the real Assign dialog:
+SO-A needs 6, SO-B needs 2, a Bill line of 5 → the box says 4 / 1; SO-B ticked from stock → 5 / 0;
+Okay → PO line linked to SO-A's line, ERPNext's ordered qty on it 5, the note on the PO and SO-A,
+read back from ERPNext's stored text. Cancel + delete left nothing. The probe also found two older
+bugs that meant **Assign to Sales Orders could never finish on this ERPNext** — R6b-5 and R6b-6.
+
 
 Checked and fine: **Q2** — the 1¢ on bill 00011 has a known cause: unit costs move only in whole cents, so 14.28 spread over 3 + 4 units rose the lines 14.27. Fixed by `exactRates` in `f68d42d` (2026-10-11 11:51); 00011 was saved at 11:45, before it — its offset Deduct is 14.27, matching what the lines took, so the bill balances. **Q3** — the Bill's posting-date stamp uses `frappe.datetime.get_today()`, which is the **site's** time zone, the same day the server's own `validate_posting_time` uses; both are America/Denver here, as is this PC. The pure date math (`dayBefore`, `addUtcDays`, …) works on `Date.UTC` dates, so it cannot slip a day. **Q1** — the tax Rate % shown on an Actual row (`displayTaxRateForRow`) is display only and never written back. After a write, the page paints from ERPNext's returned document. R6b-3 is the one place that does not.
 
@@ -820,7 +839,7 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R6c-4 | A just-in-time receipt whose submit ERPNext refuses | No draft Purchase Receipt left behind |
 | R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (e.g. a closed period) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
 | R6b-1 / R6b-2 | A Bill for a vendor made with *Create Vendor…* (no terms): type the due date first, then the lines; Save; change a qty; Save | Both saves go through. Any refusal on the status line is ERPNext's one sentence — no traceback, no "Message … Confirm" |
-| R6b-4 | Assign one Bill line (qty 7, item in Nos) to three Sales Orders; then qty 2 to three; then an item whose unit allows fractions, qty 1 to two | 7 → a bridge PO with 3 / 2 / 2; 2 → "2 units can't be split across 3 Sales Orders — assign fewer orders or split the line", no PO made; the fractional unit → 0.5 / 0.5 |
+| R6b-4 | Two Sales Orders for one item (needing 6 and 2); a Bill line of 8, then 5, then 10, each *Assign…*ed to both | 8: no box, PO 6 / 2. 5: "Costing Assumptions!" 4 / 1 — tick one *Fill from stock* and it redraws; Okay makes the PO. 10: 6 / 2 and "2 more … → into stock". Each PO line opens its Sales Order line; the PO and orders carry a *Costing assumptions:* comment |
 | R10a-1 / R10b-1 | Pay Outstanding with an installment bill that was part-paid in Vanilla | The vendor card owes what ERPNext's A/P report says, on the later installment; the board opens without a pause per bill |
 | R10a-3 | Pay Outstanding prefs: next check run 2026-12-25, every 14 days | Run strip: "… That day is a weekend or bank holiday — “Do this run today” runs it before." |
 | R2-1 | Under `npm run start:chaos`, click Save on a Bill and log out in a browser tab before it finishes, or restart Docker mid-save | The button comes back with "The ERPNext page reloaded before the step finished" — it never spins forever; Edit / New work without restarting |

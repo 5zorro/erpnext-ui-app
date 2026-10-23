@@ -96,6 +96,7 @@ import {
   paymentEntryRoute,
 } from "../src/lens-context.js";
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
+import { costingNote } from "../src/costing-assumptions.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -287,7 +288,7 @@ import { docSourceMapper, SOURCE_KIND_NOUN, soSelectedItemsWithoutVendor, trimMa
 import {
   normalizeLineAllocation,
   jitPoTitleForSalesOrders,
-  splitQtyAcrossSalesOrders,
+  planSalesOrderSplit,
   bridgePoFailureText,
 } from "../src/bill-line-allocation.js";
 import {
@@ -6706,6 +6707,96 @@ async function listBillMandatoryMissing() {
 }
 
 /**
+ * The open Sales Order lines for one item across the orders a Bill line is assigned to: what each
+ * still needs ordered, `qty − ordered_qty / conversion_factor` (ERPNext's own `make_purchase_order`
+ * figure). An order with no line for the item comes back as `salesOrderItem: ""`, `open: 0`.
+ * @param {string[]} salesOrders @param {string} itemCode
+ * @returns {Promise<{ ok: true, lines: import("../src/bill-line-allocation.js").SalesOrderOpenLine[] } | { ok: false, reason: string }>}
+ */
+async function readSalesOrderOpenLines(salesOrders, itemCode) {
+  const raw = await erpEval(`(async () => {
+    try {
+      var rows = await frappe.xcall("frappe.client.get_list", {
+        doctype: "Sales Order Item",
+        parent: "Sales Order",
+        fields: ["name", "parent", "idx", "qty", "ordered_qty", "conversion_factor"],
+        filters: [["parent", "in", ${JSON.stringify(salesOrders)}], ["item_code", "=", ${JSON.stringify(itemCode)}], ["docstatus", "=", 1]],
+        order_by: "parent asc, idx asc",
+        limit_page_length: 0,
+      });
+      return { ok: true, rows: rows || [] };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e || "could not read the Sales Orders") };
+    }
+  })()`);
+  if (!(raw && raw.ok)) return { ok: false, reason: (raw && raw.reason) || "Could not read the Sales Orders." };
+  const lines = [];
+  for (const so of salesOrders) {
+    const mine = raw.rows.filter((r) => r.parent === so);
+    if (!mine.length) lines.push({ salesOrder: so, salesOrderItem: "", open: 0 });
+    for (const r of mine) {
+      const cf = Number(r.conversion_factor) || 1;
+      const open = Math.round((Number(r.qty) - Number(r.ordered_qty || 0) / cf) * 1000) / 1000;
+      lines.push({ salesOrder: so, salesOrderItem: r.name, open: Math.max(0, open) });
+    }
+  }
+  return { ok: true, lines };
+}
+
+/**
+ * The by-need split for Bill line `ri` (review 10-19 R6b-4): the open lines read fresh, the unit's
+ * whole-number rule, the clerk's "from stock" ticks.
+ * @param {number} ri @param {string[]} salesOrders @param {string[]} fromStock
+ */
+async function planBillLineSplit(ri, salesOrders, fromStock) {
+  const line = dirtyState.doc && Array.isArray(dirtyState.doc.items) ? dirtyState.doc.items[ri] : null;
+  if (!line || !line.item_code) return { ok: false, reason: "The line has no item." };
+  const open = await readSalesOrderOpenLines(salesOrders, String(line.item_code));
+  if (!open.ok) return open;
+  return planSalesOrderSplit({
+    qty: Number(line.qty) || 0,
+    wholeUnits: await uomIsWholeNumber(line.uom || line.stock_uom),
+    lines: open.lines,
+    fromStock,
+  });
+}
+
+/**
+ * Write the costing decision where it can be read back (src/costing-assumptions.js): on the bridge
+ * PO and each Sales Order that took part. A failed note does not undo the PO; it is reported.
+ * @param {string[]} targets "Doctype|name" @param {string} content
+ */
+async function commentCostingAssumptions(targets, content) {
+  const raw = await erpEval(`(async () => {
+    var out = [];
+    var t = ${JSON.stringify(targets)};
+    for (var i = 0; i < t.length; i++) {
+      var p = t[i].split("|");
+      try {
+        await frappe.xcall("frappe.desk.form.utils.add_comment", {
+          reference_doctype: p[0], reference_name: p[1], content: ${JSON.stringify(content)},
+          comment_email: frappe.session.user, comment_by: frappe.session.user_fullname || frappe.session.user,
+        });
+      } catch (e) { out.push(p[1]); }
+    }
+    return { failed: out };
+  })()`);
+  return raw && Array.isArray(raw.failed) ? raw.failed : targets.map((x) => x.split("|")[1]);
+}
+
+ipcMain.handle("bill-plan-line-allocation", async (_e, rowIndex, payload) => {
+  const ri = Number(rowIndex);
+  if (!Number.isInteger(ri) || ri < 0) return { ok: false, reason: "Invalid row." };
+  const salesOrders = Array.isArray(payload && payload.salesOrders)
+    ? payload.salesOrders.map((x) => normalizeEditableText(x)).filter(Boolean)
+    : [];
+  if (!salesOrders.length) return { ok: true, plan: null };
+  const fromStock = Array.isArray(payload && payload.fromStock) ? payload.fromStock.map(String) : [];
+  const plan = await planBillLineSplit(ri, salesOrders, fromStock);
+  return plan.ok ? { ok: true, plan } : { ok: false, reason: plan.reason };
+});
+
+/**
  * Does ERPNext refuse fractions of this unit (UOM *Must be Whole Number*)? null when it could not
  * tell. Review 10-19 R6b-4: qty is a decimal; only some units are whole-number.
  * @param {unknown} uom
@@ -8871,18 +8962,22 @@ ipcMain.handle("bill-list-projects", async (_e, customer) => {
   const cust = customer != null ? normalizeEditableText(customer) : "";
   const raw = await erpEval(`(async () => {
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "ERP Desk not ready", projects: [] };
       }
       var filters = [];
       if (${JSON.stringify(cust)}) {
         filters.push(["customer", "=", ${JSON.stringify(cust)}]);
       }
-      var rows = await frappe.db.get_list("Project", {
-        filters: filters.length ? filters : undefined,
-        fields: ["name", "project_name", "customer", "customer_name", "status"],
+      // frappe.xcall, not frappe.db.get_list (G19): Project has no customer_name on v16, the server
+      // refused the old field list, and frappe.db never settled — Assign sat on "Loading projects…"
+      // for ever (found by the R6b-4 probe, 2026-10-22).
+      var rows = await frappe.xcall("frappe.client.get_list", {
+        doctype: "Project",
+        filters: filters,
+        fields: ["name", "project_name", "customer", "status"],
         order_by: "modified desc",
-        limit: 40,
+        limit_page_length: 40,
       });
       return { ok: true, projects: rows || [] };
     } catch (e) {
@@ -8924,6 +9019,18 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
       ? dirtyState.doc.items[ri]
       : null;
 
+  let bridgePo = "";
+  let bridgeFailure = "";
+  const bridgeWanted = !!(salesOrders.length && supplier && line && line.item_code);
+  // Review 10-19 R6b-4: split by need; anything but an exact fill is a costing assumption the clerk
+  // must have said Okay to — for *this* plan (a plan that changed since, e.g. another PO against the
+  // same orders, is shown again rather than made).
+  const fromStock = Array.isArray(payload && payload.fromStock) ? payload.fromStock.map(String) : [];
+  const split = bridgeWanted ? await planBillLineSplit(ri, salesOrders, fromStock) : null;
+  if (split && split.ok && split.needsConfirm && payload.confirmedKey !== split.key) {
+    return { ok: false, needsConfirm: true, plan: split, reason: "The split changed — look at it again." };
+  }
+
   if (project) {
     const pr = await setBillItemField(ri, "project", project);
     if (!pr || !pr.ok) {
@@ -8931,21 +9038,18 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
     }
   }
 
-  let bridgePo = "";
-  let bridgeFailure = "";
-  const bridgeWanted = !!(salesOrders.length && supplier && line && line.item_code);
-  const split = bridgeWanted
-    ? splitQtyAcrossSalesOrders(Number(line.qty) || 0, salesOrders.length, {
-        wholeUnits: await uomIsWholeNumber(line.uom || line.stock_uom),
-      })
-    : null;
   if (split && !split.ok) {
     // Review 10-19 R6b-4: refused before ERPNext would refuse it; the allocation itself still lands.
     bridgeFailure = bridgePoFailureText({ step: "build", reason: split.reason });
     navDebug("bill-bridge-po", `line=${ri + 1} not made: ${split.reason}`);
   }
   if (split && split.ok) {
-    const qtyParts = split.parts;
+    // One PO line per Sales Order line that takes part, linked to it (`sales_order_item`), so ERPNext
+    // counts it as ordered; what the orders do not need is one line for no order (into stock).
+    const poLines = split.rows
+      .filter((r) => r.gets > 0)
+      .map((r) => ({ qty: r.gets, sales_order: r.salesOrder, sales_order_item: r.salesOrderItem }));
+    if (split.toStock > 0) poLines.push({ qty: split.toStock, sales_order: "", sales_order_item: "" });
     const title = jitPoTitleForSalesOrders(salesOrders, supplierRef);
     navDebug("bill-bridge-po", `start line=${ri + 1} supplier=${supplier} sos=${salesOrders.join(",")}`);
     // Review 10-19 R2-2: build, insert and submit are separate steps (as R6c-4). A refused submit
@@ -8964,18 +9068,23 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         var supplier = ${JSON.stringify(supplier)};
         var sos = ${JSON.stringify(salesOrders)};
         var itemCode = ${JSON.stringify(String(line.item_code))};
-        var qtyParts = ${JSON.stringify(qtyParts)};
+        var poLines = ${JSON.stringify(poLines)};
         var rate = ${Number(line.rate) || 0};
         var title = ${JSON.stringify(title)};
         var company = ${JSON.stringify(company || "")};
 
-        var soDoc = await frappe.db.get_doc("Sales Order", sos[0]);
+        // frappe.xcall, not frappe.db.* — the latter never settles on a server error (G19).
+        var soDoc = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: sos[0] });
         if (!soDoc) return { ok: false, reason: "Sales Order not found." };
         var co = company || soDoc.company;
         if (!co) return { ok: false, reason: "Company missing." };
 
         var today = frappe.datetime.get_today();
         var sched = frappe.datetime.add_days(today, 7);
+        // The page is on a Bill, so Purchase Order's meta may never have loaded here, and add_child
+        // read its items field from null ("reading 'options'") — the bridge PO was never made
+        // (found by the R6b-4 probe, 2026-10-22). Load it first, as opening a PO form would.
+        await frappe.model.with_doctype("Purchase Order");
         var po = frappe.model.get_new_doc("Purchase Order");
         po.supplier = supplier;
         po.company = co;
@@ -8986,12 +9095,15 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
           po.customer = soDoc.customer;
           po.customer_name = soDoc.customer_name || soDoc.customer;
         }
-        for (var si = 0; si < sos.length; si++) {
+        for (var si = 0; si < poLines.length; si++) {
           var child = frappe.model.add_child(po, "items");
           child.item_code = itemCode;
-          child.qty = qtyParts[si] || 1;
+          child.qty = poLines[si].qty;
           child.schedule_date = sched;
-          child.sales_order = sos[si];
+          if (poLines[si].sales_order) {
+            child.sales_order = poLines[si].sales_order;
+            child.sales_order_item = poLines[si].sales_order_item;
+          }
           if (rate) child.rate = rate;
         }
         if (!po.items || !po.items.length) {
@@ -9026,12 +9138,33 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
     })()`);
     if (bridge && bridge.ok && bridge.poName) {
       bridgePo = bridge.poName;
-      navDebug("bill-bridge-po", `line=${ri + 1} made=${bridgePo}`);
+      const splitLog = split.rows.map((r) => r.salesOrder + ":" + r.gets).join(",");
+      navDebug("bill-bridge-po", `line=${ri + 1} made=${bridgePo} split=${splitLog} toStock=${split.toStock}`);
+      if (split.needsConfirm) {
+        const by = await erpEval(`(async () => {
+          return (frappe.session && (frappe.session.user_fullname || frappe.session.user)) || "";
+        })()`);
+        const note = costingNote({
+          bill: normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || normalizeEditableText(dirtyState.doc && dirtyState.doc.name),
+          line: ri + 1,
+          item: String(line.item_code),
+          qty: Number(line.qty) || 0,
+          po: bridgePo,
+          by: typeof by === "string" ? by : "",
+          plan: split,
+        });
+        const targets = [`Purchase Order|${bridgePo}`, ...new Set(split.rows.filter((r) => r.salesOrderItem).map((r) => `Sales Order|${r.salesOrder}`))];
+        const failed = await commentCostingAssumptions(targets, note);
+        if (failed.length) {
+          bridgeFailure = `The costing note could not be written on ${failed.join(", ")} — the split itself is made.`;
+          navDebug("bill-bridge-po", `costing note failed on ${failed.join(",")}`);
+        }
+      }
       const linkPo = await bridgeCall("setRow", ri, "purchase_order", bridgePo);
       if (linkPo && linkPo.ok) {
         dirtyState = markUserEdited({ ...dirtyState, doc: linkPo.doc, isDirty: true });
       } else {
-        bridgeFailure = `Purchase Order ${bridgePo} was made, but line ${ri + 1} could not be pointed at it: ${(linkPo && linkPo.reason) || "unknown"}.`;
+        bridgeFailure = [bridgeFailure, `Purchase Order ${bridgePo} was made, but line ${ri + 1} could not be pointed at it: ${(linkPo && linkPo.reason) || "unknown"}.`].filter(Boolean).join(" ");
       }
     } else {
       bridgeFailure = bridgePoFailureText(bridge);

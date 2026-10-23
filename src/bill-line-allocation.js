@@ -98,43 +98,63 @@ export function lineAllocationForRow(byRow, rowIndex) {
 }
 
 /**
- * Split a Bill line's qty across the N Sales Orders it is assigned to, for the bridge PO's lines.
- *
- * ERPNext's qty is a decimal everywhere; only a unit with *Must be Whole Number* ticked (Nos, Box,
- * Pair, Set, Unit — 5 of the 239 units here) refuses fractions (`validate_uom_is_integer`). So:
- * - **whole-number unit**: whole units, the extra to the earliest orders (7 over 3 = 3 / 2 / 2);
- *   fewer units than orders, or a qty that is not whole, is refused with the reason;
- * - **any other unit**: thousandths (ERPNext's qty precision here), the extra thousandths to the
- *   earliest orders (1 plate over 2 = 0.5 / 0.5; 1 over 3 = 0.334 / 0.333 / 0.333).
- * `wholeUnits` null (the unit could not be read): whole when the qty is whole, as a guess.
- * Review 10-19 R6b-4; the unit rule from 5zorro's plate example, 2026-10-22.
- * @param {number} qty
- * @param {number} n
- * @param {{ wholeUnits?: boolean|null }} [opts]
- * @returns {{ ok: true, parts: number[] } | { ok: false, reason: string }}
+ * @typedef {{ salesOrder: string, salesOrderItem: string, open: number }} SalesOrderOpenLine
+ *   one Sales Order line for the Bill line's item, and what it still needs ordered
+ *   (`qty − ordered_qty / conversion_factor`, as ERPNext's own `make_purchase_order`); a Sales Order
+ *   with no line for the item comes as `salesOrderItem: ""`, `open: 0`
+ * @typedef {{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }} SalesOrderSplitRow
+ *   `diff` = gets − open: below 0, that much of the order is filled from stock instead
  */
-export function splitQtyAcrossSalesOrders(qty, n, opts = {}) {
-  const total = Number(qty);
-  const count = Math.max(1, Math.floor(Number(n)) || 1);
-  const orders = `${count} Sales Order${count === 1 ? "" : "s"}`;
+
+/**
+ * How a Bill line's qty goes to the Sales Orders it is assigned to — by need (review 10-19 R6b-4,
+ * 5zorro 2026-10-22: "weighted by need is exactly what 99% of the use cases will want").
+ *
+ * - Each open Sales Order line is weighted by what it still needs; the qty is split with the one
+ *   rule (`splitUnitsByWeights`) in the item's unit: whole units for a *Must be Whole Number* unit,
+ *   thousandths for any other (ERPNext's qty is a decimal; only those units refuse fractions).
+ * - An order ticked **from stock** takes nothing from this Bill: what it needs is filled from stock.
+ * - More than the orders need: each gets what it needs and the rest is **to stock** — a PO line for
+ *   no order, since ERPNext refuses ordering past a Sales Order line's qty (allowance 0 % here).
+ * - Anything but an exact fill is a **costing assumption** (stock is costed at its own rate, or a
+ *   fallback rate when it runs negative), so it needs the clerk's "Okay" (`needsConfirm`).
+ *
+ * @param {{ qty: number, wholeUnits?: boolean|null, lines: SalesOrderOpenLine[], fromStock?: string[] }} opts
+ *   `wholeUnits` null (unit unknown): whole when the qty is whole; `fromStock` = Sales Order names
+ * @returns {{ ok: true, rows: SalesOrderSplitRow[], toStock: number, needsConfirm: boolean, key: string } | { ok: false, reason: string }}
+ */
+export function planSalesOrderSplit(opts) {
+  const total = Number(opts && opts.qty);
   if (!Number.isFinite(total) || total <= 0) {
-    return { ok: false, reason: `the line has no quantity to split across ${orders}.` };
+    return { ok: false, reason: "the line has no quantity to assign." };
   }
   const whole = opts.wholeUnits == null ? Number.isInteger(total) : !!opts.wholeUnits;
   if (whole && !Number.isInteger(total)) {
     return { ok: false, reason: `${total} is not a whole number, and this item's unit allows only whole units.` };
   }
-  const step = whole ? 1 : 1000; // units of 1, or thousandths
+  const step = whole ? 1 : 1000; // whole units, or thousandths
   const units = Math.round(total * step);
-  if (units < count) {
-    return {
-      ok: false,
-      reason: whole
-        ? `${total} unit${total === 1 ? "" : "s"} can't be split across ${orders} — assign fewer orders or split the line.`
-        : `${total} is too little to split across ${orders}.`,
-    };
-  }
-  return { ok: true, parts: splitUnitsByWeights(units, Array(count).fill(1)).map((u) => u / step) };
+  const stockSet = new Set((opts.fromStock || []).map(String));
+  const lines = (Array.isArray(opts.lines) ? opts.lines : []).map((l) => ({
+    salesOrder: String((l && l.salesOrder) || ""),
+    salesOrderItem: String((l && l.salesOrderItem) || ""),
+    open: Math.max(0, Number(l && l.open) || 0),
+  }));
+  const openUnits = lines.map((l) => (whole ? Math.floor(l.open + 1e-9) : Math.round(l.open * 1000)));
+  const takes = lines.map((l, i) => !stockSet.has(l.salesOrder) && !!l.salesOrderItem && openUnits[i] > 0);
+  const weights = openUnits.map((u, i) => (takes[i] ? u : 0));
+  const need = weights.reduce((a, b) => a + b, 0);
+  const getsUnits = units <= need ? splitUnitsByWeights(units, weights) : weights.slice();
+  const toStockUnits = Math.max(0, units - need);
+  const rows = lines.map((l, i) => ({
+    ...l,
+    gets: getsUnits[i] / step,
+    diff: (getsUnits[i] - openUnits[i]) / step,
+    fromStock: stockSet.has(l.salesOrder),
+  }));
+  const needsConfirm = toStockUnits > 0 || getsUnits.some((g, i) => g !== openUnits[i]);
+  const key = JSON.stringify({ g: getsUnits, o: openUnits, s: toStockUnits, f: [...stockSet].sort() });
+  return { ok: true, rows, toStock: toStockUnits / step, needsConfirm, key };
 }
 
 /**

@@ -331,6 +331,29 @@ How Frappe prints, read from v16: its **Print** button `window.open`s `/printvie
 Not built yet: Cheque Print Template + alignment page + spoiled-check path; Find-page multi-select
 into the queue; the queue survives a restart. WSL / Linux setup: `ops/wsl-printing/README.md`.
 
+### A Bill line assigned to Sales Orders — split by need (review 10-19 R6b-4, 2026-10-22)
+
+*Assign…* on a Bill line makes a **bridge Purchase Order** for the line's item, so the Sales Orders
+are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, `src/split-by-weights.js`):
+
+- **Weights are need:** each Sales Order line's open qty, `qty − ordered_qty / conversion_factor`
+  (ERPNext's own `make_purchase_order` figure). The split uses the one rounding rule shared with the
+  charge allocation (`splitUnitsByWeights`: rounded down, leftover units by largest remainder, ties
+  to the earlier) — whole units for a *Must be Whole Number* unit, thousandths otherwise. Qty is a
+  decimal in ERPNext; only those units refuse fractions.
+- **Each PO line links the Sales Order *line*** (`sales_order_item`), or ERPNext never counts it as
+  ordered. Once linked, ERPNext refuses ordering past that line's qty (*Over Delivery/Receipt
+  Allowance*, 0 % here), so what the orders do not need is **one more PO line for no order** — into
+  stock.
+- **Anything but an exact fill is a costing assumption** (the rest of an order comes from stock, at
+  stock's rate or a negative-stock fallback): the dialog stops on **"Costing Assumptions!"** with the
+  per-order table, a *Fill from stock* tick per order, and "Okay, I still want to do this". The Okay
+  carries the plan's key; if the orders changed since, the box is shown again rather than made.
+- **The decision is kept** as a Comment opening `Costing assumptions:` (`COSTING_TOKEN` — load-bearing,
+  the shell finds them by it) on the bridge PO and each Sales Order that took part, with a `data:`
+  line `parseCostingNote` reads back — so the same box (`src/costing-box-ui.js`) can be drawn from
+  the Sales Order later. An order's open qty at that moment cannot be worked out afterwards.
+
 ### Extension points (where new work plugs in)
 
 | Capability | Pure module(s) | Electron surface |

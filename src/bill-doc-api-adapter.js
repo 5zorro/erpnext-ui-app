@@ -71,6 +71,8 @@ export function billApiFromErpDoc(api) {
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>
       api.applyLineAllocation(rowIndex, payload || {}),
+    planLineAllocation: (rowIndex, payload) =>
+      api.planLineAllocation ? api.planLineAllocation(rowIndex, payload || {}) : Promise.resolve({ ok: true, plan: null }),
     retryLoad: () => api.retryLoad(),
     openVanilla: () => api.openVanilla(),
     openVendorAdd: () => api.openVendorAdd(),

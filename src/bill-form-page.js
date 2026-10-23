@@ -270,6 +270,7 @@ import {
   LINKED_SOURCE_GAVE_UP_PLACEHOLDER,
 } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
+import { renderCostingBox } from "../src/costing-box-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import {
@@ -3799,6 +3800,10 @@ export async function bootBillFormPage(api) {
     /** @type {Set<string>} */
     const selectedSos = new Set();
     let projectIdx = 0;
+    /** Review 10-19 R6b-4: Sales Orders the clerk ticked "fill from stock" in the costing step. */
+    const fromStock = new Set();
+    /** The plan shown in the costing step; its key goes with the Okay. */
+    let costingPlan = null;
   
     const back = document.createElement("div");
     back.className = "src-back";
@@ -3999,12 +4004,50 @@ export async function bootBillFormPage(api) {
       drawProjects();
     }
   
+    /**
+     * "Costing Assumptions!" (review 10-19 R6b-4): the by-need split, per Sales Order, before
+     * anything is made — the clerk can fill an order from stock instead, or say Okay.
+     * @param {any} plan
+     */
+    function drawCosting(plan) {
+      step = "costing";
+      costingPlan = plan;
+      titleEl.textContent = `Assign line ${rowIndex + 1} — check the costing`;
+      pickBtn.textContent = "Okay, I still want to do this";
+      backBtn.hidden = false;
+      searchEl.parentElement.hidden = true;
+      body.innerHTML = "";
+      body.appendChild(
+        renderCostingBox(plan, {
+          onToggleStock: async (so, on) => {
+            if (on) fromStock.add(so);
+            else fromStock.delete(so);
+            const again = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
+            if (again && again.ok && again.plan) drawCosting(again.plan);
+            else setStatus((again && again.reason) || "Could not work out the split.", "err");
+          },
+        }),
+      );
+      setStatus("The split is not exact — check what comes from stock, then Okay or Cancel.", "warn");
+    }
+
     async function applyAllocation() {
       const project =
         projectIdx > 0 && projectRows[projectIdx - 1]
           ? projectRows[projectIdx - 1].name
           : "";
-      close();
+      if (step !== "costing" && selectedSos.size && api.planLineAllocation) {
+        setStatus("Working out the split…");
+        const pr = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
+        if (!(pr && pr.ok)) {
+          setStatus((pr && pr.reason) || "Could not work out the split.", "err");
+          return;
+        }
+        if (pr.plan && pr.plan.needsConfirm) {
+          drawCosting(pr.plan);
+          return;
+        }
+      }
       setStatus("Applying allocation…");
       const res = await api.applyLineAllocation(rowIndex, {
         customer: customerFilter,
@@ -4012,7 +4055,16 @@ export async function bootBillFormPage(api) {
         salesOrders: [...selectedSos],
         project,
         supplier: sup,
+        fromStock: [...fromStock],
+        confirmedKey: step === "costing" && costingPlan ? costingPlan.key : undefined,
       });
+      if (res && res.needsConfirm && res.plan) {
+        // The orders changed since the box was drawn (another PO against them): show it again.
+        drawCosting(res.plan);
+        setStatus("The orders changed since you looked — check the costing again.", "warn");
+        return;
+      }
+      close();
       if (res && res.ok) {
         noteUserEdit();
         if (res.poLineMeta) poLineMeta = res.poLineMeta;
@@ -4079,6 +4131,7 @@ export async function bootBillFormPage(api) {
     backBtn.onclick = () => {
       if (step === "so") drawCustomers();
       else if (step === "project") drawSalesOrders();
+      else if (step === "costing") drawProjects();
     };
     box.querySelector('[data-act="cancel"]').onclick = () => close();
     back.addEventListener("click", (ev) => {
