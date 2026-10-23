@@ -91,13 +91,14 @@ export function resolveLinkPickIndex(hi, optionCount) {
 
 /**
  * @param {string} key
- * @param {{ dropdownOpen: boolean, optionCount: number }} state
+ * @param {{ dropdownOpen: boolean, optionCount: number, searchPending?: boolean }} state
+ *   `searchPending`: a search for exactly the text in the box is waiting (pause or in flight)
  * @returns {"pick"|"close"|"search"|"move_down"|"move_up"|"none"}
  */
 export function linkPickerKeyAction(key, state) {
   const open = !!(state && state.dropdownOpen);
   const n = Number(state && state.optionCount) || 0;
-  if (key === "Escape") return open ? "close" : "none";
+  if (key === "Escape") return open || (state && state.searchPending) ? "close" : "none";
   if (key === "ArrowDown") {
     if (!open || n === 0) return "search";
     return "move_down";
@@ -107,8 +108,12 @@ export function linkPickerKeyAction(key, state) {
     return "move_up";
   }
   if (key === "Tab" || key === "Enter") {
-    if (!open || n === 0) return "none";
-    return "pick";
+    if (open && n > 0) return "pick";
+    // No list yet, but one is on its way for the text in the box (typing pause or in flight): the
+    // key is the picker's, to hold — a fast typist's first Tab in a box beat the first answer and
+    // left the half-typed text behind (end-of-session review 2026-10-22, R5b-1's gap).
+    if (state && state.searchPending) return "pick";
+    return "none";
   }
   return "none";
 }
@@ -266,4 +271,18 @@ export function nextItemFocusAfterEdit(field, rowIndex, rowCount, opts = {}) {
  */
 export function nextFieldAfterLinkPick(field, fields) {
   return nextItemFieldAfterEdit(field, fields);
+}
+
+/**
+ * A header box's `change` fires when it loses focus after typing — also when a pick from its list
+ * set the value, and a vendor pick moves focus into the source picker at once. Writing that value
+ * again doubled the vendor write; the second answered ~9 s later and its repaint took focus off the
+ * line the clerk was typing in (end-of-session review 2026-10-22). While the pick is writing
+ * (`data-link-picking`), the pick owns the commit.
+ * @param {string|undefined} picking the value the picker is writing, if any
+ * @param {string} next what the blur would write
+ */
+export function linkPickOwnsCommit(picking, next) {
+  if (picking == null || picking === "") return false;
+  return String(picking).trim() === String(next ?? "").trim();
 }

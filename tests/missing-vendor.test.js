@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { missingVendorBannerText, lateVendorMayOpenSources } from "../src/bill-missing-vendor.js";
+import { missingVendorBannerText, lateVendorMayOpenSources, vendorBoxMayRevert } from "../src/missing-vendor.js";
 
 /** Plan 2026-10-21 D2. */
 
@@ -29,5 +29,13 @@ describe("lateVendorMayOpenSources", () => {
     assert.equal(lateVendorMayOpenSources({ ...base, boxNow: "SUMMIT" }).reason, "vendor_changed");
     assert.equal(lateVendorMayOpenSources({ ...base, activeIsOtherField: true, typedElsewhere: true }).reason, "moved_on");
     assert.equal(lateVendorMayOpenSources({ ...base, modalOpen: true }).reason, "modal_open");
+  });
+});
+
+describe("vendorBoxMayRevert", () => {
+  it("only while the box still shows the name that was checked", () => {
+    assert.equal(vendorBoxMayRevert("ZZ GONE", " zz  gone "), true);
+    assert.equal(vendorBoxMayRevert("ZZ GONE", "SUMMIT"), false);
+    assert.equal(vendorBoxMayRevert("ZZ GONE", ""), false);
   });
 });

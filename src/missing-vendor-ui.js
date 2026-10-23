@@ -1,8 +1,11 @@
 /**
  * Plan 2026-10-21 D2 / review 10-19 R5b-5: the page half of "this vendor is not in ERPNext",
  * shared by the Bill (`bill-form-page.js`) and the PO / Item Receipt (`doc-form-page.js`) so the
- * two do not drift (R6a-1). Wording and decisions are in `bill-missing-vendor.js`.
+ * two do not drift (R6a-1). Wording and decisions are in `missing-vendor.js`.
  */
+
+import { missingVendorBannerText, vendorBoxMayRevert } from "./missing-vendor.js";
+import { normalizeEditableText } from "./dirty-gate.js";
 
 const BANNER_ID = "doc-missing-vendor";
 
@@ -53,4 +56,35 @@ export function watchTypingElsewhere(vendorBox) {
 export function focusIsInOtherField(vendorBox) {
   const active = document.activeElement;
   return !!active && active !== vendorBox && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName || "");
+}
+
+/**
+ * Ask ERPNext (live, not the warm copy) whether this vendor exists. A missing one gets the banner,
+ * and on a vendor write the box goes back to the document's vendor — unless the clerk typed in it
+ * since; "could not tell" never blocks.
+ * @param {{
+ *   api: { linkExists?: (doctype: string, name: string) => Promise<{ exists?: boolean|null }> } | null,
+ *   name: string,
+ *   attempt: "vendor"|"sources",
+ *   doc?: string,
+ *   box: HTMLInputElement|null,
+ *   kept: string,
+ *   log: (event: string, detail: string) => void,
+ *   setStatus: (text: string, kind?: string) => void,
+ * }} o
+ * @returns {Promise<boolean>} true when the vendor is missing
+ */
+export async function vendorIsMissing(o) {
+  const n = normalizeEditableText(o.name);
+  if (!n || !o.api || !o.api.linkExists) return false;
+  const r = await o.api.linkExists("Supplier", n);
+  if (!r || r.exists !== false) return false;
+  o.log("vendor-missing", `${o.attempt}:${n.slice(0, 60)}`);
+  showMissingVendorBanner(missingVendorBannerText(n, o.attempt, o.doc ? { doc: o.doc } : {}));
+  if (o.attempt === "vendor" && o.box && vendorBoxMayRevert(n, o.box.value)) {
+    o.box.value = o.kept;
+    o.box.dataset.linkCommitted = o.kept;
+  }
+  o.setStatus(`Vendor “${n}” is not in ERPNext.`, "err");
+  return true;
 }

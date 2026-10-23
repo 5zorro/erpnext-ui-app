@@ -73,7 +73,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "doc-form",
     label: "Doc skin machinery shared by every form — layout, line tables, pickers, addresses, dates, numbers",
     modules: ["doc-form-*", "doc-skin-registry", "doc-chrome", "doc-caps", "doc-caps-ui", "doc-commit-gate-ui", "doc-date", "doc-address", "address-*",
-      "link-*", "missing-vendor-ui", "vendor-activity", "field-loading", "mapped-header-fields", "item-*", "doc-item-sort", "doc-number-*", "doc-terms", "doc-terms-fields",
+      "link-*", "missing-vendor", "missing-vendor-ui", "vendor-activity", "field-loading", "mapped-header-fields", "item-*", "doc-item-sort", "doc-number-*", "doc-terms", "doc-terms-fields",
       "doc-source-terms", "doc-source-terms-dom", "doc-shell-kind", "erp-form-bridge", "account-company"],
     paths: ["electron/doc-form.html", "electron/doc-form.head.html", "electron/doc-form.footer.html", "electron/doc-form-body.fragment.html",
       "electron/doc-chrome.fragment.html", "electron/doc-form-preload.cjs", "electron/doc-skin.css", "electron/doc-fields.css",

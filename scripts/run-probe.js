@@ -56,6 +56,9 @@ const backup = fs.mkdtempSync(path.join(os.tmpdir(), "erpnext-ui-probe-prefs-"))
 for (const f of before) fs.copyFileSync(path.join(PREFS, f), path.join(backup, f));
 console.log(`prefs backed up: ${before.length} file(s) → ${backup}`);
 
+// Ctrl+C reaches the probe too (same terminal) and ends it; this process stays up to restore.
+process.on("SIGINT", () => console.log("\nCtrl+C — restoring the prefs after the probe stops…"));
+
 let status = 1;
 try {
   const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "" };
@@ -64,6 +67,7 @@ try {
     ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...files],
     { cwd: ROOT, env, stdio: "inherit" },
   );
+  if (run.error) console.error(`could not run the probe: ${run.error.message}`);
   status = run.status ?? 1;
 } finally {
   for (const f of before) fs.copyFileSync(path.join(backup, f), path.join(PREFS, f));

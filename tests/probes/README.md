@@ -17,7 +17,7 @@ ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- <name>   # 5zorro's
 `scripts/run-probe.js` refuses while 5zorro's app is open (a restore would undo what it saves
 meanwhile; `--with-app-open` overrides — then tell him), backs up `~/.config/erpnext-ui-app/*.json`
 right before the run, runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared, then restores
-the backup and removes any prefs file the run created. It does **not** cover the Doc page's Local
+the backup and removes any prefs file the run created — Ctrl+C included (proven 2026-10-22). It does **not** cover the Doc page's Local
 Storage (dragged column widths) — a probe that drags columns puts them back.
 
 ## Writing one
@@ -27,6 +27,11 @@ Storage (dragged column widths) — a probe that drags columns puts them back.
 - Steps shared by probes are in `probe-helpers.js`: `openNewDoc`, `keys` (real keystrokes —
   `e2e/GOTCHAS.md` #15), `focusTestId`, `escPeek`, `docState`, `erpAnswers`, `inDoc` / `inErp`
   (each gives up after a few seconds, so a stalled page shows as `"TIMEOUT"`, not a hung run).
+- Right after a peek returns (Esc), the ERPNext form reloads for a few seconds and the Doc page's
+  snapshot is not `ok` — poll `docState(app).snapOk` before reading or typing. Esc keys sent to the
+  Doc page do not reach a peek (it is the ERPNext view): use `escPeek`.
+- Slow one search to make a race happen every run: wrap the IPC handler (`e2e/GOTCHAS.md` #16,
+  example in `r5b1-vendor-held-tab.probe.js`).
 - Sandbox records a probe makes are named `ZZ…` and deleted in `finally`. It saves a document only
   when that is the question, and deletes it after.
 - Print what was seen with `report(label, obj)` (`PROBE <label> {…}`) as well as asserting, so a

@@ -1,7 +1,7 @@
 /**
  * Review 10-19 R5b-3: an item typed within ~1 s of setting the vendor on a new PO lost its typing —
  * the half-typed text was written to the line and focus jumped to Qty. Question: is the item
- * typed whole now? Two ways in: the vendor written straight (as the original probe did), and as a
+ * typed whole, and is the clerk still on the line after the vendor settles? Two ways in: the vendor written straight (as the original probe did), and as a
  * clerk does it (type, Tab, Esc the source picker). Saves nothing.
  */
 import { test, expect } from "@playwright/test";
@@ -47,6 +47,9 @@ for (const way of ["written", "clerk"]) {
       report(`r5b3-${way}`, seen);
       expect(seen.erp).toBe(ITEM);
       expect(seen.box).toBe(ITEM);
+      // The clerk is still on the line: a late vendor repaint must not drop focus to the page
+      // (review 2026-10-22: a pick's duplicate blur write did, 9 s on).
+      expect(seen.focus).toBe("description");
     } finally {
       await app.close().catch(() => {});
     }

@@ -6,8 +6,8 @@
  * vendor box — then a late vendor write re-opened the source picker two minutes on. Now the Bill
  * asks ERPNext first and, for a missing vendor, shows a banner and opens nothing.
  *
- * Review 10-19 R5b-5 (2026-10-22): the PO / Item Receipt page (`doc-form-page.js`) does the same;
- * the banner and the typing watch both pages use are in `missing-vendor-ui.js`.
+ * Review 10-19 R5b-5 (2026-10-22): the PO / Item Receipt page (`doc-form-page.js`) does the same,
+ * so this file lost its `bill-` prefix; the page half both use is `missing-vendor-ui.js`.
  *
  * Pure: wording and decisions only.
  */
@@ -42,4 +42,16 @@ export function lateVendorMayOpenSources(s) {
   if (norm(s.boxNow) !== norm(s.wanted)) return { open: false, reason: "vendor_changed" };
   if (s.activeIsOtherField && s.typedElsewhere) return { open: false, reason: "moved_on" };
   return { open: true };
+}
+
+/**
+ * A vendor turned out missing: may its box go back to the document's vendor? Only while it still
+ * shows the name that was checked — the check is a round trip, and a clerk who went back into the
+ * box and typed meanwhile keeps their typing (end-of-session review 2026-10-22).
+ * @param {string} checked the name sent to ERPNext
+ * @param {string} boxNow what the box shows now
+ */
+export function vendorBoxMayRevert(checked, boxNow) {
+  const norm = (v) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return norm(checked) === norm(boxNow);
 }

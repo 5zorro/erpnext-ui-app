@@ -144,6 +144,7 @@ import {
 } from "../src/account-company.js";
 import {
   nextItemFocusAfterEdit,
+  linkPickOwnsCommit,
 } from "../src/link-picker-policy.js";
 import {
   autoSizeItemColumns,
@@ -170,12 +171,12 @@ import {
   receiveAskOffNote,
 } from "../src/bill-receive-ask.js";
 import { mountLinkPicker, closeAllLinkDropdowns } from "../src/link-picker-ui.js";
-import { missingVendorBannerText, lateVendorMayOpenSources } from "./bill-missing-vendor.js";
+import { lateVendorMayOpenSources } from "./missing-vendor.js";
 import {
-  showMissingVendorBanner,
   hideMissingVendorBanner,
   watchTypingElsewhere,
   focusIsInOtherField,
+  vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
 import { taxDefaultWhy } from "../src/tax-default-why.js";
@@ -3365,20 +3366,16 @@ export async function bootBillFormPage(api) {
    * @param {string} name @param {"vendor"|"sources"} attempt
    * @returns {Promise<boolean>} true when the vendor is missing
    */
-  async function vendorIsMissing(name, attempt) {
-    const n = normalizeEditableText(name);
-    if (!n || !api || !api.linkExists) return false;
-    const r = await api.linkExists("Supplier", n);
-    if (!r || r.exists !== false) return false;
-    logFocus("vendor-missing", `${attempt}:${n.slice(0, 60)}`);
-    showMissingVendorBanner(missingVendorBannerText(n, attempt));
-    const kept = String(paintedHeaderValue("supplier") ?? "");
-    if (attempt === "vendor") {
-      el.vendor.value = kept;
-      el.vendor.dataset.linkCommitted = kept;
-    }
-    setStatus(`Vendor “${n}” is not in ERPNext.`, "err");
-    return true;
+  function vendorIsMissing(name, attempt) {
+    return checkVendorMissing({
+      api,
+      name,
+      attempt,
+      box: el.vendor,
+      kept: String(paintedHeaderValue("supplier") ?? ""),
+      log: logFocus,
+      setStatus,
+    });
   }
 
   function ensureHeaderLinkPickers() {
@@ -5134,6 +5131,7 @@ export async function bootBillFormPage(api) {
       if (field === "bill_no") await runBillRefCheck(next);
       return;
     }
+    if (linkPickOwnsCommit(input.dataset.linkPicking, next)) return;
     if (field === "supplier" && (await vendorIsMissing(next, "vendor"))) return;
     // While a vendor write is out, note whether the clerk types somewhere else (D2's late guard).
     const typing = field === "supplier" ? watchTypingElsewhere(el.vendor) : null;

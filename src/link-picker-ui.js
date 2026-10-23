@@ -144,6 +144,9 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   /** @type {Array<string|null>} option values, null for a "Create…" row */
   let optValues = [];
   let searchSeq = 0;
+  /** The text a search is waiting for (typing pause or in flight); null when none is. */
+  /** @type {string|null} */
+  let pendingFor = null;
   /** A Tab / Enter waiting for the list of the text it was pressed on. */
   /** @type {{ key: string, shiftKey: boolean, text: string }|null} */
   let held = null;
@@ -244,9 +247,13 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     // A search still waiting (typing pause or in flight) is for text this pick replaces.
     clearTimeout(timer);
     searchSeq++;
+    pendingFor = null;
     held = null;
     input.value = v;
     input.dataset.linkCommitted = v;
+    // The box's own `change` (it fires when the box loses focus after typing) must not write this
+    // value a second time while the pick writes it (`linkPickOwnsCommit`).
+    input.dataset.linkPicking = v;
     dd.hidden = true;
     hi = -1;
     if (refocusAfterPick) {
@@ -257,7 +264,11 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       }
       logFocus("link-pick-blur", doctype);
     }
-    await onPicked(v);
+    try {
+      await onPicked(v);
+    } finally {
+      if (input.dataset.linkPicking === v) delete input.dataset.linkPicking;
+    }
     if (refocusAfterPick) {
       try {
         input.focus({ preventScroll: false });
@@ -276,11 +287,13 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     }
     const seq = ++searchSeq;
     const forText = input.value;
+    pendingFor = forText;
     showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
     const res = await api.searchLink(doctype, q || "");
     // A newer search owns the box; this answer is for text no longer there.
     if (seq !== searchSeq) return;
+    pendingFor = null;
     listFor = forText;
     listSource = res && res.source === "copy" ? "copy" : "live";
     opts = [];
@@ -367,6 +380,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     if (held) logFocus("link-held-cancel", trail("typed-on"));
     held = null;
     clearTimeout(timer);
+    pendingFor = input.value;
     timer = setTimeout(() => runSearch(input.value), listSource === "copy" ? SEARCH_PAUSE_COPY_MS : SEARCH_PAUSE_MS);
   });
   if (input.dataset.linkCommitted == null) {
@@ -376,9 +390,15 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     const act = linkPickerKeyAction(ev.key, {
       dropdownOpen: !dd.hidden,
       optionCount: opts.length,
+      searchPending: pendingFor !== null && pendingFor === input.value,
     });
     if (act === "close") {
       held = null;
+      // Esc means "not the list": a search still waiting would re-open it, and would make the next
+      // Tab wait for it.
+      clearTimeout(timer);
+      searchSeq++;
+      pendingFor = null;
       dd.hidden = true;
       hi = -1;
       return;

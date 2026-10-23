@@ -28,6 +28,7 @@ import {
 import {
   nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
+  linkPickOwnsCommit,
 } from "./link-picker-policy.js";
 import {
   autoSizeItemColumns,
@@ -98,12 +99,12 @@ import {
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
 import { mountLinkPicker, closeAllLinkDropdowns } from "./link-picker-ui.js";
-import { missingVendorBannerText, lateVendorMayOpenSources } from "./bill-missing-vendor.js";
+import { lateVendorMayOpenSources } from "./missing-vendor.js";
 import {
-  showMissingVendorBanner,
   hideMissingVendorBanner,
   watchTypingElsewhere,
   focusIsInOtherField,
+  vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { taxDefaultWhy } from "./tax-default-why.js";
@@ -2421,29 +2422,22 @@ function buildHeaderFields(fields) {
 }
 
 /**
- * The Bill's D2 check (plan 2026-10-21), on this page since review 10-19 R5b-5: ask ERPNext (live,
- * not the warm copy) whether this vendor exists. A missing one gets the banner and the vendor box
- * goes back to the document's vendor; "could not tell" never blocks.
+ * The Bill's D2 check (plan 2026-10-21), on this page since review 10-19 R5b-5 — see
+ * `missing-vendor-ui.js` `vendorIsMissing`.
  * @param {string} name @param {"vendor"|"sources"} attempt
  * @returns {Promise<boolean>} true when the vendor is missing
  */
-async function vendorIsMissing(name, attempt) {
-  const n = normalizeEditableText(name);
-  if (!n || !api || !api.linkExists) return false;
-  const r = await api.linkExists("Supplier", n);
-  if (!r || r.exists !== false) return false;
-  logFocus("vendor-missing", `${attempt}:${n.slice(0, 60)}`);
-  showMissingVendorBanner(missingVendorBannerText(n, attempt, { doc: docTitle() }));
-  if (attempt === "vendor") {
-    const box = supplierInput();
-    const kept = String(paintedHeaderValue("supplier") ?? "");
-    if (box) {
-      box.value = kept;
-      box.dataset.linkCommitted = kept;
-    }
-  }
-  setStatus(`Vendor “${n}” is not in ERPNext.`, "err");
-  return true;
+function vendorIsMissing(name, attempt) {
+  return checkVendorMissing({
+    api,
+    name,
+    attempt,
+    doc: docTitle(),
+    box: supplierInput(),
+    kept: String(paintedHeaderValue("supplier") ?? ""),
+    log: logFocus,
+    setStatus,
+  });
 }
 
 function ensureHeaderLinkPickers() {
@@ -2477,7 +2471,9 @@ function ensureHeaderLinkPickers() {
           openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
           onHeaderSuccess: (res) => {
             noteUserEdit();
-            paint(res.doc || lastDoc, res.scratch || scratch);
+            // The vendor settles in up to ~12 s; by then the clerk may be typing a line, which this
+            // repaint rebuilds — keep their place (end-of-session review 2026-10-22, R5b-3's cousin).
+            paint(res.doc || lastDoc, res.scratch || scratch, { keepFocus: true });
             hideMissingVendorBanner();
             if (decision && decision.open) setStatus("Choose a source (or NIC).");
           },
@@ -2919,6 +2915,7 @@ async function onHeaderBlur(input) {
     return;
   }
 
+  if (linkPickOwnsCommit(input.dataset.linkPicking, next)) return;
   if (field === "supplier" && (await vendorIsMissing(next, "vendor"))) return;
   // While a vendor write is out, note whether the clerk types somewhere else (D2's late guard).
   const typing = field === "supplier" ? watchTypingElsewhere(input) : null;
