@@ -1,7 +1,8 @@
 # Implementation plan 2026-10-24 — the navigation spine: a probe per path, and DC-4
 
-> **Status: plan only — nothing built.** Waiting on 5zorro's two answers (§ Questions). Written at
-> the end of a long session; the next session starts here.
+> **Status: plan only — nothing built. 5zorro answered 2026-10-24: DC-4 is A (match Vanilla); the
+> axes stand, plus a fourth — fresh vs ongoing state.** Ready to build in the order below; the next
+> session starts here.
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
@@ -34,12 +35,12 @@ already half true.
 | Size | Small: one check on `did-navigate` + one message + the probe | Large: a per-document unsaved store, restore rules per path, a probe per path |
 | Risk | Low | The peek/park/errand machinery (`parkedDocSurface`, `shelvedDrafts`, soft peeks) already keeps documents across navigation; B is a second mechanism beside it |
 
-Recommendation: **A now**; B only if dogfood shows reloads under typing happen. Either way the
+**Decided (5zorro 2026-10-24): A.** B only if dogfood later shows reloads under typing happen. Either way the
 spine probes below come first, so the change is made against a pinned map.
 
 ## The spine — every way to move, as a matrix
 
-Three axes. A probe runs each cell and checks the same four things: **lands** on the right surface
+Four axes. A probe runs each cell and checks the same four things: **lands** on the right surface
 and document; **unsaved typing** is kept or the gate asks (never silently lost); **back** (Esc /
 ← Back / the rail) returns to where the clerk was; **focus** lands where it was left.
 
@@ -50,9 +51,21 @@ and document; **unsaved typing** is kept or the gate asks (never silently lost);
 - **Move:** to Desk · same document in the other lens · an errand (Create Item / Create Vendor and
   back, saved and abandoned) · a peek at a source (PO, receipt) and back · another document ·
   the ERPNext page reloads (DC-4).
+- **Fresh vs ongoing** (5zorro 2026-10-24: *"to see if accumulated cruft happens such that the
+  flyout bar become unreliable and needs a pruning"*): each cell run once on a fresh start (empty
+  `nav-state.json` from a backup copy) and once **after a long session** — the same probe first plays
+  a scripted day (say 100 moves across the cells: opens, peeks, errands, abandoned drafts, deleted
+  documents, lens switches) and then runs the cell. Extra checks for the ongoing run: the Drafts
+  flyout and the history rail list only documents that still exist, each once, in the order used;
+  a deleted or submitted draft has left the Drafts flyout; nothing is still parked or peeked that the
+  clerk left; the peek stack is empty at Home; `nav-state.json` stays under a set size; the startup
+  prune (`nav-prune`) and any in-session prune keep it so. Every row a check finds wrong is a
+  pruning rule to write down (HANDOFF), not a one-off delete.
 
 Not every cell exists (a submitted document has no unsaved changes); the probe file lists the cells
-it skips and why.
+it skips and why. The probes never touch 5zorro's own `nav-state.json` contents: the runner already
+backs up and restores the prefs; the fresh run starts from an empty copy, the ongoing run from the
+scripted day.
 
 **Covered today** (e2e specs, run by hand): detour from the board and back (`scaffold-detour`);
 peek parent / Go to Vendor add… / ping-pong (`scaffold-peek-parent`); Create Item / Customer errands
@@ -70,12 +83,13 @@ ERPNext-page link from a Doc-skin document; a reload under each state (DC-4).
 2. `tests/probes/nav-spine-*.probe.js`, one file per *start from*, each a table of cells (state ×
    move) driven by one runner; tagged `@nav`; makes only `ZZ NAV …` drafts, deleted after.
    `npm run nav:check` runs them all and prints the matrix pass / FAIL / skipped.
-3. Run it on today's code; every FAIL is a finding sorted like plan 10-19's (fix, or 5zorro's call).
-4. DC-4 (A or B) built against the pinned matrix; its reload column turns green.
-5. Rule for later sessions (HANDOFF): a change to navigation runs `npm run nav:check` first and after.
+3. The ongoing-state run: the scripted day, then the same matrix, with the cruft checks.
+4. Run it all on today's code; every FAIL is a finding sorted like plan 10-19's (fix, or 5zorro's call).
+5. DC-4 (A) built against the pinned matrix; its reload column turns green.
+6. Rule for later sessions (HANDOFF): a change to navigation runs `npm run nav:check` first and after.
 
-## Questions for 5zorro
+## 5zorro's answers (2026-10-24)
 
-1. DC-4: **A** (match Vanilla — ask before, say so after, never show stale typing) or **B** (keep
-   the typing across a reload)?
-2. The matrix axes above — anything missing (a start surface, a move) or a cell that does not matter?
+1. DC-4: **A** — match Vanilla: ask before a reload under unsaved typing, say so after one that
+   happened anyway, never show stale typing.
+2. The axes stand; add **fresh vs ongoing state** (accumulated cruft in the flyout / rail).
