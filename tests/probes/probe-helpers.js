@@ -101,3 +101,17 @@ export async function openBoard(app) {
 
 /** `DOGFOOD_KEEP=1` (`npm run dogfood:setup`, or by hand): a probe leaves its scene for 5zorro. */
 export const keepScene = () => process.env.DOGFOOD_KEEP === "1";
+
+/**
+ * "ERPNext stops" without stopping Docker: the app's session refuses every request whose URL
+ * contains `part` (the ERPNext page and the main process share it; the app sets no request hooks of
+ * its own). `erpUp` lifts it. Always call `erpUp` in `finally`.
+ */
+export const erpDown = (app, part) =>
+  app.evaluate(({ session }, p) => {
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: d.url.includes(p) }));
+  }, part);
+export const erpUp = (app) => app.evaluate(({ session }) => session.defaultSession.webRequest.onBeforeRequest(null));
+
+/** In a Find page. */
+export const inFind = (app, js, ms) => inView(app, "findDoc", js, ms);

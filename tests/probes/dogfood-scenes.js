@@ -354,6 +354,31 @@ export const SCENES = {
         termScene(),
       ),
   },
+  "find-many": {
+    title: "205 draft Purchase Orders, so a Find page has a Show more",
+    rows: ["R4-2"],
+    leaves: "Vendor ZZ DF MANY with 205 draft Purchase Orders (1 × SAMPLE-SKU-01 each). Drafts: --clear deletes them.",
+    look: "Find Purchase Orders… → scroll to the bottom → stop ERPNext (or log out in a browser tab) → Show more. Expect: the 200 rows stay; under them \"Could not read more…\" and the button reads Try again.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF MANY";
+          const cleared = (await clearVendor(V)).length;
+          await ensureSupplier(V);
+          const doc = { doctype: "Purchase Order", supplier: V, schedule_date: addDays(30), items: [{ item_code: "SAMPLE-SKU-01", qty: 1, rate: 1, schedule_date: addDays(30) }] };
+          let made = 0;
+          for (let i = 0; i < 205; i += 100) {
+            const n = Math.min(100, 205 - i);
+            made += (await x("frappe.client.insert_many", { docs: Array.from({ length: n }, () => doc) })).length;
+          }
+          return { vendor: V, drafts: made, cleared };
+        `),
+        null,
+        300_000,
+      ),
+    clear: (app) => inPage(app, maker(`return { cleared: (await clearVendor("ZZ DF MANY")).length };`), null, 300_000),
+  },
 };
 
 /** R10c-3's terms, as the board's own planner names and shapes them. */
