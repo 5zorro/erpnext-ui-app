@@ -27,6 +27,14 @@ describe("reasonFrom (the ERPNext page's reason for a refused call)", () => {
     const r = { exc: JSON.stringify(["Traceback…\nfrappe.exceptions.ValidationError: Cannot create accounting entries against disabled accounts"]) };
     assert.equal(reasonFrom(r)(undefined), "Cannot create accounting entries against disabled accounts");
   });
+  it("an earlier, successful reply's notes are not this call's reason (a call that died with no reply)", () => {
+    const r = { _server_messages: msgs({ message: "Expense Head changed", indicator: "blue" }) };
+    assert.equal(reasonFrom(r)(undefined), "ERPNext refused without saying why.");
+  });
+  it("a refusal with a traceback and only plain messages: the messages", () => {
+    const r = { _server_messages: msgs({ message: "Not authorized" }), exc: JSON.stringify(["Traceback…\nfrappe.exceptions.ValidationError: x"]) };
+    assert.equal(reasonFrom(r)(undefined), "Not authorized");
+  });
   it("nothing at all: says so, and no longer blames a Payment Entry", () => {
     assert.equal(reasonFrom(null)(undefined), "ERPNext refused without saying why.");
     assert.equal(reasonFrom({})(undefined), "ERPNext refused without saying why.");

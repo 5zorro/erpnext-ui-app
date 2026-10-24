@@ -752,3 +752,22 @@ arithmetic on a typed-as-number argument gets a string (`get_payment_entry(party
 "bad operand type for abs(): 'str'"). Set the number on the returned document instead. And a list
 that asks for a field the doctype does not have is refused — with `frappe.db.get_list` that refusal
 never comes back (G19): Assign's Project step hung on `customer_name`, which Project lacks on v16.
+
+## G22 — `frappe.xcall` rejects with nothing when ERPNext refuses (2026-10-23)
+
+`frappe.xcall` is `frappe.call` with `error: (r) => reject(r?.message)` — and a refused call's reply
+has no `message`: ERPNext puts the reason in `_server_messages` (what it raised, JSON in JSON) and
+`exc` (the traceback). So `catch (e)` around an xcall gets `undefined`, and every page script that
+built its reason from `e` showed its fallback: "Payment Entry request failed." for a bill refused
+because its Purchase Order was On Hold (found by the dogfood check, DC-1). Read the reason from
+`frappe.last_response` — the reply that just failed — but only when it did refuse (a raised / red
+message or a traceback); a call that died with no reply leaves an earlier, successful reply there.
+One reader for all of it: `src/erp-refusal-reason.js` (`${PE_REASON_FROM_JS}` in a page script),
+tested; ERPNext's messages carry HTML (`<br><strong>…`) and often no full stop (`endSentence`).
+
+**Related:** a Purchase Order is not a period-closing doctype — an Accounting Period never refuses
+one. ERPNext refuses a PO's *submit* (not its save) through an Authorization Rule; a disabled
+account refuses only when ledger entries are made (submit and cancel of the copy's GL), never the
+save; a bill whose Purchase Order is On Hold or Closed cannot be cancelled
+(`check_for_on_hold_or_closed_status` in `on_cancel`), and the PO server itself never checks its
+Sales Order's hold.

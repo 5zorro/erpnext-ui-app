@@ -3,7 +3,7 @@
  * after a Bill is open with the line filled. Used by r6b4-split-by-need and the R2-2 dogfood probe.
  */
 import { expect } from "@playwright/test";
-import { sleep, inDoc, report } from "./probe-helpers.js";
+import { sleep, inDoc, report, closeSourcePickers } from "./probe-helpers.js";
 
 export const inDialog = (app, js) => inDoc(app, `(() => { const d = document.querySelector('[data-testid="bill-allocation-picker"]'); if (!d) return "NO DIALOG"; ${js} })()`);
 export const clickPrimary = (app) => inDialog(app, `d.querySelector('[data-act="pick"]').click(); return true;`);
@@ -23,7 +23,7 @@ export async function nextStep(app, want) {
  */
 export async function assignToOrders(app, { row = 0, vendor, salesOrders, beforeProject }) {
   await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(vendor)}; return true; })()`);
-  await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
+  await closeSourcePickers(app);
   await sleep(1000);
   const opened = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-assign-${row}"]'); if (!b) return false; b.click(); return true; })()`);
   expect(opened).toBe(true);

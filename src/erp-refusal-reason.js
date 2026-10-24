@@ -8,8 +8,9 @@
  * error is usually `undefined`, and until 2026-10-23 every such refusal read "Payment Entry request
  * failed." — a bill refused because its Purchase Order is On Hold said that too (dogfood probe R9).
  * When the error itself says nothing, the reason is read from `frappe.last_response`, the reply
- * that just failed: the messages ERPNext raised (not its notes), else the traceback's last
- * `XError: message` line — the rule the Bill page uses (`electron/erp-form-bridge-page.js`
+ * that just failed — only if it did refuse (a raised message or a traceback; a call that died with
+ * no reply leaves an earlier, successful reply there): the messages ERPNext raised, else the
+ * traceback's last `XError: message` line — the rule the Bill page uses (`electron/erp-form-bridge-page.js`
  * `refusalText`, review 10-19 R6b-2).
  */
 export const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
@@ -65,7 +66,9 @@ export const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
       if (Array.isArray(parsed)) {
         var all = parsed.map(function (m) { try { return typeof m === "string" ? JSON.parse(m) : m; } catch (e3) { return { message: m }; } });
         var raised = all.filter(function (o) { return o && (o.raise_exception || o.indicator === "red"); });
-        said = (raised.length ? raised : all).map(function (o) { return strip((o && o.message) || ""); }).filter(Boolean).join(" · ");
+        // Only a reply that refused: a call that died with no reply leaves an earlier, successful
+        // one here, whose notes are not this call's reason.
+        if (raised.length || r.exc) said = (raised.length ? raised : all).map(function (o) { return strip((o && o.message) || ""); }).filter(Boolean).join(" · ");
       }
     } catch (e4) {}
     if (said) return said;

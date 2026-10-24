@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, openNewDoc, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 
 const TAG = `ZZ-DF-RELOAD-${Date.now() % 100000}`;
@@ -27,12 +27,11 @@ test("R2-1: a reload mid-save ends the wait and New still works", async () => {
       90_000,
     );
     await sleep(3000);
-    const snap = await inDoc(app, SNAP);
-    await app.evaluate(({ webContents }, s) => webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", s), snap);
+    const snap = await repaintDoc(app);
     report("before-save", { supplier: snap.doc.supplier, items: (snap.doc.items || []).map((i) => i.item_code) });
     // The page reads the vendor from its box; the API write does not repaint it.
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = "ALPINE SUPPLY CO"; return true; })()`);
-    await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
+    await closeSourcePickers(app);
     await sleep(500);
 
     const total = billCompareTotal(snap.doc);

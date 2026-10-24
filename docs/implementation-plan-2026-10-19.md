@@ -89,7 +89,9 @@ built, being dogfooded). It edits no code.
 > probe found R6b-5 / R6b-6 (Assign to Sales Orders could never finish here). **End-of-session review
 > done** (`53c0a05`): the split moved to stock units, the costing note escaped; G21 written.
 > The Sales Order look-back (step 8) was built after it, the same day.
-> Next: session 6 (R7 + R8 + R12).
+> 2026-10-23: a held/closed Sales Order needs nothing in the split; the **dogfood check and setup**
+> (§ Dogfood check and setup — every residual row has a probe, 25/25 pass; DC-1–3 fixed, DC-4 open).
+> Reviewed through `d1e2f79` (2026-10-24). Next: session 6 (R7 + R8 + R12).
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -935,6 +937,18 @@ makes). Notes per row:
   Not re-run on pre-fix code: R10c-3, R2-7, D1, R5-1 (the pre-fix picker no longer loads in today's
   page), R4-2, R2-1, R4-1, D3 — each fix was proven when it was made.
 - **Yours, still:** the feel — "smooth all day" (R5-1), "a beat" (R5b-1), warm lists at ~20k items.
+
+**End-of-session review (2026-10-24, of `99ef999..d1e2f79`).** Fixed: `reasonFrom`'s
+fallback to `frappe.last_response` now reads it only when that reply refused (a raised message or a
+traceback) — a call that died with no reply leaves an earlier successful reply there, whose notes
+would have been shown as the reason (G22). Proven: DC-3's "ERPNext did not fill in" check does not
+fire on a slow ERPNext that still answers (R5b-2's probe holds each lookup 3 s: "Imported 2 line(s).").
+Shared probe steps (`closeSourcePickers`, `repaintDoc`); the affected rows re-run, all pass. Checked
+and fine: the Costing chip's `get_docinfo` is one bounded read per Sales Order open (10 versions, 21
+messages, the order's comments; read permission); a costing note is drawn as text only, its PO route
+encoded; the scenes touch only `ZZ DF …` records, a `ZZ DF` term description, the `ZZ-DF-` order
+prefix and one Authorization Rule (removed by `--clear`) — plus the four board payment methods, left
+on purpose. Open for 5zorro: DC-4; whether the board should offer only methods the site has.
 
 **Found by the check** (each fixed and re-proven by the probe that found it):
 

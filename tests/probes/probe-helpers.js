@@ -121,3 +121,17 @@ export const erpUp = (app) => app.evaluate(({ session }) => session.defaultSessi
 
 /** In a Find page. */
 export const inFind = (app, js, ms) => inView(app, "findDoc", js, ms);
+
+/** Close any source picker open on the Doc page (a vendor pick opens one). */
+export const closeSourcePickers = (app) =>
+  inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
+
+/**
+ * Repaint the Doc page from ERPNext's document, as a snapshot from main does — the page's own API
+ * writes (`window.erpDoc.setItem`) do not repaint it. Returns the snapshot.
+ */
+export async function repaintDoc(app) {
+  const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc }; })()`);
+  await app.evaluate(({ webContents }, s) => webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", s), snap);
+  return snap;
+}

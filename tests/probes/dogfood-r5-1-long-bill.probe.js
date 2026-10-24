@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, keys, inDoc, openNewDoc, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
 
 const LINES = 25;
 const SNAP = `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc }; })()`;
@@ -48,12 +48,11 @@ test("R5-1: a long Bill's repaints add no page-wide listeners, and an open dropd
       300_000,
     );
     const repaint = async () => {
-      const snap = await inDoc(app, SNAP);
-      await app.evaluate(({ webContents }, s) => webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", s), snap);
+      const snap = await repaintDoc(app);
       await sleep(150);
       return snap;
     };
-    await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
+    await closeSourcePickers(app);
     const snap = await repaint();
     expect(snap.doc.items.length).toBeGreaterThanOrEqual(LINES);
     const before = await listeners(app);

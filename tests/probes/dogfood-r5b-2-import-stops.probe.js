@@ -1,7 +1,7 @@
 /**
  * @dogfood R5b-2
  * Plan 10-19 dogfood row R5b-2: Import into a new Bill. First 4 lines with ERPNext answering (the
- * control: "Imported 4 line(s)."), then 12 lines where ERPNext stops part way — the app's session
+ * control: "Imported 4 line(s)."), then 2 with each lookup held 3 s (slow is not stopped), then 12 lines where ERPNext stops part way — the app's session
  * refuses the item lookups (`run_doc_method`) after the first 4. Questions: does the status say
  * "Import stopped at line N of 12: … Lines 1–(N−1) are on the form.", are those lines on the form
  * with ERPNext's details, and were the line table and Import locked while it ran?
@@ -12,7 +12,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, openNewDoc, erpDownAfter, erpUp, report } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, openNewDoc, erpDownAfter, erpUp, report, closeSourcePickers } from "./probe-helpers.js";
 
 const SKUS = ["SAMPLE-SKU-01", "SAMPLE-SKU-02", "SAMPLE-SKU-03", "SAMPLE-SKU-04"];
 const paste = (n) => ["SKU\tQty\tRate", ...Array.from({ length: n }, (_, i) => `${SKUS[i % 4]}\t${i + 1}\t10`)].join("\n");
@@ -36,7 +36,7 @@ test("R5b-2: an Import that stops part way says which lines are on the form", as
     await sleep(1500);
     await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO"); return true; })()`, 30_000);
     await sleep(2500);
-    await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
+    await closeSourcePickers(app);
 
     // Control: ERPNext answering, every line filled in.
     await startImport(app, paste(4));
@@ -46,6 +46,17 @@ test("R5b-2: an Import that stops part way says which lines are on the form", as
     report("control", control);
     expect(control.status).toBe("Imported 4 line(s).");
     expect(control.lines.every((l) => l[2])).toBe(true);
+
+    // A slow ERPNext that still answers (each lookup held 3 s in its page) is not "stopped": the
+    // item code write waits for the details, so DC-3's check must not fire.
+    await inErp(app, `(() => { const orig = frappe.call; window.__probeOrigCall = orig; frappe.call = function (opts) { if (opts && opts.method === "run_doc_method") return new Promise((r) => setTimeout(r, 3000)).then(() => orig.apply(this, arguments)); return orig.apply(this, arguments); }; return true; })()`);
+    await startImport(app, paste(2));
+    await apply(app);
+    await expect.poll(() => status(app), { timeout: 120_000 }).toMatch(/^Import/);
+    const slow = await status(app);
+    await inErp(app, `(() => { frappe.call = window.__probeOrigCall; return true; })()`);
+    report("slow", { status: slow });
+    expect(slow).toBe("Imported 2 line(s).");
 
     // ERPNext stops after 4 more lookups.
     await startImport(app, paste(12));
@@ -64,8 +75,8 @@ test("R5b-2: an Import that stops part way says which lines are on the form", as
     const [stoppedAt, done] = [Number(m[1]), Number(m[2])];
     expect(stoppedAt).toBe(5);
     expect(done).toBe(4);
-    // The control's 4 lines, then the 4 that landed with ERPNext's details.
-    expect(after.slice(4, 8).every((l) => l[2])).toBe(true);
+    // The control's 4 lines and the slow 2, then the 4 that landed with ERPNext's details.
+    expect(after.slice(6, 10).every((l) => l[2])).toBe(true);
     expect(during.importDisabled).toBe(true);
     expect(during.itemsInert).toBe(true);
   } finally {

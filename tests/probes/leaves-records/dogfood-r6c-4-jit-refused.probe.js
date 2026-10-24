@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
+import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, report, repaintDoc } from "../probe-helpers.js";
 import { SCENES, inPage } from "../dogfood-scenes.js";
 import { billCompareTotal } from "../../../src/bill-map.js";
 
@@ -45,8 +45,7 @@ test("R6c-4: a refused just-in-time receipt leaves no draft and says why", async
     report("line", { item: line.item_code, warehouse: line.warehouse });
     expect(line.warehouse).toBe(made.warehouse);
     // Repaint the page from ERPNext's document, as a snapshot from main does.
-    const snap = await inDoc(app, SNAP);
-    await app.evaluate(({ webContents }, s) => webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", s), snap);
+    const snap = await repaintDoc(app);
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="bill-rec-0-by"]')`), { timeout: 10_000 }).toBe(true);
     await inDoc(app, `document.querySelector('[data-testid="bill-rec-0-by"]').closest("td").click()`);
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="bill-rec-editor"]')`), { timeout: 10_000 }).toBe(true);

@@ -83,6 +83,15 @@ never by changing a site setting.
   `session.defaultSession.webRequest.onBeforeRequest` once): the Bill's item lookups are
   `run_doc_method`, its background PO/receipt reads `/api/resource/…`, live link searches
   `search_link`.
+- Bill steps a probe must answer as a clerk would: Save and Submit ask "receive with this bill?"
+  first (`bill-receive-bill-only`), Submit needs the amount due typed (`bill-amount-due`,
+  `billCompareTotal`); the page reads the vendor from its box, which `setHeader` does not repaint
+  (set the box), and `repaintDoc(app)` repaints the lines. An item code sets its default warehouse
+  after a `warehouse` write — give a ZZ item the warehouse as its default instead.
+  `closeSourcePickers(app)` closes the picker a vendor pick opens.
+- A run that died part way leaves its scene: `npm run dogfood:setup -- --clear <row>` removes it
+  (R2-2's approval rule applies to every PO over 99,000 until then; R4-1 puts the login cookie back
+  in `finally` — if that never ran, the app asks to log in once).
 - To see a page without opening a window, capture it (`wc.capturePage()` from `app.evaluate`) into
   a folder the run names — `r6b4-split-by-need` does it when `PROBE_SHOTS=<dir>` is set.
 - Print what was seen with `report(label, obj)` (`PROBE <label> {…}`) as well as asserting, so a
