@@ -76,7 +76,7 @@ test("judgeCell: a clean document is never asked about", () => {
 });
 
 test("judgeCell: a lens switch carries the typing there and back", () => {
-  const cell = { start: "lens", state: "new-typed", move: "lens" };
+  const cell = { start: "lens", state: "draft-typed", move: "lens" };
   const ok = judgeCell(cell, {
     arrived: fresh,
     mark: "ZZNAV2",
@@ -95,6 +95,28 @@ test("judgeCell: a lens switch carries the typing there and back", () => {
     back: { surface: "doc", name: "new-purchase-invoice-abc", ref: "" },
   });
   assert.equal(lost.typing.ok, false);
+});
+
+test("judgeCell: a typed new document switching lens is saved as a draft and opened in Vanilla (plan answer 3)", () => {
+  const cell = { start: "home", state: "new-typed", move: "lens" };
+  const seen = {
+    arrived: fresh,
+    mark: "ZZNAV4",
+    typedLanded: true,
+    asked: true,
+    stayKept: true,
+    gateOffersSave: true,
+    savedDraft: "ACC-PINV-2026-00070",
+    landed: { surface: "erp", doctype: "Purchase Invoice", name: "ACC-PINV-2026-00070" },
+    carried: true,
+    back: { surface: "doc", name: "ACC-PINV-2026-00070", ref: "ZZNAV4" },
+  };
+  assert.equal(cellPassed(judgeCell(cell, seen)), true);
+  const blank = judgeCell(cell, { ...seen, gateOffersSave: false, savedDraft: undefined, landed: { surface: "erp", doctype: "Purchase Invoice", name: "new-purchase-invoice-zz" }, back: { surface: "doc", name: "new-purchase-invoice-zz", ref: "" } });
+  assert.match(blank.typing.why, /does not offer Save/);
+  assert.equal(blank.lands.ok, false);
+  assert.equal(blank.back.ok, false);
+  assert.match(judgeCell(cell, { ...seen, asked: false }).typing.why, /asked nothing/);
 });
 
 test("judgeCell: a reload under typing must ask or say so, and never leave stale typing", () => {

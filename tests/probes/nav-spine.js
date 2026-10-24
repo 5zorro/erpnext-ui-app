@@ -17,7 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
+import { billCompareTotal } from "../../src/bill-map.js";
 import { spineCells, judgeCell, cellLine, cellPassed, isTyped, isNew } from "../../src/nav-spine.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -25,6 +26,8 @@ const ITEM = "SAMPLE-SKU-01";
 const REF_A = "ZZ-NAV-A";
 const REF_B = "ZZ-NAV-B";
 const PI = "/app/purchase-invoice";
+/** Per run, so a typed ref never matches a leftover from an earlier run. */
+const RUN = String(Date.now() % 100000);
 
 /** A poll's read that a page mid-load can throw from ("Script failed to execute"): read as null, poll again. */
 const soft = (p) => Promise.resolve(p).catch(() => null);
@@ -102,7 +105,7 @@ async function findOrMakeDocs(app) {
     40_000,
   );
   if (!r || r === "TIMEOUT" || !r.A || !r.B) throw new Error(`could not find or make the ZZ-NAV drafts: ${JSON.stringify(r)}`);
-  return { ...r, refs: { [r.A]: REF_A, [r.B]: REF_B, [r.S]: r.sRef } };
+  return { ...r, refs: { [r.A]: REF_A, [r.B]: REF_B, [r.S]: r.sRef }, made: [] };
 }
 
 async function waitDoc(app, name, ms = 40_000) {
@@ -226,6 +229,8 @@ async function askedOrMoved(app, asksBefore, until) {
   return { asked: false, stuck: await surface(app) };
 }
 
+/** The gate's buttons when the last Discard was clicked (a probe diagnostic). */
+let gateButtons = "";
 /** A gate is up: Stay, check the typing survived, then go again and Discard. */
 async function stayThenDiscard(app, mark, redo) {
   await inDoc(app, click("doc-gate-cancel"));
@@ -234,6 +239,7 @@ async function stayThenDiscard(app, mark, redo) {
   const stayKept = (await surface(app)) === "doc" && p.ref === mark;
   await redo();
   await expect.poll(() => inDoc(app, GATE), { timeout: 10_000 }).toBe(true);
+  gateButtons = await inDoc(app, `[...document.querySelectorAll('[data-testid="doc-commit-gate"] [data-gate]')].map((b) => b.dataset.gate + (b.hidden ? ":hidden" : "") + (b.disabled ? ":disabled" : "")).join(" ")`);
   await inDoc(app, click("doc-gate-discard"));
   return stayKept;
 }
@@ -270,8 +276,10 @@ async function move(app, cell, docs, seen) {
     const r = await askedOrMoved(app, before, cell.move === "desk" ? until : otherOpen);
     seen.asked = r.asked;
     seen.step = r.how === "gate" ? "stay then discard" : "move";
-    if (r.how === "gate") seen.stayKept = await stayThenDiscard(app, mark, go);
-    else if (r.how === "box") seen.stayKept = null;
+    if (r.how === "gate") {
+      seen.stayKept = await stayThenDiscard(app, mark, go);
+      seen.gateButtons = gateButtons;
+    } else if (r.how === "box") seen.stayKept = null;
     seen.step = "land";
     if (cell.move === "desk") {
       await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("home");
@@ -286,16 +294,58 @@ async function move(app, cell, docs, seen) {
     seen.step = "back";
     if (isNew(cell.state)) seen.back = null;
     else if (cell.move === "desk") seen.back = await backByRow(app, seen.arrived.name, RECENT);
-    else if (cell.state === "submitted") seen.backNa = "after another Bill, a submitted one has no row of its own on the rail (Recent keeps one row per doctype)";
+    else if (cell.state === "submitted") seen.backNa = "Recent keeps one row per doctype, by design (5zorro 2026-10-24); a viewed submitted Bill is not on Submitted (only one submitted this session is) — nav-submitted-backtrack checks that way back";
     else seen.back = await backByRow(app, seen.arrived.name, DRAFTS);
     return;
   }
   if (cell.move === "lens") {
     const go = () => inChrome(app, click("lens-vanilla"));
+    // 5zorro 2026-10-24 (plan answer 3): a typed new document is not carried across lenses — the
+    // gate offers Save, and Vanilla opens that saved draft. So make it saveable first.
+    const saveNew = isNew(cell.state);
+    if (saveNew) {
+      seen.step = "lens: make the new Bill saveable";
+      await inDoc(app, `(async () => { const d = window.erpDoc; await d.setHeader("supplier", ${JSON.stringify(VENDOR)}); await d.setItem(0, "item_code", ${JSON.stringify(ITEM)}); await d.setItem(0, "qty", 1); await d.setItem(0, "rate", 10); return true; })()`, 60_000);
+      await sleep(2500);
+      const snap = await repaintDoc(app);
+      await closeSourcePickers(app);
+      // Save needs the vendor box and the amount due on the page (the API writes do not repaint it).
+      const total = billCompareTotal(snap.doc);
+      await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(VENDOR)}; const r = document.getElementById("f-billno"); if (r) r.value = ${JSON.stringify(mark)}; const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = ${JSON.stringify(String(total))}; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`);
+      await sleep(500);
+      seen.step = "lens";
+    }
     await go();
     const r = await askedOrMoved(app, before, ["erp"]);
     seen.asked = r.asked;
-    if (r.how === "gate") seen.stayKept = await stayThenDiscard(app, mark, go);
+    if (r.how === "gate" && saveNew) {
+      seen.step = "lens: Stay, then Save";
+      await inDoc(app, click("doc-gate-cancel"));
+      await sleep(1000);
+      seen.stayKept = (await surface(app)) === "doc" && (await inDoc(app, DOC_PAGE)).ref === mark;
+      await go();
+      await expect.poll(() => inDoc(app, GATE), { timeout: 10_000 }).toBe(true);
+      seen.gateOffersSave = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-save"]'); return !!(b && b.offsetParent && !b.disabled); })()`);
+      if (!seen.gateOffersSave) seen.gateSaid = await inDoc(app, `(() => { const h = document.querySelector('[data-testid="doc-commit-gate-hint"]'); const b = document.querySelector('[data-testid="doc-gate-blockers"]'); return [(h && h.textContent) || "", (b && b.textContent) || ""].join(" | ").trim(); })()`);
+      if (seen.gateOffersSave) {
+        await inDoc(app, click("doc-gate-save"));
+        // A Bill's Save asks first whether the goods came with it: Bill only.
+        for (let i = 0; i < 20 && (await surface(app)) === "doc"; i += 1) {
+          if (await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-receive-bill-only"]'); if (b && b.offsetParent) { b.click(); return true; } return false; })()`)) break;
+          await sleep(500);
+        }
+        try {
+          await expect.poll(() => surface(app), { timeout: 30_000 }).toBe("erp");
+        } catch {
+          seen.gateSaid = await inDoc(app, `(document.getElementById("status") || {}).textContent || ""`);
+        }
+        // The saved draft, whatever Vanilla opened (so the probe can delete it).
+        const saved = await inErp(app, `(async () => { const r = await frappe.xcall("frappe.client.get_list", { doctype: "Purchase Invoice", filters: { bill_no: ${JSON.stringify(mark)}, docstatus: 0 }, fields: ["name"], limit_page_length: 1 }); return r[0] ? r[0].name : ""; })()`, 15_000);
+        if (saved && saved !== "TIMEOUT") seen.savedDraft = saved;
+      } else {
+        await inDoc(app, click("doc-gate-discard"));
+      }
+    } else if (r.how === "gate") seen.stayKept = await stayThenDiscard(app, mark, go);
     await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("erp");
     await sleep(1500);
     const f = (await inErp(app, ERP_FORM)) || {};
@@ -400,7 +450,7 @@ async function runCell(app, cell, docs, n) {
     if (!seen.arrived.ok) return seen;
     seen.step = "type";
     if (isTyped(cell.state)) {
-      seen.mark = `ZZNAV${n}`;
+      seen.mark = `ZZNAV${n}-${RUN}`;
       seen.typedLanded = await typeMark(app, seen.mark);
     }
     seen.step = "move";
@@ -436,6 +486,7 @@ export async function runSpine(start) {
         continue;
       }
       const seen = await runCell(app, cell, docs, i);
+      if (seen.savedDraft) docs.made.push(seen.savedDraft);
       const verdict = judgeCell(cell, seen, { other: docs.B });
       report("seen", { id: cell.id, ...seen });
       console.log(cellLine(cell, verdict));
@@ -454,7 +505,9 @@ export async function runSpine(start) {
     }
   } finally {
     if (docs) {
-      const gone = await inErp(app, `(async () => { const out = []; for (const n of ${JSON.stringify([docs.A, docs.B])}) { try { await frappe.xcall("frappe.client.delete", { doctype: "Purchase Invoice", name: n }); out.push(n); } catch (e) { out.push("kept " + n); } } return out; })()`, 30_000).catch(() => "ERR");
+      // The two drafts, and any draft a cell saved (its ref starts ZZNAV — only this probe types that).
+      const gone = await inErp(app, `(async () => { const out = []; const typed = await frappe.xcall("frappe.client.get_list", { doctype: "Purchase Invoice", filters: { bill_no: ["like", "ZZNAV%"], docstatus: 0 }, fields: ["name"], limit_page_length: 0 });
+        for (const n of [...new Set(${JSON.stringify([docs.A, docs.B, ...docs.made])}.concat(typed.map((r) => r.name)))]) { try { await frappe.xcall("frappe.client.delete", { doctype: "Purchase Invoice", name: n }); out.push(n); } catch (e) { out.push("kept " + n); } } return out; })()`, 60_000).catch(() => "ERR");
       report("cleanup", { deleted: gone });
     }
     await app.close().catch(() => {});

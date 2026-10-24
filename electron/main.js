@@ -5266,7 +5266,11 @@ async function showDocForm(skinId, route, opts = {}) {
     syncE2eApi();
   };
 
-  if (surfaceMode === "doc" || skipDirtyGate) {
+  // On a Doc page, opening *another* document leaves this one: ask about unsaved typing, as Home
+  // and Desk do. Skipping the gate whenever the clerk was already on a Doc page let a Drafts row
+  // open another draft over a typed Bill and lose the typing (nav matrix N-1, 2026-10-24). Callers
+  // that already asked (New) pass skipDirtyGate.
+  if (skipDirtyGate || (surfaceMode === "doc" && routesReferToSameDoc(currentRoute, r, ERP_BASE))) {
     await proceed();
     return;
   }
@@ -10717,6 +10721,21 @@ ipcMain.on("open-vanilla-skin", () => {
     // fell through to `/desk` — leaving the payment you were looking at (nav incident
     // 2026-09-10, same root as Recent: doc-form profiles are not the whole skin index).
     if (profileByDoctypeKey(info.doctype) || isShellDocSurface()) {
+      if (surfaceMode === "doc" && isNewDocRecord(info.record)) {
+        // An unsaved new document is not carried across lenses: the gate offers Save, and Vanilla
+        // then opens that saved draft — the route taken before the gate is still `…/new-…`, which
+        // loads a blank form (5zorro 2026-10-24, plan 2026-10-24 answer 3; nav matrix N-2).
+        gateDirtyThen(async () => {
+          const slug = info.doctype;
+          const saved = await erpEval(
+            `(function(){try{var f=window.cur_frm;if(!f||!f.doc||f.is_new())return "";return frappe.router.slug(f.doctype)===${JSON.stringify(slug)}?String(f.doc.name):"";}catch(e){return "";}})()`,
+          );
+          const path = typeof saved === "string" && saved ? `/app/${slug}/${encodeURIComponent(saved)}` : info.path || currentRoute;
+          navDebug("open-vanilla-skin", `${typeof saved === "string" && saved ? "saved draft" : "unsaved new"} → ${path}`);
+          showErp(path, { forceLoad: true, skipDirtyGate: true });
+        });
+        return;
+      }
       showErp(info.path || currentRoute, { forceLoad: true });
       return;
     }

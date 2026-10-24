@@ -103,11 +103,14 @@ shell saw the stand-in Item's route — a real save takes a round trip) the fail
 
 | Finding | Cells | What | Cause | Sorted |
 |---|---|---|---|---|
-| **N-1** | `*/new-typed/other`, `*/draft-typed/other` (7) | From a Bill with unsaved typing, a Drafts-list row opens another draft **without asking** — the typing is gone (the draft came back as ERPNext saved it) | `showDocForm` skips the unsaved gate whenever the clerk is already on a Doc page (`if (surfaceMode === "doc" \|\| skipDirtyGate) proceed()`, since the PO / IR skins, `cb60d5b`) — the Home button, Desk and the lens tab gate, the rail does not | Fix (step 4) |
+| **N-1** | `*/new-typed/other`, `*/draft-typed/other` (7) | From a Bill with unsaved typing, a Drafts-list row opens another draft **without asking** — the typing is gone (the draft came back as ERPNext saved it) | `showDocForm` skips the unsaved gate whenever the clerk is already on a Doc page (`if (surfaceMode === "doc" \|\| skipDirtyGate) proceed()`, since the PO / IR skins, `cb60d5b`) — the Home button, Desk and the lens tab gate, the rail does not | Fixed |
 | **DC-4** | `*/new-typed/reload`, `*/draft-typed/reload` (7) | A reload under typing asks nothing (G23) and the Doc page keeps showing the typing and the dead `new-…` name | — | Build (step 5) |
 
-Seen once, not reproduced in a rerun: `lens/draft-clean/desk` — the Home button left a clean draft on
-the Doc page for 15 s. Watch for it in later runs.
+| **N-2** | `*/new-typed/lens` under answer 3 | "Save draft, then continue" on a lens switch saved the Bill, then opened a **blank** new form in Vanilla | `open-vanilla-skin` took the route before the gate (`…/new-…`); after the save that address is a fresh form | Fixed: for an unsaved new document the handler gates first, then asks ERPNext's form for its saved name and opens that draft |
+| **N-3** | `home/new-typed/desk`, `lens/draft-clean/desk` (intermittent) | Discard on a new Bill, then Desk: the clerk is pulled back onto a blank Bill | Discard runs `frappe.new_doc`; a load of `/desk` armed no route guard (it has no doctype), so the 750 ms route poll read the fresh `new-…` form after the Desk load began and the Doc lens took it | Fixed: Desk arms its own guard (`DESK_INTENT`: accepts any page that is not one document, rejects a form). Probe `nav-desk-after-discard`: old code 3 of 20 tries ended on the Bill, the fix 20 of 20 on Desk |
+
+N-1 fixed too: `showDocForm` gates whenever it opens a *different* document from a Doc page (New
+passes `skipDirtyGate`, as before); its 7 cells pass.
 
 ## 5zorro's answers (2026-10-24)
 

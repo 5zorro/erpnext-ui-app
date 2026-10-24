@@ -85,6 +85,8 @@ const LEAVES = new Set(["desk", "other"]);
  *   focus?: { field?: string, row?: string } | null,
  *   focusWant?: { field: string, row?: string } | null,
  *   backNa?: string,
+ *   gateOffersSave?: boolean,
+ *   savedDraft?: string,
  *   errandWant?: string,
  *   errandItem?: string | null,
  *   reload?: { docName?: string, erpName?: string, docRef?: string, erpRef?: string, status?: string, notice?: boolean } | null,
@@ -125,7 +127,11 @@ export function judgeCell(cell, seen, ctx = {}) {
   let lands;
   const want = {
     desk: () => landed.surface === "erp" && /^\/(app|desk)\/?$/.test(String(landed.route || "")),
-    lens: () => landed.surface === "erp" && landed.doctype === "Purchase Invoice" && (isNew(cell.state) ? isNewName(landed.name) : landed.name === arrived.name),
+    // A typed new document is saved as a draft first, and Vanilla opens that draft (plan answer 3).
+    lens: () =>
+      landed.surface === "erp" &&
+      landed.doctype === "Purchase Invoice" &&
+      (isNew(cell.state) ? (typed ? !!s.savedDraft && landed.name === s.savedDraft : isNewName(landed.name)) : landed.name === arrived.name),
     "errand-abandoned": () => landed.surface === "erp" && landed.doctype === "Item",
     "errand-saved": () => landed.surface === "erp" && landed.doctype === "Item",
     peek: () => landed.surface === "erp" && landed.doctype === "Supplier",
@@ -150,6 +156,13 @@ export function judgeCell(cell, seen, ctx = {}) {
     if (!s.asked) typing = fail("left the document with unsaved typing and asked nothing");
     else if (s.stayKept === false) typing = fail("asked, but Stay lost the typing");
     else typing = pass("asked; Stay kept it");
+  } else if (cell.move === "lens" && isNew(cell.state)) {
+    if (!s.asked) typing = fail("switched lens on an unsaved new document and asked nothing");
+    else if (s.stayKept === false) typing = fail("asked, but Stay lost the typing");
+    else if (!s.gateOffersSave) typing = fail("the gate does not offer Save, so the new document cannot reach Vanilla as a draft");
+    else if (!s.savedDraft) typing = fail("Save did not open a saved draft in Vanilla");
+    else if (s.carried === false) typing = fail("the saved draft in Vanilla does not have the typing");
+    else typing = pass("asked; saved as a draft, opened in Vanilla");
   } else if (s.asked) {
     typing = s.stayKept === false ? fail("asked, but Stay lost the typing") : pass("asked before the move");
   } else if (cell.move === "lens" && s.carried === false) {
@@ -167,6 +180,7 @@ export function judgeCell(cell, seen, ctx = {}) {
   else if (!back) backV = isNew(cell.state) && LEAVES.has(cell.move) ? na("a discarded new document has no way back") : fail("did not come back");
   else if (back.surface !== "doc") backV = fail(`came back to ${back.surface || "?"}`);
   else if (!isNew(cell.state) && back.name !== arrived.name) backV = fail(`came back to ${back.name}, not ${arrived.name}`);
+  else if (isNew(cell.state) && cell.move === "lens" && typed) backV = back.name === s.savedDraft ? pass() : fail(`came back to ${back.name}, not the saved draft ${s.savedDraft || "(none)"}`);
   else if (isNew(cell.state) && !isNewName(back.name)) backV = fail(`came back to ${back.name}, not the new document`);
   else if (s.errandWant && s.errandItem !== s.errandWant) backV = fail(`the line holds ${JSON.stringify(s.errandItem)}, not the saved Item ${s.errandWant}`);
   else if (LEAVES.has(cell.move) && typed && back.ref !== back.savedRef) backV = fail(`after a discard the page shows ${JSON.stringify(back.ref)}, ERPNext has ${JSON.stringify(back.savedRef)}`);

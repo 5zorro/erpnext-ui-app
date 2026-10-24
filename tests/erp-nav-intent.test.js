@@ -25,8 +25,8 @@ describe("resolveErpNavIntent", () => {
     });
   });
 
-  it("clears for destinations no doctype guard can match", () => {
-    for (const dest of ["/desk", "/", "/login", "", null, undefined]) {
+  it("clears for destinations no guard can match", () => {
+    for (const dest of ["/", "/login", "", null, undefined]) {
       assert.deepEqual(resolveErpNavIntent(dest, BASE), { action: "clear" }, String(dest));
     }
   });
@@ -38,13 +38,19 @@ describe("resolveErpNavIntent", () => {
     assert.equal(shouldAcceptErpTrackNav(stale, `${BASE}/app`, BASE), false);
     // … while still accepting a late event from the page we just left.
     assert.equal(shouldAcceptErpTrackNav(stale, `${BASE}/app/payment-entry`, BASE), true);
-    // So /desk must clear rather than arm.
-    assert.equal(resolveErpNavIntent("/desk", BASE).action, "clear");
+    // So /desk must not leave that intent armed: it replaces it with its own.
+    assert.deepEqual(resolveErpNavIntent("/desk", BASE), { action: "arm", path: "/desk" });
   });
 
-  it("does not arm a /desk intent (it could never accept its own arrival)", () => {
-    assert.equal(shouldAcceptErpTrackNav("/desk", `${BASE}/app`, BASE), false);
-    assert.equal(shouldClearErpNavIntent("/desk", `${BASE}/app`, { fromBrowser: true }, BASE), false);
+  it("Desk arms its own intent: it accepts its arrival and rejects a late form from the page left (N-3)", () => {
+    assert.deepEqual(resolveErpNavIntent(`${BASE}/app`, BASE), { action: "arm", path: "/desk" });
+    for (const arrival of [`${BASE}/app`, `${BASE}/desk`, `${BASE}/desk/home`, `${BASE}/app/purchase-invoice`]) {
+      assert.equal(shouldAcceptErpTrackNav("/desk", arrival, BASE), true, arrival);
+    }
+    assert.equal(shouldClearErpNavIntent("/desk", `${BASE}/desk`, { fromBrowser: true }, BASE), true);
+    // Discard on a new Bill left ERPNext on a fresh new form; read after the Desk load began.
+    assert.equal(shouldAcceptErpTrackNav("/desk", `${BASE}/desk/purchase-invoice/new-purchase-invoice-nkuw`, BASE), false);
+    assert.equal(shouldAcceptErpTrackNav("/desk", `${BASE}/app/purchase-invoice/ACC-PINV-2026-00001`, BASE), false);
   });
 });
 
