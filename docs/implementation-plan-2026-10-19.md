@@ -974,7 +974,7 @@ on purpose. Open for 5zorro: DC-4; whether the board should offer only methods t
   item code comes back with neither a name nor a unit: "Import stopped at line 5 of 12: ERPNext did
   not fill in SAMPLE-SKU-01 (…). Lines 1–4 are on the form." Not changed: an item typed by hand into a
   cell while ERPNext is down shows the same blank name — visible on the line, so left as is.
-- **DC-4 (open, 5zorro's call; seen while building R2-1's probe): an unsaved new Bill does not
+- **DC-4 (open — moved to plan 2026-10-24, the navigation spine; seen while building R2-1's probe): an unsaved new Bill does not
   survive the ERPNext page reloading.** With chaos delaying the save call, the reload landed
   *before* it was sent: the reloaded page held a blank new Purchase Invoice, the save ran against
   that, and ERPNext answered "Supplier is required." — while the Doc page still showed the vendor and
