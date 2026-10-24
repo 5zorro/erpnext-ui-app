@@ -771,3 +771,22 @@ account refuses only when ledger entries are made (submit and cancel of the copy
 save; a bill whose Purchase Order is On Hold or Closed cannot be cancelled
 (`check_for_on_hold_or_closed_status` in `on_cancel`), and the PO server itself never checks its
 Sales Order's hold.
+
+## G23 — The ERPNext page never asks "leave?" for typing done in the Doc page (2026-10-24)
+
+Frappe's form adds a `beforeunload` listener the moment it goes dirty (`form.js` `dirty()`; a new
+document is dirty from the start), and the shell answers that listener in `onErpWillPreventUnload`.
+But Chromium runs a page's "leave?" prompt **only if a person has interacted with that page**
+(sticky user activation, `navigator.userActivation.hasBeenActive`). A clerk who types a Bill in the
+Doc page never touches the ERPNext page, so its listener is skipped silently and a reload throws the
+typing away without `will-prevent-unload` ever firing. Proven by `tests/probes/nav-reload-gate`:
+dirty form, listener on, no ask at 4 s or at 22 s after the open; the same reload after one user
+gesture in the ERPNext page (`executeJavaScript(code, true)`) raised the prompt and the shell asked.
+So the shell's own unsaved check (`dirtyState.userEdited`) is the only thing that can guard Doc-page
+typing — Frappe's listener guards only what was typed in Vanilla. It is why R2-1's reload asked
+nothing, and DC-4's cause (plan 2026-10-24).
+
+**Related, probes:** Playwright auto-answers a page's `beforeunload` prompt and throws "No dialog is
+showing" when Electron answered it first; a `page.on("dialog")` listener of the probe's own turns
+that off. A real `dialog.showMessageBoxSync` would block the probe — stub it in main
+(`app.evaluate(({ dialog }) => …)`).

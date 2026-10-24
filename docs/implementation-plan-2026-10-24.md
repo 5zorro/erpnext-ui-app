@@ -1,8 +1,7 @@
 # Implementation plan 2026-10-24 — the navigation spine: a probe per path, and DC-4
 
-> **Status: plan only — nothing built. 5zorro answered 2026-10-24: DC-4 is A (match Vanilla); the
-> axes stand, plus a fourth — fresh vs ongoing state.** Ready to build in the order below; the next
-> session starts here.
+> **Status: building. 5zorro answered 2026-10-24: DC-4 is A (match Vanilla); the axes stand, plus a
+> fourth — fresh vs ongoing state.** Step 1 done (2026-10-24); step 2 next.
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
@@ -21,10 +20,17 @@ gone; stay, and nothing happens. Electron does not show that box itself: the she
 (`will-prevent-unload` → `onErpWillPreventUnload`, `main.js`), lets it through when its own unsaved
 check ran just before (`decideErpUnload`), else asks with its own dialog.
 
-**To check first (not yet explained):** in R2-1's probe the ERPNext page reloaded with the Bill's
-typing in it and no question was asked. Either the form was not `dirty()` (the bridge's writes may
-not set it), or the shell's "recent check" let it through. That decides whether "match Vanilla" is
-already half true.
+**Checked first (build step 1, done 2026-10-24 — probe `nav-reload-gate`, `docs/gotchas.md` G23):**
+R2-1's reload asked nothing because **Chromium runs a page's "leave?" listener only after a person
+has interacted with that page**. The form *is* dirty and Frappe's listener *is* on (a new document is
+dirty from the start), but the clerk types in the Doc page, never in the ERPNext page, so the
+listener is skipped silently and `will-prevent-unload` never fires — at 4 s or 22 s after the open
+alike; the shell's 20 s "recent check" window plays no part. After one gesture in the ERPNext page
+the same reload was asked, and Stay kept the typing. So "match Vanilla" is **not** half true today:
+Frappe's listener guards only typing done in Vanilla, and DC-4 (A) has to come from the shell's own
+unsaved check (`dirtyState.userEdited`). Also seen: after the reload the Doc page's status line
+still names the old `new-purchase-invoice-…` that no longer exists (the stale header DC-4 must
+repaint).
 
 ## DC-4 — two ways
 
@@ -79,7 +85,7 @@ ERPNext-page link from a Doc-skin document; a reload under each state (DC-4).
 
 ## Build order (after 5zorro's answers)
 
-1. Explain the "To check first" above (one probe, read-only).
+1. ~~Explain the "To check first" above (one probe, read-only).~~ Done 2026-10-24, above.
 2. `tests/probes/nav-spine-*.probe.js`, one file per *start from*, each a table of cells (state ×
    move) driven by one runner; tagged `@nav`; makes only `ZZ NAV …` drafts, deleted after.
    `npm run nav:check` runs them all and prints the matrix pass / FAIL / skipped.
