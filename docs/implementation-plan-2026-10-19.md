@@ -928,6 +928,14 @@ Build order: the runner, setup and scenes with the R9 group (the most setup), th
   reader (`reasonFrom`, used by 16 page scripts: payments, void and amend, the method change) is now
   `src/erp-refusal-reason.js`, tested, and falls back to `frappe.last_response` the way the Bill page
   does (R6b-2): "Purchase Order PUR-ORD-2026-00002 status is On Hold." Two copies became one.
+- **DC-2 (R9-1, R10c-1, R6c-4): ERPNext's reason ran into the shell's advice, and two scripts showed
+  its HTML.** ERPNext's messages often end without a full stop ("… disabled accounts: ZZ DF Bank -
+  USE Finish or delete it …"): `endSentence` ends them in the method-change summary, the payment
+  drawer and the just-in-time receipt status. The bridge PO and just-in-time receipt scripts had
+  their own reader that took ERPNext's *first* message as HTML ("<br><strong>ZZ DF Stock -
+  USE</strong>" on the status line); both use the shared `reasonFrom` now — the raised message,
+  stripped. (For R2-2's approval rule that is ERPNext's raised "Can be approved by Guest" rather
+  than the note before it, "Not authorized since Grand Total exceeds limits".)
 - **Noted, not changed:** a blank ERPNext has none of the payment methods the board offers
   (USPS_Check, ACH, DOM_WIRE, INT_WIRE); choosing one in Method… would have every amended bill
   refused. The R9 scene makes them on the sandbox. A real site sets its own up; whether the board

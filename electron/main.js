@@ -97,7 +97,7 @@ import {
 } from "../src/lens-context.js";
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
 import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
-import { PE_REASON_FROM_JS } from "../src/erp-refusal-reason.js";
+import { PE_REASON_FROM_JS, endSentence } from "../src/erp-refusal-reason.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -8908,11 +8908,9 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
     // deletes the draft — nothing links to it yet — and names it if even that fails; a script that
     // died mid-way says nothing about what landed, so it reads as "may already exist".
     const bridge = await erpEval(`(async () => {
-      var serverMsg = function (e) {
-        var msg = (e && e.message) || String(e);
-        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
-        return msg;
-      };
+      ${PE_REASON_FROM_JS}
+      // ERPNext's raised message, HTML stripped (dogfood probe R6c-4: "<br><strong>…" reached the status).
+      var serverMsg = function (e) { return reasonFrom(e && e.message ? e : undefined); };
       try {
         if (!window.frappe || !frappe.db) {
           return { ok: false, step: "build", reason: "ERP Desk not ready" };
@@ -12136,11 +12134,9 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     // so when ERPNext refuses its submit the draft is deleted rather than left for a retry to
     // duplicate (the reuse lookup above only finds submitted receipts) — and named if even that fails.
     const raw = await erpEval(`(async () => {
-      var serverMsg = function (e) {
-        var msg = (e && e.message) || String(e);
-        try { if (frappe.last_response && frappe.last_response._server_messages) msg = JSON.parse(JSON.parse(frappe.last_response._server_messages)[0]).message || msg; } catch (e2) {}
-        return msg;
-      };
+      ${PE_REASON_FROM_JS}
+      // ERPNext's raised message, HTML stripped (dogfood probe R6c-4: "<br><strong>…" reached the status).
+      var serverMsg = function (e) { return reasonFrom(e && e.message ? e : undefined); };
       var ins;
       try {
         ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
@@ -12165,7 +12161,7 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
       }
     })()`);
     if (!raw || !raw.ok || !raw.name) {
-      const why = (raw && raw.reason) || "Item Receipt failed.";
+      const why = endSentence(raw && raw.reason) || "Item Receipt failed.";
       // The script's own failures all say `cancelled: false`; without it the page died mid-way and
       // the receipt may already be submitted (on a saved bill a retry reuses it; see the plan's
       // R6c-4 note for the unsaved one).

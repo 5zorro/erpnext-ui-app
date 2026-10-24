@@ -46,7 +46,7 @@ test("R2-2: a refused bridge PO says so, and leaves no draft", async () => {
     const status = await inDoc(app, `document.getElementById("status").textContent`);
     report("status", { status });
     expect(status).toMatch(/^Line 1 assigned\./);
-    expect(status).toMatch(/The Purchase Order for it was not made: ERPNext refused to submit it \(Not authorized since Grand Total exceeds limits\)\. Nothing was left behind\./);
+    expect(status).toMatch(/The Purchase Order for it was not made: ERPNext refused to submit it \(Can be approved by Guest\)\. Nothing was left behind\./);
     const pos = await inPage(app, async (v) => frappe.xcall("frappe.client.get_list", { doctype: "Purchase Order", filters: { supplier: v }, fields: ["name", "docstatus"] }), made.vendor);
     report("pos", pos);
     expect(pos).toEqual([]);

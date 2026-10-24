@@ -59,6 +59,8 @@ for (const [i, probe] of toRun.entries()) {
 
 const shown = only.length ? rows.filter((r) => only.includes(r.id)) : rows;
 const table = checkTable(shown, tagsByProbe, results);
+// A tag that names no row is judged against the whole table, not the rows asked for.
+table.orphanTags = checkTable(rows, tagsByProbe, results).orphanTags;
 const c = table.counts;
 const summary = `${c.pass} pass · ${c.fail} fail · ${c.yours} yours${c.notRun ? ` · ${c.notRun} not run` : ""}`;
 const md = [`# Dogfood check ${stamp}`, "", summary, "", ...table.lines, ""];

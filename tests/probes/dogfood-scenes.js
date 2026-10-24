@@ -97,6 +97,25 @@ const PAGE_HELPERS = String.raw`
     }
     return done;
   }
+  /** A ZZ warehouse whose stock account is the ZZ account "ZZ DF Stock" (disabled or not, as asked),
+   *  and a ZZ stock item that receives into it by default. */
+  async function ensureZzStores(disabled) {
+    const company = frappe.defaults.get_user_default("Company") || (await list("Company", {}))[0].name;
+    let account = await one("Account", { account_name: "ZZ DF Stock", company });
+    if (!account) {
+      const parent = (await list("Account", { company, account_type: "Stock", is_group: 1 }))[0].name;
+      account = (await insert({ doctype: "Account", account_name: "ZZ DF Stock", parent_account: parent, company, account_type: "Stock" })).name;
+    }
+    let warehouse = await one("Warehouse", { warehouse_name: "ZZ DF Stores", company });
+    if (!warehouse) warehouse = (await insert({ doctype: "Warehouse", warehouse_name: "ZZ DF Stores", company, account })).name;
+    if (!(await one("Item", { item_code: "ZZ-DF-STOCK" }))) {
+      const g = await list("Item Group", { is_group: 0 });
+      await insert({ doctype: "Item", item_code: "ZZ-DF-STOCK", item_name: "ZZ DF stock item", item_group: g[0].name, stock_uom: "Nos", is_stock_item: 1,
+        item_defaults: [{ company, default_warehouse: warehouse }] });
+    }
+    await x("frappe.client.set_value", { doctype: "Account", name: account, fieldname: "disabled", value: disabled ? 1 : 0 });
+    return { warehouse, account };
+  }
   /** Cancel or delete everything a vendor has (bills first, then orders), resuming held orders. */
   async function clearVendor(supplier) {
     const done = [];
@@ -105,7 +124,7 @@ const PAGE_HELPERS = String.raw`
       await tryDo("resume " + po.name, () => x("erpnext.buying.doctype.purchase_order.purchase_order.update_status", { status: "Draft", name: po.name }));
     for (const pe of await list("Payment Entry", { party_type: "Supplier", party: supplier, docstatus: ["<", 2] }, ["name", "docstatus"]))
       await tryDo((pe.docstatus === 1 ? "cancel " : "delete ") + pe.name, () => x(pe.docstatus === 1 ? "frappe.client.cancel" : "frappe.client.delete", { doctype: "Payment Entry", name: pe.name }));
-    for (const dt of ["Purchase Invoice", "Purchase Order"]) {
+    for (const dt of ["Purchase Invoice", "Purchase Receipt", "Purchase Order"]) {
       for (const d of await list(dt, { supplier, docstatus: ["<", 2] }, ["name", "docstatus"], { order_by: "creation desc" })) {
         if (d.docstatus === 1) await tryDo("cancel " + d.name, () => x("frappe.client.cancel", { doctype: dt, name: d.name }));
         else await tryDo("delete " + d.name, () => x("frappe.client.delete", { doctype: dt, name: d.name }));
@@ -242,7 +261,7 @@ export const SCENES = {
     rows: ["R2-2"],
     leaves:
       "Customer ZZ DF CUSTOMER with a submitted Sales Order (customer PO ZZ-DF-BRIDGE) for 1 × ZZ-DF-SERVICE; vendor ZZ DF BRIDGE; and an Authorization Rule: a Purchase Order over 99,000 may only be approved by Guest — so ERPNext saves such a PO but refuses its submit. 🔴 The rule applies to every PO over 99,000 on the site until --clear removes it.",
-    look: "New Bill for ZZ DF BRIDGE, line ZZ-DF-SERVICE × 1 at 100,000 → Assign… → ZZ DF CUSTOMER → the ZZ-DF-BRIDGE order → Apply. Expect the status line: \"Line 1 assigned. The Purchase Order for it was not made: ERPNext refused to submit it (Not authorized since Grand Total exceeds limits). Nothing was left behind.\" and no draft PO for ZZ DF BRIDGE in ERPNext.",
+    look: "New Bill for ZZ DF BRIDGE, line ZZ-DF-SERVICE × 1 at 100,000 → Assign… → ZZ DF CUSTOMER → the ZZ-DF-BRIDGE order → Apply. Expect the status line: \"Line 1 assigned. The Purchase Order for it was not made: ERPNext refused to submit it (Can be approved by Guest). Nothing was left behind.\" and no draft PO for ZZ DF BRIDGE in ERPNext.",
     make: (app) =>
       inPage(
         app,
@@ -270,6 +289,34 @@ export const SCENES = {
             cleared.push("delete rule " + r.name);
           }
           return { cleared };
+        `),
+        null,
+      ),
+  },
+  "jit-receipt-refused": {
+    title: "A warehouse whose stock account ERPNext will not post to (a just-in-time receipt saves but cannot submit)",
+    rows: ["R6c-4"],
+    leaves:
+      "Vendor ZZ DF RECEIVE; the warehouse ZZ DF Stores, whose stock account ZZ DF Stock is disabled — an Item Receipt into it saves but ERPNext refuses its submit; and the item ZZ-DF-STOCK, which receives into ZZ DF Stores by default. All stay (the account enabled by --clear).",
+    look: "New Bill for ZZ DF RECEIVE: a line ZZ-DF-STOCK × 2, Rec'd by someone, then Submit. Expect: the status says ERPNext's reason, the bill is saved as a draft, and there is no draft Item Receipt for ZZ DF RECEIVE in ERPNext.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF RECEIVE";
+          const cleared = await clearVendor(V);
+          await ensureSupplier(V);
+          const stores = await ensureZzStores(true);
+          return { vendor: V, ...stores, cleared };
+        `),
+        null,
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = await clearVendor("ZZ DF RECEIVE");
+          return { reEnabled: (await ensureZzStores(false)).account, cleared };
         `),
         null,
       ),
