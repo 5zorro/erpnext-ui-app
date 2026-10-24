@@ -372,6 +372,13 @@ async function move(app, cell, docs, seen) {
     seen.step = "errand: pick a line";
     // The clerk's Add line (the page's API add does not repaint the table); a blank last line is reused.
     const lastRow = `(() => { const c = [...document.querySelectorAll('input[data-field="item_code"][data-row]')]; const l = c[c.length - 1]; return l ? { row: Number(l.dataset.row), blank: !l.value } : { row: -1, blank: false }; })()`;
+    // The line table paints after the document arrives: wait for its first Item box.
+    try {
+      await expect.poll(async () => ((await soft(inDoc(app, lastRow))) || { row: -1 }).row, { timeout: 20_000 }).toBeGreaterThan(-1);
+    } catch (e) {
+      seen.linesSeen = await soft(inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); const b = document.getElementById("items-body"); return { snapItems: s && s.doc ? (s.doc.items || []).length : -1, name: s && s.doc ? s.doc.name : "", rows: b ? b.querySelectorAll("tr").length : -1, inputs: document.querySelectorAll('input[data-field="item_code"]').length, status: (document.getElementById("status") || {}).textContent, blocked: !!document.querySelector(".form-blocked, [data-blocked='1']") }; })()`));
+      throw e;
+    }
     let last = await inDoc(app, lastRow);
     if (!last.blank) {
       await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-add-line"], [data-testid="doc-add-line"]'); b.click(); return true; })()`);
@@ -564,6 +571,7 @@ async function cruftNow(app, label) {
   }
   const found = cruftFindings({ shelved, recent, submitted, docstatus, atHome: (await surface(app)) === "home", peekStack, parked, navStateBytes });
   console.log(cruftLine(label, found, { drafts: shelved.length, recent: recent.length, submitted: submitted.length, navStateBytes }));
+  report("rail", { label, drafts: shelved.map((d) => d.name), recent: recent.map((h) => h.route) });
   return found;
 }
 
@@ -576,7 +584,10 @@ async function makeDayDraft(app, k) {
   );
   await e2eCall(app, "openErp", `${PI}/${encodeURIComponent(name)}`);
   await waitErpForm(app, "Purchase Invoice", name);
-  await inErp(app, `(async () => { cur_frm.dirty(); await cur_frm.save(); return true; })()`, 30_000);
+  const saved = await inErp(app, `(async () => { cur_frm.dirty(); await cur_frm.save(); return cur_frm.doc.__unsaved ? "unsaved" : "saved " + cur_frm.doc.modified; })()`, 30_000);
+  // No wait for the Drafts list: a clerk saves and moves on (N-5 lost the entry when the next move
+  // reloaded the page before the 750 ms poll took it). The cruft check reads what is left.
+  report("day-draft", { name, saved });
   await goHomeClean(app);
   return name;
 }
@@ -594,7 +605,7 @@ const deleteInErp = (app, name) =>
  */
 export async function runOngoing() {
   const dayLen = Number(process.env.NAV_DAY) || 25;
-  const rand = seeded(Number(process.env.NAV_SEED) || 20261024);
+  const rand = seeded(Number(process.env.NAV_SEED) || 20261024); // which cells, in what order
   const pool = spineCells().filter((c) => !c.skip);
   const failed = [];
   let app = await launch();
@@ -603,15 +614,18 @@ export async function runOngoing() {
   try {
     docs = await findOrMakeDocs(app);
     await setUp(app, docs);
+    // Fixed events on a seeded day: drafts left behind early, two of them deleted straight in
+    // ERPNext later (as a browser tab would) — the cruft check must see what the rail does with them.
+    const makeAt = new Set([2, 5, 8]);
+    const deleteAt = new Set([12, 18]);
     for (let i = 0; i < dayLen; i += 1) {
-      const roll = rand();
-      if (roll < 0.12) {
+      if (makeAt.has(i)) {
         dayDrafts.push(await makeDayDraft(app, dayDrafts.length));
-        report("day", { i, made: dayDrafts[dayDrafts.length - 1] });
+        report("day", { i, made: dayDrafts[dayDrafts.length - 1], drafts: (await e2eCall(app, "getShelved")).map((d) => d.name) });
         continue;
       }
-      if (roll < 0.2 && dayDrafts.length) {
-        const name = dayDrafts.splice(Math.floor(rand() * dayDrafts.length), 1)[0];
+      if (deleteAt.has(i) && dayDrafts.length) {
+        const name = dayDrafts.shift();
         await deleteInErp(app, name);
         report("day", { i, deletedInErp: name });
         continue;

@@ -1,8 +1,10 @@
 # Implementation plan 2026-10-24 — the navigation spine: a probe per path, and DC-4
 
-> **Status: building. 5zorro answered 2026-10-24: DC-4 is A (match Vanilla); the axes stand, plus a
-> fourth — fresh vs ongoing state.** Steps 1–2 done, step 4's first run sorted (2026-10-24); next: his
-> answers 3–4 into the matrix, fix N-1, step 3 (ongoing run), DC-4.
+> **Status: built 2026-10-24 — steps 1–6 done.** `npm run nav:check -- --ongoing`: 109 / 109 fresh
+> cells and 33 / 33 after a long session pass, cruft check clean (`test-logs/nav-check/2026-10-24T08-36-56/`).
+> Findings N-1 … N-7 fixed, DC-4 built (A), 5zorro's answers 3–4 in; rules folded into HANDOFF
+> § Navigation spine. Left for 5zorro: the feel (dogfood) and whether Submitted should follow the
+> last *opened* rather than the last *submitted* (below).
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
@@ -111,6 +113,28 @@ shell saw the stand-in Item's route — a real save takes a round trip) the fail
 
 N-1 fixed too: `showDocForm` gates whenever it opens a *different* document from a Doc page (New
 passes `skipDirtyGate`, as before); its 7 cells pass.
+
+## Built (2026-10-24)
+
+| Step | What | Where |
+|---|---|---|
+| 1 | Why a reload under Doc typing asks nothing — Chromium skips the "leave?" of a page nobody touched (G23) | probe `nav-reload-gate` |
+| 2 | The matrix: 7 starts × 4 states × 7 moves (109 cells), judged on lands / typing / back / focus | `src/nav-spine.js`, `tests/probes/nav-spine*.js`, `npm run nav:check` |
+| 3 | The long session: a seeded day of cells with drafts made and deleted in ERPNext, then the Drafts / Recent cells again and the cruft check, then a restart | `nav-spine-ongoing`, `src/nav-cruft.js`, `nav:check -- --ongoing` |
+| 4 | Findings sorted and fixed: N-1, N-2, N-3 (table above); **N-4** — the startup / re-login prune asked ERPNext for a Recent row's URL-encoded name (`ALPINE%20SUPPLY%20CO`) and dropped rows whose name has a space (`navRecordOf` decodes; found by the cruft check) | `b7d9c34`, `b376e45` |
+| 4b | **N-5** — a Vanilla save reaches Drafts on the 750 ms route poll; a load that replaced the page first lost it (the long-session day saved 3 drafts and moved on: none reached Drafts) → `loadErpUrl` drains first (after: 3 of 3). **N-6** — a draft deleted in ERPNext mid-session stayed on Drafts until a restart (the cruft check: 2 of 2 after the day, clean after a restart) → Home re-checks the rail at most once a minute | `main.js` `loadErpUrl`, `showHome`; `nav-prune.js` `shouldPruneOnHome` |
+| 4c | **N-7** — Vanilla open of a document, Doc tab clicked at once: the load committed under the Doc page and cut off its reads — no lines, "The ERPNext page reloaded before the step finished", never recovered (made likelier by N-5's drain delaying the load). A load the shell started from Vanilla / Home that lands under the Doc page now repaints it silently (the move's origin is taken when it is asked, and a forced reopen's two loads share it) | `erp-reload-notice.js`, `main.js` `loadErpUrl` |
+| 5 | DC-4 (A): after a load of the ERPNext page the shell did not start, the Doc page repaints from the reloaded form (header boxes forced) and says what was lost; during a Save, that it may or may not have saved | `src/erp-reload-notice.js`, `d6d0f14`, `b376e45` |
+| 6 | HANDOFF rule: a navigation change runs `npm run nav:check` before and after | HANDOFF § Navigation spine |
+
+Answer 4 checked by `leaves-records/nav-submitted-backtrack` (leaves two cancelled Bills): both
+submitted Bills are on Submitted, newest first, once each, and the older reopens in the Doc lens
+after a new Bill. **Reopening it does not move it up** — Submitted is in submission order, not
+visit order. 5zorro's words were *"the correct order of deduplicated stuff I worked on recently"*;
+if "worked on" means opened, Submitted should re-sort on open — his call.
+
+Not re-run on the old code (the matrix's first run is the "before" for N-1 and DC-4; N-3 has its
+20-try probe; N-2 was found under answer 3, a new rule): none outstanding.
 
 ## 5zorro's answers (2026-10-24)
 

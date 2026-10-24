@@ -15,6 +15,7 @@ import { normalizeAppRoute, isNewDocRecord } from "./route-info.js";
  * @param {{
  *   surfaceMode: string,
  *   shellLoading: boolean,   the shell started this load (its load waiter is set)
+ *   shellLoadFrom?: string,  the surface the shell's load was started from
  *   docRoute: string,        the route the Doc page is showing
  *   loadedUrl: string,       what the ERPNext page committed
  *   userEdited: boolean,     unsaved typing on the Doc page
@@ -25,11 +26,17 @@ import { normalizeAppRoute, isNewDocRecord } from "./route-info.js";
  * @returns {{ doctype: string, typed: boolean, wasNew: boolean, notice: string } | null}
  */
 export function erpReloadUnderDoc(s) {
-  if (!s || s.surfaceMode !== "doc" || s.shellLoading) return null;
+  if (!s || s.surfaceMode !== "doc") return null;
+  // The Doc page's own load: it paints what it asked for.
+  if (s.shellLoading && s.shellLoadFrom === "doc") return null;
   const doc = normalizeAppRoute(s.docRoute || "", s.erpBase);
   const loaded = normalizeAppRoute(s.loadedUrl || "", s.erpBase);
   // A reload of that form: the same doctype comes back (a new document under a new `new-…` name).
   if (!doc.doctype || !doc.record || loaded.doctype !== doc.doctype) return null;
+  // A load the shell started from Vanilla or Home that lands after the clerk is already on the Doc
+  // page (Doc tab clicked at once): it cut off the page's own reads, which left no lines (nav matrix
+  // N-7). Nothing typed was lost — the open was gated — so repaint, say nothing.
+  if (s.shellLoading) return { doctype: doc.doctype, typed: false, wasNew: isNewDocRecord(doc.record), notice: "" };
   const typed = !!s.userEdited;
   const wasNew = isNewDocRecord(doc.record);
   const midSave = !!s.midSave;

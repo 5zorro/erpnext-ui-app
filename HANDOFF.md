@@ -469,6 +469,16 @@ fixed (2026-10-24):
   Doc page (`docs/gotchas.md` G23) — so after a load the shell did not start, the Doc page repaints
   from the reloaded form and says what was lost; during a Save it says the save may or may not have
   landed (`erp-reload-notice.js`). Vanilla keeps nothing across a reload, and nor does the shell.
+- **The rail's rows are pruned at login *and* when Home is shown** (at most once a minute,
+  `shouldPruneOnHome`): a draft deleted in a browser tab mid-session used to stay on Drafts until the
+  next start (N-6, found by the long-session run). A route's record is decoded before ERPNext is
+  asked (N-4).
+- **A Vanilla save reaches Drafts on the route poll (750 ms)**; every shell load of the ERPNext page
+  (`loadErpUrl`) takes it first, capped at 1.5 s — a save followed at once by a load that replaced
+  the page lost its Drafts row (N-5).
+- **Any load of the ERPNext page that lands under the Doc page repaints it** — unless the Doc page
+  started it: an ERPNext reload (said, DC-4) and a Vanilla open overtaken by a quick Doc-tab click
+  (silent, N-7). `loadErpUrl` records the surface the move was *asked from*, before its drain.
 - **Recent keeps one row per doctype — a feature.** The way back to a submitted document is the
   rail's *Submitted* section (newest first, once each) — 5zorro 2026-10-24.
 

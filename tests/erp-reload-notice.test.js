@@ -34,8 +34,17 @@ test("nothing typed: still a reload to repaint, but nothing to say", () => {
   assert.equal(r.notice, "");
 });
 
-test("not a reload under the Doc page: the shell's own load, another surface, another page", () => {
-  assert.equal(erpReloadUnderDoc({ ...base, shellLoading: true }), null);
+test("a shell load started from Vanilla that lands under the Doc page is repainted, silently (N-7)", () => {
+  assert.deepEqual(erpReloadUnderDoc({ ...base, shellLoading: true, shellLoadFrom: "erp" }), {
+    doctype: "purchase-invoice",
+    typed: false,
+    wasNew: true,
+    notice: "",
+  });
+});
+
+test("not a reload under the Doc page: the Doc page's own load, another surface, another page", () => {
+  assert.equal(erpReloadUnderDoc({ ...base, shellLoading: true, shellLoadFrom: "doc" }), null);
   assert.equal(erpReloadUnderDoc({ ...base, surfaceMode: "erp" }), null);
   assert.equal(erpReloadUnderDoc({ ...base, loadedUrl: `${BASE}/login` }), null);
   assert.equal(erpReloadUnderDoc({ ...base, loadedUrl: `${BASE}/app/supplier/X` }), null);

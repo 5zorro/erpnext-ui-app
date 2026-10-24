@@ -19,6 +19,7 @@ import {
   pruneVanished,
   recordsToVerify,
   vanishedKey,
+  shouldPruneOnHome,
 } from "../src/nav-prune.js";
 import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
 import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
@@ -3579,6 +3580,8 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
 
 /** @type {{ finish: () => void, refuse?: () => void } | null} */
 let erpLoadWaiter = null;
+/** The surface the clerk was on when the shell's pending load of the ERPNext page started (N-7). */
+let erpLoadStartedFrom = "";
 
 /** "bill", "purchase order", … — how the Doc page names its document in a sentence. */
 function docLabelForRoute(route) {
@@ -3591,6 +3594,7 @@ function reloadUnderDocFor(url) {
   return erpReloadUnderDoc({
     surfaceMode,
     shellLoading: !!erpLoadWaiter,
+    shellLoadFrom: erpLoadStartedFrom,
     docRoute: currentRoute,
     loadedUrl: url,
     userEdited: !!dirtyState.userEdited,
@@ -3722,7 +3726,18 @@ function onErpUnloadRefused() {
  *   chose to stay on a Vanilla page with unsaved changes (`will-prevent-unload`). A timeout
  *   still resolves true, as before.
  */
-function loadErpUrl(url) {
+/** @param {string} url @param {string} [askedFrom] the surface the move was asked from (default: now) */
+function loadErpUrl(url, askedFrom) {
+  // A save made in Vanilla reaches Drafts on the next route poll (750 ms); a load that replaces the
+  // page first threw it away (nav matrix N-5: Ctrl+S, then a Recent row at once). Take it now —
+  // capped, so a stuck page cannot hold the navigation.
+  const from = askedFrom || surfaceMode; // where the clerk asked from — they may be on the Doc page by the time it loads
+  const drained = Promise.race([drainErpSaveIntoShelved().catch(() => {}), sleep(1500)]);
+  return drained.then(() => loadErpUrlNow(url, from));
+}
+
+/** @param {string} url @param {string} from the surface the load was asked from */
+function loadErpUrlNow(url, from) {
   return new Promise((resolve) => {
     if (!erp || erp.webContents.isDestroyed()) {
       resolve(false);
@@ -3743,6 +3758,7 @@ function loadErpUrl(url) {
     };
     const finish = () => settle(true);
     erpLoadWaiter = { finish, refuse: () => settle(false) };
+    erpLoadStartedFrom = from;
     erp.webContents.once("did-finish-load", finish);
     erp.webContents.loadURL(url);
     setTimeout(finish, 10000);
@@ -4504,8 +4520,15 @@ async function gatePayOutstandingDirtyThen(doNav) {
   });
 }
 
+/** When Home last re-checked the rail against ERPNext (N-6). */
+let homePruneAt = 0;
+
 function showHome() {
   gateDirtyThen(() => {
+    if (shouldPruneOnHome(homePruneAt, Date.now())) {
+      homePruneAt = Date.now();
+      pruneVanishedNavEntries("home").catch((e) => navDebug("nav-prune", `failed: ${e && e.message}`));
+    }
     endShellDetour("home");
     collapsePeekStackHard("home");
     parkedDocSurface = null;
@@ -4715,8 +4738,10 @@ async function erpForceReopenRoute(appPath, opts = {}) {
   } else {
     navDebug("force-reopen-load", path);
   }
-  if (!(await loadErpUrl(erpUrl(ERP_BASE, "/app")))) return false;
-  if (!(await loadErpUrl(target))) return false;
+  // Both loads are one move, asked from where the clerk was before the first (N-7).
+  const from = surfaceMode;
+  if (!(await loadErpUrl(erpUrl(ERP_BASE, "/app"), from))) return false;
+  if (!(await loadErpUrl(target, from))) return false;
   trackNav(target, { fromBrowser: false });
   return true;
 }

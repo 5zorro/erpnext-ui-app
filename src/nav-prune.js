@@ -113,3 +113,18 @@ export function pruneVanished(list, vanished, erpBase) {
   }
   return { kept, dropped };
 }
+
+/** Home re-checks the rail at most this often (each check is one query per doctype). */
+export const HOME_PRUNE_MIN_MS = 60_000;
+
+/**
+ * Rows deleted in ERPNext while the app runs (a browser tab, another clerk) stayed on the Drafts
+ * list until the next start (nav matrix N-6, 2026-10-24): the prune ran at login only. Home is where
+ * the clerk next reads the rail, so it asks there too — at most once a minute.
+ * @param {number} lastAt when Home last asked (ms; 0 = never)
+ * @param {number} now
+ * @param {number} [minMs]
+ */
+export function shouldPruneOnHome(lastAt, now, minMs = HOME_PRUNE_MIN_MS) {
+  return !(Number(lastAt) > 0) || Number(now) - Number(lastAt) >= minMs;
+}
