@@ -79,6 +79,24 @@ const PAGE_HELPERS = String.raw`
     await x("frappe.client.set_value", { doctype: "Account", name: account, fieldname: "disabled", value: disabled ? 1 : 0 });
     return account;
   }
+  async function ensureCustomer(name) {
+    if (await one("Customer", { customer_name: name })) return (await list("Customer", { customer_name: name }))[0].name;
+    const g = await list("Customer Group", { is_group: 0 });
+    const t = await list("Territory", { is_group: 0 });
+    return (await insert({ doctype: "Customer", customer_name: name, customer_group: g[0] && g[0].name, territory: t[0] && t[0].name })).name;
+  }
+  /** Cancel and delete the Sales Orders whose customer PO no. starts with \`tag\` (resuming held ones). */
+  async function clearOrders(tag) {
+    const done = [];
+    const tryDo = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { done.push(label + " FAILED: " + ((e && e.message) || "")); } };
+    for (const so of await list("Sales Order", { po_no: ["like", tag + "%"], docstatus: ["<", 2] }, ["name", "docstatus", "status"])) {
+      if (so.docstatus === 1 && (so.status === "On Hold" || so.status === "Closed"))
+        await tryDo("resume " + so.name, () => x("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "Draft", name: so.name }));
+      if (so.docstatus === 1) await tryDo("cancel " + so.name, () => x("frappe.client.cancel", { doctype: "Sales Order", name: so.name }));
+      await tryDo("delete " + so.name, () => x("frappe.client.delete", { doctype: "Sales Order", name: so.name }));
+    }
+    return done;
+  }
   /** Cancel or delete everything a vendor has (bills first, then orders), resuming held orders. */
   async function clearVendor(supplier) {
     const done = [];
@@ -215,6 +233,43 @@ export const SCENES = {
         maker(String.raw`
           const cleared = await clearVendor("ZZ DF PAY REFUSED");
           return { reEnabled: await ensureZzBank(false), cleared };
+        `),
+        null,
+      ),
+  },
+  "bridge-po-refused": {
+    title: "A Sales Order for a 150,000 service, and a rule that stops any Purchase Order over 99,000",
+    rows: ["R2-2"],
+    leaves:
+      "Customer ZZ DF CUSTOMER with a submitted Sales Order (customer PO ZZ-DF-BRIDGE) for 1 × ZZ-DF-SERVICE; vendor ZZ DF BRIDGE; and an Authorization Rule: a Purchase Order over 99,000 may only be approved by Guest — so ERPNext saves such a PO but refuses its submit. 🔴 The rule applies to every PO over 99,000 on the site until --clear removes it.",
+    look: "New Bill for ZZ DF BRIDGE, line ZZ-DF-SERVICE × 1 at 100,000 → Assign… → ZZ DF CUSTOMER → the ZZ-DF-BRIDGE order → Apply. Expect the status line: \"Line 1 assigned. The Purchase Order for it was not made: ERPNext refused to submit it (Not authorized since Grand Total exceeds limits). Nothing was left behind.\" and no draft PO for ZZ DF BRIDGE in ERPNext.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF BRIDGE";
+          const cleared = [...(await clearVendor(V)), ...(await clearOrders("ZZ-DF-BRIDGE"))];
+          const { company } = await ensureZzExpense();
+          await ensureSupplier(V);
+          const customer = await ensureCustomer("ZZ DF CUSTOMER");
+          const so = await submit({ doctype: "Sales Order", customer, po_no: "ZZ-DF-BRIDGE", delivery_date: addDays(14),
+            items: [{ item_code: "ZZ-DF-SERVICE", qty: 1, rate: 150000, delivery_date: addDays(14) }] });
+          let rule = await one("Authorization Rule", { transaction: "Purchase Order", based_on: "Grand Total", approving_user: "Guest" });
+          if (!rule) rule = (await insert({ doctype: "Authorization Rule", transaction: "Purchase Order", based_on: "Grand Total", value: 99000, company, approving_user: "Guest" })).name;
+          return { vendor: V, customer, salesOrder: so.name, line: so.items[0].name, rule, cleared };
+        `),
+        null,
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = [...(await clearVendor("ZZ DF BRIDGE")), ...(await clearOrders("ZZ-DF-BRIDGE"))];
+          for (const r of await list("Authorization Rule", { transaction: "Purchase Order", based_on: "Grand Total", approving_user: "Guest" })) {
+            await x("frappe.client.delete", { doctype: "Authorization Rule", name: r.name });
+            cleared.push("delete rule " + r.name);
+          }
+          return { cleared };
         `),
         null,
       ),

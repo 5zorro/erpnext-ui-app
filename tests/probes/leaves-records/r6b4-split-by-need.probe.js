@@ -22,6 +22,7 @@ import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../../e2e/helpers.js";
 import { sleep, inDoc, inErp, keys, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
 import { parseCostingNote } from "../../../src/costing-assumptions.js";
+import { inDialog, clickPrimary, nextStep as next, assignToOrders } from "../assign-helpers.js";
 
 const CUSTOMER = "ZZ R6B4 CUSTOMER";
 const TAG = `ZZR6B4-${Date.now() % 100000}`;
@@ -94,16 +95,6 @@ const cleanup = (app) =>
     90_000,
   );
 
-const inDialog = (app, js) => inDoc(app, `(() => { const d = document.querySelector('[data-testid="bill-allocation-picker"]'); if (!d) return "NO DIALOG"; ${js} })()`);
-const clickPrimary = (app) => inDialog(app, `d.querySelector('[data-act="pick"]').click(); return true;`);
-const title = (app) => inDialog(app, `return d.querySelector("[data-alloc-title]").textContent;`);
-/** Click the dialog's main button, then wait until its title says the next step. */
-async function next(app, want) {
-  await clickPrimary(app);
-  await expect.poll(() => title(app), { timeout: 20_000 }).toMatch(want);
-  report("step", { title: await title(app) });
-}
-
 test("a Bill line split by need, with the costing box and a fill from stock", async () => {
   const app = await launchShell();
   try {
@@ -130,34 +121,14 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     report("plan", plan && plan.plan ? { gets: plan.plan.rows.map((r) => r.gets), needsConfirm: plan.plan.needsConfirm } : plan);
     expect(plan.plan.rows.map((r) => r.gets)).toEqual([4, 1]);
 
-    // The real dialog: Assign → customer → Sales Orders → Project → costing.
-    // The vendor was set through the page's API, which does not repaint the page: show it in the box
-    // as a repaint would, since Assign reads the vendor from there.
-    await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = "ALPINE SUPPLY CO"; return true; })()`);
-    // The vendor's source picker may still be open (a PO's sources): close it first.
-    report("modals-before", await inDoc(app, `[...document.querySelectorAll(".src-back")].map((b) => b.dataset.testid || b.className)`));
-    await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
-    await sleep(1000);
-    const opened = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-assign-0"]'); if (!b) return false; b.click(); return true; })()`);
-    await sleep(1000);
-    report("assign-button", { opened, status: await inDoc(app, `document.getElementById("status").textContent`), modals: await inDoc(app, `[...document.querySelectorAll(".src-back")].map((b) => b.dataset.testid || b.className)`) });
-    expect(opened).toBe(true);
-    await sleep(1500);
-    await expect.poll(() => title(app), { timeout: 10_000 }).toMatch(/pick customer/);
-    await next(app, /Sales order/); // all customers → Sales Orders
-    await sleep(500);
-    const picked = await inDialog(
-      app,
-      `const want = [${JSON.stringify(A.name)}, ${JSON.stringify(B.name)}, ${JSON.stringify(C.name)}]; let n = 0; for (const b of d.querySelectorAll(".src-item")) { if (want.some((w) => b.textContent.includes(w))) { b.click(); n++; } } return n;`,
-    );
-    report("picked", { picked });
-    await sleep(500);
-    // The list redraws on each click; pick again any that a redraw lost.
-    const selected = await inDialog(app, `return [...d.querySelectorAll(".src-item.selected")].map((b) => b.textContent);`);
-    report("selected", selected);
-    // SO-C is paused after it was picked (the list offers no held order).
-    report("hold-c", await inErp(app, `(async () => { try { await frappe.xcall("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "On Hold", name: ${JSON.stringify(C.name)} }); return "held"; } catch (e) { ${why} } })()`, 20_000));
-    await next(app, /Project/);
+    // The real dialog: Assign → customer → Sales Orders → Project → costing. SO-C is paused after it
+    // was picked (the list offers no held order).
+    await assignToOrders(app, {
+      vendor: "ALPINE SUPPLY CO",
+      salesOrders: [A.name, B.name, C.name],
+      beforeProject: async () =>
+        report("hold-c", await inErp(app, `(async () => { try { await frappe.xcall("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "On Hold", name: ${JSON.stringify(C.name)} }); return "held"; } catch (e) { ${why} } })()`, 20_000)),
+    });
     await next(app, /check the costing/); // "Apply to line" stops on the costing box
     const box = await inDialog(app, `const c = d.querySelector('[data-testid="costing-box"]'); return c ? { text: c.textContent, primary: d.querySelector('[data-act="pick"]').textContent } : null;`);
     report("costing", box);
