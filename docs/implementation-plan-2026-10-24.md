@@ -4,9 +4,16 @@
 > (`test-logs/nav-check/2026-10-24T10-29-51/`): 109 / 109 fresh cells; the long session's cells
 > and cruft check pass after two probe-only fixes (an Esc sent mid-navigation is pressed again; each
 > cell sets the Doc lens, since forms follow the last lens). Findings N-1 … N-7 fixed, DC-4 built
-> (A), 5zorro's answers 3–4 in; rules folded into HANDOFF § Navigation spine. Left for 5zorro: the
-> feel (dogfood), and whether Submitted should follow the last *opened* rather than the last
-> *submitted* (below).
+> (A), 5zorro's answers 3–4 in; rules folded into HANDOFF § Navigation spine.
+>
+> **Next, in this order (5zorro 2026-10-24 — recorded, not started; he is away and will come back to
+> it):**
+> 1. **Build answer 5** below — a sort toggle on the Submitted section.
+> 2. **Then the review of everything this session built** (`03b3b42` … `fa0bb6e6`): the two-part
+>    end-of-session review — the stability / security, maintainability, performance pass over the
+>    nav fixes N-1 … N-7, DC-4, the matrix driver and `nav:check`, and moving any context-only
+>    detail into durable files. 5zorro asked that it wait until answer 5 is built.
+> 3. Then session 6 of plan 10-19 (R7 + R8 + R12). 5zorro still dogfoods the feel.
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
@@ -160,3 +167,11 @@ Not re-run on the old code (the matrix's first run is the "before" for N-1 and D
    a new probe submits a `ZZ-NAV` draft, opens a new Bill, and goes back through Submitted (leaves a
    submitted record — `leaves-records/`). The ongoing run checks Submitted stays deduplicated and
    newest-first.
+5. **Submitted's order — a toggle, not a choice for every user** (2026-10-24, reply to the open
+   question under *Built*): *"I don't want to choose for all users. Can there be a toggle slider for
+   sort where sort is by submission date or by viewed date. Then I can have it by default
+   'submission date' but be able to switch to viewed date if I'm working on a specific question and
+   have bounced between some specific forms from today."* So the Submitted section gets a two-way
+   switch: **Submitted** (default — newest submission first, as today) ⇄ **Viewed** (the one opened
+   most recently first). The choice is remembered per user (a pref, as the rail's collapse is), and
+   opening a document from Submitted records when it was viewed. Not built yet — next.
