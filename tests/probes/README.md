@@ -77,6 +77,12 @@ never by changing a site setting.
   both: `r6b-due-date-schedule.probe.js` (it failed until R6b-1 was fixed, and is the regression check now).
 - Sandbox records a probe makes are named `ZZ…` and deleted in `finally`. It saves a document only
   when that is the question, and deletes it after.
+- "ERPNext stops" without stopping Docker: `erpDown(app, part | [parts])` makes the app's session
+  refuse every request whose URL contains it, `erpDownAfter(app, part, n)` lets the first `n`
+  through, `erpUp(app)` lifts it — always in `finally`. Find the URL first (log
+  `session.defaultSession.webRequest.onBeforeRequest` once): the Bill's item lookups are
+  `run_doc_method`, its background PO/receipt reads `/api/resource/…`, live link searches
+  `search_link`.
 - To see a page without opening a window, capture it (`wc.capturePage()` from `app.evaluate`) into
   a folder the run names — `r6b4-split-by-need` does it when `PROBE_SHOTS=<dir>` is set.
 - Print what was seen with `report(label, obj)` (`PROBE <label> {…}`) as well as asserting, so a

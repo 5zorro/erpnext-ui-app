@@ -77,8 +77,25 @@ const backup = fs.mkdtempSync(path.join(os.tmpdir(), "erpnext-ui-probe-prefs-"))
 for (const f of before) fs.copyFileSync(path.join(PREFS, f), path.join(backup, f));
 console.log(`prefs backed up: ${before.length} file(s) → ${backup}`);
 
+let restored = false;
+function restorePrefs() {
+  if (restored) return;
+  restored = true;
+  for (const f of before) fs.copyFileSync(path.join(backup, f), path.join(PREFS, f));
+  const created = jsonIn(PREFS).filter((f) => !before.includes(f));
+  for (const f of created) fs.rmSync(path.join(PREFS, f));
+  fs.rmSync(backup, { recursive: true, force: true });
+  console.log(`prefs restored: ${before.length} file(s)${created.length ? `; removed new: ${created.join(", ")}` : ""}`);
+}
+
 // Ctrl+C reaches the probe too (same terminal) and ends it; this process stays up to restore.
 process.on("SIGINT", () => console.log("\nCtrl+C — restoring the prefs after the probe stops…"));
+// A SIGTERM (`timeout`, a killed parent) reaches only this process: restore now, then go
+// (2026-10-23: a `timeout`-wrapped run left its backup behind, unrestored).
+process.on("SIGTERM", () => {
+  restorePrefs();
+  process.exit(143);
+});
 
 let status = 1;
 try {
@@ -91,10 +108,6 @@ try {
   if (run.error) console.error(`could not run the probe: ${run.error.message}`);
   status = run.status ?? 1;
 } finally {
-  for (const f of before) fs.copyFileSync(path.join(backup, f), path.join(PREFS, f));
-  const created = jsonIn(PREFS).filter((f) => !before.includes(f));
-  for (const f of created) fs.rmSync(path.join(PREFS, f));
-  fs.rmSync(backup, { recursive: true, force: true });
-  console.log(`prefs restored: ${before.length} file(s)${created.length ? `; removed new: ${created.join(", ")}` : ""}`);
+  restorePrefs();
 }
 process.exit(status);

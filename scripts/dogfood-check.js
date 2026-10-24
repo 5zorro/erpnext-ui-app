@@ -3,7 +3,7 @@
  * `npm run dogfood:check [-- <row> …]` — the check before 5zorro dogfoods (plan 10-19 § Dogfood
  * check and setup): runs every probe tagged `@dogfood <row>` (or only those for the rows named),
  * one at a time through `run-probe.js` (the app must be closed; prefs backed up and restored), then
- * prints the plan's *Dogfood residuals* table as pass / FAIL / yours. Probes that leave records run
+ * prints the *Dogfood residuals* table (from the newest dated plan that has one) as pass / FAIL / yours. Probes that leave records run
  * too — this is for the sandbox (each one checks it is, before writing). Each probe's output goes to
  * `test-logs/dogfood-check/<stamp>/<probe>.log`, and the table to `…/table.md`.
  */
@@ -14,7 +14,18 @@ import { fileURLToPath } from "node:url";
 import { residualRows, dogfoodTags, checkTable } from "../src/dogfood-check.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PLAN = path.join(ROOT, "docs", "implementation-plan-2026-10-19.md");
+// The newest dated plan that has a Dogfood residuals table (the table moves when a plan closes).
+const PLAN = fs
+  .readdirSync(path.join(ROOT, "docs"))
+  .filter((f) => /^implementation-plan-\d{4}-\d{2}-\d{2}\.md$/.test(f))
+  .sort()
+  .reverse()
+  .map((f) => path.join(ROOT, "docs", f))
+  .find((f) => /^##\s+Dogfood residuals\s*$/m.test(fs.readFileSync(f, "utf8")));
+if (!PLAN) {
+  console.error("no docs/implementation-plan-*.md has a '## Dogfood residuals' table");
+  process.exit(2);
+}
 const PROBES = path.join(ROOT, "tests", "probes");
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));

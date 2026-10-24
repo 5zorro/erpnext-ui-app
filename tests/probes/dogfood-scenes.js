@@ -90,7 +90,15 @@ const PAGE_HELPERS = String.raw`
   async function clearOrders(tag) {
     const done = [];
     const tryDo = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { done.push(label + " FAILED: " + ((e && e.message) || "")); } };
-    for (const so of await list("Sales Order", { po_no: ["like", tag + "%"], docstatus: ["<", 2] }, ["name", "docstatus", "status"])) {
+    const orders = await list("Sales Order", { po_no: ["like", tag + "%"], docstatus: ["<", 2] }, ["name", "docstatus", "status"]);
+    // Purchase Orders made for them (a bridge PO) first — an order cannot be cancelled under one.
+    const poLines = orders.length ? await x("frappe.client.get_list", { doctype: "Purchase Order Item", parent: "Purchase Order", filters: [["sales_order", "in", orders.map((o) => o.name)]], fields: ["parent"], limit_page_length: 0 }) : [];
+    for (const po of [...new Set(poLines.map((l) => l.parent))]) {
+      const d = (await list("Purchase Order", { name: po }, ["name", "docstatus"]))[0];
+      if (d && d.docstatus === 1) await tryDo("cancel " + po, () => x("frappe.client.cancel", { doctype: "Purchase Order", name: po }));
+      if (d) await tryDo("delete " + po, () => x("frappe.client.delete", { doctype: "Purchase Order", name: po }));
+    }
+    for (const so of orders) {
       if (so.docstatus === 1 && (so.status === "On Hold" || so.status === "Closed"))
         await tryDo("resume " + so.name, () => x("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "Draft", name: so.name }));
       if (so.docstatus === 1) await tryDo("cancel " + so.name, () => x("frappe.client.cancel", { doctype: "Sales Order", name: so.name }));
@@ -379,6 +387,92 @@ export const SCENES = {
       ),
     clear: (app) => inPage(app, maker(`return { cleared: (await clearVendor("ZZ DF MANY")).length };`), null, 300_000),
   },
+  "split-by-need": {
+    title: "Two Sales Orders for one item, needing 6 and 2",
+    rows: ["R6b-4"],
+    leaves:
+      "Customer ZZ DF CUSTOMER with two submitted Sales Orders for SAMPLE-SKU-01: customer PO ZZ-DF-SPLIT-A needs 6, ZZ-DF-SPLIT-B needs 2. --clear cancels the Purchase Orders made for them, then the orders.",
+    look: "New Bill (any vendor), a line SAMPLE-SKU-01 × 8, then × 5, then × 10, each Assign… → ZZ DF CUSTOMER → both ZZ-DF-SPLIT orders → Apply. Then open each Sales Order: the line's Sources cell ends with Costing. (The plan's R6b-4 row says what to expect.)",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = await clearOrders("ZZ-DF-SPLIT");
+          const customer = await ensureCustomer("ZZ DF CUSTOMER");
+          const orders = [];
+          for (const [suffix, qty] of [["A", 6], ["B", 2]]) {
+            const so = await submit({ doctype: "Sales Order", customer, po_no: "ZZ-DF-SPLIT-" + suffix, delivery_date: addDays(14),
+              items: [{ item_code: "SAMPLE-SKU-01", qty, rate: 25, delivery_date: addDays(14) }] });
+            orders.push(so.name + " needs " + qty);
+          }
+          return { customer, orders, cleared };
+        `),
+        null,
+      ),
+    clear: (app) => inPage(app, maker(`return { cleared: await clearOrders("ZZ-DF-SPLIT") };`), null),
+  },
+  "no-terms-vendor": {
+    title: "A vendor with no payment terms",
+    rows: ["R6b-1 / R6b-2"],
+    leaves: "Vendor ZZ DF NO TERMS, with no payment terms template (as Create Vendor… makes one). --clear cancels or deletes its bills.",
+    look: "New Bill for ZZ DF NO TERMS: type the due date first, then the lines; Save; change a qty; Save. Both saves go through; any refusal is ERPNext's one sentence.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF NO TERMS";
+          const cleared = await clearVendor(V);
+          await ensureSupplier(V);
+          await x("frappe.client.set_value", { doctype: "Supplier", name: V, fieldname: "payment_terms", value: "" });
+          return { vendor: V, cleared };
+        `),
+        null,
+      ),
+    clear: (app) => inPage(app, maker(`return { cleared: await clearVendor("ZZ DF NO TERMS") };`), null),
+  },
+  "long-bill": {
+    title: "A 25-line draft Bill",
+    rows: ["R5-1"],
+    leaves: "Vendor ZZ DF LONG with one draft Bill (bill no. ZZ-DF-LONG) of 25 lines. A draft: --clear deletes it.",
+    look: "Find Bills… → ZZ-DF-LONG → edit many cells, open dropdowns, scroll the line table — all day.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF LONG";
+          const cleared = await clearVendor(V);
+          await ensureSupplier(V);
+          const codes = ["SAMPLE-SKU-01", "SAMPLE-SKU-02", "SAMPLE-SKU-03", "SAMPLE-SKU-04"];
+          const bill = await insert({ doctype: "Purchase Invoice", supplier: V, bill_no: "ZZ-DF-LONG",
+            items: Array.from({ length: 25 }, (_, k) => ({ item_code: codes[k % 4], qty: k + 1, rate: 10 })) });
+          return { vendor: V, bill: bill.name, lines: bill.items.length, cleared };
+        `),
+        null,
+      ),
+    clear: (app) => inPage(app, maker(`return { cleared: await clearVendor("ZZ DF LONG") };`), null),
+  },
+  "bill-from-po": {
+    title: "A draft Bill made from a Purchase Order (its PO and receipt columns load in the background)",
+    rows: ["R6c-2"],
+    leaves: "Vendor ZZ DF ENRICH with a submitted Purchase Order (2 × SAMPLE-SKU-01) and a draft Bill made from it (bill no. ZZ-DF-ENRICH). --clear deletes the draft and cancels the order.",
+    look: "Under npm run start:chaos (or with ERPNext stopped once the Bill is open): open the draft ZZ-DF-ENRICH and wait ~2 minutes. Expect the PO/receipt fields to say \"Couldn't load — press Refresh\", and Save to say Refresh, not wait.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF ENRICH";
+          const cleared = await clearVendor(V);
+          await ensureSupplier(V);
+          const po = await submit({ doctype: "Purchase Order", supplier: V, schedule_date: addDays(7), items: [{ item_code: "SAMPLE-SKU-01", qty: 2, rate: 10, schedule_date: addDays(7) }] });
+          const pi = await x("erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice", { source_name: po.name });
+          pi.bill_no = "ZZ-DF-ENRICH";
+          const bill = await insert(pi);
+          return { vendor: V, po: po.name, bill: bill.name, cleared };
+        `),
+        null,
+      ),
+    clear: (app) => inPage(app, maker(`return { cleared: await clearVendor("ZZ DF ENRICH") };`), null),
+  },
 };
 
 /** R10c-3's terms, as the board's own planner names and shapes them. */
@@ -389,5 +483,6 @@ function termScene() {
   return { half: half.term, off: { ...off.term, credit_days: 99 }, names: [half.name, off.name] };
 }
 
-/** Scene names that serve a plan row. */
-export const scenesForRow = (row) => Object.keys(SCENES).filter((k) => SCENES[k].rows.includes(row));
+/** Scene names that serve a plan row — its whole id, or one part of it ("R6b-1" for "R6b-1 / R6b-2"). */
+export const scenesForRow = (row) =>
+  Object.keys(SCENES).filter((k) => SCENES[k].rows.some((r) => r === row || r.split(" / ").includes(row)));

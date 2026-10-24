@@ -862,7 +862,7 @@ The review itself changes no behavior; its fixes do. What unit tests cannot show
 | R10c-1 | Pay a batch where submit is refused | Drawer names the draft; it appears under Draft payments at once |
 | R10c-3 | Create a term that already exists with the same numbers (the never-run-live path) | "Created … (reusing the existing …)" — and a term with different numbers is refused naming the field |
 | R6c-4 | A just-in-time receipt whose submit ERPNext refuses | No draft Purchase Receipt left behind |
-| R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (e.g. a closed period) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
+| R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (a closed period does not apply to a PO; `npm run dogfood:setup -- R2-2` makes an approval rule that does) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
 | R6b-1 / R6b-2 | A Bill for a vendor made with *Create Vendor…* (no terms): type the due date first, then the lines; Save; change a qty; Save | Both saves go through. Any refusal on the status line is ERPNext's one sentence — no traceback, no "Message … Confirm" |
 | R6b-4 | Two Sales Orders for one item (needing 6 and 2); a Bill line of 8, then 5, then 10, each *Assign…*ed to both | 8: no box, PO 6 / 2. 5: "Costing Assumptions!" 4 / 1 — tick one *Fill from stock* and it redraws; Okay makes the PO. 10: 6 / 2 and "2 more … → into stock". Each PO line opens its Sales Order line; the PO and orders carry a *Costing assumptions:* comment. Open each Sales Order: its line's Sources cell ends with *Costing* (×2 after the second bill), and it opens the same box, read-only, that order in bold |
 | R10a-1 / R10b-1 | Pay Outstanding with an installment bill that was part-paid in Vanilla | The vendor card owes what ERPNext's A/P report says, on the later installment; the board opens without a pause per bill |
@@ -918,6 +918,23 @@ mid-save; R4-1 removes the login cookie and puts it back after.
 lists at ~20k items. The check proves the behavior; it says *yours* next to the feel.
 
 Build order: the runner, setup and scenes with the R9 group (the most setup), then the rest by group.
+
+**Built 2026-10-23 — every row has a probe** (`npm run dogfood:check` runs all 25 rows' probes,
+~25 min, mostly R6c-2's give-up and R4-2's 205 drafts). Scenes for `dogfood:setup`: R9, R9-1,
+R10c-1, R2-2, R6c-4, R10c-3, R4-2, R6b-4, R6b-1 / R6b-2, R5-1, R6c-2 (`-- --list` says what each
+makes). Notes per row:
+
+- **Simulated, not ERPNext's own refusal:** R2-7 (no plain-bill path refuses a line rate; the
+  ERPNext page's bridge refuses one call). Every other "ERPNext refuses" row uses a real ERPNext
+  check: PO On Hold (R9), disabled expense / bank / stock account (R9-1, R10c-1, R6c-4), an
+  Authorization Rule (R2-2), an existing Payment Term (R10c-3).
+- **"ERPNext stops":** the app's session refuses the matching requests (R4-2, R5b-2, R6c-2, Warm
+  lists 1–2); R2-1 holds the save call in the ERPNext page and reloads inside it; R4-1 takes the
+  login cookie out and puts it back.
+- **Run on the old code:** R9, R9-1, R10c-1, R6c-4 and R5b-2 failed first on what they found (DC-1–3).
+  Not re-run on pre-fix code: R10c-3, R2-7, D1, R5-1 (the pre-fix picker no longer loads in today's
+  page), R4-2, R2-1, R4-1, D3 — each fix was proven when it was made.
+- **Yours, still:** the feel — "smooth all day" (R5-1), "a beat" (R5b-1), warm lists at ~20k items.
 
 **Found by the check** (each fixed and re-proven by the probe that found it):
 

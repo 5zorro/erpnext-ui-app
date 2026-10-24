@@ -104,13 +104,13 @@ export const keepScene = () => process.env.DOGFOOD_KEEP === "1";
 
 /**
  * "ERPNext stops" without stopping Docker: the app's session refuses every request whose URL
- * contains `part` (the ERPNext page and the main process share it; the app sets no request hooks of
+ * contains `part` (or any of a list) (the ERPNext page and the main process share it; the app sets no request hooks of
  * its own). `erpUp` lifts it. Always call `erpUp` in `finally`.
  */
 export const erpDown = (app, part) =>
-  app.evaluate(({ session }, p) => {
-    session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: d.url.includes(p) }));
-  }, part);
+  app.evaluate(({ session }, parts) => {
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: parts.some((p) => d.url.includes(p)) }));
+  }, [].concat(part));
 /** As `erpDown`, but the first `n` matching requests still go through ("stops part way"). */
 export const erpDownAfter = (app, part, n) =>
   app.evaluate(({ session }, [p, k]) => {
