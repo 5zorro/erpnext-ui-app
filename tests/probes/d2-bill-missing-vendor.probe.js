@@ -1,4 +1,5 @@
 /**
+ * @dogfood D2
  * Plan 2026-10-21 D2 (HANDOFF § Warm pick lists), the Bill side: a vendor that does not exist,
  * typed and then left by clicking into another box and typing there. Question: banner, the box
  * back to the bill's vendor, nothing written, no source picker? Makes no records.

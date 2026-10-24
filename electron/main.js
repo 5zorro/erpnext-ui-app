@@ -97,6 +97,7 @@ import {
 } from "../src/lens-context.js";
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
 import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
+import { PE_REASON_FROM_JS } from "../src/erp-refusal-reason.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -5388,123 +5389,7 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
   const billNoLit = JSON.stringify(normalizeEditableText(meta.billNo) || name);
   const postingLit = JSON.stringify(normalizeEditableText(meta.postingDate) || "");
   const raw = await erpEval(`(async () => {
-    function reasonFrom(err) {
-      if (err == null) return "";
-      if (typeof err === "string") return err.trim();
-      if (err.message) return String(err.message).trim();
-      try { return JSON.stringify(err).slice(0, 500); } catch (e) { return String(err); }
-    }
-    try {
-      var billName = ${billLit};
-      var r = await frappe.call({
-        method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
-        args: { dt: "Purchase Invoice", dn: billName },
-      });
-      if (r && r.exc) return { ok: false, reason: reasonFrom(r), step: "get_payment_entry" };
-      var pe = r && r.message;
-      if (!pe) return { ok: false, reason: "get_payment_entry returned empty.", step: "get_payment_entry" };
-      try { pe = JSON.parse(JSON.stringify(pe)); } catch (eJson) {}
-      if (!pe.doctype) pe.doctype = "Payment Entry";
-      var billNo = ${billNoLit};
-      var postingDate = ${postingLit};
-      if (!pe.reference_no) pe.reference_no = billNo || billName;
-      if (!pe.reference_date) {
-        pe.reference_date =
-          postingDate ||
-          (frappe.datetime && frappe.datetime.get_today
-            ? frappe.datetime.get_today()
-            : null);
-      }
-      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
-      if (inserted && inserted.exc) {
-        return { ok: false, reason: reasonFrom(inserted), step: "insert" };
-      }
-      var saved = inserted && inserted.message ? inserted.message : null;
-      if (!saved || !saved.name) {
-        return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
-      }
-      return { ok: true, name: saved.name };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), step: "unknown" };
-    }
-  })()`);
-  if (!(raw && typeof raw === "object")) {
-    return { ok: false, reason: "Payment Entry create failed." };
-  }
-  if (raw.ok) return raw;
-  return {
-    ok: false,
-    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
-    step: raw.step,
-  };
-}
-
-/**
- * Create + submit Payment Entry for a submitted Purchase Invoice (OI-135 JIT).
- * @param {string} billName
- * @param {{ modeOfPayment: string, cashBankAccount: string, paidAmount: number }} intent
- */
-async function createJitPaymentEntryForBill(billName, intent) {
-  const name = billName == null ? "" : String(billName).trim();
-  if (!name || isNewDocRecord(name)) {
-    return { ok: false, reason: "Bill must be saved/submitted before Payment Entry." };
-  }
-  const mop = JSON.stringify(intent.modeOfPayment || "");
-  const bank = JSON.stringify(intent.cashBankAccount || "");
-  const paid = Number(intent.paidAmount);
-  const paidLit = Number.isFinite(paid) ? String(paid) : "0";
-  const billLit = JSON.stringify(name);
-  const billNoLit = JSON.stringify(
-    normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || name,
-  );
-  const postingLit = JSON.stringify(
-    normalizeEditableText(dirtyState.doc && dirtyState.doc.posting_date) || "",
-  );
-  const raw = await erpEval(`(async () => {
-    function reasonFrom(err) {
-      function flat(msg) {
-        if (msg == null) return "";
-        if (typeof msg === "string") {
-          var t = msg.trim();
-          if (!t) return "";
-          if (t.charAt(0) === "{" || t.charAt(0) === "[") {
-            try { return flat(JSON.parse(t)); } catch (e1) { return t.replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim(); }
-          }
-          return t.replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim();
-        }
-        if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
-        if (Array.isArray(msg)) return msg.map(flat).filter(Boolean).join(" · ");
-        if (typeof msg === "object") {
-          if (msg.message != null && msg.message !== msg) {
-            var inner = flat(msg.message);
-            if (inner) return inner;
-          }
-          if (msg.exception != null) {
-            var exn = flat(msg.exception);
-            if (exn) return exn.replace(/^frappe\\.exceptions\\.\\w+:\\s*/i, "");
-          }
-          if (msg.responseText != null) {
-            var body = flat(msg.responseText);
-            if (body) return body.replace(/^frappe\\.exceptions\\.\\w+:\\s*/i, "");
-          }
-          if (msg._server_messages != null) {
-            var sm = flat(msg._server_messages);
-            if (sm) return sm;
-          }
-          if (msg.exc != null) {
-            var ex = flat(msg.exc);
-            if (ex) return ex;
-          }
-          try {
-            var s = JSON.stringify(msg);
-            if (s && s !== "{}" && s !== "[]") return s.slice(0, 500);
-          } catch (e2) {}
-        }
-        var fb = String(msg);
-        return fb === "[object Object]" ? "" : fb;
-      }
-      return flat(err) || "Payment Entry request failed.";
-    }
+    ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
       var mop = ${mop};
@@ -5609,58 +5494,6 @@ async function createJitPaymentEntryForBill(billName, intent) {
     name: r.name || null,
   };
 }
-
-/**
- * Shared with fetchPaymentEntryDraftsForInvoices / insertAndSubmitPaymentEntry below (Packet 4b
- * step 4) -- the same error-flattening helper createJitPaymentEntryForBill already defines
- * inline above. Extracted once here rather than copy-pasted a third time; the two existing
- * single-invoice functions above are left as they are (already-shipped, already-dogfooded --
- * not touched by this batch-write work).
- */
-const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
-  function flat(msg) {
-    if (msg == null) return "";
-    if (typeof msg === "string") {
-      var t = msg.trim();
-      if (!t) return "";
-      if (t.charAt(0) === "{" || t.charAt(0) === "[") {
-        try { return flat(JSON.parse(t)); } catch (e1) { return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
-      }
-      return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    }
-    if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
-    if (Array.isArray(msg)) return msg.map(flat).filter(Boolean).join(" · ");
-    if (typeof msg === "object") {
-      if (msg.message != null && msg.message !== msg) {
-        var inner = flat(msg.message);
-        if (inner) return inner;
-      }
-      if (msg.exception != null) {
-        var exn = flat(msg.exception);
-        if (exn) return exn.replace(/^frappe\.exceptions\.\w+:\s*/i, "");
-      }
-      if (msg.responseText != null) {
-        var body = flat(msg.responseText);
-        if (body) return body.replace(/^frappe\.exceptions\.\w+:\s*/i, "");
-      }
-      if (msg._server_messages != null) {
-        var sm = flat(msg._server_messages);
-        if (sm) return sm;
-      }
-      if (msg.exc != null) {
-        var ex = flat(msg.exc);
-        if (ex) return ex;
-      }
-      try {
-        var s = JSON.stringify(msg);
-        if (s && s !== "{}" && s !== "[]") return s.slice(0, 500);
-      } catch (e2) {}
-    }
-    var fb = String(msg);
-    return fb === "[object Object]" ? "" : fb;
-  }
-  return flat(err) || "Payment Entry request failed.";
-}`;
 
 /**
  * Fetch one get_payment_entry draft per unique invoice (Packet 4b step 4). ERPNext's own

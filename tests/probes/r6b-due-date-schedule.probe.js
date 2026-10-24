@@ -1,4 +1,5 @@
 /**
+ * @dogfood R6b-1 / R6b-2
  * Plan 10-19 R6b: a Bill with no payment terms and a typed due date. The bridge adds the schedule
  * row itself (`syncScheduleFromHeaderDueDate`) with a fixed amount and no portion; ERPNext only
  * rescales rows that have a portion (`set_payment_schedule`). Question: does a second save, after

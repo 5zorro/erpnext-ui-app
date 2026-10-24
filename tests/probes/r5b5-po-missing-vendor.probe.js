@@ -1,4 +1,5 @@
 /**
+ * @dogfood R5b-5
  * Review 10-19 R5b-5 (5zorro's dogfood 2026-10-22): on a new PO, `TEST` typed, *Create Vendor…*
  * taken, Esc, then on into the dates — 10 s later the source picker opened for a vendor that does
  * not exist. Question: banner instead, and no source picker then or later? Makes no records

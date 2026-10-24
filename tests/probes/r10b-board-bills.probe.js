@@ -1,4 +1,5 @@
 /**
+ * @dogfood R10a-1 / R10b-1
  * Plan 10-19 R10a-1 / R10b-1: Pay Outstanding's bill loader — the A/P report by payment term plus
  * one Payment Schedule query. Question: does every open bill's total on the board equal ERPNext's
  * own `outstanding_amount`, and how long does a load take? Read-only: makes nothing.

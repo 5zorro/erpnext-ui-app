@@ -1,4 +1,5 @@
 /**
+ * @dogfood R6b-4
  * Plan 10-19 R6b-4 follow-up — split by need. Two Sales Orders for SAMPLE-SKU-01 (Nos): SO-A needs
  * 6, SO-B needs 2. A new Bill line of 5 is assigned to both through the real Assign dialog.
  * Questions: does the dialog stop on "Costing Assumptions!" with 4 / 1; does ticking SO-B "from

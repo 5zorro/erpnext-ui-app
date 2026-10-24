@@ -1,4 +1,5 @@
 /**
+ * @dogfood R5b-1; R5b-6 / R5b-7
  * Review 10-19 R5b-1 for vendors (5zorro 2026-10-22: "it shouldn't [go to Create Vendor] if there is
  * a vendor match"). A few letters of a real vendor and Tab before the list is in — the first
  * thing in the day, before the warm list: the search is slowed so the Tab is always held.

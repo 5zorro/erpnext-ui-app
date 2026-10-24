@@ -40,6 +40,25 @@ one. Each such probe:
 - names its records `ZZ…` and cancels what it submitted, so nothing stays open on the A/P side;
 - reuses its `ZZ…` vendor instead of making a new one each run.
 
+## Dogfood check and setup — `@dogfood`
+
+A probe that checks a row of plan 10-19's *Dogfood residuals* table says so in its header:
+`@dogfood R9` (several rows split by `;`; a row's id is its first cell without the bracket).
+
+```bash
+npm run dogfood:check               # every tagged probe, then the table: pass / FAIL / yours
+npm run dogfood:check -- R9 R5-1    # only those rows
+npm run dogfood:setup -- --list     # rows with a scene, what each makes, where to look
+npm run dogfood:setup -- R9         # make R9's records and leave them for 5zorro
+npm run dogfood:setup -- --clear R9
+```
+
+A row's records are a *scene* in `dogfood-scenes.js` (make / clear / where to look), named `ZZ DF …`;
+the probe for the row makes the same scene and clears it after (`DOGFOOD_KEEP=1` leaves it). Scenes
+that submit documents follow the rules above. "ERPNext refuses" is made from ERPNext's own checks
+(a Purchase Order On Hold refuses its bill's cancel; a disabled expense account refuses a submit),
+never by changing a site setting.
+
 ## Writing one
 
 - `<review-id or topic>-<what>.probe.js`; the header comment states the question and what the

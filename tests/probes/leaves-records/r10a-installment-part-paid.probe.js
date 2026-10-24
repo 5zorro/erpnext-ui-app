@@ -1,4 +1,5 @@
 /**
+ * @dogfood R10a-1 / R10b-1
  * Plan 10-19 R10a-1: a bill in two installments (50 % / 50 %, no template, so ERPNext does not keep
  * the rows' own outstanding) part-paid 600 of 1000. Question: does Pay Outstanding's bill loader
  * say 400 is owed, or the stale 1000?

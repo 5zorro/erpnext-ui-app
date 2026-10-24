@@ -84,3 +84,20 @@ export async function assertSandboxSite(app) {
   }
   return cos;
 }
+
+/** In the Pay Outstanding board. */
+export const inBoard = (app, js, ms) => inView(app, "payOutstanding", js, ms);
+
+/** Open Pay Outstanding from Home (its Doc lens) and wait for vendor cards. */
+export async function openBoard(app) {
+  await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+  await sleep(3000);
+  if ((await e2eGet(app, "surfaceMode")) !== "pay-outstanding") {
+    await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
+  }
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("pay-outstanding");
+  await expect.poll(async () => inBoard(app, `document.querySelectorAll('[data-testid="vendor-card"]').length`), { timeout: 30_000 }).toBeGreaterThan(0);
+}
+
+/** `DOGFOOD_KEEP=1` (`npm run dogfood:setup`, or by hand): a probe leaves its scene for 5zorro. */
+export const keepScene = () => process.env.DOGFOOD_KEEP === "1";

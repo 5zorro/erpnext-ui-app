@@ -1,4 +1,5 @@
 /**
+ * @dogfood R5b-6 / R5b-7
  * Review 10-19 R5b-3: an item typed within ~1 s of setting the vendor on a new PO lost its typing —
  * the half-typed text was written to the line and focus jumped to Qty. Question: is the item
  * typed whole, and is the clerk still on the line after the vendor settles? Two ways in: the vendor written straight (as the original probe did), and as a

@@ -108,7 +108,7 @@ export const ARCHITECTURE_FAMILIES = [
   {
     id: "edit-submitted",
     label: "Editing a submitted document — void and amend, method change, payment re-link",
-    modules: ["doc-actions", "doc-action-flow", "void-amend-flow", "mode-change-plan", "payment-relink"],
+    modules: ["doc-actions", "doc-action-flow", "void-amend-flow", "mode-change-plan", "payment-relink", "erp-refusal-reason"],
     e2e: [],
   },
   {
@@ -160,9 +160,10 @@ export const ARCHITECTURE_FAMILIES = [
   },
   {
     id: "repo",
-    label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log",
-    modules: ["architecture-families", "test-run-log"],
-    paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "scripts/run-tests.js", "scripts/test-flaky.js", "package.json", "package-lock.json", "playwright.config.js"],
+    label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log, the dogfood check",
+    modules: ["architecture-families", "test-run-log", "dogfood-check"],
+    paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "scripts/run-tests.js", "scripts/test-flaky.js",
+      "scripts/dogfood-check.js", "scripts/dogfood-setup.js", "package.json", "package-lock.json", "playwright.config.js"],
     e2e: [],
     noPaper: "process, not product",
   },
