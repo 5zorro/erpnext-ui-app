@@ -341,6 +341,10 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
   charge allocation (`splitUnitsByWeights`: rounded down, leftover units by largest remainder, ties
   to the earlier) — whole units for a *Must be Whole Number* unit, thousandths otherwise. Qty is a
   decimal in ERPNext; only those units refuse fractions.
+- **An order On Hold or Closed needs nothing**, as ERPNext counts it (`get_reserved_qty`, the Bin's
+  Reserved Qty, leaves such orders out; Desk offers no Purchase Order from one, though the PO server
+  would accept the link). The Assign list never offers one; an order paused after it was picked takes
+  nothing, shows "On Hold — not counted", and makes the box ask.
 - **Each PO line links the Sales Order *line*** (`sales_order_item`), or ERPNext never counts it as
   ordered. Once linked, ERPNext refuses ordering past that line's qty (*Over Delivery/Receipt
   Allowance*, 0 % here), so what the orders do not need is **one more PO line for no order** — into

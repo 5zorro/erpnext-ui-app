@@ -477,6 +477,15 @@ weighted by need is exactly what 99% of the use cases will want").**
    the right line, the box's row, no ticks, focus back on the chip after Esc; 0 chips on the code
    before it).
 
+9. ✅ **An order On Hold or Closed** (2026-10-23, 5zorro: "look where vanilla makes sure it isn't
+   counted before hacking around it"). ERPNext's count of what open orders need
+   (`stock_balance.py` `get_reserved_qty`) leaves out `status in ('On Hold', 'Closed')`; Desk shows
+   Create › Purchase Order only on neither; `check_on_hold_or_closed_status` refuses a Work Order or
+   Material Request against one — but **not** a Purchase Order, so the bridge PO would have bought
+   for a paused order without a word. The planner now reads each order's status: such an order
+   needs 0, takes nothing, shows "On Hold — not counted" and always asks. The probe holds a third
+   order after picking it: on the code before, it took 2 of the 5 units.
+
 The end-of-session review the same day moved the whole split to the item's **stock unit** (the open
 qty is `stock_qty − ordered_qty`, as ERPNext tracks it; PO lines say the stock unit at the per-unit
 rate; the box headers show it) — a Bill line in Box against orders in Nos had compared 1 box with 1

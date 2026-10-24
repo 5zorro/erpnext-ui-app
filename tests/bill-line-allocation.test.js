@@ -53,6 +53,17 @@ describe("bill-line-allocation", () => {
     assert.deepEqual(gets(p), [2, 0]);
     assert.equal(p.needsConfirm, false);
   });
+  it("an order On Hold or Closed needs nothing, as ERPNext counts it — shown, takes nothing, asks", () => {
+    const p = planSalesOrderSplit({ qty: 2, wholeUnits: true, lines: [AB[0], { ...AB[1], held: "On Hold" }] });
+    assert.deepEqual(gets(p), [2, 0]);
+    assert.deepEqual(p.rows.map((r) => [r.open, r.diff, r.held]), [[6, -4, undefined], [2, 0, "On Hold"]]);
+    assert.equal(p.needsConfirm, true);
+    // Exact for the open order alone: still asked, because a picked order is not being bought for.
+    const exact = planSalesOrderSplit({ qty: 6, wholeUnits: true, lines: [AB[0], { ...AB[1], held: "Closed" }] });
+    assert.deepEqual(gets(exact), [6, 0]);
+    assert.equal(exact.needsConfirm, true);
+    assert.notEqual(exact.key, planSalesOrderSplit({ qty: 6, wholeUnits: true, lines: [AB[0], { ...AB[1], open: 0 }] }).key);
+  });
   it("the leftover units follow the shared rule — 5zorro's 6.667 over ten equal orders", () => {
     const ten = Array.from({ length: 10 }, (_, i) => ({ salesOrder: `SO-${i}`, salesOrderItem: `l${i}`, open: 1 }));
     assert.deepEqual(gets(planSalesOrderSplit({ qty: 6.667, wholeUnits: false, lines: ten })), [0.667, 0.667, 0.667, 0.667, 0.667, 0.667, 0.667, 0.666, 0.666, 0.666]);

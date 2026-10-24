@@ -6726,20 +6726,31 @@ async function readSalesOrderOpenLines(salesOrders, itemCode) {
         order_by: "parent asc, idx asc",
         limit_page_length: 0,
       });
-      return { ok: true, rows: rows || [] };
+      var heads = await frappe.xcall("frappe.client.get_list", {
+        doctype: "Sales Order",
+        fields: ["name", "status"],
+        filters: [["name", "in", ${JSON.stringify(salesOrders)}]],
+        limit_page_length: 0,
+      });
+      return { ok: true, rows: rows || [], heads: heads || [] };
     } catch (e) {
       return { ok: false, reason: String((e && e.message) || e || "could not read the Sales Orders") };
     }
   })()`);
   if (!(raw && raw.ok)) return { ok: false, reason: (raw && raw.reason) || "Could not read the Sales Orders." };
+  // On Hold / Closed: ERPNext counts no need for such an order (planSalesOrderSplit).
+  const heldBy = new Map(
+    (raw.heads || []).filter((h) => h.status === "On Hold" || h.status === "Closed").map((h) => [h.name, h.status]),
+  );
   const lines = [];
   for (const so of salesOrders) {
     const mine = raw.rows.filter((r) => r.parent === so);
-    if (!mine.length) lines.push({ salesOrder: so, salesOrderItem: "", open: 0 });
+    const held = heldBy.has(so) ? { held: heldBy.get(so) } : {};
+    if (!mine.length) lines.push({ salesOrder: so, salesOrderItem: "", open: 0, ...held });
     for (const r of mine) {
       // In the item's stock unit, as ERPNext keeps ordered_qty (the PO → SO updater compares stock_qty).
       const open = Math.round((Number(r.stock_qty) - Number(r.ordered_qty || 0)) * 1000) / 1000;
-      lines.push({ salesOrder: so, salesOrderItem: r.name, open: Math.max(0, open) });
+      lines.push({ salesOrder: so, salesOrderItem: r.name, open: Math.max(0, open), ...held });
     }
   }
   return { ok: true, lines };

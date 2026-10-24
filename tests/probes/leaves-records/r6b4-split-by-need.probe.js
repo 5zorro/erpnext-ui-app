@@ -4,11 +4,13 @@
  * Questions: does the dialog stop on "Costing Assumptions!" with 4 / 1; does ticking SO-B "from
  * stock" make it 5 / 0; after Okay, is the bridge PO's line linked to SO-A's *line* (so ERPNext's
  * ordered qty on it is 5), and is the decision written on the PO and SO-A ("Costing assumptions:")?
+ * A third order, SO-C (needs 3), is picked and then put On Hold before the costing step: does the box
+ * show it "On Hold — not counted", taking nothing (ERPNext counts no need for a held order)?
  * Then the Sales Order's look-back (plan 10-19 R6b-4 step 8): opened in its Doc skin, does each
  * order's line show a *Costing* chip, and does it open the same box, read-only, this order in bold?
  * The Bill itself is never saved.
  *
- * 🔴 LEAVES RECORDS (run with --leaves-records, sandbox only): each run submits two Sales Orders
+ * 🔴 LEAVES RECORDS (run with --leaves-records, sandbox only): each run submits three Sales Orders
  * (customer `ZZ R6B4 CUSTOMER`, PO no. `ZZR6B4-<n>`) and the bridge Purchase Order, then cancels
  * and deletes them — on 2026-10-22 all three deleted cleanly (with their Comments), leaving only
  * Frappe's *Deleted Document* log and the next numbers used. Anything ERPNext refuses to delete
@@ -39,7 +41,7 @@ const makeOrders = (app) =>
           customer = (await frappe.xcall("frappe.client.insert", { doc: { doctype: "Customer", customer_name: ${JSON.stringify(CUSTOMER)}, customer_group: g[0] && g[0].name, territory: t[0] && t[0].name } })).name;
         }
         const out = [];
-        for (const [suffix, qty] of [["A", 6], ["B", 2]]) {
+        for (const [suffix, qty] of [["A", 6], ["B", 2], ["C", 3]]) {
           const so = await frappe.xcall("frappe.client.insert", { doc: {
             doctype: "Sales Order", customer, po_no: ${JSON.stringify(TAG)} + "-" + suffix, delivery_date: frappe.datetime.add_days(today, 14),
             items: [{ item_code: "SAMPLE-SKU-01", qty, rate: 25, delivery_date: frappe.datetime.add_days(today, 14) }],
@@ -81,6 +83,8 @@ const cleanup = (app) =>
         await tryDo("delete " + po, () => frappe.xcall("frappe.client.delete", { doctype: "Purchase Order", name: po }));
       }
       for (const so of sos) {
+        // A held or closed order cannot be cancelled until it is resumed.
+        if (so.docstatus === 1) await tryDo("resume " + so.name, () => frappe.xcall("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "Draft", name: so.name }));
         if (so.docstatus === 1) await tryDo("cancel " + so.name, () => frappe.xcall("frappe.client.cancel", { doctype: "Sales Order", name: so.name }));
         await tryDo("delete " + so.name, () => frappe.xcall("frappe.client.delete", { doctype: "Sales Order", name: so.name }));
       }
@@ -109,7 +113,7 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     const made = await makeOrders(app);
     report("orders", made);
     expect(made && made.error).toBeFalsy();
-    const [A, B] = made.orders;
+    const [A, B, C] = made.orders;
 
     await call(app, `window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO")`);
     await sleep(2500);
@@ -143,13 +147,15 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     await sleep(500);
     const picked = await inDialog(
       app,
-      `const want = [${JSON.stringify(A.name)}, ${JSON.stringify(B.name)}]; let n = 0; for (const b of d.querySelectorAll(".src-item")) { if (want.some((w) => b.textContent.includes(w))) { b.click(); n++; } } return n;`,
+      `const want = [${JSON.stringify(A.name)}, ${JSON.stringify(B.name)}, ${JSON.stringify(C.name)}]; let n = 0; for (const b of d.querySelectorAll(".src-item")) { if (want.some((w) => b.textContent.includes(w))) { b.click(); n++; } } return n;`,
     );
     report("picked", { picked });
     await sleep(500);
     // The list redraws on each click; pick again any that a redraw lost.
     const selected = await inDialog(app, `return [...d.querySelectorAll(".src-item.selected")].map((b) => b.textContent);`);
     report("selected", selected);
+    // SO-C is paused after it was picked (the list offers no held order).
+    report("hold-c", await inErp(app, `(async () => { try { await frappe.xcall("erpnext.selling.doctype.sales_order.sales_order.update_status", { status: "On Hold", name: ${JSON.stringify(C.name)} }); return "held"; } catch (e) { ${why} } })()`, 20_000));
     await next(app, /Project/);
     await next(app, /check the costing/); // "Apply to line" stops on the costing box
     const box = await inDialog(app, `const c = d.querySelector('[data-testid="costing-box"]'); return c ? { text: c.textContent, primary: d.querySelector('[data-act="pick"]').textContent } : null;`);
@@ -163,7 +169,9 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     const rows = await inDialog(app, `return [...d.querySelectorAll(".costing-table tbody tr")].map((r) => [...r.cells].slice(0, 4).map((c) => c.textContent));`);
     report("after-tick", rows);
     const getsBySo = Object.fromEntries(rows.map((r) => [r[0], r[2]]));
-    expect(getsBySo).toEqual({ [A.name]: "5", [B.name]: "0" });
+    expect(getsBySo).toEqual({ [A.name]: "5", [B.name]: "0", [C.name]: "0" });
+    expect(rows.find((r) => r[0] === C.name)).toEqual([C.name, "3", "0", "On Hold — not counted"]);
+    expect(await inDialog(app, `return !!d.querySelector('.costing-table tbody tr[data-so=${JSON.stringify(C.name)}] [data-testid="costing-from-stock"]');`)).toBe(false);
 
     await clickPrimary(app); // Okay
     await sleep(8000);
@@ -182,10 +190,10 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     const back = parseCostingNote(facts.notes.find((n) => n.reference_name === A.name).content);
     report("read-back", back && { po: back.po, rows: back.rows.map((r) => [r.salesOrder, r.open, r.gets, r.fromStock]), toStock: back.toStock });
     expect(back && back.po).toBe(po);
-    expect(back.rows.map((r) => r.gets).sort()).toEqual([0, 5]);
+    expect(back.rows.map((r) => r.gets).sort()).toEqual([0, 0, 5]);
 
     // The look-back: each Sales Order in its Doc skin; the Bill is left unsaved.
-    for (const [so, gets, note] of [[A, "5", "1 from stock"], [B, "0", "all from stock (ticked)"]]) {
+    for (const [so, gets, note] of [[A, "5", "1 from stock"], [B, "0", "all from stock (ticked)"], [C, "0", "On Hold — not counted"]]) {
       await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${so.name}`, { skipDirtyGate: true });
       await expect
         .poll(() => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })

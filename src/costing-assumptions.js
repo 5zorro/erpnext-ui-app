@@ -28,7 +28,7 @@ function qtyText(n) {
 /**
  * The box's rows, as text — the same for the Bill's confirm and the Sales Order's look-back.
  * Quantities are in the item's stock unit (`plan.uom`).
- * @param {{ rows: Array<{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }>, toStock: number, uom?: string }} plan
+ * @param {{ rows: Array<{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean, held?: string }>, toStock: number, uom?: string }} plan
  * @returns {{ unit: string, rows: Array<{ salesOrder: string, open: string, gets: string, fromStockQty: string, note: string, fromStock: boolean, canTick: boolean }>, stockRow: string|null }}
  */
 export function costingBoxModel(plan) {
@@ -36,7 +36,8 @@ export function costingBoxModel(plan) {
   const rows = (plan && Array.isArray(plan.rows) ? plan.rows : []).map((r) => {
     const short = r.diff < 0 ? -r.diff : 0;
     let note = "";
-    if (!r.salesOrderItem) note = "no line for this item";
+    if (r.held) note = `${r.held} — not counted`;
+    else if (!r.salesOrderItem) note = "no line for this item";
     else if (r.fromStock) note = "all from stock (ticked)";
     else if (short > 0) note = `${qtyText(short)} from stock`;
     else note = "exact";
@@ -47,7 +48,7 @@ export function costingBoxModel(plan) {
       fromStockQty: short > 0 ? qtyText(short) : "",
       note,
       fromStock: !!r.fromStock,
-      canTick: !!r.salesOrderItem && r.open > 0,
+      canTick: !!r.salesOrderItem && r.open > 0 && !r.held,
     };
   });
   const extra = Number(plan && plan.toStock) || 0;

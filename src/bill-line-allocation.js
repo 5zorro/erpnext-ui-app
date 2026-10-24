@@ -98,11 +98,12 @@ export function lineAllocationForRow(byRow, rowIndex) {
 }
 
 /**
- * @typedef {{ salesOrder: string, salesOrderItem: string, open: number }} SalesOrderOpenLine
+ * @typedef {{ salesOrder: string, salesOrderItem: string, open: number, held?: string }} SalesOrderOpenLine
  *   one Sales Order line for the Bill line's item, and what it still needs ordered
  *   (`qty − ordered_qty / conversion_factor`, as ERPNext's own `make_purchase_order`); a Sales Order
- *   with no line for the item comes as `salesOrderItem: ""`, `open: 0`
- * @typedef {{ salesOrder: string, salesOrderItem: string, open: number, gets: number, diff: number, fromStock: boolean }} SalesOrderSplitRow
+ *   with no line for the item comes as `salesOrderItem: ""`, `open: 0`. `held` is the order's status
+ *   when it is *On Hold* or *Closed*
+ * @typedef {{ salesOrder: string, salesOrderItem: string, open: number, held?: string, gets: number, diff: number, fromStock: boolean }} SalesOrderSplitRow
  *   `diff` = gets − open: below 0, that much of the order is filled from stock instead
  */
 
@@ -118,6 +119,10 @@ export function lineAllocationForRow(byRow, rowIndex) {
  *   no order, since ERPNext refuses ordering past a Sales Order line's qty (allowance 0 % here).
  * - Anything but an exact fill is a **costing assumption** (stock is costed at its own rate, or a
  *   fallback rate when it runs negative), so it needs the clerk's "Okay" (`needsConfirm`).
+ * - An order **On Hold or Closed** needs nothing — ERPNext's own count of what open orders need
+ *   (`get_reserved_qty`, the Bin's Reserved Qty) leaves such orders out, and Desk offers no
+ *   Purchase Order from one. It takes nothing and is shown, and the clerk is asked (it was picked
+ *   while open and paused since, or the Bill line remembers it).
  *
  * @param {{ qty: number, wholeUnits?: boolean|null, lines: SalesOrderOpenLine[], fromStock?: string[] }} opts
  *   `wholeUnits` null (unit unknown): whole when the qty is whole; `fromStock` = Sales Order names
@@ -139,8 +144,10 @@ export function planSalesOrderSplit(opts) {
     salesOrder: String((l && l.salesOrder) || ""),
     salesOrderItem: String((l && l.salesOrderItem) || ""),
     open: Math.max(0, Number(l && l.open) || 0),
+    ...(l && l.held ? { held: String(l.held) } : {}),
   }));
-  const openUnits = lines.map((l) => (whole ? Math.floor(l.open + 1e-9) : Math.round(l.open * 1000)));
+  // A held order's need is 0, as ERPNext counts it; its own open qty is still shown.
+  const openUnits = lines.map((l) => (l.held ? 0 : whole ? Math.floor(l.open + 1e-9) : Math.round(l.open * 1000)));
   const takes = lines.map((l, i) => !stockSet.has(l.salesOrder) && !!l.salesOrderItem && openUnits[i] > 0);
   const weights = openUnits.map((u, i) => (takes[i] ? u : 0));
   const need = weights.reduce((a, b) => a + b, 0);
@@ -152,8 +159,9 @@ export function planSalesOrderSplit(opts) {
     diff: (getsUnits[i] - openUnits[i]) / step,
     fromStock: stockSet.has(l.salesOrder),
   }));
-  const needsConfirm = toStockUnits > 0 || getsUnits.some((g, i) => g !== openUnits[i]);
-  const key = JSON.stringify({ g: getsUnits, o: openUnits, s: toStockUnits, f: [...stockSet].sort() });
+  const needsConfirm = toStockUnits > 0 || getsUnits.some((g, i) => g !== openUnits[i]) || lines.some((l) => l.held);
+  const held = lines.map((l) => l.held || "");
+  const key = JSON.stringify({ g: getsUnits, o: openUnits, s: toStockUnits, f: [...stockSet].sort(), h: held });
   return { ok: true, rows, toStock: toStockUnits / step, needsConfirm, key };
 }
 

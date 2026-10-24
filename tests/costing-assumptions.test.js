@@ -22,6 +22,10 @@ describe("costing assumptions (review 10-19 R6b-4)", () => {
     assert.equal(m.stockRow, "1.5 more than the orders need → into stock");
     assert.equal(costingBoxModel({ ...plan, uom: "Nos" }).stockRow, "1.5 Nos more than the orders need → into stock");
   });
+  it("an order On Hold or Closed is shown as not counted, with no tick", () => {
+    const m = costingBoxModel({ rows: [{ salesOrder: "SO-H", salesOrderItem: "h1", open: 4, gets: 0, diff: 0, fromStock: false, held: "On Hold" }], toStock: 0 });
+    assert.deepEqual([m.rows[0].note, m.rows[0].canTick], ["On Hold — not counted", false]);
+  });
   it("the note opens with the token, reads as text, and round-trips its data", () => {
     const note = costingNote({ bill: "INV-9", line: 2, item: "SKU", qty: 6.5, uom: "Nos", po: "PO-1", by: "Clerk", plan });
     assert.ok(note.startsWith(`${COSTING_TOKEN} INV-9 line 2, SKU × 6.5 Nos → PO-1`));
