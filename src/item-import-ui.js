@@ -470,6 +470,13 @@ async function applyImportedItemRowsAt(api, records, opts, at) {
       }
       at.lastDoc = res.doc;
       at.lastScratch = res.scratch;
+      // An item code ERPNext never answered for (dogfood probe R5b-2, DC-3): when ERPNext stops
+      // mid-import the write itself lands, but the item's name and unit never come back — the line
+      // looks imported and is not. Stop there, as for a refusal.
+      const row = field === "item_code" && res.doc && Array.isArray(res.doc.items) ? res.doc.items[ri] : null;
+      if (row && row.item_code && !row.item_name && !row.uom) {
+        return stopped({ lineNo: i + 1, rowTouched }, `ERPNext did not fill in ${row.item_code} (no name or unit came back — it may have stopped answering)`);
+      }
     }
 
     if (appendDescription && at.lastDoc && Array.isArray(at.lastDoc.items) && at.lastDoc.items[ri]) {

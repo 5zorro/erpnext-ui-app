@@ -936,6 +936,13 @@ Build order: the runner, setup and scenes with the R9 group (the most setup), th
   USE</strong>" on the status line); both use the shared `reasonFrom` now — the raised message,
   stripped. (For R2-2's approval rule that is ERPNext's raised "Can be approved by Guest" rather
   than the note before it, "Not authorized since Grand Total exceeds limits".)
+- **DC-3 (R5b-2): an Import with ERPNext stopping part way said "Imported 12 line(s)."** Writing a
+  line's item code succeeds on the form even when ERPNext never answers the item lookup
+  (`run_doc_method`), so lines 5–12 sat on the form with no name, unit or account and nothing said
+  so — R5b-2's stop only caught writes the bridge refused. `applyImportedItemRows` now stops when an
+  item code comes back with neither a name nor a unit: "Import stopped at line 5 of 12: ERPNext did
+  not fill in SAMPLE-SKU-01 (…). Lines 1–4 are on the form." Not changed: an item typed by hand into a
+  cell while ERPNext is down shows the same blank name — visible on the line, so left as is.
 - **Noted, not changed:** a blank ERPNext has none of the payment methods the board offers
   (USPS_Check, ACH, DOM_WIRE, INT_WIRE); choosing one in Method… would have every amended bill
   refused. The R9 scene makes them on the sandbox. A real site sets its own up; whether the board

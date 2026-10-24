@@ -4,8 +4,11 @@ import { applyImportedItemRows, importStoppedText, wireItemImportButton } from "
 
 /** Review 10-19 R5b-2: an import that stops part way says what landed and hands back the form. */
 
-/** A form whose setItem refuses one line's item code. */
-function fakeForm({ refuseLine = 0, start = 0 } = {}) {
+/**
+ * A form whose setItem refuses one line's item code. Like ERPNext, an item code write fills the
+ * line's name and unit — except from line `silentFrom` on, where ERPNext has stopped answering.
+ */
+function fakeForm({ refuseLine = 0, start = 0, silentFrom = 0 } = {}) {
   const doc = { items: Array.from({ length: start }, () => ({})) };
   const snap = () => ({ items: doc.items.map((r) => ({ ...r })) });
   return {
@@ -22,6 +25,7 @@ function fakeForm({ refuseLine = 0, start = 0 } = {}) {
       setItem: async (ri, field, value) => {
         if (ri + 1 === refuseLine && field === "item_code") return { ok: false, reason: "Item NOPE not found" };
         doc.items[ri][field] = value;
+        if (field === "item_code" && !(silentFrom && ri + 1 >= silentFrom)) Object.assign(doc.items[ri], { item_name: `Name of ${value}`, uom: "Nos" });
         return { ok: true, doc: snap() };
       },
     },
@@ -38,6 +42,16 @@ describe("applyImportedItemRows: stopping part way", () => {
     assert.equal(res.linesDone, 2);
     assert.equal(res.doc.items.length, 3, "lines 1–2 plus the half-written line 3");
     assert.equal(res.reason, "Import stopped at line 3 of 5: Item NOPE not found. Lines 1–2 are on the form. Check line 3.");
+  });
+
+  it("an item code ERPNext never filled in stops the import there (dogfood probe R5b-2, DC-3)", async () => {
+    const res = await applyImportedItemRows(fakeForm({ silentFrom: 5 }).api, rows(12));
+    assert.equal(res.ok, false);
+    assert.equal(res.linesDone, 4);
+    assert.equal(
+      res.reason,
+      "Import stopped at line 5 of 12: ERPNext did not fill in SKU-5 (no name or unit came back — it may have stopped answering). Lines 1–4 are on the form. Check line 5.",
+    );
   });
 
   it("a refusal on the first line says nothing landed", async () => {

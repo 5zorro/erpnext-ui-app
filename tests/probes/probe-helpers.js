@@ -111,6 +111,12 @@ export const erpDown = (app, part) =>
   app.evaluate(({ session }, p) => {
     session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: d.url.includes(p) }));
   }, part);
+/** As `erpDown`, but the first `n` matching requests still go through ("stops part way"). */
+export const erpDownAfter = (app, part, n) =>
+  app.evaluate(({ session }, [p, k]) => {
+    let seen = 0;
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: d.url.includes(p) && ++seen > k }));
+  }, [part, n]);
 export const erpUp = (app) => app.evaluate(({ session }) => session.defaultSession.webRequest.onBeforeRequest(null));
 
 /** In a Find page. */
