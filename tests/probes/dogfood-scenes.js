@@ -13,6 +13,7 @@
  * the payment methods the Pay Outstanding board offers, which a blank ERPNext does not have.
  */
 import { inErp } from "./probe-helpers.js";
+import { planPaymentTermsCreate } from "../../src/payment-term-plan.js";
 
 /**
  * Run `fn(arg)` in the ERPNext page. `fn` must be self-contained (it is sent as source). A throw
@@ -321,7 +322,47 @@ export const SCENES = {
         null,
       ),
   },
+  "term-half-made": {
+    title: "A payment term saved without its template (a half-finished create), and one whose numbers differ from its name",
+    rows: ["R10c-3"],
+    leaves:
+      "Payment Term NET_97_DAYS (ACH) +0 with no template (as a create that stopped after the term leaves it), and NET_98_DAYS (ACH) +0 saved with 99 credit days. Both described \"ZZ DF\"; --clear deletes them and any template made from them.",
+    look: "Pay Outstanding → the terms button → 97 days, grace 0, ACH, description ZZ DF → Create: \"Created NET_97_DAYS (ACH) +0 (reusing the existing NET_97_DAYS (ACH) +0)\". Then 98 days → refused, naming the field that differs.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = [];
+          for (const t of await list("Payment Terms Template", { name: ["in", arg.names] })) { await x("frappe.client.delete", { doctype: "Payment Terms Template", name: t.name }); cleared.push("delete template " + t.name); }
+          for (const t of await list("Payment Term", { description: "ZZ DF" })) { await x("frappe.client.delete", { doctype: "Payment Term", name: t.name }); cleared.push("delete term " + t.name); }
+          await ensureModes(["ACH"]);
+          const half = await insert(arg.half);
+          const off = await insert(arg.off);
+          return { half: half.name, off: off.name, offCreditDays: off.credit_days, cleared };
+        `),
+        termScene(),
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = [];
+          for (const t of await list("Payment Terms Template", { name: ["in", arg.names] })) { await x("frappe.client.delete", { doctype: "Payment Terms Template", name: t.name }); cleared.push("delete template " + t.name); }
+          for (const t of await list("Payment Term", { description: "ZZ DF" })) { await x("frappe.client.delete", { doctype: "Payment Term", name: t.name }); cleared.push("delete term " + t.name); }
+          return { cleared };
+        `),
+        termScene(),
+      ),
+  },
 };
+
+/** R10c-3's terms, as the board's own planner names and shapes them. */
+export const TERM_INPUT = { method: "ACH", dueDateBasedOn: "Day(s) after invoice date", description: "ZZ DF", graceDays: 0 };
+function termScene() {
+  const half = planPaymentTermsCreate({ ...TERM_INPUT, contractDays: 97 }).plans[0];
+  const off = planPaymentTermsCreate({ ...TERM_INPUT, contractDays: 98 }).plans[0];
+  return { half: half.term, off: { ...off.term, credit_days: 99 }, names: [half.name, off.name] };
+}
 
 /** Scene names that serve a plan row. */
 export const scenesForRow = (row) => Object.keys(SCENES).filter((k) => SCENES[k].rows.includes(row));
