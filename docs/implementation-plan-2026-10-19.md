@@ -943,6 +943,15 @@ Build order: the runner, setup and scenes with the R9 group (the most setup), th
   item code comes back with neither a name nor a unit: "Import stopped at line 5 of 12: ERPNext did
   not fill in SAMPLE-SKU-01 (…). Lines 1–4 are on the form." Not changed: an item typed by hand into a
   cell while ERPNext is down shows the same blank name — visible on the line, so left as is.
+- **DC-4 (open, 5zorro's call; seen while building R2-1's probe): an unsaved new Bill does not
+  survive the ERPNext page reloading.** With chaos delaying the save call, the reload landed
+  *before* it was sent: the reloaded page held a blank new Purchase Invoice, the save ran against
+  that, and ERPNext answered "Supplier is required." — while the Doc page still showed the vendor and
+  line the clerk typed. R2-1's fix covers a reload *during* a step (proven: "The ERPNext page reloaded
+  before the step finished."); nothing covers the form itself being replaced. Options: (a) on an
+  ERPNext page reload under an unsaved Doc, say so ("ERPNext reloaded; this bill was not saved —
+  Save again to send it") and re-send the typed values; (b) only say so; (c) leave it (a reload
+  mid-typing is rare). Not built.
 - **Noted, not changed:** a blank ERPNext has none of the payment methods the board offers
   (USPS_Check, ACH, DOM_WIRE, INT_WIRE); choosing one in Method… would have every amended bill
   refused. The R9 scene makes them on the sandbox. A real site sets its own up; whether the board
