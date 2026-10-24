@@ -99,7 +99,8 @@ process.on("SIGTERM", () => {
 
 let status = 1;
 try {
-  const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "" };
+  // ERP_PROBE_PREFS_BACKUP: a probe may change the prefs only when they will be restored (nav-spine empties nav-state.json).
+  const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "", ERP_PROBE_PREFS_BACKUP: backup };
   const run = spawnSync(
     "xvfb-run",
     ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...files],

@@ -1,7 +1,8 @@
 # Implementation plan 2026-10-24 — the navigation spine: a probe per path, and DC-4
 
 > **Status: building. 5zorro answered 2026-10-24: DC-4 is A (match Vanilla); the axes stand, plus a
-> fourth — fresh vs ongoing state.** Step 1 done (2026-10-24); step 2 next.
+> fourth — fresh vs ongoing state.** Steps 1–2 done, step 4's first run sorted (2026-10-24); next: his
+> answers 3–4 into the matrix, fix N-1, step 3 (ongoing run), DC-4.
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
@@ -94,8 +95,39 @@ ERPNext-page link from a Doc-skin document; a reload under each state (DC-4).
 5. DC-4 (A) built against the pinned matrix; its reload column turns green.
 6. Rule for later sessions (HANDOFF): a change to navigation runs `npm run nav:check` first and after.
 
+## Matrix run 1 — today's code (2026-10-24, build steps 2 and 4)
+
+`npm run nav:check`: 109 cells, 17 min (`test-logs/nav-check/2026-10-24T06-56-31/`): 81 pass, 28 fail.
+After fixing the probe's own faults (a poll that read the ERPNext page mid-load; Esc sent before the
+shell saw the stand-in Item's route — a real save takes a round trip) the failures sort into two:
+
+| Finding | Cells | What | Cause | Sorted |
+|---|---|---|---|---|
+| **N-1** | `*/new-typed/other`, `*/draft-typed/other` (7) | From a Bill with unsaved typing, a Drafts-list row opens another draft **without asking** — the typing is gone (the draft came back as ERPNext saved it) | `showDocForm` skips the unsaved gate whenever the clerk is already on a Doc page (`if (surfaceMode === "doc" \|\| skipDirtyGate) proceed()`, since the PO / IR skins, `cb60d5b`) — the Home button, Desk and the lens tab gate, the rail does not | Fix (step 4) |
+| **DC-4** | `*/new-typed/reload`, `*/draft-typed/reload` (7) | A reload under typing asks nothing (G23) and the Doc page keeps showing the typing and the dead `new-…` name | — | Build (step 5) |
+
+Seen once, not reproduced in a rerun: `lens/draft-clean/desk` — the Home button left a clean draft on
+the Doc page for 15 s. Watch for it in later runs.
+
 ## 5zorro's answers (2026-10-24)
 
 1. DC-4: **A** — match Vanilla: ask before a reload under unsaved typing, say so after one that
    happened anyway, never show stale typing.
 2. The axes stand; add **fresh vs ongoing state** (accumulated cruft in the flyout / rail).
+3. **Doc → Vanilla on a typed new document** (first matrix run: the shell asks, and Discard opens a
+   *different, blank* new form in Vanilla): don't try to carry unsaved typing across lenses —
+   *"increasingly difficult to litigate seeing as I want JIT entry of PO and IR"*. Instead the
+   unsaved gate offers **Save as draft**, and Vanilla then opens **that saved draft**. A saved draft
+   with unsaved typing already carries across (same form). The matrix cell
+   `*/new-typed/lens` checks it: asked, and after Save the Vanilla form is the saved draft with the
+   typing in it (the probe deletes that draft).
+4. **Recent keeps one row per doctype — a feature, not a gap.** Backtracking to a submitted document
+   is the **Submitted** section of the rail: *"if I submit then open a new bill, there should be a
+   'submitted' section of the flyout bar that I can go to if I wanted to backtrack. So navigation
+   info is not lost, and the correct order of deduplicated stuff I worked on recently should be at
+   the top."* So: a document submitted in this session is at the top of Submitted (deduplicated,
+   newest first) and opens again from there, after any number of other Bills. The matrix judges
+   "back" for a merely *viewed* submitted bill as not applicable (Recent's row moved on, by design);
+   a new probe submits a `ZZ-NAV` draft, opens a new Bill, and goes back through Submitted (leaves a
+   submitted record — `leaves-records/`). The ongoing run checks Submitted stays deduplicated and
+   newest-first.
