@@ -59,6 +59,27 @@ that submit documents follow the rules above. "ERPNext refuses" is made from ERP
 (a Purchase Order On Hold refuses its bill's cancel; a disabled expense account refuses a submit),
 never by changing a site setting.
 
+## The navigation matrix — `@nav`
+
+`nav-spine-<start>.probe.js` (one per start) run the cells of plan 2026-10-24's matrix through one
+driver, `nav-spine.js`; `src/nav-spine.js` judges them. `npm run nav:check [-- <start>…] [--ongoing]`
+prints the matrix; `NAV_ONLY=<start>/<state>/<move>,…` runs single cells. The driver empties
+`nav-state.json` before each launch (fresh rail) — it refuses unless `npm run probe` backed the
+prefs up (`ERP_PROBE_PREFS_BACKUP`). It makes `ZZ-NAV-A` / `ZZ-NAV-B` drafts and deletes them, and
+any draft a cell saved (refs `ZZNAV…`). Lessons from building it:
+
+- **Recent is one row per doctype**: "another document" is a Drafts row, and the way back is the
+  Recent row (it reopens the last Bill) or the Drafts row.
+- **Read a page mid-load softly**: `executeJavaScript` throws "Script failed to execute" or
+  "Execution context was destroyed" while the ERPNext page navigates — inside a poll, read it as
+  null and poll again (`soft`).
+- **A stand-in that is faster than the real thing proves nothing about timing**: opening a saved
+  Item from Frappe's cache took 0.7 s, before the shell saw the route — wait for the shell
+  (`currentRoute`) as a real save's round trip would.
+- **A race needs repeats**: N-3 failed 3 tries in 20; `nav-desk-after-discard` runs `NAV_TRIES`.
+- **Save on a Bill needs the amount due = grand total**, and asks "Bill only?" — the gate's Save
+  stays disabled until then (`doc-commit-gate-hint` says why).
+
 ## Writing one
 
 - `<review-id or topic>-<what>.probe.js`; the header comment states the question and what the

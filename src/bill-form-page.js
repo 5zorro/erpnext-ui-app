@@ -6176,6 +6176,8 @@ export async function bootBillFormPage(api) {
         reason: snap && snap.reason,
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
+        // DC-4: after an ERPNext reload the boxes show the reloaded form, never the lost typing.
+        forceHeaderPaint: !!(snap && snap.forceHeaderPaint),
         linkedPos: snap && snap.linkedPos,
         linkedReceipts: snap && snap.linkedReceipts,
         lineAllocations: snap && snap.lineAllocations,

@@ -224,7 +224,7 @@ async function typeMark(app, mark) {
 async function askedOrMoved(app, asksBefore, until) {
   const moved = typeof until === "function" ? until : async () => until.includes(await surface(app));
   for (let i = 0; i < 30; i += 1) {
-    if ((await inDoc(app, GATE)) === true) return { asked: true, how: "gate" };
+    if ((await soft(inDoc(app, GATE))) === true) return { asked: true, how: "gate" };
     if ((await asks(app)) > asksBefore) return { asked: true, how: "box" };
     if (await moved()) return { asked: false };
     await sleep(500);
@@ -258,7 +258,12 @@ async function backByRow(app, name, lists) {
 }
 
 async function backHere(app) {
-  const p = await inDoc(app, DOC_PAGE);
+  let p = null;
+  for (let i = 0; i < 10 && !(p && p.name); i += 1) {
+    p = await soft(inDoc(app, DOC_PAGE));
+    if (!(p && p.name)) await sleep(500);
+  }
+  p = p || {};
   return { surface: await surface(app), name: p.name, ref: p.ref };
 }
 
@@ -302,6 +307,7 @@ async function move(app, cell, docs, seen) {
     return;
   }
   if (cell.move === "lens") {
+    seen.step = "lens: to Vanilla";
     const go = () => inChrome(app, click("lens-vanilla"));
     // 5zorro 2026-10-24 (plan answer 3): a typed new document is not carried across lenses — the
     // gate offers Save, and Vanilla opens that saved draft. So make it saveable first.
@@ -355,8 +361,9 @@ async function move(app, cell, docs, seen) {
     const f = (await soft(inErp(app, ERP_FORM))) || {};
     seen.landed = { surface: await surface(app), doctype: f.doctype, name: f.name };
     seen.carried = typed ? f.ref === mark : null;
+    seen.step = "lens: back to the Doc tab";
     await inChrome(app, click("lens-doc"));
-    await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("doc");
+    await expect.poll(() => soft(surface(app)), { timeout: 15_000 }).toBe("doc");
     await sleep(2000);
     seen.back = await backHere(app);
     return;

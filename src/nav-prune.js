@@ -29,7 +29,15 @@ export function navRecordOf(entry, erpBase) {
   }
   const info = routeInfo(entry.route || "", erpBase);
   if (!info.doctype || !info.record || isNewDocRecord(info.record)) return null;
-  return { doctypeKey: info.doctype, name: info.record };
+  // A route carries the name URL-encoded ("ALPINE%20SUPPLY%20CO"); ERPNext knows it decoded, and
+  // asking for the encoded one read as "deleted" and dropped the row (nav matrix N-4, 2026-10-24).
+  let name = info.record;
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    /* not encoded after all */
+  }
+  return { doctypeKey: info.doctype, name };
 }
 
 /**

@@ -445,6 +445,33 @@ Simplified injection gate, Recent rows) must tolerate it lagging — see `docs/g
 Guarding those events is `erp-nav-intent.js`; the guard must always resolve to arm **or**
 clear, never "leave the last one armed".
 
+**The navigation matrix pins all of this (plan 2026-10-24).** `npm run nav:check` drives every way
+to move — start (Home tile, toolbar lens, Recent, Drafts, a link in the ERPNext page, a Find page,
+the board) × the Bill's state (new typed, draft clean / typed, submitted) × move (Desk, the other
+lens, an errand saved / abandoned, a peek, another document, an ERPNext reload) — and judges each
+cell on *lands*, *typing* (never lost without a question), *back* and *focus* (`src/nav-spine.js`);
+`-- --ongoing` adds a scripted long session and the cruft check on the rail's lists
+(`src/nav-cruft.js`). **A change to navigation runs `npm run nav:check` before and after** (~17 min,
+the app closed); a cell that changes is a finding to explain, not a test to update. The rules it
+fixed (2026-10-24):
+
+- **Opening another document from a Doc page asks** about unsaved typing, wherever the door is
+  (Recent, Drafts, Find, a link): `showDocForm` gates unless it is the same document or the caller
+  already asked (`skipDirtyGate`, New). It used to skip the gate on any Doc page (N-1).
+- **A typed new document is not carried across lenses**; the gate offers *Save draft, then
+  continue* and Vanilla opens that saved draft (5zorro: JIT entry of PO / IR makes carrying partial
+  typing a losing fight). `open-vanilla-skin` reads the saved name from the form after the gate.
+- **Desk has a route guard of its own** (`DESK_INTENT` in `erp-nav-intent.js`): while a load of Desk
+  is under way, a form URL is a late event from the page being left. Without it, Discard on a new
+  Bill followed by Desk pulled the clerk back onto a blank Bill (N-3, 3 in 20 tries).
+- **An ERPNext reload under the Doc page is said, not asked** (DC-4, 5zorro: match Vanilla). The
+  shell never reloads that page itself, and Chromium skips Frappe's "leave?" for typing done in the
+  Doc page (`docs/gotchas.md` G23) — so after a load the shell did not start, the Doc page repaints
+  from the reloaded form and says what was lost; during a Save it says the save may or may not have
+  landed (`erp-reload-notice.js`). Vanilla keeps nothing across a reload, and nor does the shell.
+- **Recent keeps one row per doctype — a feature.** The way back to a submitted document is the
+  rail's *Submitted* section (newest first, once each) — 5zorro 2026-10-24.
+
 **Every surface claims a route.** A `surfaceMode` that renders a document must set
 `currentRoute` (and push its Recent row) the moment it is shown — an ERP navigation does this
 for free, a `loadFile()` surface must do it by hand via `noteShellDocSurfaceRoute()`, using the
@@ -609,7 +636,7 @@ and a live ERPNext dependency.
 | **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope); `npm run test:flaky` lists tests that failed and passed on the same code; the last 50 logs are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
 | **2. ERP workflow e2e** (bulk of “full suite”) | Doc/Desk paths against unmodified ERP | Playwright **as a browser** → `ERP_BASE` | Optional; **skip-OK** if ERP down |
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
-| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — backs up and restores the prefs, refuses while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person | Never |
+| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — backs up and restores the prefs, refuses while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine) | Never |
 | **4. Manual** | Feel / dogfood | You (+ **ERP console**) | Never a substitute for layer 1 |
 
 **Gotcha summary:** WebContentsViews are not reliable Playwright Pages — drive via `evaluate` /

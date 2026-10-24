@@ -85,3 +85,12 @@ describe("pruneVanished", () => {
     assert.deepEqual(dropped, [list[0], list[3]]);
   });
 });
+
+it("navRecordOf decodes a route's record: ERPNext knows the name, not its URL form (N-4)", async () => {
+  const { navRecordOf, pruneVanished, vanishedKey } = await import("../src/nav-prune.js");
+  assert.deepEqual(navRecordOf({ route: "/app/supplier/ALPINE%20SUPPLY%20CO" }), { doctypeKey: "supplier", name: "ALPINE SUPPLY CO" });
+  const { kept, dropped } = pruneVanished([{ route: "/app/supplier/ALPINE%20SUPPLY%20CO" }], new Set([vanishedKey("supplier", "ALPINE SUPPLY CO")]));
+  assert.equal(dropped.length, 1);
+  assert.equal(kept.length, 0);
+  assert.deepEqual(navRecordOf({ route: "/app/supplier/100%" }), { doctypeKey: "supplier", name: "100%" });
+});

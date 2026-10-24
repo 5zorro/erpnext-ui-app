@@ -541,8 +541,10 @@ let billPoLineMetaByDoc = {};
  * @type {{ mode: "bill"|"doc", skinId: string|null, route: string }|null}
  */
 let parkedDocSurface = null;
-/** DC-4: the next Doc-page snapshot carries this line ("ERPNext reloaded — …"), once. */
+/** DC-4: the next Doc-page snapshot carries this line ("ERPNext reloaded — …"), once, and repaints
+ * every header box from the reloaded form (the Bill otherwise keeps a box whose text differs). */
 let pendingDocNotice = "";
+let pendingDocForceHeader = false;
 /** DC-4: Doc-page saves under way — a reload during one may or may not have saved. */
 let docSavesInFlight = 0;
 /** @template T @param {() => Promise<T>} run */
@@ -1511,6 +1513,10 @@ function pushDocFormSnapshot(snap) {
     if (pendingDocNotice) {
       payload.notice = pendingDocNotice;
       pendingDocNotice = "";
+    }
+    if (pendingDocForceHeader) {
+      payload.forceHeaderPaint = true;
+      pendingDocForceHeader = false;
     }
     if (activeDocSkin === "bill") {
       payload.amountDue = snap.amountDue != null ? snap.amountDue : amountDueScratch;
@@ -3631,6 +3637,7 @@ async function repaintDocAfterErpReload(r) {
     amountDueCommitted = "";
   }
   pendingDocNotice = r.notice;
+  pendingDocForceHeader = true;
   await showDocForm(skin, currentRoute, { skipDirtyGate: true });
   navDebug("erp-reload-under-doc", `repainted ${currentRoute}${r.notice ? " — said so" : ""}`);
 }
