@@ -247,6 +247,15 @@ async function stayThenDiscard(app, mark, redo) {
   return stayKept;
 }
 
+/** Esc from a peek or errand; an Esc sent while the page navigates is lost, so press it again. */
+async function escBack(app) {
+  for (let i = 0; i < 6 && (await surface(app)) !== "doc"; i += 1) {
+    await soft(inErp(app, `(() => { window.erpUiShell.softPeekEsc(); return true; })()`));
+    for (let k = 0; k < 10 && (await surface(app)) !== "doc"; k += 1) await sleep(500);
+  }
+  await expect.poll(() => surface(app), { timeout: 10_000 }).toBe("doc");
+}
+
 /** Back to `name` by its rail row (Recent: the doctype's row, which reopens the last Bill); what the page and ERPNext then hold. */
 async function backByRow(app, name, lists) {
   if (!(await clickRow(app, name, lists))) return { surface: await surface(app), name: `no row; rows: ${await railRows(app)}` };
@@ -406,8 +415,7 @@ async function move(app, cell, docs, seen) {
       await expect.poll(() => soft(e2eCall(app, "currentRoute")), { timeout: 15_000 }).toContain(`/item/${ITEM}`);
     }
     seen.step = "errand: Esc back";
-    await inErp(app, `(() => { window.erpUiShell.softPeekEsc(); return true; })()`);
-    await expect.poll(() => surface(app), { timeout: 20_000 }).toBe("doc");
+    await escBack(app);
     await sleep(2000);
     seen.back = await backHere(app);
     if (cell.move === "errand-saved") {
@@ -429,8 +437,7 @@ async function move(app, cell, docs, seen) {
     seen.asked = r.asked;
     await waitErpForm(app, "Supplier");
     seen.landed = { surface: await surface(app), doctype: "Supplier" };
-    await inErp(app, `(() => { window.erpUiShell.softPeekEsc(); return true; })()`);
-    await expect.poll(() => surface(app), { timeout: 20_000 }).toBe("doc");
+    await escBack(app);
     await sleep(2000);
     seen.back = await backHere(app);
     seen.focusWant = { field: "bill_no" };
@@ -463,6 +470,9 @@ async function runCell(app, cell, docs, n) {
   /** @type {import("../../src/nav-spine.js").Seen} */
   const seen = {};
   try {
+    // Forms follow the last lens (HANDOFF invariant): a day that last opened a Bill in Vanilla leaves
+    // Bills opening in Vanilla. Every cell is about the Doc lens, so it says so.
+    await e2eCall(app, "setLensPref", "purchase-invoice", "doc");
     seen.step = "arrive";
     seen.arrived = await arrive(app, cell.start, cell.state, docs);
     if (!seen.arrived.ok) return seen;

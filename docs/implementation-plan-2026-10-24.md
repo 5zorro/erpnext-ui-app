@@ -1,10 +1,12 @@
 # Implementation plan 2026-10-24 — the navigation spine: a probe per path, and DC-4
 
-> **Status: built 2026-10-24 — steps 1–6 done.** `npm run nav:check -- --ongoing`: 109 / 109 fresh
-> cells and 33 / 33 after a long session pass, cruft check clean (`test-logs/nav-check/2026-10-24T08-36-56/`).
-> Findings N-1 … N-7 fixed, DC-4 built (A), 5zorro's answers 3–4 in; rules folded into HANDOFF
-> § Navigation spine. Left for 5zorro: the feel (dogfood) and whether Submitted should follow the
-> last *opened* rather than the last *submitted* (below).
+> **Status: built 2026-10-24 — steps 1–6 done.** Last full run on the final code
+> (`test-logs/nav-check/2026-10-24T10-29-51/`): 109 / 109 fresh cells; the long session's cells
+> and cruft check pass after two probe-only fixes (an Esc sent mid-navigation is pressed again; each
+> cell sets the Doc lens, since forms follow the last lens). Findings N-1 … N-7 fixed, DC-4 built
+> (A), 5zorro's answers 3–4 in; rules folded into HANDOFF § Navigation spine. Left for 5zorro: the
+> feel (dogfood), and whether Submitted should follow the last *opened* rather than the last
+> *submitted* (below).
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
 whole implementation plan just to review navigation, and it has broken at least once since that was
