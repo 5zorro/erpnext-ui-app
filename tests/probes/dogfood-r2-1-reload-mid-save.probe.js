@@ -3,7 +3,7 @@
  * Plan 10-19 dogfood row R2-1: Save on a new Bill, and the ERPNext page reloads while the save is
  * in flight (as a browser-tab logout or a Docker restart does) — the save call is held 5 s in the
  * ERPNext page so the reload lands inside it. Questions: does Save come back — not spin for ever — saying the ERPNext page reloaded
- * before the step finished, and does New still work without restarting? A draft bill the save may
+ * before the step finished, then (DC-4) that the save may or may not have landed, and does New still work without restarting? A draft bill the save may
  * have made (bill no. `ZZ-DF-RELOAD-<n>`) is deleted after.
  */
 import { test, expect } from "@playwright/test";
@@ -50,6 +50,10 @@ test("R2-1: a reload mid-save ends the wait and New still works", async () => {
     const after = await inDoc(app, `({ status: document.getElementById("status").textContent, saveDisabled: document.getElementById("btn-save").disabled })`);
     report("after-reload", { ...after, ms: Date.now() - t0 });
     expect(after.saveDisabled).toBe(false);
+    // DC-4 (plan 2026-10-24): once ERPNext's form is back, the page repaints from it and never says
+    // "never saved" — the save may have landed.
+    await expect.poll(() => inDoc(app, `document.getElementById("status").textContent`), { timeout: 30_000 }).toMatch(/reloaded during the save — it may or may not have saved/);
+    report("after-repaint", { status: await inDoc(app, `document.getElementById("status").textContent`) });
 
     await inDoc(app, `(() => { window.confirm = () => true; document.getElementById("btn-new").click(); return true; })()`);
     await sleep(1000);

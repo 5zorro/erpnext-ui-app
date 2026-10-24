@@ -217,3 +217,16 @@ test("cell lines round-trip, and the matrix counts pass / FAIL / skipped / not r
   assert.match(markdown, /no open bill on the board/);
   assert.doesNotMatch(markdown, /\| new-typed \|/);
 });
+
+test("matrixMarkdown: the ongoing run's cells read under their prefix, apart from the fresh ones", () => {
+  const passV = judgeCell(
+    { start: "drafts", state: "draft-clean", move: "peek" },
+    { arrived: draft, landed: { surface: "erp", doctype: "Supplier" }, back: { surface: "doc", name: draft.name } },
+  );
+  const results = parseCellLines([cellLine({ id: "ongoing:drafts/draft-clean/peek" }, passV), cellLine({ id: "drafts/draft-clean/peek" }, passV)].join("\n"));
+  const fresh = matrixMarkdown(results, { starts: ["drafts"] });
+  const later = matrixMarkdown(results, { starts: ["drafts"], prefix: "ongoing:" });
+  assert.equal(fresh.counts.pass, 1);
+  assert.equal(later.counts.pass, 1);
+  assert.equal(later.counts.notRun, fresh.counts.notRun);
+});

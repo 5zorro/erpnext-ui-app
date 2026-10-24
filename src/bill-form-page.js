@@ -1008,8 +1008,12 @@ export async function bootBillFormPage(api) {
     el.dirtyPill.className = "dirty-pill tone-" + pill.tone + (userEdited ? " is-dirty" : "");
   }
   
+  /** DC-4: "ERPNext reloaded — …" stays on the status line through repaints of that document until the next edit. */
+  let reloadNotice = { text: "", name: "" };
+
   function noteUserEdit() {
     userEdited = true;
+    reloadNotice = { text: "", name: "" };
     paintDirtyPill();
   }
   
@@ -5024,7 +5028,9 @@ export async function bootBillFormPage(api) {
     paintTaxes(doc);
     ensureHeaderLinkPickers();
     const name = doc.name || "(new)";
-    setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
+    if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
+    if (reloadNotice.text) setStatus(reloadNotice.text, "warn");
+    else setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
     if (docNumberUi) docNumberUi.paint();
     if (comparePane) comparePane.refresh();
     if (attachList) void attachList.refresh();
@@ -6155,6 +6161,7 @@ export async function bootBillFormPage(api) {
       // A fresh copy of the document (load, reload, back from a peek) starts with the note closed;
       // background enrich progress is the same page filling in, not a reload.
       if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
+      if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
       // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read

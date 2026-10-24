@@ -238,10 +238,11 @@ export function cellPassed(v) {
  * The matrix as Markdown: one table per start, a row per state, a column per move;
  * then each failure with its reasons.
  * @param {Record<string, { skip?: string, verdict?: ReturnType<typeof judgeCell> }>} results
- * @param {{ starts?: string[] }} [opts]
+ * @param {{ starts?: string[], prefix?: string }} [opts] prefix: the ongoing run's ids (`ongoing:`)
  */
 export function matrixMarkdown(results, opts = {}) {
-  const cells = spineCells(opts);
+  const prefix = opts.prefix || "";
+  const cells = spineCells(opts).map((c) => ({ ...c, id: prefix + c.id }));
   const counts = { pass: 0, fail: 0, skipped: 0, notRun: 0 };
   const lines = [];
   const failures = [];
@@ -283,7 +284,7 @@ export function matrixMarkdown(results, opts = {}) {
     }
     lines.push("");
   }
-  const skippedRuns = Object.entries(results).filter(([, r]) => r.skip);
+  const skippedRuns = Object.entries(results).filter(([id, r]) => r.skip && id.startsWith(prefix) && (prefix || !id.includes(":")));
   if (skippedRuns.length) {
     lines.push("### Skipped by the probe", "");
     for (const [id, r] of skippedRuns) lines.push(`- \`${id}\` — ${r.skip}`);

@@ -20,6 +20,8 @@ import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.j
 import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 import { spineCells, judgeCell, cellLine, cellPassed, isTyped, isNew } from "../../src/nav-spine.js";
+import { cruftFindings, cruftLine } from "../../src/nav-cruft.js";
+import { recordsToVerify, vanishedKey } from "../../src/nav-prune.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
 const ITEM = "SAMPLE-SKU-01";
@@ -49,8 +51,9 @@ function freshNavState() {
   fs.rmSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json"), { force: true });
 }
 
-async function launch() {
-  freshNavState();
+/** @param {{ keepNavState?: boolean }} [opts] keepNavState: a restart, not a fresh start */
+async function launch(opts = {}) {
+  if (!opts.keepNavState) freshNavState();
   const app = await launchShell();
   await waitForE2eApi(app);
   await expect.poll(() => e2eCall(app, "getErpUrl"), { timeout: 30_000 }).toMatch(/\/(app|desk)\b/);
@@ -347,8 +350,9 @@ async function move(app, cell, docs, seen) {
       }
     } else if (r.how === "gate") seen.stayKept = await stayThenDiscard(app, mark, go);
     await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("erp");
+    await waitErpForm(app, "Purchase Invoice").catch(() => {});
     await sleep(1500);
-    const f = (await inErp(app, ERP_FORM)) || {};
+    const f = (await soft(inErp(app, ERP_FORM))) || {};
     seen.landed = { surface: await surface(app), doctype: f.doctype, name: f.name };
     seen.carried = typed ? f.ref === mark : null;
     await inChrome(app, click("lens-doc"));
@@ -513,4 +517,128 @@ export async function runSpine(start) {
     await app.close().catch(() => {});
   }
   return { failed, ran: cells.length };
+}
+
+/** A small seeded random (mulberry32): the same day every run, so a finding reproduces. */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** What the rail holds right now, checked against ERPNext (`src/nav-cruft.js`). */
+async function cruftNow(app, label) {
+  const shelved = await e2eCall(app, "getShelved");
+  const recent = await e2eCall(app, "getHistory");
+  const submitted = await e2eCall(app, "getSubmitted");
+  const peekStack = await e2eCall(app, "getPeekStack");
+  const parked = await e2eCall(app, "getParked");
+  const records = recordsToVerify([shelved, recent, submitted]);
+  const status = await inErp(
+    app,
+    `(async () => { const out = []; for (const [dt, names] of ${JSON.stringify([...records].map(([k, v]) => [k, v]))}) {
+      const doctype = dt.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+      try { const got = await frappe.xcall("frappe.client.get_list", { doctype, filters: { name: ["in", names] }, fields: ["name", "docstatus"], limit_page_length: 0 });
+        for (const n of names) { const r = got.find((g) => g.name === n); out.push([dt, n, r ? r.docstatus : null]); } } catch (e) { /* unclear: not judged */ } }
+      return out; })()`,
+    30_000,
+  );
+  const docstatus = new Map((Array.isArray(status) ? status : []).map(([dt, n, s]) => [vanishedKey(dt, n), s]));
+  let navStateBytes = 0;
+  try {
+    navStateBytes = fs.statSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json")).size;
+  } catch {
+    /* not written yet */
+  }
+  const found = cruftFindings({ shelved, recent, submitted, docstatus, atHome: (await surface(app)) === "home", peekStack, parked, navStateBytes });
+  console.log(cruftLine(label, found, { drafts: shelved.length, recent: recent.length, submitted: submitted.length, navStateBytes }));
+  return found;
+}
+
+/** A draft made the way a clerk leaves one: saved in Vanilla (it joins the Drafts list), never finished. */
+async function makeDayDraft(app, k) {
+  const name = await inErp(
+    app,
+    `(async () => (await frappe.xcall("frappe.client.insert", { doc: { doctype: "Purchase Invoice", supplier: ${JSON.stringify(VENDOR)}, bill_no: "ZZ-NAV-D${k}", items: [{ item_code: ${JSON.stringify(ITEM)}, qty: 1, rate: 10 }] } })).name)()`,
+    30_000,
+  );
+  await e2eCall(app, "openErp", `${PI}/${encodeURIComponent(name)}`);
+  await waitErpForm(app, "Purchase Invoice", name);
+  await inErp(app, `(async () => { cur_frm.dirty(); await cur_frm.save(); return true; })()`, 30_000);
+  await goHomeClean(app);
+  return name;
+}
+
+/** Deleted the way a browser tab deletes it: straight in ERPNext, the shell not told. */
+const deleteInErp = (app, name) =>
+  inErp(app, `(async () => { await frappe.xcall("frappe.client.delete", { doctype: "Purchase Invoice", name: ${JSON.stringify(name)} }); return true; })()`, 30_000);
+
+/**
+ * The ongoing run (plan 2026-10-24 build step 3): a scripted day — `NAV_DAY` cells (default 25, about
+ * 100 moves: arrive, type, move, come back) picked by a seeded random from every start, with drafts
+ * left behind and deleted in ERPNext along the way — then the cruft check, the Drafts and Recent
+ * cells judged as `ongoing:` ids, the cruft check again, and once more after a restart (does the
+ * startup prune mend what the day left?).
+ */
+export async function runOngoing() {
+  const dayLen = Number(process.env.NAV_DAY) || 25;
+  const rand = seeded(Number(process.env.NAV_SEED) || 20261024);
+  const pool = spineCells().filter((c) => !c.skip);
+  const failed = [];
+  let app = await launch();
+  let docs;
+  const dayDrafts = [];
+  try {
+    docs = await findOrMakeDocs(app);
+    await setUp(app, docs);
+    for (let i = 0; i < dayLen; i += 1) {
+      const roll = rand();
+      if (roll < 0.12) {
+        dayDrafts.push(await makeDayDraft(app, dayDrafts.length));
+        report("day", { i, made: dayDrafts[dayDrafts.length - 1] });
+        continue;
+      }
+      if (roll < 0.2 && dayDrafts.length) {
+        const name = dayDrafts.splice(Math.floor(rand() * dayDrafts.length), 1)[0];
+        await deleteInErp(app, name);
+        report("day", { i, deletedInErp: name });
+        continue;
+      }
+      const cell = pool[Math.floor(rand() * pool.length)];
+      const seen = await runCell(app, cell, docs, 1000 + i);
+      report("day", { i, cell: cell.id, ok: !seen.error, error: seen.error });
+      await goHomeClean(app).catch(async () => {
+        await app.close().catch(() => {});
+        app = await launch({ keepNavState: true });
+      });
+    }
+    const afterDay = await cruftNow(app, "after the day");
+    for (const cell of spineCells({ starts: ["drafts", "rail"] }).filter((c) => !c.skip)) {
+      const seen = await runCell(app, cell, docs, 2000);
+      const verdict = judgeCell(cell, seen, { other: docs.B });
+      report("seen", { id: `ongoing:${cell.id}`, ...seen });
+      console.log(cellLine({ id: `ongoing:${cell.id}` }, verdict));
+      if (!cellPassed(verdict)) failed.push(`ongoing:${cell.id}`);
+      await goHomeClean(app).catch(() => {});
+    }
+    const afterCells = await cruftNow(app, "after the cells");
+    await app.close().catch(() => {});
+    app = await launch({ keepNavState: true });
+    await sleep(8000); // the startup prune runs once the login is seen
+    const afterRestart = await cruftNow(app, "after a restart");
+    if (afterRestart.length) failed.push("cruft after a restart");
+    report("cruft-summary", { afterDay: afterDay.length, afterCells: afterCells.length, afterRestart: afterRestart.length });
+  } finally {
+    if (docs) {
+      const gone = await inErp(app, `(async () => { const out = []; for (const n of ${JSON.stringify([docs.A, docs.B, ...dayDrafts])}) { try { await frappe.xcall("frappe.client.delete", { doctype: "Purchase Invoice", name: n }); out.push(n); } catch (e) { out.push("kept " + n); } } return out; })()`, 60_000).catch(() => "ERR");
+      report("cleanup", { deleted: gone });
+    }
+    await app.close().catch(() => {});
+  }
+  return { failed };
 }

@@ -87,6 +87,7 @@ import {
   contentSizeChanged,
 } from "../src/shell-relayout.js";
 import { DOCTYPE_LABELS, listLabelForDoctype } from "../src/doctype-labels.js";
+import { erpReloadUnderDoc } from "../src/erp-reload-notice.js";
 import { DOC_WASH_PREFS_FILENAME, mergeDocWashPrefs, washPatternSyncScript } from "../src/doc-wash.js";
 import {
   resolveDocSkinTarget,
@@ -540,6 +541,19 @@ let billPoLineMetaByDoc = {};
  * @type {{ mode: "bill"|"doc", skinId: string|null, route: string }|null}
  */
 let parkedDocSurface = null;
+/** DC-4: the next Doc-page snapshot carries this line ("ERPNext reloaded — …"), once. */
+let pendingDocNotice = "";
+/** DC-4: Doc-page saves under way — a reload during one may or may not have saved. */
+let docSavesInFlight = 0;
+/** @template T @param {() => Promise<T>} run */
+async function countingDocSave(run) {
+  docSavesInFlight += 1;
+  try {
+    return await run();
+  } finally {
+    docSavesInFlight -= 1;
+  }
+}
 /** The parked document's own Vanilla form, opened on purpose (Attach) — see ownFormPeekHolds. */
 let ownFormPeekRoute = "";
 /** Bumps on each showBill proceed; stale loads abandon before paint (re-click race). */
@@ -1045,6 +1059,8 @@ function syncE2eApi() {
     getRecentRows: () =>
       JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
     getShelved: () => shelvedDrafts.map((d) => ({ ...d })),
+    getSubmitted: () => submittedDocs.map((d) => ({ ...d })),
+    getParked: () => (parkedDocSurface ? { route: parkedDocSurface.route || "" } : null),
     appVersion: APP_VERSION,
     isAllowed: (url) => isAllowedErpUrl(ERP_BASE, url),
     trackNav: (url) => {
@@ -1492,6 +1508,10 @@ function pushDocFormSnapshot(snap) {
       profileId: activeDocSkin || "",
       scratch: snap.scratch || { dateExpected: dateExpectedScratch },
     };
+    if (pendingDocNotice) {
+      payload.notice = pendingDocNotice;
+      pendingDocNotice = "";
+    }
     if (activeDocSkin === "bill") {
       payload.amountDue = snap.amountDue != null ? snap.amountDue : amountDueScratch;
       payload.linkedPos = snap.linkedPos || [];
@@ -3553,6 +3573,67 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
 
 /** @type {{ finish: () => void, refuse?: () => void } | null} */
 let erpLoadWaiter = null;
+
+/** "bill", "purchase order", … — how the Doc page names its document in a sentence. */
+function docLabelForRoute(route) {
+  const dt = routeInfo(route, ERP_BASE).doctype || "";
+  return String(DOCTYPE_LABELS[dt] || dt.replace(/-/g, " ") || "document").toLowerCase();
+}
+
+/** A load the shell did not start, of the form under the Doc page (DC-4); null otherwise. */
+function reloadUnderDocFor(url) {
+  return erpReloadUnderDoc({
+    surfaceMode,
+    shellLoading: !!erpLoadWaiter,
+    docRoute: currentRoute,
+    loadedUrl: url,
+    userEdited: !!dirtyState.userEdited,
+    midSave: docSavesInFlight > 0,
+    docLabel: docLabelForRoute(currentRoute),
+    erpBase: ERP_BASE,
+  });
+}
+
+/**
+ * DC-4 (plan 2026-10-24, 5zorro: A — match Vanilla): ERPNext reloaded its page under the Doc page
+ * (an expired session, a new version, a crash — the shell never reloads it itself, so it cannot ask
+ * first, and Chromium skips Frappe's "leave?" for Doc-page typing, G23). Vanilla keeps nothing
+ * across a reload; nor does the shell. Wait for the reloaded form, then repaint the Doc page from
+ * it — never the stale typing or the dead `new-…` name — and say what was lost.
+ * @param {{ doctype: string, typed: boolean, wasNew: boolean, notice: string }} r
+ */
+async function repaintDocAfterErpReload(r) {
+  const skin = activeDocSkin;
+  navDebug("erp-reload-under-doc", `${r.typed ? "typed" : "clean"} ${r.wasNew ? "new" : "saved"} ${currentRoute}`);
+  await new Promise((resolve) => {
+    if (!erp || erp.webContents.isDestroyed()) return resolve();
+    erp.webContents.once("did-finish-load", resolve);
+    setTimeout(resolve, 15000);
+  });
+  for (let i = 0; i < 40; i += 1) {
+    const ready = await erpEval(
+      `(function(){try{return !!(window.cur_frm&&cur_frm.doc&&frappe.router.slug(cur_frm.doctype)===${JSON.stringify(r.doctype)});}catch(e){return false;}})()`,
+    );
+    if (ready === true) break;
+    await sleep(500);
+  }
+  // The clerk moved on while ERPNext was loading: nothing to repaint.
+  if (surfaceMode !== "doc" || activeDocSkin !== skin) {
+    navDebug("erp-reload-under-doc", "moved on before the form came back");
+    return;
+  }
+  const live = currentErpPathname();
+  const n = live ? normalizeAppRoute(live, ERP_BASE) : null;
+  if (n && n.path && n.doctype === r.doctype) currentRoute = n.path;
+  dirtyState = { ...dirtyState, userEdited: false, isDirty: false };
+  if (skin === "bill") {
+    amountDueScratch = "";
+    amountDueCommitted = "";
+  }
+  pendingDocNotice = r.notice;
+  await showDocForm(skin, currentRoute, { skipDirtyGate: true });
+  navDebug("erp-reload-under-doc", `repainted ${currentRoute}${r.notice ? " — said so" : ""}`);
+}
 
 /** When the shell's own unsaved-changes check last passed (ms) — see erp-unload-guard.js. */
 let erpUnloadClearedAt = 0;
@@ -7503,7 +7584,9 @@ function createWindow() {
   erp.webContents.on("render-process-gone", (_e, d) => interruptPendingErpEvals(`stopped (${(d && d.reason) || "gone"})`));
   erp.webContents.on("destroyed", () => interruptPendingErpEvals("closed"));
   erp.webContents.on("did-navigate", (_e, url) => {
+    const reload = reloadUnderDocFor(url); // before trackNav moves currentRoute (DC-4)
     interruptPendingErpEvals("reloaded");
+    if (reload) repaintDocAfterErpReload(reload).catch((e) => navDebug("erp-reload-under-doc", `failed: ${e && e.message}`));
     if (isAllowedErpUrl(ERP_BASE, url)) erpLeftBase = false;
     trackNav(url, { fromBrowser: true });
     // Logging in (or out) is a hard navigation — re-ask now.
@@ -9495,7 +9578,7 @@ ipcMain.handle("bill-attach-file", async () => {
 });
 
 ipcMain.handle("bill-save", async (_e, opts) =>
-  saveBillFromErp(opts && typeof opts === "object" ? opts : {}),
+  countingDocSave(() => saveBillFromErp(opts && typeof opts === "object" ? opts : {})),
 );
 
 ipcMain.handle("bill-list-mandatory", async () => listBillMandatoryMissing());
@@ -10388,7 +10471,7 @@ async function saveDocFormFromErp(opts = {}) {
 }
 
 ipcMain.handle("doc-save", async (_e, opts) =>
-  saveDocFormFromErp(opts && typeof opts === "object" ? opts : {}),
+  countingDocSave(() => saveDocFormFromErp(opts && typeof opts === "object" ? opts : {})),
 );
 
 ipcMain.handle("doc-list-mandatory", async () => {

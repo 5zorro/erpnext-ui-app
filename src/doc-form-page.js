@@ -703,8 +703,12 @@ function paintDirtyPill() {
   el.dirtyPill.className = "dirty-pill tone-" + pill.tone + (userEdited ? " is-dirty" : "");
 }
 
+/** DC-4: "ERPNext reloaded — …" stays on the status line through repaints of that document until the next edit. */
+let reloadNotice = { text: "", name: "" };
+
 function noteUserEdit() {
   userEdited = true;
+  reloadNotice = { text: "", name: "" };
   paintDirtyPill();
 }
 
@@ -2806,7 +2810,9 @@ function paint(doc, snapScratch, opts = {}) {
   void paintSourceTerms(doc);
 
   const name = doc.name || "(new)";
-  setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
+  if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
+  if (reloadNotice.text) setStatus(reloadNotice.text, "warn");
+  else setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
   if (docNumberUi) docNumberUi.paint();
   if (comparePane) comparePane.refresh();
   if (attachList) void attachList.refresh();
@@ -3496,6 +3502,7 @@ export async function bootDocFormPage(injectedApi) {
   if (api.onSnapshot) {
     api.onSnapshot(async (snap) => {
       collapseTaxDefaultNote();
+      if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       await ensureUiConfig();
       paint(snap && snap.doc, (snap && snap.scratch) || {}, {
         reason: snap && snap.reason,
