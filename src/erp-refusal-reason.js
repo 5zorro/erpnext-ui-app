@@ -84,3 +84,13 @@ export const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
   }
   return flat(err) || lastRefusal() || "ERPNext refused without saying why.";
 }`;
+
+/**
+ * ERPNext's sentence, ended — its messages often have no full stop, and the shell's advice follows
+ * them ("… disabled accounts: X - USE. Open …"; dogfood probes R9-1, R10c-1).
+ * @param {unknown} reason
+ */
+export function endSentence(reason) {
+  const t = String(reason == null ? "" : reason).trim();
+  return !t || /[.!?…]$/.test(t) ? t : `${t}.`;
+}

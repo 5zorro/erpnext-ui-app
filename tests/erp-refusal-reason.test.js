@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { PE_REASON_FROM_JS } from "../src/erp-refusal-reason.js";
+import { PE_REASON_FROM_JS, endSentence } from "../src/erp-refusal-reason.js";
 
 /** The page's `reasonFrom`, with `lastResponse` as `frappe.last_response`. */
 function reasonFrom(lastResponse) {
@@ -30,5 +30,14 @@ describe("reasonFrom (the ERPNext page's reason for a refused call)", () => {
   it("nothing at all: says so, and no longer blames a Payment Entry", () => {
     assert.equal(reasonFrom(null)(undefined), "ERPNext refused without saying why.");
     assert.equal(reasonFrom({})(undefined), "ERPNext refused without saying why.");
+  });
+});
+
+describe("endSentence", () => {
+  it("ends ERPNext's sentence once", () => {
+    assert.equal(endSentence("disabled accounts: X"), "disabled accounts: X.");
+    assert.equal(endSentence("Period closed."), "Period closed.");
+    assert.equal(endSentence(" "), "");
+    assert.equal(endSentence(null), "");
   });
 });

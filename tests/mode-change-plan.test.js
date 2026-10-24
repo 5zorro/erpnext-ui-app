@@ -348,4 +348,13 @@ describe("review 10-19 / 5zorro 2026-10-20 — the batch stops at the first bill
     assert.match(told.headline, /1 amended copy was created but not submitted/);
     assert.match(told.lines[1], /B → B-1 — created but NOT submitted/);
   });
+
+  it("ERPNext's reason is ended before the advice (dogfood probe R9-1)", () => {
+    const told = summarizeModeChange([
+      { invoice: "B", ok: false, cancelled: true, amendedName: "B-1", reason: "Cannot create accounting entries against disabled accounts: X - USE" },
+      { invoice: "C", ok: false, cancelled: true, reason: "Period closed." },
+    ]);
+    assert.match(told.lines[0], /disabled accounts: X - USE\. Open B-1 and submit it\.$/);
+    assert.match(told.lines[1], /Period closed\. Amend it/);
+  });
 });

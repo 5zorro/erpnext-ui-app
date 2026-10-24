@@ -15,18 +15,11 @@ import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
 import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
 import { SCENES, inPage } from "../dogfood-scenes.js";
+import { cardOf, applyMethod, panelState, clickPanel } from "../method-panel-helpers.js";
 
 const scene = SCENES["batch-cancel-refused"];
-const card = `[...document.querySelectorAll('[data-testid="vendor-card"]')].find((c) => c.textContent.includes("ZZ DF BATCH"))`;
-const panelState = (app) =>
-  inBoard(
-    app,
-    `(() => { const c = ${card}; if (!c) return null; const p = c.querySelector('[data-testid="method-panel"]');
-      return { open: !p.hidden, status: p.querySelector('[data-testid="method-panel-status"]').textContent,
-        chips: [...p.querySelectorAll('[data-testid="method-panel-row"]')].map((r) => [r.querySelector("strong").textContent, r.querySelector('[data-testid="method-panel-chip"]').textContent]),
-        retry: (() => { const b = p.querySelector('[data-testid="method-panel-retry"]'); return b.hidden || b.closest("[hidden]") ? null : b.textContent; })(),
-        outcome: [...p.querySelectorAll('[data-testid="method-panel-outcome"] li')].map((l) => l.textContent) }; })()`,
-  );
+const V = "ZZ DF BATCH";
+const card = cardOf(V);
 
 test("R9: a batch method change stops at a refused cancel and finishes on Try again", async () => {
   const app = await launchShell();
@@ -42,14 +35,11 @@ test("R9: a batch method change stops at a refused cancel and finishes on Try ag
 
     await openBoard(app);
     await expect.poll(() => inBoard(app, `!!(${card})`), { timeout: 20_000 }).toBe(true);
-    // window.confirm is the panel's "are you sure": answer yes.
-    await inBoard(app, `(() => { window.confirm = () => true; const c = ${card}; c.querySelector('[data-testid="vendor-change-method"]').click();
-      const p = c.querySelector('[data-testid="method-panel"]'); p.querySelector('[data-testid="method-panel-mode"]').value = "ACH";
-      p.querySelector('[data-testid="method-panel-apply"]').click(); return true; })()`);
-    await expect.poll(async () => (await panelState(app)).retry, { timeout: 120_000 }).toBeTruthy();
-    const stopped = await panelState(app);
+    expect(await applyMethod(app, V, "ACH")).toBe(true);
+    await expect.poll(async () => (await panelState(app, V)).retry, { timeout: 120_000 }).toBeTruthy();
+    const stopped = await panelState(app, V);
     report("stopped", stopped);
-    const chip = Object.fromEntries(stopped.chips);
+    const chip = stopped.chips;
     const [b1, b2, b3, b4] = made.bills;
     expect(chip[b1]).toMatch(/^✓ → /);
     expect(chip[b2]).toMatch(/^✓ → /);
@@ -61,7 +51,7 @@ test("R9: a batch method change stops at a refused cancel and finishes on Try ag
     // Resume the order, then Try again: both finish and the board is read again.
     const resumed = await inPage(app, async (po) => frappe.xcall("erpnext.buying.doctype.purchase_order.purchase_order.update_status", { status: "Draft", name: po }), made.heldPo);
     report("resumed", resumed ?? "ok");
-    await inBoard(app, `(() => { const c = ${card}; c.querySelector('[data-testid="method-panel-retry"]').click(); return true; })()`);
+    await clickPanel(app, V, "method-panel-retry");
     const onAch = (app) =>
       inPage(app, async (v) => frappe.xcall("frappe.client.get_list", { doctype: "Purchase Invoice", filters: { supplier: v, docstatus: 1 }, fields: ["name", "mode_of_payment", "amended_from"], limit_page_length: 0 }), "ZZ DF BATCH");
     await expect.poll(async () => (await onAch(app)).filter((b) => b.mode_of_payment === "ACH").length, { timeout: 120_000 }).toBe(4);

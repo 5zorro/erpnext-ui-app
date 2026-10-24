@@ -53,12 +53,40 @@ const PAGE_HELPERS = String.raw`
   async function ensureModes(names) {
     for (const m of names) if (!(await one("Mode of Payment", { name: m }))) await insert({ doctype: "Mode of Payment", mode_of_payment: m, type: "Bank" });
   }
+  /** A ZZ expense account and a non-stock ZZ item booked to it (the "disabled account" refusals). */
+  async function ensureZzExpense() {
+    const company = frappe.defaults.get_user_default("Company") || (await list("Company", {}))[0].name;
+    let account = await one("Account", { account_name: "ZZ DF Expense", company });
+    if (!account) {
+      const parent = (await list("Account", { company, root_type: "Expense", is_group: 1 }, ["name", "lft"], { order_by: "lft desc" }))[0].name;
+      account = (await insert({ doctype: "Account", account_name: "ZZ DF Expense", parent_account: parent, company })).name;
+    }
+    await x("frappe.client.set_value", { doctype: "Account", name: account, fieldname: "disabled", value: 0 });
+    if (!(await one("Item", { item_code: "ZZ-DF-SERVICE" }))) {
+      const g = await list("Item Group", { is_group: 0 });
+      await insert({ doctype: "Item", item_code: "ZZ-DF-SERVICE", item_name: "ZZ DF service", item_group: g[0].name, stock_uom: "Nos", is_stock_item: 0 });
+    }
+    return { company, account };
+  }
+  /** A ZZ bank account (Bank type, under the company's bank group), enabled or not as asked. */
+  async function ensureZzBank(disabled) {
+    const company = frappe.defaults.get_user_default("Company") || (await list("Company", {}))[0].name;
+    let account = await one("Account", { account_name: "ZZ DF Bank", company });
+    if (!account) {
+      const parent = (await list("Account", { company, account_type: "Bank", is_group: 1 }))[0].name;
+      account = (await insert({ doctype: "Account", account_name: "ZZ DF Bank", parent_account: parent, company, account_type: "Bank" })).name;
+    }
+    await x("frappe.client.set_value", { doctype: "Account", name: account, fieldname: "disabled", value: disabled ? 1 : 0 });
+    return account;
+  }
   /** Cancel or delete everything a vendor has (bills first, then orders), resuming held orders. */
   async function clearVendor(supplier) {
     const done = [];
     const tryDo = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { done.push(label + " FAILED: " + ((e && e.message) || "")); } };
     for (const po of await list("Purchase Order", { supplier, docstatus: 1, status: ["in", ["On Hold", "Closed"]] }))
       await tryDo("resume " + po.name, () => x("erpnext.buying.doctype.purchase_order.purchase_order.update_status", { status: "Draft", name: po.name }));
+    for (const pe of await list("Payment Entry", { party_type: "Supplier", party: supplier, docstatus: ["<", 2] }, ["name", "docstatus"]))
+      await tryDo((pe.docstatus === 1 ? "cancel " : "delete ") + pe.name, () => x(pe.docstatus === 1 ? "frappe.client.cancel" : "frappe.client.delete", { doctype: "Payment Entry", name: pe.name }));
     for (const dt of ["Purchase Invoice", "Purchase Order"]) {
       for (const d of await list(dt, { supplier, docstatus: ["<", 2] }, ["name", "docstatus"], { order_by: "creation desc" })) {
         if (d.docstatus === 1) await tryDo("cancel " + d.name, () => x("frappe.client.cancel", { doctype: dt, name: d.name }));
@@ -117,6 +145,79 @@ export const SCENES = {
         { methods: BOARD_METHODS },
       ),
     clear: (app) => inPage(app, maker(`return { cleared: await clearVendor("ZZ DF BATCH") };`), null),
+  },
+  "batch-submit-refused": {
+    title: "A vendor with 3 open bills; ERPNext takes the 2nd's cancel but refuses its amended copy's submit",
+    rows: ["R9-1"],
+    leaves:
+      "Vendor ZZ DF BATCH SUBMIT with 3 submitted bills on Check; the 2nd is booked to the expense account ZZ DF Expense, which is then disabled — ERPNext cancels it and saves its amended copy, but refuses to submit the copy. The account and the item ZZ-DF-SERVICE stay (re-enabled by --clear).",
+    look: "Pay Outstanding → ZZ DF BATCH SUBMIT → Method… → all to ACH → Apply. Expect: bill 1 ✓; bill 2's chip \"Cancelled — <name>-1 not submitted\" and the copy is a draft in ERPNext; bill 3 not attempted. Re-enable the account (Chart of Accounts › ZZ DF Expense) and submit the draft in Vanilla.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF BATCH SUBMIT";
+          const { account } = await ensureZzExpense();
+          const cleared = await clearVendor(V);
+          await ensureModes(["Check", ...arg.methods]);
+          await ensureSupplier(V);
+          const bills = [];
+          for (const [i, days] of [[1, 10], [2, 20], [3, 30]]) {
+            const item = { item_code: "ZZ-DF-SERVICE", qty: 1, rate: i * 100 };
+            if (i === 2) item.expense_account = account;
+            const b = await submit({
+              doctype: "Purchase Invoice", supplier: V, bill_no: "ZZ-DF-SUBMIT-" + i, mode_of_payment: "Check", items: [item],
+              payment_schedule: [{ due_date: addDays(days), invoice_portion: 100, payment_amount: i * 100, mode_of_payment: "Check" }],
+            });
+            bills.push(b.name);
+          }
+          await x("frappe.client.set_value", { doctype: "Account", name: account, fieldname: "disabled", value: 1 });
+          return { vendor: V, bills, disabledAccount: account, cleared };
+        `),
+        { methods: BOARD_METHODS },
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const { account } = await ensureZzExpense();
+          return { reEnabled: account, cleared: await clearVendor("ZZ DF BATCH SUBMIT") };
+        `),
+        null,
+      ),
+  },
+  "payment-submit-refused": {
+    title: "A vendor with an open bill, and a bank account ERPNext will not post to",
+    rows: ["R10c-1"],
+    leaves:
+      "Vendor ZZ DF PAY REFUSED with one submitted bill (250.00, due in 7 days), and the bank account ZZ DF Bank, disabled — a payment from it saves as a draft but ERPNext refuses to submit it. The account stays (enabled by --clear).",
+    look: "Pay Outstanding → ZZ DF PAY REFUSED → Create payment → Pay from: type ZZ DF Bank - <company abbr> (the picker hides disabled accounts) → Submit. Expect: the drawer says the payment was saved as a draft but not submitted, naming it and ERPNext's reason, and it appears under Draft payments at once.",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const V = "ZZ DF PAY REFUSED";
+          const cleared = await clearVendor(V);
+          await ensureSupplier(V);
+          const bank = await ensureZzBank(false);
+          const b = await submit({
+            doctype: "Purchase Invoice", supplier: V, bill_no: "ZZ-DF-PAY-1", items: [{ item_code: "SAMPLE-SKU-01", qty: 1, rate: 250 }],
+            payment_schedule: [{ due_date: addDays(7), invoice_portion: 100, payment_amount: 250, mode_of_payment: "Check" }],
+          });
+          await ensureZzBank(true);
+          return { vendor: V, bill: b.name, disabledBank: bank, cleared };
+        `),
+        null,
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const cleared = await clearVendor("ZZ DF PAY REFUSED");
+          return { reEnabled: await ensureZzBank(false), cleared };
+        `),
+        null,
+      ),
   },
 };
 

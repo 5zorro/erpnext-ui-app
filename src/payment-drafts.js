@@ -8,6 +8,7 @@
  */
 
 import { formatUsdAmount } from "./money.js";
+import { endSentence } from "./erp-refusal-reason.js";
 
 /**
  * @typedef {{ doctype: string, name: string, allocated: number }} DraftPaymentReference
@@ -147,7 +148,7 @@ export function draftPaymentConfirmText(draft, action) {
  */
 export function paymentCreateFailureText(result) {
   const r = result || {};
-  const reason = String(r.reason || "").trim() || "Payment Entry create failed.";
+  const reason = endSentence(r.reason) || "Payment Entry create failed.";
   if (r.step === "uncertain") {
     // The page died mid-write (review 10-19): the payment may exist, drafted or even submitted.
     return {

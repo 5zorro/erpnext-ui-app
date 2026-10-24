@@ -55,6 +55,7 @@
  */
 
 import { predictAmendedName } from "./doc-actions.js";
+import { endSentence } from "./erp-refusal-reason.js";
 
 /** @param {unknown} v */
 function text(v) {
@@ -348,6 +349,7 @@ export function summarizeModeChange(results = []) {
   const failed = rows.filter((r) => r && !r.ok && !r.cancelled);
   const unverified = done.filter((r) => r.verified === false).map((r) => text(r.invoice));
 
+  const said = (r) => endSentence(text(r.reason));
   const lines = rows.map((r) => {
     const name = text(r.invoice);
     if (r.ok) {
@@ -356,13 +358,13 @@ export function summarizeModeChange(results = []) {
         : `${name} → ${text(r.amendedName)} ✓`;
     }
     if (r.cancelled && r.amendedName) {
-      return `${name} → ${text(r.amendedName)} — created but NOT submitted. ${text(r.reason)} Open ${text(r.amendedName)} and submit it.`;
+      return `${name} → ${text(r.amendedName)} — created but NOT submitted. ${said(r)} Open ${text(r.amendedName)} and submit it.`;
     }
     if (r.cancelled && r.uncertain) {
       return `${name} — lost contact mid-way; it may already be cancelled. Check it in ERPNext before anything else.`;
     }
     if (r.cancelled) {
-      return `${name} — CANCELLED, not replaced. ${text(r.reason)} Amend it before re-entering anything.`;
+      return `${name} — CANCELLED, not replaced. ${said(r)} Amend it before re-entering anything.`;
     }
     return `${name} — not changed. ${text(r.reason)}`;
   });

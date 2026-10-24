@@ -108,6 +108,11 @@ describe("review 10-19 R10c-1 — a refused submit leaves a draft, and the drawe
     assert.match(t.text, /Draft payments/);
   });
 
+  it("ERPNext's reason is ended before the advice (dogfood probe R10c-1)", () => {
+    const t = paymentCreateFailureText({ ok: false, step: "submit", name: "P-1", reason: "Cannot create accounting entries against disabled accounts: ZZ DF Bank - USE" });
+    assert.match(t.text, /ZZ DF Bank - USE\. Finish or delete it/);
+  });
+
   it("any other failure is just the reason", () => {
     assert.deepEqual(paymentCreateFailureText({ ok: false, step: "insert", reason: "No account." }), {
       text: "No account.",
