@@ -102,3 +102,20 @@ describe("ERP_LIST_JS — frappe.db's defaults, through frappe.xcall", () => {
     assert.ok(PE_REASON_FROM_JS.startsWith("function reasonFrom("));
   });
 });
+
+describe("a refused read is pending, not empty (the Bill's background loading, R7-5 follow-up)", () => {
+  // Before the sweep a refused frappe.db.get_list hung, timed out, and the enrich loop retried it
+  // until "Couldn't load — press Refresh". xList fails at once; reading that as "no POs" / "no
+  // limits" left the Bill at "still loading" with no retry (dogfood R6c-2 caught it, 2026-10-25).
+  it("the three loaders return { failed } on a refusal, not an empty answer", () => {
+    assert.match(main, /if \(!raw \|\| !raw\.ok\) return \{ failed: \(raw && raw\.reason\) \|\| "no answer" \};\s*return linkedPurchaseOrdersForBill/);
+    assert.match(main, /if \(!raw \|\| !raw\.ok\) return \{ failed: \(raw && raw\.reason\) \|\| "no answer" \}; \/\/ pending, not "none"\s*return linkedPurchaseReceiptsForBill/);
+    assert.match(main, /if \(!raw \|\| raw\.ok === false\) return \{ meta, poTitles: null, failed:/);
+    assert.match(main, /const \{ meta: poLineMeta, poTitles, failed \} = await fetchBillPoLineMeta\(doc\);\s*if \(failed\) return \{ failed \};/);
+  });
+  it("the open path and the retry loop keep a failed slice pending", () => {
+    for (const what of ["lineContext failed round", "linkedPos failed round", "linkedReceipts failed round"]) assert.ok(main.includes(what), what);
+    for (const what of ["source line enrich: ${enrichRaw.failed}", "linked PO titles: ${linkedRaw.failed}", "linked Item Receipt refs: ${linkedPrRaw.failed}"]) assert.ok(main.includes(what), what);
+  });
+});
+

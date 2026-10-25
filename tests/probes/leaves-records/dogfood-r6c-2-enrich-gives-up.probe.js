@@ -2,7 +2,7 @@
  * @dogfood R6c-2
  * Plan 10-19 dogfood row R6c-2: a draft Bill made from a Purchase Order, opened while ERPNext stops
  * answering the background reads for its PO and receipt columns (the app's session refuses
- * `/api/resource/Purchase Order…`, `…Purchase Receipt…` and `get_list` from before the Bill opens), until the background retry gives up (15 rounds, a few
+ * `/api/resource/Purchase Order…`, `…Purchase Receipt…` and the page's list calls from before the Bill opens), until the background retry gives up (15 rounds, a few
  * minutes; it is read from the app's own nav-debug.log). Questions: is no field left saying it is
  * still loading, and does Save say to press Refresh rather than to wait? (The PO fields keep the PO
  * numbers from the bill's own lines — only their titles are missing — so here it is the PO line
@@ -42,8 +42,9 @@ test("R6c-2: when the background loading gives up, the page says Refresh", async
     report("scene", made);
     expect(made && made.error).toBeFalsy();
 
-    // Both routes the background reads take: /api/resource over HTTP and get_list in the ERPNext page.
-    await erpDown(app, ["/api/resource/Purchase%20Order", "/api/resource/Purchase%20Receipt", "frappe.client.get_list"]);
+    // Every route the background reads take: /api/resource over HTTP, and the lists in the ERPNext
+    // page — frappe.client.get_list, and reportview.get_list, which xList asks (review 10-19 R7-5).
+    await erpDown(app, ["/api/resource/Purchase%20Order", "/api/resource/Purchase%20Receipt", "frappe.client.get_list", "frappe.desk.reportview.get_list"]);
     await openNewDoc(app, "bill", `/app/purchase-invoice/${made.bill}`);
     await expect.poll(() => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`), { timeout: 30_000 }).toBe(made.bill);
     const t0 = Date.now();

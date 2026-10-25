@@ -1718,6 +1718,8 @@ async function fetchBillPoLineMeta(doc) {
       ? `via=bridge poItems=${((raw && raw.poItems) || []).length} caps=${capRows}`
       : `via=bridge fail ${(raw && raw.reason) || "unknown"}`,
   );
+  // Failed is not "no limits": the caller keeps lineContext pending and retries (R7-5).
+  if (!raw || raw.ok === false) return { meta, poTitles: null, failed: (raw && raw.reason) || "unknown" };
   return { meta, poTitles: null };
 }
 
@@ -1730,7 +1732,8 @@ async function enrichBillLineContext(doc) {
   // index, so a slow answer for bill A stored under whichever bill is open when it lands would give
   // bill B A's per-row limits — and the save's over-billing split would cut B's lines by them.
   const key = doc && doc.name ? String(doc.name) : currentBillDocKey();
-  const { meta: poLineMeta, poTitles } = await fetchBillPoLineMeta(doc);
+  const { meta: poLineMeta, poTitles, failed } = await fetchBillPoLineMeta(doc);
+  if (failed) return { failed };
   const lineAllocations = hydrateBillLineAllocations(doc, billLineAllocationsByDoc[key] || {}, poLineMeta);
   if (currentBillDocKey() !== key) {
     navDebug("bill-enrich-stale", `dropped limits for ${key}; ${currentBillDocKey()} is open now`);
@@ -1811,6 +1814,8 @@ async function enrichBillSnapshotExtrasInner(doc) {
     );
     if (enrichRaw && enrichRaw.timedOut) {
       navDebug("bill-enrich-timeout", "source line enrich");
+    } else if (enrichRaw && enrichRaw.failed) {
+      navDebug("bill-enrich-failed", `source line enrich: ${enrichRaw.failed}`);
     } else if (enrichRaw && typeof enrichRaw === "object") {
       poLineMeta = enrichRaw.poLineMeta || {};
       lineAllocations = enrichRaw.lineAllocations || {};
@@ -1833,6 +1838,8 @@ async function enrichBillSnapshotExtrasInner(doc) {
     );
     if (linkedRaw && linkedRaw.timedOut) {
       navDebug("bill-enrich-timeout", "linked PO titles");
+    } else if (linkedRaw && linkedRaw.failed) {
+      navDebug("bill-enrich-failed", `linked PO titles: ${linkedRaw.failed}`);
     } else if (Array.isArray(linkedRaw)) {
       linkedPos = linkedRaw;
       enrichPending.linkedPos = false;
@@ -1847,6 +1854,8 @@ async function enrichBillSnapshotExtrasInner(doc) {
     );
     if (linkedPrRaw && linkedPrRaw.timedOut) {
       navDebug("bill-enrich-timeout", "linked Item Receipt refs");
+    } else if (linkedPrRaw && linkedPrRaw.failed) {
+      navDebug("bill-enrich-failed", `linked Item Receipt refs: ${linkedPrRaw.failed}`);
     } else if (Array.isArray(linkedPrRaw)) {
       linkedReceipts = linkedPrRaw;
       enrichPending.linkedReceipts = false;
@@ -1920,6 +1929,8 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           );
           if (enrichRaw && enrichRaw.timedOut) {
             navDebug("bill-enrich-slice", `lineContext timeout round=${round}`);
+          } else if (enrichRaw && enrichRaw.failed) {
+            navDebug("bill-enrich-slice", `lineContext failed round=${round}: ${enrichRaw.failed}`);
           } else if (enrichRaw && typeof enrichRaw === "object" && !enrichRaw.stale) {
             poLineMeta = enrichRaw.poLineMeta || {};
             lineAllocations = enrichRaw.lineAllocations || {};
@@ -1940,6 +1951,8 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           );
           if (linkedRaw && linkedRaw.timedOut) {
             navDebug("bill-enrich-slice", `linkedPos timeout round=${round}`);
+          } else if (linkedRaw && linkedRaw.failed) {
+            navDebug("bill-enrich-slice", `linkedPos failed round=${round}: ${linkedRaw.failed}`);
           } else if (Array.isArray(linkedRaw)) {
             linkedPos = linkedRaw;
             enrichPending.linkedPos = false;
@@ -1955,6 +1968,8 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           );
           if (linkedPrRaw && linkedPrRaw.timedOut) {
             navDebug("bill-enrich-slice", `linkedReceipts timeout round=${round}`);
+          } else if (linkedPrRaw && linkedPrRaw.failed) {
+            navDebug("bill-enrich-slice", `linkedReceipts failed round=${round}: ${linkedPrRaw.failed}`);
           } else if (Array.isArray(linkedPrRaw)) {
             linkedReceipts = linkedPrRaw;
             enrichPending.linkedReceipts = false;
@@ -3255,7 +3270,10 @@ async function linkedPosForBillDoc(doc) {
       return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
-  return linkedPurchaseOrdersForBill(doc, (raw && raw.rows) || []);
+  // A refusal or an unreachable ERPNext is not "no POs": the enrich loop keeps it pending and
+  // retries (it used to hang and time out, which the loop retried; xList now fails at once — R7-5).
+  if (!raw || !raw.ok) return { failed: (raw && raw.reason) || "no answer" };
+  return linkedPurchaseOrdersForBill(doc, raw.rows || []);
 }
 
 /**
@@ -3287,7 +3305,8 @@ async function linkedReceiptsForBillDoc(doc) {
       return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
-  return linkedPurchaseReceiptsForBill(doc, (raw && raw.rows) || []);
+  if (!raw || !raw.ok) return { failed: (raw && raw.reason) || "no answer" }; // pending, not "none"
+  return linkedPurchaseReceiptsForBill(doc, raw.rows || []);
 }
 
 /**
@@ -3509,7 +3528,7 @@ async function checkBillRef(billNoOverride, opts = {}) {
     supplier,
     existingBills,
     recentVendorRefs,
-    linkedPoTitles: linkedPos.map((r) => r.title).filter(Boolean),
+    linkedPoTitles: (Array.isArray(linkedPos) ? linkedPos : []).map((r) => r.title).filter(Boolean),
     linkedPoNames: linkedPos.map((r) => r.name).filter(Boolean),
     vendorAccountNumbers,
   });
@@ -12529,7 +12548,8 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
   // the list it holds predates these receipts (DF-02: blank until Refresh after a JIT Submit).
   let linkedReceipts;
   try {
-    linkedReceipts = doc ? await linkedReceiptsForBillDoc(doc) : undefined;
+    const refs = doc ? await linkedReceiptsForBillDoc(doc) : undefined;
+    linkedReceipts = Array.isArray(refs) ? refs : undefined; // failed: the page keeps the list it has
   } catch (e) {
     navDebug("jit-receipt-refs-fail", String((e && e.message) || e));
   }

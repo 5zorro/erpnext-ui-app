@@ -741,6 +741,13 @@ proven as a restricted user (`leaves-records/r7-5-clerk-refusals`):
   it, always threw, and showed a payment of several bills at its whole amount on each.
 - `frappe.db.get_list` defaults `limit` to 20 even when `limit_page_length` is passed; two Account
   lookups were capped at 20 that way.
+- 🔴 **A failure that used to hang now fails at once — so it must not read as "empty".** Code that
+  relied on the hang (a timeout the caller retried) turns into code that treats a refusal as "no
+  rows". The Bill's background loading did: its PO-line limits, PO titles and receipt refs returned
+  empty on a refusal, the retry loop counted them loaded, and the Bill sat at "line limit still
+  loading" with no retry (dogfood R6c-2 caught it). Those loaders now return `{ failed }` and the
+  loop keeps the slice pending. When sweeping a call off `frappe.db`, check what its callers do
+  with the error, not just that it settles.
 
 ## G20 — `frappe.after_ajax` calls back at once when nothing is in flight (2026-10-21)
 

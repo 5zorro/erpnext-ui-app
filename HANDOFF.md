@@ -842,7 +842,10 @@ version is the parent of the commit that deleted it
 `661f24b..`: session 7, the calculator's rounding row / convention toggle / ↩ resume, the trace's
 waves, the `frappe.db` sweep, the Sales Orders slice, the probe-user changes, the plan-10-19
 closeout). Found and fixed: `parseMoneyOrSum` was left called by tests only (removed); the pages
-asked main for the site's rounding on every key while it was unknown (now at most every 10 s).
+asked main for the site's rounding on every key while it was unknown (now at most every 10 s);
+and — caught by `npm run dogfood:check` (R6c-2) — the `frappe.db` sweep made the Bill's background
+loading treat a refused read as "loaded, empty", leaving "line limit still loading" with no retry
+(the loaders now return `{ failed }` and stay pending; G19).
 Recorded, not built: the tape rounds to the site's places, not a field's own Customize Form
 precision (module map, calculator row); the swept paths not yet run as a clerk
 (`tests/probes/README.md`, *Not done yet*); the Sales Orders slice reads a page's lines whole
