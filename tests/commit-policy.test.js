@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -100,7 +100,7 @@ describe("AI-session sizing policy", () => {
     GIT_COMMITTER_NAME: "5zorro",
     GIT_COMMITTER_EMAIL: "25825485+5zorro@users.noreply.github.com",
   };
-  // One per pattern in SIZING_RE; zero and zz mark them as synthetic.
+  // Each pattern in SIZING_RE at least once; zero and zz mark them as synthetic.
   const models = ["claude", "gemini", "gpt", "llama"];
   const probes = [
     "zz 0% context zz",
@@ -135,6 +135,20 @@ describe("AI-session sizing policy", () => {
       const result = scanStaged(`${probe}\n`);
       assert.equal(result.status, 1, probe);
       assert.match(result.stderr, /staged change adds a line that sizes an AI session/, probe);
+    }
+  });
+
+  it("the policy's own files carry no real sizing: every number they match is 0 or the 1m pattern", () => {
+    // The scanner skips these two files (POLICY_FILES), so this test is what checks them.
+    const script = readFileSync(scanner, "utf8");
+    const sizingRe = /^SIZING_RE='(.*)'$/m.exec(script)[1];
+    for (const file of [scanner, fileURLToPath(import.meta.url)]) {
+      const text = readFileSync(file, "utf8").toLowerCase();
+      const hits = spawnSync("grep", ["-noE", sizingRe], { input: text, encoding: "utf8" }).stdout;
+      for (const hit of hits.split("\n").filter(Boolean)) {
+        const match = hit.slice(hit.indexOf(":") + 1);
+        assert.doesNotMatch(match.replace(/1m/g, ""), /[1-9]/, `${file}: ${hit}`);
+      }
     }
   });
 

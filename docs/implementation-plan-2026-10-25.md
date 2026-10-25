@@ -65,7 +65,9 @@ field. `focusItemCell` is 90% the same (R6a-1). Fixing these in place means fixi
 module (e.g. `src/item-table-keys-ui.js`) that both pages call with a small deps object: the
 table element, `lastDoc`, `navFields`, `apply`, `api.addItem` / `deleteItem`, and a hook for
 "leave the table backward". Proof: `npm test`, both skins' smoke specs, the nav matrix's item-table
-cells.
+cells. The Bill passes no `navFields` today, so it moves through the default columns
+(`DEFAULT_ITEM_NAV_FIELDS`), not its own; keep that in 0a, then check whether the Bill's columns
+differ, and if they do, ask 5zorro before 0b changes it.
 
 **0b — the three fixes, each in that module, each with a test that fails on the old code:**
 
@@ -75,14 +77,30 @@ cells.
 | T-2 | Tab past a line's last box, or ↑ / ↓, went to a line that is not the next one on screen | `neighborItemCell` / `nextItemFocusAfterEdit` step to the next line in ERPNext's order (`rowIndex ± 1`), not the next line painted | Moves between lines follow the order on screen: the helpers take that order (the row indexes as painted) and step through it. Shift+Tab out of a line's first box goes to the line above on screen. 5zorro: *"it needs to match what the user expects"* |
 | T-3 | Tab from line 2's last box landed on line 4's Item, then left the table (PO-DOG-2002, 21:59:41 UTC) | A Tab while an earlier Tab is still adding a line is not checked, so a slow add (chaos) made two blank lines | A Tab while a line move is still working is held: no second line, no second move |
 
+**Decided while writing 0b down (so the build does not have to guess):**
+- T-1 "click away" means focus moves to something outside the items table: a header box, the
+  taxes, Terms, the toolbar. A cell's own pick list, calculator tape or a peek opened from a cell
+  is not away. A peek's return lands back in the cell, so the order holds through an errand.
+- T-1 "out of date" compares the order on screen with the order the current sort would give; the
+  banner shows only when they differ. The default sort (line number) cannot differ.
+- T-2: Tab past the last box of the **last line on screen** adds a line (today: of the last line in
+  ERPNext's order, which in a sorted table can be mid-screen). The rule that a trailing blank line
+  is deleted on Tab instead of focused (`nextItemFocusAfterEdit`) also means the last line on screen.
+- T-3: the extra Tab is dropped, not queued: the clerk pressed it because nothing showed yet, and
+  replaying it would skip the new line's Item box. The same check covers the arrow moves.
+
 **Proof for 0b:** unit tests on the pure order helpers (`src/item-table-nav.js`,
 `src/link-picker-policy.js`, `src/doc-item-sort.js`); a probe per fix on both skins, as a
 restricted clerk, failing on the old code (T-3 under `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100`);
-the full `npm run nav:check -- --ongoing` before the push. DF-05 (*odd line order for sort
+the full `npm run nav:check -- --ongoing` before the push. To read a dogfood run afterwards: each
+`focusin` in `~/.config/erpnext-ui-app/focus-debug.log` names the cell (`doc-cell-<row>-<field>`,
+row = ERPNext's line index), so a jump is a row change other than to the next line on screen. DF-05 (*odd line order for sort
 dogfood*) is the paper to dogfood it with.
 
 **Not in this plan:** the slow new PO, the slow added line, and the wait after a create-Item errand
-(museum OI-187: causes found, each its own small look).
+(museum OI-187: causes found, each its own small look). The PO's focus after the source picker and
+the Bill's ↗ peeks taking Tab were fixed outside this plan (`355249b`; probe
+`df03-po-source-focus`).
 
 ## The findings (verbatim from plan 2026-10-19)
 

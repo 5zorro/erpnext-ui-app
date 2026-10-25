@@ -23,8 +23,10 @@ describe("peek buttons stay out of Tab", () => {
     });
     it(`${page}: every peek button built in code sets tabIndex = -1`, () => {
       for (const m of src.matchAll(/(\w+)\.className = "[^"]*peek[^"]*";/g)) {
-        const block = src.slice(m.index, src.indexOf(".addEventListener(", m.index));
-        assert.match(block, new RegExp(`${m[1]}\\.tabIndex = -1;`), m[0]);
+        // The button's set-up, up to its click wiring.
+        const end = src.indexOf(`${m[1]}.addEventListener(`, m.index);
+        assert.ok(end > m.index, `${m[0]}: no click wiring found after it`);
+        assert.match(src.slice(m.index, end), new RegExp(`${m[1]}\\.tabIndex = -1;`), m[0]);
       }
     });
   }
