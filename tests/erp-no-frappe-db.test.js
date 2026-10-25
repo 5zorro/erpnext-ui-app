@@ -113,6 +113,11 @@ describe("a refused read is pending, not empty (the Bill's background loading, R
     assert.match(main, /if \(!raw \|\| raw\.ok === false\) return \{ meta, poTitles: null, failed:/);
     assert.match(main, /const \{ meta: poLineMeta, poTitles, failed \} = await fetchBillPoLineMeta\(doc\);\s*if \(failed\) return \{ failed \};/);
   });
+  it("a round where a read failed at once waits as long as a timed-out round did (~2 min to give up)", () => {
+    assert.match(main, /const BILL_ENRICH_FAILED_GAP_MS = 8000;/);
+    assert.match(main, /await sleep\(failedFast \? BILL_ENRICH_FAILED_GAP_MS : BILL_ENRICH_RETRY_GAP_MS\);/);
+    assert.equal((main.match(/failedFast = true;/g) || []).length, 3);
+  });
   it("the open path and the retry loop keep a failed slice pending", () => {
     for (const what of ["lineContext failed round", "linkedPos failed round", "linkedReceipts failed round"]) assert.ok(main.includes(what), what);
     for (const what of ["source line enrich: ${enrichRaw.failed}", "linked PO titles: ${linkedRaw.failed}", "linked Item Receipt refs: ${linkedPrRaw.failed}"]) assert.ok(main.includes(what), what);

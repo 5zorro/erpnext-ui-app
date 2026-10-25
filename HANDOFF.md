@@ -845,7 +845,9 @@ closeout). Found and fixed: `parseMoneyOrSum` was left called by tests only (rem
 asked main for the site's rounding on every key while it was unknown (now at most every 10 s);
 and — caught by `npm run dogfood:check` (R6c-2) — the `frappe.db` sweep made the Bill's background
 loading treat a refused read as "loaded, empty", leaving "line limit still loading" with no retry
-(the loaders now return `{ failed }` and stay pending; G19).
+(the loaders now return `{ failed }` and stay pending; G19). Reviewing that fix: a fast failure
+also made the 15 retry rounds take 15 s, not the ~2 min a timed-out round set; a failed round now
+waits 8 s (`BILL_ENRICH_FAILED_GAP_MS`), and R6c-2 gives up at 126 s.
 Recorded, not built: the tape rounds to the site's places, not a field's own Customize Form
 precision (module map, calculator row); the swept paths not yet run as a clerk
 (`tests/probes/README.md`, *Not done yet*); the Sales Orders slice reads a page's lines whole

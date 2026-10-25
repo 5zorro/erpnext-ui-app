@@ -1752,6 +1752,12 @@ const BILL_LINE_CONTEXT_SETTLE_MS = 500;
 /** Wait for ERP ajax to drain before merge-from-source enrich (not lineContext). */
 const BILL_ENRICH_QUIET_MS = 6000;
 const BILL_ENRICH_RETRY_GAP_MS = 450;
+/**
+ * After a round where a read was refused or unreachable (it fails at once since the frappe.db sweep,
+ * R7-5) — the pace a timed-out round used to set, so 15 rounds still give ERPNext ~2 min to come
+ * back before the page says Refresh.
+ */
+const BILL_ENRICH_FAILED_GAP_MS = 8000;
 /** ~2 min under chaos; then stop API churn and log bill-enrich-stop. */
 const BILL_ENRICH_MAX_ROUNDS = 15;
 
@@ -1911,6 +1917,7 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
     try {
       while (token === billEnrichBg.token && billEnrichBg.docName === docName) {
         round += 1;
+        let failedFast = false;
         const liveDoc = dirtyState.doc;
         if (!liveDoc || String(liveDoc.name) !== docName) {
           navDebug("bill-enrich-stop", `doc_changed round=${round}`);
@@ -1930,6 +1937,7 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           if (enrichRaw && enrichRaw.timedOut) {
             navDebug("bill-enrich-slice", `lineContext timeout round=${round}`);
           } else if (enrichRaw && enrichRaw.failed) {
+            failedFast = true;
             navDebug("bill-enrich-slice", `lineContext failed round=${round}: ${enrichRaw.failed}`);
           } else if (enrichRaw && typeof enrichRaw === "object" && !enrichRaw.stale) {
             poLineMeta = enrichRaw.poLineMeta || {};
@@ -1952,6 +1960,7 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           if (linkedRaw && linkedRaw.timedOut) {
             navDebug("bill-enrich-slice", `linkedPos timeout round=${round}`);
           } else if (linkedRaw && linkedRaw.failed) {
+            failedFast = true;
             navDebug("bill-enrich-slice", `linkedPos failed round=${round}: ${linkedRaw.failed}`);
           } else if (Array.isArray(linkedRaw)) {
             linkedPos = linkedRaw;
@@ -1969,6 +1978,7 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           if (linkedPrRaw && linkedPrRaw.timedOut) {
             navDebug("bill-enrich-slice", `linkedReceipts timeout round=${round}`);
           } else if (linkedPrRaw && linkedPrRaw.failed) {
+            failedFast = true;
             navDebug("bill-enrich-slice", `linkedReceipts failed round=${round}: ${linkedPrRaw.failed}`);
           } else if (Array.isArray(linkedPrRaw)) {
             linkedReceipts = linkedPrRaw;
@@ -2029,7 +2039,7 @@ function scheduleBillEnrichBackground(doc, seed = {}) {
           break;
         }
         navDebug("bill-enrich-round", formatEnrichPendingLog(enrichPending, round));
-        await sleep(BILL_ENRICH_RETRY_GAP_MS);
+        await sleep(failedFast ? BILL_ENRICH_FAILED_GAP_MS : BILL_ENRICH_RETRY_GAP_MS);
       }
     } finally {
       if (token === billEnrichBg.token) {
