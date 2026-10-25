@@ -4645,6 +4645,8 @@ export async function bootBillFormPage(api) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "linked-source-peek-btn";
+    // Mouse only, like the Bill's other peeks: Tab goes from box to box (5zorro DF-03).
+    btn.tabIndex = -1;
     btn.dataset.testid = testId;
     btn.title = `Go to ${label} (peek — Esc to return to Bill)`;
     btn.setAttribute("aria-label", `Peek ${label}`);

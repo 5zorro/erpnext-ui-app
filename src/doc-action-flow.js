@@ -121,7 +121,9 @@ export function linkDoctypeForDocField(field, headerFields = [], itemCols = []) 
 }
 
 /**
- * After source choose on Item Receipt, focus Packing List / BOL ref (invoice # is on the Bill).
+ * After a source is chosen (or "no source"), focus the next box the clerk fills: the Item
+ * Receipt's Packing List / BOL ref (invoice # is on the Bill), the Purchase Order's Date (5zorro
+ * DF-03: focus was left on nothing, so the next keys went nowhere).
  *
  * @param {"po"|"receipt"|string|null|undefined} profileId
  * @param {"choose"|"cancel"|"escape"} closeKind
@@ -130,6 +132,7 @@ export function linkDoctypeForDocField(field, headerFields = [], itemCols = []) 
 export function focusTargetAfterDocSourceModal(profileId, closeKind) {
   if (closeKind !== "choose") return null;
   if (profileId === "receipt") return "lr_no";
+  if (profileId === "po") return "transaction_date";
   return null;
 }
 
