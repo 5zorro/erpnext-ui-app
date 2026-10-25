@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { evaluateTypedSum } from "../src/calc/field-calc.js";
-import { parseMoneyOrSum } from "../src/money.js";
+import { moneyOrSum } from "../src/money.js";
+
+const parseMoneyOrSum = (v) => moneyOrSum(v).amount;
 
 // 5zorro 2026-10-11: `169.00*1.0845` typed into the taxes Amount box, then Add did nothing.
 describe("evaluateTypedSum", () => {
@@ -16,7 +18,7 @@ describe("evaluateTypedSum", () => {
   });
 });
 
-describe("parseMoneyOrSum (the taxes Add box)", () => {
+describe("moneyOrSum — the amount (the taxes Add box)", () => {
   it("a sum → cents; a number → itself; neither → null", () => {
     assert.equal(parseMoneyOrSum("169.00*1.0845"), 183.28);
     assert.equal(parseMoneyOrSum("1,234.50"), 1234.5);

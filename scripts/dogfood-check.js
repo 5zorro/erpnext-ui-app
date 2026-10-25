@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * `npm run dogfood:check [-- <row> …]` — the check before 5zorro dogfoods (plan 10-19 § Dogfood
- * check and setup): runs every probe tagged `@dogfood <row>` (or only those for the rows named),
+ * `npm run dogfood:check [-- <row> …]` — the check before 5zorro dogfoods (tests/probes/README.md
+ * § Dogfood residuals): runs every probe tagged `@dogfood <row>` (or only those for the rows named),
  * one at a time through `run-probe.js` (the app must be closed; prefs backed up and restored), then
  * prints the *Dogfood residuals* table (tests/probes/README.md) as pass / FAIL / yours. Probes that leave records run
  * too — this is for the sandbox (each one checks it is, before writing). Each probe's output goes to

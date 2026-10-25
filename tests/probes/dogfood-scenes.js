@@ -1,6 +1,6 @@
 /**
- * Dogfood scenes (plan 10-19 § Dogfood check and setup): the records one row of the plan's
- * *Dogfood residuals* table needs, made on the sandbox. The same maker serves two callers:
+ * Dogfood scenes (tests/probes/README.md § Dogfood residuals): the records one row of that
+ * table needs, made on the sandbox. The same maker serves two callers:
  * - a probe tagged `@dogfood <row>` makes the scene, checks the row, and clears it;
  * - `npm run dogfood:setup -- <row>` makes it and leaves it for 5zorro, printing where to look.
  *

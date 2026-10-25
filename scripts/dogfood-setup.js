@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * `npm run dogfood:setup -- <row> …` — make a dogfood row's records on the sandbox and leave them
- * for 5zorro (plan 10-19 § Dogfood check and setup); `-- --clear <row> …` removes them again;
+ * for 5zorro (tests/probes/README.md § Dogfood residuals); `-- --clear <row> …` removes them again;
  * `-- --list` says which rows have a scene and what each makes. The scenes are
  * `tests/probes/dogfood-scenes.js`; this runs them through `run-probe.js` (the app must be closed —
  * open it after) as the probe `leaves-records/dogfood-setup`.

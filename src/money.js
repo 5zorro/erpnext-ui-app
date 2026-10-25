@@ -19,18 +19,9 @@ export function parseMoney(value) {
 
 /**
  * A money box's text as an amount: a plain number, or a sum typed in it (`169.00*1.0845`), worked out
- * with the calculator's math (5zorro 2026-10-11 — the taxes Add box) and rounded the site's way.
- * @param {unknown} value
- * @param {{ precision: number, method?: string, convention?: string }} [rounding] the box's places, the site's method, the clerk's convention
- * @returns {number|null}
- */
-export function parseMoneyOrSum(value, rounding) {
-  return moneyOrSum(value, rounding).amount;
-}
-
-/**
- * {@link parseMoneyOrSum}, plus what rounding dropped, so it can be said (R13-1: never quietly):
- * `remainder` is "Rounds to 183.28 — remainder 5/10000"-style text, "" when nothing was dropped.
+ * with the calculator's math (5zorro 2026-10-11 — the taxes Add box) and rounded by the tape's
+ * convention to the box's places — plus what rounding dropped, so it can be said (R13-1: never
+ * quietly): `remainder` is "Rounds to 183.28 — remainder under 1/1000"-style text, "" when nothing was.
  * @param {unknown} value
  * @param {{ precision: number, method?: string }} [rounding]
  * @returns {{ amount: number|null, remainder: string }}

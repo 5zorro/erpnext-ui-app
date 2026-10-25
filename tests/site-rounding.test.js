@@ -22,7 +22,7 @@ import {
 } from "../src/calc/site-rounding.js";
 import { createFieldCalcState, reduceFieldCalc, commitFieldCalc, resumeFieldCalc } from "../src/calc/field-calc.js";
 import { makeCalcHistoryEntry } from "../src/calc/session-history.js";
-import { moneyOrSum, parseMoneyOrSum } from "../src/money.js";
+import { moneyOrSum } from "../src/money.js";
 
 const CENTS = { precision: 2, method: ROUNDING_BANKERS };
 
@@ -171,7 +171,7 @@ describe("the taxes Add box (a sum the tape never saw)", () => {
   it("rounds the site's way and says what it dropped", () => {
     assert.deepEqual(moneyOrSum("5.025", CENTS), { amount: 5.03, remainder: "Rounds to 5.03 — remainder −5/1000" });
     assert.deepEqual(moneyOrSum("12.50", CENTS), { amount: 12.5, remainder: "" });
-    assert.equal(parseMoneyOrSum("169.00*1.0845", CENTS), 183.28);
+    assert.equal(moneyOrSum("169.00*1.0845", CENTS).amount, 183.28);
     assert.deepEqual(moneyOrSum("5*", CENTS), { amount: null, remainder: "" });
   });
 });

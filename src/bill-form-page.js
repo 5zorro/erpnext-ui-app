@@ -380,9 +380,15 @@ export async function bootBillFormPage(api) {
   /** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
   let siteRounding = null;
   let siteRoundingAsked = false;
-  /** Ask main for it until the site has really answered (a read during a reload gets the default). */
+  let siteRoundingAskedAt = 0;
+  /**
+   * Ask main for it until the site has really answered (a read during a reload gets the default) —
+   * at most every 10 s: the tape asks on every key, and ERPNext may be down for a while.
+   */
   function loadSiteRounding() {
     if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
+    if (Date.now() - siteRoundingAskedAt < 10_000) return;
+    siteRoundingAskedAt = Date.now();
     siteRoundingAsked = true;
     api
       .getSiteRounding()

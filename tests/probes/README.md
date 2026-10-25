@@ -69,6 +69,13 @@ try {
   gate, so `back()` reloads the ERPNext page itself when that has not taken within 10 s
   (`probe-user-reload` in the output). Otherwise the page keeps the clerk's CSRF token and every call
   fails.
+- **Not done yet (2026-10-25):** the `@dogfood` set (`npm run dogfood:check`) and the `@nav` matrix
+  (`npm run nav:check`) still act as Administrator; moving each set to the clerks is one sweep each,
+  unblocked since 5zorro described his clerks. Until then these paths swept off `frappe.db` (review
+  10-19 R7-5) have never run as a clerk, only as Administrator: the address picker (a filter on the
+  Dynamic Link child table), the Bill's account-company check and vendor ranking, the PO / receipt
+  terms read, the Bill line → Sales Order list, and Pay Bills' supplier payments. A refusal there now
+  shows its reason instead of hanging, but whether a clerk *is* refused is unproven.
 - One user per role set, `zz-probe-<roles>@example.com`, or per named clerk, `zz-probe-ap-clerk@…` (first name *ZZ Probe*), made on first use
   and reused. It is **disabled between runs**, and every run gives it a fresh random password that
   is never written down. Sandbox only (`assertSandboxSite`).

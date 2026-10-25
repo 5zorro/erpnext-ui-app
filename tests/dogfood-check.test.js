@@ -19,7 +19,7 @@ Intro.
 | Not | a | row |
 `;
 
-describe("dogfood check (plan 10-19 § Dogfood check and setup)", () => {
+describe("dogfood check (tests/probes/README.md § Dogfood residuals)", () => {
   it("a row's id is its first cell without the bracket", () => {
     assert.equal(rowId("R9 (batch method change)"), "R9");
     assert.equal(rowId("R6b-1 / R6b-2"), "R6b-1 / R6b-2");

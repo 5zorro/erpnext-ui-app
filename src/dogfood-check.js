@@ -1,6 +1,6 @@
 /**
- * `npm run dogfood:check` (plan 10-19 § Dogfood check and setup): which probe checks which row of
- * the plan's *Dogfood residuals* table, and the table the run prints. Pure; the script runs the
+ * `npm run dogfood:check` (tests/probes/README.md § Dogfood residuals): which probe checks which row of
+ * the *Dogfood residuals* table (tests/probes/README.md), and the table the run prints. Pure; the script runs the
  * probes.
  *
  * A row's id is its first cell without a trailing bracket — `R9 (batch method change)` is `R9`,
