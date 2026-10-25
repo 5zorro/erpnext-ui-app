@@ -852,6 +852,11 @@ Recorded, not built: the tape rounds to the site's places, not a field's own Cus
 precision (module map, calculator row); the swept paths not yet run as a clerk
 (`tests/probes/README.md`, *Not done yet*); the Sales Orders slice reads a page's lines whole
 (100 orders × their lines — fine at ordinary order sizes, heavy at hundreds of lines an order).
+Then, before the push (2026-10-25), the unpushed commits were audited for detail that identifies
+the AI in use (the model, its window, context use, token counts): every commit's patch, since a
+file deleted later still ships, and every message, separately. Guard:
+`scripts/check-commit-attribution.sh` refuses that sizing in messages and in the lines a commit
+adds (AGENT_CONVENTIONS rule 7).
 
 **Sizing a session:** keep each session to a few slices. Never read `electron/main.js` or
 `src/bill-form-page.js` whole; grep for what the question is about.
