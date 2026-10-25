@@ -261,6 +261,8 @@ code. So after any ERPNext or Frappe upgrade:
    `assume-applier-payload.js`), and the ERPNext source facts in the local notes file, which are
    pinned to the sandbox tags. A missing handler or field fails soft, with a message or Vanilla
    as it is (R12-2 logs `simplified-skin-missing`), but it still fails.
+4. **The trace's field names:** `ERP_PASSWORD=… node ops/trace/probe-trace-queries.js` asks every
+   question the trace asks, read-only, and fails on any field the upgrade renamed (R13-2).
 
 ### Warm pick lists (folded from plan 2026-10-21, OI-185, built 2026-10-21)
 
@@ -704,7 +706,7 @@ Do **not** mirror every unit case in Playwright. Units own edges; e2e owns **wir
 | `doctype-labels` (via history) | Friendly labels | `scaffold-pure-wiring` (Bill label) |
 | `home-tiles.test.js` | Grouped tile SSoT valid | `scaffold-views` (tile/group DOM counts) |
 | `chrome-state.test.js` | Toolbar lens chip (live path beats stale route); rail width | `scaffold-chrome` (lens buttons; `showingHome` polled, never read bare) |
-| `money.test.js` | Nickel rounding | **Gap** — no UI wire yet (OI-042) |
+| `money.test.js` | Money parse and display (`$#,###.__`, amounts inside a sentence) | Every Doc skin's amount boxes |
 | `doc-terms.test.js` | plain-English relabel / reverse | Used by Bill Doc labels |
 | `bill-map.test.js` | Header/items; amount-due checksum | Bill view (`bill.html`) |
 | `dirty-gate.test.js` | Lens dirt vs user edit nav gate | Bill leave prompts in main |

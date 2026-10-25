@@ -792,7 +792,26 @@ usable, and a reload clears it.
   2. Trace readers: proven read-only by `ops/trace/probe-trace-queries.js` — does that run anywhere
      automatically, or only by hand?
   3. Chaos lag: can it ever be on in a normal `npm start`?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `661f24b` (session 7, 2026-10-25).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R13-1 | S | low | `src/money.js` `parseMoneyOrSum`; `calc-engine.js` `formatCalcDisplay` | Half cents round by float accident: `10.05*0.5` shows 5.03, `2.01*0.5` shows 1.00 (both are exactly half a cent). The site's rule is *Banker's Rounding* (5.02 / 1.00). The calculator's commit is safe: it hands ERPNext the unrounded figure. But the tape's preview can show a different cent from what ERPNext stores, and the taxes Add box keeps its own rounding | Mirror Frappe's `_round` (`number_format.js`) for the site's `rounding_method`, read once at load, in both places; test the two half-cent cases | open |
+| R13-2 | M | low | `ops/trace/probe-trace-queries.js` | Runs only by hand. It is the one check that the trace's field names still exist (144 questions, read-only), and an upgrade is when they move | A fourth item in HANDOFF § *After an ERPNext upgrade*. Re-run 2026-10-25: 144/144 | fixed (this session) |
+| R13-3 | P | low | `src/trace-query.js` `fetchTrace` | Fetches one document or list at a time: up to 80 documents × (1 read + 1–6 list queries) ≈ 300 requests in series, many seconds per trace through the ERPNext page. No caller yet (the pages, stages 3–6, are not built) | When stage 3 is built: fetch each wave together, a few at a time (plan 10-03 stage 3 row) | open (with plan 10-03 stage 3) |
+| R13-4 | S | low | `src/erp-chaos-lag.js` `readChaosLagConfig`; `main.js` `erpEval` | Chaos lag is read from the environment in any build, a packaged one included, and nothing on screen says it is on (only a filed incident records `chaosConfig`) | Ignore it when `app.isPackaged`; a line in the release checklist (R1-4 / R11-6, plan 09-26) | open |
+| R13-5 | M | low | `src/money.js` `roundToNickel` | Dead: only its test called it. OI-042 has been won't-do since 2026-07-21, but HANDOFF's test table still listed it as a gap waiting for its UI | Deleted with its test; the HANDOFF row now says what `money.test.js` covers | fixed (this session) |
+
+Checked and fine: (1) no `eval` or `Function` anywhere in the calculator. It is a key-by-key state
+machine, and a sum typed into a box is whitelisted to `0-9 . + - * /` before it reaches the engine.
+Division by zero is an error, never `Infinity`. The history is capped at 80 entries and 24 hours, and
+is drawn with `textContent` in a sandboxed window. The calculator's listeners sit on the input
+itself, so they go with it on a repaint. (2) The trace readers only read (`getDoc` / `getList`,
+GETs). `probe-trace-queries.js` runs by hand, and now on the upgrade checklist. Nothing calls
+`fetchTrace` at run time yet. (3) Chaos needs **both** `ERP_CHAOS_LAG_MS` and `ERP_CHAOS_LAG_PCT`
+above zero; `npm start` sets neither, only `start:chaos` does. The other dev tools
+(`input-count`, `interactable-scrape`, `inventories/*`, `ops/input-count/`) only read, and write
+local reports.
 
 ### R14 — Things that touch the network or the database outside the app (S) — read ~15k
 
