@@ -63,8 +63,13 @@ describe("R7-2: the pre-streaming source path is gone", () => {
 describe("R7-3: a receipt row names its PO from its own lines", () => {
   it("the receipt slices read the line's purchase_order through the receipt and roll it up", () => {
     const body = fnText(main, "fetchBillSourceSlice");
-    assert.match(body, /`tabPurchase Receipt Item`\.purchase_order as purchase_order/);
-    assert.match(body, /rollUpReceiptRows\(raw\.rows\)/);
+    assert.match(body, /tabPurchase Receipt Item\\`\.purchase_order as purchase_order/);
+    assert.match(body, /rollUpReceiptRows\(raw\.lines\)/);
+  });
+  it("capped by receipts, not by lines: the lines are a second read for the receipts listed", () => {
+    const body = fnText(main, "fetchBillSourceSlice");
+    assert.match(body, /const receiptFields = \["name", "posting_date", "grand_total"\];/);
+    assert.match(body, /filters: \[\["name", "in", rows\.map/);
   });
 });
 

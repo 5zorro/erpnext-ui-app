@@ -8190,10 +8190,12 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   const onCompany = (filters) => (company ? { ...filters, company } : filters);
   const openPo = ["not in", ["Closed", "On Hold"]];
   // A receipt row names its PO from its own lines, read through the receipt (its read permission;
-  // `Purchase Receipt Item` on its own was refused — review R7-3). One row per line, rolled up below.
-  const receiptFields = ["name", "posting_date", "grand_total", "`tabPurchase Receipt Item`.purchase_order as purchase_order"];
+  // `Purchase Receipt Item` on its own was refused — review R7-3). A second read, for the receipts
+  // listed only: asking for the lines in the first one capped it by lines, not receipts (30-line
+  // receipts → 16 of 50 listed).
+  const receiptFields = ["name", "posting_date", "grand_total"];
 
-  /** @type {{ doctype: string, filters: object, fields: string[], order_by: string, limit: number } | null} */
+  /** @type {{ doctype: string, filters: object, fields: string[], order_by: string, limit: number, receiptPos?: boolean } | null} */
   let spec = null;
   if (sliceId === "po_submitted") {
     spec = {
@@ -8218,7 +8220,8 @@ async function fetchBillSourceSlice(supplier, sliceId) {
       filters: onCompany({ supplier: sup, docstatus: 1, per_billed: ["<", 100], status: ["not in", ["Closed", "Completed", "Return Issued"]] }),
       fields: receiptFields,
       order_by: "posting_date desc",
-      limit: 500,
+      limit: 50,
+      receiptPos: true,
     };
   } else if (sliceId === "po_draft") {
     spec = {
@@ -8234,7 +8237,8 @@ async function fetchBillSourceSlice(supplier, sliceId) {
       filters: { supplier: sup, docstatus: 0 },
       fields: receiptFields,
       order_by: "posting_date desc",
-      limit: 200,
+      limit: 20,
+      receiptPos: true,
     };
   } else if (sliceId === "mr_submitted") {
     // The PO's sources (plan 2026-10-12 S3). A Material Request names no vendor: every open
@@ -8284,7 +8288,16 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         order_by: ${JSON.stringify(spec.order_by)},
         limit_page_length: ${spec.limit},
       });
-      return { ok: true, rows: rows || [] };
+      var lines = null;
+      if (${spec.receiptPos ? "true" : "false"} && rows && rows.length) {
+        // Their lines' POs; a refusal here only leaves the PO off the label.
+        try {
+          lines = await frappe.xcall("frappe.client.get_list", { doctype: "Purchase Receipt",
+            filters: [["name", "in", rows.map(function (r) { return r.name; })]],
+            fields: ["name", "\`tabPurchase Receipt Item\`.purchase_order as purchase_order"], limit_page_length: 0 });
+        } catch (eLines) { lines = null; }
+      }
+      return { ok: true, rows: rows || [], lines: lines };
     } catch (e) {
       // A refused xcall rejects with nothing (the restricted-user probe saw "undefined" on the row):
       // ERPNext's own words, else which list it would not give.
@@ -8300,8 +8313,10 @@ async function fetchBillSourceSlice(supplier, sliceId) {
     return { ok: false, reason: (raw && raw.reason) || "Could not list sources", rows: [] };
   }
   if (sliceId === "so_submitted") return { ok: true, rows: salesOrdersToOrder(raw.rows).slice(0, 50) };
-  if (sliceId === "pr_submitted") return { ok: true, rows: rollUpReceiptRows(raw.rows).slice(0, 50) };
-  if (sliceId === "pr_draft") return { ok: true, rows: rollUpReceiptRows(raw.rows).slice(0, 20) };
+  if (spec.receiptPos && Array.isArray(raw.lines)) {
+    const posOf = new Map(rollUpReceiptRows(raw.lines).map((r) => [r.name, r.purchase_orders]));
+    return { ok: true, rows: (raw.rows || []).map((r) => ({ ...r, purchase_orders: posOf.get(r.name) || [] })) };
+  }
   return { ok: true, rows: raw.rows || [] };
 }
 

@@ -106,7 +106,11 @@ built, being dogfooded). It edits no code.
 > `leaves-records/r8-create-po-twins`, `r12-simplified-in-page`, `r7-4-purchase-user-sources`; the
 > last one acts as a restricted Purchase User — § Probes, *A restricted probe user*). The `main.js`
 > half is pinned by `tests/review-session6-wiring.test.js` (14 checks, all fail on the old code).
-> Next: review the fixes (*After the first pass*), then session 7 (R13 + R15), which closes this plan.
+> **The fixes and the probe user were reviewed 2026-10-25** (*After the first pass*): R7-6 found and
+> fixed (the receipt slices were capped by lines, not receipts). **R7-5** is opened: the restricted
+> user shows that every remaining `frappe.db.*` call hangs when a clerk is refused, so the G19 sweep
+> R5b-4 dropped is needed after all. It is medium, and its role list is 5zorro's call.
+> Next: session 7 (R13 + R15), which closes this plan, with R7-5 sorted then.
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -557,7 +561,7 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
 - **Questions:**
   1. The source modal is shared by three skins: one copy of the vendor/party filter, or several?
   2. Picking sources then saving: mapper call failures — partial PO / receipt left behind?
-- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24), and its fixes `aa97466` / `b94de1e` plus the commit that adds this line (2026-10-25 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -565,6 +569,9 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
 | R7-2 | M | low | `main.js` `bill-list-sources`, `doc-list-sources`; `src/receipt-source.js`; `source-modal.js` `buildBillSourceGroups`, `enrichReceiptsWithPurchaseOrders`, `purchaseOrdersByReceipt`; `doc-form-preload.cjs` / `bill-doc-api-adapter.js` `listSources` | **Q1:** the vendor filter has **one live copy**, `fetchBillSourceSlice`'s spec table, which all three skins stream through. The second copy is the pre-streaming path: two IPC handlers, a receipt group builder and two enrich helpers. No page has called it since streaming. It is dead, and it is the copy that had the receipt's filter right (`per_received`), which is how R7-1 slipped in unnoticed | Delete the dead path and its tests, keeping `combineMappedBillSources` and `sourceItemFromRow` | fixed 2026-10-24 — both handlers, `receipt-source.js`, `buildBillSourceGroups`, the two enrich helpers and `listSources` removed; their tests rewritten on the slice builders |
 | R7-3 | M | low | `source-modal.js` `sourceItemFromRow` (kind `pr`) | Every Item Receipt row in the Bill's picker reads "**no PO**", even when the receipt came from a PO. The label reads `row.purchase_orders`, which only the dead enrich filled. That enrich was dropped after a 403 on `Purchase Receipt Item` (`bill-feature-catalog.js:247`) | Ask for the child field on the parent list (`` `tabPurchase Receipt Item`.purchase_order ``, which is how `so_submitted` reads its lines, under the receipt's own read permission) and roll up per receipt. Or at least leave the bit out when it is unknown | fixed 2026-10-24 — the receipt slices read the line's PO through the receipt and `rollUpReceiptRows` gathers them; "no PO" only when the lines were read and name none. Proven by the same probe (old code: `no PO`; now `PO PUR-ORD-…`) |
 | R7-4 | S | med | `main.js` `fetchBillSourceSlice` | Every slice is `frappe.db.get_list` inside an `erpEval` with no deadline. When the server refuses, that call never settles (G19). A **Purchase User** cannot read Sales Order: its role list is Sales User / Manager, Maintenance, Accounts and Stock User (`sales_order.json`). So on the PO's picker the Sales Orders slice would say "Still loading…" for good. The stream's `Promise.all` would never finish, so "Sources loaded" / "Some sources failed" never shows, and one `pendingErpEvals` entry is held until the page reloads. Read from code and ERPNext's role table, not reproduced (Administrator here reads everything) | `frappe.xcall("frappe.client.get_list", …)` plus a `raceTimeout` per slice, so a refused or slow slice shows its error row | fixed 2026-10-24 — `frappe.xcall("frappe.client.get_list")` and a 20 s deadline per slice; a refusal logs `source-slice-failed`. Proven the same day as a **Purchase User** (`r7-4-purchase-user-sources`, the first probe with the restricted user): the Sales Orders slice ends in "Insufficient Permission for Sales Order", and the status line says one source failed. On the code before the fix it said "Still loading…" after 45 s. That probe also found that a refused `xcall` reads "undefined" on the row; it now uses `reasonFrom` (DC-2) |
+| R7-5 | S | med | `main.js` (17 calls), `erp-form-bridge-page.js` (5): every remaining `frappe.db.get_list` / `get_value` / `get_doc` | Found reviewing session 6's fixes. R5b-4 closed the G19 sweep as "not needed", but that was judged as Administrator, who is never refused. As a clerk, any of these calls against a doctype the role may not read never settles, as R7-4's slice did. One example: the Bill's Sales Order picker lists `Sales Order` (`frappe.db.get_list`), which a Bill clerk with only Accounts User may read but a Purchase User may not. Each such hang also holds a `pendingErpEvals` entry until the page reloads | Sweep them to `frappe.xcall` with `reasonFrom` (as R7-4). Prove the worst ones with the restricted probe user (`probe-user.js`) for the roles 5zorro names for a clerk | open |
+| R7-6 | P / S | low | `main.js` `fetchBillSourceSlice` (`pr_submitted`, `pr_draft`) | Found reviewing R7-3's fix: the receipt slices asked for one row **per receipt line** (to read each line's PO), capped at 500 rows, then rolled up. A vendor whose receipts run 30 lines lists 16 receipts instead of 50, with nothing saying any are missing, and every open fetches up to 500 rows | List the receipts (50 / 20) first, then read their lines' POs in a second query for those receipts only. A refusal of that second read leaves the PO off the label | fixed 2026-10-25. `r7-1-receipt-sources` passes (the receipt row still names its PO), and the wiring test pins the two reads |
+| R7-7 | P / S | low | `main.js` `fetchBillSourceSlice` `so_submitted` | Same shape as R7-6, older (S3), left as found: the PO's Sales Orders slice reads one row per **order line** (500), then rolls up to 50 orders. Thirty-line orders → about 16 orders listed, and the rest silently missing | As R7-6: list the orders, then read their lines for those orders only | open |
 
 **Q2, checked and fine:** no mapper here writes anything. `make_purchase_invoice` /
 `make_purchase_receipt` and the MR / SQ mappers return unsaved documents. The Sales Order mapper is
@@ -587,7 +594,7 @@ failure is R7-1 (b).
   2. The Sources column queries per line — count requests on a 30-line order.
   3. Receive Payment shares Payment Entry with Pay Bills (`layoutOnly`): any A/P assumption that
      leaks into A/R (payment direction, party type)?
-- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24), and its fixes `aa97466` / `b94de1e` plus the commit that adds this line (2026-10-25 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|
@@ -758,7 +765,7 @@ Checked and fine: `lp` / SumatraPDF / `lpoptions` run as argument arrays (`execF
      closed, shows Vanilla) or break the form?
   2. Teardown: everything the payload adds (listeners, observers, styles) removed on lens switch?
   3. The generated seed file (`npm run seeds:simplified`): is `--check` in `npm test`?
-- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24), and its fixes `aa97466` / `b94de1e` plus the commit that adds this line (2026-10-25 review of the fixes).
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
 |----|------|-----|-------|------|--------------|--------|

@@ -721,8 +721,12 @@ resolved or rejected** when the server answers with an error — asking for a fi
 exist hung past 8 s, while the same request through `frappe.xcall` rejected at once (probe,
 2026-10-21). An `erpEval` awaiting it never returns, and the shell's later calls wait behind it
 until the page reloads — the likely mechanism of review 10-19 **R5b-4**. New ERP-page code uses
-`frappe.xcall` (warm pick lists do, plan 2026-10-21); the existing `frappe.db.*` calls are R5b-4's
-to sweep.
+`frappe.xcall` (warm pick lists do, plan 2026-10-21). R5b-4 turned out to have another cause (G20),
+so the sweep of the existing `frappe.db.*` calls was dropped, but that was judged as Administrator,
+who is never refused. 🔴 **A clerk is refused all the time** (no read on a doctype), and then the same
+hang happens. The restricted probe user proved it (review 10-19 R7-4, a Purchase User and Sales
+Orders), so the sweep is back as **R7-5**. Read a refused `xcall`'s reason with `reasonFrom` (G22):
+it rejects with nothing.
 
 ## G20 — `frappe.after_ajax` calls back at once when nothing is in flight (2026-10-21)
 
