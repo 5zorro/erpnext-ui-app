@@ -110,7 +110,14 @@ built, being dogfooded). It edits no code.
 > fixed (the receipt slices were capped by lines, not receipts). **R7-5** is opened: the restricted
 > user shows that every remaining `frappe.db.*` call hangs when a clerk is refused, so the G19 sweep
 > R5b-4 dropped is needed after all. It is medium, and its role list is 5zorro's call.
-> Next: session 7 (R13 + R15), which closes this plan, with R7-5 sorted then.
+> **Session 7 ✅ 2026-10-25** (R13, R15), at `661f24b`. R13: 5 findings, all low. Two were fixed in
+> place: R13-2 (the trace's field probe joins HANDOFF's after-upgrade list; 144/144 today) and R13-5
+> (`roundToNickel` was dead). Still open: R13-1 (half cents round by float accident), R13-3 (the
+> trace fetches in series, for its pages) and R13-4 (chaos lag in a packaged build). R15: 6 findings.
+> HANDOFF's read order and the scanner's registration were fixed (R15-4 / R15-5). Open: R15-1, the
+> local notes file is too large (5zorro's call), and R15-2 / 3 / 6, which are the
+> closeouts of 09-08 / 09-16 / 09-26.
+> **Next: the closeout below**, sorting each residual with 5zorro, then delete this file.
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -859,7 +866,18 @@ Checked and fine: the proxy's Caddyfile (scanner files static, `.js` only from `
      its residuals are listed and sorted with 5zorro — promoted into a plan in flight, parked in
      the museum, or dropped — never carried in a residuals-only plan.
 - **Do last**, after the code slices, so it can also fold this plan's own conclusions.
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `e4b9941` (session 7, 2026-10-25).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R15-1 | M | med | local notes file | 51 KB, loaded into every session. 25 KB of it is the *Active plan* history, which each plan's own status box already holds; 14 KB is *Verified ERP behaviour*, durable ERPNext facts with nothing private in them | *Active plan* → one line per plan in flight (state, next) plus the local-only facts (sandbox records, this machine's printing, test traps); *Verified ERP behaviour* → a public `docs/erpnext-behaviour.md` read when a task needs it, with a one-line pointer. | open — 5zorro's file; the ERP facts would become public |
+| R15-2 | M | low | plan 09-08 | Q2: C2 shipped (09-16 P3). C6's second launch point is 09-16's **P4d**, gated on **P4a**: the first live *Create term* (`createPaymentTermDocs`). P4a has never run, and the sandbox has **no Payment Term at all** | A leaves-records probe that clicks *Create term* proves P4a (5zorro asked that setup be automated); then build P4d or park it, and close 09-08 together with 09-16 | open — sort at closeout |
+| R15-3 | M | low | plan 09-16 | Q3's premise was wrong: 09-16 is not all built. **P5** (the Home tile's overdue badge) and **P6** (loading marks on the payment writes) were never started; P4a / P4d as above; three dogfood rows; and the carried C8 leftovers, AP credit-memo chain (OI-166 / 147 / 082 / 164 / 167) and OI-163 | Each one sorted at its closeout (promote / park / drop) | open — sort at closeout |
+| R15-4 | M | low | `HANDOFF.md`; plan 09-21 *Registration owed* | Q4: still owed. Its reason (the 09-16 tranche editing HANDOFF) had been gone for weeks, so an agent with only HANDOFF could not find the parked scanner | Read order, folder map row, and invariant 6's note (desktop shell only) added | fixed (this session) |
+| R15-5 | M | low | `HANDOFF.md` § Read order | Q4b: 10-19 and 09-16 both called "the active plan"; 10-03, 10-12, 10-24 and 09-21 missing; 07-15 / 07-18 named no fold | Rewritten: in flight / parked / closed, one status phrase each; 07-18's fold named (`754b53f`), 07-15 carried on as 07-18 (`3279b53`) | fixed (this session) |
+| R15-6 | M | low | plan 09-26 (100 KB) | Q5: Printing / Printer hardening and Doors are already folded (HANDOFF § Printing, invariant 8), and Parts A–D are what § Navigation spine describes. What keeps it open is the residual table (~20 rows, most "built — 5zorro to dogfood") and *After the dogfood papers* + *First release*, which are direction, not residuals | Close it at the papers' end (5zorro's sweep): its direction sections become the next plan's opening, each dogfood row sorted | open — 5zorro's sweep |
+
+Q6 (closing this plan) is its closeout below.
 
 ---
 
@@ -876,7 +894,7 @@ money first, structure later.
 | 4 ✅ | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | done |
 | 5 ✅ | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | done |
 | 6 ✅ | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | done |
-| 7 | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | |
+| 7 ✅ | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | (see the status box) |
 
 Rules that fall out of the numbers:
 

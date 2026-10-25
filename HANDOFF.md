@@ -9,17 +9,28 @@
 
 1. This file — **Architecture map** (below) + where facts live.
 2. [README.md](README.md) purpose (if scope/UX tradeoffs come up).
-3. Dated working plans (create new when a museum OI tranche is promoted):
+3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
+   at the top, says where it stands; read only the plan your work is in.
+   **In flight:**
    `implementation-plan-2026-10-19.md` (architecture review — security / stability,
    maintainability, performance, in slices; read only its *How to
-   run one review session* and your session's slices) — **active**.
-   `implementation-plan-2026-09-26.md` (navigation audit + Find pages as Doc skins, OI-056) —
-   **active**; its Part B is the audit of the nav code and history, Part D the architecture.
+   run one review session* and your session's slices) — closing (session 7, R15).
+   `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
+   rules folded into **Navigation spine** below.
+   `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
+   dogfooded.
+   `implementation-plan-2026-10-03.md` (the trace, OI-041; and the coverage map,
+   `npm run dogfood:for-change`) — stages 1, 2 and C built; the pages (3–6) are not.
+   `implementation-plan-2026-09-26.md` (navigation audit + Find pages as Doc skins, OI-056; then
+   the dogfood papers' follow-ups) — built, being dogfooded; its *After the dogfood papers* is the
+   order of what comes next.
    `implementation-plan-2026-09-16.md` (Pay Outstanding corrections, the delay calendar panel,
-   the terms-name builder) — **the active plan**.
+   the terms-name builder) — built except P4a / P4d (gated on the first live *Create term*), P5
+   and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
-   assumptions) — **superseded 2026-09-16**, closing; its two unfinished build items are carried
-   into the active plan.
+   assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
+   **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
+   phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
    **Closed:** `implementation-plan-2026-10-21.md` (warm pick lists, OI-185, plus the picker / vendor
    fixes D1–D3 its dogfood found; built and retired 2026-10-21) — folded into **Warm pick lists**
    below; code comments citing "plan 2026-10-21" mean that section. Its open dogfood rows moved to
@@ -40,7 +51,11 @@
    OI-128 (peek granularity) and OI-040 (concurrent instances, parked).
    `implementation-plan-2026-08-30.md` (AP Doc skin T0–T6 + T1 dogfood, 2026-08-31) —
    runtime lessons in [docs/gotchas.md](docs/gotchas.md); remaining OIs in museum only.
-   Older `implementation-plan-2026-07-18.md` closed 2026-07-29 (T1–T4 MVP).
+   `implementation-plan-2026-07-18.md` (T1–T4 MVP, closed 2026-07-29, `754b53f`) — the
+   lens-prefs rules are in the module map and test table below; the flyout / shell ops it shipped
+   (Drafts, diagnose, Feedback, lens prefs) are museum OI-060 / 046 / 048 / 062.
+   `implementation-plan-2026-07-15.md` was not closed on its own: it was carried on as 07-18
+   (`3279b53`).
 4. `docs/beta-slice.md` · `CONTRIBUTING.md`. Discovery / issues inbox (private): museum
    `~/agent-harness/erpnext/doc-shell/open_items.md` — **not** mirrored into this public tree.
 
@@ -88,6 +103,7 @@ flowchart LR
 | `docs/input-count-gotchas.md` | Measurement gotchas + dogfood checklist before Simplified mockups |
 | `docs/erp-unreachable.md` | ERP timeout: host `start-shell.sh` + IT notify/autofix setup in diagnose |
 | `docs/erpnext-schema-browse.md` | Safe MariaDB/DBeaver schema browse (read-only, one-hop recipe, Clean Core) |
+| `pwa/receiving/` · `src/receiving/` · `ops/receiving-proxy/` | **Parked** (plan 2026-09-21): the Receiving Scanner, a second client on the phone — its pages, its pure logic (also served to the pages as `/receiving/lib/`), and the Caddy front door in front of ERPNext's own web server (frappe_docker untouched). Phone setup: `docs/receiving-phone-setup.md`. Invariant 4 holds: the phone uses the proxy's address for both |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
@@ -114,6 +130,8 @@ flowchart LR
    page** — Purchase Order, Item Receipt, Bill, Payment Entry, Sales Order, Sales Invoice,
    Quotation (Estimate), Journal Entry — not spread across reports, workspaces, masters, or other
    lists (5zorro 2026-09-26: a Find page is the list half of an entry form, not a list skin).
+   This governs the **desktop shell**. The parked Receiving Scanner (plan 2026-09-21) is a separate
+   client on a phone, not a second window.
 
 7. **A Doc skin is still a form** (5zorro 2026-09-08) — *"it is supposed to still be a form, but
    it is supposed to be easier for humans who handle documents… I don't want to force the lens of

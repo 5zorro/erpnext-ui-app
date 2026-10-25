@@ -613,7 +613,7 @@ the logic is testable without a phone and the screens are not.
 | 7 | **Three pre-existing public mentions** of the legacy system, listed in museum **OI-176** | Removing them from history means rewriting pushed history and force-pushing a repo with a merged PR on `main`. Editing the files going forward is cheap; erasing history is not. No agent should do either unasked |
 | 8 | **ERPNext is reachable from the Wi-Fi, unencrypted, with the sandbox password** (found 2026-09-24, not caused by this tranche) | Docker Desktop publishes port 8080 on every Windows network interface, and its firewall rule allows all ports on Private networks, which the Wi-Fi is. Anyone on the Wi-Fi can reach the ERPNext login. Cheapest fix: change the `Administrator` password. Stricter: publish 8080 on `127.0.0.1` only in the frappe_docker compose file, so the Electron app keeps working and phones use the proxy. Both are 5zorro's infrastructure, so neither was done |
 
-## Registration owed (deliberately deferred)
+## Registration owed (deliberately deferred) — ✅ done 2026-10-25 (review 10-19 R15-4)
 
 Edits to make once the 2026-09-16 tranche is clear of those files:
 
