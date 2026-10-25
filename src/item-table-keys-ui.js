@@ -30,11 +30,13 @@ import { valuesMeaningfullyEqual, dirtyCompareKindForField } from "./dirty-gate.
  *   lines: (doc: object|null|undefined) => object[],
  *   lineKey: (line: object|null|undefined) => string|number|null|undefined,
  *   leaveBackward: () => void,
+ *   log?: (event: string, detail: string) => void,
  * }} ItemTableKeysDeps
  *
  * `table`: the lines table's body (`el.items`). `lines` / `lineKey`: the doc's lines and the
  * value that makes a line real (empty = a blank line). `leaveBackward`: Shift+Tab / ← out of the
- * first box of the first line — each page knows what sits before its table.
+ * first box of the first line — each page knows what sits before its table. `log`: the page's
+ * focus log (`focus-debug.log`).
  */
 
 /**
@@ -197,6 +199,21 @@ export function createItemTableKeys(deps) {
             /* ignore */
           }
         }
+        return;
+      }
+
+      // T-3 (DF-03): a Tab or move while an earlier one is still writing the cell or adding a line
+      // is dropped, not queued. Adding a line takes a while on a slow server (museum OI-187), and a
+      // second Tab in that wait ran from the old box and left the table. The clerk pressed it
+      // because nothing showed yet; replaying it would skip the new line's Item box (plan 10-25).
+      const isMove =
+        decision.action === "move" ||
+        decision.action === "leave_edit_move" ||
+        decision.action === "tab" ||
+        (decision.action === "passthrough" && ev.key === "Tab" && !ev.shiftKey && !calcActive);
+      if (itemTabGuard && isMove) {
+        if (decision.action !== "passthrough") ev.preventDefault();
+        if (deps.log) deps.log("item-key-dropped", `${ev.shiftKey ? "Shift+" : ""}${ev.key} on line ${ri + 1} ${field}: the last move is still working`);
         return;
       }
 

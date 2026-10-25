@@ -98,13 +98,10 @@ lens and scene). For another form: Journal Entry would pass `lines: (d) => d.acc
 `nextItemFocusAfterEdit` lands on the next line's `item_code`; both would become layout settings
 when a form without them shares the module.
 
-**Found while planning 0a (2026-10-25, not yet proven):** the key handler, `focusAfterItemEdit` and
-`cleanupEmptyItemRow` read `lastDoc.items` and `item_code`, not the layout's lines table. On
-Receive Payment (`references`) that would make the row count 0 (↓ from a Payment cell goes
-nowhere) and every line look like one with an empty Item (Tab takes the "delete the blank line and
-leave" path). 0a keeps that behaviour but routes it through the deps (`lines(doc)`, `lineKey(row)`),
-so the fix is one place; a probe on Receive Payment, as an A/R clerk, must show the fault before it
-is fixed, in 0b.
+**Left alone (5zorro, 2026-10-25):** the keys read `items` / `item_code`, which may not fit
+Receive Payment's `references` lines. Receive Payment exists only because of the Pay Bills
+dashboard and has had no development of its own, so it is not dug into here. The module takes
+`lines` / `lineKey` from the page anyway, so it costs nothing later.
 
 **0b — the three fixes, each in that module, each with a test that fails on the old code:**
 
@@ -112,7 +109,7 @@ is fixed, in 0b.
 |----|--------------------|-------|-----|
 | T-1 | Sorted by a column, typed in it, pressed Tab: "it jumped to the wrong row" | Every repaint sorts again, so the line moves to its new place and the cursor goes with it | The order on screen holds still while the clerk types. It is set when a header is clicked; an edit never moves a line, and a new line goes at the bottom. When an edit leaves the table out of sorted order, a banner over the table says so: **"Sort is out of date — it refreshes when you click away. 🔄"** (5zorro: *"i want a banner or something saying 'sorting out of order will refresh sort when you click away.' and have a refresh emoji next to it so that i could click there to have sorting refresh specifically"*). Clicking 🔄 sorts now; focus leaving the table sorts too. The default order (line number) never shows the banner |
 | T-2 | Tab past a line's last box, or ↑ / ↓, went to a line that is not the next one on screen | `neighborItemCell` / `nextItemFocusAfterEdit` step to the next line in ERPNext's order (`rowIndex ± 1`), not the next line painted | Moves between lines follow the order on screen: the helpers take that order (the row indexes as painted) and step through it. Shift+Tab out of a line's first box goes to the line above on screen. 5zorro: *"it needs to match what the user expects"* |
-| T-3 | Tab from line 2's last box landed on line 4's Item, then left the table (PO-DOG-2002, 21:59:41 UTC) | A Tab while an earlier Tab is still adding a line is not checked, so a slow add (chaos) made two blank lines | A Tab while a line move is still working is held: no second line, no second move |
+| T-3 | Tab past a line's last box: "it takes a bit before the new line … appears and focus is placed in the item code box" (that wait is museum OI-187). Corrected 2026-10-25: 5zorro saw **one** new line, then tabbed away and it went (by design: Tab out of a line with no Item removes it). An earlier reading of the log (focus on line 4's Item, then Terms 0.3 s later) as two blank lines was a guess; the app logs no line adds or deletes | A Tab pressed **during** that wait is not checked: it runs as a second move from the old box. Probe `df03-item-table` (1200 ms lag) on the code before the fix: two quick Tabs left the table — the PO to Terms, the Bill to the taxes with no line added | A Tab or move while an earlier one is still working is dropped, so the clerk stays on the new line's Item. The wait itself is OI-187 |
 
 **Decided while writing 0b down (so the build does not have to guess):**
 - T-1 "click away" means focus moves to something outside the items table: a header box, the
@@ -124,7 +121,8 @@ is fixed, in 0b.
   ERPNext's order, which in a sorted table can be mid-screen). The rule that a trailing blank line
   is deleted on Tab instead of focused (`nextItemFocusAfterEdit`) also means the last line on screen.
 - T-3: the extra Tab is dropped, not queued: the clerk pressed it because nothing showed yet, and
-  replaying it would skip the new line's Item box. The same check covers the arrow moves.
+  replaying it would skip the new line's Item box. The same check covers the arrow moves. Each
+  dropped key is logged (`item-key-dropped` in `focus-debug.log`).
 
 **Proof for 0b:** unit tests on the pure order helpers (`src/item-table-nav.js`,
 `src/link-picker-policy.js`, `src/doc-item-sort.js`); a probe per fix on both skins, as a

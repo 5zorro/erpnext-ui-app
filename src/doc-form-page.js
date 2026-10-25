@@ -217,6 +217,7 @@ const itemKeys = createItemTableKeys({
   lastDoc: () => lastDoc,
   lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
   lineKey: (line) => line.item_code,
+  log: logFocus,
   leaveBackward: () => {
     focusLastHeaderBeforeItems();
   },

@@ -40,12 +40,16 @@ function fakeInput(row, field, value, focused) {
   return inp;
 }
 
-/** Two lines, each with every default column as an input; the deps a page would pass. */
-function setup({ lines, lineKey, doc, leaveBackward = () => {}, apply, afterEdit } = {}) {
+/**
+ * Lines, each with every default column as an input; the deps a page would pass. `screen`: the
+ * line indexes in the order they are painted (a sorted table); left out, ERPNext's order.
+ */
+function setup({ lines, lineKey, doc, leaveBackward = () => {}, apply, afterEdit, screen } = {}) {
   const focused = [];
   const inputs = [];
   const table = {
     dataset: {},
+    querySelectorAll: () => inputs,
     querySelector: (sel) => {
       const m = sel.match(/data-row="(\d+)"\]\[data-field="(\w+)"/);
       return m ? inputs.find((i) => i.dataset.row === m[1] && i.dataset.field === m[2]) || null : null;
@@ -63,7 +67,9 @@ function setup({ lines, lineKey, doc, leaveBackward = () => {}, apply, afterEdit
     leaveBackward,
   });
   const calls = [];
-  for (const [ri, line] of (lines ? lines(lastDoc) : lastDoc.items).entries()) {
+  const all = lines ? lines(lastDoc) : lastDoc.items;
+  for (const ri of screen || all.map((_, i) => i)) {
+    const line = all[ri];
     for (const field of DEFAULT_ITEM_NAV_FIELDS) {
       const inp = fakeInput(ri, field, line[field] ?? "", focused);
       keys.wireCell(inp, {
@@ -152,6 +158,62 @@ describe("item-table-keys-ui: the moves", () => {
     assert.equal(keys.lineKeyAt(doc, 0), "SINV-1");
     assert.equal(keys.lineKeyAt(doc, 1), "");
     assert.equal(keys.lineKeyAt(doc, 5), "");
+  });
+});
+
+describe("T-3: a Tab while an earlier one is still working is dropped (DF-03)", () => {
+  it("two Tabs past the last box while the line is being added: the second does nothing", async () => {
+    let finish;
+    const adds = [];
+    const { cell } = setup({
+      afterEdit: (doc, v) => {
+        adds.push(v);
+        return new Promise((r) => (finish = r));
+      },
+    });
+    const last = cell(1, "project");
+    last.key("Tab");
+    await settle();
+    const prevented = last.key("Tab");
+    await settle();
+    finish();
+    await settle();
+    assert.equal(adds.length, 1);
+    assert.equal(prevented, true, "the dropped Tab must not move focus the browser's way either");
+  });
+
+  it("an arrow while a write is out is dropped too", async () => {
+    let finish;
+    const writes = [];
+    const { cell } = setup({
+      apply: (v) => {
+        writes.push(v);
+        return new Promise((r) => (finish = r));
+      },
+    });
+    const qty = cell(0, "qty");
+    qty.value = "5";
+    qty.key("ArrowDown");
+    await settle();
+    qty.key("ArrowDown");
+    await settle();
+    finish();
+    await settle();
+    assert.deepEqual(writes, ["5"]);
+  });
+
+  it("typing and Escape still go through while it works", async () => {
+    let finish;
+    const { keys, cell } = setup({ apply: () => new Promise((r) => (finish = r)) });
+    const qty = cell(0, "qty");
+    qty.value = "5";
+    qty.key("Tab");
+    await settle();
+    assert.equal(qty.key("7"), false);
+    qty.key("Escape");
+    assert.equal(keys.mode(), "nav");
+    finish();
+    await settle();
   });
 });
 
