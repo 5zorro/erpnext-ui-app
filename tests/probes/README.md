@@ -172,3 +172,142 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
 
 When what it proves should stay proven, move it to `e2e/` as a `.spec.js` and give it a family in
 `src/architecture-families.js`.
+
+## Dogfood residuals
+
+What 5zorro tries by hand for the fixes of the architecture review (plan 2026-10-19, closed
+2026-10-25), and what each should do. `npm run dogfood:check` reads **this** table (it moved here
+from the plan when the plan closed, so the check outlives plans); a row's id is its first cell. A
+new row goes here, with a `@dogfood <id>` probe.
+
+| Fix | What to try | Expect |
+|-----|-------------|--------|
+| R9 (batch method change) | Method… on a vendor with 3+ bills, where ERPNext will refuse one (e.g. a bill whose posting date falls in a closed period) | Chips move bill by bill; the batch stops at the refused one; Try again offers the untouched rest; Done refreshes the board |
+| R9-1 | Same, with the refusal at **submit** | That bill's chip: "Cancelled — `<name>-1` not submitted"; the copy is a draft in ERPNext |
+| R6c-2 | A Bill from a PO under `npm run start:chaos` until enrich gives up (~2 min) | PO/receipt fields say "Couldn't load — press Refresh"; Save says Refresh, not wait |
+| R10c-1 | Pay a batch where submit is refused | Drawer names the draft; it appears under Draft payments at once |
+| R10c-3 | Create a term that already exists with the same numbers (the never-run-live path) | "Created … (reusing the existing …)" — and a term with different numbers is refused naming the field |
+| R6c-4 | A just-in-time receipt whose submit ERPNext refuses | No draft Purchase Receipt left behind |
+| R2-2 | Assign a Bill line to a Sales Order where ERPNext will refuse the bridge PO's submit (a closed period does not apply to a PO; `npm run dogfood:setup -- R2-2` makes an approval rule that does) | Status: "Line N assigned. The Purchase Order for it was not made: ERPNext refused to submit it (…). Nothing was left behind." No draft PO |
+| R6b-1 / R6b-2 | A Bill for a vendor made with *Create Vendor…* (no terms): type the due date first, then the lines; Save; change a qty; Save | Both saves go through. Any refusal on the status line is ERPNext's one sentence — no traceback, no "Message … Confirm" |
+| R6b-4 | Two Sales Orders for one item (needing 6 and 2); a Bill line of 8, then 5, then 10, each *Assign…*ed to both | 8: no box, PO 6 / 2. 5: "Costing Assumptions!" 4 / 1 — tick one *Fill from stock* and it redraws; Okay makes the PO. 10: 6 / 2 and "2 more … → into stock". Each PO line opens its Sales Order line; the PO and orders carry a *Costing assumptions:* comment. Open each Sales Order: its line's Sources cell ends with *Costing* (×2 after the second bill), and it opens the same box, read-only, that order in bold |
+| R10a-1 / R10b-1 | Pay Outstanding with an installment bill that was part-paid in Vanilla | The vendor card owes what ERPNext's A/P report says, on the later installment; the board opens without a pause per bill |
+| R10a-3 | Pay Outstanding prefs: next check run 2026-12-25, every 14 days | Run strip: "… That day is a weekend or bank holiday — “Do this run today” runs it before." |
+| R2-1 | Under `npm run start:chaos`, click Save on a Bill and log out in a browser tab before it finishes, or restart Docker mid-save | The button comes back with "The ERPNext page reloaded before the step finished" — it never spins forever; Edit / New work without restarting |
+| R4-1 | Leave the app open and idle past the site's *Session Expiry* (170 h here; shorten it in System Settings to try) | On returning to the window the toolbar offers *Log in*; the health dot stayed green throughout |
+| R4-2 | Find on a list over 200 rows, stop ERPNext, click Show more | The rows already shown stay; "Could not read more…" under them and the button reads Try again |
+| R5b-2 | Import 10+ lines on a Bill and stop ERPNext (or log out in a browser tab) part way | "Import stopped at line N of M: … Lines 1–(N−1) are on the form." — those lines show on the page; the line table and Import were locked while it ran |
+| R5b-1 | Under `npm run start:chaos`, type an item number you know fast and Tab; then a partial number and Tab at once | The exact number is taken at once; the partial one waits a beat, then takes the first match and moves on. Never an item from the list you typed past |
+| Warm lists 1 (HANDOFF § Warm pick lists) | Open a Bill under `npm run start:chaos`; type a vendor, then an item | Lists appear without "Searching…"; the order is the one you know. **First run at production size:** `nav-debug.log` `link-list loaded dt=Item rows=… ms=…` says what the item copy costs |
+| Warm lists 2 | Add a vendor through Create Vendor…, come back, type part of it | It is listed at once (a check runs on the peek's return) |
+| D1 | Open a vendor dropdown, go to Vanilla, come back | The dropdown is closed |
+| D2 | Pick a vendor deleted in another window (or type one that never existed and leave the box) | Banner across the top naming it; no source picker; the box shows the bill's old vendor |
+| R5b-5 | On a new PO: type a vendor that does not exist, choose *Create Vendor…*, Esc, then Tab on into the dates and type | Banner naming it ("…the purchase order keeps its old one"); no source picker, then or later |
+| R5b-6 / R5b-7 | First thing after starting the app: on a new PO type the first few letters of a vendor fast and Tab at once; close the source picker and type an item right away | The vendor is picked (sources open); the item goes in whole and you stay on its line when the vendor settles ~10 s later |
+| D3 | Set a vendor on a new Bill under chaos | The page stays responsive; sources open within ~10 s for a vendor with no address on file, sooner for one with |
+| R5-1 | Enter a long Bill (20+ lines, many edits), then scroll the line table | Scrolling stays smooth all day; an open dropdown follows its cell |
+| R2-7 | Allocate a charge to stock where one line's rate cannot be set | "… Nothing was changed." — the other lines keep their old rates |
+
+### How the check and the setup work (2026-10-23)
+
+5zorro: "the dogfood residuals seem a little daunting. the setup for several of them are simply not
+in the currently 'mostly empty' sandbox … I don't want to spend the majority of my time setting up
+the dogfooding. I do want to do the dogfooding as the ultimate e2e test on the feel." So each row
+gets two things that share one piece of setup code:
+
+1. **A check before he dogfoods.** `npm run dogfood:check` runs every probe tagged with a row
+   (`@dogfood <row>` in its header; a row's id is its first cell without the bracket) and prints the table above as pass / fail / *yours* (no probe:
+   only a person can judge it). He dogfoods once it is green. The run's table is written to
+   `test-logs/` too.
+2. **Setup that stays.** `npm run dogfood:setup -- <row> …` makes the row's records on the sandbox
+   and leaves them (a vendor with 4 bills, a 25-line draft bill, two Sales Orders needing 6 and 2…),
+   named `ZZ DF …`, and prints where to look. `npm run dogfood:setup -- --clear` removes them
+   (cancelling what was submitted — those stay, cancelled). A new row costs one setup step.
+
+The setup code is `tests/probes/dogfood-scenes.js` (one *scene* per row: make, clear, where to
+look); the probes call the same makers and clear after. Both run through `run-probe.js` (the app
+must be closed; the prefs are backed up and restored) and the leaves-records rules
+(`assertSandboxSite`; submitted records are cancelled, not deleted).
+
+**How the "ERPNext refuses" rows are made, from ERPNext's own checks (no site settings touched):**
+a bill whose Purchase Order is **On Hold** cannot be cancelled (`purchase_invoice.py` `on_cancel` →
+`check_for_on_hold_or_closed_status`); a bill whose expense account is **disabled** after it was
+submitted cancels, and its amended copy saves, but the copy's submit is refused
+(`general_ledger.py` `validate_disabled_accounts` runs only when ledger entries are made). Each
+scene's own records only — a ZZ account, a ZZ Purchase Order.
+
+**"ERPNext stops" rows** (R4-2, R5b-2, R6c-2) make the app's requests to ERPNext fail from inside the
+run (the ERP view's session refuses them) instead of stopping Docker; R2-1 reloads the ERPNext page
+mid-save; R4-1 removes the login cookie and puts it back after.
+
+**Yours only:** how it *feels* — smooth scrolling (R5-1's "all day"), "a beat" (R5b-1), and warm
+lists at ~20k items. The check proves the behavior; it says *yours* next to the feel.
+
+Build order: the runner, setup and scenes with the R9 group (the most setup), then the rest by group.
+
+**Built 2026-10-23 — every row has a probe** (`npm run dogfood:check` runs all 25 rows' probes,
+~25 min, mostly R6c-2's give-up and R4-2's 205 drafts). Scenes for `dogfood:setup`: R9, R9-1,
+R10c-1, R2-2, R6c-4, R10c-3, R4-2, R6b-4, R6b-1 / R6b-2, R5-1, R6c-2 (`-- --list` says what each
+makes). Notes per row:
+
+- **Simulated, not ERPNext's own refusal:** R2-7 (no plain-bill path refuses a line rate; the
+  ERPNext page's bridge refuses one call). Every other "ERPNext refuses" row uses a real ERPNext
+  check: PO On Hold (R9), disabled expense / bank / stock account (R9-1, R10c-1, R6c-4), an
+  Authorization Rule (R2-2), an existing Payment Term (R10c-3).
+- **"ERPNext stops":** the app's session refuses the matching requests (R4-2, R5b-2, R6c-2, Warm
+  lists 1–2); R2-1 holds the save call in the ERPNext page and reloads inside it; R4-1 takes the
+  login cookie out and puts it back.
+- **Run on the old code:** R9, R9-1, R10c-1, R6c-4 and R5b-2 failed first on what they found (DC-1–3).
+  Not re-run on pre-fix code: R10c-3, R2-7, D1, R5-1 (the pre-fix picker no longer loads in today's
+  page), R4-2, R2-1, R4-1, D3 — each fix was proven when it was made.
+- **Yours, still:** the feel — "smooth all day" (R5-1), "a beat" (R5b-1), warm lists at ~20k items.
+
+**End-of-session review (2026-10-24, of `99ef999..d1e2f79`).** Fixed: `reasonFrom`'s
+fallback to `frappe.last_response` now reads it only when that reply refused (a raised message or a
+traceback) — a call that died with no reply leaves an earlier successful reply there, whose notes
+would have been shown as the reason (G22). Proven: DC-3's "ERPNext did not fill in" check does not
+fire on a slow ERPNext that still answers (R5b-2's probe holds each lookup 3 s: "Imported 2 line(s).").
+Shared probe steps (`closeSourcePickers`, `repaintDoc`); the affected rows re-run, all pass. Checked
+and fine: the Costing chip's `get_docinfo` is one bounded read per Sales Order open (10 versions, 21
+messages, the order's comments; read permission); a costing note is drawn as text only, its PO route
+encoded; the scenes touch only `ZZ DF …` records, a `ZZ DF` term description, the `ZZ-DF-` order
+prefix and one Authorization Rule (removed by `--clear`) — plus the four board payment methods, left
+on purpose. Open for 5zorro: DC-4; whether the board should offer only methods the site has.
+
+**Found by the check** (each fixed and re-proven by the probe that found it):
+
+- **DC-1 (R9): every refusal inside an ERPNext-page write read "Payment Entry request failed."**
+  `frappe.xcall` rejects with `r.message`, which a refused call does not have — ERPNext's reason is
+  in the reply's `_server_messages` / `exc`. So the batch said "ACC-PINV-… — not changed. Payment
+  Entry request failed." for a bill whose Purchase Order is On Hold (a bill, not a payment). The
+  reader (`reasonFrom`, used by 16 page scripts: payments, void and amend, the method change) is now
+  `src/erp-refusal-reason.js`, tested, and falls back to `frappe.last_response` the way the Bill page
+  does (R6b-2): "Purchase Order PUR-ORD-2026-00002 status is On Hold." Two copies became one.
+- **DC-2 (R9-1, R10c-1, R6c-4): ERPNext's reason ran into the shell's advice, and two scripts showed
+  its HTML.** ERPNext's messages often end without a full stop ("… disabled accounts: ZZ DF Bank -
+  USE Finish or delete it …"): `endSentence` ends them in the method-change summary, the payment
+  drawer and the just-in-time receipt status. The bridge PO and just-in-time receipt scripts had
+  their own reader that took ERPNext's *first* message as HTML ("<br><strong>ZZ DF Stock -
+  USE</strong>" on the status line); both use the shared `reasonFrom` now — the raised message,
+  stripped. (For R2-2's approval rule that is ERPNext's raised "Can be approved by Guest" rather
+  than the note before it, "Not authorized since Grand Total exceeds limits".)
+- **DC-3 (R5b-2): an Import with ERPNext stopping part way said "Imported 12 line(s)."** Writing a
+  line's item code succeeds on the form even when ERPNext never answers the item lookup
+  (`run_doc_method`), so lines 5–12 sat on the form with no name, unit or account and nothing said
+  so — R5b-2's stop only caught writes the bridge refused. `applyImportedItemRows` now stops when an
+  item code comes back with neither a name nor a unit: "Import stopped at line 5 of 12: ERPNext did
+  not fill in SAMPLE-SKU-01 (…). Lines 1–4 are on the form." Not changed: an item typed by hand into a
+  cell while ERPNext is down shows the same blank name — visible on the line, so left as is.
+- **DC-4 (open — moved to plan 2026-10-24, the navigation spine; seen while building R2-1's probe): an unsaved new Bill does not
+  survive the ERPNext page reloading.** With chaos delaying the save call, the reload landed
+  *before* it was sent: the reloaded page held a blank new Purchase Invoice, the save ran against
+  that, and ERPNext answered "Supplier is required." — while the Doc page still showed the vendor and
+  line the clerk typed. R2-1's fix covers a reload *during* a step (proven: "The ERPNext page reloaded
+  before the step finished."); nothing covers the form itself being replaced. Options: (a) on an
+  ERPNext page reload under an unsaved Doc, say so ("ERPNext reloaded; this bill was not saved —
+  Save again to send it") and re-send the typed values; (b) only say so; (c) leave it (a reload
+  mid-typing is rare). Not built.
+- **Noted, not changed:** a blank ERPNext has none of the payment methods the board offers
+  (USPS_Check, ACH, DOM_WIRE, INT_WIRE); choosing one in Method… would have every amended bill
+  refused. The R9 scene makes them on the sandbox. A real site sets its own up; whether the board
+  should offer only methods the site has is 5zorro's call.

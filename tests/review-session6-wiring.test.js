@@ -7,7 +7,9 @@ import { buildSimplifiedPayload } from "../src/assume-applier-payload.js";
 /**
  * Review 10-19 session 6 (R7, R8, R12): the fixes that live in main.js, the ERPNext page bridge and
  * the Simplified payload, where a pure test cannot reach. Each test pins one rule; the reason is in
- * the finding row of docs/implementation-plan-2026-10-19.md.
+ * the finding row of
+ * docs/implementation-plan-2026-10-19.md (closed 2026-10-25; in git history — HANDOFF § Reviewing
+ * what was built says how to find it).
  */
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");

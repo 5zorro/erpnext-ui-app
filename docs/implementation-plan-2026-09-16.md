@@ -9,6 +9,13 @@ carried below, and its durable rules fold into `HANDOFF.md` at closeout.
 **Museum OIs in play:** OI-169 (method locked on grouping) · OI-172 (batch all overdue) ·
 OI-168 (pending state, remainder) · OI-171 / OI-175 (doc-skin actions, scoped not built).
 
+> **Status 2026-10-25 (architecture review 10-19 R15-2 / R15-3):** built except **P4a** — the first
+> live *Create term* (`createPaymentTermDocs`) has never run; the sandbox has no Payment Term at
+> all, so a leaves-records probe that clicks *Create term* is the way to prove it — then **P4d**
+> (the Bill's terms picker launching the modal), **P5** (Home tile badge) and **P6** (loading marks
+> on the payment writes), which were never started. Plan 09-08 closes with this one (its last item
+> is P4d). Its residuals are sorted at closeout like any plan's.
+>
 > **Status 2026-09-16: direction set by 5zorro, nothing built yet.** Six packets below, ordered.
 > P1 and P2 are corrections to a surface he is actively dogfooding and come first.
 

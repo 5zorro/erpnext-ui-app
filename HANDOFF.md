@@ -12,9 +12,8 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
-   `implementation-plan-2026-10-19.md` (architecture review — security / stability,
-   maintainability, performance, in slices; read only its *How to
-   run one review session* and your session's slices) — closing (session 7, R15).
+   `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
+   once — R2-5, R6a-1, R6a-2 from the review) — plan only; one question for 5zorro first.
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
@@ -31,7 +30,11 @@
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-21.md` (warm pick lists, OI-185, plus the picker / vendor
+   **Closed:** `implementation-plan-2026-10-19.md` (the architecture review, 2026-10-19 → 25) —
+   folded into **Reviewing what was built** below; its dogfood table moved to
+   `tests/probes/README.md` § Dogfood residuals (what `npm run dogfood:check` reads); the test-run
+   log and probe rules are in **Test strategy** and `tests/probes/README.md`.
+   `implementation-plan-2026-10-21.md` (warm pick lists, OI-185, plus the picker / vendor
    fixes D1–D3 its dogfood found; built and retired 2026-10-21) — folded into **Warm pick lists**
    below; code comments citing "plan 2026-10-21" mean that section. Its open dogfood rows moved to
    plan 10-19 *Dogfood residuals*.
@@ -812,6 +815,56 @@ Now each leftover is sorted and goes where it belongs; a plan never exists just 
 6. **There is always at least one plan in `docs/`.** If this was the last one, the closeout ends
    with the question *"what is the direction of the next implementation plan?"* — 5zorro answers
    it. The agent asks; it does not pick the direction.
+
+### Reviewing what was built (folded from plan 2026-10-19, the architecture review, closed 2026-10-25)
+
+The review read everything the plans had built, 2026-07-15 → 2026-10-12, for what was missed while
+getting it to work, in three lenses: **S** security / stability (what the app trusts, writes that
+stop halfway, races, silent failures), **M** maintainability (files too big to change safely, one
+fact worked out twice, dead code), **P** performance (repeated calls, per-keystroke work, things
+that grow without limit). Seven sessions; every finding was fixed, promoted (the big-file
+refactor → plan 2026-10-25; release items → plan 09-26 *First release*), parked (R1-2 → OI-040,
+R14-1 → OI-183) or closed won't-fix. The findings themselves are in git history: the plan's last
+version is the parent of the commit that deleted it
+(`git log --diff-filter=D -- docs/implementation-plan-2026-10-19.md`). Code comments citing
+"review 10-19 Rn-m" or "plan 10-19 § …" mean that file.
+
+**Review incrementally, before every session ends and before closing a plan** (5zorro 2026-10-19):
+1. `git log --oneline <reviewed through>..HEAD` — what landed since the marker below.
+2. `npm run dogfood:for-change <reviewed through>` — which families (slices) it touched.
+3. Review only those slices, only the diff (`git diff <sha>..HEAD -- <paths>`), in the three lenses.
+   A one-line fix with its test is made in place; anything bigger is a finding in the plan in
+   flight, sorted with 5zorro. A finding detailed enough to exploit goes to the museum, with a
+   one-line pointer in the public file.
+4. Move the marker here.
+
+**Reviewed through: `30c990a`** (2026-10-25, the end of session 7). **Built since, not yet
+reviewed:** the calculator's rounding row, convention toggle and ↩ resume (`dfb096a`, `e74336e`),
+the trace's waves (`67510cf`), the `frappe.db` sweep and the Sales Orders slice (`77069a9`), and the
+plan-10-19 closeout docs.
+
+**Sizing a session:** keep each session to a few slices. Never read `electron/main.js` or
+`src/bill-form-page.js` whole; grep for what the question is about.
+
+The slices, by coverage-map family (`src/architecture-families.js`):
+
+| Slice | What | Families |
+|---|---|---|
+| R1 | The trust boundary: what remote content can reach | `wiring` (security half) |
+| R2 | `main.js` as a file: size, duplication, the long-running process | `wiring` |
+| R3 | Navigation spine | `nav` |
+| R4 | Chrome, health, Find pages | `chrome`, `find` |
+| R5 / R5b | Doc-form machinery: the page; tables, pickers, import | `doc-form` |
+| R6a / R6b / R6c | Bill skin: the page file; money (taxes, terms, charges); loading and enrich | `bill-skin` |
+| R7 | Sources, Purchase Order, Item Receipt | `sources`, `po-ir` |
+| R8 | A/R skins and the Sales Order dashboard | `ar`, `home` |
+| R9 | Editing a submitted document | `edit-submitted` |
+| R10a / R10b / R10c | Pay Outstanding: the pure math; the board page; the write paths | `pay` |
+| R11 | Printing and Papers | `printing`, `papers` |
+| R12 | Simplified lens | `simplified` |
+| R13 | Calculator, trace, dev tools | `calc`, `trace`, `dev` |
+| R14 | What touches the network or the database outside the app | `receiving`, `sample-data`, ops scripts |
+| R15 | The process documents themselves (this file, the plans, the agent notes) | — |
 
 ## Communication (what 5zorro wants from agents)
 

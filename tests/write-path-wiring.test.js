@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 /**
  * Review 10-19 session 2 (R9, R10c, R6c): the fixes that live in main.js wiring, where a pure test
  * cannot reach. Each test pins one rule; the reason is in the finding row of
- * docs/implementation-plan-2026-10-19.md.
+ * docs/implementation-plan-2026-10-19.md (closed 2026-10-25; in git history — HANDOFF § Reviewing
+ * what was built says how to find it).
  */
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");

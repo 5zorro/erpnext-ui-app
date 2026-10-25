@@ -15,6 +15,13 @@ OI-062 (Find is its own Recent slot — done, relied on here) · OI-128 (peek gr
 > live sandbox, including `e2e/scaffold-find-doc.spec.js`. 5zorro has not clicked through it yet.
 > F1–F4 and A1 are built (see the stage table). 5zorro's three decisions are in, and HANDOFF is updated.
 
+
+> **Status 2026-10-25 (architecture review 10-19 R15-6):** Printing / Printer hardening and Doors
+> are folded into HANDOFF (§ Printing, invariant 8), and Parts A–D are what § Navigation spine
+> describes. What keeps this plan open is its *Dogfood residuals* (most "built — 5zorro to
+> dogfood") and *After the dogfood papers* + *First release*, which are direction: at 5zorro's sweep
+> after the papers, the direction sections become the next plan's opening and each residual is
+> sorted.
 ---
 
 ## How to handle cross-architecture dogfood (copy into every new dated plan)
