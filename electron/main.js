@@ -982,9 +982,10 @@ function shelveKeyFromDoc(doc) {
  * Vanilla Save/Submit fires a document "save" event the bridge records.
  * Also peek cur_frm so submitted docs leave Drafts even if the save hook missed.
  */
-async function drainErpSaveIntoShelved() {
+/** @param {{ inject?: boolean }} [opts] inject: false — a page without the bridge holds no save to take */
+async function drainErpSaveIntoShelved(opts = {}) {
   if (!erp || erp.webContents.isDestroyed()) return;
-  await ensureErpFormBridge();
+  if (opts.inject !== false) await ensureErpFormBridge();
   const raw = await erpEval(
     `(function(){
       try {
@@ -3589,6 +3590,10 @@ async function waitForPurchaseInvoice(timeoutMs = 25000) {
 let erpLoadWaiter = null;
 /** The surface the clerk was on when the shell's pending load of the ERPNext page started (N-7). */
 let erpLoadStartedFrom = "";
+/** The newest `loadErpUrl` asked (RV-4). */
+let erpLoadSeq = 0;
+/** The newest DC-4 repaint (RV-3): an older one still waiting gives way. */
+let reloadRepaintSeq = 0;
 
 /** "bill", "purchase order", … — how the Doc page names its document in a sentence. */
 function docLabelForRoute(route) {
@@ -3620,22 +3625,38 @@ function reloadUnderDocFor(url) {
  * @param {{ doctype: string, typed: boolean, wasNew: boolean, notice: string }} r
  */
 async function repaintDocAfterErpReload(r) {
+  const seq = ++reloadRepaintSeq;
   const skin = activeDocSkin;
+  const was = routeInfo(currentRoute, ERP_BASE);
   navDebug("erp-reload-under-doc", `${r.typed ? "typed" : "clean"} ${r.wasNew ? "new" : "saved"} ${currentRoute}`);
   await new Promise((resolve) => {
-    if (!erp || erp.webContents.isDestroyed()) return resolve();
-    erp.webContents.once("did-finish-load", resolve);
-    setTimeout(resolve, 15000);
+    const view = erp && !erp.webContents.isDestroyed() ? erp.webContents : null;
+    if (!view) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      if (!view.isDestroyed()) view.removeListener("did-finish-load", done);
+      resolve();
+    };
+    const timer = setTimeout(done, 15000);
+    view.once("did-finish-load", done);
   });
-  for (let i = 0; i < 40; i += 1) {
+  for (let i = 0; i < 40 && seq === reloadRepaintSeq; i += 1) {
     const ready = await erpEval(
       `(function(){try{return !!(window.cur_frm&&cur_frm.doc&&frappe.router.slug(cur_frm.doctype)===${JSON.stringify(r.doctype)});}catch(e){return false;}})()`,
     );
     if (ready === true) break;
     await sleep(500);
   }
-  // The clerk moved on while ERPNext was loading: nothing to repaint.
-  if (surfaceMode !== "doc" || activeDocSkin !== skin) {
+  if (seq !== reloadRepaintSeq) {
+    navDebug("erp-reload-under-doc", "a newer reload took over");
+    return;
+  }
+  // The clerk moved on while ERPNext was loading — another surface, another skin, or another
+  // document (review RV-1: the notice must never land on a document it is not about). A new
+  // document comes back under a new `new-…` name, which is still the same one.
+  const now = routeInfo(currentRoute, ERP_BASE);
+  const sameDoc = now.doctype === was.doctype && (now.record === was.record || (r.wasNew && isNewDocRecord(now.record)));
+  if (surfaceMode !== "doc" || activeDocSkin !== skin || !sameDoc) {
     navDebug("erp-reload-under-doc", "moved on before the form came back");
     return;
   }
@@ -3649,7 +3670,13 @@ async function repaintDocAfterErpReload(r) {
   }
   pendingDocNotice = r.notice;
   pendingDocForceHeader = true;
-  await showDocForm(skin, currentRoute, { skipDirtyGate: true });
+  try {
+    await showDocForm(skin, currentRoute, { skipDirtyGate: true });
+  } finally {
+    // Never carried to a later, unrelated snapshot if this one did not push (RV-2).
+    pendingDocNotice = "";
+    pendingDocForceHeader = false;
+  }
   navDebug("erp-reload-under-doc", `repainted ${currentRoute}${r.notice ? " — said so" : ""}`);
 }
 
@@ -3739,8 +3766,17 @@ function loadErpUrl(url, askedFrom) {
   // page first threw it away (nav matrix N-5: Ctrl+S, then a Recent row at once). Take it now —
   // capped, so a stuck page cannot hold the navigation.
   const from = askedFrom || surfaceMode; // where the clerk asked from — they may be on the Doc page by the time it loads
-  const drained = Promise.race([drainErpSaveIntoShelved().catch(() => {}), sleep(1500)]);
-  return drained.then(() => loadErpUrlNow(url, from));
+  // The drain makes the start async: a load asked later must still win (review RV-4) — one
+  // overtaken while draining never starts, and reads as "did not happen" to its caller.
+  const seq = ++erpLoadSeq;
+  const drained = Promise.race([drainErpSaveIntoShelved({ inject: false }).catch(() => {}), sleep(1500)]);
+  return drained.then(() => {
+    if (seq !== erpLoadSeq) {
+      navDebug("erp-load-superseded", url);
+      return false;
+    }
+    return loadErpUrlNow(url, from);
+  });
 }
 
 /** @param {string} url @param {string} from the surface the load was asked from */
@@ -10845,9 +10881,14 @@ ipcMain.on("open-vanilla-skin", () => {
     return;
   }
   const info = routeInfo(currentRoute, ERP_BASE);
+  // An unsaved new document on the Doc page goes through the gate first (below): Stay must leave
+  // the lens as it was, so its "Vanilla" is remembered after the gate, by showErp (review RV-6).
+  const gatedNew =
+    surfaceMode === "doc" && !!info.record && isNewDocRecord(info.record) &&
+    !!(profileByDoctypeKey(info.doctype) || isShellDocSurface());
   // Explicitly reset simplified pref to vanilla so ensureSimplifiedSkin won't re-inject
   // after the page reloads. Must happen before showErp so the did-finish-load handler sees it.
-  if (info.doctype) {
+  if (info.doctype && !gatedNew) {
     // A list remembers its own lens: clicking Vanilla on a list used to switch how the
     // *form* opens too (lens-prefs.js says a list must never do that).
     lensPrefs = rememberLens(lensPrefs, lensPrefKey(info.doctype, info.record), "vanilla");

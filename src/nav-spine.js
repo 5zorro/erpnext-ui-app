@@ -86,6 +86,7 @@ const LEAVES = new Set(["desk", "other"]);
  *   focusWant?: { field: string, row?: string } | null,
  *   backNa?: string,
  *   gateOffersSave?: boolean,
+ *   lensAfterStay?: string,
  *   savedDraft?: string,
  *   errandWant?: string,
  *   errandItem?: string | null,
@@ -159,6 +160,7 @@ export function judgeCell(cell, seen, ctx = {}) {
   } else if (cell.move === "lens" && isNew(cell.state)) {
     if (!s.asked) typing = fail("switched lens on an unsaved new document and asked nothing");
     else if (s.stayKept === false) typing = fail("asked, but Stay lost the typing");
+    else if (s.lensAfterStay === "vanilla") typing = fail("Stay kept the typing but switched Bills to open in Vanilla");
     else if (!s.gateOffersSave) typing = fail("the gate does not offer Save, so the new document cannot reach Vanilla as a draft");
     else if (!s.savedDraft) typing = fail("Save did not open a saved draft in Vanilla");
     else if (s.carried === false) typing = fail("the saved draft in Vanilla does not have the typing");

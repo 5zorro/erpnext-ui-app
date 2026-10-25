@@ -6,14 +6,13 @@
 > cell sets the Doc lens, since forms follow the last lens). Findings N-1 … N-7 fixed, DC-4 built
 > (A), 5zorro's answers 3–4 in; rules folded into HANDOFF § Navigation spine.
 >
-> **Next, in this order (5zorro 2026-10-24 — recorded, not started; he is away and will come back to
-> it):**
+> **Next, in this order (5zorro 2026-10-24):**
 > 1. ~~**Build answer 5** below — a sort toggle on the Submitted section.~~ **Built 2026-10-24**
 >    (see answer 5).
-> 2. **Next: the review of everything this session built** (`03b3b42` … `fa0bb6e6`): the two-part
+> 2. ~~**The review of everything this session built** (`03b3b42` … `fa0bb6e6`): the two-part
 >    end-of-session review — the stability / security, maintainability, performance pass over the
 >    nav fixes N-1 … N-7, DC-4, the matrix driver and `nav:check`, and moving any context-only
->    detail into durable files. 5zorro asked that it wait until answer 5 is built.
+>    detail into durable files.~~ **Done 2026-10-24** — *Review of this session's work* below.
 > 3. Then session 6 of plan 10-19 (R7 + R8 + R12). 5zorro still dogfoods the feel.
 
 5zorro (2026-10-24): *"is there a probe for each of the possible ways to navigate … I have made a
@@ -119,7 +118,7 @@ shell saw the stand-in Item's route — a real save takes a round trip) the fail
 | **DC-4** | `*/new-typed/reload`, `*/draft-typed/reload` (7) | A reload under typing asks nothing (G23) and the Doc page keeps showing the typing and the dead `new-…` name | — | Build (step 5) |
 
 | **N-2** | `*/new-typed/lens` under answer 3 | "Save draft, then continue" on a lens switch saved the Bill, then opened a **blank** new form in Vanilla | `open-vanilla-skin` took the route before the gate (`…/new-…`); after the save that address is a fresh form | Fixed: for an unsaved new document the handler gates first, then asks ERPNext's form for its saved name and opens that draft |
-| **N-3** | `home/new-typed/desk`, `lens/draft-clean/desk` (intermittent) | Discard on a new Bill, then Desk: the clerk is pulled back onto a blank Bill | Discard runs `frappe.new_doc`; a load of `/desk` armed no route guard (it has no doctype), so the 750 ms route poll read the fresh `new-…` form after the Desk load began and the Doc lens took it | Fixed: Desk arms its own guard (`DESK_INTENT`: accepts any page that is not one document, rejects a form). Probe `nav-desk-after-discard`: old code 3 of 20 tries ended on the Bill, the fix 20 of 20 on Desk |
+| **N-3** | `home/new-typed/desk` (intermittent) | Discard on a new Bill, then Desk: the clerk is pulled back onto a blank Bill | Discard runs `frappe.new_doc`; a load of `/desk` armed no route guard (it has no doctype), so the 750 ms route poll read the fresh `new-…` form after the Desk load began and the Doc lens took it | Fixed: Desk arms its own guard (`DESK_INTENT`: accepts any page that is not one document, rejects a form). Probe `nav-desk-after-discard`: old code 3 of 20 tries ended on the Bill, the fix 20 of 20 on Desk |
 
 N-1 fixed too: `showDocForm` gates whenever it opens a *different* document from a Doc page (New
 passes `skipDirtyGate`, as before); its 7 cells pass.
@@ -145,6 +144,36 @@ if "worked on" means opened, Submitted should re-sort on open — his call.
 
 Not re-run on the old code (the matrix's first run is the "before" for N-1 and DC-4; N-3 has its
 20-try probe; N-2 was found under answer 3, a new rule): none outstanding.
+
+## Review of this session's work (2026-10-24, after answer 5)
+
+The two-part review 5zorro asked for (security / stability, maintainability, performance; and
+context-only details moved somewhere durable), over `03b3b42` … `c8a56ae`.
+
+| # | Kind | Gap | Sorted |
+|---|---|---|---|
+| RV-1 | stability, medium | DC-4's repaint waits for ERPNext to come back; its "moved on?" check compared only the surface and the skin, so a clerk who opened another Bill meanwhile could get "your unsaved changes to X are gone" on that other Bill | Fix: give up when the Doc page's document changed (a new document's `new-…` rename allowed) |
+| RV-2 | stability, low | The one-time notice rides on the *next* snapshot pushed; if the repaint returns without pushing one, a later unrelated snapshot carries it | Fix: clear it when the repaint returns |
+| RV-3 | stability, low | Two reloads in a row run two repaint loops; the `did-finish-load` listener stays attached when the 15 s timeout wins | Fix: the newest repaint supersedes; the listener is removed |
+| RV-4 | stability, medium | Since N-5's drain a load starts after an async step, so two loads asked in quick succession can land out of order (the earlier one last) | Fix: a sequence number — a load superseded while draining never starts (resolves false, which every caller already reads as "did not happen") |
+| RV-5 | performance | The drain injects the whole form bridge into a page that lacks it, only to ask about a save it cannot hold | Fix: drain without injecting |
+| RV-6 | stability, low (pre-existing, newly reachable) | The lens switch remembers "Vanilla" for Bills *before* the gate, so Stay on the gate leaves Bills opening in Vanilla | Fix for the new-document branch: remember after the gate passes |
+| RV-7 | safety, medium | The matrix probes write wherever they run — drafts made, saved, deleted — and every insert consumes a number of the Bill naming series (the sandbox went 00054 → 00188): on company data, gaps in the invoice series | Fix: the driver refuses off the sandbox (`assertSandboxSite`); README |
+| RV-8 | honesty | This plan filed `lens/draft-clean/desk` under N-3 — that cell discards nothing, so the cause was not shown | Corrected: seen once (run 1), not seen in 6 later full runs; unexplained. If it comes back, its trail is in `nav-debug.log` |
+| RV-9 | residual | N-7's repaint assumes the ERPNext form is the Doc page's document: a Vanilla open of X overtaken by opening Y on the Doc lens could pair Y's route with X's form (the Bill re-syncs, `ensureErpMatchesShellRoute`; other skins do not) | Recorded, not fixed — an edge of an edge; the matrix has no cell for it |
+| RV-10 | residual | Only Doc-page Save / Submit count as "during a save" for DC-4's wording; a reload during void-and-amend or a board write gets the plain "changes are gone" | Recorded, not fixed |
+
+**Proven how (focused, per HANDOFF's new rule):** RV-6 has a matrix check (`lensAfterStay`) that
+failed on the old code ("Stay kept the typing but switched Bills to open in Vanilla") and passes
+now; the lens cells around RV-1 … RV-5, `nav-reload-gate`, R2-1's probe and `nav-desk-after-discard`
+pass on the fixes. **RV-1, RV-3 and RV-4 are reasoned, not probed** — no cell makes those races (a
+second reload or a second load inside the drain; `erp-load-superseded` never logged), so they rest
+on the code read. RV-7 runs on every matrix launch. The full `nav:check -- --ongoing` over these
+fixes is owed before the next push (the run just before them: 109 / 109, 33 / 33, cruft clean —
+`test-logs/nav-check/2026-10-25T03-17-58/`).
+
+Context-only details moved: the sandbox's Bill series consumed by the matrix and the cancelled
+`ZZ-NAV-S…` Bills (local notes file sandbox note); RV-8's correction above.
 
 ## 5zorro's answers (2026-10-24)
 

@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 import { spineCells, judgeCell, cellLine, cellPassed, isTyped, isNew } from "../../src/nav-spine.js";
 import { cruftFindings, cruftLine } from "../../src/nav-cruft.js";
@@ -57,6 +57,9 @@ async function launch(opts = {}) {
   const app = await launchShell();
   await waitForE2eApi(app);
   await expect.poll(() => e2eCall(app, "getErpUrl"), { timeout: 30_000 }).toMatch(/\/(app|desk)\b/);
+  // It makes, saves and deletes drafts, and each one uses up a Bill number: never on company data
+  // (review RV-7 — deleted drafts leave gaps in the invoice series).
+  await assertSandboxSite(app);
   await app.evaluate(({ dialog }) => {
     globalThis.__navAsks = 0;
     globalThis.__navAnswer = 0;
@@ -341,6 +344,12 @@ async function move(app, cell, docs, seen) {
       await inDoc(app, click("doc-gate-cancel"));
       await sleep(1000);
       seen.stayKept = (await surface(app)) === "doc" && (await inDoc(app, DOC_PAGE)).ref === mark;
+      // Stay leaves the lens as it was (review RV-6): Bills still open on the Doc lens.
+      try {
+        seen.lensAfterStay = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "lens-prefs.json"), "utf8"))["purchase-invoice"] || "";
+      } catch {
+        seen.lensAfterStay = "";
+      }
       await go();
       await expect.poll(() => inDoc(app, GATE), { timeout: 10_000 }).toBe(true);
       seen.gateOffersSave = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-save"]'); return !!(b && b.offsetParent && !b.disabled); })()`);

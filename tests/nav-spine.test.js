@@ -117,6 +117,7 @@ test("judgeCell: a typed new document switching lens is saved as a draft and ope
   assert.equal(blank.lands.ok, false);
   assert.equal(blank.back.ok, false);
   assert.match(judgeCell(cell, { ...seen, asked: false }).typing.why, /asked nothing/);
+  assert.match(judgeCell(cell, { ...seen, lensAfterStay: "vanilla" }).typing.why, /switched Bills to open in Vanilla/);
 });
 
 test("judgeCell: a reload under typing must ask or say so, and never leave stale typing", () => {
