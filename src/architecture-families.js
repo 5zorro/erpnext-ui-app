@@ -96,7 +96,7 @@ export const ARCHITECTURE_FAMILIES = [
   {
     id: "po-ir",
     label: "Purchase Order and Item Receipt Doc skins",
-    modules: ["po-map", "po-source", "receipt-map", "receipt-source", "so-picker"],
+    modules: ["po-map", "po-source", "receipt-map", "so-picker"],
     e2e: [],
   },
   {

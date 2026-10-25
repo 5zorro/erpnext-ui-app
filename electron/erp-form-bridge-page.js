@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 27;
+  var VERSION = 28;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1562,7 +1562,8 @@
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
-        if (!src || !src.items) return { ok: false, reason: "No items mapped from source." };
+        // An empty list too: clearing the lines for nothing is never a merge (review R7-1).
+        if (!src || !src.items || !src.items.length) return { ok: false, reason: "No items mapped from source." };
         var headerPlan = plan && typeof plan === "object" ? plan : null;
         var partyList = headerPlan && headerPlan.party ? headerPlan.party : [];
         for (var pi = 0; pi < partyList.length; pi++) {

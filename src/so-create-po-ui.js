@@ -4,7 +4,7 @@
  * a vendor for all ticked lines or per line; every PO is saved as a draft and the page stays on
  * the Sales Order. Logic in src/so-create-po.js.
  */
-import { SO_CREATE_ENTRIES, canCreatePoFrom, poPendingLines, draftQtyBySoLine, poSelection, createdPosMessage } from "./so-create-po.js";
+import { SO_CREATE_ENTRIES, canCreatePoFrom, poPendingLines, draftQtyBySoLine, poSelection, createdPosMessage, pendingForSave } from "./so-create-po.js";
 import { soCreateEntries, soCreateFlow, CREATE_VIEW_KEY, normalizeCreateView } from "./so-create-menu.js";
 import { DOC_WASH_BY_PROFILE, DOC_WASH_COLORS, DOC_WASH_ACCENTS } from "./doc-wash.js";
 
@@ -70,6 +70,7 @@ function washFor(entry) {
  *   button: HTMLButtonElement|null,
  *   getDoc: () => any,
  *   setStatus: (text: string, kind?: string) => void,
+ *   stickyStatus?: (text: string) => void,
  *   mountSupplierPicker: (input: HTMLInputElement, onPicked: (v: string) => void) => void,
  *   onCreated?: (names: string[]) => Promise<void>|void,
  * }} opts
@@ -325,10 +326,34 @@ export function mountSoCreateMenu(opts) {
       msg.textContent = "";
       save.disabled = true;
       save.textContent = "Saving…";
-      /** @type {Record<string, number>} */
-      const pending = {};
-      for (const l of lines) pending[l.rowName] = l.pendingQty;
+      const again = () => {
+        save.disabled = false;
+        save.textContent = "Save draft purchase orders";
+      };
+      // The drafts as they are now, not as they were when this opened (review R8-1).
+      const ctx = await api.soCreatePoContext(doc.name).catch((e) => ({ ok: false, reason: String(e) }));
+      if (!ctx || !ctx.ok) {
+        again();
+        msg.textContent = (ctx && ctx.reason) || "Could not read the draft purchase orders.";
+        return;
+      }
+      const { pending, anyLeft } = pendingForSave(picks, poPendingLines(doc, draftQtyBySoLine(ctx.rows)));
+      if (!anyLeft) {
+        again();
+        msg.textContent = "Every ticked line is already on a draft purchase order — see Drafts.";
+        return;
+      }
       const res = await api.soCreatePos({ soName: doc.name, selectedItems: sel.selectedItems, pending }).catch((e) => ({ ok: false, reason: String(e) }));
+      if (res && res.uncertain) {
+        // ERPNext may have made some or all of them: never the same Save twice (review R8-1).
+        close();
+        if (opts.onCreated) await opts.onCreated([]);
+        const lost = "Lost contact with ERPNext while saving — the purchase orders may already have been made. Check Drafts before trying again.";
+        // Through the repaints the reload brings, not just until the next one.
+        if (opts.stickyStatus) opts.stickyStatus(lost);
+        else setStatus(lost, "warn");
+        return;
+      }
       if (!res || !res.ok) {
         save.disabled = false;
         save.textContent = "Save draft purchase orders";
@@ -336,6 +361,7 @@ export function mountSoCreateMenu(opts) {
         return;
       }
       close();
+      if (opts.stickyStatus) opts.stickyStatus("");
       // The page re-reads the order first (its repaint resets the status line), then says what was made.
       if (opts.onCreated) await opts.onCreated(res.names || []);
       setStatus(createdPosMessage(res.names, res.failed), res.failed && res.failed.length ? "warn" : "");

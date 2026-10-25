@@ -54,7 +54,6 @@ export function billApiFromErpDoc(api) {
     linkExists: (doctype, name) =>
       api.linkExists ? api.linkExists(doctype || "", name || "") : Promise.resolve({ ok: true, exists: null }),
     checkAccountCompanies: () => api.checkAccountCompanies(),
-    listSources: (supplier) => api.listSources(supplier || ""),
     listSourceSlice: (supplier, sliceId) =>
       api.listSourceSlice ? api.listSourceSlice(supplier || "", sliceId || "") : Promise.resolve({ ok: false }),
     fetchSourceTerms: (refs) => api.fetchSourceTerms(refs || []),

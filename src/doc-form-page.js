@@ -703,7 +703,9 @@ function paintDirtyPill() {
   el.dirtyPill.className = "dirty-pill tone-" + pill.tone + (userEdited ? " is-dirty" : "");
 }
 
-/** DC-4: "ERPNext reloaded — …" stays on the status line through repaints of that document until the next edit. */
+/** DC-4: "ERPNext reloaded — …" stays on the status line through repaints of that document until the next edit.
+ * Create ▾ › Purchase Order's "may already have been made" uses it too (review R8-1): the reload
+ * that caused it repaints the page. */
 let reloadNotice = { text: "", name: "" };
 
 function noteUserEdit() {
@@ -3478,6 +3480,10 @@ export async function bootDocFormPage(injectedApi) {
     button: /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-create")),
     getDoc: () => lastDoc,
     setStatus,
+    stickyStatus: (text) => {
+      reloadNotice = text ? { text, name: String((lastDoc && lastDoc.name) || "") } : { text: "", name: "" };
+      if (text) setStatus(text, "warn");
+    },
     mountSupplierPicker: (input, onPicked) => mountDocLinkPicker(input, "Supplier", onPicked, { refocusAfterPick: false }),
     // Stay on the order (5zorro): Drafts' yellow and, later, the Sources column are the trail.
     onCreated: async () => {

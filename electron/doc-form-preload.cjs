@@ -85,7 +85,6 @@ contextBridge.exposeInMainWorld("erpDoc", {
     return () => ipcRenderer.removeListener("doc-surface-left", handler);
   },
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
-  listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
   listSourceSlice: (supplier, sliceId) =>
     ipcRenderer.invoke("bill-list-source-slice", supplier || "", sliceId || ""),
   mergeSource: async (kindOrItems, name) => {

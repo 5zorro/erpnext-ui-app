@@ -132,37 +132,6 @@ export function sourceModalKeyAction(key) {
 }
 
 /**
- * Unique non-empty PO names from Purchase Receipt Item rows.
- * @param {Array<{ parent?: string, purchase_order?: string }>} itemRows
- * @returns {Record<string, string[]>} parent PR name → PO names
- */
-export function purchaseOrdersByReceipt(itemRows = []) {
-  /** @type {Record<string, string[]>} */
-  const map = {};
-  for (const row of itemRows || []) {
-    const parent = row && row.parent;
-    const po = row && row.purchase_order;
-    if (!parent || !po) continue;
-    if (!map[parent]) map[parent] = [];
-    if (!map[parent].includes(po)) map[parent].push(po);
-  }
-  return map;
-}
-
-/**
- * Attach `purchase_orders: string[]` onto PR list rows.
- * @param {object[]} receipts
- * @param {Array<{ parent?: string, purchase_order?: string }>} itemRows
- */
-export function enrichReceiptsWithPurchaseOrders(receipts = [], itemRows = []) {
-  const byPr = purchaseOrdersByReceipt(itemRows);
-  return (receipts || []).map((r) => ({
-    ...r,
-    purchase_orders: byPr[r.name] || r.purchase_orders || [],
-  }));
-}
-
-/**
  * @param {{ name?: string, title?: string, transaction_date?: string, posting_date?: string, grand_total?: number, purchase_orders?: string[], purchase_order?: string }} row
  * @param {"po" | "pr"} kind
  * @param {boolean} [draft]
@@ -194,10 +163,11 @@ export function sourceItemFromRow(row, kind, draft = false) {
   }
   const money = formatSourceMoney(row.grand_total);
   if (kind === "pr") {
-    const pos = row.purchase_orders || (row.purchase_order ? [row.purchase_order] : []);
-    const poLabel = pos.length ? `PO ${pos.join(", ")}` : "no PO";
+    const pos = row.purchase_orders || (row.purchase_order ? [row.purchase_order] : null);
+    // "no PO" only when the receipt's lines were read and name none (review R7-3).
+    const poBit = pos ? `   ·   ${pos.length ? `PO ${pos.join(", ")}` : "no PO"}` : "";
     return {
-      label: `${row.name || ""}   ·   ${poLabel}   ·   ${date || ""}   ·   ${money}`,
+      label: `${row.name || ""}${poBit}   ·   ${date || ""}   ·   ${money}`,
       kind,
       name: row.name,
     };
@@ -242,60 +212,6 @@ export function poSourceItemFromRow(row, kind) {
     if (Number.isFinite(n) && n > 0) bits.push(`${n} line${n === 1 ? "" : "s"} to order`);
   }
   return { label: bits.join(sep), kind, name: r.name };
-}
-
-/**
- * @param {{
- *   purchaseOrders?: object[],
- *   purchaseReceipts?: object[],
- *   purchaseOrdersDraft?: object[],
- *   purchaseReceiptsDraft?: object[],
- * }} lists
- * @returns {SourceGroup[]}
- */
-export function buildBillSourceGroups(lists = {}) {
-  const pos = lists.purchaseOrders || [];
-  const prs = lists.purchaseReceipts || [];
-  const posD = lists.purchaseOrdersDraft || [];
-  const prsD = lists.purchaseReceiptsDraft || [];
-
-  /** @type {SourceGroup[]} */
-  const groups = [
-    {
-      id: "nic",
-      name: "Not in computer (NIC)",
-      items: [{ label: "NIC — enter this Bill manually (no source)", kind: "nic" }],
-    },
-  ];
-  if (pos.length) {
-    groups.push({
-      id: "po_submitted",
-      name: `Purchase Orders — submitted (${pos.length})`,
-      items: pos.map((p) => sourceItemFromRow(p, "po", false)),
-    });
-  }
-  if (prs.length) {
-    groups.push({
-      id: "pr_submitted",
-      name: `Item Receipts — submitted (${prs.length})`,
-      items: prs.map((p) => sourceItemFromRow(p, "pr", false)),
-    });
-  }
-  if (posD.length) {
-    groups.push({
-      id: "po_draft",
-      name: "Purchase Orders — draft (not selectable)",
-      items: posD.map((p) => sourceItemFromRow(p, "po", true)),
-    });
-  }
-  if (prsD.length) {
-    groups.push({
-      id: "pr_draft",
-      name: "Item Receipts — draft (not selectable)",
-      items: prsD.map((p) => sourceItemFromRow(p, "pr", true)),
-    });
-  }
-  return groups;
 }
 
 /**

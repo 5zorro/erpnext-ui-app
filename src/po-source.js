@@ -39,6 +39,21 @@ export function docSourceMapper(skinId, kind) {
 }
 
 /**
+ * Why a picked source brought in nothing: every line of it is already on an Item Receipt (the PO
+ * mapper copies only lines with `received_qty < qty`) or otherwise used up. The merge refuses it
+ * rather than clear the form's lines (review R7-1).
+ * @param {string|null|undefined} skinId
+ * @param {string|null|undefined} kind
+ * @param {string} name
+ * @returns {string}
+ */
+export function emptySourceReason(skinId, kind, name) {
+  if (skinId === "receipt" && kind === "po") return `Every line of ${name} is already received — nothing to bring in.`;
+  const noun = SOURCE_KIND_NOUN[String(kind || "")] || "That document";
+  return `${noun} ${name} has no lines left to bring in.`;
+}
+
+/**
  * The Sales Order mapper's `selected_items`: each item still to order, **with no vendor** (so the
  * mapper does not save a PO of its own). One entry per item code — ERPNext maps by item code.
  * @param {Array<{ itemCode: string, pendingQty: number }>} pendingLines from poPendingLines

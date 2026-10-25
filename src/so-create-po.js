@@ -67,6 +67,29 @@ export function poPendingLines(doc, onDrafts = {}) {
 }
 
 /**
+ * What each line may still put on a new PO, as the mapper's trim reads it (`pending` by Sales
+ * Order line). Read from the draft POs **at Save**, not when the dialog opened — another run may
+ * have made some since (review R8-1). An **unticked** line gets 0: ERPNext maps by item code, so
+ * an unticked twin of a ticked line comes along unless the trim drops it (review R8-2).
+ * @param {Array<{ rowName: string, ticked: boolean }>} picks every line the dialog shows
+ * @param {Array<{ rowName: string, pendingQty: number }>} freshLines poPendingLines read at Save
+ * @returns {{ pending: Record<string, number>, anyLeft: boolean }} anyLeft: a ticked line still has something to order
+ */
+export function pendingForSave(picks, freshLines) {
+  const now = new Map((Array.isArray(freshLines) ? freshLines : []).map((l) => [l.rowName, num(l.pendingQty)]));
+  /** @type {Record<string, number>} */
+  const pending = {};
+  let anyLeft = false;
+  for (const p of Array.isArray(picks) ? picks : []) {
+    if (!p || !p.rowName) continue;
+    const left = p.ticked ? Math.max(0, now.get(p.rowName) || 0) : 0;
+    pending[p.rowName] = left;
+    if (p.ticked && left > 0) anyLeft = true;
+  }
+  return { pending, anyLeft };
+}
+
+/**
  * Sum the draft PO lines that point at this order, by Sales Order line.
  * @param {Array<{ name?: string, sales_order_item?: string, stock_qty?: number|string }>} rows
  * @returns {Record<string, { stockQty: number, pos: string[] }>}

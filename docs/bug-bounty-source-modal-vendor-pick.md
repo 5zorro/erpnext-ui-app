@@ -169,7 +169,7 @@ Do **not** commit `localhost.har` (large; session cookies). Keep local for foren
 
 | Layer | What exists | What it proves | What it does **not** prove |
 |-------|-------------|----------------|----------------------------|
-| `tests/source-modal.test.js` | `buildBillSourceGroups`, draft grey, PR↔PO labels, money format | Group **shape** if lists arrive | Modal opens; IPC; focus; vendor pick |
+| `tests/source-modal.test.js` | `sourceItemFromRow`, draft grey, PR↔PO labels, money format | Group **shape** if lists arrive | Modal opens; IPC; focus; vendor pick |
 | `tests/link-search.test.js` | normalize / filter / labels / **empty → Vendor add** sentinel | Search row shaping | Dropdown Tab/Enter; `onPicked`; modal |
 | `tests/erp-form-bridge.test.js` | doctype match, item enrich helpers, bridge version | Pure bridge helpers | `setHeader` / `listSources` in live ERP |
 | `tests/dirty-gate.test.js` | nav gate / normalize | Leave-Bill prompts | Source modal |

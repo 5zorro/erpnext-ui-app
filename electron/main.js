@@ -276,18 +276,13 @@ import {
   linkListCheckDue,
   linkListCopyable,
 } from "../src/link-list-cache.js";
-import { buildBillSourceGroups, enrichReceiptsWithPurchaseOrders, combineMappedBillSources } from "../src/source-modal.js";
-import {
-  SOURCE_LIST_SLICE_ORDER,
-  buildSourceGroupFromSliceRows,
-  buildBillSourceLoadingGroups,
-  applySourceSliceToGroups,
-} from "../src/source-list-slices.js";
+import { combineMappedBillSources } from "../src/source-modal.js";
+import { buildSourceGroupFromSliceRows, rollUpReceiptRows } from "../src/source-list-slices.js";
 import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
 import { rankSalesOrdersForBill } from "../src/so-picker.js";
 import { salesOrdersToOrder, poPendingLines, draftQtyBySoLine } from "../src/so-create-po.js";
 import { SO_CREATE_CATALOG, linkedCounts } from "../src/so-create-menu.js";
-import { docSourceMapper, SOURCE_KIND_NOUN, soSelectedItemsWithoutVendor, trimMappedSoLines } from "../src/po-source.js";
+import { docSourceMapper, SOURCE_KIND_NOUN, soSelectedItemsWithoutVendor, trimMappedSoLines, emptySourceReason } from "../src/po-source.js";
 import {
   normalizeLineAllocation,
   jitPoTitleForSalesOrders,
@@ -312,7 +307,6 @@ import {
   billRefWaitingForVendorResult,
   resolveBillRefSupplier,
 } from "../src/bill-ref-check.js";
-import { buildReceiptSourceGroups } from "../src/receipt-source.js";
 import {
   DOC_SKIN_PROFILES,
   docFormUiPayload,
@@ -3175,7 +3169,12 @@ async function ensureSimplifiedSkin() {
   try {
     const payload = buildSimplifiedPayload();
     await erpExec(payload);
+    // Ask the page, as ensureErpFormBridge does: a payload whose core did not load returns without
+    // installing, and the toolbar said Simplified over plain Vanilla with nothing logged (R12-2).
+    // The teardown runs either way — it also strips a half-applied skin.
     simplifiedSkinInstalled = true;
+    const ver = await erpEval("(function(){ try { return window.__simplifiedSkin && window.__simplifiedSkin.version || 0; } catch(e) { return 0; } })()");
+    if (!(typeof ver === "number" && ver > 0)) navDebug("simplified-skin-missing", `${info.doctype} ${info.record}`);
   } catch (e) {
     navDebug("simplified-skin-err", String(e && e.message ? e.message : e));
   }
@@ -8185,13 +8184,30 @@ ipcMain.handle("bill-set-amount-due", async (_e, value, markEdited) => {
 async function fetchBillSourceSlice(supplier, sliceId) {
   const sup = normalizeEditableText(supplier);
   if (!sup) return { ok: false, reason: "No vendor", rows: [] };
+  // Vanilla's Get Items From filters (purchase_invoice.js / purchase_receipt.js): this company's
+  // documents only, and never a held or closed PO — ERPNext refuses those at save (review R7-1).
+  const company = normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
+  const onCompany = (filters) => (company ? { ...filters, company } : filters);
+  const openPo = ["not in", ["Closed", "On Hold"]];
+  // A receipt row names its PO from its own lines, read through the receipt (its read permission;
+  // `Purchase Receipt Item` on its own was refused — review R7-3). One row per line, rolled up below.
+  const receiptFields = ["name", "posting_date", "grand_total", "`tabPurchase Receipt Item`.purchase_order as purchase_order"];
 
   /** @type {{ doctype: string, filters: object, fields: string[], order_by: string, limit: number } | null} */
   let spec = null;
   if (sliceId === "po_submitted") {
     spec = {
       doctype: "Purchase Order",
-      filters: { supplier: sup, docstatus: 1, per_billed: ["<", 100] },
+      filters: onCompany({ supplier: sup, docstatus: 1, status: openPo, per_billed: ["<", 99.99] }),
+      fields: ["name", "title", "transaction_date", "grand_total"],
+      order_by: "transaction_date desc",
+      limit: 50,
+    };
+  } else if (sliceId === "po_to_receive") {
+    // The Item Receipt's POs: still to *receive*, whatever has been billed (review R7-1).
+    spec = {
+      doctype: "Purchase Order",
+      filters: onCompany({ supplier: sup, docstatus: 1, status: openPo, per_received: ["<", 99.99] }),
       fields: ["name", "title", "transaction_date", "grand_total"],
       order_by: "transaction_date desc",
       limit: 50,
@@ -8199,10 +8215,10 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   } else if (sliceId === "pr_submitted") {
     spec = {
       doctype: "Purchase Receipt",
-      filters: { supplier: sup, docstatus: 1, per_billed: ["<", 100] },
-      fields: ["name", "posting_date", "grand_total"],
+      filters: onCompany({ supplier: sup, docstatus: 1, per_billed: ["<", 100], status: ["not in", ["Closed", "Completed", "Return Issued"]] }),
+      fields: receiptFields,
       order_by: "posting_date desc",
-      limit: 50,
+      limit: 500,
     };
   } else if (sliceId === "po_draft") {
     spec = {
@@ -8216,9 +8232,9 @@ async function fetchBillSourceSlice(supplier, sliceId) {
     spec = {
       doctype: "Purchase Receipt",
       filters: { supplier: sup, docstatus: 0 },
-      fields: ["name", "posting_date", "grand_total"],
+      fields: receiptFields,
       order_by: "posting_date desc",
-      limit: 20,
+      limit: 200,
     };
   } else if (sliceId === "mr_submitted") {
     // The PO's sources (plan 2026-10-12 S3). A Material Request names no vendor: every open
@@ -8250,63 +8266,50 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   }
   if (!spec) return { ok: false, reason: "Invalid source slice", rows: [] };
 
-  const raw = await erpEval(
-    `(async () => {
+  // frappe.xcall, not frappe.db.get_list (G19): a list the clerk may not read (a Purchase User and
+  // Sales Orders) is refused, and get_list would never settle — the slice spun for good (R7-4).
+  // The deadline is for a server that never answers at all.
+  const raw = await Promise.race([
+    erpEval(
+      `(async () => {
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "ERP Desk not ready" };
       }
-      var rows = await frappe.db.get_list(${JSON.stringify(spec.doctype)}, {
+      var rows = await frappe.xcall("frappe.client.get_list", {
+        doctype: ${JSON.stringify(spec.doctype)},
         filters: ${JSON.stringify(spec.filters)},
         fields: ${JSON.stringify(spec.fields)},
         order_by: ${JSON.stringify(spec.order_by)},
-        limit: ${spec.limit},
+        limit_page_length: ${spec.limit},
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
     }
   })()`,
-    "listSources",
-  );
+      "listSources",
+    ),
+    sleep(SOURCE_SLICE_DEADLINE_MS).then(() => ({ ok: false, reason: "ERPNext did not answer — close and reopen to try again." })),
+  ]);
   if (!raw || !raw.ok) {
+    navDebug("source-slice-failed", `${sliceId}: ${(raw && raw.reason) || "?"}`);
     return { ok: false, reason: (raw && raw.reason) || "Could not list sources", rows: [] };
   }
   if (sliceId === "so_submitted") return { ok: true, rows: salesOrdersToOrder(raw.rows).slice(0, 50) };
+  if (sliceId === "pr_submitted") return { ok: true, rows: rollUpReceiptRows(raw.rows).slice(0, 50) };
+  if (sliceId === "pr_draft") return { ok: true, rows: rollUpReceiptRows(raw.rows).slice(0, 20) };
   return { ok: true, rows: raw.rows || [] };
 }
+
+/** How long one source slice may take before it shows its error row (review R7-4). */
+const SOURCE_SLICE_DEADLINE_MS = 20_000;
 
 ipcMain.handle("bill-list-source-slice", async (_e, supplier, sliceId) => {
   const raw = await fetchBillSourceSlice(supplier, sliceId);
   if (!raw.ok) return raw;
   const group = buildSourceGroupFromSliceRows(sliceId, raw.rows || []);
   return { ok: true, rows: raw.rows || [], group: group || null };
-});
-
-ipcMain.handle("bill-list-sources", async (_e, supplier) => {
-  const sup = normalizeEditableText(supplier);
-  if (!sup) return { ok: false, reason: "No vendor", groups: [] };
-  const sliceResults = await Promise.all(
-    SOURCE_LIST_SLICE_ORDER.map(async (sliceId) => {
-      const raw = await fetchBillSourceSlice(sup, sliceId);
-      return { sliceId, raw };
-    }),
-  );
-  let groups = buildBillSourceLoadingGroups().filter((g) => g.id === "nic");
-  /** @type {string[]} */
-  const errors = [];
-  for (const { sliceId, raw } of sliceResults) {
-    if (!raw.ok) {
-      errors.push(raw.reason || sliceId);
-      continue;
-    }
-    const group = buildSourceGroupFromSliceRows(sliceId, raw.rows || []);
-    if (group) groups = applySourceSliceToGroups(groups, group);
-  }
-  if (errors.length === sliceResults.length) {
-    return { ok: false, reason: errors[0] || "Could not list sources", groups: [] };
-  }
-  return { ok: true, groups };
 });
 
 ipcMain.handle("bill-merge-source", async (_e, kind, name) => {
@@ -10320,9 +10323,32 @@ ipcMain.handle("so-create-pos", async (_e, req) => {
   const so = normalizeEditableText(r.soName);
   const selected = Array.isArray(r.selectedItems) ? r.selectedItems : [];
   if (!so || !selected.length) return { ok: false, reason: "Nothing to order." };
+  // One run per order at a time (review R8-1): a dialog closed and opened again mid-save read the
+  // drafts before the first set existed, and its Save ordered the same lines again.
+  if (soCreatePosRunning.has(so)) {
+    navDebug("so-create-pos", `${so}: refused — a run is still out`);
+    return { ok: false, reason: `Still making the purchase orders for ${so} — wait for them, then check Drafts.` };
+  }
+  soCreatePosRunning.add(so);
+  try {
+    return await soCreatePos(so, selected, r.pending || {});
+  } finally {
+    soCreatePosRunning.delete(so);
+  }
+});
+
+/** Sales Orders whose Create ▾ › Purchase Order run is still out (review R8-1). @type {Set<string>} */
+const soCreatePosRunning = new Set();
+
+/**
+ * @param {string} so
+ * @param {Array<Record<string, any>>} selected
+ * @param {Record<string, number>} pendingByLine
+ */
+async function soCreatePos(so, selected, pendingByLine) {
   navDebug("so-create-pos", `${so}: ${selected.length} line(s) → ${[...new Set(selected.map((x) => x.supplier))].join(", ")} start`);
   const raw = await erpEval(`(async () => {
-    var pending = ${JSON.stringify(r.pending || {})};
+    var pending = ${JSON.stringify(pendingByLine)};
     try {
       var m = await frappe.call({ method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
         args: { source_name: ${JSON.stringify(so)}, selected_items: ${JSON.stringify(selected)} } });
@@ -10356,17 +10382,20 @@ ipcMain.handle("so-create-pos", async (_e, req) => {
           failed.push({ supplier: d.supplier || "", reason: d.name + " is saved, but trimming lines already on other drafts failed: " + String((e && e.message) || e) });
         }
       }
-      return { ok: true, saved: saved, failed: failed };
+      return { ok: true, ran: true, saved: saved, failed: failed };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
+      return { ok: false, ran: true, reason: String(e && e.message ? e.message : e) };
     }
   })()`);
   const res = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not create the purchase orders." };
+  // No answer from the script (the ERPNext page reloaded or died mid-run, R2-1): ERPNext may have
+  // saved some or all of them. Never offer the same Save again (review R8-1).
+  const uncertain = !res.ok && !res.ran && !res.notRun;
   for (const doc of res.saved || []) noteShelvedFromSave("purchase-order", doc);
   const names = (res.saved || []).map((d) => d.name);
-  navDebug("so-create-pos", `${so}: ${res.ok ? `saved ${names.join(", ") || "none"}${(res.failed || []).length ? `; failed ${res.failed.length}` : ""}` : `failed: ${res.reason}`}`);
-  return { ok: !!res.ok, reason: res.reason, names, failed: res.failed || [] };
-});
+  navDebug("so-create-pos", `${so}: ${res.ok ? `saved ${names.join(", ") || "none"}${(res.failed || []).length ? `; failed ${res.failed.length}` : ""}` : `failed${uncertain ? " uncertain=1" : ""}: ${res.reason}`}`);
+  return { ok: !!res.ok, reason: res.reason, names, failed: res.failed || [], uncertain };
+}
 
 /**
  * The Sources column (plan 2026-10-12 S4): everything that sources this Sales Order's lines —
@@ -10387,27 +10416,38 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
       } catch (e) { return null; }
     }
     var out = {};
-    out.purchaseOrders = await list({ doctype: "Purchase Order",
+    // At once, not one after another (review R8-3): each already fails on its own to null.
+    var reads = await Promise.all([
+    list({ doctype: "Purchase Order",
       fields: ["name", "docstatus", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
-      filters: [["Purchase Order Item", "sales_order", "=", so], ["docstatus", "<", 2]] });
-    out.workOrders = await list({ doctype: "Work Order",
+      filters: [["Purchase Order Item", "sales_order", "=", so], ["docstatus", "<", 2]] }),
+    list({ doctype: "Work Order",
       fields: ["name", "docstatus", "status", "sales_order_item", "qty"],
-      filters: [["sales_order", "=", so], ["docstatus", "<", 2]] });
-    out.materialRequests = await list({ doctype: "Material Request",
+      filters: [["sales_order", "=", so], ["docstatus", "<", 2]] }),
+    list({ doctype: "Material Request",
       fields: ["name", "docstatus", "\`tabMaterial Request Item\`.sales_order_item as sales_order_item", "\`tabMaterial Request Item\`.stock_qty as stock_qty", "\`tabMaterial Request Item\`.ordered_qty as ordered_qty"],
-      filters: [["Material Request Item", "sales_order", "=", so], ["docstatus", "<", 2]] });
-    out.reservations = await list({ doctype: "Stock Reservation Entry",
+      filters: [["Material Request Item", "sales_order", "=", so], ["docstatus", "<", 2]] }),
+    list({ doctype: "Stock Reservation Entry",
       fields: ["voucher_detail_no", "reserved_qty", "delivered_qty"],
-      filters: [["voucher_type", "=", "Sales Order"], ["voucher_no", "=", so], ["docstatus", "=", 1]] });
-    out.bins = codes.length ? await list({ doctype: "Bin", fields: ["item_code", "warehouse", "actual_qty"], filters: [["item_code", "in", codes]] }) : [];
+      filters: [["voucher_type", "=", "Sales Order"], ["voucher_no", "=", so], ["docstatus", "=", 1]] }),
+    codes.length ? list({ doctype: "Bin", fields: ["item_code", "warehouse", "actual_qty"], filters: [["item_code", "in", codes]] }) : Promise.resolve([]),
     // Costing notes (plan 10-19 R6b-4 step 8) come from the form's own docinfo: anyone who can read
     // the order may read its Comments there, while listing Comment needs System Manager.
-    try {
-      var di = await frappe.call({ method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
-      var cs = (di && di.docinfo && di.docinfo.comments) || [];
-      out.costingNotes = cs.filter(function (c) { return String(c.content || "").indexOf(${JSON.stringify(COSTING_TOKEN)}) >= 0; })
-        .map(function (c) { return { name: c.name, creation: c.creation, content: c.content }; });
-    } catch (e) { out.costingNotes = null; }
+    (async function () {
+      try {
+        var di = await frappe.call({ method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
+        var cs = (di && di.docinfo && di.docinfo.comments) || [];
+        return cs.filter(function (c) { return String(c.content || "").indexOf(${JSON.stringify(COSTING_TOKEN)}) >= 0; })
+          .map(function (c) { return { name: c.name, creation: c.creation, content: c.content }; });
+      } catch (e) { return null; }
+    })(),
+    ]);
+    out.purchaseOrders = reads[0];
+    out.workOrders = reads[1];
+    out.materialRequests = reads[2];
+    out.reservations = reads[3];
+    out.bins = reads[4];
+    out.costingNotes = reads[5];
     return { ok: true, data: out };
   })()`);
   if (!raw || !raw.ok) return { ok: false, reason: (raw && raw.reason) || "Could not read this order's sources." };
@@ -10685,53 +10725,6 @@ ipcMain.handle("link-list-refresh", async (_e, doctype) => {
   return copy ? { ok: true, asOf: copy.checkedAt } : { ok: false, reason: "Could not reload the list — searching ERPNext directly." };
 });
 
-ipcMain.handle("doc-list-sources", async (_e, supplier) => {
-  if (activeDocSkin !== "receipt") {
-    return { ok: false, reason: "Source picker not used on this Doc form", groups: [] };
-  }
-  const sup = normalizeEditableText(supplier);
-  if (!sup) return { ok: false, reason: "No vendor", groups: [] };
-  const raw = await erpEval(`(async () => {
-    try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
-        return { ok: false, reason: "ERP Desk not ready" };
-      }
-      var supplier = ${JSON.stringify(sup)};
-      var res = await Promise.all([
-        frappe.db.get_list("Purchase Order", {
-          filters: { supplier: supplier, docstatus: 1, per_received: ["<", 100] },
-          fields: ["name", "transaction_date", "grand_total"],
-          order_by: "transaction_date desc",
-          limit: 50,
-        }),
-        frappe.db.get_list("Purchase Order", {
-          filters: { supplier: supplier, docstatus: 0 },
-          fields: ["name", "transaction_date", "grand_total"],
-          order_by: "transaction_date desc",
-          limit: 20,
-        }),
-      ]);
-      return {
-        ok: true,
-        purchaseOrders: res[0] || [],
-        purchaseOrdersDraft: res[1] || [],
-      };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  if (!raw || !raw.ok) {
-    return { ok: false, reason: (raw && raw.reason) || "Could not list sources", groups: [] };
-  }
-  return {
-    ok: true,
-    groups: buildReceiptSourceGroups({
-      purchaseOrders: raw.purchaseOrders,
-      purchaseOrdersDraft: raw.purchaseOrdersDraft,
-    }),
-  };
-});
-
 ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
   // Which ERPNext mapper fills this skin from this kind of source (src/po-source.js): the Item
   // Receipt from a PO; the PO from a Material Request, Supplier Quotation or Sales Order (S3).
@@ -10793,6 +10786,12 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
     };
   }
   if (soPending) mapped.src.items = trimMappedSoLines(mapped.src.items, soPending);
+  // A source with nothing left maps no lines; merging that would clear the form's lines and still
+  // say "Pulled from" (review R7-1: a PO already received in full, picked on an Item Receipt).
+  if (!(mapped.src.items || []).length) {
+    navDebug("doc-merge-source", `${activeDocSkin} ← ${kind} ${source}: no lines left — refused`);
+    return { ok: false, reason: emptySourceReason(activeDocSkin, kind, source) };
+  }
   navDebug("doc-merge-source", `${activeDocSkin} ← ${kind} ${source}: ${(mapped.src.items || []).length} line(s)`);
   const raw = await bridgeCall("mergeFromMapped", mapped.src);
   if (raw && raw.ok) {

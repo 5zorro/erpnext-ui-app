@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES, SEED_VALUES } from "./simplified-seed-profiles.js";
 
-const VERSION = 14;
+const VERSION = 15;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -408,6 +408,32 @@ export function buildSimplifiedPayload() {
      still runs on click and un-shows every other pane again, so replace it outright
      (off("click"), unnamespaced) instead of adding alongside it. */
   var scrollNavSections = [];
+  /* Every form whose tabs were rewired, so destroy() can give each its Vanilla tabs back. Frappe
+     keeps one form per doctype for the page's life, so a form left rewired stays that way until
+     a reload — and leaving the lens by an in-page hop reloads nothing (review R12-1). */
+  var scrollNavForms = [];
+  function restoreScrollNav(frm) {
+    try {
+      if (frm.__ssShowGuard) { try { frm.__ssShowGuard.disconnect(); } catch(e) {} frm.__ssShowGuard = null; }
+      var tabs = (frm.layout && frm.layout.tabs) || [];
+      var first = null;
+      tabs.forEach(function(tab) {
+        if (!tab || !tab.wrapper) return;
+        var el = tab.wrapper.get(0);
+        if (el) el.style.display = "";
+        if (tab.tab_link) {
+          var link = tab.tab_link.find(".nav-link");
+          link.off(".ssScrollNav");
+          link.removeClass("active");
+          /* Frappe's own click handler (tab.js setup_listeners), stripped by off("click") above. */
+          if (typeof tab.setup_listeners === "function") tab.setup_listeners();
+        }
+        if (!first && !tab.hidden) first = tab;
+      });
+      /* set_active() hides every other pane and strips the "show" this skin added. */
+      if (first && typeof first.set_active === "function") first.set_active();
+    } catch(e) {}
+  }
   function updateScrollNavActive() {
     if (!scrollNavSections.length) return;
     var headerOffset = 60;
@@ -422,6 +448,7 @@ export function buildSimplifiedPayload() {
   function installScrollNav(frm) {
     try {
       if (!frm || !frm.layout || !frm.layout.tabs || !frm.layout.tabs.length) return;
+      if (scrollNavForms.indexOf(frm) < 0) scrollNavForms.push(frm);
       var tabs = frm.layout.tabs;
       var sections = [];
       tabs.forEach(function(tab, i) {
@@ -904,15 +931,21 @@ export function buildSimplifiedPayload() {
         !frappe.ui.form.Form.prototype
       ) return false;
       var proto = frappe.ui.form.Form.prototype;
-      if (proto.__ssRefreshPatched) return true;
+      /* 2: the patch calls whichever copy of the skin is installed now. It outlives destroy(), so
+         calling this copy's own apply would leave a later re-inject never applied on refresh —
+         its hook would see the mark and skip (review R12-1). */
+      if (proto.__ssRefreshPatched === 2) return true;
       var orig = proto.refresh;
       proto.refresh = function() {
         var result = orig.apply(this, arguments);
         /* Apply after Frappe finishes its own refresh. */
-        try { apply(this); } catch(e) {}
+        try {
+          var skin = window.__simplifiedSkin;
+          if (skin && typeof skin.apply === "function") skin.apply(this);
+        } catch(e) {}
         return result;
       };
-      proto.__ssRefreshPatched = true;
+      proto.__ssRefreshPatched = 2;
       return true;
     } catch(e) { return false; }
   }
@@ -969,9 +1002,8 @@ export function buildSimplifiedPayload() {
      skin. When that reload was skipped or raced (nav incidents 2026-09-03/04), the
      toolbar said Vanilla while the assumptions button and every dimmed/locked field
      were still on screen. destroy() makes leaving the lens explicit instead.
-     Frappe's own tab click handlers were removed by installScrollNav and only a
-     reload restores them, so main still reloads — this just stops the skin from
-     surviving a reload that does not happen. */
+     Each rewired form gets Frappe's own tab handlers and tab state back (restoreScrollNav), so
+     leaving the lens by an in-page hop needs no reload (review R12-1). */
   function destroy() {
     destroyed = true;
     if (expenseHeadObserver) { try { expenseHeadObserver.disconnect(); } catch(e) {} expenseHeadObserver = null; }
@@ -984,10 +1016,8 @@ export function buildSimplifiedPayload() {
     scrollListenerBound = false;
     scrollNavSections = [];
 
-    if (frm && frm.__ssShowGuard) {
-      try { frm.__ssShowGuard.disconnect(); } catch(e) {}
-      frm.__ssShowGuard = null;
-    }
+    scrollNavForms.forEach(restoreScrollNav);
+    scrollNavForms = [];
 
     ["ss-aff", "ss-top", "ss-back", "ss-injected-css"].forEach(function(id) {
       var el = document.getElementById(id);

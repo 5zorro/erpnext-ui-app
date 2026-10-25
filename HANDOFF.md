@@ -244,6 +244,24 @@ the loose money against the wrong one and leaves the amended bill outstanding â€
 *and* still exposed to paying twice. The shell proposes the pairing instead (`payment-relink.js`),
 using the one fact the allocator ignores: an amendment carries `amended_from`.
 
+### After an ERPNext upgrade (review 10-19 R12-3)
+
+The shell never patches ERPNext, but it does lean on some of ERPNext's internals by name, and an
+upgrade can move them. Nothing fails at once: the unit tests read snapshots and this repo's own
+code. So after any ERPNext or Frappe upgrade:
+
+1. **Simplified's field lists:** run `npm run seeds:simplified -- --refresh-meta`, then
+   `npm run seeds:simplified`, and commit both. The drift test checks against the snapshot in
+   `tests/fixtures/simplified-seed-meta/`, not against the live site.
+2. **`npm run dogfood:check`** and the **full `npm run nav:check -- --ongoing`** (app closed, about
+   55 min together). These drive the real pages against the upgraded site.
+3. **Re-read what is named in code:** the Create â–¾ catalog's `cscript` handlers
+   (`so-create-menu.js`), Receive Payment's `get_outstanding_documents` (`erp-form-bridge-page.js`),
+   the tab DOM and `Form.prototype.refresh` that Simplified rewires (G2, G4,
+   `assume-applier-payload.js`), and the ERPNext source facts in the local notes file, which are
+   pinned to the sandbox tags. A missing handler or field fails soft, with a message or Vanilla
+   as it is (R12-2 logs `simplified-skin-missing`), but it still fails.
+
 ### Warm pick lists (folded from plan 2026-10-21, OI-185, built 2026-10-21)
 
 Why: every keystroke in a link field waited for a round trip through the ERPNext page, and a vendor

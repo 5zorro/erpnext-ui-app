@@ -1,10 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildBillSourceGroups,
   isSelectableSourceItem,
   formatSourceMoney,
-  enrichReceiptsWithPurchaseOrders,
   sourceItemFromRow,
   sourceItemKey,
   toggleSourceSelection,
@@ -17,17 +15,29 @@ import {
 } from "../src/source-modal.js";
 import {
   buildBillSourceLoadingGroups,
+  buildSourceGroupFromSliceRows,
+  applySourceSliceToGroups,
+  rollUpReceiptRows,
+  sourceSlicesForSkin,
   SOURCE_LIST_SLICE_DEFS,
   SOURCE_LIST_SLICE_ORDER,
 } from "../src/source-list-slices.js";
 
-describe("buildBillSourceGroups", () => {
+/** The groups the picker shows once every slice has answered (NIC first). */
+function groupsFrom(slices) {
+  let g = buildBillSourceLoadingGroups().filter((x) => x.id === "nic");
+  for (const [id, rows] of Object.entries(slices)) {
+    const one = buildSourceGroupFromSliceRows(id, rows);
+    if (one) g = applySourceSliceToGroups(g, one);
+  }
+  return g;
+}
+
+describe("source groups", () => {
   it("always includes NIC and greys drafts", () => {
-    const g = buildBillSourceGroups({
-      purchaseOrders: [{ name: "PO-1", transaction_date: "2019-01-01", grand_total: 10 }],
-      purchaseOrdersDraft: [{ name: "PO-D", transaction_date: "2019-01-02", grand_total: 1 }],
-      purchaseReceipts: [],
-      purchaseReceiptsDraft: [],
+    const g = groupsFrom({
+      po_submitted: [{ name: "PO-1", transaction_date: "2019-01-01", grand_total: 10 }],
+      po_draft: [{ name: "PO-D", transaction_date: "2019-01-02", grand_total: 1 }],
     });
     assert.equal(g[0].items[0].kind, "nic");
     assert.equal(isSelectableSourceItem(g[0].items[0]), true);
@@ -60,17 +70,24 @@ describe("buildBillSourceGroups", () => {
     assert.match(item.label, /12\.50/);
   });
 
-  it("shows PO number on Item Receipt rows", () => {
-    const prs = enrichReceiptsWithPurchaseOrders(
-      [{ name: "PR-1", posting_date: "2019-02-01", grand_total: 50 }],
-      [
-        { parent: "PR-1", purchase_order: "PO-9" },
-        { parent: "PR-1", purchase_order: "PO-9" },
-      ],
-    );
+  it("shows PO number on Item Receipt rows (one list row per receipt line, rolled up — R7-3)", () => {
+    const prs = rollUpReceiptRows([
+      { name: "PR-1", posting_date: "2019-02-01", grand_total: 50, purchase_order: "PO-9" },
+      { name: "PR-1", posting_date: "2019-02-01", grand_total: 50, purchase_order: "PO-9" },
+      { name: "PR-1", posting_date: "2019-02-01", grand_total: 50, purchase_order: "PO-10" },
+      { name: "PR-2", posting_date: "2019-02-02", grand_total: 5, purchase_order: null },
+    ]);
+    assert.deepEqual(prs.map((r) => [r.name, r.purchase_orders]), [["PR-1", ["PO-9", "PO-10"]], ["PR-2", []]]);
+    assert.equal("purchase_order" in prs[0], false);
     const item = sourceItemFromRow(prs[0], "pr", false);
-    assert.match(item.label, /PO PO-9|PO-9/);
+    assert.match(item.label, /PO PO-9, PO-10/);
     assert.ok(item.label.includes("PR-1"));
+    assert.match(sourceItemFromRow(prs[1], "pr", false).label, /no PO/);
+  });
+
+  it("says nothing about a PO it never read (R7-3: every row used to read 'no PO')", () => {
+    const item = sourceItemFromRow({ name: "PR-3", posting_date: "2019-02-01", grand_total: 1 }, "pr", false);
+    assert.doesNotMatch(item.label, /PO/);
   });
 
   it("labels receipt with no PO clearly", () => {
@@ -84,12 +101,12 @@ describe("buildBillSourceGroups", () => {
 });
 
 describe("source multi-select", () => {
-  const groups = buildBillSourceGroups({
-    purchaseOrders: [
+  const groups = groupsFrom({
+    po_submitted: [
       { name: "PO-A", transaction_date: "2026-01-01", grand_total: 1 },
       { name: "PO-B", transaction_date: "2026-01-02", grand_total: 2 },
     ],
-    purchaseReceipts: [{ name: "PR-1", posting_date: "2026-01-03", grand_total: 3 }],
+    pr_submitted: [{ name: "PR-1", posting_date: "2026-01-03", grand_total: 3 }],
   });
 
   it("keys NIC and documents", () => {
@@ -186,5 +203,17 @@ describe("buildBillSourceLoadingGroups", () => {
       assert.equal(g[i].items[0].loading, true);
       assert.equal(isSelectableSourceItem(g[i].items[0]), false);
     }
+  });
+});
+
+describe("which POs each skin lists (review R7-1)", () => {
+  it("the Item Receipt lists POs still to receive, not still to bill", () => {
+    assert.deepEqual(sourceSlicesForSkin("receipt"), ["po_to_receive", "po_draft"]);
+    assert.ok(!sourceSlicesForSkin("receipt").includes("po_submitted"));
+    assert.ok(sourceSlicesForSkin("bill").includes("po_submitted"));
+    const g = buildSourceGroupFromSliceRows("po_to_receive", [{ name: "PO-R", transaction_date: "2026-01-01", grand_total: 4 }]);
+    assert.equal(g.items[0].kind, "po");
+    assert.equal(isSelectableSourceItem(g.items[0]), true);
+    assert.match(g.name, /still to receive/);
   });
 });

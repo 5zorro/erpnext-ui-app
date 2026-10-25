@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { docSourceMapper, soSelectedItemsWithoutVendor, trimMappedSoLines, SOURCE_KIND_NOUN } from "../src/po-source.js";
+import { docSourceMapper, soSelectedItemsWithoutVendor, trimMappedSoLines, SOURCE_KIND_NOUN, emptySourceReason } from "../src/po-source.js";
 import { sourceSlicesForSkin, buildBillSourceLoadingGroups, buildSourceGroupFromSliceRows } from "../src/source-list-slices.js";
 import { poSourceItemFromRow } from "../src/source-modal.js";
 import { salesOrdersToOrder } from "../src/so-create-po.js";
@@ -9,7 +9,7 @@ import { salesOrdersToOrder } from "../src/so-create-po.js";
 describe("the PO's sources", () => {
   it("each skin lists its own slices; the Item Receipt no longer offers Item Receipts", () => {
     assert.deepEqual(sourceSlicesForSkin("po"), ["mr_submitted", "sq_submitted", "so_submitted"]);
-    assert.deepEqual(sourceSlicesForSkin("receipt"), ["po_submitted", "po_draft"]);
+    assert.deepEqual(sourceSlicesForSkin("receipt"), ["po_to_receive", "po_draft"]);
     assert.deepEqual(sourceSlicesForSkin("bill"), ["po_submitted", "pr_submitted", "po_draft", "pr_draft"]);
     assert.deepEqual(sourceSlicesForSkin(""), sourceSlicesForSkin("bill"));
   });
@@ -76,5 +76,12 @@ describe("Sales Order → the open PO", () => {
       trimMappedSoLines(items, { r1: 0, r2: 1 }).map((i) => [i.item_code, i.qty, i.stock_qty]),
       [["B", 1, 12], ["C", 4, 4]],
     );
+  });
+});
+
+describe("a source with nothing left to bring in (review R7-1)", () => {
+  it("names why, so the merge refuses instead of clearing the lines", () => {
+    assert.equal(emptySourceReason("receipt", "po", "PO-1"), "Every line of PO-1 is already received — nothing to bring in.");
+    assert.equal(emptySourceReason("po", "mr", "MR-1"), "Material Request MR-1 has no lines left to bring in.");
   });
 });

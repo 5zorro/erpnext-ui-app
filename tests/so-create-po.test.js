@@ -7,6 +7,7 @@ import {
   draftQtyBySoLine,
   poSelection,
   createdPosMessage,
+  pendingForSave,
 } from "../src/so-create-po.js";
 
 // Plan 2026-10-12 S2: Create ▾ › Purchase Order… on the Sales Order, every PO a draft.
@@ -92,5 +93,23 @@ describe("createdPosMessage / SO_CREATE_ENTRIES", () => {
   });
   it("the menu starts with Purchase Order", () => {
     assert.deepEqual(SO_CREATE_ENTRIES.map((e) => e.id), ["purchase-order"]);
+  });
+});
+
+describe("pendingForSave (review R8-1, R8-2)", () => {
+  const fresh = [
+    { rowName: "L1", pendingQty: 4 },
+    { rowName: "L2", pendingQty: 3 },
+    { rowName: "L3", pendingQty: 0 },
+  ];
+  it("an unticked line gets 0, so the unticked twin of a ticked item is trimmed off the PO", () => {
+    const r = pendingForSave([{ rowName: "L1", ticked: true }, { rowName: "L2", ticked: false }], fresh);
+    assert.deepEqual(r.pending, { L1: 4, L2: 0 });
+    assert.equal(r.anyLeft, true);
+  });
+  it("reads what is left now: a line another run put on a draft since has nothing to order", () => {
+    const r = pendingForSave([{ rowName: "L3", ticked: true }, { rowName: "L4", ticked: true }], fresh);
+    assert.deepEqual(r.pending, { L3: 0, L4: 0 });
+    assert.equal(r.anyLeft, false);
   });
 });
