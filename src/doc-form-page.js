@@ -23,7 +23,7 @@ import {
   formatGroupedNumber,
   formatUsdAmountHtml,
   parseMoney,
-  parseMoneyOrSum,
+  moneyOrSum,
 } from "./money.js";
 import {
   nextItemFocusAfterEdit,
@@ -130,6 +130,7 @@ import {
   REFRESH_BUTTON_TITLE,
 } from "./doc-chrome.js";
 import { createFieldCalcUi } from "./calc/attach-field-calc.js";
+import { DEFAULT_SITE_ROUNDING } from "./calc/site-rounding.js";
 import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
 import { addressTextareaRows } from "./address-format.js";
@@ -241,6 +242,28 @@ const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
 let totalsLayout = { qtyIdx: 2, amtIdx: 4 };
 
+/** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
+let siteRounding = null;
+let siteRoundingAsked = false;
+/** Ask main for it until the site has really answered (a read during a reload gets the default). */
+function loadSiteRounding() {
+  if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
+  siteRoundingAsked = true;
+  api
+    .getSiteRounding()
+    .then((r) => {
+      if (r && r.known) siteRounding = r;
+    })
+    .catch(() => {})
+    .finally(() => {
+      siteRoundingAsked = false;
+    });
+}
+/** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
+function moneyRounding() {
+  const site = siteRounding || DEFAULT_SITE_ROUNDING;
+  return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
+}
 const calcUi = createFieldCalcUi({
   overlay: document.getElementById("calc-overlay"),
   exprEl: document.getElementById("calc-expr"),
@@ -249,6 +272,10 @@ const calcUi = createFieldCalcUi({
   getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
   copyHistory: (id, mode) =>
     api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
+  getSiteRounding: () => {
+    loadSiteRounding();
+    return siteRounding;
+  },
 });
 
 function publishCalcHistory(payload) {
@@ -3347,7 +3374,7 @@ function wireStaticControls() {
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
       // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
       const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
-      const n = parseMoneyOrSum(typed);
+      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
@@ -3362,7 +3389,9 @@ function wireStaticControls() {
         if (el.taxAmount) el.taxAmount.value = "";
         noteUserEdit();
         paint(res.doc, res.scratch || scratch);
-        setStatus("Tax/charge row added.");
+        // Never quietly rounded (R13-1): the part ERPNext will not keep is said.
+        if (remainder) setStatus(`Tax/charge row added. ${remainder}.`, "warn");
+        else setStatus("Tax/charge row added.");
       } else {
         setStatus((res && res.reason) || "Add tax failed.", "err");
       }
@@ -3434,6 +3463,7 @@ export async function bootDocFormPage(injectedApi) {
     setStatus("Doc API unavailable — preload missing.", "err");
     return;
   }
+  loadSiteRounding();
   wireStaticControls();
 
   docCapsUi = wireDocCapsUi({

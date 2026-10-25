@@ -82,6 +82,7 @@ export function billApiFromErpDoc(api) {
     appendCalcHistory: (entry) => api.appendCalcHistory(entry || {}),
     getCalcHistory: () => api.getCalcHistory(),
     copyCalcHistory: (id, mode) => api.copyCalcHistory(id, mode || "table"),
+    getSiteRounding: () => api.getSiteRounding(),
     onSnapshot: (cb) => api.onSnapshot(cb),
     onOpenNavGate: (cb) => api.onOpenNavGate(cb),
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),

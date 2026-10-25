@@ -162,6 +162,44 @@ input.money-cost { text-align: right; }
   white-space: pre;
 }
 
+/* R13-1: what rounding dropped, said in yellow; the tape stays up ~5 s after Enter, then fades,
+   and clicks pass through it meanwhile (attach-field-calc.js CALC_REMAINDER_*). */
+#calc-overlay .calc-remainder {
+  margin-top: 4px; padding: 3px 6px; border-radius: 4px;
+  background: #fde68a; color: #422006;
+  font-size: 12px; font-weight: 600; line-height: 1.35; white-space: nowrap;
+}
+
+#calc-overlay .calc-remainder[hidden] { display: none !important; }
+
+/* The rounding convention, pinned first on the tape (above the history, which scrolls under it). */
+#calc-overlay .calc-convention {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
+  margin: 0 0 5px; padding-bottom: 5px; border-bottom: 1px solid #334155;
+}
+
+#calc-overlay .calc-convention button {
+  border: none; border-radius: 4px; padding: 2px 6px; font-size: 11px; line-height: 1.3;
+  cursor: pointer; background: #334155; color: #cbd5e1; white-space: nowrap;
+}
+
+#calc-overlay .calc-convention button.on { background: #e2e8f0; color: #0f172a; font-weight: 600; }
+
+#calc-overlay .calc-convention .calc-convention-info {
+  margin-left: auto; background: transparent; color: #94a3b8; padding: 2px 3px;
+}
+
+#calc-overlay .calc-convention-note {
+  flex: 0 0 auto; max-width: 300px; margin: 0 0 6px;
+  font-size: 11px; line-height: 1.4; color: #cbd5e1; white-space: normal;
+}
+
+#calc-overlay .calc-convention-note[hidden] { display: none !important; }
+
+#calc-overlay.calc-lingering { opacity: 1; pointer-events: none; }
+
+#calc-overlay.calc-lingering.calc-fading { opacity: 0; transition: opacity 700ms ease; }
+
 #calc-overlay .calc-hint { margin-top: 4px; font-size: 9px; color: #64748b; line-height: 1.3; }
 
 #calc-overlay .calc-hist-empty {

@@ -48,9 +48,15 @@ Administrator reads everything, so a probe run as Administrator never meets a re
 probes act as a clerk with the roles that clerk would have. An existing probe moves over when it is
 next touched. Set the scene as Administrator (records, accounts and rules a clerk cannot make), then:
 
+Most probes should act as one of the **two clerks** in `probe-user.js` (5zorro 2026-10-25), built
+from ERPNext's own roles: `AP_CLERK` (edits most things, and receives goods) and `AR_CLERK` (sales
+orders, POs, sales invoices, payments received; reads payables; cannot make a receipt or a vendor).
+Use a bare role list only to pin one role's refusal, as R7-4 does.
+
 ```js
-import { loginAsProbeUser } from "./probe-user.js";
-const clerk = await loginAsProbeUser(app, ["Purchase User"]); // exactly these roles
+import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
+const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name }); // zz-probe-ap-clerk@…
+// or one role set: await loginAsProbeUser(app, ["Purchase User"]); // exactly these roles
 try {
   // …drive the pages as the clerk…
   await clerk.back(); // Administrator again, e.g. to clean up (no password: the app's own cookies)
@@ -59,7 +65,11 @@ try {
 }
 ```
 
-- One user per role set, `zz-probe-<roles>@example.com` (first name *ZZ Probe*), made on first use
+- **Leaving an unsaved Doc page:** the shell's way back to Administrator is held by its Save / Discard
+  gate, so `back()` reloads the ERPNext page itself when that has not taken within 10 s
+  (`probe-user-reload` in the output). Otherwise the page keeps the clerk's CSRF token and every call
+  fails.
+- One user per role set, `zz-probe-<roles>@example.com`, or per named clerk, `zz-probe-ap-clerk@…` (first name *ZZ Probe*), made on first use
   and reused. It is **disabled between runs**, and every run gives it a fresh random password that
   is never written down. Sandbox only (`assertSandboxSite`).
 - **Interrupted runs:** the lock file `test-logs/probe-user.lock.json` names the user while it may be

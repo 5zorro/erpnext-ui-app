@@ -17,28 +17,73 @@ import { e2eCall, e2eGet } from "../../e2e/helpers.js";
 import { inErp, assertSandboxSite, report } from "./probe-helpers.js";
 import { lockProbeUser, retireLockedProbeUsers } from "./probe-user-retire.js";
 
-/** One user per role set: `zz-probe-purchase-user@example.com`. */
-export const probeUserFor = (roles) =>
-  `zz-probe-${roles.map((r) => String(r).toLowerCase().replace(/[^a-z0-9]+/g, "-")).sort().join("-and-")}@example.com`;
+/**
+ * The two clerks most probes should act as (5zorro 2026-10-25: most real users have limited
+ * roles). ERPNext's own roles, so the sandbox needs no custom role:
+ * - **AP clerk** edits most things and also receives goods: bills, payments, POs, receipts, new
+ *   vendors and items, sales orders.
+ * - **AR clerk** edits sales orders, POs, sales invoices and payments received, and reads payables.
+ *   It cannot make an Item Receipt (no Stock User) or a vendor (no Purchase Master Manager).
+ *   ERPNext's roles are coarse here: Accounts User writes Purchase Invoices as well as Sales
+ *   Invoices, so this clerk can edit a bill too.
+ * Pass one as `loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name })`.
+ */
+export const AP_CLERK = Object.freeze({
+  name: "ap-clerk",
+  roles: Object.freeze(["Accounts User", "Purchase User", "Purchase Master Manager", "Stock User", "Item Manager", "Sales User"]),
+});
+export const AR_CLERK = Object.freeze({
+  name: "ar-clerk",
+  roles: Object.freeze(["Accounts User", "Sales User", "Purchase User"]),
+});
+
+/**
+ * One user per role set: `zz-probe-purchase-user@example.com`, or per named clerk
+ * (`zz-probe-ap-clerk@example.com`). A name always means the same roles: they are set again on
+ * every login.
+ * @param {readonly string[]} roles
+ * @param {string} [as]
+ */
+export const probeUserFor = (roles, as) =>
+  as
+    ? `zz-probe-${String(as).toLowerCase().replace(/[^a-z0-9]+/g, "-")}@example.com`
+    : `zz-probe-${roles.map((r) => String(r).toLowerCase().replace(/[^a-z0-9]+/g, "-")).sort().join("-and-")}@example.com`;
 
 const loggedUser = (app) => inErp(app, `(async () => { try { return await frappe.xcall("frappe.auth.get_logged_user"); } catch (e) { return "ERR " + (e && e.message); } })()`, 15_000);
 
-/** Reload the ERPNext page and wait until it answers as `user`. */
+/**
+ * Reload the ERPNext page and wait until it answers as `user`. The shell's own way first; when that
+ * is held — an unsaved Doc page opens its Save / Discard gate, so the page keeps the old login's
+ * CSRF token and every call fails — the ERPNext page itself is reloaded.
+ */
 async function reloadAs(app, user) {
   await e2eCall(app, "openErp", "/app");
+  const took = await expect
+    .poll(async () => loggedUser(app).catch(() => ""), { timeout: 10_000 })
+    .toBe(user)
+    .then(() => true, () => false);
+  if (took) return;
+  const base = await e2eGet(app, "erpBase");
+  const reloaded = await app.evaluate(({ webContents }, url) => {
+    const wc = webContents.getAllWebContents().filter((w) => w.getURL().startsWith(url));
+    wc.forEach((w) => w.reload());
+    return wc.length;
+  }, base);
+  report("probe-user-reload", { user, reloaded, why: "the shell's reload was held (unsaved Doc page?)" });
   await expect.poll(async () => loggedUser(app).catch(() => ""), { timeout: 40_000 }).toBe(user);
 }
 
 /**
  * @param {import('@playwright/test').ElectronApplication} app signed in as Administrator
- * @param {string[]} roles exactly the roles the user gets
+ * @param {readonly string[]} roles exactly the roles the user gets
+ * @param {{ as?: string }} [opts] a clerk's name (AP_CLERK.name) instead of one made from the roles
  * @returns {Promise<{ user: string, back: () => Promise<void>, retire: () => Promise<string[]> }>}
  */
-export async function loginAsProbeUser(app, roles) {
+export async function loginAsProbeUser(app, roles, opts = {}) {
   await assertSandboxSite(app);
   const admin = await loggedUser(app);
   const base = await e2eGet(app, "erpBase");
-  const user = probeUserFor(roles);
+  const user = probeUserFor(roles, opts.as);
   lockProbeUser(user); // before the user can be enabled: an interrupted run is retired from this
   const pwd = `Zz-${randomBytes(18).toString("base64url")}-9!`; // held here only, never written
   const made = await inErp(

@@ -10,10 +10,13 @@ import {
   calcFootingText,
   calcPreview,
   formatCalcResult,
+  formatCalcDisplay,
+  formatCalcOperand,
   isCalcOp,
   parseCalcNumber,
   decimalsForCalcField,
 } from "./calc-engine.js";
+import { roundByConvention, roundingRemainder, remainderNote } from "./site-rounding.js";
 
 /** @typedef {"idle"|"active"} FieldCalcMode */
 
@@ -24,6 +27,7 @@ import {
  *   priorValue: string,
  *   session: import("./calc-engine.js").CalcSession|null,
  *   decimals: number|null,
+ *   rounding?: { precision: number, method?: string } | null,
  * }} FieldCalcState
  */
 
@@ -35,13 +39,18 @@ import {
  *   expression?: string,
  *   preview?: string,
  *   allowDefault?: boolean,
+ *   remainder?: string,
+ *   exact?: string,
  * }} FieldCalcResult
+ *   exact = the result before rounding (what ↩ resumes from, 5zorro 2026-10-25)
  */
 
 /**
  * @param {string} [priorValue] field text at focus / before calc
  * @param {string} [dialect]
- * @param {{ decimals?: number|null, kind?: string }} [opts]
+ * @param {{ decimals?: number|null, kind?: string, rounding?: { precision: number, method?: string } | null }} [opts]
+ *   rounding = the places the box keeps and the site's method (site-rounding.js); without it the
+ *   result goes in unrounded and ERPNext rounds it unseen.
  * @returns {FieldCalcState}
  */
 export function createFieldCalcState(priorValue = "", dialect = DIALECT_EXCEL, opts = {}) {
@@ -55,6 +64,7 @@ export function createFieldCalcState(priorValue = "", dialect = DIALECT_EXCEL, o
     priorValue: priorValue == null ? "" : String(priorValue),
     session: null,
     decimals,
+    rounding: opts.rounding || null,
   };
 }
 
@@ -69,7 +79,7 @@ export function resetFieldCalc(state, priorValue) {
   return createFieldCalcState(
     priorValue != null ? priorValue : state ? state.priorValue : "",
     dialect,
-    { decimals: state && state.decimals != null ? state.decimals : null },
+    { decimals: state && state.decimals != null ? state.decimals : null, rounding: state ? state.rounding : null },
   );
 }
 
@@ -110,13 +120,19 @@ export function commitFieldCalc(state) {
   }
   const out = feedCalcKey(st.session, "=");
   if (out.done && Number.isFinite(out.result)) {
-    const commitValue = formatCalcResult(out.result);
+    // What goes in is what ERPNext will store (R13-1); what rounding dropped is said, not hidden.
+    const r = st.rounding;
+    const kept = r ? roundByConvention(out.result, r) : out.result;
+    const commitValue = formatCalcResult(kept);
+    const dropped = r ? roundingRemainder(out.result, r) : null;
     return {
-      state: createFieldCalcState(commitValue, st.dialect, { decimals: st.decimals }),
+      state: createFieldCalcState(commitValue, st.dialect, { decimals: st.decimals, rounding: r }),
       action: "commit",
       commitValue,
       expression: calcFootingText(out.session),
-      preview: commitValue,
+      preview: r ? formatCalcDisplay(kept, st.decimals, r) : commitValue,
+      exact: formatCalcResult(out.result),
+      ...(dropped ? { remainder: remainderNote(dropped, r.precision) } : {}),
     };
   }
   return {
@@ -149,6 +165,11 @@ export function reduceFieldCalc(state, ev) {
     if (mapped === "Escape" || mapped === "Tab") {
       return { state: st, action: "none" };
     }
+    if (mapped === "=" && ev.key === "=") {
+      // `=` opens the tape on the box's number, so a past calculation can be resumed (↩).
+      // Enter maps to `=` too, but at rest it stays the page's Enter.
+      return openTape(st, fieldValue);
+    }
     if (mapped === "=" || mapped === "Enter") {
       return { state: st, action: "none" };
     }
@@ -164,7 +185,7 @@ export function reduceFieldCalc(state, ev) {
   // Active: Esc only cancels. Tab / = / Enter commit.
   if (mapped === "Escape") {
     return {
-      state: createFieldCalcState(st.priorValue, st.dialect, { decimals: st.decimals }),
+      state: createFieldCalcState(st.priorValue, st.dialect, { decimals: st.decimals, rounding: st.rounding }),
       action: "cancel",
       commitValue: st.priorValue,
     };
@@ -228,7 +249,7 @@ function startCalc(st, fieldValue, op) {
     }
   }
 
-  let session = createCalcSession(st.dialect, { decimals: st.decimals });
+  let session = createCalcSession(st.dialect, { decimals: st.decimals, rounding: st.rounding });
   if (st.dialect === DIALECT_EXCEL) {
     session = seedExcelWithValue(session, n, op);
   } else {
@@ -247,7 +268,58 @@ function startCalc(st, fieldValue, op) {
       priorValue: st.priorValue,
       session,
       decimals: st.decimals,
+      rounding: st.rounding,
     },
+    action: "prevent",
+    expression: calcFootingText(session),
+    preview: calcPreview(session),
+  };
+}
+
+/**
+ * `=` on a box at rest: the tape opens on its number, nothing pending. Enter puts it back as it was;
+ * an operator carries on from it; ↩ on a past calculation replaces it ({@link resumeFieldCalc}).
+ * @param {FieldCalcState} st
+ * @param {string} fieldValue
+ * @returns {FieldCalcResult}
+ */
+function openTape(st, fieldValue) {
+  const trimmed = String(fieldValue).trim();
+  const n = trimmed === "" ? 0 : parseCalcNumber(fieldValue);
+  if (n == null) return { state: st, action: "none" };
+  const session = {
+    ...createCalcSession(st.dialect, { decimals: st.decimals, rounding: st.rounding }),
+    total: n,
+    parts: [formatCalcOperand(n, st.decimals)],
+  };
+  return {
+    state: { ...st, mode: "active", session },
+    action: "prevent",
+    expression: calcFootingText(session),
+    preview: calcPreview(session),
+  };
+}
+
+/**
+ * ↩ on a past calculation in the tape's history (5zorro 2026-10-25): carry on from its result
+ * **before rounding**, in place of the rounded number the box holds. An operator already typed
+ * stays pending; the past tape is not replayed, only its exact result.
+ * @param {FieldCalcState} st an active calculation
+ * @param {string} exactText the past calculation's unrounded result
+ * @returns {FieldCalcResult}
+ */
+export function resumeFieldCalc(st, exactText) {
+  const n = parseCalcNumber(exactText);
+  if (!st || st.mode !== "active" || !st.session || n == null) return { state: st, action: "none" };
+  const op = st.session.pendingOp;
+  const session = {
+    ...st.session,
+    total: n,
+    entry: "",
+    parts: op ? [formatCalcResult(n), op] : [formatCalcResult(n)],
+  };
+  return {
+    state: { ...st, session },
     action: "prevent",
     expression: calcFootingText(session),
     preview: calcPreview(session),

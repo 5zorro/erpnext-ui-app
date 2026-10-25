@@ -3,6 +3,7 @@
  * No ERPNext imports — unit-testable offline (ADR-0002: unit tests first).
  */
 import { evaluateTypedSum } from "./calc/field-calc.js";
+import { DEFAULT_SITE_ROUNDING, roundByConvention, roundingRemainder, remainderNote } from "./calc/site-rounding.js";
 
 /**
  * Parse user/ERP money text → number (null if blank / not a number).
@@ -18,16 +19,35 @@ export function parseMoney(value) {
 
 /**
  * A money box's text as an amount: a plain number, or a sum typed in it (`169.00*1.0845`), worked out
- * with the calculator's math and rounded to cents (5zorro 2026-10-11 — the taxes Add box).
+ * with the calculator's math (5zorro 2026-10-11 — the taxes Add box) and rounded the site's way.
  * @param {unknown} value
+ * @param {{ precision: number, method?: string, convention?: string }} [rounding] the box's places, the site's method, the clerk's convention
  * @returns {number|null}
  */
-export function parseMoneyOrSum(value) {
-  const sum = typeof value === "string" ? evaluateTypedSum(value) : null;
-  if (sum != null) return Math.round(sum * 100) / 100;
-  // An unfinished sum (`5*`) is not 5: parseMoney would drop the operator and read the digits.
-  if (typeof value === "string" && (/[+*/]/.test(value) || /[0-9.]\s*-/.test(value))) return null;
-  return parseMoney(value);
+export function parseMoneyOrSum(value, rounding) {
+  return moneyOrSum(value, rounding).amount;
+}
+
+/**
+ * {@link parseMoneyOrSum}, plus what rounding dropped, so it can be said (R13-1: never quietly):
+ * `remainder` is "Rounds to 183.28 — remainder 5/10000"-style text, "" when nothing was dropped.
+ * @param {unknown} value
+ * @param {{ precision: number, method?: string }} [rounding]
+ * @returns {{ amount: number|null, remainder: string }}
+ */
+export function moneyOrSum(value, rounding = { precision: DEFAULT_SITE_ROUNDING.currency, method: DEFAULT_SITE_ROUNDING.method }) {
+  let exact = typeof value === "string" ? evaluateTypedSum(value) : null;
+  if (exact == null) {
+    // An unfinished sum (`5*`) is not 5: parseMoney would drop the operator and read the digits.
+    if (typeof value === "string" && (/[+*/]/.test(value) || /[0-9.]\s*-/.test(value))) return { amount: null, remainder: "" };
+    exact = parseMoney(value);
+  }
+  if (exact == null) return { amount: null, remainder: "" };
+  const dropped = roundingRemainder(exact, rounding);
+  return {
+    amount: roundByConvention(exact, rounding),
+    remainder: dropped ? remainderNote(dropped, rounding.precision) : "",
+  };
 }
 
 /**

@@ -20,8 +20,10 @@ export const CALC_HISTORY_SOFT_CAP = 80;
  *   fieldKind?: string,
  *   footing: string,
  *   total: string,
+ *   exact?: string,
  *   priorSession?: boolean,
  * }} CalcHistoryEntry
+ *   exact = the result before rounding, when it differs from `total` or not (↩ resumes from it)
  */
 
 /**
@@ -82,6 +84,7 @@ export function makeCalcHistoryEntry(raw, opts = {}) {
     fieldKind: raw.fieldKind != null ? String(raw.fieldKind) : undefined,
     footing,
     total,
+    ...(raw.exact != null && parseCalcNumber(raw.exact) != null ? { exact: formatCalcResult(parseCalcNumber(raw.exact)) } : {}),
     priorSession: !!raw.priorSession,
   };
 }

@@ -318,6 +318,7 @@ import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-fo
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
 import { withBillRefToken } from "../src/credit-memo.js";
 import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
+import { siteRoundingFrom } from "../src/calc/site-rounding.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
 import {
   toolbarLensId,
@@ -7912,6 +7913,31 @@ ipcMain.handle("health-remediation-autofix", async () => {
 
 ipcMain.on("calc-history-append", (_e, raw) => {
   noteCalcHistoryAppend(raw);
+});
+
+/**
+ * The site's rounding for the calculator (R13-1): method and places, from what the ERPNext page
+ * booted with (no server call). Kept once read; the stock default when the page cannot say.
+ * @type {{ method: string, currency: number, float: number } | null}
+ */
+let calcSiteRounding = null;
+ipcMain.handle("calc-site-rounding", async () => {
+  if (calcSiteRounding) return calcSiteRounding;
+  const raw = await erpEval(`(() => {
+    try {
+      var d = (frappe.boot && frappe.boot.sysdefaults) || {};
+      var cur = cint(d.currency_precision);
+      if (!cur) cur = get_number_format_info(get_number_format()).precision;
+      return { ok: true, method: d.rounding_method || "", currency: cur, float: cint(d.float_precision) || 3 };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message ? e.message : e) };
+    }
+  })()`);
+  // `known: false` = the stock default (the page was reloading, say): the page asks again later.
+  const site = { ...siteRoundingFrom(raw), known: !!(raw && raw.ok) };
+  if (site.known) calcSiteRounding = site;
+  else navDebug("calc-site-rounding", `default ${(raw && raw.reason) || "no answer"}`);
+  return site;
 });
 
 ipcMain.handle("calc-history-list", () => {

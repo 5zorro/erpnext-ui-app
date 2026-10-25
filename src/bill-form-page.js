@@ -134,7 +134,7 @@ import {
   formatUsdAmountHtml,
   formatSignedUsdHtml,
   parseMoney,
-  parseMoneyOrSum,
+  moneyOrSum,
 } from "../src/money.js";
 import {
   linkDoctypeForBillField,
@@ -247,6 +247,7 @@ import {
   formatSalesOrderPickerLabel,
 } from "../src/so-picker.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
+import { DEFAULT_SITE_ROUNDING } from "../src/calc/site-rounding.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 import {
   taxAmountFromRate,
@@ -376,6 +377,28 @@ export async function bootBillFormPage(api) {
   let lineApplyInFlight = null;
   /** @type {boolean} */
   let saveInFlight = false;
+  /** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
+  let siteRounding = null;
+  let siteRoundingAsked = false;
+  /** Ask main for it until the site has really answered (a read during a reload gets the default). */
+  function loadSiteRounding() {
+    if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
+    siteRoundingAsked = true;
+    api
+      .getSiteRounding()
+      .then((r) => {
+        if (r && r.known) siteRounding = r;
+      })
+      .catch(() => {})
+      .finally(() => {
+        siteRoundingAsked = false;
+      });
+  }
+  /** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
+  function moneyRounding() {
+    const site = siteRounding || DEFAULT_SITE_ROUNDING;
+    return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
+  }
   const calcUi = createFieldCalcUi({
     overlay: document.getElementById("calc-overlay"),
     exprEl: document.getElementById("calc-expr"),
@@ -384,7 +407,12 @@ export async function bootBillFormPage(api) {
     getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
     copyHistory: (id, mode) =>
       api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
+    getSiteRounding: () => {
+      loadSiteRounding();
+      return siteRounding;
+    },
   });
+  loadSiteRounding();
   
   /**
    * Max billable qty from enrich/merge cache only (OI-151 — no JIT fetch at qty commit or save).
@@ -6040,7 +6068,7 @@ export async function bootBillFormPage(api) {
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
       // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
       const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
-      const n = parseMoneyOrSum(typed);
+      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
@@ -6055,7 +6083,9 @@ export async function bootBillFormPage(api) {
         if (el.taxAmount) el.taxAmount.value = "";
         noteUserEdit();
         paint(res.doc, amountDue);
-        setStatus("Tax/charge row added.");
+        // Never quietly rounded (R13-1): the part ERPNext will not keep is said.
+        if (remainder) setStatus(`Tax/charge row added. ${remainder}.`, "warn");
+        else setStatus("Tax/charge row added.");
         if (el.taxAccount) {
           requestAnimationFrame(() => el.taxAccount.focus());
         }

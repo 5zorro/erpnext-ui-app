@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
   getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
+  getSiteRounding: () => ipcRenderer.invoke("calc-site-rounding"),
   // Bill-only
   checkRef: (billNo, opts) => ipcRenderer.invoke("bill-check-ref", billNo, opts || {}),
   prefetchVendorRefs: (supplier) =>
