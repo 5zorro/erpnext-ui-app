@@ -36,6 +36,10 @@ rules directory it replaces. `HANDOFF.md` is the tracked, public architecture SS
 6. **No business-identifying detail in tracked files** — plans, code comments, test comments. Never
    name the legacy accounting system, state the size of the item master, or frame the work as a
    migration: write "the legacy system" and "~20k item numbers".
+7. **No AI-session sizing in tracked files or commit messages** — no model name with its version, no
+   effort level, window size, context-usage percentage or token count per file or session. Size
+   review sessions by slice count. `scripts/check-commit-attribution.sh` (the commit-msg hook and the
+   CI range check) refuses the common forms in messages and in added lines.
 
 ## Process
 
