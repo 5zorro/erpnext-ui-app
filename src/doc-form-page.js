@@ -35,13 +35,8 @@ import {
   mountColResize,
   mountDensityControl,
 } from "./item-col-resize.js";
-import {
-  CELL_MODE_EDIT,
-  CELL_MODE_NAV,
-  itemTableKeyDecision,
-  neighborItemCell,
-  shouldLeaveItemTableBackward,
-} from "./item-table-nav.js";
+import { CELL_MODE_EDIT, CELL_MODE_NAV } from "./item-table-nav.js";
+import { createItemTableKeys } from "./item-table-keys-ui.js";
 import {
   emptyItemRowCleanupAction,
   isEmptyItemCode,
@@ -209,25 +204,27 @@ let sourcePickerInflight = null;
 /** @type {string} */
 let sourcePickerInflightSupplier = "";
 const addressPickerOpenRef = { current: false };
-/** Suppress blur cleanup while Tab/arrow handlers are mid-flight. */
-let itemTabGuard = false;
-/** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
-let itemCellMode = CELL_MODE_EDIT;
-
 /**
- * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
- * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
- * (it is a one-shot handoff to the focus handler), so nothing survives for a
- * stylesheet to match on.
- * @param {"edit"|"nav"} mode
+ * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last box
+ * (src/item-table-keys-ui.js, shared with the Bill page). `itemKeys.busy()` is true while a Tab or
+ * arrow is committing a cell.
  */
+const itemKeys = createItemTableKeys({
+  table: () => el && el.items,
+  editable: () => editable(),
+  painting: () => painting,
+  calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+  lastDoc: () => lastDoc,
+  lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+  lineKey: (line) => line.item_code,
+  leaveBackward: () => {
+    focusLastHeaderBeforeItems();
+  },
+});
+
+/** @param {"edit"|"nav"} mode */
 function setItemCellMode(mode) {
-  itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-  try {
-    if (el && el.items) el.items.dataset.cellMode = itemCellMode;
-  } catch {
-    /* mode mirroring is cosmetic; never let it break navigation */
-  }
+  itemKeys.setMode(mode);
 }
 
 /** @type {{ key: string, asc: boolean }} */
@@ -1075,38 +1072,7 @@ async function resolveCommitGate(choiceRaw) {
 }
 
 function focusItemCell(rowIndex, field, opts = {}) {
-  const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-  setItemCellMode(mode);
-  const wantSelect =
-    opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
-  const tryFocus = () => {
-    const inp = el.items.querySelector(`input[data-row="${rowIndex}"][data-field="${field}"]`);
-    if (!inp) return false;
-    try {
-      if (mode === CELL_MODE_NAV) inp.dataset.navFocus = "1";
-      inp.focus({ preventScroll: false });
-      if (wantSelect && typeof inp.select === "function") inp.select();
-    } catch {
-      try {
-        inp.focus();
-      } catch {
-        /* ignore */
-      }
-    }
-    return true;
-  };
-  if (tryFocus()) return;
-  requestAnimationFrame(() => {
-    tryFocus();
-    setTimeout(tryFocus, 50);
-  });
-}
-
-function isItemLinkDropdownOpen(inp) {
-  const wrap = inp && inp.closest ? inp.closest(".link-wrap") : null;
-  if (!wrap) return false;
-  const dd = wrap.querySelector(".link-dd");
-  return !!(dd && !dd.hidden);
+  itemKeys.focusCell(rowIndex, field, opts);
 }
 
 function showToast(text) {
@@ -1134,7 +1100,7 @@ async function ensureAtLeastOneItemRow(doc) {
  * @param {string} itemCode
  */
 async function cleanupEmptyItemRow(rowIndex, itemCode) {
-  if (!api || !editable() || painting || itemTabGuard) return;
+  if (!api || !editable() || painting || itemKeys.busy()) return;
   if (peekHoldsRow(rowIndex)) {
     logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
     return;
@@ -1282,9 +1248,7 @@ function focusAfterLeavingItemsTable() {
 }
 
 function rowItemCodeAt(doc, rowIndex) {
-  const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  const row = items[rowIndex];
-  return row && row.item_code != null ? String(row.item_code).trim() : "";
+  return itemKeys.lineKeyAt(doc, rowIndex);
 }
 
 /**
@@ -1989,7 +1953,7 @@ function paintItems(doc) {
     if (field === "item_code") {
       inp.addEventListener("blur", () => {
         window.setTimeout(() => {
-          if (!editable() || painting || itemTabGuard) return;
+          if (!editable() || painting || itemKeys.busy()) return;
           const wrap = inp.closest(".link-wrap");
           if (wrap && wrap.contains(document.activeElement)) return;
           const code = normalizeEditableText(inp.value);
@@ -2027,142 +1991,16 @@ function paintItems(doc) {
         },
       });
     }
-    inp.addEventListener("keydown", (ev) => {
-      if (!editable() || painting) return;
-      const calcActive =
-        calcUi.getState().mode === "active" && calcUi.getInput() === inp;
-      const decision = itemTableKeyDecision({
-        mode: itemCellMode,
-        key: ev.key,
-        shiftKey: !!ev.shiftKey,
-        ctrlKey: !!ev.ctrlKey,
-        metaKey: !!ev.metaKey,
-        altKey: !!ev.altKey,
-        selectionStart: inp.selectionStart,
-        selectionEnd: inp.selectionEnd,
-        valueLength: String(inp.value ?? "").length,
-        linkDropdownOpen: isItemLinkDropdownOpen(inp),
-        calcActive,
-        verticalArrowsAlwaysNav: field === "qty",
-      });
-
-      if (decision.action === "leave_edit") {
-        if (decision.preventDefault) ev.preventDefault();
-        setItemCellMode(CELL_MODE_NAV);
-        try {
-          if (typeof inp.select === "function") inp.select();
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-
-      if (decision.action === "enter_edit") {
-        setItemCellMode(CELL_MODE_EDIT);
-        if (ev.key === "F2") {
-          ev.preventDefault();
-          try {
-            const len = String(inp.value ?? "").length;
-            inp.setSelectionRange(len, len);
-          } catch {
-            /* ignore */
-          }
-        }
-        return;
-      }
-
-      if (decision.action === "passthrough") {
-        if (ev.key !== "Tab" || ev.shiftKey) return;
-      } else if (decision.preventDefault) {
-        ev.preventDefault();
-      }
-
-      if (
-        decision.action === "move" ||
-        decision.action === "leave_edit_move" ||
-        (decision.action === "tab" && decision.direction === "left")
-      ) {
-        setItemCellMode(CELL_MODE_NAV);
-        itemTabGuard = true;
-        void (async () => {
-          try {
-            const next = readCellValue();
-            const rowCount =
-              lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-            const dest = neighborItemCell(
-              field,
-              ri,
-              rowCount,
-              decision.direction || "left",
-              navFields,
-            );
-            const prev =
-              (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-              "";
-            const kind = dirtyCompareKindForField(field);
-            const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
-            if (!dest) {
-              if (dirty) await apply(next, { stay: true });
-              if (shouldLeaveItemTableBackward(dest, decision.direction)) {
-                focusLastHeaderBeforeItems();
-              }
-              return;
-            }
-            if (dirty) {
-              await apply(next, {
-                focus: {
-                  rowIndex: dest.rowIndex,
-                  field: dest.field,
-                  mode: CELL_MODE_NAV,
-                },
-              });
-            } else {
-              focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-            }
-          } finally {
-            itemTabGuard = false;
-          }
-        })();
-        return;
-      }
-
-      if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
-      ev.preventDefault();
-      setItemCellMode(CELL_MODE_NAV);
-      itemTabGuard = true;
-      void (async () => {
-        try {
-          const next = readCellValue();
-          const rowCount =
-            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-          const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-            cellValue: next,
-            fields: navFields,
-            rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
-            nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
-          });
-          if (dest.deleteRow && dest.leaveTable) {
-            await focusAfterItemEdit(lastDoc, next);
-            return;
-          }
-          const prev =
-            (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-            "";
-          const kind = dirtyCompareKindForField(field);
-          if (!valuesMeaningfullyEqual(prev, next, { kind })) {
-            await apply(next);
-          } else if (dest.field) {
-            focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-          } else if (dest.addRow) {
-            await focusAfterItemEdit(lastDoc, next);
-          }
-        } finally {
-          itemTabGuard = false;
-        }
-      })();
+    itemKeys.wireCell(inp, {
+      field,
+      rowIndex: ri,
+      navFields,
+      readValue: readCellValue,
+      apply,
+      afterEdit: focusAfterItemEdit,
     });
     inp.addEventListener("change", async () => {
-      if (!api || painting || itemTabGuard) return;
+      if (!api || painting || itemKeys.busy()) return;
       if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
       let next = readCellValue();
       if (field === "rate") {

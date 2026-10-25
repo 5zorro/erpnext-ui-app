@@ -1,6 +1,6 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
-> **Status: plan only, nothing built.** Promoted from the architecture review (plan 2026-10-19,
+> **Status: step 0a built (2026-10-25); next, 0b (T-3, T-2, T-1).** Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
 > yourself'. that is going to be a separate session."* Its own goal: changing the app gets cheaper
@@ -75,9 +75,28 @@ field. `focusItemCell` is 90% the same (R6a-1). Fixing these in place means fixi
 module (e.g. `src/item-table-keys-ui.js`) that both pages call with a small deps object: the
 table element, `lastDoc`, `navFields`, `apply`, `api.addItem` / `deleteItem`, and a hook for
 "leave the table backward". Proof: `npm test`, both skins' smoke specs, the nav matrix's item-table
-cells. The Bill passes no `navFields` today, so it moves through the default columns
-(`DEFAULT_ITEM_NAV_FIELDS`), not its own; keep that in 0a, then check whether the Bill's columns
-differ, and if they do, ask 5zorro before 0b changes it.
+cells.
+
+**0a built (2026-10-25).** `src/item-table-keys-ui.js` (`createItemTableKeys(deps)`) holds the
+cell's edit / nav mode and its mirror on the table, the busy flag (was `itemTabGuard`),
+`focusItemCell` and the cell's keydown; each page passes `table`, `editable`, `painting`,
+`calcActiveOn`, `lastDoc`, `lines`, `lineKey` and `leaveBackward` (Bill: Amount Due, else the bill
+number; doc-form: `focusLastHeaderBeforeItems`), and per cell `field`, `rowIndex`, `navFields`,
+`readValue`, `apply`, `afterEdit` (the page's `focusAfterItemEdit`, which stays in the page until
+R6a-1 step 3). The Bill's own columns were checked: its editable ones are the default five, so it
+now passes them (`BILL_NAV_FIELDS`) with no change in behaviour, and a Bill column added later moves
+Tab with it. Proof: `npm test` (`tests/item-table-keys.test.js`, stand-in inputs; 0b adds its
+failing-first tests there); probe `item-table-keys` (AP clerk, Bill and PO: Escape, ↓, ↑, →,
+Shift+Tab out the front, Tab past the last box adds a line) passed on the code before the move and
+after it with the same path, key for key. Smoke specs: `scaffold-bill`, `scaffold-ar-doc-skins`,
+`scaffold-peek-return-focus`, `scaffold-pure-wiring` — 20 pass; the same 10 fail on the code before
+the move too: the Sales Order ones open in ERPNext because the specs read the user's own
+`lens-prefs.json` (`"sales-order": "vanilla"`) instead of setting the lens, and the Estimate one
+expects a price (100) the blank sandbox does not have (residual: the specs should set their own
+lens and scene). For another form: Journal Entry would pass `lines: (d) => d.accounts`,
+`lineKey: (l) => l.account`. Two item names remain: ↑ / ↓ always move in `qty` (no spinner), and
+`nextItemFocusAfterEdit` lands on the next line's `item_code`; both would become layout settings
+when a form without them shares the module.
 
 **Found while planning 0a (2026-10-25, not yet proven):** the key handler, `focusAfterItemEdit` and
 `cleanupEmptyItemRow` read `lastDoc.items` and `item_code`, not the layout's lines table. On

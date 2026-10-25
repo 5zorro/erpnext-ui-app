@@ -14,6 +14,10 @@ const docFormPage = readFileSync(
   join(fileURLToPath(new URL("../src/doc-form-page.js", import.meta.url))),
   "utf8",
 );
+const itemTableKeys = readFileSync(
+  join(fileURLToPath(new URL("../src/item-table-keys-ui.js", import.meta.url))),
+  "utf8",
+);
 const docSkinCss = readFileSync(join(electronDir, "doc-skin.css"), "utf8");
 const billDashboardCss = readFileSync(join(electronDir, "bill-dashboard.css"), "utf8");
 const docFieldsCss = readFileSync(join(electronDir, "doc-fields.css"), "utf8");
@@ -183,13 +187,16 @@ describe("Packet T step B — display layer (2026-09-06)", () => {
   it("mirrors the cell mode to the DOM through a single setter", () => {
     // The mode used to live only in a module-local variable, so no stylesheet
     // could see it. Every assignment must go through the setter or the CSS
-    // silently desyncs from the real mode.
+    // silently desyncs from the real mode. Since plan 10-25 0a the mode lives in
+    // the shared lines-table keys module, and both pages go through it.
+    assert.match(itemTableKeys, /function setItemCellMode\(mode\) \{/, "no setter");
+    assert.match(itemTableKeys, /table\.dataset\.cellMode = itemCellMode;/, "does not mirror");
+    // Only the setter itself may assign the variable directly.
+    const direct = [...itemTableKeys.matchAll(/^\s*itemCellMode = /gm)];
+    assert.equal(direct.length, 1, `${direct.length} raw itemCellMode assignments`);
     for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(src, /function setItemCellMode\(mode\) \{/, `${label} has no setter`);
-      assert.match(src, /el\.items\.dataset\.cellMode = itemCellMode;/, `${label} does not mirror`);
-      // Only the setter itself may assign the variable directly.
-      const direct = [...src.matchAll(/^\s*itemCellMode = /gm)];
-      assert.equal(direct.length, 1, `${label} has ${direct.length} raw itemCellMode assignments`);
+      assert.match(src, /createItemTableKeys\(\{/, `${label} does not use the shared keys`);
+      assert.doesNotMatch(src, /itemCellMode/, `${label} keeps its own cell mode`);
     }
   });
 });
