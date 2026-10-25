@@ -12,6 +12,7 @@ in the e2e coverage map (`e2e/` only).
 npm run probe                     # lists the probes
 npm run probe -- r5b5-po-missing-vendor [another …]
 ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- <name>   # 5zorro's chaos mode
+npm run probe -- df03-item-table --grep=T-2   # only the tests whose title matches
 ```
 
 `scripts/run-probe.js` refuses while 5zorro's app is open (a restore would undo what it saves

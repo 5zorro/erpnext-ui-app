@@ -1,6 +1,6 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
-> **Status: step 0a built (2026-10-25); next, 0b (T-3, T-2, T-1).** Promoted from the architecture review (plan 2026-10-19,
+> **Status: step 0a, T-3 and T-2 built (2026-10-25); next, T-1.** Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
 > yourself'. that is going to be a separate session."* Its own goal: changing the app gets cheaper
@@ -123,6 +123,16 @@ dashboard and has had no development of its own, so it is not dug into here. The
 - T-3: the extra Tab is dropped, not queued: the clerk pressed it because nothing showed yet, and
   replaying it would skip the new line's Item box. The same check covers the arrow moves. Each
   dropped key is logged (`item-key-dropped` in `focus-debug.log`).
+
+**T-3 and T-2 built (2026-10-25).** T-3: the module's keydown drops a Tab or move while its busy
+flag is up and logs `item-key-dropped`. T-2: the module reads the painted order from the table
+(`screenOrder`, the `data-row` of its inputs in document order) and steps through it for arrows,
+Shift+Tab and Tab (`neighborOnScreen`, `nextAfterEdit`); both pages' after-write focus asks
+`itemKeys.nextAfterEdit`, so `rowItemCodeAt` is gone from both. Proof: `tests/item-table-keys.test.js`
+(failed first: 2 for T-3, 8 for T-2); probe `df03-item-table` (`--grep=T-3` under its own 1200 ms
+lag, `--grep=T-2` sorted by Qty) failed on the code before each fix on both pages and passes now;
+`item-table-keys` walks the same path as before. Until T-1 lands, a write that re-sorts the table
+still moves the line, and T-2 then steps from where it landed.
 
 **Proof for 0b:** unit tests on the pure order helpers (`src/item-table-nav.js`,
 `src/link-picker-policy.js`, `src/doc-item-sort.js`); a probe per fix on both skins, as a

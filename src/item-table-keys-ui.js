@@ -141,6 +141,65 @@ export function createItemTableKeys(deps) {
   }
 
   /**
+   * T-2 (DF-03): the line indexes in the order they are painted. In a sorted table that is not
+   * ERPNext's order, and the clerk moves by what they see (5zorro: "it needs to match what the
+   * user expects"). Lines not painted (yet) follow, in ERPNext's order.
+   * @param {number} count
+   * @returns {number[]}
+   */
+  function screenOrder(count) {
+    /** @type {number[]} */
+    const order = [];
+    const table = deps.table();
+    if (table && typeof table.querySelectorAll === "function") {
+      for (const inp of table.querySelectorAll("input[data-row]")) {
+        const r = Number(inp.dataset.row);
+        if (Number.isInteger(r) && r >= 0 && r < count && !order.includes(r)) order.push(r);
+      }
+    }
+    for (let r = 0; r < count; r++) if (!order.includes(r)) order.push(r);
+    return order;
+  }
+
+  /**
+   * The cell an arrow / Shift+Tab moves to, stepping through the lines on screen.
+   * @param {string} field
+   * @param {number} ri
+   * @param {"up"|"down"|"left"|"right"} direction
+   * @param {readonly string[]|undefined} navFields
+   */
+  function neighborOnScreen(field, ri, direction, navFields) {
+    const order = screenOrder(lineCount(deps.lastDoc()));
+    const step = neighborItemCell(field, order.indexOf(ri), order.length, direction, navFields);
+    return step && { rowIndex: order[step.rowIndex], field: step.field };
+  }
+
+  /**
+   * Where focus goes after a cell is done (Tab, or a write that moves on): the next box, the next
+   * line **on screen**, a new line past the last line on screen, or out of the table — deleting
+   * a blank line that is last on screen instead of focusing it. `nextItemFocusAfterEdit` works in
+   * screen positions here; its row comes back as a line index.
+   * @param {string} field
+   * @param {number} ri
+   * @param {object|null|undefined} doc
+   * @param {{ cellValue?: string|null, fields?: readonly string[], rowItemCode?: string|number|null }} [opts]
+   *   `rowItemCode`: the line's key as the page knows it; left out, read from `doc`
+   */
+  function nextAfterEdit(field, ri, doc, opts = {}) {
+    const order = screenOrder(lineCount(doc));
+    const pos = order.indexOf(ri);
+    const p = pos < 0 ? ri : pos;
+    const at = (q) => (pos < 0 ? q : order[q]);
+    const dest = nextItemFocusAfterEdit(field, p, order.length, {
+      cellValue: opts.cellValue,
+      fields: opts.fields,
+      rowItemCode: opts.rowItemCode ?? lineKeyAt(doc, ri),
+      nextRowItemCode: p + 1 < order.length ? lineKeyAt(doc, at(p + 1)) : "",
+    });
+    return { ...dest, rowIndex: dest.rowIndex < order.length ? at(dest.rowIndex) : dest.rowIndex };
+  }
+
+  /**
    * @param {string} field
    * @param {number} ri
    * @param {string} next
@@ -233,13 +292,7 @@ export function createItemTableKeys(deps) {
         void (async () => {
           try {
             const next = readValue();
-            const dest = neighborItemCell(
-              field,
-              ri,
-              lineCount(deps.lastDoc()),
-              decision.direction || "left",
-              navFields,
-            );
+            const dest = neighborOnScreen(field, ri, decision.direction || "left", navFields);
             const dirty = cellIsDirty(field, ri, next);
             if (!dest) {
               if (dirty) await apply(next, { stay: true });
@@ -274,12 +327,7 @@ export function createItemTableKeys(deps) {
         try {
           const next = readValue();
           const doc = deps.lastDoc();
-          const dest = nextItemFocusAfterEdit(field, ri, lineCount(doc), {
-            cellValue: next,
-            fields: navFields,
-            rowItemCode: lineKeyAt(doc, ri),
-            nextRowItemCode: lineKeyAt(doc, ri + 1),
-          });
+          const dest = nextAfterEdit(field, ri, doc, { cellValue: next, fields: navFields });
           if (dest.deleteRow && dest.leaveTable) {
             await afterEdit(doc, next);
             return;
@@ -306,6 +354,7 @@ export function createItemTableKeys(deps) {
     busy: () => itemTabGuard,
     focusCell: focusItemCell,
     lineKeyAt,
+    nextAfterEdit,
     wireCell,
   };
 }

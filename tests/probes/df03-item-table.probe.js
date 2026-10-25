@@ -5,6 +5,10 @@
  *   during that wait was not checked. Under a slow server (the test sets 1200 ms on every call),
  *   two quick Tabs past the last line's last box. Question: does the clerk end on the new line's
  *   Item? Before the fix the second Tab left the table (PO: Terms; Bill: the taxes, no line added).
+ * - T-2: lines with qty 5, 1, 3, sorted by Qty, so the screen shows ERPNext's lines 2, 3, 1.
+ *   Question: do ↓ / ↑ / Tab past a line's last box follow the screen? Before the fix they stepped
+ *   through ERPNext's order: ↓ from the middle line on screen went nowhere, and Tab past it added
+ *   a line.
  * Makes no records (nothing is saved).
  */
 import { test, expect } from "@playwright/test";
@@ -105,6 +109,49 @@ for (const { skin, route, lastBox } of SKINS) {
     } finally {
       delete process.env.ERP_CHAOS_LAG_MS;
       delete process.env.ERP_CHAOS_LAG_PCT;
+      if (clerk) await clerk.retire();
+      if (app) await app.close().catch(() => {});
+    }
+  });
+}
+
+/** Line indexes in painted order. */
+const screenRows = (app) =>
+  inDoc(app, `(() => [...new Set([...document.querySelectorAll("input[data-row]")].map((i) => Number(i.dataset.row)))])()`);
+
+for (const { skin, route, lastBox } of SKINS) {
+  test(`T-2 (${skin}): in a table sorted by Qty, moves follow the screen`, async () => {
+    test.setTimeout(6 * 60_000);
+    let app = null;
+    let clerk = null;
+    const path = [];
+    const step = async (label) => {
+      await sleep(900);
+      const w = await where(app);
+      path.push(`${label} → ${w.at} (${w.lines} lines)`);
+      return w;
+    };
+    try {
+      ({ app, clerk } = await openWithLines(skin, route, [5, 1, 3]));
+      await inDoc(app, `(() => { document.querySelector('th[data-sort="qty"]').click(); return true; })()`);
+      await sleep(1500);
+      const rows = await screenRows(app);
+      report(`t2-${skin}-screen`, rows);
+      expect(rows).toEqual([1, 2, 0]);
+
+      await focusNav(app, 2, "qty");
+      await press(app, "Down");
+      expect((await step("Down from the middle line")).at).toBe("0:qty");
+      await press(app, "Up");
+      expect((await step("Up from the bottom line")).at).toBe("2:qty");
+
+      await focusNav(app, 2, lastBox);
+      await press(app, "Tab");
+      const w = await step("Tab past the middle line's last box");
+      expect(w.at).toBe("0:item_code");
+      expect(w.lines).toBe(3);
+    } finally {
+      if (path.length) report(`t2-${skin}`, path);
       if (clerk) await clerk.retire();
       if (app) await app.close().catch(() => {});
     }

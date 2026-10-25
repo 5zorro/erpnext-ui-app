@@ -217,6 +217,77 @@ describe("T-3: a Tab while an earlier one is still working is dropped (DF-03)", 
   });
 });
 
+describe("T-2: moves between lines follow the order on screen (DF-03)", () => {
+  // Three lines sorted so the screen shows line 3, then line 1, then line 2.
+  const doc = { items: [{ item_code: "A", qty: 1 }, { item_code: "B", qty: 2 }, { item_code: "C", qty: 3 }] };
+  const screen = [2, 0, 1];
+
+  it("↓ goes to the line below on screen, ↑ to the line above", async () => {
+    const { keys, focused, cell } = setup({ doc, screen });
+    keys.setMode("nav");
+    cell(2, "qty").key("ArrowDown");
+    await settle();
+    cell(0, "qty").key("ArrowUp");
+    await settle();
+    assert.deepEqual(focused, ["0:qty", "2:qty"]);
+  });
+
+  it("↑ from the top line on screen does not move", async () => {
+    const { keys, focused, cell } = setup({ doc, screen });
+    keys.setMode("nav");
+    cell(2, "qty").key("ArrowUp");
+    await settle();
+    assert.deepEqual(focused, []);
+  });
+
+  it("Tab past a line's last box goes to the next line on screen", async () => {
+    // Line 3 is ERPNext's last but the top line on screen: the next one is line 1, not a new line.
+    const { calls, focused, cell } = setup({ doc, screen });
+    cell(2, "project").key("Tab");
+    await settle();
+    assert.deepEqual(focused, ["0:item_code"]);
+    assert.deepEqual(calls, []);
+  });
+
+  it("Tab past the last box of the last line on screen adds a line, even when it is not ERPNext's last", async () => {
+    const { calls, focused, cell } = setup({ doc, screen: [2, 1, 0] });
+    cell(0, "project").key("Tab");
+    await settle();
+    assert.deepEqual(focused, []);
+    assert.deepEqual(calls, [["afterEdit", 0, "project"]]);
+  });
+
+  it("Shift+Tab out of a line's first box goes to the line above on screen", async () => {
+    const { focused, cell } = setup({ doc, screen });
+    cell(0, "item_code").key("Tab", { shiftKey: true });
+    await settle();
+    assert.deepEqual(focused, ["2:project"]);
+  });
+
+  it("Shift+Tab out of the top line on screen leaves the table backward", async () => {
+    let left = 0;
+    const { cell } = setup({ doc, screen, leaveBackward: () => left++ });
+    cell(2, "item_code").key("Tab", { shiftKey: true });
+    await settle();
+    assert.equal(left, 1);
+  });
+
+  it("after a write, where to go is worked out on screen too", () => {
+    const { keys } = setup({ doc, screen });
+    assert.deepEqual(keys.nextAfterEdit("project", 0, doc, { cellValue: "P" }), {
+      rowIndex: 1, field: "item_code", addRow: false, deleteRow: false, leaveTable: false,
+    });
+    assert.equal(keys.nextAfterEdit("project", 1, doc, { cellValue: "P" }).addRow, true);
+  });
+
+  it("a blank line last on screen is deleted on Tab, not focused", () => {
+    const blank = { items: [{ item_code: "" }, { item_code: "B" }, { item_code: "C" }] };
+    const { keys } = setup({ doc: blank, screen: [2, 1, 0] });
+    const d = keys.nextAfterEdit("project", 1, blank, { cellValue: "P" });
+    assert.deepEqual([d.rowIndex, d.deleteRow, d.leaveTable], [0, true, true]);
+  });
+});
+
 describe("item-table-keys-ui: both pages use it", () => {
   for (const page of ["../src/bill-form-page.js", "../src/doc-form-page.js"]) {
     const src = read(page);

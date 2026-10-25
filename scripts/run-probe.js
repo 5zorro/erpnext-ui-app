@@ -12,6 +12,8 @@
  *    its sessions ended — and puts the app's login `Cookies` back, however the run ended. A user a
  *    killed `run-probe` left enabled is retired at the start of the next run.
  * Environment passes through, so `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- x` works.
+ * `--grep=<pattern>` runs only the tests whose title matches (Playwright's `--grep`), e.g.
+ * `npm run probe -- df03-item-table --grep=T-2`.
  *
  * Probes in `tests/probes/leaves-records/` leave records in ERPNext they cannot delete (a submitted
  * document, once cancelled, stays — its ledger entries link to it). They run only with
@@ -51,12 +53,13 @@ try {
 const args = process.argv.slice(2);
 const withAppOpen = args.includes("--with-app-open");
 const leavesRecords = args.includes("--leaves-records");
+const grep = args.filter((a) => a.startsWith("--grep=")).flatMap((a) => ["--grep", a.slice("--grep=".length)]);
 const names = args.filter((a) => !a.startsWith("--"));
 const LEAVES = path.join(PROBES, "leaves-records");
 const probesIn = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".probe.js")).map((f) => f.replace(/\.probe\.js$/, "")) : []);
 if (!names.length) {
   console.log(
-    `usage: npm run probe -- <name> [--with-app-open] [--leaves-records]\nprobes: ${probesIn(PROBES).join(", ") || "(none)"}\n` +
+    `usage: npm run probe -- <name> [--with-app-open] [--leaves-records] [--grep=<test title>]\nprobes: ${probesIn(PROBES).join(", ") || "(none)"}\n` +
       `leave records in ERPNext (need --leaves-records): ${probesIn(LEAVES).join(", ") || "(none)"}`,
   );
   process.exit(2);
@@ -145,7 +148,7 @@ try {
   const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "", ERP_PROBE_PREFS_BACKUP: backup };
   const run = spawnSync(
     "xvfb-run",
-    ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...files],
+    ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...grep, ...files],
     { cwd: ROOT, env, stdio: "inherit" },
   );
   if (run.error) console.error(`could not run the probe: ${run.error.message}`);

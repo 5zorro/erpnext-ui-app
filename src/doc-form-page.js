@@ -26,7 +26,6 @@ import {
   moneyOrSum,
 } from "./money.js";
 import {
-  nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "./link-picker-policy.js";
@@ -1248,10 +1247,6 @@ function focusAfterLeavingItemsTable() {
   }
 }
 
-function rowItemCodeAt(doc, rowIndex) {
-  return itemKeys.lineKeyAt(doc, rowIndex);
-}
-
 /**
  * Packet T C — size the line grid from its content, then arm the drag handles.
  * Runs after every repaint because the header row is rebuilt each time; both
@@ -1852,14 +1847,7 @@ function paintItems(doc) {
       return next;
     };
     const focusAfterItemEdit = async (docAfter, cellValue) => {
-      const rowCount =
-        docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
-      const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-        cellValue,
-        fields: navFields,
-        rowItemCode: docAfter?.items?.[ri]?.item_code ?? "",
-        nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
-      });
+      const dest = itemKeys.nextAfterEdit(field, ri, docAfter, { cellValue, fields: navFields });
       if (dest.deleteRow && dest.leaveTable) {
         if (!api || !editable()) return;
         const rowCountNow =

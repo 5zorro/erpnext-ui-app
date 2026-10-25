@@ -143,7 +143,6 @@ import {
   accountCompanyMismatchPickMessage,
 } from "../src/account-company.js";
 import {
-  nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "../src/link-picker-policy.js";
@@ -1017,10 +1016,6 @@ export async function bootBillFormPage(api) {
     } catch {
       /* ignore */
     }
-  }
-
-  function rowItemCodeAt(doc, rowIndex) {
-    return itemKeys.lineKeyAt(doc, rowIndex);
   }
   
   async function cleanupEmptyItemRow(rowIndex, itemCode) {
@@ -2461,13 +2456,10 @@ export async function bootBillFormPage(api) {
         return next;
       };
       const focusAfterItemEdit = async (docAfter, cellValue) => {
-        const rowCount =
-          docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
-        const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
+        const dest = itemKeys.nextAfterEdit(field, ri, docAfter, {
           cellValue,
           fields: BILL_NAV_FIELDS,
           rowItemCode: docAfter?.items?.[ri]?.item_code ?? lastDoc?.items?.[ri]?.item_code ?? "",
-          nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
         });
         if (dest.deleteRow && dest.leaveTable) {
           if (!api || !editable()) return;
