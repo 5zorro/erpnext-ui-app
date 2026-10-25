@@ -8272,6 +8272,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   const raw = await Promise.race([
     erpEval(
       `(async () => {
+    ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "ERP Desk not ready" };
@@ -8285,7 +8286,9 @@ async function fetchBillSourceSlice(supplier, sliceId) {
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
+      // A refused xcall rejects with nothing (the restricted-user probe saw "undefined" on the row):
+      // ERPNext's own words, else which list it would not give.
+      return { ok: false, reason: reasonFrom(e) || ${JSON.stringify(`ERPNext would not list ${spec.doctype}s for you.`)} };
     }
   })()`,
       "listSources",

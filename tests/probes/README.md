@@ -40,6 +40,40 @@ one. Each such probe:
 - names its records `ZZ…` and cancels what it submitted, so nothing stays open on the A/P side;
 - reuses its `ZZ…` vendor instead of making a new one each run.
 
+## Acting as a clerk, not Administrator — `probe-user.js`
+
+Administrator reads everything, so a probe run as Administrator never meets a refusal a clerk would
+(review 10-19 R7-4: a Purchase User may not read Sales Orders, and the PO's Select PO spun for good).
+**5zorro 2026-10-24: most real users have limited permissions, so a probe should act as one.** New
+probes act as a clerk with the roles that clerk would have. An existing probe moves over when it is
+next touched. Set the scene as Administrator (records, accounts and rules a clerk cannot make), then:
+
+```js
+import { loginAsProbeUser } from "./probe-user.js";
+const clerk = await loginAsProbeUser(app, ["Purchase User"]); // exactly these roles
+try {
+  // …drive the pages as the clerk…
+  await clerk.back(); // Administrator again, e.g. to clean up (no password: the app's own cookies)
+} finally {
+  await clerk.retire(); // back(), then disable the user and end its sessions
+}
+```
+
+- One user per role set, `zz-probe-<roles>@example.com` (first name *ZZ Probe*), made on first use
+  and reused. It is **disabled between runs**, and every run gives it a fresh random password that
+  is never written down. Sandbox only (`assertSandboxSite`).
+- **Interrupted runs:** the lock file `test-logs/probe-user.lock.json` names the user while it may be
+  enabled. After the run ends any way (pass, fail, Ctrl+C, SIGTERM), `run-probe` retires it and puts
+  the app's login `Cookies` back. A `run-probe` that was itself killed (kill -9) leaves the lock, and
+  the next `npm run probe` (even with no probe named) retires the user then, and names the killed
+  run's prefs backup (`test-logs/probe-run.json`). It does not restore that backup on its own, since
+  the app may have been used since. Proven 2026-10-24: Ctrl+C mid-probe left the user disabled with
+  no sessions and the Cookies file byte-identical; after a kill -9 the next run retired it.
+- Retiring uses `bench execute` in the backend container (`ERP_BACKEND_CONTAINER`, `ERP_SITE` to
+  override), so it needs no login.
+- **What a refusal looks like:** a refused `frappe.xcall` rejects with nothing. Read the reason with
+  `reasonFrom` (`src/erp-refusal-reason.js`), or the clerk sees "undefined" (the R7-4 probe found it).
+
 ## Dogfood check and setup — `@dogfood`
 
 A probe that checks a row of plan 10-19's *Dogfood residuals* table says so in its header:

@@ -103,7 +103,8 @@ built, being dogfooded). It edits no code.
 > (R12-1), no install handshake (R12-2), no *After an ERPNext upgrade* list in HANDOFF (R12-3).
 > **Session 6's fixes ✅ 2026-10-24** (all 10), at 5zorro's request. Each medium or behavioural one is
 > proven by a probe that fails on the old code (`leaves-records/r7-1-receipt-sources`,
-> `leaves-records/r8-create-po-twins`, `r12-simplified-in-page`); R7-4 is reasoned. The `main.js`
+> `leaves-records/r8-create-po-twins`, `r12-simplified-in-page`, `r7-4-purchase-user-sources`; the
+> last one acts as a restricted Purchase User — § Probes, *A restricted probe user*). The `main.js`
 > half is pinned by `tests/review-session6-wiring.test.js` (14 checks, all fail on the old code).
 > Next: review the fixes (*After the first pass*), then session 7 (R13 + R15), which closes this plan.
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
@@ -563,7 +564,7 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
 | R7-1 | S | med | `src/source-list-slices.js` `SOURCE_SLICES_BY_SKIN.receipt`; `main.js` `fetchBillSourceSlice` `po_submitted` | Since S3 (`9bc376b`) the Item Receipt lists POs with the **Bill's** slice, whose filter is `per_billed < 100`, not `per_received < 100`. Two results. (a) A PO that has been billed but not yet received (the clerk's *Bill only*, then the goods arrive) is **missing** from the receipt's picker. The clerk types the lines by hand, the receipt never links the PO, and the PO stays "To Receive" for good. (b) A PO received in full but not billed **is** offered. ERPNext's `make_purchase_receipt` maps only lines with `received_qty < qty` (`purchase_order.py:809`), so it returns no lines. `doc-merge-source` does not check for that: `mergeFromMapped` clears the receipt's lines, adds nothing, and the page says "Pulled from …". Also, neither PO slice has Vanilla's `status not in (Closed, On Hold)` or company filters (`purchase_invoice.js:167`, `purchase_receipt.js:233`). ERPNext then refuses a held or closed PO at **save** (`check_for_on_hold_or_closed_status`), after the clerk has typed the whole document | Give the receipt its own slice (`po_to_receive`: `per_received < 99.99`, not Closed / On Hold, this company), and add the status and company filters to the Bill's `po_submitted`. Have `doc-merge-source` refuse a mapping with no lines before it touches the form ("every line of X is already received"), the way `mergeBillSources` already does | fixed 2026-10-24 — the receipt's own slice `po_to_receive` (`per_received < 99.99`); both PO slices leave out Closed / On Hold and keep to the document's company; `doc-merge-source` refuses a mapping with no lines ("Every line of X is already received"), and the bridge's `mergeFromMapped` refuses an empty list as a backstop (bridge v28). Proven by `leaves-records/r7-1-receipt-sources` (old code: Select PO offered the received PO and hid the billed one; merging the received one said OK and left the receipt with 0 lines) |
 | R7-2 | M | low | `main.js` `bill-list-sources`, `doc-list-sources`; `src/receipt-source.js`; `source-modal.js` `buildBillSourceGroups`, `enrichReceiptsWithPurchaseOrders`, `purchaseOrdersByReceipt`; `doc-form-preload.cjs` / `bill-doc-api-adapter.js` `listSources` | **Q1:** the vendor filter has **one live copy**, `fetchBillSourceSlice`'s spec table, which all three skins stream through. The second copy is the pre-streaming path: two IPC handlers, a receipt group builder and two enrich helpers. No page has called it since streaming. It is dead, and it is the copy that had the receipt's filter right (`per_received`), which is how R7-1 slipped in unnoticed | Delete the dead path and its tests, keeping `combineMappedBillSources` and `sourceItemFromRow` | fixed 2026-10-24 — both handlers, `receipt-source.js`, `buildBillSourceGroups`, the two enrich helpers and `listSources` removed; their tests rewritten on the slice builders |
 | R7-3 | M | low | `source-modal.js` `sourceItemFromRow` (kind `pr`) | Every Item Receipt row in the Bill's picker reads "**no PO**", even when the receipt came from a PO. The label reads `row.purchase_orders`, which only the dead enrich filled. That enrich was dropped after a 403 on `Purchase Receipt Item` (`bill-feature-catalog.js:247`) | Ask for the child field on the parent list (`` `tabPurchase Receipt Item`.purchase_order ``, which is how `so_submitted` reads its lines, under the receipt's own read permission) and roll up per receipt. Or at least leave the bit out when it is unknown | fixed 2026-10-24 — the receipt slices read the line's PO through the receipt and `rollUpReceiptRows` gathers them; "no PO" only when the lines were read and name none. Proven by the same probe (old code: `no PO`; now `PO PUR-ORD-…`) |
-| R7-4 | S | med | `main.js` `fetchBillSourceSlice` | Every slice is `frappe.db.get_list` inside an `erpEval` with no deadline. When the server refuses, that call never settles (G19). A **Purchase User** cannot read Sales Order: its role list is Sales User / Manager, Maintenance, Accounts and Stock User (`sales_order.json`). So on the PO's picker the Sales Orders slice would say "Still loading…" for good. The stream's `Promise.all` would never finish, so "Sources loaded" / "Some sources failed" never shows, and one `pendingErpEvals` entry is held until the page reloads. Read from code and ERPNext's role table, not reproduced (Administrator here reads everything) | `frappe.xcall("frappe.client.get_list", …)` plus a `raceTimeout` per slice, so a refused or slow slice shows its error row | fixed 2026-10-24 — `frappe.xcall("frappe.client.get_list")` and a 20 s deadline per slice; a refusal logs `source-slice-failed`. Reasoned, not probed (needs a user without Sales Order read); `tests/review-session6-wiring.test.js` pins it, and the queries were checked against the live API |
+| R7-4 | S | med | `main.js` `fetchBillSourceSlice` | Every slice is `frappe.db.get_list` inside an `erpEval` with no deadline. When the server refuses, that call never settles (G19). A **Purchase User** cannot read Sales Order: its role list is Sales User / Manager, Maintenance, Accounts and Stock User (`sales_order.json`). So on the PO's picker the Sales Orders slice would say "Still loading…" for good. The stream's `Promise.all` would never finish, so "Sources loaded" / "Some sources failed" never shows, and one `pendingErpEvals` entry is held until the page reloads. Read from code and ERPNext's role table, not reproduced (Administrator here reads everything) | `frappe.xcall("frappe.client.get_list", …)` plus a `raceTimeout` per slice, so a refused or slow slice shows its error row | fixed 2026-10-24 — `frappe.xcall("frappe.client.get_list")` and a 20 s deadline per slice; a refusal logs `source-slice-failed`. Proven the same day as a **Purchase User** (`r7-4-purchase-user-sources`, the first probe with the restricted user): the Sales Orders slice ends in "Insufficient Permission for Sales Order", and the status line says one source failed. On the code before the fix it said "Still loading…" after 45 s. That probe also found that a refused `xcall` reads "undefined" on the row; it now uses `reasonFrom` (DC-2) |
 
 **Q2, checked and fine:** no mapper here writes anything. `make_purchase_invoice` /
 `make_purchase_receipt` and the MR / SQ mappers return unsaved documents. The Sales Order mapper is
@@ -908,6 +909,43 @@ Until 2026-10-22 probes lived in a temp folder and were lost on every reboot, so
 session wrote them again. 5zorro: keep them, so probes grow into better e2e tests. They are in
 `tests/probes/` (`npm run probe -- <name>`); how to run and write one is in its `README.md`, and
 HANDOFF's test strategy lists them as layer 3b — so this section can go when the plan closes.
+
+### A restricted probe user (5zorro 2026-10-24, for R7-4)
+
+Every probe ran as Administrator, who reads everything, so no path where ERPNext *refuses* the
+clerk was ever exercised (R7-4: a Purchase User cannot read Sales Orders). 5zorro: yes, on the
+sandbox, *"in the case that a probe is interrupted, i hope that it gracefully logs out the user and
+disables."*
+
+- `tests/probes/probe-user.js` `loginAsProbeUser(app, roles)`: on the sandbox only
+  (`assertSandboxSite`), it makes or reuses one user per role set (`zz-probe-…@example.com`, first
+  name *ZZ Probe*). It gives the user exactly those roles, enables it with a fresh random password
+  that is only ever held in memory, and logs the app's ERPNext page in as that user. It writes a
+  lock file (`test-logs/probe-user.lock.json`, the user's name only).
+- **Retire** = disable the user **and** end its sessions (`clear_sessions(force)`). Disabling alone
+  does not end them in Frappe: only a change of user type does (`user.py` `on_update`). Both go
+  through `bench execute` in the backend container, so retiring needs no login and works whoever
+  the app is signed in as.
+- **Three layers, so an interrupted probe still retires the user:**
+  1. the probe's `finally`;
+  2. `run-probe` after the run ends any way (pass, fail, Ctrl+C, SIGTERM). If the lock is there,
+     it retires the user and restores the app's `Cookies` from the copy taken before the run, so
+     5zorro's app is signed in as before;
+  3. `run-probe` at the start of the next run, for a lock left by a `run-probe` that was itself
+     killed.
+- What stays on the sandbox: the disabled `ZZ Probe` users, reused by the next run.
+- **Built 2026-10-24** (`tests/probes/probe-user.js`, `probe-user-retire.js`, `scripts/run-probe.js`).
+  The user is switched back to Administrator by putting the app's own cookies back (no admin
+  password anywhere). Proven on all three layers: the probe's own run; Ctrl+C mid-probe, after which
+  the user was disabled with 0 sessions and the `Cookies` file byte-identical; and kill -9 of the
+  whole run, after which the next `npm run probe` retired it and named the killed run's prefs backup
+  (`test-logs/probe-run.json`, which also covers a gap older than this: a killed run never said its
+  prefs were left unrestored). A kill -9 reaches the app last; it exited on its own.
+- **5zorro 2026-10-24:** *"i mildly want all probes to use the sandbox user(s) of varying permissions
+  instead of admin. the vast majority of actual users are 'users of varying permissions'."* The
+  path: new probes act as a clerk (set the scene as Administrator, then switch). Existing probes
+  move over when next touched, and the `@dogfood` / `@nav` sets in one sweep each, when 5zorro picks
+  the roles a clerk has here. Rules in `tests/probes/README.md`.
 
 ## Open questions for 5zorro
 
