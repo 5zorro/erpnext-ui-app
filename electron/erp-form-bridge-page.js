@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 28;
+  var VERSION = 29;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -71,6 +71,27 @@
       }
     } catch (eMsg) {}
     return msg || frappeExcMessage(r && r.exc);
+  }
+
+  // xList / xValue: frappe.db.get_list never settles on a refusal (review 10-19 R7-5, G19). The
+  // same text as src/erp-refusal-reason.js ERP_LIST_JS (tests/erp-no-frappe-db.test.js keeps them equal).
+  function xList(doctype, args) {
+    var a = {};
+    var src = args || {};
+    for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) a[k] = src[k];
+    a.doctype = doctype;
+    if (!a.fields) a.fields = ["name"];
+    if (!("limit" in a)) a.limit = 20;
+    return frappe.xcall("frappe.desk.reportview.get_list", a);
+  }
+  function xValue(doctype, filters, fieldname) {
+    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+  }
+
+  /** A refused xList / xValue: its own message, else the reply ERPNext refused with. */
+  function listRefusal(e) {
+    var said = (e && e.message) || refusalText(window.frappe && frappe.last_response);
+    return said || String(e == null ? "ERPNext refused without saying why." : e);
   }
 
   function clearSaveLocks() {
@@ -1509,7 +1530,7 @@
 
         if (field === "item_code" && row && value && rowNeedsEnrichment(row)) {
           try {
-            var iv = await frappe.db.get_value("Item", value, [
+            var iv = await xValue("Item", value, [
               "item_name",
               "description",
               "standard_rate",
@@ -1664,7 +1685,7 @@
             }
           } else if (code && !stripHtml(row.description)) {
             try {
-              var iv = await frappe.db.get_value("Item", code, [
+              var iv = await xValue("Item", code, [
                 "item_name",
                 "description",
                 "standard_rate",
@@ -1913,25 +1934,28 @@
 
   async function fetchPoLineMeta(poDetails, prDetails, poNames) {
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "frappe not ready", poItems: [], poHeaders: [], prItems: [] };
       }
+      // A child table's rows: name the parent, or ERPNext refuses anyone but Administrator.
       var poItems = poDetails && poDetails.length
-        ? await frappe.db.get_list("Purchase Order Item", {
+        ? await xList("Purchase Order Item", {
+            parent_doctype: "Purchase Order",
             filters: [["name", "in", poDetails]],
             fields: ["name", "idx", "sales_order", "customer", "parent", "qty", "rate", "amount", "billed_amt"],
             limit: poDetails.length,
           })
         : [];
       var prItems = prDetails && prDetails.length
-        ? await frappe.db.get_list("Purchase Receipt Item", {
+        ? await xList("Purchase Receipt Item", {
+            parent_doctype: "Purchase Receipt",
             filters: [["name", "in", prDetails]],
             fields: ["name", "idx", "parent", "qty", "rate", "amount", "billed_amt"],
             limit: prDetails.length,
           })
         : [];
       var poHeaders = poNames && poNames.length
-        ? await frappe.db.get_list("Purchase Order", {
+        ? await xList("Purchase Order", {
             filters: [["name", "in", poNames]],
             fields: ["name", "customer", "customer_name"],
             limit: poNames.length,
@@ -1941,7 +1965,7 @@
     } catch (e) {
       return {
         ok: false,
-        reason: String(e && e.message ? e.message : e),
+        reason: listRefusal(e),
         poItems: [],
         poHeaders: [],
         prItems: [],

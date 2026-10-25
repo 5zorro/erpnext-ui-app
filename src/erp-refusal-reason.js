@@ -89,6 +89,29 @@ export const PE_REASON_FROM_JS = String.raw`function reasonFrom(err) {
 }`;
 
 /**
+ * `xList` / `xValue` for the scripts the shell runs in the ERPNext page (review 10-19 R7-5, G19).
+ * `frappe.db.get_list` wraps its call in a promise that only ever resolves (`frappe/public/js/
+ * frappe/db.js`), so a refused list — a clerk without the role — never settles and the page waits
+ * for good. These ask the same server methods with the same defaults (`fields` `["name"]`, `limit`
+ * 20 when no `limit` is given) through `frappe.xcall`, which rejects: catch it and read the reason
+ * with `reasonFrom` (send `${PE_REASON_FROM_JS}` too). A child table's rows need
+ * `parent_doctype` (`{ parent_doctype: "Purchase Order" }` for Purchase Order Item), or ERPNext
+ * refuses anyone but Administrator. Sent as source: `${ERP_LIST_JS}` inside the script.
+ */
+export const ERP_LIST_JS = String.raw`function xList(doctype, args) {
+  var a = {};
+  var src = args || {};
+  for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) a[k] = src[k];
+  a.doctype = doctype;
+  if (!a.fields) a.fields = ["name"];
+  if (!("limit" in a)) a.limit = 20;
+  return frappe.xcall("frappe.desk.reportview.get_list", a);
+}
+function xValue(doctype, filters, fieldname) {
+  return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+}`;
+
+/**
  * ERPNext's sentence, ended — its messages often have no full stop, and the shell's advice follows
  * them ("… disabled accounts: X - USE. Open …"; dogfood probes R9-1, R10c-1).
  * @param {unknown} reason

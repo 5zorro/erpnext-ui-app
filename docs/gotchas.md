@@ -728,6 +728,20 @@ hang happens. The restricted probe user proved it (review 10-19 R7-4, a Purchase
 Orders), so the sweep is back as **R7-5**. Read a refused `xcall`'s reason with `reasonFrom` (G22):
 it rejects with nothing.
 
+**Swept 2026-10-25 (R7-5).** No ERPNext-page script calls `frappe.db.*` any more
+(`tests/erp-no-frappe-db.test.js` keeps it so). Use `xList` / `xValue` (`ERP_LIST_JS` in
+`src/erp-refusal-reason.js`, a copy in the bridge): the same server methods and defaults as
+`frappe.db.get_list` / `get_value`, through `frappe.xcall`. Two more things the sweep found, both
+proven as a restricted user (`leaves-records/r7-5-clerk-refusals`):
+- **A child table's rows need their parent named** (`parent_doctype: "Purchase Order"` for
+  Purchase Order Item, `"Payment Entry"` for Payment Entry Reference). Without it ERPNext refuses
+  anyone but Administrator ("Insufficient Permission for Purchase Invoice Item"), so the Bill's
+  PO-line lookup would have hung for every clerk.
+- **`frappe.db.get_all` does not exist in v16's `db.js`**: the Bill's applied-payments list called
+  it, always threw, and showed a payment of several bills at its whole amount on each.
+- `frappe.db.get_list` defaults `limit` to 20 even when `limit_page_length` is passed; two Account
+  lookups were capped at 20 that way.
+
 ## G20 — `frappe.after_ajax` calls back at once when nothing is in flight (2026-10-21)
 
 `frappe.after_ajax(fn)` (`frappe/public/js/frappe/request.js`, v16.31.0) runs `fn` **synchronously**

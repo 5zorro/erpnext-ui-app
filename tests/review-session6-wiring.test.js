@@ -73,6 +73,17 @@ describe("R7-3: a receipt row names its PO from its own lines", () => {
   });
 });
 
+describe("R7-7: the Sales Orders slice is capped by orders, not by lines", () => {
+  it("orders first (a page of 100), then only their lines; pages until 50 orders have a line to order", () => {
+    const body = fnText(main, "fetchBillSourceSlice");
+    assert.doesNotMatch(body, /limit: 500/);
+    assert.match(body, /fields: \["name"\],\s*order_by: "transaction_date desc",\s*limit: 100,\s*orderLines:/);
+    assert.match(body, /limit_start: \(p \+ 1\) \* \$\{spec\.limit\}/);
+    assert.match(body, /Object\.keys\(due\)\.length >= 50/);
+    assert.match(body, /salesOrdersToOrder\(raw\.rows\)\.slice\(0, 50\)/);
+  });
+});
+
 describe("R7-4: a source slice the server refuses shows its error, never spins", () => {
   const body = fnText(main, "fetchBillSourceSlice");
   it("frappe.xcall, not frappe.db.get_list (G19)", () => {

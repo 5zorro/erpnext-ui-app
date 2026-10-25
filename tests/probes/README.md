@@ -50,7 +50,7 @@ next touched. Set the scene as Administrator (records, accounts and rules a cler
 
 Most probes should act as one of the **two clerks** in `probe-user.js` (5zorro 2026-10-25), built
 from ERPNext's own roles: `AP_CLERK` (edits most things, and receives goods) and `AR_CLERK` (sales
-orders, POs, sales invoices, payments received; reads payables; cannot make a receipt or a vendor).
+orders, POs, sales invoices, payments received; reads payables; cannot make a vendor or an item).
 Use a bare role list only to pin one role's refusal, as R7-4 does.
 
 ```js

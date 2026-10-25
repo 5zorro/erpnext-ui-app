@@ -99,7 +99,7 @@ import {
 } from "../src/lens-context.js";
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
 import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
-import { PE_REASON_FROM_JS, endSentence } from "../src/erp-refusal-reason.js";
+import { PE_REASON_FROM_JS, ERP_LIST_JS, endSentence } from "../src/erp-refusal-reason.js";
 import {
   DEFAULT_PAYMENT_BATCH_PREFS,
   mergePaymentBatchPrefs,
@@ -3238,19 +3238,21 @@ async function linkedPosForBillDoc(doc) {
     );
   }
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, rows: [] };
       }
       var names = ${JSON.stringify(names)};
-      var rows = await frappe.db.get_list("Purchase Order", {
+      var rows = await xList("Purchase Order", {
         filters: [["name", "in", names]],
         fields: ["name", "title"],
         limit: names.length,
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+      return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
   return linkedPurchaseOrdersForBill(doc, (raw && raw.rows) || []);
@@ -3265,12 +3267,14 @@ async function linkedReceiptsForBillDoc(doc) {
   const names = uniqueLinkedPurchaseReceiptNames(doc);
   if (!names.length) return [];
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, rows: [] };
       }
       var names = ${JSON.stringify(names)};
-      var rows = await frappe.db.get_list("Purchase Receipt", {
+      var rows = await xList("Purchase Receipt", {
         filters: [["name", "in", names]],
         fields: ["name", "lr_no", "remarks", "owner", "posting_date"],
         limit: names.length,
@@ -3280,7 +3284,7 @@ async function linkedReceiptsForBillDoc(doc) {
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+      return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
   return linkedPurchaseReceiptsForBill(doc, (raw && raw.rows) || []);
@@ -3297,19 +3301,21 @@ async function vendorAccountNumbersForSupplier(supplier, company) {
   if (!sup) return [];
   const co = company != null ? String(company).trim() : "";
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, rows: [] };
       }
       var filters = [["parent", "=", ${JSON.stringify(sup)}]];
-      var rows = await frappe.db.get_list("Customer Number At Supplier", {
+      var rows = await xList("Customer Number At Supplier", {
         filters: filters,
         fields: ["customer_number", "company"],
         limit: 20,
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+      return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
   const nums = [];
@@ -3334,15 +3340,17 @@ async function existingBillsWithRef(billNo, excludeName) {
   if (!ref) return [];
   const exclude = excludeName != null ? String(excludeName).trim() : "";
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, rows: [] };
       }
       var filters = [["bill_no", "=", ${JSON.stringify(ref)}]];
       if (${JSON.stringify(exclude)}) {
         filters.push(["name", "!=", ${JSON.stringify(exclude)}]);
       }
-      var rows = await frappe.db.get_list("Purchase Invoice", {
+      var rows = await xList("Purchase Invoice", {
         filters: filters,
         fields: ["name", "bill_no", "supplier", "posting_date", "grand_total", "docstatus"],
         order_by: "posting_date desc",
@@ -3350,7 +3358,7 @@ async function existingBillsWithRef(billNo, excludeName) {
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+      return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
   return (raw && raw.rows) || [];
@@ -3369,8 +3377,10 @@ async function recentVendorBillRefs(supplier, excludeName, limit = 6) {
   const exclude = excludeName != null ? String(excludeName).trim() : "";
   const lim = Math.max(3, Math.min(12, Number(limit) || 6));
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, rows: [] };
       }
       var filters = [
@@ -3380,7 +3390,7 @@ async function recentVendorBillRefs(supplier, excludeName, limit = 6) {
       if (${JSON.stringify(exclude)}) {
         filters.push(["name", "!=", ${JSON.stringify(exclude)}]);
       }
-      var rows = await frappe.db.get_list("Purchase Invoice", {
+      var rows = await xList("Purchase Invoice", {
         filters: filters,
         fields: ["name", "bill_no", "posting_date"],
         order_by: "posting_date desc",
@@ -3388,7 +3398,7 @@ async function recentVendorBillRefs(supplier, excludeName, limit = 6) {
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, rows: [], reason: String(e && e.message ? e.message : e) };
+      return { ok: false, rows: [], reason: reasonFrom(e) };
     }
   })()`);
   const out = [];
@@ -6292,6 +6302,8 @@ async function listBillPaymentEntries(billName) {
   }
   const billLit = JSON.stringify(name);
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
       var peList = [];
@@ -6356,27 +6368,35 @@ async function listBillPaymentEntries(billName) {
           /* keep peList empty */
         }
       }
+      // What each payment allocated to THIS bill, in one question (review 10-19 R7-5: this
+      // called frappe.db.get_all, which v16 does not have, so a payment of several bills always
+      // showed its whole amount here). Refused → the payment's own amount, as before.
+      var allocTo = null;
+      var needAlloc = peList.filter(function (r) { return r && (r.allocated_amount == null || r.allocated_amount === ""); })
+        .map(function (r) { return r.name; });
+      if (needAlloc.length) {
+        try {
+          var refRows = await xList("Payment Entry Reference", {
+            parent_doctype: "Payment Entry",
+            filters: [["parent", "in", needAlloc], ["reference_doctype", "=", "Purchase Invoice"], ["reference_name", "=", billName]],
+            fields: ["parent", "allocated_amount"],
+            limit: 0,
+          });
+          allocTo = {};
+          for (var c = 0; c < (refRows || []).length; c++) {
+            var rr = refRows[c];
+            allocTo[rr.parent] = (allocTo[rr.parent] || 0) + (Number(rr.allocated_amount) || 0);
+          }
+        } catch (eChild) {
+          allocTo = null;
+        }
+      }
       var out = [];
       for (var p = 0; p < peList.length; p++) {
         var row = peList[p] || {};
         var alloc = row.allocated_amount;
         if (alloc == null || alloc === "") {
-          try {
-            var children = await frappe.db.get_all("Payment Entry Reference", {
-              filters: {
-                parent: row.name,
-                reference_doctype: "Purchase Invoice",
-                reference_name: billName,
-              },
-              fields: ["allocated_amount"],
-            });
-            alloc = 0;
-            for (var c = 0; c < (children || []).length; c++) {
-              alloc += Number(children[c].allocated_amount) || 0;
-            }
-          } catch (eChild) {
-            alloc = row.paid_amount;
-          }
+          alloc = allocTo && allocTo[row.name] != null ? allocTo[row.name] : row.paid_amount;
         }
         out.push({
           name: row.name,
@@ -6390,7 +6410,7 @@ async function listBillPaymentEntries(billName) {
       }
       return { ok: true, rows: out };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), rows: [] };
+      return { ok: false, reason: reasonFrom(e), rows: [] };
     }
   })()`);
   if (!(raw && raw.ok)) {
@@ -7003,6 +7023,8 @@ async function searchLink(doctype, txt, filters) {
       ? Object.entries(filters).filter(([, v]) => v != null && v !== "")
       : [];
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe) return { ok: false, reason: "ERP Desk not ready (no frappe)." };
       var doctype = ${JSON.stringify(doctype)};
@@ -7026,7 +7048,7 @@ async function searchLink(doctype, txt, filters) {
           args: args
         });
         rows = (r && r.message) ? r.message : [];
-      } else if (frappe.db && frappe.db.get_list) {
+      } else if (frappe.xcall) {
         var fields = ["name"];
         if (doctype === "Supplier") fields.push("supplier_name");
         if (doctype === "Item") fields.push("item_name");
@@ -7040,7 +7062,7 @@ async function searchLink(doctype, txt, filters) {
             listFilters.push([p[0], "=", p[1]]);
           }
         });
-        var list = await frappe.db.get_list(doctype, {
+        var list = await xList(doctype, {
           fields: fields,
           filters: listFilters,
           limit: 25,
@@ -7057,7 +7079,7 @@ async function searchLink(doctype, txt, filters) {
       }
       return { ok: true, results: rows };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), results: [] };
+      return { ok: false, reason: reasonFrom(e), results: [] };
     }
   })()`);
   if (!raw || !raw.ok) {
@@ -7318,13 +7340,15 @@ async function enrichAccountLinkResults(results) {
   const billCompany = normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
   const namesLit = JSON.stringify(names);
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       var names = ${namesLit};
       if (!names.length) return { ok: true, byName: {} };
-      var list = await frappe.db.get_list("Account", {
+      var list = await xList("Account", {
         fields: ["name", "company"],
         filters: [["name", "in", names]],
-        limit_page_length: names.length,
+        limit: names.length,
       });
       var byName = {};
       (list || []).forEach(function (row) {
@@ -7332,7 +7356,7 @@ async function enrichAccountLinkResults(results) {
       });
       return { ok: true, byName: byName };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), byName: {} };
+      return { ok: false, reason: reasonFrom(e), byName: {} };
     }
   })()`);
   const byName = (raw && raw.byName) || {};
@@ -7355,12 +7379,14 @@ async function listBillAccountCompanyMismatches() {
   }
   const namesLit = JSON.stringify(names);
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       var names = ${namesLit};
-      var list = await frappe.db.get_list("Account", {
+      var list = await xList("Account", {
         fields: ["name", "company"],
         filters: [["name", "in", names]],
-        limit_page_length: names.length,
+        limit: names.length,
       });
       var byName = {};
       (list || []).forEach(function (row) {
@@ -7368,7 +7394,7 @@ async function listBillAccountCompanyMismatches() {
       });
       return { ok: true, byName: byName };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), byName: {} };
+      return { ok: false, reason: reasonFrom(e), byName: {} };
     }
   })()`);
   if (!(raw && raw.ok)) {
@@ -7399,11 +7425,13 @@ async function rankSupplierSearchResults(results) {
   const names = results.map((r) => r.value).filter(Boolean);
   if (!names.length) return results;
   const extra = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       var names = ${JSON.stringify(names)};
       var lastPo = {};
-      if (frappe.db && frappe.db.get_list) {
-        var pos = await frappe.db.get_list("Purchase Order", {
+      if (frappe.xcall) {
+        var pos = await xList("Purchase Order", {
           fields: ["supplier", "transaction_date"],
           filters: [["supplier", "in", names], ["docstatus", "=", 1]],
           order_by: "transaction_date desc",
@@ -7418,8 +7446,8 @@ async function rankSupplierSearchResults(results) {
         var fy = frappe.defaults && frappe.defaults.get_user_default
           ? frappe.defaults.get_user_default("fiscal_year")
           : "";
-        if (fy && frappe.db && frappe.db.get_value) {
-          var v = await frappe.db.get_value("Fiscal Year", fy, "year_start_date");
+        if (fy) {
+          var v = await xValue("Fiscal Year", fy, "year_start_date");
           if (v && v.message && v.message.year_start_date) fyStart = v.message.year_start_date;
           else if (v && v.year_start_date) fyStart = v.year_start_date;
           else if (typeof v === "string") fyStart = v;
@@ -8221,7 +8249,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
   // receipts → 16 of 50 listed).
   const receiptFields = ["name", "posting_date", "grand_total"];
 
-  /** @type {{ doctype: string, filters: object, fields: string[], order_by: string, limit: number, receiptPos?: boolean } | null} */
+  /** @type {{ doctype: string, filters: object, fields: string[], order_by: string, limit: number, receiptPos?: boolean, orderLines?: string[] } | null} */
   let spec = null;
   if (sliceId === "po_submitted") {
     spec = {
@@ -8285,13 +8313,17 @@ async function fetchBillSourceSlice(supplier, sliceId) {
       limit: 50,
     };
   } else if (sliceId === "so_submitted") {
-    // One row per order line (child fields), rolled up by salesOrdersToOrder below.
+    // Orders first, a page of 100 at a time, then only their lines, rolled up by salesOrdersToOrder
+    // below (review R7-7: one row per order line, capped at 500, listed 16 orders of 30 lines
+    // where 50 were due). Sales Order has no header field for "still to order", so pages go on
+    // until 50 orders have a line to order, or 5 pages.
     spec = {
       doctype: "Sales Order",
       filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed", "Cancelled"]] },
-      fields: ["name", "customer", "customer_name", "transaction_date", "`tabSales Order Item`.stock_qty as stock_qty", "`tabSales Order Item`.ordered_qty as ordered_qty"],
+      fields: ["name"],
       order_by: "transaction_date desc",
-      limit: 500,
+      limit: 100,
+      orderLines: ["name", "customer", "customer_name", "transaction_date", "`tabSales Order Item`.stock_qty as stock_qty", "`tabSales Order Item`.ordered_qty as ordered_qty"],
     };
   }
   if (!spec) return { ok: false, reason: "Invalid source slice", rows: [] };
@@ -8315,6 +8347,27 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         limit_page_length: ${spec.limit},
       });
       var lines = null;
+      var orderLines = ${JSON.stringify(spec.orderLines || null)};
+      if (orderLines) {
+        // Sales Orders (R7-7): each page's lines; stop once 50 orders have one still to order.
+        var all = [];
+        var due = {};
+        var page = rows || [];
+        for (var p = 0; p < 5 && page.length; p++) {
+          var some = await frappe.xcall("frappe.client.get_list", { doctype: "Sales Order",
+            filters: [["name", "in", page.map(function (r) { return r.name; })]],
+            fields: orderLines, order_by: ${JSON.stringify(spec.order_by)}, limit_page_length: 0 });
+          for (var i = 0; i < (some || []).length; i++) {
+            all.push(some[i]);
+            if (Number(some[i].stock_qty) > Number(some[i].ordered_qty)) due[some[i].name] = 1;
+          }
+          if (Object.keys(due).length >= 50 || page.length < ${spec.limit}) break;
+          page = await frappe.xcall("frappe.client.get_list", {
+            doctype: ${JSON.stringify(spec.doctype)}, filters: ${JSON.stringify(spec.filters)}, fields: ["name"],
+            order_by: ${JSON.stringify(spec.order_by)}, limit_start: (p + 1) * ${spec.limit}, limit_page_length: ${spec.limit} });
+        }
+        rows = all;
+      }
       if (${spec.receiptPos ? "true" : "false"} && rows && rows.length) {
         // Their lines' POs; a refusal here only leaves the PO off the label.
         try {
@@ -8457,6 +8510,7 @@ async function voidAndAmendFacts(doctype, name) {
   }
   const payload = JSON.stringify({ doctype: dt, name: nm, probes });
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
     ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
@@ -8489,7 +8543,7 @@ async function voidAndAmendFacts(doctype, name) {
       // possible at all. Both fail soft: unknown means the confirm simply does not name the ID.
       var isAmendment = null;
       try {
-        isAmendment = !!(await frappe.db.get_value(i.doctype, i.name, "amended_from")).message.amended_from;
+        isAmendment = !!((await xValue(i.doctype, i.name, "amended_from")) || {}).amended_from;
       } catch (eAf) {
         isAmendment = null;
       }
@@ -8983,8 +9037,10 @@ ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
   const billLines = Array.isArray(payload && payload.billLines) ? payload.billLines : [];
 
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "ERP Desk not ready" };
       }
       /** @type {Record<string, unknown>[]} */
@@ -8992,7 +9048,7 @@ ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
       if (${JSON.stringify(customer)}) {
         filters.push(["customer", "=", ${JSON.stringify(customer)}]);
       }
-      var sos = await frappe.db.get_list("Sales Order", {
+      var sos = await xList("Sales Order", {
         filters: filters,
         fields: [
           "name",
@@ -9008,8 +9064,9 @@ ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
       });
       var names = (sos || []).map(function (r) { return r.name; }).filter(Boolean);
       var itemsBySo = {};
-      if (names.length && frappe.db.get_list) {
-        var itemRows = await frappe.db.get_list("Sales Order Item", {
+      if (names.length) {
+        var itemRows = await xList("Sales Order Item", {
+          parent_doctype: "Sales Order",
           filters: [["parent", "in", names]],
           fields: ["parent", "item_code", "qty", "rate", "amount"],
           limit: 500,
@@ -9026,7 +9083,7 @@ ipcMain.handle("bill-so-picker-list", async (_e, payload) => {
       });
       return { ok: true, orders: enriched };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), orders: [] };
+      return { ok: false, reason: reasonFrom(e), orders: [] };
     }
   })()`);
   if (!raw || !raw.ok) {
@@ -9142,7 +9199,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
       // ERPNext's raised message, HTML stripped (dogfood probe R6c-4: "<br><strong>…" reached the status).
       var serverMsg = function (e) { return reasonFrom(e && e.message ? e : undefined); };
       try {
-        if (!window.frappe || !frappe.db) {
+        if (!window.frappe || !frappe.xcall) {
           return { ok: false, step: "build", reason: "ERP Desk not ready" };
         }
         var supplier = ${JSON.stringify(supplier)};
@@ -9424,10 +9481,12 @@ async function listAddressesForProfile(profileId, doc, role) {
   const partyLit = JSON.stringify(partyName);
   const doctypeLit = JSON.stringify(partyDoctype);
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
       var partyName = ${partyLit};
       var linkDoctype = ${doctypeLit};
-      var rows = await frappe.db.get_list("Address", {
+      var rows = await xList("Address", {
         filters: [
           ["Dynamic Link", "link_doctype", "=", linkDoctype],
           ["Dynamic Link", "link_name", "=", partyName],
@@ -9450,7 +9509,7 @@ async function listAddressesForProfile(profileId, doc, role) {
       });
       return { ok: true, rows: rows || [] };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), rows: [] };
+      return { ok: false, reason: reasonFrom(e), rows: [] };
     }
   })()`);
   if (!(raw && raw.ok)) {
@@ -9491,8 +9550,10 @@ async function fetchSourceTermsForRefs(refs) {
     name: String(r.name).trim(),
   }));
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
+    ${PE_REASON_FROM_JS}
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_value) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "ERP Desk not ready" };
       }
       var pairs = ${JSON.stringify(pairs)};
@@ -9502,7 +9563,7 @@ async function fetchSourceTermsForRefs(refs) {
         var p = pairs[i];
         try {
           var fields = p.doctype === "Purchase Receipt" ? ["terms", "remarks"] : ["terms"];
-          var r = await frappe.db.get_value(p.doctype, p.name, fields);
+          var r = await xValue(p.doctype, p.name, fields);
           var m = r && (r.message || r);
           termsByKey[p.key] = m && m.terms != null ? String(m.terms) : "";
           if (p.doctype === "Purchase Receipt") {
@@ -9512,7 +9573,7 @@ async function fetchSourceTermsForRefs(refs) {
       }
       return { ok: true, termsByKey: termsByKey, remarksByKey: remarksByKey };
     } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), termsByKey: {}, remarksByKey: {} };
+      return { ok: false, reason: reasonFrom(e), termsByKey: {}, remarksByKey: {} };
     }
   })()`);
   if (!(raw && raw.ok)) {
@@ -10789,7 +10850,7 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
     // The order's lines still to order, less what is on draft POs (src/so-create-po.js).
     const ctx = await erpEval(`(async () => {
       try {
-        var so = await frappe.db.get_doc("Sales Order", ${JSON.stringify(source)});
+        var so = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: ${JSON.stringify(source)} });
         var r = await frappe.call({ method: "frappe.client.get_list", args: {
           doctype: "Purchase Order",
           fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
@@ -12644,13 +12705,14 @@ async function paymentRelinkFacts(supplier) {
   if (!party) return { ok: false, reason: "Supplier required." };
   const payload = JSON.stringify({ party });
   const raw = await erpEval(`(async () => {
+    ${ERP_LIST_JS}
     ${PE_REASON_FROM_JS}
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       var i = ${payload};
       var company = frappe.defaults.get_user_default("Company");
       if (!company) {
-        var cs = await frappe.db.get_list("Company", { limit: 1 });
+        var cs = await xList("Company", { limit: 1 });
         company = cs && cs[0] && cs[0].name;
       }
       if (!company) return { ok: false, reason: "No Company configured." };

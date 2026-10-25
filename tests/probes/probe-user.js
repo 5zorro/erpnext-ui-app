@@ -23,9 +23,10 @@ import { lockProbeUser, retireLockedProbeUsers } from "./probe-user-retire.js";
  * - **AP clerk** edits most things and also receives goods: bills, payments, POs, receipts, new
  *   vendors and items, sales orders.
  * - **AR clerk** edits sales orders, POs, sales invoices and payments received, and reads payables.
- *   It cannot make an Item Receipt (no Stock User) or a vendor (no Purchase Master Manager).
- *   ERPNext's roles are coarse here: Accounts User writes Purchase Invoices as well as Sales
- *   Invoices, so this clerk can edit a bill too.
+ *   It cannot make a vendor (no Purchase Master Manager) or an item (no Item Manager), nor stock
+ *   entries (no Stock User). ERPNext's roles are coarse here: Purchase User writes Item Receipts,
+ *   and Accounts User writes Purchase Invoices as well as Sales Invoices, so this clerk can edit
+ *   both — narrower would take a custom role.
  * Pass one as `loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name })`.
  */
 export const AP_CLERK = Object.freeze({
