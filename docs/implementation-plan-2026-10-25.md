@@ -7,6 +7,12 @@
 > and safer; nothing a clerk sees changes.
 >
 > **First, one question for 5zorro (below).** Then the sessions in the order under *Order*.
+>
+> **2026-10-25, added: step 0.** 5zorro's DF-03 dogfood found three bugs in the items table's
+> keys, in code both pages carry (*Step 0* below). He chose to do this plan before finishing that
+> dogfood run, starting with the table: its keyboard code moves into one module first, and the
+> three fixes land there once. This is the one place the plan changes what a clerk sees, and only
+> in step 0b.
 
 **Why now is the right time to plan it, not build it:** the review measured the cost (R6a-1: 1,295
 identical lines across 55 functions; R2-5: 12,744 lines and 82 shared variables in `main.js`) and it
@@ -31,6 +37,9 @@ dropped — then update HANDOFF's registry and the local notes file, and delete 
 
 ## Question for 5zorro before building
 
+**Recommended: share** (proposed 2026-10-25; confirm at the start of the session). Step 0 is a
+share either way.
+
 **Merge the two pages, or share their code?** 5zorro said *"merge doc form and bill form"*. The
 review's proposal (R6a-1) is **not** to merge the pages into one but to move what they share into
 modules both import (as `item-import-ui.js` and `address-picker-ui.js` already are), with the
@@ -43,6 +52,38 @@ difference is risk and size of step:
 - **Merge into one page:** one page for every skin, the Bill's extras switched on by its layout.
   Fewer files at the end, but one big step that has to be proven all at once.
 
+## Step 0 — the items table's keys, written once, then three fixes (DF-03)
+
+**Why first:** these are the bugs 5zorro is hitting while he dogfoods, and the code behind them is
+the same in both pages. The item cell's `keydown` handler (`src/doc-form-page.js` ~2030–2163,
+`src/bill-form-page.js` ~2624–2760) is 134 lines and differs in three spots: the Bill calls
+`neighborItemCell` / `nextItemFocusAfterEdit` without the layout's `navFields`, and Shift+Tab out
+of the first box goes to the Bill's Amount Due / bill number but to the doc-form's last header
+field. `focusItemCell` is 90% the same (R6a-1). Fixing these in place means fixing them twice.
+
+**0a — move, behaviour unchanged.** The item cell's key handling and `focusItemCell` go into one
+module (e.g. `src/item-table-keys-ui.js`) that both pages call with a small deps object: the
+table element, `lastDoc`, `navFields`, `apply`, `api.addItem` / `deleteItem`, and a hook for
+"leave the table backward". Proof: `npm test`, both skins' smoke specs, the nav matrix's item-table
+cells.
+
+**0b — the three fixes, each in that module, each with a test that fails on the old code:**
+
+| ID | What the clerk saw | Cause | Fix |
+|----|--------------------|-------|-----|
+| T-1 | Sorted by a column, typed in it, pressed Tab: "it jumped to the wrong row" | Every repaint sorts again, so the line moves to its new place and the cursor goes with it | The order on screen holds still while the clerk types. It is set when a header is clicked; an edit never moves a line, and a new line goes at the bottom. When an edit leaves the table out of sorted order, a banner over the table says so: **"Sort is out of date — it refreshes when you click away. 🔄"** (5zorro: *"i want a banner or something saying 'sorting out of order will refresh sort when you click away.' and have a refresh emoji next to it so that i could click there to have sorting refresh specifically"*). Clicking 🔄 sorts now; focus leaving the table sorts too. The default order (line number) never shows the banner |
+| T-2 | Tab past a line's last box, or ↑ / ↓, went to a line that is not the next one on screen | `neighborItemCell` / `nextItemFocusAfterEdit` step to the next line in ERPNext's order (`rowIndex ± 1`), not the next line painted | Moves between lines follow the order on screen: the helpers take that order (the row indexes as painted) and step through it. Shift+Tab out of a line's first box goes to the line above on screen. 5zorro: *"it needs to match what the user expects"* |
+| T-3 | Tab from line 2's last box landed on line 4's Item, then left the table (PO-DOG-2002, 21:59:41 UTC) | A Tab while an earlier Tab is still adding a line is not checked, so a slow add (chaos) made two blank lines | A Tab while a line move is still working is held: no second line, no second move |
+
+**Proof for 0b:** unit tests on the pure order helpers (`src/item-table-nav.js`,
+`src/link-picker-policy.js`, `src/doc-item-sort.js`); a probe per fix on both skins, as a
+restricted clerk, failing on the old code (T-3 under `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100`);
+the full `npm run nav:check -- --ongoing` before the push. DF-05 (*odd line order for sort
+dogfood*) is the paper to dogfood it with.
+
+**Not in this plan:** the slow new PO, the slow added line, and the wait after a create-Item errand
+(museum OI-187: causes found, each its own small look).
+
 ## The findings (verbatim from plan 2026-10-19)
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |
@@ -53,9 +94,10 @@ difference is risk and size of step:
 
 ## Order
 
+0. **Step 0** (one session): 0a, then 0b's T-3, T-2, T-1.
 1. **R6a-1 steps 1–2** (one session): the identical leaves, then the commit gate.
 2. **R6a-1 step 3 with R6a-2's `paintItems` / `paintTaxes`** (its own session, both skins' smoke
-   specs).
+   specs). Builds on step 0's module.
 3. **R6a-2's four dialogs** to `src/bill-*-modal-ui.js` (Assign's steps as a pure reducer).
 4. **R2-5** in its order (print IPC → Papers → Find → payment settings → re-link / method change →
    health / incidents → the warm pick lists block → doc-form → Bill), each family to

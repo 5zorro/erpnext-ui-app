@@ -13,7 +13,8 @@
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
-   once — R2-5, R6a-1, R6a-2 from the review) — plan only; one question for 5zorro first.
+   once — R2-5, R6a-1, R6a-2 from the review) — plan only; starts with step 0, the items table's
+   keys written once and three navigation fixes (DF-03); one question for 5zorro first.
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
