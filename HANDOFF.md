@@ -451,8 +451,12 @@ the board) × the Bill's state (new typed, draft clean / typed, submitted) × mo
 lens, an errand saved / abandoned, a peek, another document, an ERPNext reload) — and judges each
 cell on *lands*, *typing* (never lost without a question), *back* and *focus* (`src/nav-spine.js`);
 `-- --ongoing` adds a scripted long session and the cruft check on the rail's lists
-(`src/nav-cruft.js`). **A change to navigation runs `npm run nav:check` before and after** (~17 min,
-the app closed); a cell that changes is a finding to explain, not a test to update. The rules it
+(`src/nav-cruft.js`). **When to run it (5zorro 2026-10-24):** after a navigation change, only the
+cells it touches — `NAV_ONLY=<start>/<state>/<move>,…`, one start (`npm run nav:check -- drafts`,
+2–4 min) or the probe that reproduced the bug; the **full** `npm run nav:check -- --ongoing` (~30 min,
+the app closed the whole time) only when 5zorro says he is about to push. A full run blocks him from
+opening the app, so it is not the default. A cell that changes is a finding to explain, not a test
+to update. The rules it
 fixed (2026-10-24):
 
 - **Opening another document from a Doc page asks** about unsaved typing, wherever the door is
