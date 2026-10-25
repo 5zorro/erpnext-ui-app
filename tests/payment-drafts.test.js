@@ -6,6 +6,7 @@ import {
   draftPaymentsByInvoice,
   draftPaymentAdvisory,
   draftPaymentConfirmText,
+  paymentCreateFailureText,
 } from "../src/payment-drafts.js";
 
 const draft = (over = {}) => ({
@@ -96,5 +97,35 @@ describe("payment-drafts (plan 2026-09-26 DF-01 D)", () => {
       draftPaymentConfirmText(normalizeDraftPayment(draft({ references: [] })), "delete"),
       /not applied to any bill/,
     );
+  });
+});
+
+describe("review 10-19 R10c-1 — a refused submit leaves a draft, and the drawer names it", () => {
+  it("names the draft and where to find it", () => {
+    const t = paymentCreateFailureText({ ok: false, step: "submit", name: "ACC-PAY-2026-00045", reason: "Period closed." });
+    assert.equal(t.draftLeft, "ACC-PAY-2026-00045");
+    assert.match(t.text, /Saved as draft ACC-PAY-2026-00045 but not submitted: Period closed\./);
+    assert.match(t.text, /Draft payments/);
+  });
+
+  it("ERPNext's reason is ended before the advice (dogfood probe R10c-1)", () => {
+    const t = paymentCreateFailureText({ ok: false, step: "submit", name: "P-1", reason: "Cannot create accounting entries against disabled accounts: ZZ DF Bank - USE" });
+    assert.match(t.text, /ZZ DF Bank - USE\. Finish or delete it/);
+  });
+
+  it("any other failure is just the reason", () => {
+    assert.deepEqual(paymentCreateFailureText({ ok: false, step: "insert", reason: "No account." }), {
+      text: "No account.",
+      draftLeft: "",
+    });
+    assert.equal(paymentCreateFailureText(null).text, "Payment Entry create failed.");
+  });
+});
+
+describe("review 10-19 — a payment create that lost contact mid-way says it may exist", () => {
+  it("does not read as a plain failure", () => {
+    const t = paymentCreateFailureText({ ok: false, step: "uncertain", reason: "Script failed to execute" });
+    assert.match(t.text, /may already be saved/);
+    assert.equal(t.draftLeft, "");
   });
 });

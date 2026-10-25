@@ -10,16 +10,52 @@ import {
   reduceFieldCalc,
   resetFieldCalc,
   commitFieldCalc,
+  resumeFieldCalc,
   isCalcEligibleField,
 } from "./field-calc.js";
+import { calcRibbonPlacement } from "./calc-ribbon-place.js";
 import { calcHistoryTapeOrder } from "./session-history.js";
 import { copyTableIconHtml, copyTotalIconHtml, uiIconHtml } from "../ui-icons.js";
 import { padDisplayToFooting, stripCalcDisplayPad, footingAlignMetrics, formatAlignedFootingLine } from "./calc-engine.js";
+import {
+  DEFAULT_SITE_ROUNDING,
+  ROUNDING_CONVENTIONS,
+  calcFieldPrecision,
+  conventionNote,
+  normalizeConvention,
+} from "./site-rounding.js";
 
 export { calcHistoryTapeOrder } from "./session-history.js";
 
 const CALC_MONO =
   'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+/**
+ * A result that had to be rounded keeps its tape up after Enter, with the yellow remainder row,
+ * then fades (5zorro 2026-10-25: "stay and fade after about 5 seconds"). Clicks pass through it.
+ */
+export const CALC_REMAINDER_LINGER_MS = 5000;
+export const CALC_REMAINDER_FADE_MS = 700;
+
+/** The clerk's rounding convention, remembered on this computer (a per-person convenience). */
+const CONVENTION_KEY = "calc-rounding-convention";
+
+function loadConvention() {
+  try {
+    return normalizeConvention(window.localStorage.getItem(CONVENTION_KEY));
+  } catch {
+    return normalizeConvention(null);
+  }
+}
+
+/** @param {string} id */
+function saveConvention(id) {
+  try {
+    window.localStorage.setItem(CONVENTION_KEY, id);
+  } catch {
+    /* private window / blocked storage: the choice lasts this page only */
+  }
+}
 
 /**
  * @param {HTMLElement} el
@@ -53,7 +89,9 @@ function fieldTextAlign(inp) {
  *   historyEl?: HTMLElement|null,
  *   getHistory?: () => Promise<import("./session-history.js").CalcHistoryEntry[]|null|undefined> | import("./session-history.js").CalcHistoryEntry[],
  *   copyHistory?: (id: string, mode?: string) => Promise<{ ok?: boolean }|null|undefined> | void,
+ *   getSiteRounding?: () => ({ method: string, currency: number, float: number } | null | undefined),
  * }} els
+ *   getSiteRounding: the site's rounding (main.js `calc-site-rounding`); the stock default until known.
  */
 export function createFieldCalcUi(els) {
   const overlay = els.overlay;
@@ -73,6 +111,121 @@ export function createFieldCalcUi(els) {
   let pointerOnOverlay = false;
   /** @type {HTMLInputElement|null} */
   let monoStyledInput = null;
+  /** The yellow "Rounds to … — remainder …" row under the result (R13-1), made when first needed. */
+  /** @type {HTMLElement|null} */
+  let remainderEl = null;
+  function ensureRemainderEl() {
+    if (!remainderEl && overlay && resultEl) {
+      remainderEl = document.createElement("div");
+      remainderEl.className = "calc-remainder";
+      remainderEl.dataset.testid = "doc-calc-remainder";
+      remainderEl.hidden = true;
+      resultEl.after(remainderEl);
+    }
+    return remainderEl;
+  }
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let lingerTimer = null;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let fadeTimer = null;
+
+  let convention = loadConvention();
+  /** The box the tape is for, so the ⓘ speaks of its places (cents / thousandths). */
+  let activeKind = "";
+  /** @type {HTMLElement|null} */
+  let conventionBar = null;
+  /** @type {HTMLElement|null} */
+  let conventionNoteEl = null;
+
+  /** @param {string} kind */
+  function roundingFor(kind) {
+    const site = (els.getSiteRounding && els.getSiteRounding()) || DEFAULT_SITE_ROUNDING;
+    return { precision: calcFieldPrecision(kind, site), method: site.method, convention };
+  }
+
+  /**
+   * The state with the rounding as it is now: the clerk may switch the convention mid-calculation,
+   * and the one showing when the result goes in is the one used.
+   * @param {import("./field-calc.js").FieldCalcState} st
+   * @param {string} kind
+   */
+  function withRounding(st, kind) {
+    const rounding = roundingFor(kind);
+    return { ...st, rounding, session: st.session ? { ...st.session, rounding } : st.session };
+  }
+
+  function paintConventionBar() {
+    if (!conventionBar) return;
+    conventionBar.querySelectorAll("button[data-convention]").forEach((b) => {
+      const on = /** @type {HTMLElement} */ (b).dataset.convention === convention;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    if (conventionNoteEl) conventionNoteEl.textContent = conventionNote(roundingFor(activeKind));
+  }
+
+  /**
+   * Round · Round up · Round down, pinned to the top of the tape, with an ⓘ that says the rule in
+   * plain words at the box's places (5zorro 2026-10-25). Made when the tape first shows.
+   */
+  function ensureConventionBar() {
+    if (conventionBar || !overlay) return;
+    conventionBar = document.createElement("div");
+    conventionBar.className = "calc-convention";
+    conventionBar.dataset.testid = "doc-calc-convention";
+    // Clicking here must not take focus from the box mid-calculation.
+    conventionBar.addEventListener("mousedown", (ev) => ev.preventDefault());
+    for (const c of ROUNDING_CONVENTIONS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.convention = c.id;
+      b.dataset.testid = `doc-calc-convention-${c.id}`;
+      b.textContent = c.label;
+      b.addEventListener("click", () => {
+        convention = c.id;
+        saveConvention(c.id);
+        paintConventionBar();
+        if (lastAnchor) positionOverlay(lastAnchor);
+      });
+      conventionBar.appendChild(b);
+    }
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "calc-convention-info";
+    info.dataset.testid = "doc-calc-convention-info";
+    info.title = "How this rounds";
+    info.setAttribute("aria-label", "How this rounds");
+    info.innerHTML = uiIconHtml("info", { size: 12 });
+    conventionBar.appendChild(info);
+    conventionNoteEl = document.createElement("div");
+    conventionNoteEl.className = "calc-convention-note";
+    conventionNoteEl.dataset.testid = "doc-calc-convention-note";
+    conventionNoteEl.hidden = true;
+    info.addEventListener("click", () => {
+      if (!conventionNoteEl) return;
+      conventionNoteEl.hidden = !conventionNoteEl.hidden;
+      if (lastAnchor) positionOverlay(lastAnchor);
+    });
+    overlay.prepend(conventionNoteEl);
+    overlay.prepend(conventionBar);
+    paintConventionBar();
+  }
+
+  function lingering() {
+    return lingerTimer != null || fadeTimer != null;
+  }
+
+  function stopLinger() {
+    if (lingerTimer != null) clearTimeout(lingerTimer);
+    if (fadeTimer != null) clearTimeout(fadeTimer);
+    lingerTimer = null;
+    fadeTimer = null;
+    if (overlay) overlay.classList.remove("calc-lingering", "calc-fading");
+    if (remainderEl) {
+      remainderEl.hidden = true;
+      remainderEl.textContent = "";
+    }
+  }
 
   function restoreInputCalcStyle() {
     if (!monoStyledInput) return;
@@ -121,6 +274,7 @@ export function createFieldCalcUi(els) {
   }
 
   function hideOverlay() {
+    stopLinger();
     pointerOnOverlay = false;
     lastAnchor = null;
     hideHistoryPanel();
@@ -142,7 +296,7 @@ export function createFieldCalcUi(els) {
   }
 
   /**
-   * Position tape to match the field box (left edge + width). Tape/result
+   * Position tape lined up with the field box, wide enough for its tape. Tape/result
    * text-align follows the input so left-aligned Amount Due and right-aligned
    * rate cells both get decimal columns that match the field.
    * @param {HTMLElement} anchor
@@ -152,16 +306,21 @@ export function createFieldCalcUi(els) {
     const r = anchor.getBoundingClientRect();
     const gap = 6;
     const topPad = 8;
-    const width = Math.max(72, Math.round(r.width));
-    overlay.style.left = `${Math.max(0, r.left)}px`;
-    overlay.style.width = `${width}px`;
-    overlay.style.minWidth = `${width}px`;
-    overlay.style.maxWidth = `${width}px`;
-
     const align =
       anchor instanceof HTMLInputElement || anchor instanceof HTMLTextAreaElement
         ? fieldTextAlign(/** @type {HTMLInputElement} */ (anchor))
         : "right";
+    // The tape's natural width first, then lined up with the field and grown to fit it
+    // (calc-ribbon-place.js — a narrow cell no longer squeezes the tape out of the ribbon).
+    overlay.style.minWidth = "";
+    overlay.style.maxWidth = "";
+    overlay.style.width = "max-content";
+    const natural = overlay.getBoundingClientRect().width;
+    const place = calcRibbonPlacement(r, natural, align, window.innerWidth);
+    overlay.style.left = `${place.left}px`;
+    overlay.style.width = `${place.width}px`;
+    overlay.style.minWidth = `${place.width}px`;
+    overlay.style.maxWidth = `${place.width}px`;
     if (exprEl) applyTapeTextAlign(exprEl, align);
     if (resultEl) applyTapeTextAlign(resultEl, align);
     if (historyEl) {
@@ -270,6 +429,35 @@ export function createFieldCalcUi(els) {
       };
       wireCopy(copyTable, "table");
       wireCopy(copyTotal, "total");
+      // ↩ carries on from this calculation's result before rounding (5zorro 2026-10-25).
+      if (e.exact && fieldCalc.mode === "active" && fieldCalcInput) {
+        const resume = document.createElement("button");
+        resume.type = "button";
+        resume.className = "calc-hist-copy calc-hist-resume";
+        resume.dataset.testid = "doc-calc-resume";
+        resume.textContent = "↩";
+        resume.title = `Resume this calculation from ${e.exact} (before rounding)`;
+        resume.setAttribute("aria-label", resume.title);
+        resume.addEventListener("mousedown", (ev) => ev.preventDefault());
+        resume.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const inp = fieldCalcInput;
+          if (!inp) return;
+          const r = resumeFieldCalc(fieldCalc, e.exact);
+          if (r.action !== "prevent") return;
+          fieldCalc = r.state;
+          collapseHistory();
+          paintFieldAligned(inp, r.preview, r.expression);
+          showOverlay(inp, r.expression, r.preview);
+          try {
+            inp.focus({ preventScroll: true });
+          } catch {
+            /* ignore */
+          }
+        });
+        actions.appendChild(resume);
+      }
       actions.appendChild(copyTable);
       actions.appendChild(copyTotal);
       block.appendChild(actions);
@@ -321,6 +509,9 @@ export function createFieldCalcUi(els) {
    */
   function showOverlay(anchor, expression, preview) {
     if (!overlay || !exprEl || !anchor) return;
+    stopLinger();
+    ensureConventionBar();
+    paintConventionBar();
     lastAnchor = anchor;
     exprEl.textContent = expression || "";
     if (resultEl) {
@@ -358,9 +549,51 @@ export function createFieldCalcUi(els) {
     inp.value = padDisplayToFooting(preview, expression || "");
   }
 
+  /**
+   * The finished tape stays up with its remainder row, then fades. The repaint that follows the
+   * commit (`clear`) leaves it be; a new calculation or an explicit hide ends it at once.
+   * @param {HTMLElement} anchor
+   * @param {string|undefined} expression
+   * @param {string|undefined} result
+   * @param {string} note
+   */
+  function lingerWithRemainder(anchor, expression, result, note) {
+    restoreInputCalcStyle();
+    hideHistoryPanel();
+    pointerOnOverlay = false;
+    showOverlay(anchor, expression, result);
+    if (!overlay || overlay.hidden || !ensureRemainderEl()) return;
+    remainderEl.textContent = note;
+    remainderEl.hidden = false;
+    overlay.classList.add("calc-lingering");
+    positionOverlay(anchor);
+    lingerTimer = setTimeout(() => {
+      lingerTimer = null;
+      overlay.classList.add("calc-fading");
+      fadeTimer = setTimeout(() => {
+        fadeTimer = null;
+        hideOverlay();
+      }, CALC_REMAINDER_FADE_MS);
+    }, CALC_REMAINDER_LINGER_MS);
+  }
+
+  /**
+   * Close the tape after a commit: hide it, or leave it up with the remainder when one was dropped.
+   * @param {HTMLElement} anchor
+   * @param {import("./field-calc.js").FieldCalcResult} r
+   */
+  function endTape(anchor, r) {
+    if (r.remainder) lingerWithRemainder(anchor, r.expression, r.preview, r.remainder);
+    else hideOverlay();
+  }
+
   function clear(prior) {
     fieldCalc = resetFieldCalc(fieldCalc, prior != null ? prior : fieldCalc.priorValue);
     fieldCalcInput = null;
+    if (lingering()) {
+      restoreInputCalcStyle();
+      return;
+    }
     hideOverlay();
   }
 
@@ -395,13 +628,14 @@ export function createFieldCalcUi(els) {
     const editable = () => (opts.isEditable ? !!opts.isEditable() : true);
     const commitIdleBlur = !!opts.commitOnIdleBlur;
 
-    function noteHistory(footing, total) {
+    function noteHistory(footing, total, exact) {
       if (!opts.onHistory || total == null || String(total).trim() === "") return;
       if (footing == null || String(footing).trim() === "") return;
       try {
         opts.onHistory({
           footing: String(footing),
           total: String(total).trim(),
+          ...(exact ? { exact: String(exact) } : {}),
           fieldKind: opts.kind,
         });
       } catch {
@@ -410,16 +644,19 @@ export function createFieldCalcUi(els) {
     }
 
     inp.addEventListener("focus", () => {
-      fieldCalc = createFieldCalcState(inp.value, undefined, { kind: opts.kind });
+      fieldCalc = createFieldCalcState(inp.value, undefined, { kind: opts.kind, rounding: roundingFor(opts.kind) });
       fieldCalcInput = inp;
+      activeKind = opts.kind;
     });
 
     inp.addEventListener("keydown", (ev) => {
       if (painting() || !editable()) return;
       if (fieldCalcInput !== inp) {
-        fieldCalc = createFieldCalcState(inp.value, undefined, { kind: opts.kind });
+        fieldCalc = createFieldCalcState(inp.value, undefined, { kind: opts.kind, rounding: roundingFor(opts.kind) });
         fieldCalcInput = inp;
       }
+      activeKind = opts.kind;
+      fieldCalc = withRounding(fieldCalc, opts.kind);
       const r = reduceFieldCalc(fieldCalc, {
         key: ev.key,
         fieldValue: stripCalcDisplayPad(inp.value),
@@ -440,10 +677,10 @@ export function createFieldCalcUi(els) {
           ev.preventDefault();
           ev.stopPropagation();
         }
-        hideOverlay();
+        endTape(inp, r);
         fieldCalcInput = null;
         inp.value = r.commitValue != null ? r.commitValue : "";
-        noteHistory(r.expression, inp.value);
+        noteHistory(r.expression, inp.value, r.exact);
         Promise.resolve(opts.onCommit(inp.value)).catch(() => {});
         return;
       }
@@ -465,13 +702,14 @@ export function createFieldCalcUi(els) {
         return;
       }
       if (fieldCalc.mode === "active") {
-        const r = commitFieldCalc(fieldCalc);
+        const r = commitFieldCalc(withRounding(fieldCalc, opts.kind));
         fieldCalc = r.state;
-        hideOverlay();
+        if (r.action === "commit") endTape(inp, r);
+        else hideOverlay();
         fieldCalcInput = null;
         if (r.action === "commit") {
           inp.value = r.commitValue != null ? r.commitValue : "";
-          noteHistory(r.expression, inp.value);
+          noteHistory(r.expression, inp.value, r.exact);
           Promise.resolve(opts.onCommit(inp.value)).catch(() => {});
         } else {
           inp.value = fieldCalc.priorValue;
@@ -498,6 +736,8 @@ export function createFieldCalcUi(els) {
     getState: () => fieldCalc,
     /** @returns {HTMLInputElement|null} */
     getInput: () => fieldCalcInput,
+    /** The clerk's rounding convention (round / up / down), for a sum the tape never saw. */
+    getConvention: () => convention,
     setState(next, input) {
       fieldCalc = next;
       if (input !== undefined) fieldCalcInput = input;

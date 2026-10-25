@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("erpUi", {
   openNavIncident: () => ipcRenderer.send("open-nav-incident"),
   openFocusIncident: () => ipcRenderer.send("open-focus-incident"),
   goHome: () => ipcRenderer.send("go-home"),
+  detourBack: () => ipcRenderer.send("shell-detour-back"),
   openDocSkin: () => ipcRenderer.send("open-doc-skin"),
   openVanillaSkin: () => ipcRenderer.send("open-vanilla-skin"),
   openSimplifiedSkin: () => ipcRenderer.send("open-simplified-skin"),

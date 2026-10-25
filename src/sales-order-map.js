@@ -83,7 +83,7 @@ export const SALES_ORDER_HEADER_FIELDS = [
 /** @type {import("./sales-doc-map.js").SalesLineCol[]} */
 export const SALES_ORDER_ITEM_COLS = [
   { label: "Line", field: "__line_no", displayOnly: true, readOnly: true, sortKey: "lineNo" },
-  { label: "Item", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
   { label: "Description", field: "description", sortKey: "description" },
   { label: "Qty", field: "qty", sortKey: "qty" },
   { label: "Rate", field: "rate", sortKey: "rate" },
@@ -91,6 +91,8 @@ export const SALES_ORDER_ITEM_COLS = [
   { label: "Amount", field: null, display: "amount", displayOnly: true, sortKey: "amount" },
   { label: "Delivered", field: null, display: "delivered_qty", displayOnly: true, sortKey: "delivered_qty" },
   { label: "Billed", field: null, display: "billed_amt", displayOnly: true, money: true, sortKey: "billed_amt" },
+  // Where each line comes from — POs, Work Orders, Material Requests, stock (plan 2026-10-12 S4).
+  { label: "Sources", field: null, display: "__sources", displayOnly: true, sources: true },
 ];
 
 /** The read-only progress strip — the first sliver of the Sales Order's dashboard half. */

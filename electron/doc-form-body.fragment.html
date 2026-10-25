@@ -41,12 +41,17 @@
         </section>
         <section class="bill-section bill-section-taxes" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
             <span class="taxes-title">Taxes and Charges</span>
+            <button type="button" class="linkish" id="btn-tax-default" data-testid="doc-tax-default" tabindex="-1"
+              title="Why these taxes, and how to change them">Vendor tax template default</button>
+            <div class="tax-default-note" id="tax-default-note" data-testid="doc-tax-default-note" hidden></div>
+            <div class="line-panel tax-panel" data-testid="doc-tax-panel">
             <table class="taxes-table">
               <thead>
                 <tr id="taxes-head-row"></tr>
               </thead>
               <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
             </table>
+            </div>
             <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
               <div class="field">
                 <label for="f-tax-account">Account</label>
@@ -57,6 +62,8 @@
                 <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
               </div>
               <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
+              <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="doc-remove-all-tax" tabindex="-1"
+                title="Remove every tax and charge row, and the template they came from. They stay removed until you save this document.">Remove all taxes/charges</button>
             </div>
             <div class="money-stack" data-testid="doc-money-stack">
               <div class="ms-row">
@@ -80,7 +87,10 @@
               <div id="source-terms-fields" class="source-terms-fields" data-testid="doc-source-terms-fields"></div>
             </div>
             <div class="field terms-text" id="terms-block" data-testid="doc-terms-block" hidden>
-              <label for="f-terms-text">Terms and conditions</label>
+              <!-- No Remarks on this doctype (the PO): Attach sits here instead, as beside the Bill's memo. -->
+              <div class="memo-head" id="terms-head">
+                <label for="f-terms-text">Terms and conditions</label>
+              </div>
               <textarea id="f-terms-text" rows="3" data-field="terms" data-testid="doc-terms-text"></textarea>
             </div>
             <div class="memo-entry" id="memo-entry" hidden>
@@ -90,12 +100,14 @@
               </div>
               <textarea id="f-memo" rows="2" data-field="remarks" data-testid="doc-memo"></textarea>
             </div>
+            <!-- The attached files, with Peek / Download (src/attachment-list-ui.js). -->
+            <div class="attach-list-host" id="attach-list" hidden></div>
           </div>
         </section>
           <div class="back-to-top-row">
             <button type="button" id="btn-back-top" data-testid="doc-back-top"
               title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
           </div>
-          <p class="hint" id="doc-hint"></p>
+          <p class="hint hatch-clear" id="doc-hint"></p>
         </div>
 </div>

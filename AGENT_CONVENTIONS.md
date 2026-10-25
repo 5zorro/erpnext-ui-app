@@ -29,7 +29,28 @@ rules directory it replaces. `HANDOFF.md` is the tracked, public architecture SS
 3. **Architecture invariants** (Clean Core, HTTP-only, pure-first, one ERP base,
    commits-vs-pushes) — see `HANDOFF.md` § Invariants. Not restated here; that file is the
    SSoT for them.
-4. **`npm test` green** before handing work back to the user.
+4. **`npm test` green** before handing work back to the user. A red run is evidence: read its log
+   in `test-logs/`, name the test, never commit past it.
+5. **Agents commit, only the owner pushes.** Commit freely on `alpha` as checkpoints; never push,
+   and never `git push --all` / `--mirror`.
+6. **No business-identifying detail in tracked files** — plans, code comments, test comments. Never
+   name the legacy accounting system, state the size of the item master, or frame the work as a
+   migration: write "the legacy system" and "~20k item numbers".
+7. **No AI-session sizing in tracked files or commit messages** — no model name with its version, no
+   effort level, window size, context-usage percentage or token count per file or session. Size
+   review sessions by slice count. `scripts/check-commit-attribution.sh` (the commit-msg hook and the
+   CI range check) refuses the common forms in messages and in added lines.
+
+## Process
+
+- **Plan before building.** When an open item is ready, write or extend the dated plan
+  (`docs/implementation-plan-YYYY-MM-DD.md`) first, then build. Close a plan by `HANDOFF.md`
+  § *Closing a plan*.
+- **Pure first:** new logic lands in `src/` + `tests/` before `electron/` wiring.
+- **Prove it on the surface:** a passing unit test is not proof the page is wired. Probes
+  (`tests/probes/`) drive the real app, acting as a restricted clerk, not Administrator; a probe
+  proves a fix only once it has failed on the old code.
+- **ERPNext site settings: recommend, never set** (`HANDOFF.md` § *ERP site settings*).
 
 ## Scope discipline (ponytail lite)
 

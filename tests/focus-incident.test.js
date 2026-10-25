@@ -9,6 +9,8 @@ import {
   formatFocusIncidentsDigest,
   appendFocusIncident,
   serializeFocusIncidentLine,
+  redactFocusDetail,
+  slimFocusTrail,
 } from "../src/focus-incident.js";
 
 describe("sanitizeFocusIncidentNote", () => {
@@ -86,5 +88,19 @@ describe("formatFocusIncidentsDigest", () => {
     const lines = formatFocusIncidentsDigest([inc]);
     assert.match(lines.join("\n"), /Tab stuck/);
     assert.match(formatFocusIncidentLines(inc).join("\n"), /Focus incident/);
+  });
+});
+
+describe("redactFocusDetail (plan 2026-10-21 trail, no field values in an incident)", () => {
+  it("keeps a pick line's shape, rule and source, drops its text", () => {
+    const line = 'Item typed="SAMPLE-SKU-0" list="W" rule=held picked="SAMPLE-SKU-01" src=copy';
+    assert.equal(redactFocusDetail("link-pick-key", line), "Item typed=(12 chars) list=(1 chars) rule=held picked=(13 chars) src=copy");
+    assert.equal(redactFocusDetail("link-held", 'Item typed="a" list=none rule=held src=live'), "Item typed=(1 chars) list=none rule=held src=live");
+    assert.equal(redactFocusDetail("vendor-missing", "vendor:ZZ GONE"), "vendor:(7 chars)");
+    assert.equal(redactFocusDetail("paint-start", 'onSnapshot "x"'), 'onSnapshot "x"');
+  });
+  it("slimFocusTrail applies it", () => {
+    const [row] = slimFocusTrail([{ event: "link-pick", detail: 'Supplier typed="ACME" list="AC" rule=chosen picked="ACME" src=copy' }]);
+    assert.doesNotMatch(row.detail, /ACME/);
   });
 });

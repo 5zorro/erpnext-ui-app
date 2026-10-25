@@ -29,7 +29,15 @@ export function navRecordOf(entry, erpBase) {
   }
   const info = routeInfo(entry.route || "", erpBase);
   if (!info.doctype || !info.record || isNewDocRecord(info.record)) return null;
-  return { doctypeKey: info.doctype, name: info.record };
+  // A route carries the name URL-encoded ("ALPINE%20SUPPLY%20CO"); ERPNext knows it decoded, and
+  // asking for the encoded one read as "deleted" and dropped the row (nav matrix N-4, 2026-10-24).
+  let name = info.record;
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    /* not encoded after all */
+  }
+  return { doctypeKey: info.doctype, name };
 }
 
 /**
@@ -104,4 +112,19 @@ export function pruneVanished(list, vanished, erpBase) {
     else kept.push(e);
   }
   return { kept, dropped };
+}
+
+/** Home re-checks the rail at most this often (each check is one query per doctype). */
+export const HOME_PRUNE_MIN_MS = 60_000;
+
+/**
+ * Rows deleted in ERPNext while the app runs (a browser tab, another clerk) stayed on the Drafts
+ * list until the next start (nav matrix N-6, 2026-10-24): the prune ran at login only. Home is where
+ * the clerk next reads the rail, so it asks there too — at most once a minute.
+ * @param {number} lastAt when Home last asked (ms; 0 = never)
+ * @param {number} now
+ * @param {number} [minMs]
+ */
+export function shouldPruneOnHome(lastAt, now, minMs = HOME_PRUNE_MIN_MS) {
+  return !(Number(lastAt) > 0) || Number(now) - Number(lastAt) >= minMs;
 }

@@ -55,6 +55,7 @@
  */
 
 import { predictAmendedName } from "./doc-actions.js";
+import { endSentence } from "./erp-refusal-reason.js";
 
 /** @param {unknown} v */
 function text(v) {
@@ -62,8 +63,8 @@ function text(v) {
 }
 
 /** @param {number} n @param {string} noun */
-function plural(n, noun) {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+function plural(n, noun, many = `${noun}s`) {
+  return `${n} ${n === 1 ? noun : many}`;
 }
 
 /**
@@ -261,6 +262,66 @@ export function describeModeChange(plan, ctx = {}) {
 }
 
 /**
+ * Review 10-19 / 5zorro 2026-10-20: the batch stops at the first bill that did not go exactly as
+ * asked — refused, half-done, unknown, or amended without the method sticking. Whatever made
+ * ERPNext refuse one bill (a closed period, a setting that refetches the schedule) usually refuses
+ * the next, and every further bill would be one more cancelled original to sort out by hand.
+ *
+ * @param {{ ok?: boolean, verified?: boolean }|null|undefined} r
+ */
+export function modeChangeShouldStop(r) {
+  return !r || !r.ok || r.verified === false;
+}
+
+/**
+ * The status chip on one bill's row of the Method… panel, while the batch runs and after.
+ *
+ * @param {{ phase?: "waiting"|"working" }|{ invoice?: string, ok?: boolean, cancelled?: boolean,
+ *   uncertain?: boolean, notAttempted?: boolean, amendedName?: string, verified?: boolean,
+ *   reason?: string }|null|undefined} entry
+ * @returns {{ state: "waiting"|"working"|"done"|"check"|"unchanged"|"skipped"|"half"|"stranded", text: string, title: string }}
+ */
+export function modeChangeChip(entry) {
+  const e = /** @type {Record<string, any>} */ (entry || {});
+  if (e.phase === "waiting") return { state: "waiting", text: "Waiting", title: "" };
+  if (e.phase === "working") return { state: "working", text: "Changing…", title: "" };
+  const reason = text(e.reason);
+  if (e.ok) {
+    return e.verified === false
+      ? { state: "check", text: `→ ${text(e.amendedName)} — check method`, title: "Amended, but ERPNext did not read the new method back." }
+      : { state: "done", text: `✓ → ${text(e.amendedName)}`, title: "" };
+  }
+  if (e.notAttempted) return { state: "skipped", text: "Not attempted", title: reason };
+  if (e.cancelled && e.amendedName) {
+    return { state: "half", text: `Cancelled — ${text(e.amendedName)} not submitted`, title: reason };
+  }
+  if (e.cancelled) {
+    return e.uncertain
+      ? { state: "stranded", text: "May be cancelled — check", title: reason }
+      : { state: "stranded", text: "CANCELLED, not replaced", title: reason };
+  }
+  return { state: "unchanged", text: "Not changed", title: reason };
+}
+
+/**
+ * The work still worth a "Try again" after a stop: bills never attempted, and bills ERPNext refused
+ * before anything changed. A bill that was cancelled (or may have been) is left out — it needs a
+ * person, and re-running the batch on it would be answered "already amended" or worse.
+ *
+ * @template {{ invoice: string }} W
+ * @param {W[]} work
+ * @param {{ invoice?: string, ok?: boolean, cancelled?: boolean }[]} results
+ * @returns {W[]}
+ */
+export function modeChangeRemainder(work, results) {
+  const byInvoice = new Map((Array.isArray(results) ? results : []).filter(Boolean).map((r) => [text(r.invoice), r]));
+  return (Array.isArray(work) ? work : []).filter((w) => {
+    const r = byInvoice.get(text(w && w.invoice));
+    return !r || (!r.ok && !r.cancelled);
+  });
+}
+
+/**
  * The per-bill outcome, as a batch. 🔴 **A batch that reports one outcome for five documents will
  * be wrong about at least one of them** (the plan's own words), so there is no single "it worked".
  *
@@ -283,10 +344,12 @@ export function describeModeChange(plan, ctx = {}) {
 export function summarizeModeChange(results = []) {
   const rows = Array.isArray(results) ? results : [];
   const done = rows.filter((r) => r && r.ok);
-  const stranded = rows.filter((r) => r && !r.ok && r.cancelled).map((r) => text(r.invoice));
+  const stranded = rows.filter((r) => r && !r.ok && r.cancelled && !r.amendedName).map((r) => text(r.invoice));
+  const halfDone = rows.filter((r) => r && !r.ok && r.cancelled && r.amendedName).map((r) => text(r.invoice));
   const failed = rows.filter((r) => r && !r.ok && !r.cancelled);
   const unverified = done.filter((r) => r.verified === false).map((r) => text(r.invoice));
 
+  const said = (r) => endSentence(text(r.reason));
   const lines = rows.map((r) => {
     const name = text(r.invoice);
     if (r.ok) {
@@ -294,19 +357,34 @@ export function summarizeModeChange(results = []) {
         ? `${name} → ${text(r.amendedName)} — amended, but ERPNext did not read the method back. Check it.`
         : `${name} → ${text(r.amendedName)} ✓`;
     }
+    if (r.cancelled && r.amendedName) {
+      return `${name} → ${text(r.amendedName)} — created but NOT submitted. ${said(r)} Open ${text(r.amendedName)} and submit it.`;
+    }
+    if (r.cancelled && r.uncertain) {
+      return `${name} — lost contact mid-way; it may already be cancelled. Check it in ERPNext before anything else.`;
+    }
     if (r.cancelled) {
-      return `${name} — CANCELLED, not replaced. ${text(r.reason)} Amend it before re-entering anything.`;
+      return `${name} — CANCELLED, not replaced. ${said(r)} Amend it before re-entering anything.`;
     }
     return `${name} — not changed. ${text(r.reason)}`;
   });
 
   const headline = stranded.length
     ? `${plural(stranded.length, "bill")} ${stranded.length === 1 ? "is" : "are"} cancelled with no replacement — fix ${stranded.length === 1 ? "that" : "those"} first.`
+    : halfDone.length
+      ? `${plural(halfDone.length, "amended copy", "amended copies")} ${halfDone.length === 1 ? "was" : "were"} created but not submitted — submit ${halfDone.length === 1 ? "it" : "them"} first.`
     : failed.length
       ? `${done.length} of ${rows.length} changed; ${plural(failed.length, "bill")} unchanged.`
       : unverified.length
         ? `${plural(done.length, "bill")} amended, but ${unverified.length} could not be verified.`
         : `${plural(done.length, "bill")} changed.`;
 
-  return { ok: !stranded.length && !failed.length && !unverified.length, headline, lines, stranded, unverified };
+  return {
+    ok: !stranded.length && !halfDone.length && !failed.length && !unverified.length,
+    headline,
+    lines,
+    stranded,
+    halfDone,
+    unverified,
+  };
 }

@@ -27,6 +27,7 @@
  * |---|---|
  * | `checks` | ticks to do right after entering it — including the click-through checks (Find pages, the hatch toggle, Home) placed on the paper where you are already on that screen |
  * | `knownGaps` | what the Doc skin cannot do yet, so that part is done in Vanilla instead of typed into a wall |
+ * | `touches` | the architecture families it exercises beyond its kind's own (src/architecture-families.js) — `npm run dogfood:for-change` picks papers by it |
  */
 
 /**
@@ -95,6 +96,7 @@ export const SOURCE_KIND_FLOW = Object.freeze({
  *   notes?: string[],
  *   checks?: string[],       // ticks right after entering it (see the table above)
  *   knownGaps?: string[],    // what the Doc skin cannot do yet — do that part in Vanilla
+ *   touches?: string[],      // architecture families beyond its kind's (src/architecture-families.js)
  *   lines: SourceLine[],
  * }} DogfoodSourceDoc
  */
@@ -103,6 +105,7 @@ export const SOURCE_KIND_FLOW = Object.freeze({
 export const DOGFOOD_SOURCES = [
   {
     id: "DF-01",
+    touches: ["home", "find", "nav"],
     scenario: "Invoice includes tax that should be backed out when paying in full",
     oi103: 1,
     kind: "vendor_invoice",
@@ -204,6 +207,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-03c",
+    touches: ["sources"],
     scenario: "Multi-PO → one Bill — combined vendor invoice",
     oi103: 3,
     kind: "vendor_invoice",
@@ -253,6 +257,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-04a",
+    touches: ["sources"],
     scenario: "Multi-Bill → one PO — first partial invoice",
     oi103: 4,
     kind: "vendor_invoice",
@@ -274,6 +279,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-04b",
+    touches: ["sources"],
     scenario: "Multi-Bill → one PO — second partial invoice",
     oi103: 4,
     kind: "vendor_invoice",
@@ -295,6 +301,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-05",
+    touches: ["doc-form"],
     scenario: "Odd line order for sort dogfood",
     oi103: 5,
     kind: "vendor_invoice",
@@ -317,6 +324,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-06",
+    touches: ["pay", "find"],
     scenario: "Credit-card pay path cue",
     oi103: 6,
     kind: "vendor_invoice",
@@ -483,6 +491,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-13",
+    touches: ["doc-form"],
     scenario: "Messy vendor spreadsheet paste — OI-132 Import lines",
     kind: "purchase_order",
     template: "grid",
@@ -506,6 +515,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-14",
+    touches: ["sources"],
     scenario: "OI-149 — PO + partial IR same vendor (multi-source Bill dogfood)",
     kind: "vendor_invoice",
     template: "classic",
@@ -531,6 +541,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-15",
+    touches: ["pay"],
     scenario: "OI-153 — Vendor prepayment (pay before goods)",
     kind: "purchase_order",
     template: "ack",
@@ -559,6 +570,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-16",
+    touches: ["find"],
     scenario: "OI-154 — Logbook PO# Find (title TO-5599, not ERP name)",
     kind: "purchase_order",
     template: "ack",
@@ -585,6 +597,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-17",
+    touches: ["edit-submitted", "pay"],
     scenario: "Vendor statement still shows a bill you already paid — because amending it detached the payment",
     oi: "OI-171",
     kind: "vendor_statement",
@@ -612,6 +625,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-18",
+    touches: ["home"],
     scenario: "Customer RFQ priced under THEIR part numbers, with a quantity break and an expiry",
     oi: "OI-143",
     kind: "customer_rfq",
@@ -656,6 +670,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-19",
+    touches: ["find", "doc-form"],
     scenario: "Customer PO: bill-to is head office, ship-to is a jobsite, and their PO# is the only number they will quote",
     oi: "OI-134",
     kind: "customer_po",
@@ -698,6 +713,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-20",
+    touches: ["doc-form"],
     scenario: "Bill only what shipped: partial invoice against a customer PO, with the rest on backorder",
     oi: "OI-134",
     kind: "billing_instruction",
@@ -740,6 +756,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-21",
+    touches: ["find"],
     scenario: "Customer check short-pays an invoice they identify only by THEIR PO number",
     kind: "customer_remittance",
     template: "classic",
@@ -777,17 +794,18 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-22",
-    scenario: "A bill entered weeks after its invoice date must post on the invoice date, not the day it was typed",
+    touches: ["doc-form"],
+    scenario: "A bill entered weeks after its invoice date: it posts the day it is entered, and its due date still counts from the invoice date",
     kind: "vendor_invoice",
     template: "grid",
     dogfoodHint:
-      "Enter as printed on the Doc Bill. The Invoice date is 08/04/2026; you are typing it much later. The fix of 2026-09-26: a typed Invoice date is also the posting date (ERPNext's own ‘invoice date, else posting date’ rule). Before it, this bill posted to the ledger today.",
+      "Enter as printed on the Doc Bill, typing the vendor first and then the Invoice date 08/04/2026; you are typing it much later. A Bill's posting date is a stamp — the day it is saved or submitted (5zorro 2026-10-10, reversing 2026-09-26's ‘posts on its invoice date’). The Invoice date drives the due date. Before 2026-10-10 the Doc Bill counted terms from today here and ERPNext refused the save (‘Due Date cannot be after …’).",
     expect:
-      "In Vanilla the saved Bill shows Posting Date 08/04/2026 with Edit Posting Date ticked, and the Due Date is 30 days after 08/04 — not after today.",
+      "The Bill saves and submits. In Vanilla: Posting Date is the day you entered it, ‘Edit Posting Date and Time’ is not ticked, Supplier Invoice Date is 08/04/2026, and the Due Date is 09/03/2026 — 30 days after 08/04, not after today.",
     checks: [
-      "After typing the Invoice date — Open in Default-skin: Posting Date is 08/04/2026 and ‘Edit Posting Date and Time’ is ticked.",
-      "With Terms NET 30 DAYS, the Due date reads 09/03/2026 — 30 days from the invoice date.",
-      "Back on the Doc skin, clear the Invoice date: in Vanilla the Posting Date returns to today. Retype 08/04/2026 before saving.",
+      "After typing the Invoice date, the Due date reads 09/03/2026 (NET 30 DAYS from 08/04).",
+      "Change the vendor and pick it again: the Due date still reads 09/03/2026.",
+      "Open in Default-skin: Posting Date is today, Edit Posting Date unticked.",
       "Save, then Find Bills: the Bill date column shows Aug 4, 2026.",
     ],
     vendor: {
@@ -805,6 +823,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-23",
+    touches: ["doc-form", "find"],
     scenario: "Goods received last week, receipt typed today — the Item Receipt must keep the received date",
     kind: "packing_list",
     template: "ack",
@@ -835,6 +854,7 @@ export const DOGFOOD_SOURCES = [
   // set_expense_account). The PO skin's "Customer (drop ship)" sets only the address, not the lines.
   {
     id: "DF-24a",
+    touches: ["doc-form"],
     scenario: "Drop ship, step 1 — the customer orders something we have the vendor ship straight to them",
     kind: "customer_po",
     template: "ack",
@@ -870,6 +890,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-24b",
+    touches: ["po-ir", "doc-form"],
     scenario: "Drop ship, step 2 — our PO tells the vendor to ship to the customer, not to us",
     kind: "purchase_order",
     template: "ack",
@@ -901,6 +922,7 @@ export const DOGFOOD_SOURCES = [
   },
   {
     id: "DF-24c",
+    touches: ["sources", "doc-form"],
     scenario: "Drop ship, step 3 — the vendor bills us for goods that went straight to the customer",
     kind: "vendor_invoice",
     template: "grid",
@@ -927,6 +949,241 @@ export const DOGFOOD_SOURCES = [
     poNos: ["PO-DOG-4410"],
     terms: "Net 30",
     lines: [{ sku: "SAMPLE-SKU-09", description: "Sample Item 09 — drop ship", qty: 2, rate: 455 }],
+  },
+  // DF-25a…i — the trace chain (plan 2026-10-03, OI-041): one customer order walked through both
+  // sides of the business, carrying every edge case the trace pages (lifecycle, bowtie, statement,
+  // Gantt) are built to show. Typed now, it is the data those pages are proven on when they land —
+  // the same story and the same numbers as tests/fixtures/trace-chain.js.
+  {
+    id: "DF-25a",
+    touches: ["trace", "find"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 1 — the customer asks for a price on two items",
+    kind: "customer_rfq",
+    template: "plain",
+    dogfoodHint: "Enter as an Estimate for LAKESIDE MARINE SUPPLY at the prices below. Submit it: DF-25b's Sales Order is made from it.",
+    expect: "A submitted Estimate for 1,000.00.",
+    checks: ["Find Estimates finds it by customer."],
+    vendor: { legalName: "LAKESIDE MARINE SUPPLY", accountNo: "RFQ-5512", address: ["90 Harbor Dr", "Bear Lake, UT 84028"] },
+    docNo: "RFQ-5512",
+    docDate: "10/05/2026",
+    terms: "Net 30",
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 150 },
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 200 },
+    ],
+  },
+  {
+    id: "DF-25b",
+    touches: ["trace", "find"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 2 — the customer's PO, made into a Sales Order from the Estimate",
+    kind: "customer_po",
+    template: "ack",
+    dogfoodHint: "Make the Sales Order from DF-25a's Estimate (Create › Sales Order, or Vanilla's Get Items From › Quotation) — not typed fresh, so each line keeps its link to the Estimate line. Customer PO No. CPO-55120.",
+    expect: "The Sales Order's lines came from the Estimate (Vanilla: each line's Quotation column is filled).",
+    checks: ["Find Sales Orders finds it by CPO-55120."],
+    vendor: { legalName: "LAKESIDE MARINE SUPPLY", accountNo: "CPO-55120", address: ["90 Harbor Dr", "Bear Lake, UT 84028"] },
+    docNo: "CPO-55120",
+    docDate: "10/06/2026",
+    terms: "Net 30",
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 150 },
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 200 },
+    ],
+  },
+  {
+    id: "DF-25c",
+    touches: ["trace", "doc-form"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 3 — one PO carries the customer's lines, a line not on their order, and stock for the warehouse",
+    kind: "purchase_order",
+    template: "ack",
+    dogfoodHint:
+      "Three sources on one PO. (1) First, in Vanilla, a Material Request (Purchase) for SAMPLE-SKU-13 × 5 — stock for the warehouse, nothing to do with the customer. (2) From DF-25b's Sales Order: Create › Purchase Order for CASCADE FITTINGS, keeping SKU-10 and SKU-11. (3) On that PO add SAMPLE-SKU-12 × 1 @ 45.00 by hand and pick DF-25b's Sales Order in the line's Sales Order column — the customer never ordered it. (4) Get Items From › Material Request for SKU-13. Logbook PO# PO-DOG-5501.",
+    expect: "One PO, 835.00: two lines from the Sales Order, one line naming the Sales Order that has no such item, one line from the Material Request.",
+    checks: [
+      "The No.: toggle shows PO-DOG-5501 leading.",
+      "Later, when the trace pages are built (plan 2026-10-03): the Lifecycle tab marks SKU-12 ⚠ 'not on the Sales Order', and SKU-13 shows only under the Material Request's own story — never in the customer's margin.",
+    ],
+    knownGaps: [
+      "No Doc skin for Material Request — create it in Vanilla.",
+      "The PO Doc skin has no per-line Sales Order column — set SKU-12's Sales Order in Vanilla, and use Vanilla's Get Items From › Material Request.",
+    ],
+    vendor: { legalName: "CASCADE FITTINGS CO.", address: ["410 Mill St", "Logan, UT 84321"] },
+    shipTo: { name: "HECSANDBOX Receiving", address: ["1 Warehouse Way", "Provo, UT 84601"] },
+    docNo: "PO-DOG-5501",
+    docDate: "10/08/2026",
+    terms: "Net 30",
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 100 },
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 120 },
+      { sku: "SAMPLE-SKU-12", description: "Sample Item 12 — not on the customer's order", qty: 1, rate: 45 },
+      { sku: "SAMPLE-SKU-13", description: "Sample Item 13 — warehouse stock", qty: 5, rate: 30 },
+    ],
+  },
+  {
+    id: "DF-25d",
+    touches: ["trace", "doc-form"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 4 — first delivery: the customer's SKU-10 and the warehouse's stock",
+    kind: "packing_list",
+    template: "grid",
+    dogfoodHint: "Doc Item Receipt → Select PO / source → PO-DOG-5501, receive SKU-10 × 4 and SKU-13 × 5 only. Date 10/12/2026.",
+    expect: "PO-DOG-5501 is part received; SKU-11 and SKU-12 still open.",
+    checks: ["Item Receipt's Date stays 10/12/2026 after Save."],
+    vendor: { legalName: "CASCADE FITTINGS CO.", address: ["410 Mill St", "Logan, UT 84321"] },
+    docNo: "PS-6601",
+    docDate: "10/12/2026",
+    poNos: ["PO-DOG-5501"],
+    packingNo: "PS-6601",
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 100 },
+      { sku: "SAMPLE-SKU-13", description: "Sample Item 13 — warehouse stock", qty: 5, rate: 30 },
+    ],
+  },
+  {
+    id: "DF-25e",
+    touches: ["trace"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 5 — the rest arrives the day AFTER the vendor dated its invoice",
+    kind: "packing_list",
+    template: "classic",
+    dogfoodHint: "Doc Item Receipt → PO-DOG-5501, receive SKU-11 × 2 and SKU-12 × 1. Date 10/14/2026 — one day after DF-25f's invoice date (the vendor invoiced on the ship date). Enter this receipt before the bill.",
+    expect: "PO-DOG-5501 fully received.",
+    checks: ["Later, when the trace pages are built: the Lifecycle tab draws the link from this receipt to the bill dashed with a ⚠ — the bill is dated before the goods it bills arrived."],
+    vendor: { legalName: "CASCADE FITTINGS CO.", address: ["410 Mill St", "Logan, UT 84321"] },
+    docNo: "PS-6602",
+    docDate: "10/14/2026",
+    poNos: ["PO-DOG-5501"],
+    packingNo: "PS-6602",
+    lines: [
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 120 },
+      { sku: "SAMPLE-SKU-12", description: "Sample Item 12", qty: 1, rate: 45 },
+    ],
+  },
+  {
+    id: "DF-25f",
+    touches: ["trace", "sources", "pay"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 6 — one bill for both deliveries, with freight, a fuel surcharge and a line nobody ordered",
+    kind: "vendor_invoice",
+    template: "grid",
+    dogfoodHint:
+      "Doc Bill → Select PO / source → both receipts (PS-6601, PS-6602). Add PALLET-WRAP × 1 @ 20.00 as a line with no source (NIC). Charges: Freight 30.00 with Consider Tax or Charge for = Valuation and Total, Add, Actual, and 'Allocate full amount to stock items' ticked; Fuel surcharge 15.00 with Total only. Invoice date 10/13/2026. Then Pay Bills: pay 500.00 of it with Check 10511 and leave that check uncleared (no Bank Reconciliation).",
+    expect: "A 900.00 bill. ERPNext spreads the 30.00 freight over the four stock lines by their amounts (Vanilla › each line's Item Tax Amount: 14.37 / 5.39 / 8.62 / 1.62); the pallet wrap and the fuel surcharge are in no line's cost.",
+    checks: [
+      "Posting date = invoice date 10/13/2026.",
+      "Pay Bills shows 400.00 still open after Check 10511.",
+      "Later, when the trace pages are built: the bill's Landed column reads 414.37 for SKU-10; 'Fuel surcharge 15.00 — in no line's cost' shows beside it; the statement's Payments focus lists Check 10511 as 'not cleared — in the mail?'.",
+    ],
+    knownGaps: [
+      "The Doc Bill's charges table may not offer 'Valuation and Total' or 'Allocate full amount to stock items' — set those on the Taxes rows in Vanilla, then Refresh.",
+    ],
+    vendor: { legalName: "CASCADE FITTINGS CO.", accountNo: "CF-LAKE-221", address: ["410 Mill St", "Logan, UT 84321"] },
+    docNo: "CF-30981",
+    docDate: "10/13/2026",
+    poNos: ["PO-DOG-5501"],
+    terms: "Net 30",
+    taxNote: "Freight 30.00 · Fuel surcharge 15.00",
+    taxAmount: 45,
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 100 },
+      { sku: "SAMPLE-SKU-13", description: "Sample Item 13", qty: 5, rate: 30 },
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 120 },
+      { sku: "SAMPLE-SKU-12", description: "Sample Item 12", qty: 1, rate: 45 },
+      { sku: "PALLET-WRAP", description: "Pallet wrap (not on PO)", qty: 1, rate: 20 },
+    ],
+  },
+  {
+    id: "DF-25g",
+    touches: ["trace"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 7 — the vendor credits back the item the customer never ordered",
+    kind: "vendor_invoice",
+    template: "plain",
+    dogfoodHint: "A CREDIT MEMO, not a bill: enter it as a Vendor Credit (return) against DF-25f's bill CF-30981 for SAMPLE-SKU-12 × 1 @ 45.00. Leave it unapplied.",
+    expect: "A -45.00 credit with Return Against = the DF-25f bill, open on its own (v16: update_outstanding_for_self is on by default).",
+    checks: ["Later, when the trace pages are built: it sits in the Payment column of the bowtie, and the Lifecycle shows SKU-12 at −1.62 margin — returned, but its share of the freight was not credited."],
+    vendor: { legalName: "CASCADE FITTINGS CO.", accountNo: "CF-LAKE-221", address: ["410 Mill St", "Logan, UT 84321"] },
+    docNo: "CF-CM-112",
+    docDate: "10/20/2026",
+    poNos: ["PO-DOG-5501"],
+    notes: ["CREDIT MEMO — return of SAMPLE-SKU-12, shipped in error.", "Applies to invoice CF-30981."],
+    lines: [{ sku: "SAMPLE-SKU-12", description: "Sample Item 12 — returned", qty: 1, rate: 45 }],
+  },
+  {
+    id: "DF-25h",
+    touches: ["trace"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 8 — invoice the customer for what they ordered",
+    kind: "billing_instruction",
+    template: "plain",
+    dogfoodHint: "Make the Invoice from DF-25b's Sales Order (both lines, in full). Date 10/16/2026.",
+    expect: "A 1,000.00 Invoice whose lines came from the Sales Order.",
+    checks: ["Later, when the trace pages are built: the Lifecycle's margin for the order reads 315.39 — 185.63 + 151.38 − 1.62 − 20.00."],
+    vendor: { legalName: "LAKESIDE MARINE SUPPLY", accountNo: "CPO-55120", address: ["90 Harbor Dr", "Bear Lake, UT 84028"] },
+    docNo: "INV-REQ-55120",
+    docDate: "10/16/2026",
+    poNos: ["CPO-55120"],
+    terms: "Net 30",
+    lines: [
+      { sku: "SAMPLE-SKU-10", description: "Sample Item 10", qty: 4, rate: 150 },
+      { sku: "SAMPLE-SKU-11", description: "Sample Item 11", qty: 2, rate: 200 },
+    ],
+  },
+  {
+    id: "DF-25i",
+    touches: ["trace"],
+    oi: "OI-041",
+    scenario: "Trace chain, step 9 — the customer's check pays the invoice in full",
+    kind: "customer_remittance",
+    template: "plain",
+    dogfoodHint: "Receive Payments: LAKESIDE MARINE SUPPLY, Check 3318 dated 10/28/2026, 1,000.00 against DF-25h's Invoice.",
+    expect: "The Invoice is Paid.",
+    checks: ["Later, when the trace pages are built: put this payment and DF-25f's bill in focus together — the bowtie's path runs bill → receipts → PO → Sales Order → Invoice → this check."],
+    vendor: { legalName: "LAKESIDE MARINE SUPPLY", address: ["90 Harbor Dr", "Bear Lake, UT 84028"] },
+    docNo: "Check 3318",
+    docDate: "10/28/2026",
+    poNos: ["CPO-55120"],
+    lines: [{ sku: "PAYMENT", description: "Payment — invoice for CPO-55120", qty: 1, rate: 1000 }],
+  },
+  // DF-26: just-in-time Item Receipts from Bill lines (plan 2026-09-26 "DF-02 follow-ups", J —
+  // 5zorro 2026-10-10). Two people received this invoice's goods; the bill says who, and Submit
+  // makes one receipt per person + date before the bill. No custom fields: who is in Remarks.
+  {
+    id: "DF-26",
+    touches: ["doc-form"],
+    scenario: "Two people received this invoice's goods — the Bill records who, and Submit makes one Item Receipt per person + date",
+    kind: "vendor_invoice",
+    template: "grid",
+    dogfoodHint:
+      "Enter on the Doc Bill with no PO and no Item Receipt. Click Rec'd by on line 1: John, Rec'd Date 10/04/2026 (it starts on 10/04, the day before the invoice date). Line 2: Jason, 10/04/2026. Leave line 3 blank. Save draft, reopen it, then Save draft & submit.",
+    expect:
+      "Submit asks about line 3 only, offering your name and 10/04/2026; choose Receive them now with John. Two Item Receipts are made, dated 10/04/2026 — one for John (lines 1 and 3), one for Jason (line 2) — and the bill submits with every line pointing at its receipt.",
+    checks: [
+      "After Save draft: the memo box does not show the [received] block, but Vanilla's Remarks does; reopening the Doc Bill shows John / Jason back in the columns.",
+      "After Submit: Rec'd by / Rec'd Date are read-only and come from the receipts; Find Item Receipts lists the two, each with ‘Received by: …’ in its Remarks and Posting Date 10/04/2026.",
+      "Vanilla's Remarks on the bill no longer has the [received] block. Update Stock is off.",
+      "nav-debug.log has jit-receipt-insert / jit-receipt-submitted / jit-receipt-linked for each receipt.",
+    ],
+    vendor: {
+      legalName: "SAMPLE Vendor 05",
+      address: ["500 Sample Ln", "Lehi, UT 84043"],
+    },
+    docNo: "SV5-INV-1005",
+    docDate: "10/05/2026",
+    terms: "NET 30 DAYS",
+    taxNote: "No tax — resale",
+    taxAmount: 0,
+    notes: [
+      "Dock note: lines 1 and 3 signed in by John, line 2 by Jason — 10/04/2026.",
+    ],
+    lines: [
+      { sku: "SAMPLE-SKU-05", description: "Sample Item 05", qty: 4, rate: 12 },
+      { sku: "SAMPLE-SKU-06", description: "Sample Item 06", qty: 6, rate: 9.5 },
+      { sku: "SAMPLE-SKU-07", description: "Sample Item 07", qty: 2, rate: 30 },
+    ],
   },
 ];
 

@@ -6,9 +6,9 @@
  * Idempotent: no-ops if already installed at the same version.
  */
 
-import { SEED_PROFILES } from "./simplified-seed-profiles.js";
+import { SEED_PROFILES, SEED_VALUES } from "./simplified-seed-profiles.js";
 
-const VERSION = 12;
+const VERSION = 15;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -171,7 +171,14 @@ const CORE_INLINE = `
       var n=normExpr(x); if(!n) return null;
       return {id:x.id||(x.base+"_"+(parseInt(x.offset,10)||0)),label:x.label||presetLabel(n),base:n.base,offset:n.offset};
     }).filter(Boolean);
-    return {doctype:doctype||p.doctype||null,fields:fields,presets:presets};
+    var out={doctype:doctype||p.doctype||null,fields:fields,presets:presets};
+    if(p.source==="doc-skin") out.source="doc-skin";
+    return out;
+  }
+  function shouldLockAssumed(fieldtype, value){
+    if(value===null||value===undefined||value==="") return false;
+    if(fieldtype==="Check"&&!Number(value)) return false;
+    return true;
   }
   function isAssumed(p,fn){ return !!(p&&p.fields&&p.fields[fn]&&p.fields[fn].placement!=="vanilla"); }
   function placementFor(p,fn){ return isAssumed(p,fn)?p.fields[fn].placement:"vanilla"; }
@@ -248,7 +255,7 @@ const CORE_INLINE = `
     isAssumed:isAssumed,placementFor:placementFor,valueFor:valueFor,assumedFields:assumedFields,
     tabSkips:tabSkips,checkProfile:checkProfile,setAssumption:setAssumption,
     resolveExpr:resolveExpr,presetLabel:presetLabel,resolveFieldValue:resolveFieldValue,
-    addPreset:addPreset,isEffectivelyEmpty:isEffectivelyEmpty};
+    addPreset:addPreset,isEffectivelyEmpty:isEffectivelyEmpty,shouldLockAssumed:shouldLockAssumed};
 });
 `;
 
@@ -287,14 +294,20 @@ export function buildSimplifiedPayload() {
 
   /* ---- Persistence ---- */
   var SEED_PROFILES = ${JSON.stringify(seedProfiles)};
+  var SEED_VALUES = ${JSON.stringify(SEED_VALUES)};
   function seedProfile(doctype) {
     var seed = SEED_PROFILES[doctype];
     if (!seed) return null;
     var fields = {};
+    var values = SEED_VALUES[doctype] || {};
     Object.keys(seed).forEach(function(fn) {
-      fields[fn] = { value: null, placement: seed[fn], valueSource: "literal", expr: null };
+      var v = values[fn];
+      fields[fn] = v
+        ? { value: v.value === undefined ? null : v.value, placement: seed[fn], valueSource: v.valueSource,
+            expr: v.expr ? { base: v.expr.base, offset: v.expr.offset } : null }
+        : { value: null, placement: seed[fn], valueSource: "literal", expr: null };
     });
-    return { doctype: doctype, fields: fields, presets: [] };
+    return { doctype: doctype, fields: fields, presets: [], source: "doc-skin" };
   }
   function load(doctype) {
     var raw = null;
@@ -395,6 +408,32 @@ export function buildSimplifiedPayload() {
      still runs on click and un-shows every other pane again, so replace it outright
      (off("click"), unnamespaced) instead of adding alongside it. */
   var scrollNavSections = [];
+  /* Every form whose tabs were rewired, so destroy() can give each its Vanilla tabs back. Frappe
+     keeps one form per doctype for the page's life, so a form left rewired stays that way until
+     a reload — and leaving the lens by an in-page hop reloads nothing (review R12-1). */
+  var scrollNavForms = [];
+  function restoreScrollNav(frm) {
+    try {
+      if (frm.__ssShowGuard) { try { frm.__ssShowGuard.disconnect(); } catch(e) {} frm.__ssShowGuard = null; }
+      var tabs = (frm.layout && frm.layout.tabs) || [];
+      var first = null;
+      tabs.forEach(function(tab) {
+        if (!tab || !tab.wrapper) return;
+        var el = tab.wrapper.get(0);
+        if (el) el.style.display = "";
+        if (tab.tab_link) {
+          var link = tab.tab_link.find(".nav-link");
+          link.off(".ssScrollNav");
+          link.removeClass("active");
+          /* Frappe's own click handler (tab.js setup_listeners), stripped by off("click") above. */
+          if (typeof tab.setup_listeners === "function") tab.setup_listeners();
+        }
+        if (!first && !tab.hidden) first = tab;
+      });
+      /* set_active() hides every other pane and strips the "show" this skin added. */
+      if (first && typeof first.set_active === "function") first.set_active();
+    } catch(e) {}
+  }
   function updateScrollNavActive() {
     if (!scrollNavSections.length) return;
     var headerOffset = 60;
@@ -409,6 +448,7 @@ export function buildSimplifiedPayload() {
   function installScrollNav(frm) {
     try {
       if (!frm || !frm.layout || !frm.layout.tabs || !frm.layout.tabs.length) return;
+      if (scrollNavForms.indexOf(frm) < 0) scrollNavForms.push(frm);
       var tabs = frm.layout.tabs;
       var sections = [];
       tabs.forEach(function(tab, i) {
@@ -527,11 +567,32 @@ export function buildSimplifiedPayload() {
       : { hidden: 0, read_only: 0, description: "" };
   }
 
+  /* Doc-skin rule (5zorro 2026-10-10): a Bill's posting date is a stamp — the day it is saved or
+     submitted. The Doc Bill shows only the Supplier Invoice Date (it drives the due date);
+     Simplified cannot hide Posting Date (ERPNext requires it), so under the Doc-skin profile it is
+     quiet, Edit Posting Date is locked unticked, and save stamps today. */
+  var postingStampInstalled = false;
+  function installPostingStamp() {
+    if (postingStampInstalled || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
+    postingStampInstalled = true;
+    frappe.ui.form.on("Purchase Invoice", "validate", function(frm) {
+      if (destroyed || !frm || !frm.doc || frm.doc.docstatus !== 0) return;
+      if (load("Purchase Invoice").source !== "doc-skin") return;
+      var today = frappe.datetime.get_today();
+      if (!Number(frm.doc.set_posting_time) && frm.doc.posting_date === today) return;
+      /* Direct: no triggers mid-save. */
+      frm.doc.set_posting_time = 0; frm.doc.posting_date = today;
+      try { frm.refresh_fields(["set_posting_time", "posting_date"]); } catch(e) {}
+    });
+  }
+
   function apply(frm) {
     if (destroyed) return;
     if (!frm || !frm.doctype) return;
     installScrollNav(frm);
     var profile = load(frm.doctype);
+    var docSkinBill = frm.doctype === "Purchase Invoice" && profile.source === "doc-skin";
+    if (docSkinBill) installPostingStamp();
     var check = core.checkProfile(profile, frm.meta ? frm.meta.fields : []);
     if (!check.ok && window.frappe && frappe.show_alert) {
       frappe.show_alert({
@@ -567,7 +628,12 @@ export function buildSimplifiedPayload() {
            value outright when System Settings "hide_empty_read_only_fields" is on — so a
            seeded L1/L2 field with no literal value (the common case here) would silently
            vanish instead of showing quiet-but-visible. Skip the lock rather than the field. */
-        if (!blank) frm.set_df_property(fn, "read_only", 1);
+        var ftype = frm.fields_dict && frm.fields_dict[fn] && frm.fields_dict[fn].df ? frm.fields_dict[fn].df.fieldtype : "";
+        /* A value the profile decides (e.g. Edit Posting Date = 0 under the Doc-skin rule) locks the
+           field even when it reads as "not answered"; otherwise an unticked box stays clickable. */
+        var asm = profile.fields[fn];
+        var decided = !!asm && asm.valueSource === "literal" && asm.value !== null && asm.value !== undefined && asm.value !== "";
+        if (decided || core.shouldLockAssumed(ftype, frm.doc ? frm.doc[fn] : null)) frm.set_df_property(fn, "read_only", 1);
         frm.set_df_property(fn, "description", "Set as a general assumption — change it in ⚙ Assumptions.");
         if (pl === "L2") deemph(frm, fn, true);
         if (pl === "L1") prefillMark(frm, fn, true);
@@ -575,6 +641,12 @@ export function buildSimplifiedPayload() {
       } catch(e) {}
     });
 
+    /* After the loop, which gives every assumed field the generic note. */
+    if (docSkinBill) {
+      try {
+        frm.set_df_property("posting_date", "description", "Stamped with the day you save (Doc-skin assumptions). The Supplier Invoice Date drives the due date.");
+      } catch(e) {}
+    }
     if (frm.refresh_fields) { try { frm.refresh_fields(); } catch(e) {} }
     /* Keep assumed-default forms clean (don't mark dirty just from applying defaults). */
     if (wasClean && frm.doc) {
@@ -859,15 +931,21 @@ export function buildSimplifiedPayload() {
         !frappe.ui.form.Form.prototype
       ) return false;
       var proto = frappe.ui.form.Form.prototype;
-      if (proto.__ssRefreshPatched) return true;
+      /* 2: the patch calls whichever copy of the skin is installed now. It outlives destroy(), so
+         calling this copy's own apply would leave a later re-inject never applied on refresh —
+         its hook would see the mark and skip (review R12-1). */
+      if (proto.__ssRefreshPatched === 2) return true;
       var orig = proto.refresh;
       proto.refresh = function() {
         var result = orig.apply(this, arguments);
         /* Apply after Frappe finishes its own refresh. */
-        try { apply(this); } catch(e) {}
+        try {
+          var skin = window.__simplifiedSkin;
+          if (skin && typeof skin.apply === "function") skin.apply(this);
+        } catch(e) {}
         return result;
       };
-      proto.__ssRefreshPatched = true;
+      proto.__ssRefreshPatched = 2;
       return true;
     } catch(e) { return false; }
   }
@@ -887,7 +965,7 @@ export function buildSimplifiedPayload() {
 
   /* ---- DF-01 R: say what to do after ERPNext's "Expense Head Changed" ----
      ERPNext raises it on a bill whose stock lines have no receipt (purchase_invoice.py
-     set_expense_account). By then a submitted bill can no longer receive the goods; the note says
+     set_expense_account) — and also on one that receives with Update Stock, skipped below. By then a submitted bill can no longer receive the goods; the note says
      how to next time, and where the site-wide default lives. Watches for the dialog, adds one
      paragraph, never touches the form. */
   var expenseHeadObserver = null;
@@ -898,6 +976,11 @@ export function buildSimplifiedPayload() {
       var modal = t.closest(".modal");
       var body = modal && modal.querySelector(".modal-body");
       if (!body || body.querySelector(".ss-receive-note")) return;
+      /* ERPNext shows this dialog both ways: Update Stock off (cost parked in Stock Received But Not
+         Billed) and on (cost moved to the warehouse's Stock In Hand — the goods were received).
+         The hint is for the first only (5zorro 2026-10-10: it told him to tick a box he had ticked). */
+      var frm = window.cur_frm;
+      if (frm && frm.doc && Number(frm.doc.update_stock)) return;
       var p = document.createElement("div");
       p.className = "ss-receive-note";
       p.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:12px;color:#475569;";
@@ -919,9 +1002,8 @@ export function buildSimplifiedPayload() {
      skin. When that reload was skipped or raced (nav incidents 2026-09-03/04), the
      toolbar said Vanilla while the assumptions button and every dimmed/locked field
      were still on screen. destroy() makes leaving the lens explicit instead.
-     Frappe's own tab click handlers were removed by installScrollNav and only a
-     reload restores them, so main still reloads — this just stops the skin from
-     surviving a reload that does not happen. */
+     Each rewired form gets Frappe's own tab handlers and tab state back (restoreScrollNav), so
+     leaving the lens by an in-page hop needs no reload (review R12-1). */
   function destroy() {
     destroyed = true;
     if (expenseHeadObserver) { try { expenseHeadObserver.disconnect(); } catch(e) {} expenseHeadObserver = null; }
@@ -934,10 +1016,8 @@ export function buildSimplifiedPayload() {
     scrollListenerBound = false;
     scrollNavSections = [];
 
-    if (frm && frm.__ssShowGuard) {
-      try { frm.__ssShowGuard.disconnect(); } catch(e) {}
-      frm.__ssShowGuard = null;
-    }
+    scrollNavForms.forEach(restoreScrollNav);
+    scrollNavForms = [];
 
     ["ss-aff", "ss-top", "ss-back", "ss-injected-css"].forEach(function(id) {
       var el = document.getElementById(id);

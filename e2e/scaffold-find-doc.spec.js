@@ -295,6 +295,7 @@ test.describe("scaffold: find pages", () => {
     await waitForE2eApi(app);
 
     // Pay Bills dashboard → Find Payments, on the "Paid to vendors" side, party box first.
+    await e2eCall(app, "setLensPref", "payment-entry:list", "doc");
     await e2eCall(app, "showLauncher");
     await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("pay-outstanding");
@@ -318,4 +319,80 @@ test.describe("scaffold: find pages", () => {
     await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
     await expect.poll(async () => inFind(app, `document.activeElement && document.activeElement.dataset.id`)).toBe("ref");
   });
+
+  // 5zorro DF-01: "by default, a find page filters out the cancelled entries, but you can toggle it on".
+  test("cancelled documents are hidden until Show cancelled is ticked", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "setLensPref", "payment-entry:list", "doc");
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "payOutstanding", `document.querySelector('[data-testid="pay-outstanding-find"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
+    await clearFindSearch(app);
+    const cancelled = await inFind(
+      app,
+      `(async () => { const r = await window.erpFindDoc.list("payment-entry", { direction: "Pay", showCancelled: true }); return r.rows.filter((x) => Number(x.docstatus) === 2).map((x) => x.name); })()`,
+    );
+    test.skip(!cancelled.length, "no cancelled Pay payment in this sandbox");
+    const shown = () => inFind(app, `[...document.querySelectorAll("tr.row")].map((t) => t.dataset.name)`);
+    await expect.poll(async () => (await shown()).length, { timeout: 20_000 }).toBeGreaterThan(0);
+    expect((await shown()).filter((n) => cancelled.includes(n))).toEqual([]);
+    expect(await inFind(app, `document.querySelector('[data-testid="find-doc-show-cancelled"]').checked`)).toBe(false);
+    await inFind(app, `(() => { const c = document.querySelector('[data-testid="find-doc-show-cancelled"]'); c.click(); return true; })()`);
+    await expect.poll(async () => (await shown()).filter((n) => cancelled.includes(n)).sort(), { timeout: 20_000 }).toEqual([...cancelled].sort());
+    // Clear search hides them again.
+    await clearFindSearch(app);
+    await expect.poll(async () => (await shown()).filter((n) => cancelled.includes(n)), { timeout: 20_000 }).toEqual([]);
+  });
+
+  // 5zorro 2026-10-11: right-click on a Find row → party / this document / view & edit / this page.
+  test("right-click on a row opens the four-group menu; Esc closes it, Show only works, placeholders are greyed", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "setLensPref", "payment-entry:list", "doc");
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("pay-outstanding");
+    await e2eCall(app, "execInView", "payOutstanding", `document.querySelector('[data-testid="pay-outstanding-find"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).toBe("find-doc");
+    await clearFindSearch(app);
+    await expect.poll(async () => inFind(app, `document.querySelectorAll("tr.row").length`), { timeout: 20_000 }).toBeGreaterThan(0);
+    const openMenu = () =>
+      inFind(
+        app,
+        `(() => { const tr = document.querySelector("tr.row"); const r = tr.getBoundingClientRect();
+          tr.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + 5 })); return tr.dataset.name; })()`,
+      );
+    const name = await openMenu();
+    const menu = await inFind(
+      app,
+      `(() => { const m = document.querySelector('[data-testid="find-row-menu"]'); if (!m) return null;
+        return { groups: [...m.querySelectorAll(".grp")].map((g) => g.textContent), items: m.querySelectorAll("button").length,
+          disabled: m.querySelectorAll("button:disabled").length, focused: document.activeElement && document.activeElement.dataset.id }; })()`,
+    );
+    expect(menu.groups.length).toBe(4);
+    expect(menu.groups[1]).toBe(`This payment · ${name}`);
+    expect(menu.items).toBeLessThanOrEqual(12);
+    expect(menu.disabled).toBeGreaterThan(0);
+    expect(menu.focused).toBe("party-only");
+    // Esc closes it.
+    await inFind(app, `document.querySelector('[data-testid="find-row-menu"]').dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
+    expect(await inFind(app, `!!document.querySelector('[data-testid="find-row-menu"]')`)).toBe(false);
+    // Show only this party: every card left is that party.
+    const party = await inFind(app, `document.querySelector("tr.row").closest(".card").querySelector("h2").textContent`);
+    await openMenu();
+    await inFind(app, `document.querySelector('[data-testid="find-row-menu"] [data-id="party-only"]').click(); true`);
+    await expect
+      .poll(async () => inFind(app, `[...new Set([...document.querySelectorAll(".card-head h2")].map((h) => h.textContent))].join("|")`), { timeout: 15_000 })
+      .toBe(party);
+    // (one vendor on a blank site makes the cards check pass early — wait for the box and Clear too)
+    await expect.poll(async () => inFind(app, `document.querySelector('.box input[data-id="party"]').value`), { timeout: 15_000 }).not.toBe("");
+    await expect.poll(async () => inFind(app, `document.getElementById("btn-clear").hidden`), { timeout: 15_000 }).toBe(false);
+    await clearFindSearch(app);
+  });
 });
+

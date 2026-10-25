@@ -2,19 +2,8 @@
  * Pure money helpers for the Doc Workflow shell.
  * No ERPNext imports — unit-testable offline (ADR-0002: unit tests first).
  */
-
-/**
- * Round a dollar amount to the nearest nickel (5 cents).
- * Used later for OI-042 experiments; stub proves CI without a live server.
- * @param {number} amount
- * @returns {number}
- */
-export function roundToNickel(amount) {
-  if (typeof amount !== "number" || !Number.isFinite(amount)) {
-    throw new TypeError("roundToNickel: amount must be a finite number");
-  }
-  return Math.round(amount * 20) / 20;
-}
+import { evaluateTypedSum } from "./calc/field-calc.js";
+import { DEFAULT_SITE_ROUNDING, roundByConvention, roundingRemainder, remainderNote } from "./calc/site-rounding.js";
 
 /**
  * Parse user/ERP money text → number (null if blank / not a number).
@@ -26,6 +15,30 @@ export function parseMoney(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   const n = Number(String(value).replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * A money box's text as an amount: a plain number, or a sum typed in it (`169.00*1.0845`), worked out
+ * with the calculator's math (5zorro 2026-10-11 — the taxes Add box) and rounded by the tape's
+ * convention to the box's places — plus what rounding dropped, so it can be said (R13-1: never
+ * quietly): `remainder` is "Rounds to 183.28 — remainder under 1/1000"-style text, "" when nothing was.
+ * @param {unknown} value
+ * @param {{ precision: number, method?: string }} [rounding]
+ * @returns {{ amount: number|null, remainder: string }}
+ */
+export function moneyOrSum(value, rounding = { precision: DEFAULT_SITE_ROUNDING.currency, method: DEFAULT_SITE_ROUNDING.method }) {
+  let exact = typeof value === "string" ? evaluateTypedSum(value) : null;
+  if (exact == null) {
+    // An unfinished sum (`5*`) is not 5: parseMoney would drop the operator and read the digits.
+    if (typeof value === "string" && (/[+*/]/.test(value) || /[0-9.]\s*-/.test(value))) return { amount: null, remainder: "" };
+    exact = parseMoney(value);
+  }
+  if (exact == null) return { amount: null, remainder: "" };
+  const dropped = roundingRemainder(exact, rounding);
+  return {
+    amount: roundByConvention(exact, rounding),
+    remainder: dropped ? remainderNote(dropped, rounding.precision) : "",
+  };
 }
 
 /**

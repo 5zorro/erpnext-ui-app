@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// @covers scripts/check-commit-attribution.sh
 const scanner = join(repoRoot, "scripts", "check-commit-attribution.sh");
 
 function scanMessage(message) {
@@ -89,5 +90,59 @@ describe("commit attribution policy", () => {
     });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Gmail address or marker/i);
+  });
+});
+
+describe("AI-session sizing policy", () => {
+  const identity = {
+    GIT_AUTHOR_NAME: "5zorro",
+    GIT_AUTHOR_EMAIL: "25825485+5zorro@users.noreply.github.com",
+    GIT_COMMITTER_NAME: "5zorro",
+    GIT_COMMITTER_EMAIL: "25825485+5zorro@users.noreply.github.com",
+  };
+  function scanStaged(content) {
+    const dir = mkdtempSync(join(tmpdir(), "commit-policy-staged-"));
+    git(dir, ["init", "-q"]);
+    writeFileSync(join(dir, "plan.md"), content);
+    git(dir, ["add", "plan.md"]);
+    writeFileSync(join(dir, "msg.txt"), "docs: plan\n");
+    return spawnSync("bash", [scanner, "--message-file", join(dir, "msg.txt")], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, ...identity },
+    });
+  }
+
+  it("rejects a message that sizes the session", () => {
+    for (const message of [
+      "docs: zz 0% context zz\n",
+      "docs: zz 1m window zz\n",
+      "review: zz 0k tokens zz\n",
+      "docs: zz context 0% zz\n",
+    ]) {
+      const result = scanMessage(message);
+      assert.equal(result.status, 1, message);
+      assert.match(result.stderr, /sizes an AI session/, message);
+    }
+  });
+
+  it("rejects a staged line naming the model with its version or the context reading", () => {
+    for (const line of ["zz llama 0 zz\n", "zz context 0% zz\n", "zz 0k tokens zz\n"]) {
+      const result = scanStaged(line);
+      assert.equal(result.status, 1, line);
+      assert.match(result.stderr, /staged change adds a line that sizes an AI session/, line);
+    }
+  });
+
+  it("lets ordinary percentages, windows and CSS through", () => {
+    for (const line of [
+      "the drawer stood 631px tall (58% of the window)\n",
+      "under chaos (250 ms, 45 %)\n",
+      "button { cursor: pointer; }\n",
+      "a 100% portion; contextIsolation: true\n",
+    ]) {
+      const result = scanStaged(line);
+      assert.equal(result.status, 0, `${line}${result.stderr}`);
+    }
   });
 });

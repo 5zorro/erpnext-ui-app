@@ -7,6 +7,8 @@
  * - standalone: optional leading operator — `+1-2=` (adding-machine style).
  */
 
+import { roundByConvention } from "./site-rounding.js";
+
 export const DIALECT_EXCEL = "excel";
 export const DIALECT_STANDALONE = "standalone";
 
@@ -78,14 +80,35 @@ export function formatCalcResult(n) {
  * @param {number|null|undefined} decimals fixed places when set (money → 2)
  * @returns {string}
  */
-export function formatCalcDisplay(n, decimals) {
+export function formatCalcDisplay(n, decimals, rounding) {
   if (!Number.isFinite(n)) return "";
+  if (rounding) {
+    // The site's rounding (R13-1): what ERPNext will store, never fewer digits than that.
+    const r = roundByConvention(n, rounding);
+    const own = fractionDigitsFromSample(formatCalcResult(r)) || 0;
+    const d = Math.max(0, Math.min(8, Math.max(decimals == null ? 0 : Math.floor(decimals), own)));
+    return Object.is(r, -0) || r === 0 ? (0).toFixed(d) : r.toFixed(d);
+  }
   if (decimals == null || !Number.isFinite(decimals)) return formatCalcResult(n);
   const d = Math.max(0, Math.min(8, Math.floor(decimals)));
   const factor = 10 ** d;
   const rounded = Math.round(n * factor) / factor;
   if (Object.is(rounded, -0)) return (0).toFixed(d);
   return rounded.toFixed(d);
+}
+
+/**
+ * A number the clerk typed, on the tape: the box's places, or more when it was typed with more
+ * (`1.0845` stays `1.0845` on a money tape; R13-1 — the tape showed `1.08`).
+ * @param {number} n
+ * @param {number|null|undefined} decimals
+ * @returns {string}
+ */
+export function formatCalcOperand(n, decimals) {
+  if (!Number.isFinite(n)) return "";
+  if (decimals == null || !Number.isFinite(decimals)) return formatCalcResult(n);
+  const own = fractionDigitsFromSample(formatCalcResult(n)) || 0;
+  return formatCalcDisplay(n, Math.max(Math.floor(decimals), own));
 }
 
 /**
@@ -124,12 +147,13 @@ export function decimalsForCalcField(kind, sampleValue) {
  *   entry: string,
  *   parts: string[],
  *   decimals: number|null,
+ *   rounding?: { precision: number, method?: string, convention?: string } | null,
  * }} CalcSession
  */
 
 /**
  * @param {CalcDialect} [dialect]
- * @param {{ decimals?: number|null }} [opts]
+ * @param {{ decimals?: number|null, rounding?: { precision: number, method?: string } | null }} [opts]
  * @returns {CalcSession}
  */
 export function createCalcSession(dialect = DIALECT_EXCEL, opts = {}) {
@@ -141,6 +165,7 @@ export function createCalcSession(dialect = DIALECT_EXCEL, opts = {}) {
     entry: "",
     parts: [],
     decimals: opts.decimals != null && Number.isFinite(opts.decimals) ? opts.decimals : null,
+    rounding: opts.rounding || null,
   };
 }
 
@@ -161,7 +186,7 @@ export function seedExcelWithValue(session, value, op) {
     total: n,
     pendingOp: op,
     entry: "",
-    parts: [formatCalcDisplay(n, decimals), op],
+    parts: [formatCalcOperand(n, decimals), op],
   };
 }
 
@@ -250,7 +275,7 @@ export function calcPreview(session) {
   }
   // Mid-chord waiting for the next operand — don't paint the prior total into the field.
   if (session.pendingOp != null) return "";
-  if (session.total != null) return formatCalcDisplay(session.total, session.decimals);
+  if (session.total != null) return formatCalcDisplay(session.total, session.decimals, session.rounding);
   return "";
 }
 
@@ -407,7 +432,7 @@ export function feedCalcKey(session, key) {
   const k = String(key);
 
   if (k === "Clear" || k === "c" || k === "C") {
-    return { session: createCalcSession(session.dialect, { decimals: session.decimals }) };
+    return { session: createCalcSession(session.dialect, { decimals: session.decimals, rounding: session.rounding }) };
   }
 
   if (k === "Backspace") {
@@ -524,7 +549,7 @@ function applyOperatorKey(session, op) {
   }
 
   const entryNum = parseCalcNumber(session.entry);
-  const fmt = (n) => formatCalcDisplay(n, session.decimals);
+  const fmt = (n) => formatCalcOperand(n, session.decimals);
 
   if (session.total == null) {
     // Excel: need a number before first op
@@ -594,7 +619,7 @@ function applyOperatorKey(session, op) {
  * @param {CalcSession} session
  */
 function finalizeCalc(session) {
-  const fmt = (n) => formatCalcDisplay(n, session.decimals);
+  const fmt = (n) => formatCalcOperand(n, session.decimals);
   if (session.total == null && session.entry !== "") {
     const n = parseCalcNumber(session.entry);
     if (n == null) return { session, done: true, result: NaN, error: "Not a number" };

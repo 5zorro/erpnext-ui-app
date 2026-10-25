@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Print as image</title>
+  <!-- Printer hardening (plan 2026-09-26): every page flattened onto white at printer resolution, so
+       a printer driver only ever sees plain pictures. Loaded in a hidden window, never shown. -->
+  <style id="page-size"></style>
+  <style>
+    html, body { margin: 0; padding: 0; background: #fff; }
+    .pg { display: block; overflow: hidden; break-after: page; background: #fff; }
+    .pg:last-child { break-after: auto; }
+    .pg img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <script type="module" src="../src/print-raster-page.js"></script>
+</body>
+</html>

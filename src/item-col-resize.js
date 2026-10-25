@@ -153,17 +153,36 @@ function measureDemands(table, heads) {
   });
 
   for (const row of body ? [...body.querySelectorAll("tr")] : []) {
+    // A full-width row (a row's opened note, "No rows yet") is not one column's width.
+    if (row.hidden || [...row.children].some((c) => c.colSpan > 1)) continue;
     const cells = [...row.children];
     heads.forEach(({ key }, i) => {
       const cell = cells[i];
       if (!cell) return;
       const text = cell.querySelector(".cell-text");
       const input = cell.querySelector("input");
+      // A cell with buttons is as wide as its buttons (taxes: Allocate + 🗑) plus any words beside
+      // them (a Type cell's "Actual" + its ⓘ), not the buttons' own text.
+      const buttons = !text && !input ? [...cell.querySelectorAll("button")] : [];
+      if (buttons.length) {
+        const words = [...cell.childNodes]
+          .filter((n) => !(n.nodeType === 1 && /** @type {Element} */ (n).tagName === "BUTTON"))
+          .map((n) => n.textContent || "")
+          .join("")
+          .trim();
+        const px =
+          buttons.reduce((sum, b) => sum + b.offsetWidth, 0) +
+          4 * (buttons.length - 1) +
+          (words ? measureCell(words) + 4 : 0);
+        if (px > (demands[key] || 0)) demands[key] = px;
+        return;
+      }
+      // innerText, not textContent: a hidden note in the cell (a row marker's) is not its width.
       const value = text
         ? text.textContent || ""
         : input
           ? /** @type {HTMLInputElement} */ (input).value || ""
-          : cell.textContent || "";
+          : (cell.innerText != null ? cell.innerText : cell.textContent) || "";
       const px = measureCell(value.trim());
       if (px > (demands[key] || 0)) demands[key] = px;
     });
@@ -204,7 +223,11 @@ export function autoSizeItemColumns(table, opts) {
     // remove, so the header sets the floor.
     const headerPx = (headers[key] || 0) + CELL_CHROME_PX;
     const fixedPx =
-      rule.fixedPx != null ? Math.max(rule.fixedPx, headerPx) : undefined;
+      rule.fixedPx != null
+        ? Math.max(rule.fixedPx, headerPx)
+        : rule.fitContent
+          ? Math.min(rule.maxPx ?? Infinity, Math.max(rule.minPx, (demands[key] || 0) + CELL_CHROME_PX))
+          : undefined;
     return {
       key,
       demandPx: (demands[key] || 0) + CELL_CHROME_PX,
@@ -255,7 +278,12 @@ function growSectionToNeed(section, host, cols, overrides) {
   // A hidden tab panel measures 0 — leave the section on the card.
   if (!(paperPx > 0)) return paperPx || null;
   const chromePx = section.offsetWidth - paperPx;
-  const viewport = document.documentElement.clientWidth;
+  // The compare pane, when it sits beside the document, is the right edge (compare-pane-ui.js).
+  const root = document.documentElement;
+  const pane = root.classList.contains("compare-side")
+    ? parseFloat(getComputedStyle(root).getPropertyValue("--compare-pane-width")) || 0
+    : 0;
+  const viewport = root.clientWidth - pane;
   const roomPx = viewport - section.getBoundingClientRect().left - GROW_RIGHT_GUTTER_PX - chromePx;
   const width = lineTableWidthPx({ needPx: naturalTableWidthPx(cols, overrides), paperPx, roomPx });
   const extra = Math.round(width - paperPx);

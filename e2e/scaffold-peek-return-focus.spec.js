@@ -1,0 +1,1057 @@
+/**
+ * DF-02 (2026-10-10), against the live sandbox. The Item cases never save; the Customer case
+ * (DF-03, 2026-10-11) saves one throwaway Customer and deletes it.
+ *
+ * Esc back from "create Item…" (picked in a Bill line's Item cell) must land the cursor in that
+ * same cell. When the errand saved the Item, the cell holds it. Saving a real Item is a write, so
+ * the "saved" case moves the peek onto an existing Item first, which is the route a just-saved
+ * Item leaves the peek on (/app/item/<code>).
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test, expect } from "@playwright/test";
+import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
+
+/** @param {import('@playwright/test').ElectronApplication} app @param {string} js */
+const inErp = (app, js) => e2eCall(app, "execInView", "erp", js);
+/** @param {import('@playwright/test').ElectronApplication} app @param {string} js */
+const inDoc = (app, js) => e2eCall(app, "execInView", "docForm", js);
+
+const ACTIVE = `(() => { const a = document.activeElement; return a ? { row: a.dataset.row, field: a.dataset.field, value: a.value } : null; })()`;
+
+/** New Doc Bill, then "create Item…" from line 1's Item cell; resolves once Vanilla shows the Item form. */
+async function openCreateItemPeek(app) {
+  await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+  await expect
+    .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), {
+      timeout: 40_000,
+    })
+    .toBe(true);
+  await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+  await expect
+    .poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 })
+    .toBe(true);
+  await inDoc(
+    app,
+    `(() => { const i = document.querySelector('input[data-row="0"][data-field="item_code"]'); i.focus(); i.value = "ZZ-NO-SUCH-ITEM-E2E"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+  );
+  await expect
+    .poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]')`), { timeout: 15_000 })
+    .toBe(true);
+  await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]').click()`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+  await expect
+    .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Item")`), { timeout: 30_000 })
+    .toBe(true);
+}
+
+test.describe("scaffold: Esc back from create Item lands in the Item cell (DF-02)", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  // DF-01: "the dropdown box was constrained by the same width restriction of the item number column".
+  test("the Item dropdown is wider than its column and nothing clips it", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    // The default test window is short enough that line 1 sits below the fold.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 1000));
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 })
+      .toBe(true);
+    await inDoc(
+      app,
+      `(() => { const i = document.querySelector('input[data-row="0"][data-field="item_code"]'); i.scrollIntoView({ block: "center" }); i.focus(); i.value = "ZZ"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) .link-opt')`), { timeout: 15_000 }).toBe(true);
+    const m = await inDoc(
+      app,
+      `(() => {
+        const dd = document.querySelector('.link-dd:not([hidden])');
+        const td = dd.closest("td");
+        const r = dd.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.right - 8, r.top + 8);
+        return { dd: Math.round(r.width), cell: Math.round(td.getBoundingClientRect().width), right: r.right, vw: window.innerWidth, visible: !!hit && dd.contains(hit) };
+      })()`,
+    );
+    expect(m.dd).toBeGreaterThanOrEqual(Math.min(360, m.vw - 32));
+    expect(m.dd).toBeGreaterThan(m.cell);
+    expect(m.right).toBeLessThanOrEqual(m.vw - 16 + 1);
+    expect(m.visible).toBe(true);
+  });
+
+  // 5zorro 2026-10-11: "SAMPLE" found two items, neither right; Create Item only showed once nothing matched.
+  test("Create Item is the last row even when the search has hits; Enter still takes the first hit", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const hits = await inErp(
+      app,
+      `(async () => (await frappe.db.get_list("Item", { filters: { disabled: 0, name: ["like", "%SAMPLE%"] }, limit: 5 })).length)()`,
+    );
+    test.skip(hits < 1, "sandbox has no SAMPLE item");
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 })
+      .toBe(true);
+    const cell = `document.querySelector('input[data-row="0"][data-field="item_code"]')`;
+    await inDoc(app, `(() => { const i = ${cell}; i.focus(); i.value = "SAMPLE"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    const ROWS = `[...document.querySelectorAll('.link-dd:not([hidden]) .link-opt')].map((b) => ({ v: b.dataset.value, t: b.textContent }))`;
+    await expect.poll(async () => (await inDoc(app, ROWS)).length, { timeout: 15_000 }).toBeGreaterThan(1);
+    const rows = await inDoc(app, ROWS);
+    expect(rows.at(-1)).toEqual({ v: "__doc_create_item__", t: "Create a new Item…" });
+    expect(rows.slice(0, -1).every((r) => /SAMPLE/i.test(r.v))).toBe(true);
+    // Enter picks the highlighted first hit, never the create row.
+    const first = rows[0].v;
+    await app.evaluate(({ webContents }) => {
+      const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+      w.focus();
+      w.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+      w.sendInputEvent({ type: "char", keyCode: "Enter" });
+      w.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+    });
+    await expect.poll(async () => inDoc(app, `${cell}.value`), { timeout: 15_000 }).toBe(first);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 5_000 }).toBe("doc");
+    // And the create row, clicked under the hits, opens a new Item with what was typed.
+    // The pick repaints the line (item name, rate), which can replace the cell: type until the
+    // dropdown opens on the cell that is there now.
+    await expect
+      .poll(
+        async () =>
+          inDoc(
+            app,
+            `(async () => { const i = ${cell}; i.focus(); i.value = "SAMPLE"; i.dispatchEvent(new Event("input", { bubbles: true }));
+              await new Promise((r) => setTimeout(r, 1500));
+              return document.querySelectorAll('.link-dd:not([hidden]) .link-opt').length; })()`,
+          ),
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(1);
+    await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]').click()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Item" && cur_frm.is_new())`), { timeout: 30_000 })
+      .toBe(true);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+  });
+
+  test("abandoned: cursor back in line 1's Item cell", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openCreateItemPeek(app);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ row: "0", field: "item_code" });
+  });
+
+  test("saved: the cell holds the new Item, cursor on it", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const item = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Item", { filters: { disabled: 0 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    test.skip(!item, "sandbox has no Item");
+    await openCreateItemPeek(app);
+    // Stand-in for Save on the new Item: Frappe then shows /app/item/<code>.
+    await inErp(app, `frappe.set_route("Form", "Item", ${JSON.stringify(item)})`);
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doc.name === ${JSON.stringify(item)})`), { timeout: 20_000 })
+      .toBe(true);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 10_000 }).toContain("/item/");
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return s.doc.items[0] && s.doc.items[0].item_code; })()`), {
+        timeout: 20_000,
+      })
+      .toBe(item);
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ row: "0", field: "item_code", value: item });
+  });
+});
+
+/** New Doc Sales Order, then "create Customer…" from its Customer box. */
+async function openCreateCustomerPeek(app, typed) {
+  await e2eCall(app, "showLauncher");
+  await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-so-new"]').click(); true`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+  await expect
+    .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), {
+      timeout: 40_000,
+    })
+    .toBe(true);
+  await inDoc(
+    app,
+    `(() => { const i = document.querySelector('input[data-field="customer"]'); i.focus(); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+  );
+  await expect
+    .poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_customer__"]')`), { timeout: 15_000 })
+    .toBe(true);
+  await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_customer__"]').click()`);
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+  await expect
+    .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Customer")`), { timeout: 30_000 })
+    .toBe(true);
+}
+
+test.describe("scaffold: create Customer from the Sales Order's Customer box (DF-03)", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("abandoned: the new Customer form had the typed name; cursor back in the Customer box", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await openCreateCustomerPeek(app, "ZZ NO SUCH CUSTOMER E2E");
+    expect(await inErp(app, `cur_frm.doc.customer_name`)).toBe("ZZ NO SUCH CUSTOMER E2E");
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ field: "customer" });
+  });
+
+  test("saved: the Sales Order holds the new Customer (then it is deleted)", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const typed = `ZZ E2E CUSTOMER ${Date.now()}`;
+    await openCreateCustomerPeek(app, typed);
+    let saved = "";
+    try {
+      saved = await inErp(app, `(async () => { await cur_frm.save(); return cur_frm.doc.name; })()`);
+      expect(saved).toBeTruthy();
+      await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 10_000 }).toContain("/customer/");
+      await inErp(app, `window.erpUiShell.softPeekEsc()`);
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+      await expect
+        .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.customer)()`), { timeout: 20_000 })
+        .toBe(saved);
+      await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ field: "customer" });
+    } finally {
+      if (saved) {
+        // Drop the unsaved order's hold on it, then delete the Customer.
+        await inErp(app, `(async () => { if (window.cur_frm && cur_frm.doctype === "Sales Order") cur_frm.doc.customer = ""; })()`).catch(() => {});
+        await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Customer", name: ${JSON.stringify(saved)} } }).then(() => true)`);
+      }
+    }
+  });
+});
+
+// 5zorro nav incident 2026-10-12: line 2 of a new Sales Order, create Item, Save, Esc — the line
+// was removed (the empty-line cleanup saw the cell the create pick had emptied) instead of filled.
+// Line 1 is never removed (the last line stays), which is why the Bill's line-1 cases never saw it.
+test.describe("scaffold: create Item from line 2 of a Sales Order", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("saved: line 2 holds the new Item, not removed", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const items = await inErp(
+      app,
+      `(async () => (await frappe.db.get_list("Item", { filters: { disabled: 0, is_sales_item: 1 }, limit: 2 })).map((r) => r.name))()`,
+    );
+    test.skip(items.length < 2, "sandbox needs two sales Items");
+    await e2eCall(app, "showLauncher");
+    await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-so-new"]').click(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    // Line 1 holds an Item; line 2 is the new, empty line the clerk is typing in (Add line, as a
+    // clerk would — its repaint also shows line 1's Item).
+    await inDoc(
+      app,
+      `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem();
+        await window.erpDoc.setItem(0, "item_code", ${JSON.stringify(items[0])}); return true; })()`,
+    );
+    await inDoc(app, `document.querySelector('[data-testid="doc-add-line"]').click(); true`);
+    const cell = `document.querySelector('input[data-row="1"][data-field="item_code"]')`;
+    await expect.poll(async () => inDoc(app, `!!${cell}`), { timeout: 20_000 }).toBe(true);
+    const lines = async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.items.map((r) => r.item_code || ""))()`);
+    expect((await lines()).length).toBe(2);
+    await inDoc(app, `(() => { const i = ${cell}; i.focus(); i.value = "ZZ-NO-SUCH-ITEM-E2E"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await expect
+      .poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]')`), { timeout: 15_000 })
+      .toBe(true);
+    await inDoc(app, `document.querySelector('.link-dd:not([hidden]) [data-value="__doc_create_item__"]').click()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("erp");
+    await expect.poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Item")`), { timeout: 30_000 }).toBe(true);
+    // Stand-in for Save on the new Item: Frappe then shows /app/item/<code>.
+    await inErp(app, `frappe.set_route("Form", "Item", ${JSON.stringify(items[1])})`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/item/");
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doc.name === ${JSON.stringify(items[1])})`), { timeout: 20_000 })
+      .toBe(true);
+    await inErp(app, `window.erpUiShell.softPeekEsc()`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(lines, { timeout: 20_000 }).toEqual([items[0], items[1]]);
+    // And it stays: give the cleanup's timer its chance to fire.
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(await lines()).toEqual([items[0], items[1]]);
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000 }).toMatchObject({ row: "1", field: "item_code", value: items[1] });
+  });
+});
+
+// 5zorro 2026-10-11: the Bill's Customer / Sales order(s) columns — PO wash on the header, Sales
+// Order wash (+ A/R hatch) on the cells, and a peek for the PO the link lives on. Never saves: the
+// line's PO is set in the hidden form only (this site has no POs), so the peek lands on "not found".
+test.describe("scaffold: Bill line order peeks", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("Customer / Sales order(s): washes, and the PO peek opens the PO", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await inErp(app, `(() => { cur_frm.doc.items[0].purchase_order = "PUR-ORD-E2E-NONE"; return true; })()`);
+    const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { ok: true, doc: s.doc, amountDue: s.amountDue }; })()`);
+    await app.evaluate(({ webContents }, sn) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", sn);
+    }, snap);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-peek-0-po"]')`), { timeout: 15_000 }).toBe(true);
+    const look = await inDoc(
+      app,
+      `(() => {
+        const th = document.querySelector('#items-head-row th.so-col');
+        const td = document.querySelector('[data-testid="bill-peek-0-po"]').closest("td");
+        const css = (e) => getComputedStyle(e);
+        return { pattern: document.documentElement.dataset.pattern || "", th: css(th).backgroundColor, td: css(td).backgroundColor,
+          tdImage: css(td).backgroundImage, headers: document.querySelectorAll('#items-head-row th.so-col').length, so: !!document.querySelector('[data-testid="bill-peek-0-so"]') };
+      })()`,
+    );
+    expect(look.headers).toBe(2);
+    expect(look.th).toBe(look.td); // both the order wash
+    expect(look.so).toBe(false); // no Sales Order on this line
+    if (look.pattern === "ar" || look.pattern === "both") expect(look.tdImage).toMatch(/repeating-linear-gradient/);
+    else expect(look.tdImage).toBe("none");
+    await inDoc(app, `document.querySelector('[data-testid="bill-peek-0-po"]').click(); true`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/purchase-order/PUR-ORD-E2E-NONE");
+    // The way back from a clean bill's errand is the next describe's job (an unsaved new bill like
+    // this one has no saved address to come back to).
+  });
+});
+
+/** A real Esc keypress on the Doc page. */
+async function escOnDocPage(app) {
+  await app.evaluate(({ webContents }) => {
+    const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+    w.focus();
+    w.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    w.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  });
+}
+const backLabel = (app) =>
+  e2eCall(app, "execInView", "chrome", `(() => { const b = document.querySelector('[data-testid="btn-detour-back"]'); return b && !b.hidden ? b.textContent : ""; })()`);
+
+// 5zorro 2026-10-11: from a bill to a document with its own Doc skin — ask at the door when the bill
+// is unsaved, then "← Back to Bill …" / Esc. Read-only: test A uses an existing submitted bill, test B
+// cancels the gate.
+test.describe("scaffold: errand from a bill to another Doc-skinned document", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("clean bill → its Item Receipt: no question, then Back to Bill and Esc return", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const bill = await inErp(
+      app,
+      `(async () => {
+        const r = await frappe.call({ method: "frappe.client.get_list", args: { doctype: "Purchase Invoice Item", parent: "Purchase Invoice",
+          filters: [["purchase_receipt", "is", "set"], ["docstatus", "=", 1]], fields: ["parent"], limit_page_length: 1 } });
+        return ((r.message || [])[0] || {}).parent || "";
+      })()`,
+    );
+    test.skip(!bill, "no submitted bill with an Item Receipt line on this site");
+    await e2eCall(app, "openBill", `/app/purchase-invoice/${bill}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-linked-pr-peek-0"]')`), { timeout: 40_000 }).toBe(true);
+    await inDoc(app, `document.querySelector('[data-testid="bill-linked-pr-peek-0"]').click(); true`);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toContain("/purchase-receipt/");
+    expect(await inDoc(app, `!document.querySelector('[data-testid="doc-commit-gate"]').hidden`)).toBe(false);
+    await expect.poll(async () => backLabel(app), { timeout: 15_000 }).toBe(`← Back to Bill ${bill}`);
+    await new Promise((r) => setTimeout(r, 1000));
+    await escOnDocPage(app);
+    await expect.poll(async () => e2eCall(app, "currentRoute"), { timeout: 20_000 }).toBe(`/app/purchase-invoice/${bill}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => backLabel(app), { timeout: 15_000 }).toBe("");
+  });
+
+  test("unsaved bill → a PO: the unsaved-changes gate asks first; Cancel stays on the bill", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await inErp(app, `(() => { cur_frm.doc.items[0].purchase_order = "PUR-ORD-E2E-NONE"; return true; })()`);
+    const snap = await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return { ok: true, doc: s.doc, amountDue: s.amountDue }; })()`);
+    await app.evaluate(({ webContents }, sn) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", sn);
+    }, snap);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-peek-0-po"]')`), { timeout: 15_000 }).toBe(true);
+    // A clerk's edit: Amount Due typed.
+    await inDoc(
+      app,
+      `(() => { const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = "12.34"; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`,
+    );
+    const before = await e2eCall(app, "currentRoute");
+    await inDoc(app, `document.querySelector('[data-testid="bill-peek-0-po"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `!document.querySelector('[data-testid="doc-commit-gate"]').hidden`), { timeout: 20_000 })
+      .toBe(true);
+    expect(await e2eCall(app, "currentRoute")).toBe(before);
+    await inDoc(app, `document.querySelector("#commit-gate [data-gate='cancel']").click()`);
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-commit-gate"]').hidden`), { timeout: 10_000 }).toBe(true);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(await e2eCall(app, "currentRoute")).toBe(before);
+    expect(String((await inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`)))).toMatch(/^new-purchase-invoice-/);
+    expect(await backLabel(app)).toBe("");
+  });
+});
+
+// 5zorro focus incident 2026-10-11T21:14:44Z: pick an Item on a line, Tab from Description to Qty —
+// yanked back to Description ~150 ms later, when the pick's own post-ERPNext move landed. Run it
+// with ERP_CHAOS_LAG_MS / ERP_CHAOS_LAG_PCT to widen the race the way 5zorro's session had it.
+test.describe("scaffold: a late post-edit move never overrides the clerk's Tab", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("Tab-pick an Item, Tab on from Description to Qty, and stay on Qty", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const item = await inErp(app, `(async () => { const r = await frappe.db.get_list("Item", { filters: { disabled: 0 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`);
+    test.skip(!item, "sandbox has no Item");
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); if (!(s.doc.items || []).length) await window.erpDoc.addItem(); })()`);
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="item_code"]')`), { timeout: 20_000 }).toBe(true);
+    // A new bill settles first (its opening focus lands on Vendor); this test is about what follows.
+    await expect.poll(async () => inDoc(app, `document.activeElement && document.activeElement.id`), { timeout: 20_000 }).toBe("f-vendor");
+    await new Promise((r) => setTimeout(r, 2000));
+    await inDoc(
+      app,
+      `(() => { const i = document.querySelector('input[data-row="0"][data-field="item_code"]'); i.focus(); i.value = ${JSON.stringify(item)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('.link-dd:not([hidden]) .link-opt:not(.link-action)')`), { timeout: 15_000 }).toBe(true);
+    const key = (k) =>
+      app.evaluate(({ webContents }, kk) => {
+        const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+        w.focus();
+        w.sendInputEvent({ type: "keyDown", keyCode: kk });
+        w.sendInputEvent({ type: "keyUp", keyCode: kk });
+      }, k);
+    // Tab accepts the highlighted Item and moves to Description at once; the pick's update is still
+    // on its way to ERPNext (5zorro's trail: Description at +0.1 s, ERPNext's answer at +0.9 s).
+    await key("Tab");
+    // As soon as the clerk is on Description, Tab on.
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 15_000, intervals: [50] }).toMatchObject({ field: "description" });
+    await key("Tab");
+    await expect.poll(async () => inDoc(app, ACTIVE), { timeout: 5_000, intervals: [50] }).toMatchObject({ field: "qty" });
+    // Long enough for ERPNext's answer and any late move.
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(await inDoc(app, ACTIVE)).toMatchObject({ row: "0", field: "qty" });
+  });
+
+  // Same family: a new bill's opening "focus Vendor" retries for half a second while it loads; a clerk
+  // who has already clicked into a line keeps their place.
+  test("clicking into a line while a new bill loads keeps the clerk there", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 1000));
+    await e2eCall(app, "openBill", "/app/purchase-invoice/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `!!document.querySelector('input[data-row="0"][data-field="qty"]')`), { timeout: 40_000, intervals: [50] }).toBe(true);
+    // Click into Qty like a clerk — again if the loading page moved under the pointer.
+    const clickQty = async () => {
+      const box = await inDoc(app, `(() => { const i = document.querySelector('input[data-row="0"][data-field="qty"]'); if (!i) return null; i.scrollIntoView({ block: "center" }); const r = i.getBoundingClientRect(); return { x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) }; })()`);
+      if (!box) return false;
+      await app.evaluate(({ webContents }, p) => {
+        const w = webContents.getAllWebContents().find((x) => /doc-form\.html/.test(x.getURL()));
+        w.focus();
+        w.sendInputEvent({ type: "mouseDown", x: p.x, y: p.y, button: "left", clickCount: 1 });
+        w.sendInputEvent({ type: "mouseUp", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      }, box);
+      await new Promise((r) => setTimeout(r, 150));
+      return ((await inDoc(app, ACTIVE)) || {}).field === "qty";
+    };
+    let inQty = false;
+    for (let k = 0; k < 10 && !inQty; k++) inQty = await clickQty();
+    expect(inQty).toBe(true);
+    await new Promise((r) => setTimeout(r, 4000));
+    // Still in Qty: not pulled to Vendor, and not dropped by a loading repaint that skipped putting
+    // the clerk back because it expected Vendor to take focus.
+    expect(await inDoc(app, ACTIVE)).toMatchObject({ row: "0", field: "qty" });
+  });
+});
+
+// 5zorro 2026-10-11: Attach in the same spot on Bill, PO and Item Receipt — beside the notes. The PO has
+// no Remarks; its terms box ("Freeform comments") is the stand-in, so Attach sits there.
+test.describe("scaffold: Attach sits beside the notes on every A/P Doc skin", () => {
+  test("PO beside Freeform comments, Item Receipt beside its Remarks; no toolbar copy", async () => {
+    test.setTimeout(150_000);
+    const app = await launchShell();
+    try {
+      await waitForE2eApi(app);
+      const want = { openPo: ["/app/purchase-order/new", "terms-head", "Freeform comments", "purchase order"], openReceipt: ["/app/purchase-receipt/new", "memo-entry", "Remarks", "item receipt"] };
+      for (const [hook, [route, home, label, noun]] of Object.entries(want)) {
+        await e2eCall(app, hook, route);
+        await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+        await expect
+          .poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-attach"); return b ? b.textContent.trim() : ""; })()`), { timeout: 40_000 })
+          .toBe(`Attach file to this ${noun}`);
+        const at = await inDoc(
+          app,
+          `(() => { const b = document.getElementById("btn-attach"); const t = document.getElementById("btn-attach-toolbar");
+            return { visible: b.getClientRects().length > 0, home: b.closest("#terms-head, #memo-entry") && b.closest("#terms-head, #memo-entry").id,
+              label: (b.parentElement.querySelector("label") || {}).textContent || "", toolbar: !!t && !t.hidden }; })()`,
+        );
+        expect(at).toMatchObject({ visible: true, home, toolbar: false });
+        expect(at.label).toContain(label);
+      }
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+});
+
+// 5zorro nav incident 2026-10-12: a new Item Receipt (Doc), then Home, then the Material Request tile.
+// The Material Request has no Doc skin; the hidden untouched Item Receipt became its "peek parent" and
+// the Doc tab lit up as "back to" it. Opened from Home, it has no parent — the Doc tab stays hidden.
+test.describe("scaffold: a page opened from Home has no peek parent", () => {
+  test("Material Request from Home after a new Item Receipt: no Doc tab, no parent", async () => {
+    test.setTimeout(150_000);
+    const app = await launchShell();
+    try {
+      await waitForE2eApi(app);
+      await e2eCall(app, "openReceipt", "/app/purchase-receipt/new");
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+      await expect.poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 }).toBe(true);
+      await e2eCall(app, "showLauncher");
+      await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-mr-new"]').click(); true`);
+      await expect.poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Material Request")`), { timeout: 30_000 }).toBe(true);
+      await new Promise((r) => setTimeout(r, 1500));
+      const docTab = await e2eCall(app, "execInView", "chrome", `(() => { const b = document.querySelector('[data-testid="lens-doc"]'); return { shown: !!b && !b.hidden, title: b ? b.title : "" }; })()`);
+      expect(docTab.shown, `Doc tab should be hidden (title: ${docTab.title})`).toBe(false);
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+});
+
+// 5zorro 2026-10-12: a saved Sales Order draft, Attach "flickered, and nothing else". Attach opens the
+// document's own Vanilla form for Frappe's uploader; the Vanilla → Doc hijack pulled the clerk back
+// at once. Never uploads: the dialog is closed and Esc goes back.
+test.describe("scaffold: Attach on a saved Sales Order draft", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("the uploader stays open in Vanilla; closing it comes back to the Doc skin", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: ["<", 2] }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    // Draft or submitted: Frappe attaches to both, and so does the skin (canAttachTo).
+    test.skip(!so, "sandbox has no saved Sales Order");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })
+      .toBe(so);
+    await expect.poll(async () => inDoc(app, `!document.getElementById("btn-attach").disabled`), { timeout: 20_000 }).toBe(true);
+    await inDoc(app, `document.getElementById("btn-attach").click(); true`);
+    const UPLOADER = `!!(window.cur_dialog && cur_dialog.display && cur_frm && cur_frm.doc.name === ${JSON.stringify(so)})`;
+    await expect.poll(async () => inErp(app, UPLOADER), { timeout: 20_000 }).toBe(true);
+    // And it stays: the old code was back on the Doc skin within half a second.
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(await e2eGet(app, "surfaceMode")).toBe("erp");
+    expect(await inErp(app, UPLOADER)).toBe(true);
+    // The uploader closing (after an upload, or closed by hand) is the way back — no Esc
+    // (5zorro 2026-10-12: "after it finished attaching, I was left on the Vanilla page").
+    await inErp(app, `cur_dialog.hide(); true`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`), { timeout: 20_000 })
+      .toBe(so);
+  });
+});
+
+// 5zorro 2026-10-12: the attached files as a small table under the notes, each with Peek and
+// Download. Reads 5zorro's saved Sales Order draft and the file already on it; writes only a local
+// copy in the OS temp folder (deleted after). The Papers pane remembers being open — closed at the end.
+test.describe("scaffold: attached files table under the notes", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("lists the order's files; Peek shows it in Papers; Download saves the same bytes", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const found = await inErp(
+      app,
+      `(async () => {
+        const r = await frappe.db.get_list("File", { filters: { attached_to_doctype: "Sales Order", is_folder: 0 },
+          fields: ["attached_to_name", "file_name", "file_url", "file_size"], limit: 1 });
+        if (!r[0]) return null;
+        const so = await frappe.db.get_value("Sales Order", r[0].attached_to_name, "docstatus");
+        return so && so.message && Number(so.message.docstatus) < 2 ? r[0] : null;
+      })()`,
+    );
+    test.skip(!found, "sandbox has no saved Sales Order with a file attached");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${found.attached_to_name}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    const ROWS = `[...document.querySelectorAll('[data-testid="doc-attach-list"] tr[data-file-url]')].map((tr) => ({ url: tr.dataset.fileUrl, name: tr.querySelector(".al-name").textContent }))`;
+    await expect.poll(async () => inDoc(app, ROWS), { timeout: 40_000 }).toContainEqual({ url: found.file_url, name: found.file_name });
+    // It sits in the notes section, with the Attach button.
+    expect(await inDoc(app, `!!document.querySelector('[data-testid="doc-notes-section"] [data-testid="doc-attach-list"]')`)).toBe(true);
+
+    const url = JSON.stringify(found.file_url);
+    const row = `[...document.querySelectorAll('[data-testid="doc-attach-list"] tr[data-file-url]')].find((t) => t.dataset.fileUrl === ${url})`;
+    await inDoc(app, `${row}.querySelector('[data-al="peek"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `(() => { const p = document.querySelector('[data-testid="compare-pane"]'); return !!p && !p.hidden && [...p.querySelectorAll(".cp-paper")].some((b) => b.dataset.fileUrl === ${url}); })()`), { timeout: 20_000 })
+      .toBe(true);
+
+    const out = path.join(os.tmpdir(), `e2e-attach-${Date.now()}-${found.file_name}`);
+    try {
+      await e2eCall(app, "setNextSavePath", out);
+      await inDoc(app, `${row}.querySelector('[data-al="download"]').click(); true`);
+      await expect.poll(() => fs.existsSync(out) && fs.statSync(out).size, { timeout: 20_000 }).toBe(Number(found.file_size));
+    } finally {
+      fs.rmSync(out, { force: true });
+      await inDoc(app, `(() => { const p = document.querySelector('[data-testid="compare-pane"]'); if (p && !p.hidden) p.querySelector('[data-cp="close"]').click(); return true; })()`);
+    }
+  });
+});
+
+// 5zorro 2026-10-12: a file attached to the submitted Sales Order in Vanilla did not show in the
+// table back on the Doc skin (the table only re-read on a new document name), and Attach was grey
+// on a submitted order though Frappe attaches to it. Adds one small text file and deletes it.
+test.describe("scaffold: attached files follow ERPNext, not the page", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("a file attached outside the skin shows when the page gets its document again; Attach is on for a submitted order", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await inErp(
+      app,
+      `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1 }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`,
+    );
+    test.skip(!so, "sandbox has no submitted Sales Order");
+    const route = `/app/sales-order/${so}`;
+    await e2eCall(app, "openDocSkin", "sales-order", route);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`), { timeout: 40_000 })
+      .toBe(so);
+    await expect.poll(async () => inDoc(app, `!document.getElementById("btn-attach").disabled`), { timeout: 20_000 }).toBe(true);
+    const NAMES = `[...document.querySelectorAll('[data-testid="doc-attach-list"] .al-name')].map((td) => td.textContent)`;
+    await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-attach-list"]') ? 1 : 0`), { timeout: 20_000 }).toBeGreaterThanOrEqual(0);
+    const fileName = `zz-e2e-${Date.now()}.txt`;
+    let fileId = "";
+    try {
+      // Attached the way Vanilla's uploader does (upload_file), from the ERP page.
+      fileId = await inErp(
+        app,
+        `(async () => {
+          const fd = new FormData();
+          fd.append("file", new Blob(["e2e"], { type: "text/plain" }), ${JSON.stringify(fileName)});
+          fd.append("doctype", "Sales Order"); fd.append("docname", ${JSON.stringify(so)}); fd.append("is_private", "1");
+          const r = await fetch("/api/method/upload_file", { method: "POST", body: fd, headers: { "X-Frappe-CSRF-Token": frappe.csrf_token } });
+          const j = await r.json(); return (j.message && j.message.name) || "";
+        })()`,
+      );
+      expect(fileId).toBeTruthy();
+      // The page gets the same document again (as on the way back from Vanilla).
+      await e2eCall(app, "openDocSkin", "sales-order", route);
+      await expect.poll(async () => inDoc(app, NAMES), { timeout: 30_000 }).toContain(fileName);
+    } finally {
+      if (fileId) await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "File", name: ${JSON.stringify(fileId)} } }).then(() => true)`);
+    }
+  });
+});
+
+// Plan 2026-10-12 S2: Create ▾ › Purchase Order… on a submitted Sales Order. Writes: one draft PO
+// per vendor, deleted at the end (the PO numbers they used are not reused by ERPNext).
+test.describe("scaffold: Sales Order Create ▾ › Purchase Order", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("saves one draft PO per vendor, stays on the order, and does not offer the same lines twice", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 2 });
+        return { so: (so[0] && so[0].name) || "", suppliers: sup.map((s) => s.name) };
+      })()`,
+    );
+    test.skip(!ctx.so || ctx.suppliers.length < 1, "sandbox needs a submitted, open Sales Order and a vendor");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${ctx.so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-create"); return !!b && !b.hidden && !b.disabled; })()`), { timeout: 40_000 }).toBe(true);
+
+    // The menu: Purchase Order…, in the PO's order wash.
+    await inDoc(app, `document.getElementById("btn-create").click(); true`);
+    const entry = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-create-menu"] [data-create="purchase-order"]'); return b ? { text: b.textContent, bg: getComputedStyle(b).backgroundColor } : null; })()`);
+    expect(entry).toEqual({ text: "Purchase Order…", bg: "rgb(232, 244, 252)" });
+    await inDoc(app, `document.querySelector('[data-create="purchase-order"]').click(); true`);
+    await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="so-create-po"] tbody tr').length`), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    // Two vendors when there are two lines and two vendors: line 1 → first, the rest → the second.
+    const vendors = ctx.suppliers;
+    const lineCount = await inDoc(
+      app,
+      `(() => {
+        const rows = [...document.querySelectorAll('[data-testid="so-create-po"] tbody tr')];
+        rows.forEach((tr, i) => { const v = tr.querySelector('[data-sc="vendor"]'); const name = ${JSON.stringify(vendors)}[Math.min(i, ${vendors.length - 1})]; v.value = name; v.dataset.linkCommitted = name; });
+        return rows.length;
+      })()`,
+    );
+    expect(lineCount).toBeGreaterThan(0);
+    const before = await inErp(app, `(async () => (await frappe.db.get_list("Purchase Order", { limit: 0 })).map((p) => p.name))()`);
+    let made = [];
+    try {
+      await inDoc(app, `document.querySelector('[data-testid="so-create-save"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `!document.querySelector('[data-testid="so-create-po"]')`), { timeout: 60_000 }).toBe(true);
+      made = await inErp(
+        app,
+        `(async () => (await frappe.db.get_list("Purchase Order", { limit: 0, fields: ["name", "supplier", "docstatus"] })).filter((p) => !${JSON.stringify(before)}.includes(p.name)))()`,
+      );
+      const wantVendors = [...new Set(Array.from({ length: lineCount }, (_, i) => vendors[Math.min(i, vendors.length - 1)]))];
+      expect(made.map((p) => p.supplier).sort()).toEqual(wantVendors.sort());
+      expect(made.every((p) => p.docstatus === 0)).toBe(true);
+      // Each PO line points back at the order.
+      const links = await inErp(
+        app,
+        `(async () => { const out = []; for (const n of ${JSON.stringify(made.map((p) => p.name))}) { const d = await frappe.db.get_doc("Purchase Order", n); out.push(...d.items.map((it) => it.sales_order)); } return out; })()`,
+      );
+      expect(links.length).toBe(lineCount);
+      expect(new Set(links)).toEqual(new Set([ctx.so]));
+      // Stayed on the order; the status names the drafts.
+      expect(await e2eGet(app, "surfaceMode")).toBe("doc");
+      expect(await inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.name)()`)).toBe(ctx.so);
+      const status = await inDoc(app, `document.getElementById("status") ? document.getElementById("status").textContent : document.body.innerText`);
+      expect(status).toContain("saved as");
+      // On the Drafts shelf, which wears its yellow border.
+      await expect
+        .poll(
+          async () =>
+            app.evaluate(async ({ webContents }) => {
+              const w = webContents.getAllWebContents().find((x) => /history\.html/.test(x.getURL()));
+              return w ? w.executeJavaScript(`(() => { const s = document.getElementById("sec-drafts"); return s && !s.hidden ? s.innerText + "|" + getComputedStyle(s).borderTopColor : ""; })()`) : "";
+            }),
+          { timeout: 20_000 },
+        )
+        .toMatch(/PUR-ORD[\s\S]*\|rgb\(234, 179, 8\)/);
+      // Create again: every line is already on a draft PO — nothing offered twice.
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="purchase-order"]').click(); true`);
+      await expect
+        .poll(async () => inDoc(app, `document.body.innerText.includes("Every line is already on a purchase order")`), { timeout: 20_000 })
+        .toBe(true);
+      expect(await inDoc(app, `!!document.querySelector('[data-testid="so-create-po"]')`)).toBe(false);
+    } finally {
+      for (const p of made) {
+        await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: ${JSON.stringify(p.name)} } }).then(() => true)`).catch(() => {});
+      }
+    }
+  });
+});
+
+// Plan 2026-10-12 S3: the PO's source picker — NIC, Material Request, Supplier Quotation, Sales
+// Order (5zorro). Pulls a submitted Sales Order into a new, unsaved PO; never saves.
+test.describe("scaffold: PO source picker", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("lists the Sales Order still to order and fills the PO with its lines, linked back", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 1 });
+        if (!so[0] || !sup[0]) return null;
+        const d = await frappe.db.get_doc("Sales Order", so[0].name);
+        return { so: so[0].name, supplier: sup[0].name, codes: d.items.filter((i) => i.ordered_qty < i.stock_qty).map((i) => i.item_code) };
+      })()`,
+    );
+    test.skip(!ctx || !ctx.codes.length, "sandbox needs a submitted Sales Order with lines to order, and a vendor");
+    await e2eCall(app, "openPo", "/app/purchase-order/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), { timeout: 40_000 })
+      .toBe(true);
+    await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", ${JSON.stringify(ctx.supplier)}); return true; })()`);
+    await expect.poll(async () => inDoc(app, `(() => { const b = document.getElementById("btn-select-source"); return !!b && !b.hidden ? b.textContent : ""; })()`), { timeout: 20_000 }).toBe("Select source");
+    // setHeader is a back door: wait for the page to show the vendor before asking for sources.
+    await expect.poll(async () => inDoc(app, `(document.querySelector('[data-field="supplier"]') || {}).value || ""`), { timeout: 20_000 }).toBe(ctx.supplier);
+    // A vendor pick may already have opened it; otherwise the toolbar button does.
+    const open = `!!document.querySelector('[data-testid="doc-source-modal"]')`;
+    if (!(await inDoc(app, open))) await inDoc(app, `document.getElementById("btn-select-source").click(); true`);
+    await expect.poll(async () => inDoc(app, open), { timeout: 20_000 }).toBe(true);
+    const ITEMS = `[...document.querySelectorAll('[data-testid="doc-source-modal"] .src-item')].map((b) => b.textContent)`;
+    await expect.poll(async () => (await inDoc(app, ITEMS)).some((t) => t.includes(ctx.so)), { timeout: 30_000 }).toBe(true);
+    const items = await inDoc(app, ITEMS);
+    expect(items[0]).toContain("NIC — enter this Purchase Order manually");
+    expect(items.some((t) => /Item Receipt|IR /.test(t))).toBe(false);
+    const groups = await inDoc(app, `[...document.querySelectorAll('[data-testid="doc-source-modal"] .src-group')].map((g) => g.textContent)`);
+    expect(groups.some((g) => g.startsWith("Sales Orders — still to order"))).toBe(true);
+    await inDoc(
+      app,
+      `(() => { const b = [...document.querySelectorAll('[data-testid="doc-source-modal"] .src-item')].find((x) => x.textContent.includes(${JSON.stringify(ctx.so)})); b.click(); document.querySelector('[data-testid="doc-source-modal"] [data-act="pick"]').click(); return true; })()`,
+    );
+    await expect
+      .poll(async () => inDoc(app, `(async () => (await window.erpDoc.getSnapshot()).doc.items.map((i) => [i.item_code, i.sales_order]))()`), { timeout: 40_000 })
+      .toEqual(ctx.codes.map((c) => [c, ctx.so]));
+    // The vendor stays the one picked, and nothing was saved.
+    const doc = await inDoc(app, `(async () => { const d = (await window.erpDoc.getSnapshot()).doc; return { supplier: d.supplier, name: d.name }; })()`);
+    expect(doc.supplier).toBe(ctx.supplier);
+    expect(doc.name).toMatch(/^new-purchase-order/);
+  });
+});
+
+// Plan 2026-10-12 S4: the Sources column on the Sales Order's lines. Writes one draft PO (through
+// Create ▾, for line 1 only) and deletes it.
+test.describe("scaffold: Sales Order Sources column", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  test("not sourced (with QOH) until a PO exists; then the line shows the PO chip, washed and hatched", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const ctx = await inErp(
+      app,
+      `(async () => {
+        const so = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, status: ["not in", ["Closed", "On Hold", "Completed"]] }, limit: 1 });
+        const sup = await frappe.db.get_list("Supplier", { filters: { disabled: 0 }, limit: 1 });
+        if (!so[0] || !sup[0]) return null;
+        const d = await frappe.db.get_doc("Sales Order", so[0].name);
+        const pos = await frappe.db.get_list("Purchase Order", { filters: [["Purchase Order Item", "sales_order", "=", so[0].name], ["docstatus", "<", 2]] });
+        return { so: so[0].name, supplier: sup[0].name, lines: d.items.length, clean: !pos.length && d.items.every((i) => !i.delivered_qty) };
+      })()`,
+    );
+    test.skip(!ctx || !ctx.clean || ctx.lines < 2, "needs a submitted Sales Order with two lines, nothing ordered or shipped yet");
+    await e2eCall(app, "setLensPref", "sales-order", "doc");
+    await e2eCall(app, "openDocSkin", "sales-order", `/app/sales-order/${ctx.so}`);
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    const CELLS = `[...document.querySelectorAll('#items-body td.so-sources, td.so-sources')].map((td) => [...td.querySelectorAll(".src-chip")].map((c) => ({ kind: c.dataset.kind, text: c.textContent })))`;
+    await expect
+      .poll(async () => (await inDoc(app, CELLS)).map((cell) => cell.map((c) => c.kind).join(",")), { timeout: 40_000 })
+      .toEqual(Array(ctx.lines).fill("none"));
+    expect((await inDoc(app, CELLS))[0][0].text).toMatch(/^Not sourced ×\d+(\.\d+)? \(QOH ×\d+(\.\d+)? \S+\)$/);
+
+    let made = [];
+    try {
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="purchase-order"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="so-create-po"] tbody tr').length`), { timeout: 20_000 }).toBeGreaterThan(1);
+      await inDoc(
+        app,
+        `(() => { const rows = [...document.querySelectorAll('[data-testid="so-create-po"] tbody tr')];
+          rows.forEach((tr, i) => { tr.querySelector('[data-sc="tick"]').checked = i === 0; });
+          const v = rows[0].querySelector('[data-sc="vendor"]'); v.value = ${JSON.stringify(ctx.supplier)}; v.dataset.linkCommitted = v.value;
+          document.querySelector('[data-testid="so-create-save"]').click(); return true; })()`,
+      );
+      await expect.poll(async () => inDoc(app, `!document.querySelector('[data-testid="so-create-po"]')`), { timeout: 60_000 }).toBe(true);
+      made = await inErp(app, `(async () => (await frappe.db.get_list("Purchase Order", { filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(ctx.so)}]] })).map((p) => p.name))()`);
+      expect(made.length).toBe(1);
+      await expect
+        .poll(async () => (await inDoc(app, CELLS)).map((cell) => cell.map((c) => c.text).join(" | ")), { timeout: 30_000 })
+        .toEqual([`PO ${made[0]} ×2 (draft)`, ...Array(ctx.lines - 1).fill(expect.stringMatching(/^Not sourced/))]);
+      // The PO chip: a peek to the PO, in the order wash; hatched when the clerk hatches A/P.
+      const chip = await inDoc(
+        app,
+        `(() => { const c = document.querySelector('td.so-sources .src-chip[data-kind="po"]');
+          document.documentElement.dataset.pattern = "ap";
+          const hatched = getComputedStyle(c).backgroundImage;
+          return { route: c.dataset.peekRoute, desk: c.dataset.desk, bg: getComputedStyle(c).backgroundColor, hatched,
+            textBg: getComputedStyle(c.querySelector(".hatch-clear")).backgroundColor }; })()`,
+      );
+      expect(chip.route).toBe(`/app/purchase-order/${made[0]}`);
+      expect(chip.desk).toBe("ap");
+      expect(chip.bg).toBe("rgb(232, 244, 252)");
+      expect(chip.hatched).toContain("repeating-linear-gradient");
+      expect(chip.textBg).toBe("rgb(232, 244, 252)");
+    } finally {
+      for (const n of made) await inErp(app, `frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: ${JSON.stringify(n)} } }).then(() => true)`).catch(() => {});
+    }
+  });
+});
+
+// Plan 2026-10-12 S5: the rest of Create — Vanilla's entries, each in its wash, as a list or a
+// flowchart. Never saves: the documents Vanilla makes are left unsaved.
+test.describe("scaffold: Sales Order Create ▾ — list and flowchart", () => {
+  /** @type {import('@playwright/test').ElectronApplication | undefined} */
+  let app;
+  test.afterEach(async () => {
+    if (app) await app.close().catch(() => {});
+    app = undefined;
+  });
+
+  async function openSo(a) {
+    const so = await e2eCall(a, "execInView", "erp", `(async () => { const r = await frappe.db.get_list("Sales Order", { filters: { docstatus: 1, per_billed: ["<", 100], per_delivered: ["<", 100], status: ["not in", ["Closed", "On Hold"]] }, limit: 1 }); return (r[0] && r[0].name) || ""; })()`);
+    if (!so) return "";
+    await e2eCall(a, "setLensPref", "sales-order", "doc");
+    await e2eCall(a, "openDocSkin", "sales-order", `/app/sales-order/${so}`);
+    await expect.poll(async () => e2eGet(a, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect.poll(async () => inDoc(a, `(() => { const b = document.getElementById("btn-create"); return !!b && !b.hidden && !b.disabled; })()`), { timeout: 40_000 }).toBe(true);
+    // The list is the default; a previous run (or the clerk) may have left the flowchart on.
+    await inDoc(a, `(() => { try { localStorage.setItem("so-create-view", "list"); } catch {} return true; })()`);
+    return so;
+  }
+
+  test("the list: Vanilla's entries in order, each washed; Sales Invoice opens unsaved in its Doc skin", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    await e2eCall(app, "setLensPref", "sales-invoice", "doc");
+    await inDoc(app, `document.getElementById("btn-create").click(); true`);
+    const entries = await inDoc(app, `[...document.querySelectorAll('[data-testid="doc-create-menu"] [data-create]')].map((b) => ({ id: b.dataset.create, bg: getComputedStyle(b).backgroundColor }))`);
+    expect(entries.map((e) => e.id)).toEqual([
+      "pick-list", "delivery-note", "work-order", "production-plan", "sales-invoice",
+      "material-request", "raw-materials", "purchase-order", "project", "payment-request", "payment",
+    ]);
+    const bg = Object.fromEntries(entries.map((e) => [e.id, e.bg]));
+    expect(bg["delivery-note"]).toBe("rgb(255, 244, 224)"); // fulfill
+    expect(bg["sales-invoice"]).toBe("rgb(246, 234, 242)"); // invoice
+    expect(bg["purchase-order"]).toBe("rgb(232, 244, 252)"); // order
+    expect(bg["payment"]).toBe("rgb(230, 245, 240)"); // payment
+    await inDoc(app, `document.querySelector('[data-create="sales-invoice"]').click(); true`);
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); const d = s && s.doc; return d ? { doctype: d.doctype, name: d.name, so: (d.items || []).map((i) => i.sales_order) } : null; })()`), { timeout: 40_000 })
+      .toMatchObject({ doctype: "Sales Invoice", name: expect.stringMatching(/^new-sales-invoice/), so: expect.arrayContaining([so]) });
+    expect(await e2eGet(app, "surfaceMode")).toBe("doc");
+  });
+
+  test("Delivery Note runs Vanilla's button and lands on an unsaved Delivery Note", async () => {
+    test.setTimeout(180_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-create="delivery-note"]').click(); true`);
+    await expect
+      .poll(async () => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Delivery Note" && cur_frm.is_new() && (cur_frm.doc.items || []).some((i) => i.against_sales_order === ${JSON.stringify(so)}))`), { timeout: 40_000 })
+      .toBe(true);
+    expect(await e2eGet(app, "surfaceMode")).toBe("erp");
+  });
+
+  test("the flowchart: stages in order, the order in the middle, counts, Create where it can", async () => {
+    test.setTimeout(150_000);
+    app = await launchShell();
+    await waitForE2eApi(app);
+    const so = await openSo(app);
+    test.skip(!so, "needs a submitted Sales Order, not yet delivered or billed");
+    try {
+      await inDoc(app, `document.getElementById("btn-create").click(); document.querySelector('[data-testid="doc-create-menu"] [data-view="flow"]').click(); true`);
+      await expect.poll(async () => inDoc(app, `document.querySelectorAll('[data-testid="doc-create-flow"] .sc-col').length`), { timeout: 20_000 }).toBeGreaterThan(4);
+      const flow = await inDoc(
+        app,
+        `[...document.querySelectorAll('[data-testid="doc-create-flow"] .sc-col')].map((c) => ({ stage: c.dataset.stage,
+          boxes: [...c.querySelectorAll(".sc-box")].map((b) => ({ id: b.dataset.box, made: (b.querySelector(".sc-made") || {}).textContent || "", create: !!b.querySelector("[data-create]") })) }))`,
+      );
+      expect(flow.map((c) => c.stage)).toEqual(["before", "order", "make", "ship", "bill", "paid", "also"]);
+      expect(flow[1].boxes[0].id).toBe("sales-order");
+      const po = flow[2].boxes.find((b) => b.id === "purchase-order");
+      expect(po).toMatchObject({ create: true });
+      expect(po.made).toMatch(/none yet|\d+ made/);
+      // The choice sticks: the menu opens as a flowchart next time.
+      await inDoc(app, `document.body.click(); document.getElementById("btn-create").click(); true`);
+      expect(await inDoc(app, `document.querySelector('[data-testid="doc-create-menu"]').dataset.view`)).toBe("flow");
+    } finally {
+      await inDoc(app, `(() => { try { localStorage.setItem("so-create-view", "list"); } catch {} return true; })()`);
+    }
+  });
+});

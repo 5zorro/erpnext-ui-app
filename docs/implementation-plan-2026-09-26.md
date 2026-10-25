@@ -15,6 +15,13 @@ OI-062 (Find is its own Recent slot — done, relied on here) · OI-128 (peek gr
 > live sandbox, including `e2e/scaffold-find-doc.spec.js`. 5zorro has not clicked through it yet.
 > F1–F4 and A1 are built (see the stage table). 5zorro's three decisions are in, and HANDOFF is updated.
 
+
+> **Status 2026-10-25 (architecture review 10-19 R15-6):** Printing / Printer hardening and Doors
+> are folded into HANDOFF (§ Printing, invariant 8), and Parts A–D are what § Navigation spine
+> describes. What keeps this plan open is its *Dogfood residuals* (most "built — 5zorro to
+> dogfood") and *After the dogfood papers* + *First release*, which are direction: at 5zorro's sweep
+> after the papers, the direction sections become the next plan's opening and each residual is
+> sorted.
 ---
 
 ## How to handle cross-architecture dogfood (copy into every new dated plan)
@@ -43,9 +50,12 @@ treated as one blob. Prefer **error classes / architecture families**, not a sin
 
 ### Closeout (before deleting this plan)
 
-1. Append durable **decisions** via `~/agent-harness/scripts/append-decision.sh`.
-2. Update museum **OI status** — set `done` or note what promoted.
-3. **Delete** this dated plan; open a **new** dated plan for the next tranche.
+Follow `HANDOFF.md` § *Closing a plan* (5zorro 2026-10-22): fold the durable rules, list every
+residual, and sort each one with 5zorro — **promoted** into the plan in flight it fits best (a new
+plan only when none fits and it has a goal of its own), **parked** in museum `open_items.md`
+(`Status: parked`), or **dropped** in the decision log. Then update HANDOFF's registry, the OI
+statuses and the local notes file, and delete this file. **Never** open a plan that holds only this one's
+residuals.
 
 ---
 
@@ -627,11 +637,557 @@ Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); 
 - **Simplified:** ERPNext's own *Expense Head Changed* dialog gets a note — tick Update Stock before
   submitting, or default it in Customize Form (`assume-applier-payload.js`, version 12).
 
+## Doors: peek or navigate — one convention (agreed 5zorro 2026-10-02)
+
+**Why.** Nav incident 2026-10-03 (DF-02): "Go to Vendor add…" on the Doc Bill was a hard navigation
+written in July, before peeks existed, while Payment Terms add next to it was a peek. The hard one
+dropped the Bill. How a door moves the clerk was decided door by door, which is where the
+workarounds come from. Fixed in `606fc73` for the create doors; this section makes it a rule.
+
+**What a peek is.** An errand you come back from. **Not read-only**: you can edit and save on a peek
+(creating the Vendor is one). What makes it a peek is that the page you left is kept as the return
+point and Esc (or a visible back control) takes you there, with nothing discarded.
+
+**The rule — one question per door: will the clerk come back to this page when done?**
+
+| Kind | When | What happens |
+|---|---|---|
+| **Peek** | Yes — an errand for this document: create a missing master (Vendor, Item, Terms, Project, Address), look at or fix a linked document (source PO, a payment, the bill a check pays), a setting this document needs | The page is parked as the parent; Esc returns; a draft saved on the errand is followed under its new name (`renameInPeekStack`) |
+| **Navigate** | No — other work: Find, New, a different document as the job | The page is left; the unsaved-changes gate asks first |
+| **Lens** | Same document, other view: Open in Default-skin / Simplified | Only an explicit lens click changes the remembered lens — no door changes it as a side effect |
+
+**Doors today, against the rule** (Bill / PO / IR / A/R Doc skins and the payment pages):
+
+| Door | Today | Rule says |
+|---|---|---|
+| Create Vendor / Item / Payment Terms / Project | peek (Vendor + Project fixed `606fc73`) | ✅ peek |
+| Linked source ↗ (PO / receipt / bill / Sales Order), Applied payment 👁, Add payment | peek | ✅ peek |
+| Ship To → company addresses; receive dialog → Customize Form | peek | ✅ peek |
+| Find…, New, Select PO / source | navigate / in place | ✅ navigate |
+| Open in Default-skin / Simplified | lens | ✅ lens |
+| **1. Landed Cost Voucher** (Bill) | hard navigate **and sets the Bill lens to Vanilla** | peek; lens untouched |
+| **2. Attach file** | hard navigate to the same bill in Vanilla **and sets the lens to Vanilla** | peek to Vanilla's uploader on this bill; lens untouched |
+| **3. "Discard draft and edit available addresses for this vendor"** | discards the draft, then navigates | peek to the Supplier; nothing discarded; reopen the picker on return |
+| **4. Payment board eye "Peek at …" (and the payment document page's bill links)** | navigates (opens the bill via Recent's door); no way back to the board | peek with the board as the return point — below |
+
+1–3 agreed. **4, clarified by 5zorro 2026-10-02:** writing a check, the clerk opens the bill it
+pays to correct it — including a void and amend — and must land back on the payment work. So:
+
+- The return point may be a **shell page** (Pay Outstanding, the payment document page), not only a
+  Doc skin. Today only a Doc skin can be parked (`parkDocSurfaceIfNeeded`) and the errand always
+  opens in Vanilla; both are new.
+- The bill opens **in the clerk's usual lens** (currently the Doc skin), not forced into any skin.
+- **The way back is visible**: a "← Back to Pay Outstanding" control in the Doc chrome while on the
+  errand. Esc also returns when the page is not using Esc itself — a Doc skin also uses Esc to close
+  its own dialogs and cancel an edit, so Esc alone is not enough.
+- **Void and amend keeps the way back**: the amended bill's new name (`…-1`) is followed, like any
+  draft renamed on save.
+- **On return the board re-reads its bills** (the amend changed them; the re-link pass runs) and an
+  unsaved check in the drawer keeps what was typed.
+
+**Enforcement.** Every Doc-skin and payment-page door goes in one table, `src/doc-doors.js`
+(door → peek / navigate / lens, with its reason), the way `src/shell-surfaces.js` lists the shell
+pages. `tests/peek-doors.test.js` grows from "create doors peek" to "every navigating door is in
+the table and uses the call its kind says". The rule moves into `HANDOFF.md` § Invariants when the
+table lands.
+
+**Order:** the table + 1–3 (small, existing machinery), then 4 (the two new abilities).
+
+**Built 2026-10-03.** `src/doc-doors.js` lists every door; HANDOFF invariant 8 states the rule.
+1–3 are peeks and no longer touch the lens (nor does Print, which had the same side effect).
+"Discard draft and edit available addresses" is now "Edit this vendor's addresses… (Esc returns
+here)" — no gate, nothing discarded; click the address box again on return (the picker re-reads).
+Door 4: the board's two bill eyes, and an eye on each bill of a check stub (board drawer and the
+payment page), call `shell-detour-open`; `openRoutePreferred(…, { skipDirtyGate: true })` leaves the
+board loaded. The way back is a "← Back to …" button in the top bar (every lens), Esc on a Doc page
+when no dialog is open and no field is being typed in (`doc-form-boot.js`), and the soft-peek Esc in
+Vanilla once the peek stack has nothing to say. Return shows the page without reloading and fires
+`shell-detour-return`: the board re-reads bills and runs the re-link pass; the payment page re-reads
+unless it has unsaved edits. Home, Find or any other shell page ends a detour.
+**Print stays pending:** a full load into Vanilla for the print preview; making it a peek is next.
+
+## Printing — how Frappe does it, and one convention for the shell (research 2026-10-03, not built)
+
+5zorro 2026-10-03: *"I have no idea how the underlying printing engine works or why it works on
+vanilla but not on the doc skins … hitting print would have opened a popup."* Checks are printed in
+batches (a check run); invoices are generated and then printed or saved in batches; POs, Item
+Receipts and Bills are one-offs.
+
+### How Frappe prints (read from the v16 source on this instance)
+
+| What | Where | What it does |
+|---|---|---|
+| **Print** button | `printing/page/print/print.js` `printit()` → `render_page("/printview?", true)` | **`window.open`** of `/printview?doctype&name&format&no_letterhead&letterhead&settings&trigger_print=1`. That page renders the document as HTML and, because of `trigger_print`, calls the browser's own print. In a browser that is a new tab; **in Electron it is a new window — the popup** |
+| **PDF** button | same file, `render_pdf()` | `window.open` of `/api/method/frappe.utils.print_format.download_pdf?doctype&name&format&…` — the server makes the PDF (`Print Settings.pdf_generator`: `wkhtmltopdf` here; `chrome` exists) |
+| **Bulk print** (list view → Print) | `list/bulk_operations.js` `print()` | Up to **500** docs → `download_multi_pdf` (one merged PDF; `doctype` may be a `{doctype: [names]}` map, so several doctypes go in one file), or `download_multi_pdf_async` (a background job that saves a private File and announces it over realtime) |
+| HTML only | `www/printview.py` `get_html_and_style` (whitelisted) | The rendered body + print-style CSS, no page around it |
+| Server-side printer | `print_format.py` `print_by_server` | Prints on a **CUPS printer the server can reach** (`Network Printer Settings`, needs `pycups`); `enable_print_server` = 0 here |
+| Raw printing | `print.js` via QZ Tray | Label/receipt printers, raw commands; `enable_raw_printing` = 0 here |
+
+Rules ERPNext applies whatever the client (`printview.py`):
+- **Drafts** print only with `Print Settings.allow_print_for_draft` (**1** here) and then carry a
+  **"Draft" heading** (`add_draft_heading` = 1). **Cancelled** documents are refused
+  (`allow_print_for_cancelled` = 0). The shell reflects these; it never works around them.
+- **Every render is logged**: `make_access_log(method="Print", file_type="PDF", page="Print Format: …")`.
+  That is a record that a print was *rendered* — a preview counts — not proof that paper came out.
+- The layout is a **Print Format** (Jinja; this site has the standard ones, e.g. *Purchase Invoice
+  Standard*, *Drop Shipping Format* for PO, *Bank and Cash Payment Voucher* for Payment Entry), plus
+  a **Letter Head** and the site's **print style** (`Redesign`).
+- **Checks**: ERPNext's **Cheque Print Template** (per bank) generates a Payment Entry Print Format
+  with fields placed over pre-printed check stock (`create_or_update_cheque_print_format`). None
+  exists on this sandbox yet.
+
+### Why the Doc skin's Print breaks today
+`bill-print` / `doc-print` hard-load the document in Vanilla, call Frappe's `print_doc()` (its print
+*page*), switch the clerk to the ERP view, and set the lens to Vanilla (that last part removed
+2026-10-03). The clerk then presses Frappe's Print, which `window.open`s the print view — and the
+ERP view's `setWindowOpenHandler` **allows** any ERPNext-origin URL, so Electron opens a separate
+window. That breaks invariant 6 (one window) and is the popup 5zorro remembers. Vanilla's own
+Print / PDF buttons inside the shell do the same thing.
+
+### The convention
+
+1. **ERPNext renders; the shell only delivers.** Every printed page and PDF comes from ERPNext's
+   own endpoints (`/printview`, `download_pdf`, `download_multi_pdf`) with ERPNext's Print Format,
+   Letter Head and print style. Same output as Vanilla, and no second layout to drift. Clean Core.
+2. **Print is an in-place action, not a door.** It never leaves the page and never opens a window.
+   (`src/doc-doors.js` lists `bill-print` / `doc-print` as *pending peeks* today; they become
+   in-place actions, which the doors test will check.)
+3. **No popups, ever.** The ERP view's window-open handler sends `/printview` and
+   `/api/method/frappe.utils.print_format.download_*` URLs to the shell's print service instead of
+   allowing a window. That also fixes Vanilla's own Print / PDF buttons inside the shell.
+4. **Two destinations, one engine each.**
+   - **Printer**: load `/printview?…` (without `trigger_print`) in a hidden, never-shown view and
+     call Electron's `webContents.print()` — the same HTML-to-printer path a browser takes on
+     Vanilla's Print. The printer is chosen in the shell (Electron `getPrintersAsync`) and
+     remembered per purpose (checks / invoices / everything else); with one chosen, a batch prints
+     **silently** (`print({ silent: true, deviceName })`), with no dialog per document.
+   - **File**: ERPNext's PDF (`download_pdf`, or `download_multi_pdf` for one merged file; the async
+     variant above ~20 documents), saved where the clerk says.
+5. **Print what ERPNext has saved.** Printing an unsaved page asks first (*Save draft, then print*);
+   the commit gate already has a `print` action. Drafts and cancelled documents follow the site's
+   own settings above.
+6. **Choose the format, then remember it.** ERPNext's default Print Format for the doctype unless
+   the clerk picks another; letter head on/off from Print Settings. The pick is remembered per
+   doctype (like the lens), never written to the site.
+7. **One print queue, app-wide.** "Add to print queue" from any Doc skin or Find page (multi-select),
+   and automatically from a check run. The queue groups by doctype + format and offers *Print all*
+   and *Save as one PDF / one PDF each*, reporting per document — a batch that prints 9 of 10 says
+   which one did not.
+
+### Per document
+- **Checks (batch).** A check run already groups payments (Pay Outstanding). Its Payment Entries go
+  to the queue in check-number order with the bank's Cheque Print Template format, to the printer
+  remembered for checks. Needs: an **alignment test page** before a run; a **spoiled check** path
+  (the number is used — void-and-amend or edit the draft's number, never reprint the same number);
+  and a decision on **print before or after submit** — a draft check would carry the "Draft"
+  heading if its format renders it (to verify against a Cheque Print Template format).
+- **Invoices (batch).** Generated Sales Invoices go to the queue: print, one PDF each (named by
+  invoice number, for emailing), or one merged PDF. Emailing is ERPNext's own *Email* with the print
+  attached — a later step.
+- **PO, Item Receipt, Bill (one-off).** Print in place: format and letter head as remembered,
+  printer or PDF, back on the same page.
+
+### What a Bill print has to handle (the one 5zorro tried)
+1. Stay on the Bill — no Vanilla hop, no popup, no lens change.
+2. Saved state only: unsaved edits → *Save draft, then print*.
+3. Draft → prints with ERPNext's "Draft" heading (site setting); cancelled → ERPNext refuses, so the
+   button says why instead.
+4. Which Print Format (*Purchase Invoice Standard* by default) and letter head.
+5. Destination: printer or PDF file; optionally the PDF **attached to the Bill** for the record.
+6. The Access Log entry is ERPNext's; nothing extra to record.
+
+### Environment note
+This WSL setup has **no CUPS client**, so Electron here sees no printers — only *Save as PDF*.
+`ops/wsl-printing/README.md` is the minimal setup (`cups` + `printer-driver-cups-pdf`, a virtual
+"PDF" printer). Real printers need the Windows build of the shell or CUPS in WSL.
+
+🔴 **ERPNext's PDFs were broken on this sandbox, in Vanilla too** (found 2026-10-03): wkhtmltopdf
+fetches the page's CSS from `get_url()`, which without `host_name` is the address the request came
+in on (`localhost:8080`) — unreachable from inside the backend container ("network error:
+ConnectionRefusedError", surfacing as `OSError`). Fixed by
+`bench --site frontend set-config host_name 'http://frontend:8080'` (the compose network's
+frontend). Side effect: ERPNext-made absolute links (emails) name `frontend:8080`. Any
+frappe_docker deployment needs the same.
+
+### Built 2026-10-03
+- `src/print-service.js` (pure) + main's print service; `src/print-dialog-ui.js` (the dialog, shared).
+- **No popups**: the ERP view's window-open handler hands `/printview` and `download_*pdf` to the
+  print service — Vanilla's own Print / PDF / bulk print included. Verified live: no new window.
+- **Doc skins**: Print opens the dialog in place (format, letter head, printer, Print / Save PDF /
+  Add to print queue); the old Vanilla-hop `bill-print` / `doc-print` are deleted. `print-run` and
+  `print-queue-run` are in-place actions the doors test holds to "never navigates".
+- **Queue**: app-wide in main (in memory, this session); Print all / one merged PDF / one PDF each;
+  what printed leaves the queue, what failed stays and is named. Pay Outstanding has a
+  "Print queue (n)" button, and a payment made **by check** joins the queue on submit.
+- **Printers**: the 3 most recently used sort to the top (5zorro 2026-10-03); each shows its full
+  name and, when the system reports it, its address; the chosen one is spelled out under the menu.
+- Remembered per doctype / purpose in `print-prefs.json`, never on the site.
+- Verified live (`e2e/scaffold-print.spec.js`): ERPNext's PDF over the app's session, the dialog in
+  place with the doctype's formats, queue add, a Vanilla PDF popup caught.
+- **Self-healing** (5zorro 2026-10-03: *"ideally this app will self heal from stuff like that"*).
+  `diagnosePrintFailure` sorts every failure by who can fix it: **rule** (ERPNext said no — passed
+  through, never worked around), **session** (log in), **engine** (ERPNext's PDF engine broke —
+  the shell makes the PDF itself from ERPNext's own `/printview` with Electron's `printToPDF`, says
+  so, and the dialog shows IT's fix), **printer** (gone / refused — said up front, jobs stay
+  queued). The shell never changes the server (HTTP only, Clean Core). A merged PDF cannot be
+  healed without a PDF merger this app does not carry, so it falls back to one file per document
+  beside the chosen file. **Proven live 2026-10-03**: with `host_name` blanked (the Docker fault
+  back) the app still produced a PDF, marked healed, and a cancelled bill was still refused; with
+  `host_name` restored ERPNext's own PDF came back and the notice cleared. A site-config change
+  takes about a minute to reach ERPNext's workers.
+- **Windows option (5zorro)**: SumatraPDF prints a PDF silently to a named printer — a candidate
+  third path (ERPNext's server PDF straight to paper) for the Windows build; noted in
+  `ops/wsl-printing/README.md`, not wired.
+- **Printer path, proven live 2026-10-03 with CUPS + cups-pdf.** Chromium's silent print on Linux
+  refused the working CUPS printer ("Invalid printer settings") for every option set tried, while
+  `lp` printed. Self-healing: on that refusal the document's PDF (ERPNext's, or the app's own) goes
+  to the OS print command — `lp -d <printer> -t <doc>` on Linux / macOS, SumatraPDF `-print-to
+  -silent` on Windows when installed — and the rest of the session goes straight there. One bill and
+  a two-bill batch printed silently to the "PDF" printer, each job titled with its document.
+- **Not yet**: a Cheque Print Template, the alignment page,
+  the spoiled-check path, and draft-vs-submit for checks; Find pages' multi-select "Add to print
+  queue"; the queue does not survive a restart.
+
+## Printer hardening (5zorro 2026-10-03; built 2026-10-03)
+
+*"I don't want intermittent printer driver problems to be an issue for a user in this app."*
+
+| Risk | Decision (5zorro) |
+|---|---|
+| **Paper size mismatch** — ERPNext prints A4 (Print Settings › PDF Page Size) while US printers load Letter: the job stalls ("load A4"), clips, or shrinks | Printers report their sizes (CUPS `lpoptions` *PageSize*, default starred; Windows `Get-PrintConfiguration`). A ⚠ beside each mismatched printer in the menu and the chosen one; clicking it explains document size vs the printer's paper, that the app **shrinks to fit**, and links to Print Settings so the override is not needed |
+| **Driver crashes** — transparency (letter-head logos are transparent PNGs), complex pages | **Print as image on by default**: every page flattened onto white at printer resolution, so the driver gets plain pictures. The clerk may turn it off (remembered); then an ℹ says *"print jobs will be faster but there is a slightly increased risk that the printer driver won't be able to handle the job"* |
+| **Jobs that queue but never print** | After sending, watch the job: printed, or *the printer stopped* with its reason (out of paper, paused) and two ways on — **Check again** (after fixing it) or **Stop watching** (Esc) |
+| **Checks** | The exception: exact size, no shrink, no image conversion, never scaled — alignment depends on it |
+| **Huge photos / long attachments in "Save as one PDF"** | Each picture fits **one page**; photos flattened onto white and capped at print resolution. **Word keeps all its pages** (5zorro: "microsoft word is okay"). **Spreadsheets** (Excel, CSV — "a csv that accidentally takes up 20 pages and no headers") are left out with "open it in its own program", unless they fit one page |
+
+**Built and proven live 2026-10-03** (`src/print-service.js` pure; main's print service;
+`electron/print-raster.html` + `src/print-raster-page.js`, the hidden "print as image" page):
+- The PDF printer, set to Letter for the test, showed ⚠ in the menu and beside the selection; the ⚠
+  opened "ERPNext lays documents out on A4 … this printer loads Letter. The app shrinks each page to
+  fit … Open Print Settings".
+- *Print as image* was on by default. The printed file came out on **Letter** (612×792 pt) with one
+  image and no fonts — a flat picture, shrunk to fit — and the watcher read "The printer has all 1
+  job". (The printer's paper and the test's `print-prefs.json` were put back after.)
+- Job watching reads CUPS (`lpstat`) and Electron's `printer-state-reasons`; trouble names the cause
+  (out of paper, paused, a door open…) with *Check again* / *Stop watching (Esc)*. A trouble state
+  was proven in unit tests only — pausing a CUPS printer needs admin rights here.
+- Every Electron print call has a 90-second deadline, so a hung driver cannot freeze a batch.
+- **Spreadsheets that fit one page are shown** (5zorro: "csv and spreadsheets that are only one
+  page is enough"): a CSV / TSV or the first sheet of an .xlsx as a plain table (values only) in the
+  pane and in "Save as one PDF", up to 45 rows × 10 columns; bigger ones say "more than one page (N
+  rows × M columns) — open it in its own program (Excel)". No library: `src/sheet-preview.js` reads
+  the .xlsx ZIP with the platform's DecompressionStream; old binary .xls stays "open it in Excel".
+  Proven live with a 3-row CSV, a 300-row CSV and a small .xlsx (attachments deleted after).
+
+## Compare pane (5zorro 2026-10-03, "moonshot" — step 1 built 2026-10-03)
+
+Beside the Doc Bill (when the window is wide enough), the papers it should match — scanned PDFs,
+phone photos, a .docx — shown as **one continuous document**, as if a single PDF. Sketch, for when it
+is picked up:
+
+- **Where the files come from:** the bill's own ERPNext attachments (`File`, `attached_to_doctype`
+  / `attached_to_name`), its source PO / receipt's attachments, and files dropped on the pane — which
+  are uploaded to ERPNext as attachments (`upload_file`), so they are there next time and in Vanilla.
+- **One column, every page:** PDFs rendered page by page (PDF.js), images as pages, .docx converted
+  to HTML (mammoth — text and tables, layout approximate; "open in Word" for the exact look). HEIC
+  phone photos are not readable by Chromium.
+- **Layout:** the bill keeps its column on the left (papers are stapled on the left) and the pane
+  fills the right from about 1700px of window; narrower, it is a toggle.
+- **Then:** save the stack as one PDF (`printToPDF`) and attach it to the bill; and the real compare
+  — find the bill's numbers (supplier no., date, total, line amounts) in the papers' text and mark
+  both sides where they match or do not (text PDFs and .docx first; OCR for photos later).
+- New dependencies: `pdfjs-dist`, `mammoth` (added 2026-10-03; `npm audit --omit=dev` clean), and
+  `tesseract.js` for OCR, later.
+
+**Step 1 (building):** a "Papers" toggle on the Doc skins opens the pane. It lists the document's
+attachments — and, on a Bill, its source POs' and receipts' — read over the ERP session (the page
+itself cannot reach ERPNext's private files), stacked in one column: PDFs page by page, images,
+.docx as HTML; anything else is a card with *Open* (the system's viewer). Files dropped on the pane
+are uploaded to ERPNext as attachments of the document (private), so they are there next time and in
+Vanilla; on an unsaved draft they are shown but not uploaded, and the pane says so. Side by side from
+1700px of window (the document column moves left; the line tables' grow-to-need stops at the pane),
+an overlay below that. Steps 2 (one PDF, attached) and 3 (find the bill's numbers) come after.
+
+**Built 2026-10-03.** `src/compare-papers.js` (pure) + `src/compare-pane-ui.js`; main's
+`papers-list` / `papers-bytes` / `papers-upload` (Frappe's `upload_file` from the logged-in page,
+CSRF and all; logged both sides) / `papers-open`. The pane scrolls on its own — the wheel over the
+papers moves the papers, over the document moves the document. **Include PO and receipt papers**
+(5zorro 2026-10-03) is a checkbox in the pane's header, shown only when the bill has a PO or
+receipt, off by default, remembered. Verified live on ACC-PINV-2026-00004 at 1960px: a PDF drawn
+page by page, a PNG, a .docx as text and a table, a .HEIC as its "cannot draw" card, side by side
+with the bill (the line tables stop at the pane). The four test attachments were deleted after.
+
+**Step 2, reshaped by 5zorro 2026-10-03 and built the same day.** Above the papers: **Save all as
+ZIP** and **Save as one PDF**, with **Include the printed Bill** (and PO / receipt when their papers
+are included). Usually printing the bill alone is enough; these are for bringing context to a
+question. ZIP: the files as they are (`src/zip-store.js`, a stored-entry ZIP writer, no dependency).
+One PDF: the pane draws every paper (PDF pages as images, a .docx as HTML, a HEIC as a "not
+included" note) into one page that Chromium prints — no PDF merger. Printed documents go through the
+self-healing PDF path. Verified live: a ZIP of 5 (printed Bill + 4 papers, byte-identical, valid)
+and a 5-page PDF; test attachments deleted after. A "print all of it" button was considered and left
+out: the saved PDF prints from the print dialog like any file.
+
+**Step 3 parked (5zorro 2026-10-03)** until several other parts of the app reach MVP. "Find the
+bill's numbers in the papers" was the idea of marking where the papers' amounts / dates / supplier
+no. match the bill's. 5zorro's longer-term direction instead: link **emailed PDFs** to bills, and
+extract them into a draft bill when approved / received. Far off.
+
+## DF-02 follow-ups (5zorro 2026-10-10 notes)
+
+Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before building.
+
+- **Hang (fixed `a94bdca`).** Save in the unsaved-changes gate asks "Receive these items with this
+  bill?" while the gate is still up; the question sat under the gate (z-index 80 vs 200), so the
+  gate waited on "Saving…" for an answer nobody could see. Questions asked mid-save now use
+  `.over-gate`. App test `e2e/scaffold-receive-gate.spec.js`.
+- **Hatch through text (fixed `06f45ce`).** Every hatched surface names its solid colour
+  (`--hatch-base`); text on it carries `.hatch-clear`. `tests/hatch-clear.test.js` lists the
+  surfaces, so a new hatched page fails until its text is handled.
+- **Esc from create Item (fixed `bd0105f`).** Back in the Item cell it was opened from, holding the
+  new Item when it was saved (`src/peek-return-focus.js`).
+- **Item Code (fixed `cbc98b1`).** Item columns use ERPNext's word. "Description" already is the
+  long description field (it starts as the item name); no Item Name column.
+- **Taxes and charges (built `05f57b3`).**
+  - Root cause of "typed 0 in Amount, grand total did not move": **Tab** out of an edited Amount
+    dropped the edit (the move guard also blocked the commit). Clicking away worked. Reproduced live.
+  - Tab order follows ERPNext's own rule: a % row tabs Account → Rate %, a fixed (Actual) row
+    Account → Amount. Amount on a % row is mouse-only; editing it makes the row Actual (the bridge
+    already does), so the typed amount is that row's source of truth; the row says it was n% before.
+  - The table sits in an inner panel like the items table: laid out against its own padding it was
+    28px too wide, so it scrolled sideways and pushed the remove button off-screen.
+  - 🗑 per row; **Remove all** clears the rows and the template field, and stays removed until the
+    bill is saved (a vendor change would otherwise refill them from the template).
+  - **ⓘ Vendor tax template default**: why these taxes (the template marked Default, or a Tax Rule
+    naming this vendor) and how to change it (peek either).
+- **J — just-in-time receipts (un-parked and built 2026-10-10: `931cf28`, `0c74ee1`, `600a862`; paper
+  DF-26).** Rec'd by / Rec'd Date columns; a click opens a small editor (one line, or every line not
+  yet received — stock items only); not Tab-walk cells yet. The block is written into the draft's
+  Remarks on every change, not only at Save, so the draft carries it and the gate guards it.
+  Submit order: ask about unfilled lines → save the draft → make + submit each receipt → point the
+  lines at them (bridge v25 `linkReceiptLines`) → trim the block → submit. No custom fields:
+  - Per line, Received by (plain text) and Received on. On Submit, before the bill: one Item Receipt
+    per person + date, lines from several POs and NIC together, qty and rate from the bill (the bill
+    is the source of truth; PO 3 / bill 5 is the existing over-PO split), dated the day received,
+    submitted; then each bill line points at its receipt line; then the bill submits.
+  - Receipt Remarks carries `Received by: <name>`; a receipt without it falls back to its creator.
+  - A draft keeps the pending who/when in the bill's Remarks as a `[received]` block (line number +
+    item code), hidden from the memo box and removed once the receipts exist.
+  - Any line with who/when, or any line already from a receipt → the receipt route (ERPNext refuses
+    Update Stock on such a bill). Otherwise "Receive with this bill" stays as it is.
+  - Stock lines with no who/when on a receipt-route bill (5zorro 2026-10-10): the receive question
+    at Submit names them and offers **Receive them now as <you> on <date>** (both editable) or
+    **Not received yet (bill only)**. The date defaults to **the day before the invoice date** —
+    common ERP practice, so goods sold the day they are billed are not costed as sold before they
+    were received (negative-stock guess, the local notes file "Shipping before receiving").
+  - Known gap, v1: the receipt carries no taxes; a bill tax with a Valuation category would not
+    reach stock cost through these receipts.
+- **A Bill's posting date is a stamp (5zorro 2026-10-10 — reverses the 09-26 "posts on its Invoice
+  date").** It is the day the Bill is saved or submitted; the Supplier Invoice Date drives only the
+  due date. Doc Bill: typing the Invoice date no longer moves the posting date, and save stamps
+  today (bridge v26 `stampBillPostingDate`, which also corrects drafts left ticked). Simplified
+  (Doc-skin profile): Posting Date quiet with "Today", Edit Posting Date locked off, save stamps
+  today. Item Receipts keep their typed Date (DF-23) and just-in-time receipts their received date.
+  🔴 **Exposed by the reversal, fixed:** on a backdated invoice ERPNext's form-side terms call
+  (`get_payment_terms` with the real posting date) pulls a due date earlier than the posting date
+  up to it, and its save then refuses it ("Due Date cannot be after <invoice date + terms>"). The
+  bridge now fetches the schedule as ERPNext's save does, from `bill_date or posting_date`
+  (`fetchScheduleLikeSave`), after the Invoice date, the terms, or a vendor change. DF-22 rewritten.
+  Already-submitted ACC-PINV-2026-00006 posted on 07/22 under the old rule; left as is.
+- **Simplified's Doc-skin defaults (DF-01 Update Stock, DF-02 posting date; built 2026-10-10).** The
+  defaults were a hand-made list (09-03/04) that froze unticked checkboxes. Now: an unticked box is
+  never locked unless the profile decides its value; under the Doc-skin profile the posting date is
+  stamped as above. And the list is
+  **generated**: `npm run seeds:simplified` applies `src/simplified-seed-rule.js` to a snapshot of
+  ERPNext's field lists (`tests/fixtures/simplified-seed-meta/`, refresh with `-- --refresh-meta`
+  after an upgrade) and writes `src/simplified-seed-profiles.generated.js`; a drift test fails
+  until it is re-run. PI `project`, `subscription`, `title` were first kept Normal (the old hand
+  list had not seeded them); 2026-10-11 5zorro: Simplified's assumptions come from the Doc skin
+  (generated) or the clerk's own saved customization — so they follow the rule, quiet & locked.
+- **Parked:** an opt-in custom-field module with a clear fence around it (5zorro: stay Clean Core).
+- **DF-01 notes, read back 2026-10-11:** *built* — sequential check numbers (`proposeReferenceNo`,
+  Pay Bills' check: highest all-digit reference on that bank account + 1; with none it asks for the
+  first — the blank site's earlier references were all text, so DF-01 got the ask; next on
+  OPERATING ACCOUNT is 1235. Vanilla Payment Entry proposes nothing); the items table's scroll bars
+  when blank (T above); Simplified's Update Stock tick (above). *Built 2026-10-11:* link dropdowns
+  placed against the window, ≥360px, flipping above near the bottom (`57aaa52`); Find pages hide
+  cancelled documents, *Show cancelled* (or the Cancelled status) brings them back, not remembered
+  (`2383557`); right-click / Menu key on a Find row (`6c793cb`) — four groups (party, this document,
+  view & edit, this page), ≤12 items, data in `src/find-row-menu.js`; placeholders greyed: new
+  document for the party, linked documents, **cancel or delete…** (where the three-step delete path
+  goes — still not built), print, page settings. Copy is not driven by an app test.
+- **DF-02 second round (2026-10-11):** JIT Submit dogfooded (ACC-PINV-2026-00008 → MAT-PRE-2026-00002).
+  Rec'd by / Rec'd Date blank until Refresh, after Submit and after Simplified → Doc: two Doc-skin
+  open pushes dropped `linkedReceipts`, and the JIT step did not return the new receipts — fixed
+  `e006ee3`, but **not reproduced in a test** (the page's own fetch refills it there), so a
+  `bill-recd-source` breadcrumb now logs which paint left a receipt line blank; 5zorro to repeat and
+  file a nav incident if it recurs — 5zorro could not reproduce after the fix (two nav incidents
+  2026-10-11; on ACC-PINV-2026-00010 the JIT paint logged `given=1 … blank=0`). Open: the Bill's
+  Customer / Sales order(s) columns — a Bill line has no Sales Order field; both are read through
+  its PO line (`sales_order`, editable on a draft PO, locked once submitted → void-and-amend the PO).
+  Built 2026-10-11 (5zorro: peek the Sales Order *and the PO*, to fix or void & amend the PO): headers
+  plain order wash, cells order wash + the A/R desk hatch (when the clerk hatches A/R), text in a
+  hatch-free box; the Sales order(s) cell has 👁 SO and 👁 PO peeks (`billLineOrderPeeks`).
+- **🔴 Gap found 2026-10-11 — a peek into a Doc-skinned document has no way back.** The doors table
+  below marks *Linked source ↗ (PO / receipt / bill / Sales Order)* as a peek where Esc returns, but
+  `notePeekParentAndChild` only records a child when `isSoftPeekRoute` says `vanilla-always` (a
+  master with no Doc skin). A PO / Item Receipt / Sales Order opens in its own Doc skin, logs
+  `peek-none … (not a record)`, and Esc has nothing to return to — 5zorro came back from
+  MAT-PRE-2026-00002 through Recent (2026-10-11 06:03). Same for the new SO / PO peeks. Fix needs
+  a Doc → Doc errand (park the bill, Esc / "← Back to bill" on the child Doc page) — likely the
+  detour mechanism (`shell-detour.js`) widened to Doc pages; not started, read back first.
+  **The unsaved parent (5zorro's question, 2026-10-11):** a parked Doc page is only `{skinId, route}`;
+  the unsaved bill itself lives in Frappe's `locals` in the ERP view, which survives in-SPA hops
+  (looking at a PO, editing and saving a draft PO) but **not a full load** — and Void & amend's
+  reopen (`reopenAfterVoidAndAmend` → `showDocForm` → `loadErpUrl`) and any navigate from the child
+  page are full loads. Frappe's own guard (`form.js` `dirty()` adds a `beforeunload` listener on the
+  bill's form, removed only on that form's refresh; skipped in developer_mode) may refuse such a
+  load, but what the shell then does mid-errand is unproven. Proposal: no question at the door;
+  a dirty gate for the **parked** bill at the moment an errand action would full-load (Save it as a
+  draft and continue / Back to the bill / Cancel); Esc / "← Back to bill" returns to the in-memory draft.
+  **Decided (5zorro 2026-10-11): ask at the door instead** — a gate at the moment of danger would
+  not be intuitive. Temp fix: going from an unsaved Doc page to another Doc-skinned document asks
+  first (the unsaved-changes gate); a clean page peeks as today. The real answer is a **new window**
+  for the errand, with its own defaults — OI-040 (multi-window / concurrent Doc skins, parked).
+  Sizing given 2026-10-11: a plain Vanilla pop-out window is small; Doc skins in a second window
+  mean splitting `main.js`'s single-window state (~78 module-level variables; `dirtyState` alone is
+  read ~180 times, one hidden ERP view behind every `erpEval`) into one state object per window.
+  **Built 2026-10-11:** `soft-peek-route` from a Doc page to a Doc-skinned record (`isDocErrandTarget`)
+  runs `openDocErrand`: the unsaved-changes gate first (clean → straight through), then the document
+  opens in the clerk's usual lens with a Doc-page detour (`beginDocDetour`: the saved name, read after
+  the gate; a never-saved bill gets no way back) — "← Back to Bill …" in the top bar and Esc return;
+  being back on the bill by other means ends it. App tests: clean bill → Item Receipt → Esc back;
+  unsaved bill → PO → gate → Cancel stays. **Not driven:** the gate's *Save* then the errand (it writes
+  a draft) — 5zorro's to dogfood. One detour at a time: an errand from the errand replaces the way back.
+- **DF-03 (2026-10-11):** the Sales Order's Customer box offers *create Customer* when nothing
+  matches (`name_field` prefill — `customer_name` is no_copy), Esc back fills it; a settling repaint
+  no longer wipes a half-typed link search (`071e2ad`, app tests in `scaffold-peek-return-focus`).
+
+- **Late focus moves (5zorro focus incident 2026-10-11):** a line edit's after-ERPNext move, and a
+  new bill's opening "focus Vendor" (retried to 500 ms), no longer override the clerk — both check
+  `user-move-guard.js` (Tab / Enter / Esc / arrows / clicks since the edit, or since the bill first
+  appeared) and log `focus-after-edit-skipped` / `focus-vendor-skipped`. A repaint that rebuilds the
+  line the clerk is in now puts them back in the same row and field (`restoreBillFocus`). The
+  heavy-lag drop first left as a gap was the same family: a "start in Vendor" repaint skipped putting
+  the clerk back on the assumption Vendor would take focus; once the guard could decline, nobody did.
+  The repaint now restores whenever Vendor did not actually take focus. Proven under 1.2 s lag.
+
+- **2026-10-11, later the same day (all committed, app-tested):**
+  - *Taxes Add amount* has the shared in-field calculator (Bill + Item Receipt; the PO Doc skin has no
+    taxes section), and Add works out a typed / pasted sum (`parseMoneyOrSum`, the calculator's
+    left-to-right math, to cents); an unfinished sum (`5*`) is refused by name.
+  - *Allocate to stock cost* is exact: unit costs are nudged a cent until the lines rise by exactly
+    the charge (`exactRates`, Banker's rounding as this site); when every qty shares a factor the
+    leftover (< that factor in cents) stays on the charge line and the status names it. Leftover
+    cents spread by largest remainder (67¢ over ten $1 lines → seven 7¢, three 6¢), not piled on one
+    line. ACC-PINV-2026-00011 was submitted 1¢ off before this — 5zorro: leave it (sandbox).
+  - *Calculator ribbon* grows to fit its tape, lined up with the field's aligned edge
+    (`calc-ribbon-place.js`); it was exactly the field's width and spilled in narrow cells.
+  - *Attach* sits beside the notes on all three A/P skins — Item Receipt beside its Remarks, PO beside
+    its Freeform comments (terms used as remarks; ERPNext's PO has no Remarks).
+  - *Nav incident 2026-10-12:* a Material Request opened from Home adopted the hidden untouched new
+    Item Receipt as its peek parent (any new Frappe form counts as unsaved), so the Doc tab offered
+    "Back to Item Receipt". The shell's own no-parent decision now holds for the hops that follow
+    (`applyErpHopToPeekStack` `shellOpened`). **Decided (5zorro):** the Doc tab shows only when the
+    page has a Doc skin — hidden, not greyed, otherwise. **No Material Request Doc skin is planned**;
+    decide by dogfood (it would be an A1-style layout-as-data skin; questions: which MR types,
+    make-PO-from-request, trace).
+  - *Create row always last* (5zorro: "SAMPLE" found two items, neither right): Create Item /
+    Customer / Project and Vendor add now sit under the hits, not only when nothing matched (as
+    Vanilla's Link does). Enter still takes the first hit.
+  - *Nav incident 2026-10-12:* line 2 of a new Sales Order → create Item → Save → Esc removed the
+    line instead of filling it. Picking "create …" empties the cell, and the empty-line cleanup (an
+    Item cell left empty drops its line, 180 ms after blur) fired on the return before the new Item
+    landed — under chaos lag. Line 1 never showed it (the last line is never dropped), so the Bill's
+    line-1 tests could not catch it; the Bill had the same hole. Fix, both pages:
+    `peekErrandHoldsRow` holds the line while the errand is out and after the return until the
+    clerk's next move. App test (line 2, `ERP_CHAOS_LAG_MS=1200`) fails on the old code with the
+    incident's own breadcrumb (`focus-after-items → terms`) and passes with the fix
+    (`empty-line-kept`).
+  - *Attach on the PO / Item Receipt / A-R skins (5zorro 2026-10-12, a saved Sales Order draft):*
+    the page "flickered, and nothing else". Attach opens the document's own Vanilla form for
+    Frappe's uploader; that form is not a peek child (only setup records are), so no peek stack
+    held the Vanilla → Doc hijack off, and the form's first hop pulled the clerk back to the Doc
+    skin (`doc-rebind` 0.15 s after `showErp-soft`). The Bill never showed it — its surface is not a
+    hijack target. Fix: a soft peek onto the parked document's own form is an *own-form peek*
+    (`ownFormPeekHolds`); the hijack leaves that document alone until Esc resumes the park or
+    Vanilla moves to another document. App test on 5zorro's draft (no upload; dialog closed, Esc)
+    fails on the old code ("doc" at once) and passes with the fix.
+    Then (5zorro, same day: "after it finished attaching, I was left on the Vanilla page"): the
+    uploader closing — the upload done, or closed by hand — now takes the clerk back to the Doc
+    skin, as Esc does; Bill and Doc skins share `openOwnFormUploader`, which builds the uploader
+    the way the form's own Attach does so the shell holds its dialog. Attached files are seen in
+    the **Papers** pane (toolbar) — and, from the next bullet, under the notes too.
+  - *Attached files table (5zorro 2026-10-12):* under the notes, beside Attach, on the Bill and every
+    doc-form skin: one row per file (name, size, date added) with **Peek** (opens Papers scrolled to
+    that file, outlined) and **Download** (save dialog; bytes over the ERP session, logged
+    `paper-download`). Hidden when there are none or the draft is unsaved. Pure rows in
+    `src/attachment-list.js`, the table in `src/attachment-list-ui.js` (Papers family); refreshes on a
+    new document, after Attach returns, and after a drop on Papers. App test on 5zorro's Sales Order
+    (its one file): listed, Peek shows it, Download writes the same bytes (to the OS temp folder).
+    Not app-tested on the Bill — the sandbox has no saved draft bill.
+  - *Same day, after 5zorro submitted the order and attached an .html in Vanilla:* (1) **Attach follows
+    Frappe's rule, not the edit lock** — any saved document takes files, submitted and cancelled
+    included (`canAttachTo`; the sidebar hides Attach only on an unsaved form). (2) The table
+    re-reads the files **every time the page gets its document** (back from Vanilla, a peek), not
+    only on a new name; when the list changed, Papers redraws too. (3) **A private `.html`
+    attachment cannot be fetched by its own address** on this install: frappe_docker's nginx
+    rewrites `….html` to `…` (`rewrite ^(.+)\.html$ $1 permanent`; only public `/files/` exempt) and
+    the stripped address answers 403 — Vanilla's link to it fails the same way. The shell falls back
+    to Frappe's own `download_file` (same permission check) for Peek/Open/Download
+    (`frappeDownloadPath`, breadcrumb `paper-bytes-fallback`). App tests: Attach enabled on the
+    submitted order; a file added outside the skin shows when the page gets its document again
+    (fails with the re-read removed); Download of the .html writes its bytes.
+
+## After the dogfood papers — the order of what comes next (5zorro 2026-10-12)
+
+1. **Finish the generated dogfood papers** (DF-01 … DF-26), in order — in progress.
+2. **Sweep the implementation plans**: retire every plan whose work has shipped, as `HANDOFF.md`
+   § *Closing a plan* says — fold its lasting rules first, then sort its residuals (promoted into
+   a plan in flight, parked in the museum, or dropped); no plan made of residuals alone.
+3. **Maybe promote multi-window** (OI-040) — 5zorro's call after the sweep.
+4. **The first release, one per operating system** — the app as something you install and run
+   directly on Windows (and the others), not started from a WSL terminal.
+
+### First release — what is known now (not started)
+
+- **Nothing is set up for it.** No packaging tool, no build script, no installer. Choosing one
+  (electron-builder is the usual one) and making it produce a Windows installer is step one.
+- **File windows will be the system's own.** Attach (Frappe's uploader, a browser file button) and
+  Download / Save as ZIP / Save as one PDF (Electron's save dialog) both ask the operating system for
+  its dialog, so on Windows they are Explorer's Open and Save As. Under WSL they look like Linux's.
+  Dragging files from Explorer onto Papers should work too (unreliable into WSL today).
+- **Where the ERP server is.** The address comes from the `ERP_URL` environment variable, else
+  `http://localhost:8080` (`src/config.js`). Someone double-clicking an installed app sets no
+  variables, so a release needs a way to enter the address (a setting, or a first-run question).
+- **Printing is the part that differs by system.** Windows has its own path (`osPrintCommand`;
+  SumatraPDF when installed, found by `findSumatraPdf`), written but never run — everything printed
+  so far went through Linux CUPS. Dogfood it early on Windows.
+- **Settings move.** The settings files (`~/.config/erpnext-ui-app/` here) live in each system's own
+  app-data folder (`%APPDATA%` on Windows); nothing carries over from WSL unless copied.
+- **Unsigned builds warn.** Windows SmartScreen (and macOS Gatekeeper) warn on an unsigned app;
+  fine for 5zorro's own use, a decision before anyone else installs it.
+- **Security items owed to the first build** (architecture review, plan 2026-10-19): turn on
+  Electron's fuses that stop a shipped app being run as plain Node or opened with an inspector
+  (R1-4); pass the printer name to PowerShell through an environment variable, not the command
+  text (R11-6); and check that **Open** / **Download** on Windows mark a paper as "from the
+  internet" (file Properties → *This file came from another computer*) — written, never run (R11-2).
+  macOS has its own mark (the `com.apple.quarantine` attribute), which is **not** written yet.
+  And ignore the chaos-lag settings in a packaged build (`ERP_CHAOS_LAG_MS` / `_PCT`, a stress tool
+  for development: they are read from the environment in any build today, with nothing on screen
+  saying they are on — R13-4; gate on `app.isPackaged`).
+
+**Questions for 5zorro when it starts:** which systems (Windows first? macOS? Linux?); an installer
+or a portable app; signed or not; whether it should update itself.
+
 ## Dogfood residuals
 
 | Family | Residual | State |
 |---|---|---|
-| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
+| DF-02 hang | Receive question behind the unsaved gate | fixed `a94bdca` — app test drives the exact path; 5zorro to re-run DF-02 |
+| DF-02 taxes | Tab commit, rate/amount rule, Remove all, no sideways scroll, ⓘ template default | built `05f57b3`, `e5b6a51` — app tests (4); the ⓘ's Tax Rule link not clicked through |
+| DF-02 J | Just-in-time receipts from Bill lines | built — editor, block, question and ERPNext's acceptance of the receipt proven; **a real Submit has not run** (it leaves submitted documents). 5zorro: paper DF-26 |
+| A/P (found in A1) | Item Receipt's Date: a typed past date is reset to today on save, because `set_posting_time` is never ticked (the Invoice skin now ticks it) | **fixed 2026-09-26** — 5zorro: keep it. *(The Bill half — posting on the Invoice date — was reversed 2026-10-10: a Bill posts the day it is saved; see DF-02 follow-ups.)* IR ticks `set_posting_time` on a typed Date. And the Bill had the same gap: a typed Invoice date (`bill_date`) left the posting date on today, so a July bill posted in September. The Bill's Invoice date now *is* its posting date; clearing it goes back to today — ERPNext's own `bill_date or posting_date` (bridge `postingDateFollows`, `e2e/scaffold-typed-dates.spec.js`) |
 | A1 | Save / Submit of an A/R document has not run | open — dogfood checklist A1; paper DF-18…23 |
 | A1 | The A/R skin gaps listed above | open — marked on the paper; next A/R stage |
 | 09-30 N1 | Peek stack: Esc swaps parent and child; who is a parent; Recent dropdown | built 2026-09-30 — 5zorro to dogfood |
@@ -642,5 +1198,9 @@ Pure part: `naturalTableWidthPx` / `lineTableWidthPx` (`item-table-layout.js`); 
 | DF-01 R | Receive with the bill: ask at Save (Doc), note on Expense Head Changed (Simplified) | built 2026-10-01 — dialog driven live on an unsaved draft and cancelled; *Receive* / *Bill only* not yet clicked |
 | DF-01 T | Line tables take room only when they need it | built 2026-10-01 — measured live (blank stays on the card; a long item code grows it right only; no page scroll) |
 | DF-24 | Drop ship papers (SO → PO → Bill) | added 2026-10-01 — 5zorro to dogfood |
+| 10-03 nav | Vendor add from the Doc Bill dropped the Bill; a saved draft kept its placeholder in the peek session | fixed `606fc73` — guard test, incident replay, app test (verified failing on the old code) |
+| Doors | Peek / navigate convention — table, mismatches 1–3, board → bill detour (4) | built 2026-10-03 — table + guard test; 1–3 are peeks; 4 driven live (`e2e/scaffold-detour.spec.js`: board → Doc Bill → Esc and ← Back, board not reloaded, drawer kept; Home ends it). A void and amend *during* a detour not yet run live. Print is listed **pending** (still a full load) |
+| Printing | Print service, dialog, queue, no-popup handler, recent printers, self-healing | built 2026-10-03 — PDF, popup catch, healing and silent printing (CUPS `lp`) all verified live |
+| Compare | Papers pane beside the Doc skins; Save all as ZIP / as one PDF | built 2026-10-03 — verified live; step 3 (match numbers, emailed-PDF intake) parked |
 | DF-01 J | Just-in-time receipt (received on / by) | parked — opt-in custom-field module; issue drafted for 5zorro to file |
 | 09-30 N4 | Resume shows a stale copy of a fresh draft; Vanilla → Doc reloads the draft | built 2026-09-30 — 5zorro to dogfood |

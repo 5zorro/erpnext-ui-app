@@ -95,9 +95,12 @@ treated as one blob. Prefer **error classes / architecture families**, not a sin
 
 ### Closeout (before deleting this plan)
 
-1. Append durable **decisions** via `~/agent-harness/scripts/append-decision.sh`.
-2. Update museum **OI status** — set `done` or note what promoted.
-3. **Delete** this dated plan; open a **new** dated plan for the next tranche.
+Follow `HANDOFF.md` § *Closing a plan* (5zorro 2026-10-22): fold the durable rules, list every
+residual, and sort each one with 5zorro — **promoted** into the plan in flight it fits best (a new
+plan only when none fits and it has a goal of its own), **parked** in museum `open_items.md`
+(`Status: parked`), or **dropped** in the decision log. Then update HANDOFF's registry, the OI
+statuses and the local notes file, and delete this file. **Never** open a plan that holds only this one's
+residuals.
 
 ---
 
@@ -610,7 +613,7 @@ the logic is testable without a phone and the screens are not.
 | 7 | **Three pre-existing public mentions** of the legacy system, listed in museum **OI-176** | Removing them from history means rewriting pushed history and force-pushing a repo with a merged PR on `main`. Editing the files going forward is cheap; erasing history is not. No agent should do either unasked |
 | 8 | **ERPNext is reachable from the Wi-Fi, unencrypted, with the sandbox password** (found 2026-09-24, not caused by this tranche) | Docker Desktop publishes port 8080 on every Windows network interface, and its firewall rule allows all ports on Private networks, which the Wi-Fi is. Anyone on the Wi-Fi can reach the ERPNext login. Cheapest fix: change the `Administrator` password. Stricter: publish 8080 on `127.0.0.1` only in the frappe_docker compose file, so the Electron app keeps working and phones use the proxy. Both are 5zorro's infrastructure, so neither was done |
 
-## Registration owed (deliberately deferred)
+## Registration owed (deliberately deferred) — ✅ done 2026-10-25 (review 10-19 R15-4)
 
 Edits to make once the 2026-09-16 tranche is clear of those files:
 

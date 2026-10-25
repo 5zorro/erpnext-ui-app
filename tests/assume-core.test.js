@@ -298,3 +298,16 @@ describe("assume-core", () => {
     });
   });
 });
+
+import { shouldLockAssumed } from "../src/assume-core.js";
+
+describe("shouldLockAssumed (DF-01/DF-02: unticked checkboxes stay clickable)", () => {
+  it("never locks an empty field or an unticked checkbox; locks a filled one", () => {
+    assert.equal(shouldLockAssumed("Data", ""), false);
+    assert.equal(shouldLockAssumed("Link", null), false);
+    assert.equal(shouldLockAssumed("Check", 0), false);
+    assert.equal(shouldLockAssumed("Check", "0"), false);
+    assert.equal(shouldLockAssumed("Check", 1), true);
+    assert.equal(shouldLockAssumed("Link", "USD"), true);
+  });
+});

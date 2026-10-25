@@ -3,7 +3,7 @@
  * focus back to Payment terms (or other header fields) after the user has moved on.
  */
 
-/** @typedef {{ element: Element|null, field: string|null }} BillFocusCapture */
+/** @typedef {{ element: Element|null, field: string|null, row?: string|null }} BillFocusCapture */
 
 /**
  * @param {Element|null|undefined} el
@@ -35,7 +35,11 @@ export function captureBillFocus() {
     active && /** @type {Element} */ (active).getAttribute
       ? /** @type {Element} */ (active).getAttribute("data-field")
       : null;
-  return { element: active, field: field != null ? String(field) : null };
+  const row =
+    active && /** @type {Element} */ (active).getAttribute
+      ? /** @type {Element} */ (active).getAttribute("data-row")
+      : null;
+  return { element: active, field: field != null ? String(field) : null, row: row != null ? String(row) : null };
 }
 
 /**
@@ -48,9 +52,16 @@ export function restoreBillFocus(saved, opts = {}) {
     saved && typeof saved === "object" && "element" in saved
       ? /** @type {BillFocusCapture} */ (saved)
       : { element: saved || null, field: null };
-  const el = cap.element;
+  let el = cap.element;
   if (!el || typeof el.focus !== "function") return;
-  if (typeof document !== "undefined" && !document.contains(el)) return;
+  if (typeof document !== "undefined" && !document.contains(el)) {
+    // The repaint rebuilt that line: the same row and field, as a new element (5zorro 2026-10-11 —
+    // a click into a line while a new bill loaded was dropped by the next repaint).
+    if (!cap.field || cap.row == null) return;
+    const again = document.querySelector(`[data-row="${cap.row}"][data-field="${cap.field}"]`);
+    if (!again) return;
+    el = again;
+  }
   if (!isBillFormFocusTarget(el)) return;
   try {
     el.focus({ preventScroll: true });

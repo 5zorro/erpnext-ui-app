@@ -22,6 +22,7 @@ export const SUBMITTED_CAP = 25;
  *   label: string,
  *   detail: string,
  *   at: string,
+ *   viewedAt?: string,
  *   priorSession?: boolean,
  * }} SubmittedEntry
  */
@@ -126,4 +127,58 @@ export function submittedRowSummary(list) {
 export function submittedEntryRoute(entry, erpBase) {
   if (!entry || !entry.route) return "";
   return normalizeAppRoute(entry.route, erpBase).path || entry.route;
+}
+
+/**
+ * How the panel is sorted (5zorro 2026-10-24, plan 2026-10-24 answer 5): by when each was
+ * submitted — the default — or by when each was last looked at, for a day spent bouncing between a
+ * few of them on one question. A choice per clerk, not one order for every user.
+ */
+export const SUBMITTED_SORTS = Object.freeze(["submitted", "viewed"]);
+
+/** @param {unknown} v @returns {"submitted"|"viewed"} */
+export function normalizeSubmittedSort(v) {
+  return v === "viewed" ? "viewed" : "submitted";
+}
+
+/**
+ * The submitted document on screen was looked at now. Returns the same list when nothing changes
+ * (not listed, or already the most recently viewed), so callers save only on a real change.
+ * @param {SubmittedEntry[]} list
+ * @param {string} doctypeKey
+ * @param {string} name
+ * @param {string} [at] ISO time
+ * @returns {SubmittedEntry[]}
+ */
+export function markSubmittedViewed(list, doctypeKey, name, at) {
+  const prev = Array.isArray(list) ? list : [];
+  const key = normalizeDoctypeKey(doctypeKey);
+  const n = name != null ? String(name).trim() : "";
+  const i = prev.findIndex((e) => e && e.doctypeKey === key && e.name === n);
+  if (i < 0) return prev;
+  const latest = sortSubmitted(prev, "viewed")[0];
+  if (latest === prev[i]) return prev;
+  const next = prev.slice();
+  next[i] = { ...prev[i], viewedAt: at || new Date().toISOString() };
+  return next;
+}
+
+/** @param {SubmittedEntry} e */
+const viewedTime = (e) => Date.parse((e && (e.viewedAt || e.at)) || "") || 0;
+
+/**
+ * The panel's rows in the chosen order. "submitted" keeps the list's own order (newest submission
+ * first, as `pushSubmittedDoc` keeps it); "viewed" puts the most recently looked-at first — a row
+ * never viewed counts from when it was submitted.
+ * @param {SubmittedEntry[]} list
+ * @param {"submitted"|"viewed"|string} sort
+ * @returns {SubmittedEntry[]} the same entries, reordered (input untouched)
+ */
+export function sortSubmitted(list, sort) {
+  const prev = Array.isArray(list) ? list.filter(Boolean) : [];
+  if (normalizeSubmittedSort(sort) !== "viewed") return prev.slice();
+  return prev
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => viewedTime(b.e) - viewedTime(a.e) || a.i - b.i)
+    .map((x) => x.e);
 }

@@ -34,6 +34,8 @@
  *   it out in the chrome"*).
  */
 
+import { isBankHoliday } from "./bank-business-days.js";
+
 /**
  * @typedef {{
  *   state: "off"|"upcoming"|"run-day",
@@ -206,11 +208,16 @@ export function describeCheckRun(run) {
       : "No check run set, so every suggested payment is shown as ready to act on.";
   }
   if (run.early) return `Doing the ${run.runDate} check run today — it pays everything due before ${run.cutoff}.`;
-  if (run.state === "run-day") return `Check run today pays everything due before ${run.cutoff}.`;
+  // Review 10-19 R10a-3: a schedule can roll onto a closed day. Said, never moved — each payment is
+  // already dated a banking day of its own; only the run day itself is not one.
+  const closed = isBankHoliday(run.runDate)
+    ? " That day is a weekend or bank holiday — “Do this run today” runs it before."
+    : "";
+  if (run.state === "run-day") return `Check run today pays everything due before ${run.cutoff}.${closed}`;
   const rolled = run.rolledFrom
     ? ` Rolled forward from ${run.rolledFrom}, assuming the runs in between happened.`
     : "";
-  return `Next check run ${run.runDate} pays everything due before ${run.cutoff}.${rolled}`;
+  return `Next check run ${run.runDate} pays everything due before ${run.cutoff}.${rolled}${closed}`;
 }
 
 /**

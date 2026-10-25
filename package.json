@@ -10,12 +10,19 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node scripts/run-tests.js",
+    "test:flaky": "node scripts/test-flaky.js",
+    "probe": "node scripts/run-probe.js",
     "test:e2e": "playwright test",
     "test:e2e:xvfb": "xvfb-run -a playwright test",
     "seed:sample": "bash ops/sample-data/run-seed.sh",
     "seed:sample:plan": "node ops/sample-data/emit-plan.js",
+    "seeds:simplified": "node scripts/generate-simplified-seeds.js",
     "dogfood:ap-sources": "node ops/sample-data/emit-dogfood-sources.js",
+    "dogfood:for-change": "node scripts/dogfood-for-change.js",
+    "dogfood:check": "node scripts/dogfood-check.js",
+    "dogfood:setup": "node scripts/dogfood-setup.js",
+    "nav:check": "node scripts/nav-check.js",
     "dogfood:ap-sources:pdf": "node ops/sample-data/emit-dogfood-sources.js --pdf",
     "report:input-count": "node ops/input-count/report-all.js",
     "report:input-count:bill": "node ops/input-count/report-bill.js",
@@ -36,5 +43,9 @@
   "_architecture_note": "Shell talks to ERPNext over HTTP/API only. Vanilla Desk remains available for troubleshooting in a stock browser. Clean Core: never edit vendor apps/frappe or apps/erpnext.",
   "allowScripts": {
     "electron@33.4.11": true
+  },
+  "dependencies": {
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.3.289"
   }
 }

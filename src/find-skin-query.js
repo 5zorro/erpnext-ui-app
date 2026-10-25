@@ -16,6 +16,8 @@
  *     where Vanilla's `?field=value` filters are exact. "Search in Vanilla list →" still hands
  *     over exact filters.
  *   - The party box matches the party's id *or* its display name (`or_filters`).
+ *   - Cancelled documents are hidden unless the page's "Show cancelled" is on (DF-01). Vanilla's
+ *     list shows them; its address filters cannot say "not cancelled".
  */
 
 import { findSkinFor, findSearchValues } from "./find-skin-registry.js";
@@ -97,6 +99,7 @@ function likeValue(text) {
  * @param {{
  *   values?: Record<string, unknown>,
  *   status?: string,
+ *   showCancelled?: boolean,
  *   direction?: string,
  *   sort?: unknown,
  *   start?: unknown,
@@ -130,6 +133,9 @@ export function findListQuery(doctypeKey, opts = {}) {
   }
   const status = opts.status != null ? String(opts.status).trim() : "";
   if (status && skin.statuses.includes(status)) filters.push(["status", "=", status]);
+  // Cancelled documents stay out unless asked for (5zorro DF-01: "i don't want cancelled entries
+  // cluttering up my tables") — the toggle, or picking the Cancelled status itself.
+  if (opts.showCancelled !== true && status !== "Cancelled") filters.push(["docstatus", "!=", "2"]);
   if (skin.directional) {
     const dir = opts.direction === "Receive" ? "Receive" : "Pay";
     filters.push(["payment_type", "=", dir]);

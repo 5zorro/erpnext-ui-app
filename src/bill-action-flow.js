@@ -9,7 +9,7 @@ import { normalizeAppRoute, isNewDocRecord, routeInfo } from "./route-info.js";
 import { commitGateContinues } from "./bill-toolbar.js";
 
 /** @typedef {"idle"|"validating"|"saving"|"submitting"|"success"|"error"} CommitGatePhase */
-/** @typedef {"find"|"new"|"print"|"edit-vendor-addresses"} CommitGateAction */
+/** @typedef {"find"|"new"|"print"} CommitGateAction */
 /** @typedef {"discard"|"save"|"submit"|"cancel"} CommitGateChoice */
 /**
  * A gate trigger is whatever asked to leave the current dirty Bill: a toolbar
@@ -34,8 +34,6 @@ export function gateTriggerLabel(trigger) {
       return "New Bill";
     case "print":
       return "Print";
-    case "edit-vendor-addresses":
-      return "edit vendor addresses";
     default:
       return trigger.action || "continue";
   }
@@ -59,7 +57,6 @@ export const BILL_SAVE_TIMEOUT_MS = 18_000;
 /** Inner bridge deadline — must be ≤ {@link BILL_SAVE_TIMEOUT_MS}. */
 export const BILL_SAVE_BRIDGE_TIMEOUT_MS = 12_000;
 export const BILL_FIND_TIMEOUT_MS = 20_000;
-export const BILL_PRINT_TIMEOUT_MS = 25_000;
 
 /**
  * Progress text for save-based gate choices (never say "submitting" for draft save).
@@ -290,52 +287,6 @@ export function classifyPrintNavResult(landedRoute, expectedName, erpBase) {
     };
   }
   return { ok: true };
-}
-
-/**
- * Does hidden Vanilla cur_frm match the Bill we want to print?
- * @param {{ doctype?: string, name?: string }|null|undefined} frmDoc
- * @param {string} expectedName
- * @returns {{ ok: boolean, reason?: string }}
- */
-export function printFormMatchesBill(frmDoc, expectedName) {
-  const want = expectedName == null ? "" : String(expectedName);
-  if (!want || isNewDocRecord(want)) {
-    return { ok: false, reason: "Save the Bill draft first — print needs a document name." };
-  }
-  if (!frmDoc) {
-    return { ok: false, reason: "No form loaded." };
-  }
-  if (frmDoc.doctype && frmDoc.doctype !== "Purchase Invoice") {
-    return { ok: false, reason: `Wrong form type (${frmDoc.doctype}).` };
-  }
-  const got = frmDoc.name == null ? "" : String(frmDoc.name);
-  if (!got || isNewDocRecord(got)) {
-    return { ok: false, reason: "No form loaded." };
-  }
-  if (got !== want) {
-    return {
-      ok: false,
-      reason: `Vanilla is on a different Bill (${got}), not ${want}.`,
-    };
-  }
-  return { ok: true };
-}
-
-/**
- * Normalize Print IPC / eval payload — never invent success after failure.
- * @param {unknown} raw
- * @returns {{ ok: boolean, reason?: string }}
- */
-export function normalizePrintIpcResult(raw) {
-  if (!raw || typeof raw !== "object") {
-    return { ok: false, reason: "Could not open print." };
-  }
-  const r = /** @type {{ ok?: boolean, reason?: string }} */ (raw);
-  if (r.ok === true) {
-    return { ok: true, reason: r.reason };
-  }
-  return { ok: false, reason: r.reason || "Print failed." };
 }
 
 /**

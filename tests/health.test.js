@@ -7,6 +7,9 @@ import {
   loginRouteFor,
   pingHealth,
   probeLogin,
+  loginCheckOnHealthChange,
+  loginCheckAfterRefusal,
+  LOGIN_PROBE_PATH,
 } from "../src/health.js";
 
 describe("buildPingUrl", () => {
@@ -112,5 +115,21 @@ describe("loginRouteFor", () => {
   it("falls back to Desk from the login page itself or a blank view", () => {
     assert.equal(loginRouteFor("/login").search, "redirect-to=%2Fdesk");
     assert.equal(loginRouteFor("").search, "redirect-to=%2Fdesk");
+  });
+});
+
+describe("when the login question is asked (review 10-19 R4-1)", () => {
+  it("a health tick asks only when the server's state changed", () => {
+    assert.equal(loginCheckOnHealthChange("unknown", "ok"), true, "first answer at launch");
+    assert.equal(loginCheckOnHealthChange("down", "ok"), true, "server came back");
+    assert.equal(loginCheckOnHealthChange("ok", "down"), true, "server went away");
+    assert.equal(loginCheckOnHealthChange("ok", "ok"), false, "the 5 s beat never asks");
+  });
+  it("a refused signed-in read asks, but the login check's own 403 does not", () => {
+    assert.equal(loginCheckAfterRefusal(403, "http://x/api/resource/Purchase%20Invoice"), true);
+    assert.equal(loginCheckAfterRefusal(401, "http://x/api/method/y"), true);
+    assert.equal(loginCheckAfterRefusal(200, "http://x/api/resource/Item"), false);
+    assert.equal(loginCheckAfterRefusal(417, "http://x/api/method/y"), false);
+    assert.equal(loginCheckAfterRefusal(403, `http://x${LOGIN_PROBE_PATH}`), false);
   });
 });

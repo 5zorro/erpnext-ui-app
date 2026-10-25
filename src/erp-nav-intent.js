@@ -6,16 +6,19 @@
 
 import { routeInfo, routesReferToSameDoc, normalizeAppRoute } from "./route-info.js";
 
+/** The intent a load of Desk (`/desk`, `/app`) arms: it has no doctype to match on. */
+export const DESK_INTENT = "/desk";
+
 /**
  * Arm-or-clear decision for an intentional shell navigation.
  *
- * Only `/app/…` destinations can be guarded: the guard matches on doctype, so a
- * doctype-less destination (`/desk`, `/`, `/login`) would never accept its own
- * arrival and would block every event for the whole timeout. Those destinations
- * must therefore **clear** — leaving a stale intent armed is worse than no guard:
- * it rejects the real arrival (currentRoute never updates, and the route poll
- * cannot repair it) while still accepting late in-page events from the page we
- * just left, which write the old route back.
+ * `/app/…` destinations are guarded by doctype. Desk (`/desk`, `/app`) has no doctype, so it arms
+ * the Desk intent, which accepts any page that is not one document (Desk itself, a workspace, a
+ * list — its arrival) and rejects a form: while the Desk load is under way, a form URL can only be
+ * a late event from the page being left (nav matrix N-3, 2026-10-24: Discard on a new Bill, then
+ * Desk — ERPNext's fresh `new-…` form was read after the Desk load began, and the Doc lens pulled
+ * the clerk back onto it). `/` and `/login` still **clear** — leaving a stale intent armed is worse
+ * than no guard: it rejects the real arrival while accepting late events from the page left.
  *
  * @param {string|null|undefined} destination route or URL we mean to open
  * @param {string} [erpBase]
@@ -25,6 +28,7 @@ export function resolveErpNavIntent(destination, erpBase) {
   const raw = destination == null ? "" : String(destination);
   if (!raw) return { action: "clear" };
   const path = normalizeAppRoute(raw, erpBase).path || raw;
+  if (path === "/desk" || path === "/app") return { action: "arm", path: DESK_INTENT };
   if (!path.startsWith("/app/")) return { action: "clear" };
   return { action: "arm", path };
 }
@@ -62,6 +66,7 @@ export function shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBa
 export function shouldAcceptErpTrackNav(intentPath, incomingUrl, erpBase) {
   if (!intentPath) return true;
   if (typeof incomingUrl !== "string" || !incomingUrl) return false;
+  if (intentPath === DESK_INTENT) return !normalizeAppRoute(incomingUrl, erpBase).record;
   // List intent must not treat a stale same-doctype form URL as "arrived" (OI-054 Find).
   if (shouldBlockDocHijackForListIntent(intentPath, incomingUrl, erpBase)) return false;
   if (routesReferToSameDoc(intentPath, incomingUrl, erpBase)) return true;

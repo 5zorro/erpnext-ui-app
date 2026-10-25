@@ -10,6 +10,7 @@
 import {
   buildBillSourceLoadingGroups,
   SOURCE_LIST_SLICE_ORDER,
+  sourceSlicesForSkin,
   buildSourceGroupFromSliceRows,
   applySourceSliceToGroups,
 } from "./source-list-slices.js";
@@ -21,6 +22,7 @@ import {
  *   supplier: string,
  *   trigger: SourcePickerTrigger,
  *   mode?: "single" | "multi",
+ *   skinId?: string,
  *   listSourceSlice: (supplier: string, sliceId: string) => Promise<{ ok?: boolean, rows?: object[], reason?: string }>,
  *   showModal: (opts: object) => Promise<{ ok?: boolean, kind?: string }>,
  *   buildInitialGroups?: () => import("./source-modal.js").SourceGroup[],
@@ -87,7 +89,9 @@ export async function runSourcePickerFlow(opts) {
 
   /** @type {import("./source-modal-ui.js").SourceModalController | null} */
   let ctl = null;
-  let groups = o.buildInitialGroups ? o.buildInitialGroups() : buildBillSourceLoadingGroups();
+  // Which slices this skin lists (source-list-slices.js SOURCE_SLICES_BY_SKIN); the Bill's by default.
+  const sliceIds = o.skinId ? sourceSlicesForSkin(o.skinId) : SOURCE_LIST_SLICE_ORDER;
+  let groups = o.buildInitialGroups ? o.buildInitialGroups() : buildBillSourceLoadingGroups(o.skinId || "bill");
 
   const modalDone = o.showModal({
     groups,
@@ -104,6 +108,7 @@ export async function runSourcePickerFlow(opts) {
 
   void streamSourceSlices({
     supplier,
+    sliceIds,
     session,
     listSourceSlice: o.listSourceSlice,
     getController: () => ctl,
@@ -130,6 +135,7 @@ export async function runSourcePickerFlow(opts) {
 /**
  * @param {{
  *   supplier: string,
+ *   sliceIds?: string[],
  *   session: { alive: boolean },
  *   listSourceSlice: RunSourcePickerFlowOptions["listSourceSlice"],
  *   getController: () => import("./source-modal-ui.js").SourceModalController | null,
@@ -144,7 +150,7 @@ async function streamSourceSlices(ctx) {
   /** @type {string[]} */
   const errors = [];
   await Promise.all(
-    SOURCE_LIST_SLICE_ORDER.map(async (sliceId) => {
+    (ctx.sliceIds || SOURCE_LIST_SLICE_ORDER).map(async (sliceId) => {
       try {
         const raw = await ctx.listSourceSlice(ctx.supplier, sliceId);
         if (!ctx.session.alive) return;

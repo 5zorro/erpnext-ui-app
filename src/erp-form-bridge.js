@@ -6,7 +6,7 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 23;
+export const DOC_FORM_BRIDGE_VERSION = 29;
 
 /** Max wait for address_display on supplier setHeader before snapshot (bridge deadline). */
 export const SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
@@ -275,6 +275,30 @@ export function stripHtmlPlain(s) {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * The last `SomeError: message` line of a Frappe traceback (`r.exc`, a JSON list of them): what a
+ * refused save shows when it carries no `_server_messages` (review 10-19 R6b-2). Mirrors
+ * `frappeExcMessage` in electron/erp-form-bridge-page.js.
+ * @param {unknown} exc
+ * @returns {string} "" when no such line
+ */
+export function frappeExcMessage(exc) {
+  let text = String(exc == null ? "" : exc);
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) text = parsed.join("\n");
+    else if (typeof parsed === "string") text = parsed;
+  } catch {
+    /* not JSON — a bare traceback */
+  }
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\s*(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*(?:Error|Exception))\s*:\s*(.+?)\s*$/.exec(lines[i]);
+    if (m) return stripHtmlPlain(m[2]);
+  }
+  return "";
 }
 
 /**

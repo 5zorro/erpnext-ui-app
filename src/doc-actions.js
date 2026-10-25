@@ -538,6 +538,31 @@ export function describeVoidAndAmendResult(result = {}) {
     };
   }
 
+  // Review 10-19 R9-1: the amended copy exists — only its submit was refused. Not stranded, and
+  // the one thing the clerk must not do is re-enter the bill.
+  if (result.cancelled && amended) {
+    return {
+      ok: false,
+      headline: `${name || "The document"} is cancelled; its amended copy ${amended} was created but not submitted.`,
+      detail:
+        (reason ? `${reason} ` : "") +
+        `Open ${amended} and submit it there — do not re-enter it as a new bill, or it will exist twice.`,
+      strandedName: "",
+    };
+  }
+
+  // Review 10-19 R9-2: the page died mid-write, so whether the cancel landed is unknown.
+  if (result.uncertain) {
+    return {
+      ok: false,
+      headline: name ? `Lost contact while voiding ${name} — it may already be cancelled.` : "Lost contact mid-way — it may already be cancelled.",
+      detail:
+        (reason ? `${reason} ` : "") +
+        "If it is cancelled, retry the amend against it or amend it in Vanilla — do not re-enter it as a new bill.",
+      strandedName: name,
+    };
+  }
+
   // The dangerous half. The cancel went through, so the bill is no longer live, and the clerk needs
   // to know that before anything else — including that retrying means amending the cancelled one.
   if (result.cancelled) {

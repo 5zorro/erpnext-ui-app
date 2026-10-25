@@ -191,3 +191,16 @@ describe("check-run schedule: what the clerk reads", () => {
     assert.deepEqual(summarizeCheckRun(groups, resolveCheckRun({}, TODAY)).offCycle, { count: 0, amount: 0 });
   });
 });
+
+describe("describeCheckRun: a run date on a closed day (review 10-19 R10a-3)", () => {
+  it("says so, and does not move the date", () => {
+    // Every 14 days from Fri 2026-12-11 reaches Christmas Day, Fri 2026-12-25.
+    const run = resolveCheckRun({ nextRunDate: "2026-12-25", runIntervalDays: 14 }, "2026-12-20");
+    assert.equal(run.runDate, "2026-12-25");
+    assert.match(describeCheckRun(run), /^Next check run 2026-12-25 .* That day is a weekend or bank holiday/);
+  });
+  it("an open day says nothing extra", () => {
+    const run = resolveCheckRun({ nextRunDate: "2026-12-18", runIntervalDays: 14 }, "2026-12-14");
+    assert.doesNotMatch(describeCheckRun(run), /bank holiday/);
+  });
+});

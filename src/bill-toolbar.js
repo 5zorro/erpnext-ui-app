@@ -23,7 +23,7 @@ export const MUSEUM_BILL_TOOLBAR = Object.freeze([
 ]);
 
 /**
- * Alpha Bill toolbar as shipped in electron/bill.html (labels normalized).
+ * Alpha Bill toolbar (labels normalized).
  * @type {readonly { id: string, label: string, museumEquivalent: string|null }[]}
  */
 export const ALPHA_BILL_TOOLBAR = Object.freeze([

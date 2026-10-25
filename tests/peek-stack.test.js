@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { ownFormPeekHolds } from "../src/peek-stack.js";
 import { pushHistory, splitHistory, RECENT_MAX } from "../src/history.js";
 import {
   PEEK_CHILD_CAP,
@@ -16,6 +17,8 @@ import {
   syncPeekLinks,
   isPeekChildRoute,
   PEEK_LINK_CAP,
+  renameInPeekStack,
+  renameInPeekLinks,
 } from "../src/peek-stack.js";
 import { normalizeAppRoute } from "../src/route-info.js";
 
@@ -216,6 +219,16 @@ describe("applyErpHopToPeekStack — who is a parent (plan 2026-09-26 N1)", () =
     assert.deepEqual(stack.children.map((c) => c.dt), ["account"]);
   });
 
+  // 5zorro nav incident 2026-10-12: Material Request opened from Home; the hidden new Item Receipt
+  // left behind (always "unsaved" in Frappe) became its parent, and the Doc tab returned to it.
+  it("a page the shell opened with no parent does not adopt the hidden form it hopped away from", () => {
+    const newIr = "/app/purchase-receipt/new-purchase-receipt-njuadgpcoe";
+    const mr = "/app/material-request/new-material-request-btrrsfwozk";
+    assert.equal(applyErpHopToPeekStack(null, newIr, mr, { prevUnsaved: true, shellOpened: true }), null);
+    // …while the same hop made by the clerk in Vanilla still parks the unsaved form.
+    assert.equal(applyErpHopToPeekStack(null, newIr, mr, { prevUnsaved: true }).parent.route, newIr);
+  });
+
   it("a clean form left for a setup record is plain navigation, not a peek", () => {
     assert.equal(applyErpHopToPeekStack(null, "/app/purchase-order/PO-1", supplier), null);
   });
@@ -396,3 +409,92 @@ describe("resolveSoftPeekEscAction", () => {
   });
 });
 
+// Nav incident 2026-10-03 (DF-02): Doc Bill → vendor picker "Go to Vendor add…" → new Supplier →
+// (unsaved) Create a new Payment Terms Template → save it → save the Supplier → Esc. The clerk
+// wanted the Bill back and got the Supplier just saved. Replayed hop by hop, as main applies them.
+describe("nav incident 2026-10-03 — a Supplier created from the Doc Bill, saved, then Esc", () => {
+  const bill = "/app/purchase-invoice/new-purchase-invoice-sqtmgsgbgs";
+  const parked = { route: bill, mode: "doc" };
+  const opts = { anchorRoute: bill };
+
+  function replay() {
+    // softPeekErp from the Doc skin: the parked Bill is the parent, the new Supplier its child.
+    let stack = beginPeekParent(null, resolveSoftPeekParent({ surfaceMode: "doc", parkedRoute: bill, currentRoute: bill }));
+    stack = pushPeekChild(stack, "/app/supplier/new");
+    // Frappe reroutes /new to the draft's own name.
+    stack = applyErpHopToPeekStack(stack, "/app/supplier/new", "/app/supplier/new-supplier-ydoenvughm", opts);
+    // Create a new Payment Terms Template from the unsaved Supplier.
+    stack = applyErpHopToPeekStack(
+      stack,
+      "/app/supplier/new-supplier-ydoenvughm",
+      "/app/payment-terms-template/new-payment-terms-template-mssertehbg",
+      { ...opts, prevUnsaved: true },
+    );
+    // Template saved, back to the Supplier; then the Supplier is saved and renamed.
+    const renamed = {
+      "new-payment-terms-template-mssertehbg": "NET 30 DAYS",
+      "new-supplier-ydoenvughm": "SUMMIT TRADERS",
+    };
+    stack = renameInPeekStack(stack, renamed);
+    stack = applyErpHopToPeekStack(stack, "/app/supplier/new", "/app/supplier/SUMMIT%20TRADERS", opts);
+    return stack;
+  }
+
+  it("the Bill stays the parent through the whole session — a parked Doc anchors it", () => {
+    const stack = replay();
+    assert.equal(stack.parent.route, bill);
+  });
+
+  it("the saved records are held under their real names, not their placeholders", () => {
+    const routes = replay().children.map((c) => c.route);
+    assert.ok(routes.includes("/app/supplier/SUMMIT%20TRADERS"), routes.join(" | "));
+    assert.ok(routes.includes("/app/payment-terms-template/NET%2030%20DAYS"), routes.join(" | "));
+    assert.ok(!routes.some((r) => /\/new(-|$)/.test(r)), `a placeholder survived: ${routes.join(" | ")}`);
+  });
+
+  it("Esc from the saved Supplier goes back to the Bill", () => {
+    const decision = resolveSoftPeekEscAction({
+      parked,
+      peekStack: replay(),
+      currentRoute: "/app/supplier/SUMMIT%20TRADERS",
+    });
+    assert.deepEqual(decision, { action: "resume-park", route: bill });
+  });
+
+  it("a parent saved during its own session is renamed too (unsaved Vanilla parent)", () => {
+    let stack = beginPeekParent(null, "/app/supplier/new-supplier-abc");
+    stack = pushPeekChild(stack, "/app/address/new-address-xyz");
+    stack = renameInPeekStack(stack, { "new-supplier-abc": "ACME" });
+    assert.equal(stack.parent.route, "/app/supplier/ACME");
+    assert.deepEqual(stack.children.map((c) => c.route), ["/app/address/new-address-xyz"]);
+  });
+
+  it("Recent's child → parent links follow the rename", () => {
+    const links = renameInPeekLinks(
+      { "/app/payment-terms-template/new-payment-terms-template-q": "/app/supplier/new-supplier-abc" },
+      { "new-supplier-abc": "ACME", "new-payment-terms-template-q": "NET 30" },
+    );
+    assert.deepEqual(links, { "/app/payment-terms-template/NET%2030": "/app/supplier/ACME" });
+  });
+
+  it("no renames → the same stack object back", () => {
+    const stack = beginPeekParent(null, bill);
+    assert.equal(renameInPeekStack(stack, {}), stack);
+    assert.equal(renameInPeekStack(null, { a: "b" }), null);
+  });
+});
+
+// 5zorro 2026-10-12: Sales Order Attach "flickered, and nothing else" — the Vanilla → Doc hijack
+// pulled the clerk off the document's own form that Attach had opened.
+describe("ownFormPeekHolds", () => {
+  const base = "http://localhost:8080";
+  it("holds the hijack for the same document, however Frappe spells its address", () => {
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", `${base}/desk/sales-order/SAL-ORD-2026-00001#details`, base), true);
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/sales-order/SAL-ORD-2026-00001", base), true);
+  });
+  it("not for another document, and not when no own-form peek is up", () => {
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/sales-order/SAL-ORD-2026-00002", base), false);
+    assert.equal(ownFormPeekHolds("/app/sales-order/SAL-ORD-2026-00001", "/app/purchase-order/SAL-ORD-2026-00001", base), false);
+    assert.equal(ownFormPeekHolds("", "/app/sales-order/SAL-ORD-2026-00001", base), false);
+  });
+});

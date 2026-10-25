@@ -1,6 +1,6 @@
 /**
  * Shared Doc skin chrome — Bill, PO, Item Receipt (toolbar, gate, dirty pill, memo, link picker).
- * Bill-only dashboard styles stay in bill.html; PO/IR-specific layout stays in doc-form.html.
+ * Bill-only dashboard styles stay in bill-dashboard.css; PO/IR-specific layout stays in doc-form.html.
  */
 
 /* Inline SVG icons — SSoT: src/ui-icons.js (no Unicode emoji in product chrome). */
@@ -383,6 +383,66 @@
   cursor: not-allowed;
 }
 
+/* The attached files under the notes (5zorro 2026-10-12): solid like the notes box, so the desk
+   hatch never runs through the file names. */
+.attach-list-host {
+  margin-top: 8px;
+}
+.attach-list {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.attach-list caption {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  padding: 0 0 4px;
+}
+.attach-list td {
+  padding: 4px 8px;
+  border-top: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+.attach-list tr:first-child td {
+  border-top: 0;
+}
+.attach-list .al-name {
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-list .al-meta {
+  color: #64748b;
+  white-space: nowrap;
+}
+.attach-list .al-act {
+  white-space: nowrap;
+  text-align: right;
+}
+.attach-list .al-act button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.attach-list .al-act button:hover {
+  background: #f1f5f9;
+}
+.attach-list-note.err {
+  color: #b91c1c;
+  font-size: 12px;
+  margin: 0;
+}
+
 .link-wrap {
   position: relative;
   display: flex;
@@ -419,6 +479,13 @@
   overflow: auto;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
+/* Placed against the window by link-picker-ui (link-dropdown-place.js), so a narrow line cell
+   does not clip it (DF-01). */
+.link-dd.link-dd-floating {
+  position: fixed;
+  right: auto;
+  z-index: 60;
+}
 .link-opt {
   display: block;
   width: 100%;
@@ -439,6 +506,29 @@
   padding: 10px;
   font-size: 12px;
   color: #64748b;
+}
+/* Under a list answered from the shell's copy (plan 2026-10-21): its age, and Refresh. */
+.link-list-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 11px;
+  color: #64748b;
+}
+.link-list-refresh {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  color: #2563eb;
+  cursor: pointer;
+}
+.link-list-refresh:disabled {
+  color: #94a3b8;
+  cursor: default;
 }
 .link-opt.active {
   background: #eaf4ff;
@@ -661,6 +751,11 @@
   justify-content: center;
   padding: 16px;
 }
+/* A question asked mid-save (the gate's Save runs it) must sit above the commit gate, or the save
+   waits on a dialog nobody can see — the DF-02 hang. */
+.addr-modal-backdrop.over-gate {
+  z-index: 210;
+}
 .addr-modal {
   background: #fff;
   border-radius: 10px;
@@ -810,3 +905,43 @@
   color: #64748b;
   margin: 8px 0;
 }
+
+/* Plan 2026-10-21 D2: across the top while the vendor named is not in ERPNext. */
+.doc-alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+.doc-alert-banner[hidden] {
+  display: none;
+}
+.doc-alert-text {
+  flex: 1;
+}
+.doc-alert-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* "Costing Assumptions!" (review 10-19 R6b-4) — src/costing-box-ui.js; the Bill's assign dialog,
+   and the Sales Order's look-back (the Costing chip in its Sources column). */
+.costing-box { padding: 10px 14px; }
+.costing-title { font-weight: 700; color: #92400e; margin-bottom: 4px; }
+.costing-lead { margin: 0 0 8px; font-size: 12px; color: #475569; line-height: 1.4; }
+.costing-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.costing-table th, .costing-table td { padding: 4px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+.costing-table th:nth-child(n + 2):nth-child(-n + 3), .costing-table td:nth-child(n + 2):nth-child(-n + 3) { text-align: right; }
+.costing-stock-row td { color: #92400e; font-style: italic; }
+.costing-here td { font-weight: 700; }
+.costing-lookback { max-width: 640px; }
+.costing-caption { margin-top: 12px; font-size: 12px; color: #334155; }
+.costing-peek { font-size: 11px; padding: 1px 6px; margin-left: 4px; cursor: pointer; }

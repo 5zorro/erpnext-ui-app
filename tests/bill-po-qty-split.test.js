@@ -11,6 +11,7 @@ import {
   saveFailureIsOverBilling,
   listOverbillCapCacheBlockers,
   OVERBILL_CAP_CACHE_BLOCKER,
+  OVERBILL_CAP_GAVE_UP_BLOCKER,
 } from "../src/bill-po-qty-split.js";
 import { indexPoLineMeta } from "../src/bill-po-hydrate.js";
 
@@ -141,5 +142,15 @@ describe("bill-po-qty-split", () => {
       {},
     );
     assert.equal(meta[0].maxBillableQty, 1);
+  });
+});
+
+describe("review 10-19 R6c-2 — once the limits stop loading, Save stops saying 'wait'", () => {
+  const items = [{ item_code: "A", po_detail: "pod-1" }];
+  it("says wait while loading, and Refresh once main has given up", () => {
+    assert.deepEqual(listOverbillCapCacheBlockers(items, () => null), [OVERBILL_CAP_CACHE_BLOCKER]);
+    assert.deepEqual(listOverbillCapCacheBlockers(items, () => null, { gaveUp: true }), [OVERBILL_CAP_GAVE_UP_BLOCKER]);
+    assert.match(OVERBILL_CAP_GAVE_UP_BLOCKER, /Refresh/);
+    assert.deepEqual(listOverbillCapCacheBlockers(items, () => 2, { gaveUp: true }), []);
   });
 });

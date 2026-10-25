@@ -8,6 +8,7 @@
  */
 
 import { formatUsdAmount } from "./money.js";
+import { endSentence } from "./erp-refusal-reason.js";
 
 /**
  * @typedef {{ doctype: string, name: string, allocated: number }} DraftPaymentReference
@@ -135,4 +136,30 @@ export function draftPaymentConfirmText(draft, action) {
     `Submit payment ${d.name} (${d.party}, ${amount}${d.modeOfPayment ? `, ${d.modeOfPayment}` : ""})?\n\n` +
     `${covers}\n\nSubmitting posts it to the ledger. Undoing it afterwards means cancelling the payment.`
   );
+}
+
+/**
+ * What the payment drawer says when a create fails (review 10-19 R10c-1). When ERPNext saved the
+ * Payment Entry and then refused to submit it, the draft exists — say its name and where it is, or
+ * the clerk fixes the cause, clicks again, and leaves the first as an unexplained second payment.
+ *
+ * @param {{ ok?: boolean, reason?: string, step?: string, name?: string|null }|null|undefined} result
+ * @returns {{ text: string, draftLeft: string }}
+ */
+export function paymentCreateFailureText(result) {
+  const r = result || {};
+  const reason = endSentence(r.reason) || "Payment Entry create failed.";
+  if (r.step === "uncertain") {
+    // The page died mid-write (review 10-19): the payment may exist, drafted or even submitted.
+    return {
+      text: `${reason} Lost contact mid-way — the payment may already be saved. Check Draft payments and this vendor's payments before trying again.`,
+      draftLeft: "",
+    };
+  }
+  const draft = r.step === "submit" && r.name ? String(r.name) : "";
+  if (!draft) return { text: reason, draftLeft: "" };
+  return {
+    text: `Saved as draft ${draft} but not submitted: ${reason} Finish or delete it under Draft payments before trying again.`,
+    draftLeft: draft,
+  };
 }

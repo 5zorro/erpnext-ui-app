@@ -13,6 +13,8 @@ export const LINK_ACTION_CREATE_SUPPLIER = "__doc_create_supplier__";
 export const LINK_ACTION_CREATE_PROJECT = "__doc_create_project__";
 /** Empty Item search → soft-peek Vanilla "new Item", item code prefilled with what was typed. */
 export const LINK_ACTION_CREATE_ITEM = "__doc_create_item__";
+/** Empty Customer search → soft-peek Vanilla "new Customer", name prefilled (DF-03). */
+export const LINK_ACTION_CREATE_CUSTOMER = "__doc_create_customer__";
 /** Soft-peek Vanilla Payment Terms Template form (shared Bill · PO). */
 export const LINK_ACTION_CREATE_PAYMENT_TERMS = "__doc_create_payment_terms__";
 export const PAYMENT_TERMS_TEMPLATE_DOCTYPE = "Payment Terms Template";
@@ -46,53 +48,58 @@ export function normalizeSearchLinkResults(message) {
 }
 
 /**
- * When Link search has no rows (or always for Terms), offer create-via-peek actions.
+ * Create-via-peek actions, always the last row (5zorro 2026-10-11: "SAMPLE" found two items, neither
+ * the right one, and Create Item only appeared once the typing matched nothing). Vanilla's Link does
+ * the same: "Create a new …" sits under the hits. With no hits the row says so.
  * @param {LinkOption[]} rows
  * @param {string} doctype
  * @returns {LinkOption[]}
  */
 export function withEmptySearchActions(rows, doctype) {
-  const list = Array.isArray(rows) ? [...rows] : [];
-  if (doctype === PAYMENT_TERMS_TEMPLATE_DOCTYPE) {
-    // Always offer create — Vanilla Link also lets clerks add Terms when templates already exist.
-    if (!list.some((o) => isCreatePaymentTermsLinkAction(o))) {
-      list.push({
-        value: LINK_ACTION_CREATE_PAYMENT_TERMS,
-        description: "Create new Payment Terms…",
-        action: "create_payment_terms",
-      });
-    }
-    return list;
-  }
-  if (list.length) return list;
-  if (doctype === "Supplier") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_SUPPLIER,
-        description: "Go to Vendor add…",
-        action: "create_supplier",
-      },
-    ];
-  }
-  if (doctype === "Item") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_ITEM,
-        description: "No items found — create Item…",
-        action: "create_item",
-      },
-    ];
-  }
-  if (doctype === "Project") {
-    return [
-      {
-        value: LINK_ACTION_CREATE_PROJECT,
-        description: "No projects found — create Project…",
-        action: "create_project",
-      },
-    ];
-  }
-  return list;
+  const list = Array.isArray(rows) ? rows.filter((o) => !isLinkCreateAction(o)) : [];
+  const act = LINK_CREATE_ACTIONS[doctype];
+  if (!act) return list;
+  const description = list.length || !act.empty ? act.label : act.empty;
+  return [...list, { value: act.value, description, action: act.action }];
+}
+
+/** @type {Record<string, { value: string, action: string, label: string, empty?: string }>} */
+const LINK_CREATE_ACTIONS = {
+  [PAYMENT_TERMS_TEMPLATE_DOCTYPE]: {
+    value: LINK_ACTION_CREATE_PAYMENT_TERMS,
+    action: "create_payment_terms",
+    label: "Create new Payment Terms…",
+  },
+  Supplier: { value: LINK_ACTION_CREATE_SUPPLIER, action: "create_supplier", label: "Go to Vendor add…" },
+  Item: {
+    value: LINK_ACTION_CREATE_ITEM,
+    action: "create_item",
+    label: "Create a new Item…",
+    empty: "No items found — create Item…",
+  },
+  Customer: {
+    value: LINK_ACTION_CREATE_CUSTOMER,
+    action: "create_customer",
+    label: "Create a new Customer…",
+    empty: "No customers found — create Customer…",
+  },
+  Project: {
+    value: LINK_ACTION_CREATE_PROJECT,
+    action: "create_project",
+    label: "Create a new Project…",
+    empty: "No projects found — create Project…",
+  },
+};
+
+/** Any of the create-via-peek rows. */
+function isLinkCreateAction(o) {
+  return (
+    isCreateSupplierLinkAction(o) ||
+    isCreatePaymentTermsLinkAction(o) ||
+    isCreateProjectLinkAction(o) ||
+    isCreateItemLinkAction(o) ||
+    isCreateCustomerLinkAction(o)
+  );
 }
 
 /**
@@ -139,6 +146,30 @@ export function isCreateItemLinkAction(optOrValue) {
 }
 
 /**
+ * @param {LinkOption|string|null|undefined} optOrValue
+ * @returns {boolean}
+ */
+export function isCreateCustomerLinkAction(optOrValue) {
+  if (optOrValue == null) return false;
+  if (typeof optOrValue === "string") return optOrValue === LINK_ACTION_CREATE_CUSTOMER;
+  return optOrValue.value === LINK_ACTION_CREATE_CUSTOMER || optOrValue.action === "create_customer";
+}
+
+/**
+ * Vanilla "new Customer" route carrying what the clerk typed. Not `customer_name=`: that field is
+ * `no_copy`, and get_new_doc (create_new.js) skips no_copy route options. `name_field` is what
+ * Vanilla's own Link "Create a new Customer" passes — get_new_doc writes it into the title field
+ * (customer_name). The saved name follows Selling Settings (by Customer Name by default).
+ * @param {string|null|undefined} typed
+ * @returns {string}
+ */
+export function customerCreateRoute(typed) {
+  const name = String(typed ?? "").trim();
+  if (!name) return "/app/customer/new";
+  return `/app/customer/new?${new URLSearchParams({ name_field: name }).toString()}`;
+}
+
+/**
  * Vanilla "new Item" route carrying what the clerk typed. Frappe copies query parameters into
  * `frappe.route_options`, and `get_new_doc` (create_new.js) writes those onto the new document —
  * item_code is the Item's name field (`autoname: field:item_code`), item_name its title.
@@ -173,7 +204,8 @@ export function filterLinkOptions(options, query, opts = {}) {
       isCreateSupplierLinkAction(o) ||
       isCreatePaymentTermsLinkAction(o) ||
       isCreateProjectLinkAction(o) ||
-      isCreateItemLinkAction(o)
+      isCreateItemLinkAction(o) ||
+      isCreateCustomerLinkAction(o)
     ) {
       continue;
     }
@@ -196,6 +228,7 @@ export function linkOptionLabel(opt) {
   if (isCreatePaymentTermsLinkAction(opt)) return opt.description || "Create new Payment Terms…";
   if (isCreateProjectLinkAction(opt)) return opt.description || "Create Project…";
   if (isCreateItemLinkAction(opt)) return opt.description || "Create Item…";
+  if (isCreateCustomerLinkAction(opt)) return opt.description || "Create Customer…";
   let label = opt.description || opt.value;
   if (opt.description && opt.description !== opt.value) {
     label = `${opt.description} (${opt.value})`;
@@ -219,7 +252,8 @@ export function linkOptionClassNames(opt) {
     isCreateSupplierLinkAction(opt) ||
     isCreatePaymentTermsLinkAction(opt) ||
     isCreateProjectLinkAction(opt) ||
-    isCreateItemLinkAction(opt)
+    isCreateItemLinkAction(opt) ||
+    isCreateCustomerLinkAction(opt)
   ) {
     bits.push("link-action");
   }

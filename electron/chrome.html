@@ -26,6 +26,13 @@
       background: #3d4f63; flex-shrink: 0; letter-spacing: .2px;
     }
     .peek-hint[hidden] { display: none; }
+    /* Doors rule, door 4: away from the payment board / payment page on a detour. */
+    .detour-back {
+      background: #f0e6d2; color: #1f2d3d; font-weight: 700; border-radius: 6px; padding: 4px 12px;
+      border: none; cursor: pointer; flex-shrink: 0;
+    }
+    .detour-back:hover { background: #fff3dc; }
+    .detour-back[hidden] { display: none; }
     .spacer { flex: 1; min-width: 8px; }
     .health {
       display: flex; align-items: center; gap: 6px; color: #9fb3c8; font-size: 12px; padding: 0 8px;
@@ -61,6 +68,8 @@
       <button type="button" class="opt active" id="lens-doc" data-testid="lens-doc" title="Document-skin for this page" role="tab">Document-skin</button>
     </div>
     <span class="peek-hint" id="peek-hint" hidden data-testid="soft-peek-hint"></span>
+    <button type="button" class="detour-back" id="btn-detour-back" data-testid="btn-detour-back" hidden
+      title="Back to the payment work you left, as you left it (Esc too, when the page is not using it)"></button>
     <span class="spacer"></span>
     <button type="button" class="health" id="health" data-testid="health" title="Connection details · Nav issue lives here (or Ctrl+Shift+M)" aria-haspopup="dialog" aria-expanded="false">
       <span class="dot" aria-hidden="true"></span>
@@ -80,6 +89,7 @@
     const lensDoc = document.getElementById("lens-doc");
     const lensLabel = document.getElementById("lens-label");
     const peekHint = document.getElementById("peek-hint");
+    const detourBack = document.getElementById("btn-detour-back");
     const appVer = document.getElementById("app-ver");
     let diagnoseOpen = false;
     let softPeekActive = false;
@@ -115,6 +125,11 @@
         peekHint.textContent = hint;
         peekHint.title = hint ? "Return to the document you were editing" : "";
       }
+      if (detourBack) {
+        const back = s.detourBack ? String(s.detourBack) : "";
+        detourBack.hidden = !back;
+        detourBack.textContent = back;
+      }
       if (s.diagnoseOpen != null) {
         diagnoseOpen = !!s.diagnoseOpen;
         healthEl.setAttribute("aria-expanded", diagnoseOpen ? "true" : "false");
@@ -122,6 +137,7 @@
     }
 
     document.getElementById("btn-home").onclick = () => api && api.goHome();
+    if (detourBack) detourBack.onclick = () => api && api.detourBack && api.detourBack();
     document.getElementById("btn-feedback").onclick = () => {
       if (api && api.openFeedback) api.openFeedback();
     };

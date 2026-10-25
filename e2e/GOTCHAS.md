@@ -56,4 +56,33 @@
  *    they typed. xvfb-run replaces DISPLAY, but WSLg also exports WAYLAND_DISPLAY, which
  *    Electron can use instead — the likely route (not proven). Clear both:
  *    `WAYLAND_DISPLAY= DISPLAY= xvfb-run -a npx playwright test …`.
+ *
+ * 13. `webContents.forcefullyCrashRenderer()` crashes nothing under xvfb here (2026-10-20)
+ *    No `render-process-gone`, and the page kept running — so a "crash" test built on it proves
+ *    nothing. Kill the renderer instead: `process.kill(wc.getOSProcessId(), "SIGKILL")` fires
+ *    `render-process-gone` with reason `killed` (review 10-19 R2-1 was proven that way).
+ *
+ * 14. Counting a page's listeners, and making one IPC call fail, from a probe (2026-10-21)
+ *    Listeners: from `app.evaluate`, attach `wc.debugger` ("1.3"), `Runtime.evaluate` "window" /
+ *    "document" for an objectId, then `DOMDebugger.getEventListeners` — counts by type (review
+ *    10-19 R5-1: 9 → 37 per kind over 4 repaints on the old code). A failure ERPNext will not
+ *    give you (it accepts an unknown item code on set_value): wrap the handler in place via the
+ *    private `ipcMain._invokeHandlers` Map (`m.set(ch, (e, ...a) => cond ? refusal : orig(e, ...a))`).
+ *    Test-only; it is Electron internals and may move between versions. The same wrap with a
+ *    `setTimeout` makes one search slow, which is how a race is made to happen every run.
+ *
+ * 15. Typing like a clerk, and where the keys actually land (2026-10-21)
+ *    Real keystrokes: `wc.sendInputEvent` keyDown / char / keyUp per character, and keyDown "Tab"
+ *    — trusted events, so the page's own Tab handlers run. Two traps from review 10-19 R5b-1:
+ *    a new Purchase Order with no vendor sends focus to the Vendor box, so keys meant for an item
+ *    cell typed a vendor search instead (set the vendor first, then check `document.activeElement`);
+ *    and typing an item within ~1 s of setting the vendor races its repaint (plan 10-19 R5b-3) —
+ *    wait ~3 s unless that race is the subject.
+ *
+ * 16. Asking main a question without a page (2026-10-21)
+ *    `ipcMain._invokeHandlers.get(channel)({ sender: null }, ...args)` from `app.evaluate` calls a
+ *    handler directly — how the warm-list probe compared answers. A search with a filter that
+ *    matches every row (`{ name: ["like", "%"] }`) skips the warm copy, so the same call gives
+ *    ERPNext's live answer to compare with (plan 2026-10-21 W4). A probe that adds a record to
+ *    the sandbox deletes it in `finally`.
  */

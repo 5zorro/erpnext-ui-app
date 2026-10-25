@@ -12,8 +12,6 @@ import {
   isPurchaseInvoiceListRoute,
   isPurchaseInvoiceFormRoute,
   classifyFindBillResult,
-  printFormMatchesBill,
-  normalizePrintIpcResult,
   timeoutFailure,
   formatSaveFailureReason,
   billExpensesTaxOrientation,
@@ -145,29 +143,6 @@ describe("Find Bill list confirmation (OI-056)", () => {
 });
 
 describe("Print form identity (OI-058)", () => {
-  it("requires a saved name and matching cur_frm doc", () => {
-    assert.equal(printFormMatchesBill(null, "PINV-1").ok, false);
-    assert.match(printFormMatchesBill(null, "PINV-1").reason, /No form loaded/);
-    assert.equal(printFormMatchesBill({ doctype: "Purchase Invoice", name: "new" }, "PINV-1").ok, false);
-    assert.equal(
-      printFormMatchesBill({ doctype: "Purchase Invoice", name: "OTHER" }, "PINV-1").ok,
-      false,
-    );
-    assert.equal(
-      printFormMatchesBill({ doctype: "Purchase Invoice", name: "PINV-1" }, "PINV-1").ok,
-      true,
-    );
-  });
-
-  it("never normalizes a failed print into success", () => {
-    assert.deepEqual(normalizePrintIpcResult({ ok: false, reason: "No form loaded." }), {
-      ok: false,
-      reason: "No form loaded.",
-    });
-    assert.equal(normalizePrintIpcResult({ ok: true, reason: "Print opened." }).ok, true);
-    assert.equal(normalizePrintIpcResult(null).ok, false);
-  });
-
   it("classifies Vanilla print preview navigation", () => {
     assert.equal(isPrintPreviewRoute("/app/print/Purchase%20Invoice/PINV-1"), true);
     assert.equal(isPrintPreviewRoute("/app/purchase-invoice/PINV-1"), false);

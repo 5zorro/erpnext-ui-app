@@ -117,7 +117,7 @@
             <tr id="items-head-row">
               <th class="sortable sorted" data-sort="lineNo" title="Sort by Line">Line ▲</th>
               <th class="sortable" data-sort="poLine" title="Sort by PO line">PO line</th>
-              <th class="sortable" data-sort="item_code" title="Sort by Item">Item</th>
+              <th class="sortable" data-sort="item_code" title="Sort by Item Code">Item Code</th>
               <th class="sortable" data-sort="description" title="Sort by Description">Description</th>
               <th class="sortable" data-sort="qty" title="Sort by Qty">Qty</th>
               <th class="sortable" data-sort="rate" title="Sort by Cost">Cost</th>
@@ -161,10 +161,16 @@
         <div class="line-tabs line-tabs-static" role="presentation">
           <span class="line-tab active" aria-current="page">Taxes and Charges</span>
           <div class="line-tabs-tools">
+            <button type="button" class="linkish" id="btn-tax-default" data-testid="bill-tax-default" tabindex="-1"
+              title="Why these taxes, and how to change them">Vendor tax template default</button>
             <button type="button" class="linkish" id="btn-landed-cost" data-testid="bill-open-landed-cost" tabindex="-1"
               title="Open Vanilla Landed Cost Voucher (Qty / Amount / Manual distribute)">Landed Cost Voucher…</button>
           </div>
         </div>
+        <div class="tax-default-note" id="tax-default-note" data-testid="bill-tax-default-note" hidden></div>
+        <!-- Inner panel like the items table: laid out against the section's own padding the table
+             came out 28px too wide and scrolled sideways (DF-02). -->
+        <div class="line-panel tax-panel" data-testid="bill-tax-panel">
         <table class="taxes-tbl">
           <colgroup>
             <col class="c-line"><col class="c-acct"><col class="c-desc">
@@ -180,7 +186,7 @@
               <th class="sortable num" data-tax-sort="rate" title="Sort by Rate">Rate %</th>
               <th class="sortable num" data-tax-sort="tax_amount" title="Sort by Amount">Amount</th>
               <th class="sortable" data-tax-sort="add_deduct_tax" title="Sort by Add/Deduct">Add/Deduct</th>
-              <th></th>
+              <th data-col-key="tax_actions"></th>
             </tr>
           </thead>
           <tbody id="taxes-body" data-testid="bill-taxes"></tbody>
@@ -196,6 +202,7 @@
             </tr>
           </tfoot>
         </table>
+        </div>
         <div class="line-actions" id="taxes-add" data-testid="bill-taxes-add">
           <div class="inline-add-fields">
             <div class="inline-field inline-field--account">
@@ -208,6 +215,8 @@
             </div>
           </div>
           <button type="button" id="btn-add-tax" data-testid="bill-add-tax">Add tax/charge</button>
+          <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="bill-remove-all-tax" tabindex="-1"
+            title="Remove every tax and charge row, and the template they came from. They stay removed until you save this document.">Remove all taxes/charges</button>
         </div>
       </section>
       <section class="bill-section bill-section-summary" data-testid="bill-summary-section">
@@ -297,6 +306,8 @@
             </button>
           </div>
           <textarea id="f-memo" rows="2" data-field="remarks" data-testid="bill-memo"></textarea>
+          <!-- The attached files, with Peek / Download (src/attachment-list-ui.js). -->
+          <div class="attach-list-host" id="attach-list" hidden></div>
         </div>
         <div class="credit-links" id="credit-links-block" data-testid="bill-credit-links" hidden>
           <div class="credit-link-row">
@@ -317,7 +328,7 @@
           <button type="button" id="btn-back-top" data-testid="bill-back-top"
             title="Jump to Save draft &amp; submit (default finalize).">Back to top · focus Submit</button>
         </div>
-        <p class="hint">
+        <p class="hint hatch-clear">
           Use the ▾ / search on Vendor, Terms, Item, Project, and Tax Account (type a few letters).
           Item subtotal is Σ line amounts; Taxes and Charges roll into Grand total.
           Amount Due (header) must match Grand total — checksum chip shows $ difference; Bill $ beside it is the same target.

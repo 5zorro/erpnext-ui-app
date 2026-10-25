@@ -1,6 +1,6 @@
 /**
  * Link picker keyboard / highlight policy (Bill Vendor/Terms/Item/Project).
- * Pure — no DOM. bill.html / doc-form-page must call these so Tab/Enter behavior stays tested.
+ * Pure — no DOM. bill-form-page / doc-form-page must call these so Tab/Enter behavior stays tested.
  */
 
 /** Default Bill (and Item Receipt) editable cell order for Tab / Excel nav. */
@@ -91,13 +91,14 @@ export function resolveLinkPickIndex(hi, optionCount) {
 
 /**
  * @param {string} key
- * @param {{ dropdownOpen: boolean, optionCount: number }} state
+ * @param {{ dropdownOpen: boolean, optionCount: number, searchPending?: boolean }} state
+ *   `searchPending`: a search for exactly the text in the box is waiting (pause or in flight)
  * @returns {"pick"|"close"|"search"|"move_down"|"move_up"|"none"}
  */
 export function linkPickerKeyAction(key, state) {
   const open = !!(state && state.dropdownOpen);
   const n = Number(state && state.optionCount) || 0;
-  if (key === "Escape") return open ? "close" : "none";
+  if (key === "Escape") return open || (state && state.searchPending) ? "close" : "none";
   if (key === "ArrowDown") {
     if (!open || n === 0) return "search";
     return "move_down";
@@ -107,10 +108,48 @@ export function linkPickerKeyAction(key, state) {
     return "move_up";
   }
   if (key === "Tab" || key === "Enter") {
-    if (!open || n === 0) return "none";
-    return "pick";
+    if (open && n > 0) return "pick";
+    // No list yet, but one is on its way for the text in the box (typing pause or in flight): the
+    // key is the picker's, to hold — a fast typist's first Tab in a box beat the first answer and
+    // left the half-typed text behind (end-of-session review 2026-10-22, R5b-1's gap).
+    if (state && state.searchPending) return "pick";
+    return "none";
   }
   return "none";
+}
+
+/**
+ * Tab / Enter on an open dropdown: pick from the list on screen, or hold the key until the list
+ * for the typed text is in (review 10-19 R5b-1).
+ *
+ * 🔴 The list on screen can be from an earlier search: it stays during the typing pause and while
+ * the next search runs. Picking its highlighted option once committed `ABC-1` for a typed `ABC-12`.
+ * Rules, as 5zorro read them back (2026-10-21):
+ * - the list was fetched for exactly the text in the box → pick its highlighted option, as before;
+ * - else the typed text names one of its options (case aside) → pick that one at once — his fast
+ *   Tab on a number he knows has one match must not wait for the network;
+ * - else hold the key and search now. The answer replays the key, so a held Tab does what a slow
+ *   Tab would have done (pick the first match, choice "a"). Typing or leaving the box cancels it.
+ * Never pick from a list fetched for other text.
+ *
+ * @param {{ typed: string, listFor: string|null, values: Array<string|null>, hi: number }} state
+ *   `listFor` = the text in the box when the list's search started (null: no list yet);
+ *   `values` = the options' values in order, null for a "Create…" row
+ * @returns {{ kind: "pick", index: number } | { kind: "hold" } | { kind: "none" }}
+ */
+export function linkPickerCommitPlan(state) {
+  const typed = String((state && state.typed) ?? "");
+  const values = Array.isArray(state && state.values) ? state.values : [];
+  if (state && state.listFor != null && String(state.listFor) === typed) {
+    const index = resolveLinkPickIndex(state.hi, values.length);
+    return index >= 0 ? { kind: "pick", index } : { kind: "none" };
+  }
+  const want = typed.trim().toLowerCase();
+  if (want) {
+    const index = values.findIndex((v) => v != null && String(v).trim().toLowerCase() === want);
+    if (index >= 0) return { kind: "pick", index };
+  }
+  return { kind: "hold" };
 }
 
 /**
@@ -232,4 +271,18 @@ export function nextItemFocusAfterEdit(field, rowIndex, rowCount, opts = {}) {
  */
 export function nextFieldAfterLinkPick(field, fields) {
   return nextItemFieldAfterEdit(field, fields);
+}
+
+/**
+ * A header box's `change` fires when it loses focus after typing — also when a pick from its list
+ * set the value, and a vendor pick moves focus into the source picker at once. Writing that value
+ * again doubled the vendor write; the second answered ~9 s later and its repaint took focus off the
+ * line the clerk was typing in (end-of-session review 2026-10-22). While the pick is writing
+ * (`data-link-picking`), the pick owns the commit.
+ * @param {string|undefined} picking the value the picker is writing, if any
+ * @param {string} next what the blur would write
+ */
+export function linkPickOwnsCommit(picking, next) {
+  if (picking == null || picking === "") return false;
+  return String(picking).trim() === String(next ?? "").trim();
 }

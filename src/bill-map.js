@@ -17,7 +17,8 @@ import {
   JOB_COST_CENTER_FIELD,
   JOB_COST_CENTER_LABEL,
 } from "./bill-line-allocation.js";
-import { BILL_LINE_META_COLS, readBillItemRowsWithAllocation } from "./bill-item-table.js";
+import { BILL_LINE_META_COLS, BILL_RECEIVED_COLS, readBillItemRowsWithAllocation } from "./bill-item-table.js";
+import { receivedByOf } from "./jit-receipt.js";
 
 export const BILL_DOCTYPE = "Purchase Invoice";
 export const BILL_LAYOUT_KEY = "bill";
@@ -168,6 +169,9 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
   const names = uniqueLinkedPurchaseReceiptNames(doc);
   /** @type {Record<string, string>} */
   const byName = {};
+  /** DF-02 J: who received each receipt and when (its Remarks line, else its creator). */
+  /** @type {Record<string, { receivedBy: string, receivedOn: string }>} */
+  const who = {};
   if (refs && typeof refs === "object" && !Array.isArray(refs)) {
     for (const [k, v] of Object.entries(refs)) {
       if (k) byName[k] = v != null ? String(v) : "";
@@ -178,13 +182,30 @@ export function linkedPurchaseReceiptsForBill(doc, refs) {
       const n = String(row.name).trim();
       if (!n) continue;
       byName[n] = row.lr_no != null ? String(row.lr_no) : "";
+      who[n] = { receivedBy: receivedByOf(row), receivedOn: row.posting_date ? String(row.posting_date) : "" };
     }
   }
   return names.map((name) => ({
     name,
     lrNo: byName[name] != null ? byName[name] : "",
+    receivedBy: (who[name] && who[name].receivedBy) || "",
+    receivedOn: (who[name] && who[name].receivedOn) || "",
   }));
 }
+
+/**
+ * Fields the Doc Bill works out instead of asking: a Bill's posting date is a stamp — the day it is
+ * saved or submitted (5zorro 2026-10-10; the bridge's save stamps it), so Edit Posting Date stays
+ * off. The clerk never sets them, so Simplified's Doc-skin defaults keep them quiet and locked.
+ */
+export const BILL_DERIVED_FIELDS = Object.freeze(["set_posting_time", "posting_date"]);
+
+/**
+ * Fields the clerk sets on the Doc Bill through a question rather than a box: "Receive these items
+ * with this bill?" writes Update Stock and the warehouse (DF-01 R). Simplified keeps them quiet but
+ * clickable (L1) — the clerk's choice, never locked.
+ */
+export const BILL_QUESTION_FIELDS = Object.freeze(["update_stock", "set_warehouse"]);
 
 export const BILL_MEMO_FIELD = "remarks";
 export const BILL_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
@@ -201,17 +222,18 @@ export { JOB_COST_CENTER_FIELD, JOB_COST_CENTER_LABEL };
 
 /** Items tab columns; null = display-only Amount from ERPNext. */
 export const BILL_ITEM_BASE_COLS = [
-  { label: "Item", field: "item_code", linkDoctype: "Item" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item" },
   { label: "Description", field: "description" },
   { label: "Qty", field: "qty" },
   { label: "Cost", field: "rate" },
   { label: "Amount", field: null, displayOnly: true },
 ];
 
-export const BILL_ITEM_COLS = [...BILL_LINE_META_COLS, ...BILL_ITEM_BASE_COLS, ...BILL_ALLOCATION_COLS];
+export const BILL_ITEM_COLS = [...BILL_LINE_META_COLS, ...BILL_ITEM_BASE_COLS, ...BILL_RECEIVED_COLS, ...BILL_ALLOCATION_COLS];
 
 /** ERPNext child fields safe to write via frappe.model.set_value (M3d). */
-export const BILL_ITEM_EDIT_FIELDS = BILL_ITEM_COLS.map((c) => c.field).filter(Boolean);
+// The received columns are the page's (kept in Remarks), never written to an item row.
+export const BILL_ITEM_EDIT_FIELDS = BILL_ITEM_COLS.map((c) => c.field).filter((f) => f && !String(f).startsWith("__rec_"));
 
 /**
  * @param {string} field
@@ -747,6 +769,8 @@ export function isWritableBillHeaderField(field) {
     // DF-01 R: "receive with this bill" — ERPNext's Update Stock and the warehouse it receives into.
     field === "update_stock" ||
     field === "set_warehouse" ||
+    // DF-02: Remove all taxes clears the template too, or ERPNext refills the rows from it.
+    field === "taxes_and_charges" ||
     field === "mode_of_payment" ||
     field === "cash_bank_account" ||
     field === "paid_amount" ||

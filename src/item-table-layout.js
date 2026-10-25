@@ -423,6 +423,12 @@ const COL_RULES = Object.freeze({
   rate: { fixedPx: 88, minPx: 70 },
   amount: { fixedPx: 96, minPx: 76 },
   __action: { fixedPx: 32, minPx: 28 },
+  // DF-02 J: a date is as wide as its format (MM/DD/YYYY); a name is measured.
+  receivedOn: { fixedPx: 96, minPx: 90 },
+  receivedBy: { minPx: 70, maxPx: 180 },
+  // Taxes' actions hold Allocate and 🗑 (DF-02): as wide as the buttons, never negotiated down — a
+  // dragged-wide Account column once squeezed 🗑 out of view. Short of room, the panel scrolls.
+  tax_actions: { minPx: 36, maxPx: 240, fitContent: true },
 });
 
 /** Text columns with no explicit rule (customer, project, sales orders, …). */
@@ -430,7 +436,7 @@ export const DEFAULT_COL_RULE = Object.freeze({ minPx: 70, maxPx: 260 });
 
 /**
  * @param {string|null|undefined} key column sort key
- * @returns {{ minPx: number, maxPx?: number, fixedPx?: number, flex?: boolean }}
+ * @returns {{ minPx: number, maxPx?: number, fixedPx?: number, flex?: boolean, fitContent?: boolean }}
  */
 export function colRuleFor(key) {
   if (typeof key === "string" && Object.prototype.hasOwnProperty.call(COL_RULES, key)) {

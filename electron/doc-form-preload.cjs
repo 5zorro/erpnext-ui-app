@@ -51,11 +51,40 @@ contextBridge.exposeInMainWorld("erpDoc", {
   refocusListFilter: (fieldname) =>
     ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => invokeSkin("bill-new", "doc-new"),
-  printDoc: () => invokeSkin("bill-print", "doc-print"),
+  // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
+  // Compare pane (plan 2026-09-26): the document's papers, over the ERP session.
+  papersList: (sources) => ipcRenderer.invoke("papers-list", sources || []),
+  papersBytes: (fileUrl) => ipcRenderer.invoke("papers-bytes", fileUrl || ""),
+  papersUpload: (req) => ipcRenderer.invoke("papers-upload", req || {}),
+  papersOpen: (req) => ipcRenderer.invoke("papers-open", req || {}),
+  papersDownload: (req) => ipcRenderer.invoke("papers-download", req || {}),
+  soCreatePoContext: (soName) => ipcRenderer.invoke("so-create-po-context", soName || ""),
+  soCreatePos: (req) => ipcRenderer.invoke("so-create-pos", req || {}),
+  soLineSources: (soName, itemCodes) => ipcRenderer.invoke("so-line-sources", soName || "", itemCodes || []),
+  soCreateCounts: (soName) => ipcRenderer.invoke("so-create-counts", soName || ""),
+  soVanillaCreate: (id) => ipcRenderer.invoke("so-vanilla-create", { id: id || "" }),
+  papersZip: (req) => ipcRenderer.invoke("papers-zip", req || {}),
+  papersPrintedPdf: (doc) => ipcRenderer.invoke("papers-printed-pdf", doc || {}),
+  papersPdf: (req) => ipcRenderer.invoke("papers-pdf", req || {}),
+  printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
+  printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
+  printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
+  printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
+  printJobStatus: (jobs) => ipcRenderer.invoke("print-job-status", jobs || []),
+  printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
+  printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
+  printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),
+  printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
+  refreshLinkList: (doctype) => ipcRenderer.invoke("link-list-refresh", doctype || ""),
+  linkExists: (doctype, name) => ipcRenderer.invoke("doc-link-exists", doctype || "", name || ""),
+  onSurfaceLeft: (cb) => {
+    const handler = (_e, next) => cb(next);
+    ipcRenderer.on("doc-surface-left", handler);
+    return () => ipcRenderer.removeListener("doc-surface-left", handler);
+  },
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
-  listSources: (supplier) => invokeSkin("bill-list-sources", "doc-list-sources", supplier || ""),
   listSourceSlice: (supplier, sliceId) =>
     ipcRenderer.invoke("bill-list-source-slice", supplier || "", sliceId || ""),
   mergeSource: async (kindOrItems, name) => {
@@ -86,7 +115,10 @@ contextBridge.exposeInMainWorld("erpDoc", {
     ),
   softPeekRoute: (route) => ipcRenderer.invoke("soft-peek-route", route || ""),
   billReceiveFacts: (codes, company) => ipcRenderer.invoke("bill-receive-facts", codes || [], company || ""),
+  makeJitReceipts: (groups) => ipcRenderer.invoke("bill-jit-receipts", groups || []),
+  taxDefaultFacts: (supplier) => ipcRenderer.invoke("tax-default-facts", supplier || ""),
   setBillReceiveAsk: (on) => ipcRenderer.invoke("set-bill-receive-ask", on !== false),
+  detourBack: () => ipcRenderer.send("shell-detour-back"),
   getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
   setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
   logNav: (event, detail) => ipcRenderer.send("nav-debug", event || "renderer", detail != null ? String(detail) : ""),
@@ -95,6 +127,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
   getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
   copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
+  getSiteRounding: () => ipcRenderer.invoke("calc-site-rounding"),
   // Bill-only
   checkRef: (billNo, opts) => ipcRenderer.invoke("bill-check-ref", billNo, opts || {}),
   prefetchVendorRefs: (supplier) =>
@@ -111,7 +144,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
   listProjectsForPicker: (customer) => ipcRenderer.invoke("bill-list-projects", customer || ""),
   applyLineAllocation: (rowIndex, payload) =>
     ipcRenderer.invoke("bill-apply-line-allocation", rowIndex, payload || {}),
-  bridgeSalesOrderToPo: (payload) => ipcRenderer.invoke("bill-so-bridge-po", payload || {}),
+  planLineAllocation: (rowIndex, payload) =>
+    ipcRenderer.invoke("bill-plan-line-allocation", rowIndex, payload || {}),
   openSupplierForm: (supplier) => ipcRenderer.invoke("bill-open-supplier-form", supplier || ""),
   openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
   onSnapshot: (cb) => onProfileSnapshot(cb),

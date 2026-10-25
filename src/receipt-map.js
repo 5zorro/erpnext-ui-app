@@ -49,7 +49,7 @@ export const RECEIPT_MEMO_LABEL = BILL_MEMO_LABEL;
 
 /** Same ITEM_COLS pattern as Bill (museum itemColFields). */
 export const RECEIPT_ITEM_COLS = [
-  { label: "Item", field: "item_code", linkDoctype: "Item" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item" },
   { label: "Description", field: "description" },
   { label: "Qty", field: "qty" },
   { label: "Cost", field: "rate" },

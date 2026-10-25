@@ -26,6 +26,7 @@
     html[data-pattern="ar"][data-find-desk="ar"] header,
     html[data-pattern="ap"][data-find-desk="ap"] header,
     html[data-pattern="both"][data-find-desk] header { background-image: var(--hatch-desk); }
+    header { --hatch-base: var(--role-wash); }
     .stamp { width: 22px; height: 22px; opacity: .7; }
     h1 { font-size: 15px; margin: 0; color: #2c3e50; font-weight: 600; }
     .hdr-actions { margin-left: auto; display: flex; gap: 8px; }
@@ -59,6 +60,8 @@
     .direction button.active { background: #2c3e50; color: #fff; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
     .chips-label { font-size: 11px; color: #64748b; margin-right: 4px; }
+    .show-cancelled { margin-left: 12px; font-size: 12px; color: #475569; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+    .show-cancelled input:disabled + span { color: #94a3b8; }
     .chip {
       border: 1px solid #d6dee6; background: #f8fafc; color: #475569; border-radius: 999px;
       padding: 3px 10px; font-size: 11px; cursor: pointer;
@@ -129,12 +132,26 @@
     .paper table { background: #fff; border-radius: 4px; }
     .paper tfoot td { font-weight: 600; border-bottom: 0; }
     .peek-note { font-size: 11px; color: #94a3b8; }
+    /* Right-click on a row (find-row-menu.js) */
+    .row-menu { position: fixed; z-index: 50; min-width: 240px; max-width: 340px; background: #fff; border: 1px solid #cbd5e1;
+      border-radius: 8px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18); padding: 4px 0; font-size: 13px; }
+    .row-menu .grp { padding: 6px 12px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: #64748b;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-menu .grp + button, .row-menu button + button { margin-top: 0; }
+    .row-menu hr { border: 0; border-top: 1px solid #eef2f5; margin: 4px 0; }
+    .row-menu button { display: flex; width: 100%; gap: 8px; align-items: center; border: 0; background: transparent; text-align: left;
+      padding: 6px 12px 6px 14px; font: inherit; color: #1e293b; cursor: pointer; }
+    .row-menu button:hover:not(:disabled), .row-menu button:focus { background: #eaf4ff; outline: none; }
+    .row-menu button:disabled { color: #94a3b8; cursor: default; }
+    .row-menu .tick { width: 14px; display: inline-block; color: #2563eb; }
+    .copied-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1e293b; color: #fff;
+      padding: 6px 12px; border-radius: 6px; font-size: 12px; z-index: 60; }
   </style>
 </head>
 <body>
   <header>
     <img class="stamp" id="stamp" alt="" />
-    <h1 id="title" data-testid="find-doc-title">Find</h1>
+    <h1 id="title" class="hatch-clear" data-testid="find-doc-title">Find</h1>
     <div class="hdr-actions">
       <button type="button" class="btn" id="btn-new" data-testid="find-doc-new">New</button>
       <button type="button" class="btn primary" id="btn-vanilla" data-testid="find-doc-vanilla"
@@ -154,11 +171,12 @@
       <div class="summary-row">
         <p class="summary" id="summary"></p>
         <button type="button" class="linkish" id="btn-clear" data-testid="find-doc-clear" hidden
-          title="Empty the boxes, back to every status and the newest-first order">Clear search</button>
+          title="Empty the boxes, back to every status (cancelled hidden) and the newest-first order">Clear search</button>
       </div>
       <div id="results"></div>
       <div class="more-row" id="more-row" hidden>
         <button type="button" class="btn" id="btn-more" data-testid="find-doc-more">Show more</button>
+        <div class="empty" id="more-error" data-testid="find-doc-more-error" hidden></div>
       </div>
     </div>
   </section>
@@ -191,6 +209,7 @@
       findSavedSearch,
       FIND_LIST_LIMIT,
     } from "../src/find-skin-query.js";
+    import { findRowMenu } from "../src/find-row-menu.js";
 
     const api = window.erpFindDoc || null;
     const q = new URLSearchParams(location.search);
@@ -201,12 +220,15 @@
     const state = {
       direction: q.get("direction") === "Receive" ? "Receive" : "Pay",
       status: "",
+      // Cancelled documents hidden on every open (5zorro DF-01); not part of the remembered search.
+      showCancelled: false,
       values: {},
       selected: "",
       rows: [],
       more: false,
       loading: false,
       error: "",
+      moreError: "",
       sort: findSortFor(doctypeKey, null),
     };
 
@@ -223,6 +245,7 @@
     }
     const searchIsDefault = () =>
       !state.status &&
+      !state.showCancelled &&
       !Object.values(state.values).some((v) => String(v || "").trim()) &&
       state.sort.field === "creation" &&
       state.sort.dir === "desc";
@@ -311,6 +334,13 @@
         c.onclick = () => { state.status = st; paintSearch(); runQuery(); };
         chips.appendChild(c);
       }
+      const sc = document.createElement("label");
+      sc.className = "show-cancelled";
+      sc.title = "Cancelled documents are hidden unless this is on";
+      const picked = state.status === "Cancelled";
+      sc.innerHTML = `<input type="checkbox" data-testid="find-doc-show-cancelled"${state.showCancelled || picked ? " checked" : ""}${picked ? " disabled" : ""} /><span>Show cancelled</span>`;
+      sc.querySelector("input").onchange = (e) => { state.showCancelled = e.target.checked; runQuery(); };
+      chips.appendChild(sc);
     }
 
     function queueQuery() {
@@ -334,6 +364,7 @@
             .list(doctypeKey, {
               values: state.values,
               status: state.status,
+              showCancelled: state.showCancelled,
               direction: state.direction,
               sort: state.sort,
               start: append ? state.rows.length : 0,
@@ -342,10 +373,17 @@
         : { ok: false, reason: "Shell bridge unavailable." };
       if (seq !== querySeq) return;
       state.loading = false;
-      state.error = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
-      const got = res && res.ok ? res.rows : [];
-      state.rows = append && !state.error ? [...state.rows, ...got] : got;
-      state.more = !!(res && res.more);
+      const failed = res && res.ok ? "" : (res && res.reason) || "Could not read the list.";
+      state.moreError = "";
+      if (append && failed) {
+        // Review 10-19 R4-2: a failed Show more keeps the rows already read; the button stays to retry.
+        state.moreError = failed;
+      } else {
+        state.error = failed;
+        const got = res && res.ok ? res.rows : [];
+        state.rows = append ? [...state.rows, ...got] : got;
+        state.more = !!(res && res.more);
+      }
       paintResults();
     }
 
@@ -372,7 +410,9 @@
       const host = $("results");
       $("btn-clear").hidden = searchIsDefault();
       $("more-row").hidden = !(state.more && !state.error);
-      $("btn-more").textContent = `Show ${FIND_LIST_LIMIT} more`;
+      $("btn-more").textContent = state.moreError ? "Try again" : `Show ${FIND_LIST_LIMIT} more`;
+      $("more-error").hidden = !state.moreError;
+      $("more-error").textContent = state.moreError ? `Could not read more from ERPNext: ${state.moreError}` : "";
       if (state.error) {
         host.innerHTML = `<div class="empty" data-testid="find-doc-error">Could not read the list from ERPNext: ${esc(state.error)}</div>`;
         return;
@@ -408,9 +448,18 @@
         });
       });
       host.querySelectorAll("tr.row").forEach((tr) => {
-        const pick = () => peek(rows.find((r) => r.name === tr.dataset.name));
+        const row = () => rows.find((r) => r.name === tr.dataset.name);
+        const pick = () => peek(row());
         tr.addEventListener("click", pick);
-        tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+        tr.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+            e.preventDefault();
+            const r = tr.getBoundingClientRect();
+            openRowMenu(row(), r.left + 24, r.bottom, tr);
+          }
+        });
+        tr.addEventListener("contextmenu", (e) => { e.preventDefault(); openRowMenu(row(), e.clientX, e.clientY, tr); });
       });
     }
 
@@ -447,6 +496,88 @@
         <tbody data-testid="find-doc-peek-lines">${body}</tbody>
         <tfoot><tr><td>Total</td><td></td><td class="num">${esc(money(row[mc.field]))}</td></tr></tfoot></table></div>`;
     }
+
+    // ── Right-click menu (5zorro 2026-10-11). The items are data in src/find-row-menu.js. ──
+    let menuReturn = null;
+    function closeRowMenu() {
+      const m = document.querySelector(".row-menu");
+      if (!m) return;
+      m.remove();
+      if (menuReturn && document.body.contains(menuReturn)) menuReturn.focus();
+      menuReturn = null;
+    }
+    function toast(text) {
+      const t = document.createElement("div");
+      t.className = "copied-toast";
+      t.textContent = text;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1600);
+    }
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through */ }
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    }
+    function runRowMenu(it, row) {
+      if (it.route && (it.id === "party-open" || it.id === "view-open")) { if (api) api.openPreferred(it.route); return; }
+      if (it.id === "party-only") {
+        const box = skin.searches.find((s) => s.id === "party");
+        if (!box) return;
+        state.values = { ...state.values, [box.field]: String(row[skin.party.field] || row.party || "") };
+        state.selected = "";
+        $("peek").hidden = true;
+        paintSearch();
+        runQuery();
+        return;
+      }
+      if (it.id === "doc-copy") { copyText(row.name).then((ok) => toast(ok ? `Copied ${row.name}` : "Could not copy")); return; }
+      if (it.id === "view-peek") { peek(row); return; }
+      if (it.id === "page-cancelled") { state.showCancelled = !state.showCancelled; paintSearch(); runQuery(); return; }
+      if (it.id === "page-vanilla") { $("btn-vanilla").click(); }
+    }
+    function openRowMenu(row, x, y, fromEl) {
+      closeRowMenu();
+      if (!row) return;
+      const groups = findRowMenu({ doctypeKey, row, direction: state.direction, showCancelled: state.showCancelled, status: state.status });
+      if (!groups.length) return;
+      menuReturn = fromEl || null;
+      const m = document.createElement("div");
+      m.className = "row-menu";
+      m.setAttribute("role", "menu");
+      m.dataset.testid = "find-row-menu";
+      m.innerHTML = groups.map((g, gi) => `${gi ? "<hr>" : ""}<div class="grp">${esc(g.title)}</div>${g.items.map((it) =>
+        `<button type="button" role="menuitem" data-id="${esc(it.id)}"${it.enabled ? "" : " disabled"}${it.hint ? ` title="${esc(it.hint)}"` : ""}><span class="tick">${it.checked ? "✓" : ""}</span>${esc(it.label)}</button>`).join("")}`).join("");
+      document.body.appendChild(m);
+      const items = groups.flatMap((g) => g.items);
+      m.querySelectorAll("button").forEach((b) => {
+        b.addEventListener("click", () => {
+          const it = items.find((i) => i.id === b.dataset.id);
+          menuReturn = null;
+          closeRowMenu();
+          if (it && it.enabled) runRowMenu(it, row);
+        });
+      });
+      // Keep it on screen.
+      const r = m.getBoundingClientRect();
+      m.style.left = `${Math.max(8, Math.min(x, window.innerWidth - r.width - 8))}px`;
+      m.style.top = `${Math.max(8, Math.min(y, window.innerHeight - r.height - 8))}px`;
+      const live = [...m.querySelectorAll("button:not(:disabled)")];
+      if (live[0]) live[0].focus();
+      m.addEventListener("keydown", (e) => {
+        const i = live.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
+        if (e.key === "ArrowDown") { e.preventDefault(); live[(i + 1) % live.length].focus(); }
+        if (e.key === "ArrowUp") { e.preventDefault(); live[(i - 1 + live.length) % live.length].focus(); }
+        if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeRowMenu(); }
+      });
+    }
+    document.addEventListener("mousedown", (e) => { if (!e.target.closest || !e.target.closest(".row-menu")) closeRowMenu(); }, true);
+    window.addEventListener("blur", () => closeRowMenu());
+    document.addEventListener("scroll", () => closeRowMenu(), true);
 
     function closePeek() {
       $("peek").hidden = true;
@@ -486,6 +617,7 @@
       $("btn-clear").onclick = () => {
         state.values = {};
         state.status = "";
+        state.showCancelled = false;
         state.sort = findSortFor(doctypeKey, null);
         state.selected = "";
         paintAll();

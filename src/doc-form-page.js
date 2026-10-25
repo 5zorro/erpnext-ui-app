@@ -23,10 +23,12 @@ import {
   formatGroupedNumber,
   formatUsdAmountHtml,
   parseMoney,
+  moneyOrSum,
 } from "./money.js";
 import {
   nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
+  linkPickOwnsCommit,
 } from "./link-picker-policy.js";
 import {
   autoSizeItemColumns,
@@ -96,8 +98,20 @@ import {
   runSourcePickerFlow,
   mayAutoOpenSourcePicker,
 } from "./source-picker-flow.js";
-import { mountLinkPicker } from "./link-picker-ui.js";
+import { mountLinkPicker, closeAllLinkDropdowns } from "./link-picker-ui.js";
+import { lateVendorMayOpenSources } from "./missing-vendor.js";
+import {
+  hideMissingVendorBanner,
+  watchTypingElsewhere,
+  focusIsInOtherField,
+  vendorIsMissing as checkVendorMissing,
+} from "./missing-vendor-ui.js";
+import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
+import { taxDefaultWhy } from "./tax-default-why.js";
+import { uiIconHtml } from "./ui-icons.js";
+import { taxRowNavFields } from "./bill-tax-table-nav.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
+import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
 import {
   paintCommitGateValidation,
@@ -116,6 +130,7 @@ import {
   REFRESH_BUTTON_TITLE,
 } from "./doc-chrome.js";
 import { createFieldCalcUi } from "./calc/attach-field-calc.js";
+import { DEFAULT_SITE_ROUNDING } from "./calc/site-rounding.js";
 import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
 import { addressTextareaRows } from "./address-format.js";
@@ -127,6 +142,12 @@ import { wireItemImportButton } from "./item-import-ui.js";
 import { wireDocCapsUi } from "./doc-caps-ui.js";
 import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
+import { openPrintDialog } from "./print-dialog-ui.js";
+import { mountComparePane } from "./compare-pane-ui.js";
+import { canAttachTo } from "./attachment-list.js";
+import { mountAttachmentList } from "./attachment-list-ui.js";
+import { mountSoCreateMenu } from "./so-create-po-ui.js";
+import { mountLineSources } from "./so-line-sources-ui.js";
 import {
   addressRoleMeta,
   addressPickerOpenDecision,
@@ -146,6 +167,11 @@ let api = null;
 /** @type {import("./doc-skin-registry.js").ReturnType<import("./doc-skin-registry.js").docFormUiPayload>} */
 let ui = null;
 let lastDoc = null;
+/** DF-02 taxes: rows whose Amount the clerk typed over a percentage (row name → old rate). */
+const taxRowsFixedByClerk = new Map();
+/** DF-02 Remove all: documents (under every name each has had) whose taxes the clerk removed. */
+const taxesRemovedOn = new Set();
+let removingTaxes = false;
 /** @type {{ dateExpected?: string }} */
 let scratch = {};
 let painting = false;
@@ -156,6 +182,14 @@ let docCapsOn = true;
 let docCapsUi = null;
 /** @type {{ paint: () => void } | null} */
 let docNumberUi = null;
+/** @type {{ refresh: () => void } | null} */
+let comparePane = null;
+/** The attached files under the notes (src/attachment-list-ui.js). */
+let attachList = null;
+/** Create ▾ on the Sales Order (src/so-create-po-ui.js, plan 2026-10-12 S2). */
+let soCreate = null;
+/** The Sources column on the Sales Order (src/so-line-sources-ui.js, plan 2026-10-12 S4). */
+let lineSources = null;
 /** @type {Promise<void>|null} */
 let lineApplyInFlight = null;
 /** @type {boolean} */
@@ -208,6 +242,34 @@ const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
 let totalsLayout = { qtyIdx: 2, amtIdx: 4 };
 
+/** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
+let siteRounding = null;
+let siteRoundingAsked = false;
+let siteRoundingAskedAt = 0;
+/**
+ * Ask main for it until the site has really answered (a read during a reload gets the default) —
+ * at most every 10 s: the tape asks on every key, and ERPNext may be down for a while.
+ */
+function loadSiteRounding() {
+  if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
+  if (Date.now() - siteRoundingAskedAt < 10_000) return;
+  siteRoundingAskedAt = Date.now();
+  siteRoundingAsked = true;
+  api
+    .getSiteRounding()
+    .then((r) => {
+      if (r && r.known) siteRounding = r;
+    })
+    .catch(() => {})
+    .finally(() => {
+      siteRoundingAsked = false;
+    });
+}
+/** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
+function moneyRounding() {
+  const site = siteRounding || DEFAULT_SITE_ROUNDING;
+  return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
+}
 const calcUi = createFieldCalcUi({
   overlay: document.getElementById("calc-overlay"),
   exprEl: document.getElementById("calc-expr"),
@@ -216,6 +278,10 @@ const calcUi = createFieldCalcUi({
   getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
   copyHistory: (id, mode) =>
     api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
+  getSiteRounding: () => {
+    loadSiteRounding();
+    return siteRounding;
+  },
 });
 
 function publishCalcHistory(payload) {
@@ -295,6 +361,9 @@ function buildDocFormEl() {
     taxAccount: document.getElementById("f-tax-account"),
     taxAmount: document.getElementById("f-tax-amount"),
     addTax: document.getElementById("btn-add-tax"),
+    removeAllTax: document.getElementById("btn-remove-all-tax"),
+    taxDefault: document.getElementById("btn-tax-default"),
+    taxDefaultNote: document.getElementById("tax-default-note"),
     msItems: document.getElementById("ms-items"),
     msTaxes: document.getElementById("ms-taxes"),
     msGrand: document.getElementById("ms-grand"),
@@ -312,6 +381,7 @@ function buildDocFormEl() {
     memoBlock: document.getElementById("memo-block"),
     memoLabel: document.getElementById("memo-label"),
     memoEntry: document.getElementById("memo-entry"),
+    termsHead: document.getElementById("terms-head"),
     memo: document.getElementById("f-memo"),
     termsBlock: document.getElementById("terms-block"),
     termsText: document.getElementById("f-terms-text"),
@@ -345,8 +415,66 @@ function commitGateEls() {
   };
 }
 
+// The clerk's own moves, counted before any handler sees the key (user-move-guard.js).
+const userMoves = createUserMoveGuard();
+document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
+document.addEventListener("pointerdown", () => userMoves.bump(), true);
+
+/** The line cell a "create …" peek was opened from (DF-02). */
+let peekReturn = null;
+/** The line a create peek came back to; held from the empty-line cleanup until the clerk moves. */
+let peekHold = null;
+
+/** True while a create errand (out, or just back) owns this line — see peekErrandHoldsRow. */
+function peekHoldsRow(ri) {
+  return peekErrandHoldsRow(peekReturn, peekHold, ri, !!peekHold && userMoves.movedSince(peekHold.mark));
+}
+
+/** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
+async function comeBackFromPeek(leftFrom) {
+  const plan = peekReturnPlan(peekReturn, leftFrom);
+  const what = (peekReturn && peekReturn.doctype) || "";
+  peekHold = plan && plan.row != null ? { row: plan.row, mark: userMoves.mark() } : null;
+  peekReturn = null;
+  if (!plan) return;
+  if (plan.row == null) {
+    // A header field — the Sales Order's Customer (DF-03).
+    if (plan.fill && api && editable()) {
+      const res = await api.setHeader(plan.field, plan.fill);
+      if (res && res.ok && !res.skipped) {
+        noteUserEdit();
+        await refresh();
+        setStatus(`New ${what} ${plan.fill} is set.`);
+      } else if (!res || !res.ok) {
+        setStatus((res && res.reason) || `Could not set ${plan.fill}.`, "warn");
+      }
+    }
+    focusHeaderField(plan.field);
+    return;
+  }
+  if (plan.fill && api && editable()) {
+    const res = await api.setItem(plan.row, plan.field, plan.fill);
+    if (res && res.ok) {
+      noteUserEdit();
+      if (res.scratch) scratch = res.scratch;
+      paint(res.doc, res.scratch || scratch);
+      setStatus(`New Item ${plan.fill} is on line ${plan.row + 1}.`);
+    } else {
+      setStatus((res && res.reason) || `Could not put ${plan.fill} on line ${plan.row + 1}.`, "warn");
+    }
+  }
+  focusItemCell(plan.row, plan.field, { mode: plan.fill ? CELL_MODE_NAV : CELL_MODE_EDIT });
+}
+
 function linkPickerDeps() {
-  return { api, linkMounted, setStatus };
+  return {
+    api,
+    linkMounted,
+    setStatus,
+    onCreatePeek: (input, doctype) => {
+      peekReturn = peekReturnTarget(input, doctype);
+    },
+  };
 }
 
 function mountDocLinkPicker(input, doctype, onPicked, pickOpts) {
@@ -608,8 +736,14 @@ function paintDirtyPill() {
   el.dirtyPill.className = "dirty-pill tone-" + pill.tone + (userEdited ? " is-dirty" : "");
 }
 
+/** DC-4: "ERPNext reloaded — …" stays on the status line through repaints of that document until the next edit.
+ * Create ▾ › Purchase Order's "may already have been made" uses it too (review R8-1): the reload
+ * that caused it repaints the page. */
+let reloadNotice = { text: "", name: "" };
+
 function noteUserEdit() {
   userEdited = true;
+  reloadNotice = { text: "", name: "" };
   paintDirtyPill();
 }
 
@@ -836,10 +970,8 @@ async function runPendingAction(action) {
     return;
   }
   if (action === "print") {
-    setStatus("Opening print…");
-    const res = await api.printDoc();
-    if (res && res.ok) setStatus(res.reason || "Print opened.");
-    else setStatus((res && res.reason) || "Print failed.", "err");
+    // In place: the dialog prints / saves ERPNext's own output; the page never moves.
+    await openPrintDialog({ api, doc: lastDoc, label: docTitle() });
   }
 }
 
@@ -1003,6 +1135,10 @@ async function ensureAtLeastOneItemRow(doc) {
  */
 async function cleanupEmptyItemRow(rowIndex, itemCode) {
   if (!api || !editable() || painting || itemTabGuard) return;
+  if (peekHoldsRow(rowIndex)) {
+    logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
+    return;
+  }
   const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
   const decision = emptyItemRowCleanupAction(rowCount, itemCode);
   if (decision.action !== "delete") return;
@@ -1204,9 +1340,15 @@ function paintItemsHead() {
         .join("") + "<th></th>";
     return;
   }
+  // Every column gets a header — a column with no sort key (Sources, plan 2026-10-12 S4) a plain
+  // one — or the header row comes out shorter than the rows under it.
   el.itemsHead.innerHTML =
-    headers
-      .map((h) => {
+    ui.itemCols
+      .map((c) => {
+        if (!c || !c.sortKey) {
+          return `<th data-col-key="${escapeHtml((c && (c.field || c.display || c.label)) || "")}">${escapeHtml((c && c.label) || "")}</th>`;
+        }
+        const h = { label: String(c.label || c.sortKey), sortKey: String(c.sortKey) };
         const st = sortHeaderState(itemSortSpecs, h.sortKey);
         const arrow = sortHeaderArrow(itemSortSpecs, h.sortKey);
         const tip =
@@ -1343,7 +1485,7 @@ function paintTaxesHead() {
       const arrow = sortHeaderArrow(taxSortSpecs, h.sortKey);
       const cls = ["sortable", st.active ? "sorted" : "", h.className || ""].filter(Boolean).join(" ");
       return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
-    }).join("") + `<th></th>`;
+    }).join("") + `<th data-col-key="tax_actions"></th>`;
   if (!taxesHeadWired) {
     taxesHeadWired = true;
     el.taxesHead.addEventListener("click", (ev) => {
@@ -1370,6 +1512,9 @@ function paintTaxes(doc) {
   // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
   const canEdit = editable() && !ui.features.taxesReadOnly;
   if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
+  if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
+  // The ⓘ explains purchase templates; A/R taxes follow the customer's Sales Taxes template.
+  if (el.taxDefault) el.taxDefault.hidden = !isPurchaseTaxDoc(doc);
   if (!rows.length) {
     el.taxesBody.innerHTML =
       `<tr><td colspan="7" class="link-muted">No tax/charge rows yet.</td></tr>`;
@@ -1395,7 +1540,7 @@ function paintTaxes(doc) {
       return `<tr data-taxidx="${r.idx}">
         <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
         <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
-        <td><span class="ro">${escapeHtml(r.charge_type)}</span></td>
+        <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxFixedMarkerHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx)}</td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="doc-tax-${r.idx}-rate" /></td>
         <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="doc-tax-${r.idx}-amount" /></td>
         <td>
@@ -1404,8 +1549,8 @@ function paintTaxes(doc) {
             <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
           </select>
         </td>
-        <td><button type="button" class="del" data-tax-del="${r.idx}" title="Remove tax row" data-testid="doc-tax-del-${r.idx}">×</button></td>
-      </tr>`;
+        <td><button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="doc-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button></td>
+      </tr>${taxFixedNoteRowHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx, 7)}`;
     })
     .join("");
   sizeTaxColumns();
@@ -1422,8 +1567,16 @@ function paintTaxes(doc) {
     }
     const field = inp.getAttribute("data-tax-field");
     const ri = Number(inp.getAttribute("data-tax-row"));
+    const taxRow = doc && Array.isArray(doc.taxes) ? doc.taxes[ri] : null;
+    // ERPNext's rule (DF-02): Tab reaches Rate % on a percentage row, Amount on a fixed one; the
+    // other number is mouse-only.
+    if ((field === "rate" || field === "tax_amount") && !taxRowNavFields(taxRow).includes(field)) inp.tabIndex = -1;
     const apply = async (value) => {
       if (!api || painting || !api.setTax) return;
+      // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
+      if (field === "tax_amount" && taxRow && taxRow.charge_type !== "Actual" && taxRow.name) {
+        taxRowsFixedByClerk.set(String(taxRow.name), taxRow.rate);
+      }
       setStatus(`Updating tax ${field}…`);
       const res = await api.setTax(ri, field, value);
       if (res && res.ok) {
@@ -1475,7 +1628,148 @@ function paintTaxes(doc) {
       }
     });
   });
+  el.taxesBody.querySelectorAll("[data-tax-note]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = el.taxesBody.querySelector(`[data-tax-note-text="${btn.getAttribute("data-tax-note")}"]`);
+      if (t) t.hidden = !t.hidden;
+    });
+  });
   paintMoneyStack(doc);
+  keepTaxesRemoved(doc);
+  if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
+}
+
+function isPurchaseTaxDoc(doc) {
+  return !!doc && (doc.doctype === "Purchase Order" || doc.doctype === "Purchase Receipt");
+}
+
+/** Why a row is fixed, when the clerk typed its Amount over a percentage this entry; else "". */
+function taxFixedNote(taxRaw) {
+  const name = taxRaw && taxRaw.name ? String(taxRaw.name) : "";
+  if (!name || !taxRowsFixedByClerk.has(name) || taxRaw.charge_type !== "Actual") return "";
+  const was = taxRowsFixedByClerk.get(name);
+  const pct = was === "" || was == null ? "a percentage" : `${formatGroupedNumber(Number(was))}%`;
+  return `Was ${pct} of the net total. You typed this row's Amount, so it is a fixed amount now and no longer follows the item lines.`;
+}
+
+/** The note opens as a full-width line under its row (a narrow Type cell made the row a tower). */
+function taxFixedNoteRowHtml(taxRaw, idx, cols) {
+  const note = taxFixedNote(taxRaw);
+  return note
+    ? `<tr class="row-note-row" data-tax-note-text="${idx}" hidden><td colspan="${cols}" class="row-note">${escapeHtml(note)}</td></tr>`
+    : "";
+}
+
+/** ⓘ on a row whose Amount the clerk typed over a percentage; the note opens on click. */
+function taxFixedMarkerHtml(taxRaw, idx) {
+  const note = taxFixedNote(taxRaw);
+  if (!note) return "";
+  return ` <button type="button" class="row-note-btn" data-tax-note="${idx}" tabindex="-1" title="${escapeHtml(note)}" aria-label="Why this row is a fixed amount" data-testid="doc-tax-${idx}-fixed">${uiIconHtml("info", { size: 12 })}</button>`;
+}
+
+/** Clear the template field first (or ERPNext refills the rows from it), then every row. */
+async function removeAllTaxes(opts = {}) {
+  if (!api || !editable() || !lastDoc || removingTaxes) return;
+  removingTaxes = true;
+  try {
+    taxesRemovedOn.add(String(lastDoc.name || ""));
+    let doc = lastDoc;
+    let sc = scratch;
+    if (doc.taxes_and_charges) {
+      const r = await api.setHeader("taxes_and_charges", "");
+      if (!(r && r.ok)) {
+        setStatus((r && r.reason) || "Could not clear the tax template.", "err");
+        return;
+      }
+      doc = r.doc || doc;
+      if (r.scratch) sc = r.scratch;
+    }
+    for (let i = (Array.isArray(doc.taxes) ? doc.taxes.length : 0) - 1; i >= 0; i -= 1) {
+      const r = await api.deleteTax(i);
+      if (!(r && r.ok)) {
+        setStatus((r && r.reason) || "Could not remove a tax row.", "err");
+        break;
+      }
+      doc = r.doc || doc;
+      if (r.scratch) sc = r.scratch;
+    }
+    noteUserEdit();
+    paint(doc, sc);
+    setStatus(
+      opts.quiet
+        ? "ERPNext put the template's taxes back; removed again — you removed all taxes here. Add tax/charge adds one."
+        : "All taxes and charges removed. They stay removed until you save; Add tax/charge adds one back.",
+    );
+  } finally {
+    removingTaxes = false;
+  }
+}
+
+/** Re-clears per document: a refill that keeps coming back is reported, not fought forever. */
+const taxReclears = new Map();
+
+/** A vendor change refills taxes from a template; on a document the clerk emptied, empty them again. */
+function keepTaxesRemoved(doc) {
+  if (removingTaxes || !doc || !taxesRemovedOn.has(String(doc.name || ""))) return;
+  if (!doc.taxes_and_charges || !(Array.isArray(doc.taxes) && doc.taxes.length)) return;
+  const key = String(doc.name || "");
+  const n = (taxReclears.get(key) || 0) + 1;
+  taxReclears.set(key, n);
+  if (n > 3) {
+    taxesRemovedOn.delete(key);
+    setStatus("ERPNext keeps putting the template's taxes back here; leaving them. Remove all again, or check the vendor's tax defaults (ⓘ).", "warn");
+    return;
+  }
+  void removeAllTaxes({ quiet: true });
+}
+
+/** Which document + vendor the open note explains; anything else closes it (5zorro DF-02). */
+let taxNoteKey = "";
+const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
+
+/** Close the note: on Refresh, on a fresh snapshot, or when the document or vendor changes. */
+function collapseTaxDefaultNote() {
+  if (el && el.taxDefaultNote) el.taxDefaultNote.hidden = true;
+  taxNoteKey = "";
+}
+
+/** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
+async function toggleTaxDefaultNote() {
+  const note = el.taxDefaultNote;
+  if (!note) return;
+  if (!note.hidden) {
+    collapseTaxDefaultNote();
+    return;
+  }
+  note.hidden = false;
+  taxNoteKey = taxNoteKeyOf(lastDoc);
+  note.textContent = "Reading the tax defaults…";
+  const supplier = (lastDoc && lastDoc.supplier) || "";
+  const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
+  if (!(facts && facts.ok)) {
+    note.textContent = (facts && facts.reason) || "Could not read the tax defaults.";
+    return;
+  }
+  const why = taxDefaultWhy({
+    supplier,
+    current: (lastDoc && lastDoc.taxes_and_charges) || "",
+    defaultTemplate: facts.defaultTemplate,
+    vendorRule: facts.vendorRule,
+    removed: taxesRemovedOn.has(String((lastDoc && lastDoc.name) || "")),
+  });
+  note.innerHTML =
+    why.lines.map((l) => `<p>${escapeHtml(l)}</p>`).join("") +
+    `<div class="tax-default-links">${why.links
+      .map((k, i) => `<button type="button" class="linkish" data-tax-default-link="${i}" tabindex="-1">${escapeHtml(k.label)} ↗</button>`)
+      .join("")}</div>`;
+  note.querySelectorAll("[data-tax-default-link]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const link = why.links[Number(b.getAttribute("data-tax-default-link"))];
+      if (!link || !api || !api.softPeekRoute) return;
+      setStatus(`Opening ${link.label} (Esc returns here)…`);
+      void api.softPeekRoute(link.route);
+    });
+  });
 }
 
 function paintItems(doc) {
@@ -1497,6 +1791,10 @@ function paintItems(doc) {
       const cells = cols
         .map((col, ci) => {
           const val = r[ci] ?? "";
+          if (col.sources) {
+            const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
+            return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
+          }
           if (col.displayOnly || col.field == null) {
             const isLine = col.sortKey === "lineNo" || col.field === "__line_no";
             const isAmount = /^amount$/i.test(col.label || "");
@@ -1645,13 +1943,17 @@ function paintItems(doc) {
       if (!api || painting) return;
       const run = async () => {
         setStatus(`Updating ${field}…`);
+        const moveMark = userMoves.mark();
         const res = await api.setItem(ri, field, value);
         if (res && res.ok) {
           noteUserEdit();
           if (res.scratch) scratch = res.scratch;
           paint(res.doc, res.scratch || scratch);
           setStatus("Line updated.");
-          if (opts.focus && opts.focus.field) {
+          if (userMoves.movedSince(moveMark)) {
+            // The clerk moved on while ERPNext answered: leave focus where they put it.
+            logFocus("focus-after-edit-skipped", field);
+          } else if (opts.focus && opts.focus.field) {
             focusItemCell(opts.focus.rowIndex, opts.focus.field, {
               mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
             });
@@ -2158,6 +2460,25 @@ function buildHeaderFields(fields) {
   wireDocAddressPickers();
 }
 
+/**
+ * The Bill's D2 check (plan 2026-10-21), on this page since review 10-19 R5b-5 — see
+ * `missing-vendor-ui.js` `vendorIsMissing`.
+ * @param {string} name @param {"vendor"|"sources"} attempt
+ * @returns {Promise<boolean>} true when the vendor is missing
+ */
+function vendorIsMissing(name, attempt) {
+  return checkVendorMissing({
+    api,
+    name,
+    attempt,
+    doc: docTitle(),
+    box: supplierInput(),
+    kept: String(paintedHeaderValue("supplier") ?? ""),
+    log: logFocus,
+    setStatus,
+  });
+}
+
 function ensureHeaderLinkPickers() {
   if (!ui) return;
   for (const meta of ui.headerFields) {
@@ -2171,6 +2492,7 @@ function ensureHeaderLinkPickers() {
           setStatus(`${docTitle()} is not a draft — cannot set vendor.`, "warn");
           return;
         }
+        if (await vendorIsMissing(v, "vendor")) return;
         const decision =
           ui.features.sourceModal &&
           shouldOpenSourceModalAfterVendorPick({
@@ -2188,7 +2510,10 @@ function ensureHeaderLinkPickers() {
           openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
           onHeaderSuccess: (res) => {
             noteUserEdit();
-            paint(res.doc || lastDoc, res.scratch || scratch);
+            // The vendor settles in up to ~12 s; by then the clerk may be typing a line, which this
+            // repaint rebuilds — keep their place (end-of-session review 2026-10-22, R5b-3's cousin).
+            paint(res.doc || lastDoc, res.scratch || scratch, { keepFocus: true });
+            hideMissingVendorBanner();
             if (decision && decision.open) setStatus("Choose a source (or NIC).");
           },
           onHeaderFailure: (res) => {
@@ -2229,6 +2554,10 @@ async function openSourcePicker(supplier, opts = {}) {
     setStatus(`Pick a vendor before ${ui.sourceLabel || "Select PO"}.`, "warn");
     return { ok: false, reason: "no_supplier" };
   }
+  // The vendor pick checked already; the toolbar and a vendor typed then left were not (R5b-5).
+  if (trigger !== "link_pick" && (await vendorIsMissing(sup, "sources"))) {
+    return { ok: false, reason: "vendor_missing" };
+  }
 
   if (trigger === "toolbar") {
     vendorPickSourceSession = null;
@@ -2259,12 +2588,13 @@ async function openSourcePicker(supplier, opts = {}) {
  * @param {"link_pick" | "blur" | "toolbar" | "unknown"} trigger
  */
 async function runDocSourcePicker(sup, trigger) {
-  setStatus("Loading open Purchase Orders…");
+  setStatus(ui.profileId === "po" ? "Loading sources (Material Requests, Supplier Quotations, Sales Orders)…" : "Loading open Purchase Orders…");
 
   return runSourcePickerFlow({
     supplier: sup,
     trigger,
     mode: "single",
+    skinId: ui.profileId,
     listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
     log: (event, detail) => logFocus(event, detail || ""),
     mayOpen: (vendor, trig) =>
@@ -2384,9 +2714,18 @@ function paintedScratchDateExpected() {
 }
 
 function paint(doc, snapScratch, opts = {}) {
+  // Review 10-19 R3-1 (G18, as the Bill's paint): `keepFocus` takes the clerk's place right before
+  // the repaint — after whatever the caller waited on — so a box rebuilt under them is refocused,
+  // and a clerk who already moved on is left where they are.
+  const focusAnchor = opts.keepFocus ? captureFocusAnchor() : null;
   painting = true;
   try {
   calcUi.clear();
+  // Another document (or none): a dropdown left open holds the old one's list (plan 2026-10-21 D1).
+  if (String((doc && doc.name) || "") !== String((lastDoc && lastDoc.name) || "")) {
+    closeAllLinkDropdowns();
+    hideMissingVendorBanner();
+  }
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
   if (opts.userEdited != null) userEdited = !!opts.userEdited;
@@ -2399,6 +2738,7 @@ function paint(doc, snapScratch, opts = {}) {
     if (el.importItems) el.importItems.disabled = true;
     if (el.clearQty) el.clearQty.disabled = true;
     if (el.attach) el.attach.disabled = true;
+    if (soCreate) soCreate.paint(false, null);
     if (el.addTax) el.addTax.disabled = true;
     return;
   }
@@ -2422,6 +2762,16 @@ function paint(doc, snapScratch, opts = {}) {
         inp.placeholder = "MM/DD/YYYY";
         if (meta.validationHint) inp.title = meta.validationHint;
       }
+      continue;
+    }
+    if (
+      meta.linkDoctype &&
+      inp === document.activeElement &&
+      String(val) === String(inp.dataset.linkCommitted ?? "") &&
+      inp.value !== String(val)
+    ) {
+      // The clerk is typing a search here, and the repaint brings no new value: keep the typing
+      // (DF-03 — a new Sales Order's settling repaint wiped a half-typed customer name).
       continue;
     }
     if (meta.type === "date") {
@@ -2481,7 +2831,10 @@ function paint(doc, snapScratch, opts = {}) {
   el.addLine.disabled = !canEdit || !linesAreAddable();
   if (el.importItems) el.importItems.disabled = !canEdit || !linesAreAddable();
   if (el.clearQty) el.clearQty.disabled = !canEdit;
-  if (el.attach) el.attach.disabled = !canEdit;
+  // Frappe's rule, not the edit lock: a submitted document takes files too (canAttachTo).
+  if (el.attach) el.attach.disabled = !canAttachTo(doc);
+  if (soCreate) soCreate.paint(!!(ui && ui.features.createMenu), doc);
+  if (lineSources && ui && ui.itemCols && ui.itemCols.some((c) => c.sources)) void lineSources.refresh();
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
@@ -2492,8 +2845,12 @@ function paint(doc, snapScratch, opts = {}) {
   void paintSourceTerms(doc);
 
   const name = doc.name || "(new)";
-  setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
+  if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
+  if (reloadNotice.text) setStatus(reloadNotice.text, "warn");
+  else setStatus(`${name} · ${editable() ? "Draft" : "Posted"}`);
   if (docNumberUi) docNumberUi.paint();
+  if (comparePane) comparePane.refresh();
+  if (attachList) void attachList.refresh();
   if (opts.focusVendor) {
     docCapsOn = true;
     if (docCapsUi) docCapsUi.syncCapsButton();
@@ -2502,25 +2859,29 @@ function paint(doc, snapScratch, opts = {}) {
   void ensureAtLeastOneItemRow(doc);
   } finally {
     painting = false;
+    // Only when the repaint dropped focus: a box that survived keeps the clerk's typing untouched.
+    const now = document.activeElement;
+    if (focusAnchor && (!now || now === document.body)) restoreFocusAnchor(focusAnchor);
   }
 }
 
-async function refresh() {
+/** @param {{ keepFocus?: boolean }} [opts] */
+async function refresh(opts = {}) {
   if (!api) return;
+  collapseTaxDefaultNote();
   setStatus("Refreshing…");
   const snap = await api.getSnapshot();
   paint(snap && snap.doc, (snap && snap.scratch) || {}, {
     reason: snap && snap.reason,
     focusVendor: false,
     userEdited: snap && snap.userEdited,
+    keepFocus: !!opts.keepFocus,
   });
   if (snap && snap.ok === false) setStatus(snap.reason || "Waiting for ERP form…", "warn");
 }
 
 async function onHeaderBlur(input) {
   if (!api || painting || !editable()) return;
-  const focusAnchor = captureFocusAnchor();
-
   if (input.dataset.scratch === "dateExpected") {
     const raw = filterDateInputValue(input.value).trim();
     if (
@@ -2549,12 +2910,10 @@ async function onHeaderBlur(input) {
     if (res && res.ok) {
       noteUserEdit();
       scratch = res.scratch || { dateExpected: parsed.iso };
-      paint(res.doc || lastDoc, scratch);
-      restoreFocusAnchor(focusAnchor);
+      paint(res.doc || lastDoc, scratch, { keepFocus: true });
     } else {
       setStatus((res && res.reason) || "Date Expected update failed.", "err");
-      await refresh();
-      restoreFocusAnchor(focusAnchor);
+      await refresh({ keepFocus: true });
     }
     return;
   }
@@ -2584,8 +2943,7 @@ async function onHeaderBlur(input) {
     const res = await api.setHeader(field, parsed.iso);
     if (res && res.skipped) return;
     if (res && res.ok) noteUserEdit();
-    await refresh();
-    restoreFocusAnchor(focusAnchor);
+    await refresh({ keepFocus: true });
     return;
   }
 
@@ -2598,9 +2956,32 @@ async function onHeaderBlur(input) {
     return;
   }
 
-  const res = await api.setHeader(field, next);
+  if (linkPickOwnsCommit(input.dataset.linkPicking, next)) return;
+  if (field === "supplier" && (await vendorIsMissing(next, "vendor"))) return;
+  // While a vendor write is out, note whether the clerk types somewhere else (D2's late guard).
+  const typing = field === "supplier" ? watchTypingElsewhere(input) : null;
+  let res;
+  try {
+    res = await api.setHeader(field, next);
+  } finally {
+    typing?.stop();
+  }
+  if (field === "supplier" && res && res.ok) hideMissingVendorBanner();
 
-  if (field === "supplier" && ui && ui.features.sourceModal) {
+  // The answer can come long after the clerk moved on (5zorro's dogfood 2026-10-22: 10 s, and he
+  // was in Title): then it opens nothing (R5b-5).
+  const late =
+    field === "supplier"
+      ? lateVendorMayOpenSources({
+          wanted: next,
+          boxNow: normalizeEditableText(input.value),
+          activeIsOtherField: focusIsInOtherField(input),
+          modalOpen: sourceModalOpenRef.current,
+          typedElsewhere: !!typing?.typed(),
+        })
+      : { open: false };
+  if (field === "supplier" && !late.open) logFocus("source-modal-skip", `blur:${late.reason}`);
+  if (field === "supplier" && late.open && ui && ui.features.sourceModal) {
     const decision = shouldOpenSourceModalAfterVendorPick({
       trigger: "blur",
       hasSupplier: !!normalizeEditableText(next),
@@ -2619,9 +3000,8 @@ async function onHeaderBlur(input) {
 
   if (res && res.skipped) return;
   if (res && res.ok) noteUserEdit();
-  await refresh();
+  await refresh({ keepFocus: true });
   if (res && res.warning) setStatus(res.warning, "warn");
-  restoreFocusAnchor(focusAnchor);
 }
 
 async function flushDateExpectedFromInput() {
@@ -2676,8 +3056,10 @@ async function doSave(submit) {
     }
     const choice = submit ? "submit" : "save";
     setStatus(commitGateProgressLabel(choice));
+    const nameBeforeSave = String((lastDoc && lastDoc.name) || "");
     const r = await api.save({ submit: !!submit });
     if (r && r.ok) {
+      if (taxesRemovedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxesRemovedOn.add(String(r.doc.name));
       userEdited = false;
       metaBlockers = [];
       paint(r.doc, r.scratch || scratch);
@@ -2829,20 +3211,28 @@ function applyUiConfig(config) {
     if (ui.sourceLabel) el.selectSource.textContent = ui.sourceLabel;
   }
 
+  // Attach sits beside the notes, as on the Bill (5zorro 2026-10-11): the memo's head, or — on a
+  // doctype with no Remarks (the PO) — the terms box's head. The toolbar copy is only for a page
+  // with neither.
   const attachTitle = ui.attachTitle || "Attach file";
+  const memoHead = el.memoEntry && el.memoEntry.querySelector(".memo-head");
+  const attachHome = ui.features.memo ? memoHead : ui.features.termsField ? el.termsHead : null;
   if (el.attach) {
-    el.attach.textContent = ui.features.memo
-      ? `Attach file to this ${ui.title.toLowerCase()}`
-      : "Attach file";
+    if (attachHome && el.attach.parentElement !== attachHome) attachHome.appendChild(el.attach);
+    el.attach.innerHTML = `${ATTACH_ICON_SVG} Attach file to this ${escapeHtml(ui.title.toLowerCase())}`;
     el.attach.title = attachTitle;
   }
   if (el.attachToolbar) {
-    el.attachToolbar.hidden = !!ui.features.memo;
+    el.attachToolbar.hidden = !!attachHome;
     el.attachToolbar.title = attachTitle;
   }
 
   if (ui.features.expensesTab) buildExpenseNote();
 }
+
+/** The paperclip the Bill's Attach button wears (bill-shell.fragment.html). */
+const ATTACH_ICON_SVG =
+  '<svg class="attach-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1.5 1.5 0 0 1-3 0V6h-1.5v9.5a3 3 0 0 0 6 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/></svg>';
 
 async function attachFileAction() {
   if (!api || !api.attachFile) {
@@ -2966,16 +3356,37 @@ function wireStaticControls() {
     });
   }
   if (el.addTax) {
+    if (el.removeAllTax) el.removeAllTax.onclick = () => void removeAllTaxes();
+    if (el.taxDefault && !el.taxDefault.querySelector(".ui-ico")) {
+      el.taxDefault.insertAdjacentHTML("beforeend", uiIconHtml("info", { size: 12 }));
+    }
+    if (el.taxDefault) el.taxDefault.onclick = () => void toggleTaxDefaultNote();
+    // The calculator on the Add amount box, as on the line cells (5zorro 2026-10-11).
+    if (el.taxAmount && !el.taxAmount.dataset.calcWired) {
+      el.taxAmount.dataset.calcWired = "1";
+      calcUi.attach(el.taxAmount, {
+        kind: "amount",
+        isPainting: () => painting,
+        isEditable: () => editable(),
+        onHistory: publishCalcHistory,
+        onCommit: (value) => {
+          const n = parseMoney(value);
+          el.taxAmount.value = n == null ? "" : formatGroupedNumber(n);
+        },
+      });
+    }
     el.addTax.onclick = async () => {
       if (!api || !editable() || !api.addTax) return;
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
-      const n = parseMoney(el.taxAmount && el.taxAmount.value);
+      // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
+      const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
+      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
       }
       if (n == null) {
-        setStatus("Enter a tax/charge Amount.", "warn");
+        setStatus(typed ? `“${typed}” is not an amount or a sum — fix the Amount, then Add.` : "Enter a tax/charge Amount.", "warn");
         return;
       }
       setStatus("Adding tax/charge…");
@@ -2984,7 +3395,9 @@ function wireStaticControls() {
         if (el.taxAmount) el.taxAmount.value = "";
         noteUserEdit();
         paint(res.doc, res.scratch || scratch);
-        setStatus("Tax/charge row added.");
+        // Never quietly rounded (R13-1): the part ERPNext will not keep is said.
+        if (remainder) setStatus(`Tax/charge row added. ${remainder}.`, "warn");
+        else setStatus("Tax/charge row added.");
       } else {
         setStatus((res && res.reason) || "Add tax failed.", "err");
       }
@@ -3017,6 +3430,7 @@ function wireStaticControls() {
       paint(result.doc || lastDoc, result.scratch || scratch);
     },
     setStatus,
+    lockWhileRunning: [el.items, document.getElementById("btn-add-line")],
     testId: "doc-import",
   });
 
@@ -3055,6 +3469,7 @@ export async function bootDocFormPage(injectedApi) {
     setStatus("Doc API unavailable — preload missing.", "err");
     return;
   }
+  loadSiteRounding();
   wireStaticControls();
 
   docCapsUi = wireDocCapsUi({
@@ -3075,18 +3490,72 @@ export async function bootDocFormPage(injectedApi) {
     getDoc: () => lastDoc,
   });
 
+  comparePane = mountComparePane({
+    api,
+    button: document.getElementById("btn-papers"),
+    getDoc: () => lastDoc,
+    selfLabel: () => docTitle(),
+    setStatus,
+    onFilesChanged: () => {
+      if (attachList) void attachList.refresh(true);
+    },
+  });
+  attachList = mountAttachmentList({
+    api,
+    host: document.getElementById("attach-list"),
+    getDoc: () => lastDoc,
+    onPeek: (fileUrl) => (comparePane ? comparePane.peek(fileUrl) : false),
+    setStatus,
+    testidPrefix: "doc",
+    onFilesChanged: () => {
+      if (comparePane) comparePane.refresh(true);
+    },
+  });
+  soCreate = mountSoCreateMenu({
+    api,
+    button: /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-create")),
+    getDoc: () => lastDoc,
+    setStatus,
+    stickyStatus: (text) => {
+      reloadNotice = text ? { text, name: String((lastDoc && lastDoc.name) || "") } : { text: "", name: "" };
+      if (text) setStatus(text, "warn");
+    },
+    mountSupplierPicker: (input, onPicked) => mountDocLinkPicker(input, "Supplier", onPicked, { refocusAfterPick: false }),
+    // Stay on the order (5zorro): Drafts' yellow and, later, the Sources column are the trail.
+    onCreated: async () => {
+      await refresh();
+      if (lineSources) await lineSources.refresh(true);
+    },
+  });
+  lineSources = mountLineSources({
+    api,
+    getDoc: () => lastDoc,
+    root: () => el.items,
+    onPeek: (route) => {
+      if (route && api && api.softPeekRoute) void api.softPeekRoute(route);
+    },
+    onFilled: () => sizeItemColumns(),
+  });
+
   setStatus("Ready — open a Purchase Order or Item Receipt.");
   // Profile is null until main sets activeDocSkin; apply on first snapshot / refresh.
   await ensureUiConfig();
 
   if (api.onSnapshot) {
     api.onSnapshot(async (snap) => {
+      collapseTaxDefaultNote();
+      if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       await ensureUiConfig();
       paint(snap && snap.doc, (snap && snap.scratch) || {}, {
         reason: snap && snap.reason,
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
       });
+      if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
+      // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
+      // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
+      if (attachList) void attachList.refresh(true);
+      if (lineSources && snap && snap.softPeekReturn) void lineSources.refresh(true);
     });
   }
 

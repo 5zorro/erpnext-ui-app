@@ -75,3 +75,20 @@ export function formatNavDebugLines(entries) {
   }
   return lines;
 }
+
+/**
+ * The dogfood log files (`nav-debug.log`, `focus-debug.log` and the two incident logs) are appended
+ * to for as long as the app is used (review 10-19 R2-6: 17 MB in six weeks). At startup a file past
+ * this size is moved to `<name>.1`, replacing the previous one — one older generation is kept, and
+ * the newest lines are always at the end of the live file.
+ */
+export const DEBUG_LOG_ROTATE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * @param {number|null|undefined} sizeBytes
+ * @param {number} [maxBytes]
+ * @returns {boolean}
+ */
+export function debugLogNeedsRotation(sizeBytes, maxBytes = DEBUG_LOG_ROTATE_BYTES) {
+  return Number.isFinite(sizeBytes) && Number(sizeBytes) > maxBytes;
+}

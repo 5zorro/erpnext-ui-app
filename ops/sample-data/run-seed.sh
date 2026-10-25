@@ -76,8 +76,10 @@ docker cp "$PLAN_HOST" "$CONTAINER:/tmp/corpus-plan.json"
 docker cp "$ROOT/ops/sample-data/seed_corpus.py" "$CONTAINER:/tmp/seed_corpus.py"
 
 if [[ "$PURGE_AP" == "1" ]]; then
-  echo "🔴 PURGING ALL AP DOCS for company '$COMPANY' (Payment Entry, Purchase Invoice,"
-  echo "   Purchase Receipt, Purchase Order) — hand-made dogfood documents included."
+  # purge_ap() covers EVERY company whose name looks like a sandbox, not only $COMPANY (R14-4);
+  # it prints each company as it goes.
+  echo "🔴 PURGING ALL AP DOCS for EVERY sandbox company on site '$SITE' (Payment Entry, Purchase"
+  echo "   Invoice, Purchase Receipt, Purchase Order) — hand-made dogfood documents included."
   docker exec \
     -e SAMPLE_COMPANY="${SAMPLE_COMPANY:-}" \
     -e SAMPLE_DATA_FORCE="${SAMPLE_DATA_FORCE:-}" \

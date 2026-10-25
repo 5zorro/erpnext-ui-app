@@ -69,6 +69,32 @@ html[data-doc-role="order"] { --role-accent: var(--accent-order); }
 html[data-doc-role="fulfill"] { --role-accent: var(--accent-fulfill); }
 html[data-doc-role="invoice"] { --role-accent: var(--accent-invoice); }
 html[data-doc-role="payment"] { --role-accent: var(--accent-payment); }
+html[data-doc-role="request"] { --hatch-base: var(--wash-request); }
+html[data-doc-role="order"] { --hatch-base: var(--wash-order); }
+html[data-doc-role="fulfill"] { --hatch-base: var(--wash-fulfill); }
+html[data-doc-role="invoice"] { --hatch-base: var(--wash-invoice); }
+html[data-doc-role="payment"] { --hatch-base: var(--wash-payment); }
+
+/*
+  Text on a hatch gets a hatch-free box (5zorro DF-02): stripes running through letters add
+  lines and make them harder to read. A hatched surface sets --hatch-base to its own solid
+  colour; any text sitting directly on it carries .hatch-clear, which paints that colour behind
+  just the characters (inline: one box per line). With the hatch off the box matches the surface
+  and disappears. tests/hatch-clear.test.js lists every surface that paints a hatch.
+*/
+.hatch-clear {
+  /* Positioned, so it also paints above the desk stamp (.card::before), which is. */
+  position: relative;
+  background-color: var(--hatch-base, transparent);
+  border-radius: 3px;
+  padding: 0 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+p.hatch-clear,
+div.hatch-clear {
+  width: fit-content;
+}
 
 /* Layer 2 — main chrome groups use doc-skin role wash */
 html[data-doc-role="request"] .tb-group,
@@ -202,5 +228,8 @@ html[data-pattern="ar"][data-doc-desk="ar"] .field input[data-wash-source]:read-
 html[data-pattern="ar"][data-doc-desk="ar"] .field textarea[data-wash-source]:read-only,
 html[data-pattern="both"] .field input[data-wash-source]:read-only,
 html[data-pattern="both"] .field textarea[data-wash-source]:read-only {
+  /* A band down the left edge, inside the padding, so the field's text never sits on it. */
   background-image: var(--hatch-lighten);
+  background-size: 6px 100%;
+  background-repeat: no-repeat;
 }

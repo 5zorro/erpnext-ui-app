@@ -11,6 +11,9 @@ import {
   isCreatePaymentTermsLinkAction,
   isCreateItemLinkAction,
   itemCreateRoute,
+  isCreateCustomerLinkAction,
+  customerCreateRoute,
+  LINK_ACTION_CREATE_CUSTOMER,
   LINK_ACTION_CREATE_ITEM,
   LINK_ACTION_CREATE_SUPPLIER,
   LINK_ACTION_CREATE_PAYMENT_TERMS,
@@ -102,11 +105,38 @@ describe("withEmptySearchActions", () => {
     assert.equal(withEmptySearchActions([], PAYMENT_TERMS_TEMPLATE_DOCTYPE).length, 1);
   });
 
-  it("leaves non-empty and other doctypes alone", () => {
+  it("leaves doctypes with no create action alone", () => {
     const rows = [{ value: "A", description: "A" }];
-    assert.deepEqual(withEmptySearchActions(rows, "Supplier"), rows);
-    assert.deepEqual(withEmptySearchActions(rows, "Item"), rows);
+    assert.deepEqual(withEmptySearchActions(rows, "Warehouse"), rows);
     assert.deepEqual(withEmptySearchActions([], "Warehouse"), []);
+  });
+
+  // 5zorro 2026-10-11: "SAMPLE" found two items, neither right — Create Item must not wait for no hits.
+  it("puts the create row last even when the search has hits", () => {
+    const rows = [
+      { value: "SAMPLE-1", description: "Sample one" },
+      { value: "SAMPLE-2", description: "Sample two" },
+    ];
+    for (const [dt, isAct, label] of [
+      ["Item", isCreateItemLinkAction, /Create a new Item/],
+      ["Customer", isCreateCustomerLinkAction, /Create a new Customer/],
+      ["Supplier", isCreateSupplierLinkAction, /Vendor add/],
+    ]) {
+      const out = withEmptySearchActions(rows, dt);
+      assert.equal(out.length, 3, dt);
+      assert.deepEqual(out.slice(0, 2), rows, dt);
+      assert.equal(isAct(out[2]), true, dt);
+      assert.match(linkOptionLabel(out[2]), label, dt);
+      assert.doesNotMatch(linkOptionLabel(out[2]), /No .* found/, dt);
+    }
+    assert.equal(rows.length, 2, "the search's own rows are not mutated");
+  });
+
+  it("never adds a second create row", () => {
+    const once = withEmptySearchActions([{ value: "A", description: "A" }], "Item");
+    const twice = withEmptySearchActions(once, "Item");
+    assert.equal(twice.filter((o) => isCreateItemLinkAction(o)).length, 1);
+    assert.equal(isCreateItemLinkAction(twice.at(-1)), true);
   });
 
   // 5zorro 2026-09-30, DF-01 on a blank bench: "No matches for WIDGET" and no way forward.
@@ -121,9 +151,33 @@ describe("withEmptySearchActions", () => {
     assert.match(linkOptionLabel(out[0]), /create Item/i);
   });
 
+  // 5zorro 2026-10-11, DF-03: a Sales Order on a blank site had no way to add its customer.
+  it("offers Create Customer when Customer search is empty", () => {
+    const out = withEmptySearchActions([], "Customer");
+    assert.equal(out.length, 1);
+    assert.equal(out[0].value, LINK_ACTION_CREATE_CUSTOMER);
+    assert.equal(isCreateCustomerLinkAction(out[0]), true);
+    assert.equal(isCreateItemLinkAction(out[0]), false);
+    assert.match(linkOptionClassNames(out[0]), /link-action/);
+    assert.match(linkOptionLabel(out[0]), /create Customer/i);
+    assert.deepEqual(filterLinkOptions(out, "cust"), []);
+  });
+
   it("never lets a create action through the client-side refine", () => {
     const out = filterLinkOptions(withEmptySearchActions([], "Item"), "item");
     assert.deepEqual(out, []);
+  });
+});
+
+describe("customerCreateRoute", () => {
+  // customer_name is no_copy, so Frappe ignores it as a route option; name_field fills the title.
+  it("carries what was typed as name_field, not customer_name", () => {
+    const route = customerCreateRoute(" Acme & Sons ");
+    assert.equal(route.split("?")[0], "/app/customer/new");
+    const q = new URLSearchParams(route.split("?")[1]);
+    assert.equal(q.get("name_field"), "Acme & Sons");
+    assert.equal(q.get("customer_name"), null);
+    assert.equal(customerCreateRoute(""), "/app/customer/new");
   });
 });
 

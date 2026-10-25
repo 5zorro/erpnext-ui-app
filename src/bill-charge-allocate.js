@@ -3,9 +3,91 @@
  * Grand total stays flat: item amounts rise by the charge; a Deduct tax offsets the Add charge.
  *
  * Modes: by basket amount (price), by qty, or custom $/line (or % of charge).
- * Rounding remainder → largest basis line; ties → lowest rowIndex (first unique id).
+ * Leftover cents: one at a time to the lines nearest the next cent (largest remainder; ties → first).
  * If nothing eligible, remainder stays unallocated (cents unadjusted).
+ *
+ * The lines must take *exactly* the charge (5zorro 2026-10-11, DF-02: 14.28 allocated, the lines
+ * rose 14.27). A line's cost moves only in whole cents per unit, so its amount moves in steps of
+ * about qty cents: after rounding each new unit cost, `exactRates` nudges unit costs a cent up or
+ * down until the lines' total rise equals the charge (3 × −1¢ and 4 × +1¢ = +1¢). When no nudge can
+ * reach it (every qty even and an odd cent left), the offset takes what the lines really rose and
+ * the rest is reported as the remainder — the bill still balances.
  */
+
+import { splitUnitsByWeights } from "./split-by-weights.js";
+
+/**
+ * A line's amount as ERPNext stores it: qty × rate to cents, Banker's Rounding (this site's
+ * System Settings rounding_method; half-cents only arise with fractional quantities).
+ * @param {number} qty
+ * @param {number} rate
+ * @returns {number} cents
+ */
+export function lineAmountCents(qty, rate) {
+  const x = Number(qty) * Number(rate) * 100;
+  if (!Number.isFinite(x)) return 0;
+  const r = Math.round(x * 1e6) / 1e6; // float noise off before deciding a half
+  const f = Math.floor(r);
+  const diff = r - f;
+  if (Math.abs(diff - 0.5) < 1e-9) return f % 2 === 0 ? f : f + 1;
+  return Math.round(r);
+}
+
+/**
+ * New unit costs (whole cents) whose line totals rise by exactly `targetCents` overall, as close to
+ * each line's own share as can be. Only lines with a share move (custom mode leaves others alone).
+ * @param {{ qty: number, rateCents: number, prevCents: number, shareCents: number }[]} lines
+ * @param {number} targetCents
+ * @returns {{ rateCents: number[], riseCents: number[], missCents: number }}
+ */
+export function exactRates(lines, targetCents) {
+  const base = lines.map((l) => {
+    if (!(l.shareCents > 0) || !(Number(l.qty) !== 0)) return l.rateCents;
+    return Math.round((l.prevCents + l.shareCents) / Number(l.qty));
+  });
+  const riseAt = (i, rc) => lineAmountCents(lines[i].qty, rc / 100) - lines[i].prevCents;
+  const rise0 = base.map((rc, i) => (lines[i].shareCents > 0 ? riseAt(i, rc) : 0));
+  const need = targetCents - rise0.reduce((a, b) => a + b, 0);
+  if (need === 0) return { rateCents: base, riseCents: rise0, missCents: 0 };
+  // Smallest set of cent nudges that closes the gap (dynamic programme over the running offset).
+  const STEPS = 6;
+  const span = Math.abs(need) + 400;
+  /** @type {Map<number, { cost: number, ks: number[] }>} */
+  let best = new Map([[0, { cost: 0, ks: [] }]]);
+  for (let i = 0; i < lines.length; i++) {
+    const movable = lines[i].shareCents > 0 && Number(lines[i].qty) !== 0;
+    /** @type {Map<number, { cost: number, ks: number[] }>} */
+    const next = new Map();
+    for (const [off, st] of best) {
+      for (let k = movable ? -STEPS : 0; k <= (movable ? STEPS : 0); k++) {
+        const rise = movable ? riseAt(i, base[i] + k) : 0;
+        if (movable && rise < 0) continue; // never take cost off a line
+        const o = off + (rise - rise0[i]);
+        if (Math.abs(o) > span) continue;
+        const cost = st.cost + Math.abs(k);
+        const cur = next.get(o);
+        if (!cur || cost < cur.cost) next.set(o, { cost, ks: [...st.ks, k] });
+      }
+    }
+    best = next;
+  }
+  let pick = best.get(need);
+  let miss = 0;
+  if (!pick) {
+    // Closest reachable that does not put more into cost than the charge (rise ≤ charge).
+    let bestOff = null;
+    for (const off of best.keys()) {
+      if (off <= need && (bestOff == null || off > bestOff)) bestOff = off;
+    }
+    if (bestOff == null) bestOff = Math.min(...best.keys());
+    pick = best.get(bestOff);
+    miss = need - bestOff;
+  }
+  const ks = pick ? pick.ks : lines.map(() => 0);
+  const rateCents = base.map((rc, i) => rc + (ks[i] || 0));
+  const riseCents = rateCents.map((rc, i) => (lines[i].shareCents > 0 ? riseAt(i, rc) : 0));
+  return { rateCents, riseCents, missCents: miss };
+}
 
 /**
  * @typedef {{
@@ -69,42 +151,23 @@ export function allocationBasisWeights(items, mode) {
 }
 
 /**
- * Split `chargeAmount` across weights; remainder cents → largest weight (tie → lowest index).
+ * Split `chargeAmount` across weights, to the cent (`splitUnitsByWeights`, the rule shared with the
+ * Sales Order qty split), as evenly as the cents allow (5zorro 2026-10-11):
+ * every line starts rounded down, then the leftover cents go one at a time to the lines whose share
+ * was closest to the next cent (the largest-remainder method; ties → the earlier line). 67¢ over ten
+ * equal lines is seven 7¢ and three 6¢ — not 13¢ on the first line, as the old rule gave; 3.33 over
+ * ten is three 34¢ and seven 33¢.
  * @param {number} chargeAmount
  * @param {number[]} weights
  * @returns {{ shares: number[], remainder: number }}
  */
 export function splitByWeights(chargeAmount, weights) {
   const total = money2(chargeAmount);
-  const w = (Array.isArray(weights) ? weights : []).map((x) => {
-    const n = Number(x);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  });
-  const sumW = w.reduce((a, b) => a + b, 0);
-  if (!(total > 0) || !(sumW > 0)) {
-    return { shares: w.map(() => 0), remainder: total > 0 ? total : 0 };
+  const cents = splitUnitsByWeights(Math.round(Math.max(0, total) * 100), weights);
+  if (!(total > 0) || !cents.some((c) => c > 0)) {
+    return { shares: cents.map(() => 0), remainder: total > 0 ? total : 0 };
   }
-  /** @type {number[]} */
-  const raw = w.map((wi) => (wi / sumW) * total);
-  const floors = raw.map((x) => Math.floor(x * 100) / 100);
-  let assigned = money2(floors.reduce((a, b) => a + b, 0));
-  let rem = money2(total - assigned);
-  if (rem > 0) {
-    let best = -1;
-    let bestW = -1;
-    for (let i = 0; i < w.length; i++) {
-      if (w[i] <= 0) continue;
-      if (w[i] > bestW || (w[i] === bestW && (best < 0 || i < best))) {
-        bestW = w[i];
-        best = i;
-      }
-    }
-    if (best >= 0) {
-      floors[best] = money2(floors[best] + rem);
-      rem = 0;
-    }
-  }
-  return { shares: floors.map(money2), remainder: money2(rem) };
+  return { shares: cents.map((c) => c / 100), remainder: 0 };
 }
 
 /**
@@ -223,28 +286,47 @@ export function planChargeToStockAllocation(opts) {
     remainder = split.remainder;
   }
 
+  // What each line can actually take: whole-cent unit costs, nudged so the total is exact.
+  const lines = items.map((it, i) => {
+    const qty = Number(it.qty);
+    const rate = Number(it.rate);
+    const prevCents = Math.round(money2(lineAmount(it)) * 100);
+    return {
+      qty: Number.isFinite(qty) ? qty : 0,
+      rateCents: Math.round((Number.isFinite(rate) ? rate : 0) * 100),
+      prevCents,
+      shareCents: Math.round(money2(shares[i] || 0) * 100),
+    };
+  });
+  const sharedCents = lines.reduce((a, l) => a + Math.max(0, l.shareCents), 0);
+  const exact = exactRates(lines, sharedCents);
+
   /** @type {ChargeAllocShare[]} */
   const itemUpdates = [];
   for (let i = 0; i < items.length; i++) {
-    const add = money2(shares[i] || 0);
-    if (!(add > 0)) continue;
+    if (!(lines[i].shareCents > 0)) continue;
     const it = items[i];
-    const qty = Number(it.qty);
-    const prevAmt = money2(lineAmount(it));
-    const nextAmount = money2(prevAmt + add);
-    let nextRate = Number(it.rate);
-    if (Number.isFinite(qty) && qty !== 0) {
-      nextRate = money2(nextAmount / qty);
+    const qty = lines[i].qty;
+    let nextRate;
+    let add;
+    if (qty !== 0) {
+      nextRate = exact.rateCents[i] / 100;
+      add = exact.riseCents[i] / 100;
     } else {
-      nextRate = money2((Number.isFinite(nextRate) ? nextRate : 0) + add);
+      // No qty to spread over: the rate carries the whole share.
+      add = lines[i].shareCents / 100;
+      nextRate = money2((Number.isFinite(Number(it.rate)) ? Number(it.rate) : 0) + add);
     }
+    if (!(add > 0)) continue;
     itemUpdates.push({
       rowIndex: it.rowIndex,
-      addAmount: add,
+      addAmount: money2(add),
       nextRate,
-      nextAmount,
+      nextAmount: money2(lines[i].prevCents / 100 + add),
     });
   }
+  // A cent no unit-cost nudge could place stays with the charge (reported, never hidden).
+  remainder = money2(remainder + exact.missCents / 100);
 
   const allocatedTotal = money2(itemUpdates.reduce((s, u) => s + u.addAmount, 0));
   if (!(allocatedTotal > 0)) {
@@ -286,6 +368,37 @@ export function planChargeToStockAllocation(opts) {
     offsetTax,
     allocatedTotal,
     remainder,
+  };
+}
+
+/**
+ * What the lines **actually** rose once ERPNext worked out their amounts, for the offset Deduct
+ * (review 10-19 R6b-3). The plan predicts each line's amount with this site's rounding
+ * (`lineAmountCents`); ERPNext's own figure is the one the bill posts, so the offset takes that,
+ * and the difference — a cent on a site that rounds another way — goes back to the charge.
+ * @param {ChargeAllocItem[]} before the lines as they were (amount, or qty × rate)
+ * @param {Array<{ amount?: unknown }>|null|undefined} afterItems the document's lines after the rates were set
+ * @param {ChargeAllocShare[]} updates the lines the plan raised
+ * @param {number} planned the plan's `allocatedTotal`
+ * @returns {{ allocatedTotal: number, driftCents: number }} driftCents = planned − actual
+ */
+export function allocatedFromDoc(before, afterItems, updates, planned) {
+  const after = Array.isArray(afterItems) ? afterItems : [];
+  let riseCents = 0;
+  for (const u of Array.isArray(updates) ? updates : []) {
+    const was = (Array.isArray(before) ? before : []).find((it) => it && it.rowIndex === u.rowIndex);
+    const now = after[u.rowIndex];
+    const nowAmt = Number(now && now.amount);
+    if (!was || !Number.isFinite(nowAmt)) {
+      // ERPNext's figure is missing for a line: keep the plan's own number for it.
+      riseCents += Math.round(money2(u.addAmount) * 100);
+      continue;
+    }
+    riseCents += Math.round(money2(nowAmt) * 100) - Math.round(money2(lineAmount(was)) * 100);
+  }
+  return {
+    allocatedTotal: riseCents / 100,
+    driftCents: Math.round(money2(planned) * 100) - riseCents,
   };
 }
 

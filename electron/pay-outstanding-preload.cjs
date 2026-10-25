@@ -3,6 +3,16 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("erpPayOutstanding", {
   getOutstandingBills: () => ipcRenderer.invoke("get-outstanding-bills"),
+  // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
+  printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
+  printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
+  printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
+  printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
+  printJobStatus: (jobs) => ipcRenderer.invoke("print-job-status", jobs || []),
+  printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
+  printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
+  printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),
+  printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
   getDraftPayments: () => ipcRenderer.invoke("get-draft-payments"),
   getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
   setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
@@ -11,6 +21,7 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   getPrefs: () => ipcRenderer.invoke("get-payment-batch-prefs"),
   setPrefs: (prefs) => ipcRenderer.invoke("set-payment-batch-prefs", prefs),
   openErp: (route) => ipcRenderer.send("open-erp", route || "/desk"),
+  openDetour: (route) => ipcRenderer.invoke("shell-detour-open", route || ""),
   setDirty: (dirty) => ipcRenderer.send("set-pay-outstanding-dirty", !!dirty),
   searchLink: (doctype, txt, filters) =>
     ipcRenderer.invoke("pay-outstanding-search-link", doctype, txt || "", filters || null),
@@ -31,6 +42,19 @@ contextBridge.exposeInMainWorld("erpPayOutstanding", {
   modeChangeFacts: (invoices) =>
     ipcRenderer.invoke("mode-change-facts", Array.isArray(invoices) ? invoices : []),
   runModeChange: (work) => ipcRenderer.invoke("run-mode-change", Array.isArray(work) ? work : []),
+  // Review 10-19: one event before and after each bill, for the panel's per-bill chips. Returns
+  // the unsubscribe.
+  onModeChangeProgress: (cb) => {
+    const handler = (_e, payload) => {
+      try {
+        cb(payload);
+      } catch {
+        /* a chip that fails to paint must not break the batch */
+      }
+    };
+    ipcRenderer.on("mode-change-progress", handler);
+    return () => ipcRenderer.removeListener("mode-change-progress", handler);
+  },
   // OI-171 after-effects: what this vendor has loose, and one re-link posted through ERPNext's own
   // Payment Reconciliation.
   paymentRelinkFacts: (supplier) => ipcRenderer.invoke("payment-relink-facts", supplier || ""),

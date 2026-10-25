@@ -39,7 +39,7 @@ PO line qty **1**, bill qty **2** — skin should cap sourced row and NIC the ex
 | **ERP webview `executeJavaScript`** | `frappe.db.get_list` / bridge eval **hangs** under form ajax + chaos; `raceTimeout` abandons the waiter but the browser may still hold the eval. |
 | **`erpEval` serialize queue (removed)** | Chained promises behind abandoned evals → background enrich never logged the next round. |
 | **POST `frappe.client.get_list` + manual Cookie** | Frappe returned **400** — wrong shape for this session. |
-| **GET `/api/resource/Purchase Order Item?filters=…`** | **417** / permission quirks — **child doctypes are a bad list target**. |
+| **GET `/api/resource/Purchase Order Item?filters=…`** | **417** / permission quirks — **child doctypes are a bad list target**. Exception (2026-10-22, checked live): `frappe.client.get_list` **with `parent: "<Parent DocType>"`** returns a child doctype's fields; without `parent` it returns only `name`. Pay Outstanding reads Payment Schedule that way in one call. |
 | **GET `/api/resource/Purchase Order` (header only)** | Works for logbook — **misleading green** when child cap cache is still empty. |
 
 ### Fix (current SSoT)
@@ -636,3 +636,347 @@ on the retry, and the sandbox now carries nothing queued and nothing failed.
 document an **explicit `posting_time`**. Without the latter a seeded document takes its insert's
 wall-clock time, and `future_sle_exists` matches at `posting_datetime >= …`, so two documents sharing
 a date and a second each queue a repost for the other.
+
+---
+
+## G15 — Ribbons drawn to the right numbers, painted 7–12px off their rows (2026-09-29, bowtie mockup)
+
+**Observed:** 5zorro, from a screenshot: the payment's ribbon ended between two rows. The page's own
+self-check said every ribbon end was 0.00px off its row.
+
+**Expected:** each ribbon's centre on the centre of the row it starts or ends at — and a check that
+can tell when it is not.
+
+**Architecture / fix:** two causes, each invisible to arithmetic.
+
+1. **An SVG whose `height` grows without its `viewBox`** keeps its old coordinate box, and the
+   browser centres that box in the taller element (`preserveAspectRatio` default `xMidYMid meet`):
+   everything paints lower by half the growth. Keep `viewBox` equal to the element's size, and set
+   `preserveAspectRatio="xMinYMin meet"` so a mismatch shows at the top instead of sliding.
+2. **A `<table>` row's height is a minimum, not a size.** A header border, a taller fallback font or
+   a ⚠ glyph stretched rows from 16px to 16.5px and up, and every row below slid. Rows that something
+   else is drawn *to* must be fixed-height strips that clip (`display: grid; height: 16px;
+   overflow: hidden`), and the card's own border is part of the arithmetic.
+
+**Dogfood:** the check compared the numbers written into each path with the rows — they agreed while
+the picture did not (G8 again). Measure **painted** points:
+`path.getPointAtLength(…).matrixTransform(path.getScreenCTM())` against `getBoundingClientRect()`
+of the row, and prove the check by putting the bug back (it then read 11.90px, matching the
+screenshot). An exemption in the check (braced bundles) hid a 1.5px error the same way — no
+exemptions. The bowtie build (plan 2026-10-03 stage 5) carries both rules.
+
+
+## G16 — A backdated invoice: ERPNext's own form and save disagree on the due date (2026-10-10)
+
+**Observed:** with the Bill's posting date a stamp (today) and a Supplier Invoice Date in July, the
+Doc Bill's save was refused: "Due Date cannot be after 08-27-2026". Vanilla saved the same bill.
+
+**Cause:** `get_payment_term_details` (accounts_controller.py) counts from `bill_date or
+posting_date`, then **pulls any due date earlier than the posting date up to it**. The form-side
+call (`transaction.js payment_terms_template`) passes the real posting date → due = today. The save
+path (`set_payment_schedule`) passes `bill_date or posting_date` *as* the posting date → no pull,
+and `validate_due_date_with_template` refuses anything after invoice date + terms. The Doc Bill
+re-ran the form-side call after the Invoice date; hidden while posting = invoice date.
+
+**Fix:** the bridge fetches the schedule the save's way (`fetchScheduleLikeSave`) after the Invoice
+date, the terms, or a vendor change. **Generalize:** when ERPNext computes the same thing on the
+client and the server, they can differ — prefer the server path's arguments.
+
+## G17 — A percentage tax row computes from a copy on each item line (2026-10-10)
+
+**Observed:** changing a tax row's Rate % from 6 to 5 left its Amount at 24.00 — in Vanilla too —
+until save.
+
+**Cause:** v16 stamps each item line's `item_tax_rate` with the taxes table's rates when the line is
+added (`get_item_tax_map`), and the client computes a % row from that copy. The server rebuilds
+the copies on every save (`taxes_and_totals.update_item_tax_map`); the client refresh
+(`update_item_tax_map`) only touches lines with an Item Tax Template. **Fix:** the bridge rebuilds
+the copies the server's way after a Rate % edit. Also: a typed Amount on a % row is thrown away
+unless the row is "Actual" — the bridge switches it, mirroring Vanilla's editable-field rule.
+
+## G18 — Lost focus: where Tab goes next (2026-10-11)
+
+When focus leaves a box, the next Tab depends on how it left. Measured in the Doc Bill (Chromium):
+
+| How focus was lost | Next Tab goes to |
+|---|---|
+| Blur — the box still exists | the box after it (Qty → Cost): Chromium keeps its "sequential focus navigation starting point" on the blurred box |
+| The repaint replaced that box (the line was rebuilt) | the first tabbable in the container — line 1's Item Code, from any line |
+
+So a repaint that rebuilds the clerk's line must put focus back by row + field (`restoreBillFocus`),
+or Tab sends them to the top of the table. And any focus move the shell makes *after waiting* on
+ERPNext must first check the clerk has not moved (`user-move-guard.js`): a late move pulled a clerk
+from Qty back to Description (focus incident 2026-10-11). The new bill's opening Vendor focus had
+50/200/500 ms retries from a July debugging pass — removed; now one try and one after layout.
+A focus-skipping path must hand the clerk's place back: a repaint that skipped its restore because
+"Vendor will take focus" lost the clerk when Vendor declined. Skip the restore only when the other
+focus actually happened (`vendorFocused` in the Bill's `paint`).
+
+
+## G19 — `frappe.db.get_list` never settles when the server raises (2026-10-21)
+
+Run inside the ERPNext page (the shell's `erpEval`), `frappe.db.get_list` (and the other
+`frappe.db.*` helpers built on `frappe.call` with a callback) returns a promise that is **never
+resolved or rejected** when the server answers with an error — asking for a field that does not
+exist hung past 8 s, while the same request through `frappe.xcall` rejected at once (probe,
+2026-10-21). An `erpEval` awaiting it never returns, and the shell's later calls wait behind it
+until the page reloads — the likely mechanism of review 10-19 **R5b-4**. New ERP-page code uses
+`frappe.xcall` (warm pick lists do, plan 2026-10-21). R5b-4 turned out to have another cause (G20),
+so the sweep of the existing `frappe.db.*` calls was dropped, but that was judged as Administrator,
+who is never refused. 🔴 **A clerk is refused all the time** (no read on a doctype), and then the same
+hang happens. The restricted probe user proved it (review 10-19 R7-4, a Purchase User and Sales
+Orders), so the sweep is back as **R7-5**. Read a refused `xcall`'s reason with `reasonFrom` (G22):
+it rejects with nothing.
+
+**Swept 2026-10-25 (R7-5).** No ERPNext-page script calls `frappe.db.*` any more
+(`tests/erp-no-frappe-db.test.js` keeps it so). Use `xList` / `xValue` (`ERP_LIST_JS` in
+`src/erp-refusal-reason.js`, a copy in the bridge): the same server methods and defaults as
+`frappe.db.get_list` / `get_value`, through `frappe.xcall`. Two more things the sweep found, both
+proven as a restricted user (`leaves-records/r7-5-clerk-refusals`):
+- **A child table's rows need their parent named** (`parent_doctype: "Purchase Order"` for
+  Purchase Order Item, `"Payment Entry"` for Payment Entry Reference). Without it ERPNext refuses
+  anyone but Administrator ("Insufficient Permission for Purchase Invoice Item"), so the Bill's
+  PO-line lookup would have hung for every clerk.
+- **`frappe.db.get_all` does not exist in v16's `db.js`**: the Bill's applied-payments list called
+  it, always threw, and showed a payment of several bills at its whole amount on each.
+- `frappe.db.get_list` defaults `limit` to 20 even when `limit_page_length` is passed; two Account
+  lookups were capped at 20 that way.
+- 🔴 **A failure that used to hang now fails at once — so it must not read as "empty".** Code that
+  relied on the hang (a timeout the caller retried) turns into code that treats a refusal as "no
+  rows". The Bill's background loading did: its PO-line limits, PO titles and receipt refs returned
+  empty on a refusal, the retry loop counted them loaded, and the Bill sat at "line limit still
+  loading" with no retry (dogfood R6c-2 caught it). Those loaders now return `{ failed }` and the
+  loop keeps the slice pending. When sweeping a call off `frappe.db`, check what its callers do
+  with the error, not just that it settles.
+
+## G20 — `frappe.after_ajax` calls back at once when nothing is in flight (2026-10-21)
+
+`frappe.after_ajax(fn)` (`frappe/public/js/frappe/request.js`, v16.31.0) runs `fn` **synchronously**
+when `frappe.request.ajax_count` is 0. A "wait until ERPNext is quiet" helper that resolves there,
+inside `while (…) { …; await helper(); }`, never yields to the event loop: the loop spins on
+microtasks until its deadline, the page freezes (an `executeJavaScript` of `document.title` got no
+answer), and ERPNext's own replies cannot land — so the condition being waited for never comes
+true and the wait always runs to its deadline. The Bill's vendor write did exactly this for
+seven weeks (`afterAjaxQuiet` in `electron/erp-form-bridge-page.js`, plan 2026-10-21 D3): ~12 s
+frozen per vendor, ~38 s under chaos, and a timing entry logged per spin. Every wait inside the
+ERPNext page must yield a real turn (`setTimeout`), even when it is already quiet.
+
+## G21 — Building another doctype's document in the ERPNext page needs its meta first (2026-10-22)
+
+**Observed:** *Assign…* on a Bill line to Sales Orders never made its bridge Purchase Order —
+"Cannot read properties of null (reading 'options')". No test had run that path to the end.
+
+**Cause:** `frappe.model.get_new_doc("Purchase Order")` / `frappe.model.add_child(po, "items")` read
+the doctype's meta from the page's cache, and the page was showing a Bill, so Purchase Order's meta
+had never loaded. **Fix:** `await frappe.model.with_doctype("<Doctype>")` before building, as opening
+that form would. Or build a plain `{ doctype, items: [...] }` and let `frappe.client.insert` fill it
+server-side.
+
+**Related, same day:** `frappe.xcall` sends its args as form text, so a whitelisted method that does
+arithmetic on a typed-as-number argument gets a string (`get_payment_entry(party_amount=600)` →
+"bad operand type for abs(): 'str'"). Set the number on the returned document instead. And a list
+that asks for a field the doctype does not have is refused — with `frappe.db.get_list` that refusal
+never comes back (G19): Assign's Project step hung on `customer_name`, which Project lacks on v16.
+
+## G22 — `frappe.xcall` rejects with nothing when ERPNext refuses (2026-10-23)
+
+`frappe.xcall` is `frappe.call` with `error: (r) => reject(r?.message)` — and a refused call's reply
+has no `message`: ERPNext puts the reason in `_server_messages` (what it raised, JSON in JSON) and
+`exc` (the traceback). So `catch (e)` around an xcall gets `undefined`, and every page script that
+built its reason from `e` showed its fallback: "Payment Entry request failed." for a bill refused
+because its Purchase Order was On Hold (found by the dogfood check, DC-1). Read the reason from
+`frappe.last_response` — the reply that just failed — but only when it did refuse (a raised / red
+message or a traceback); a call that died with no reply leaves an earlier, successful reply there.
+One reader for all of it: `src/erp-refusal-reason.js` (`${PE_REASON_FROM_JS}` in a page script),
+tested; ERPNext's messages carry HTML (`<br><strong>…`) and often no full stop (`endSentence`).
+
+**Related:** a Purchase Order is not a period-closing doctype — an Accounting Period never refuses
+one. ERPNext refuses a PO's *submit* (not its save) through an Authorization Rule; a disabled
+account refuses only when ledger entries are made (submit and cancel of the copy's GL), never the
+save; a bill whose Purchase Order is On Hold or Closed cannot be cancelled
+(`check_for_on_hold_or_closed_status` in `on_cancel`), and the PO server itself never checks its
+Sales Order's hold.
+
+## G23 — The ERPNext page never asks "leave?" for typing done in the Doc page (2026-10-24)
+
+Frappe's form adds a `beforeunload` listener the moment it goes dirty (`form.js` `dirty()`; a new
+document is dirty from the start), and the shell answers that listener in `onErpWillPreventUnload`.
+But Chromium runs a page's "leave?" prompt **only if a person has interacted with that page**
+(sticky user activation, `navigator.userActivation.hasBeenActive`). A clerk who types a Bill in the
+Doc page never touches the ERPNext page, so its listener is skipped silently and a reload throws the
+typing away without `will-prevent-unload` ever firing. Proven by `tests/probes/nav-reload-gate`:
+dirty form, listener on, no ask at 4 s or at 22 s after the open; the same reload after one user
+gesture in the ERPNext page (`executeJavaScript(code, true)`) raised the prompt and the shell asked.
+So the shell's own unsaved check (`dirtyState.userEdited`) is the only thing that can guard Doc-page
+typing — Frappe's listener guards only what was typed in Vanilla. It is why R2-1's reload asked
+nothing, and DC-4's cause (plan 2026-10-24).
+
+**Related, probes:** Playwright auto-answers a page's `beforeunload` prompt and throws "No dialog is
+showing" when Electron answered it first; a `page.on("dialog")` listener of the probe's own turns
+that off. A real `dialog.showMessageBoxSync` would block the probe — stub it in main
+(`app.evaluate(({ dialog }) => …)`).
+
+---
+
+## ERPNext behaviour verified from source (read the bullet you need; don't re-derive)
+
+Facts about the ERPNext / Frappe this shell drives, read from the source at the sandbox's tags
+(ERPNext v16.32.1, Frappe v16.31.0) and proven on the sandbox. Each one cost real time to
+establish. Moved here from the local agent notes 2026-10-25 (review 10-19 R15-1), so an agent
+off this machine has them too. `HANDOFF.md` § *ERP site settings this shell reads* is the table of
+the settings among them.
+
+- **List filters ride in the address** (2026-09-26, frappe `router.js` `set_route_options_from_url`
+  → `list_view.js` `parse_filters_from_route_options`): `/app/purchase-invoice?supplier=X&bill_no=Y`
+  opens the list already filtered and replaces its saved filters. A bare list address instead
+  **restores the last saved filters** (seen live: a leftover `?name=…&supplier=…`). v16 shows
+  `/app/…` in the address bar as `/desk/…` — assert either. `/<doctype>/view/<kind>` is a list view,
+  never a record (`routeInfo` now agrees).
+
+Read from source and from this instance. Each of these cost real time to establish.
+
+- **Amend is client-side.** There is no server-side amend call: `frappe.client.cancel`, then
+  `frappe.model.copy_doc(doc, 1)` with `amended_from` set, then insert — exactly what
+  `form.js::amend_doc` does. 🔴 `from_amend` **keeps** `no_copy` fields rather than stripping them,
+  and the copy carries a temporary local name that `set_new_name` discards. A document may be
+  amended **once** (`frappe.client.is_document_amended`), and amending renames it to `<name>-1`,
+  so the ERP id changes while the vendor ref and logbook number do not — that is OI-170's reason.
+- 🔴 **Amending a v16 invoice with `Tax Withholding Entry` rows fails from code, not from Desk.**
+  Those rows link back to the invoice itself, and a bare `copy_doc(doc, 1)` + insert keeps them, so
+  `_validate_links` rejects the insert before anything could rebuild them. **Vanilla's Amend button
+  works** — the form's `onload` empties the table on any new document (`purchase_invoice.js:706`;
+  Sales Invoice and Payment Entry have the same clear), and ERPNext rebuilds the rows on save.
+  5zorro confirmed it by hand 2026-09-24 on ACC-PINV-2026-00243 → `-1`, which has a withholding
+  row. So the shell's drop-the-self-links fix is copying what the form does; it is **not** an
+  upstream bug, and `erpnext-issue-draft.md` (repo root, untracked) must **not** be filed. The
+  earlier claim that Vanilla fails too was inferred from the code path and never clicked. Both the
+  code comment (`src/doc-actions.js`) and the plan's P1 finding 2 are corrected (2026-09-26).
+  🔴 Testing withholding needs a supplier **with** a Tax Withholding Category (SAMPLE Vendor 01/02
+  here) — the tickbox alone creates no rows, and no rows means nothing to test.
+- **Cancelling an invoice detaches its payments here** — `unlink_payment_on_cancellation_of_invoice`
+  is on, so payments survive unallocated and the invoice's outstanding goes back up. They are not
+  re-applied to the amendment automatically.
+- 🔴 **And ERPNext keeps no record of what the payment paid.** `unlink_ref_doc_from_payment_entries`
+  (`accounts/utils.py:1025`) zeroes then *deletes* the Payment Entry Reference row, blanks
+  `against_voucher` on GL and Payment Ledger entries, and writes through the query builder so the
+  removal is not in the document's version history either. Confirmed by querying all three on this
+  sandbox. So the pairing can only be inferred, never looked up — and ERPNext's own
+  `allocate_entries` infers it badly (greedy over a `posting_date` sort, blind to amendments).
+  `src/payment-relink.js` proposes it from `amended_from` + an exact amount match instead, and
+  hands the chosen pairing to Payment Reconciliation to post. **Payment Reconciliation is a virtual
+  doctype** and is driven over HTTP with `run_doc_method` + `docs` as a JSON *string* — its own
+  `load_from_db` comment says that is the intended path, and it works (proven 2026-09-26).
+- 🔴 **Re-linking a payment is an update-after-submit, NOT a cancel-and-amend.**
+  `reconcile_against_document`'s docstring says "Cancel PE or JV … and resubmit", but the
+  implementation is `update_reference_in_payment_entry(do_not_save=True)` then `doc.save()` on a
+  submitted document, followed by deleting and rebuilding its ledger entries
+  (`accounts/utils.py:553`). Proven 2026-09-26: the payment kept its name and `docstatus`. So there
+  is **no second amendment** to chase when a payment is put back on an amended bill.
+- **The undo is `Unreconcile Payment`** — its `on_submit` calls the same
+  `unlink_ref_doc_from_payment_entries` and restores outstanding, and the Payment Entry form
+  carries an *UnReconcile* button. Also no amend.
+  🔴 But driving it over HTTP left this sandbox with the invoice's stored `outstanding_amount` (9.00,
+  Unpaid) disagreeing with its own Payment Ledger (net 0, i.e. paid), and the reconciliation tool
+  then offered neither side. Repaired with
+  `bench --site frontend execute erpnext.accounts.utils.update_voucher_outstanding --kwargs "{...}"`,
+  which is the recipe to remember for any stale outstanding. Prefer the Desk button over the
+  whitelisted `create_unreconcile_doc_for_selection` until that is understood.
+- **Provenance is a Comment; the review request is an assignment. Two records, on purpose.**
+  An assignment *closes*, and a closed one is invisible — so on its own it cannot answer "did a
+  person type this allocation or did a rule post it?", which is what a reviewer needs afterwards
+  (5zorro 2026-09-26). So every re-link also writes a permanent Comment via the whitelisted
+  `frappe.desk.form.utils.add_comment`, opening with the token `Allocation source:` and then
+  `AUTO-LINK` or `PERSON`. The difference it records is **blast radius**: a wrong auto-link means
+  the matching rule is wrong and others may be wrong the same way; a wrong manual one stops there.
+  Both paths write one, because "no comment" would otherwise mean three different things.
+- **Frappe assignments are the review flag.** `frappe.desk.form.assign_to.add` / `.close` (both
+  whitelisted) put a ToDo plus `_assign` on a document — an Open/Closed status, visible on the form
+  in a plain browser, and no custom field, so the site's schema is untouched. The shell finds its own
+  flags again by querying ToDo for the phrase `Auto-linked by the Doc shell`, which makes that
+  phrase load-bearing (`relinkReviewNote` in `src/payment-relink.js`).
+- 🔴 **`auto_reconcile_payments` is a gate, not an automation** — it only enables the *Process
+  Payment Reconciliation* tool, whose cron processes PPR documents somebody already queued. Turning
+  it on reconciles nothing by itself, and when it does run it allocates oldest-invoice-first. Left
+  **off** deliberately (5zorro 2026-09-26). `HANDOFF.md` § *ERP site settings this shell reads* is
+  the public table of this and the four others; all are at stock default here.
+- 🔴 **Cost layers are stored on every movement, not derived.** `Stock Ledger Entry.stock_queue` is
+  a Long Text holding `[[qty, rate], ...]` **as of that transaction** (`stock_ledger.py:1019`;
+  classes in `erpnext/stock/valuation.py`), and `stock_value_difference` on the same row is the COGS
+  it booked. A costing panel must **read** those — recomputing FIFO shell-side would be a second
+  opinion that drifts the first time a backdated entry reposts. `valuation_method` is per **Item**
+  (Select: `FIFO` / `Moving Average` / `LIFO` — all three exist in v16), and **Moving Average writes
+  no queue at all** (`get_moving_average_values`, `:1561`) — `stock_queue` stays `[]`. Verified on
+  this sandbox 2026-09-26 with the seed's three costing SKUs (buy 2 @ 50, buy 1 @ 75, sell 2): one
+  unit on hand under all three, worth 75.00 / 50.00 / 58.33, and the same sale booking COGS of
+  100.00 / 125.00 / 116.67. OI-177.
+- 🔴 **Shipping before receiving: whether the guess is ever corrected turns on the receipt's
+  posting date, nothing else.** Enabled by `Stock Settings.allow_negative_stock` **or** per item by
+  `Item.allow_negative_stock` (`is_negative_stock_allowed`, `stock_ledger.py:2417`). The outgoing
+  movement books COGS at a guess: `get_fallback_rate` (`:1708`) → last SLE valuation rate →
+  `Item.valuation_rate` → `standard_rate` → buying Item Price, landing on **0** if none exist. The
+  queue keeps a negative bin at *the rate of the last layer it consumed*, or that fallback
+  (`valuation.py` `remove_stock`: `[-qty, outgoing_rate or fifo_bin[RATE]]`) — **never** a future
+  receipt's rate. Then, proven live 2026-09-26 (ship 2 on Aug 1 with master rate 60, receive 3 @ 50):
+  - **receipt dated *after* the sale → no repost, ever.** The sale keeps 60.00 / −120.00 permanently.
+    The receipt absorbs the difference instead: 150.00 of goods moves **170.00** of value. Balance
+    sheet right, margin on that sale wrong in its own period and wrong in the receipt's, silently.
+  - **receipt *backdated* before the sale → `Repost Item Valuation` (Queued, async) → the sale is
+    genuinely rewritten** 60.00 → 50.00, −120.00 → −100.00. Costs land in the right periods.
+  So the one prompt worth building is at receipt time: *date this when the goods arrived and the
+  shipment corrects itself.* 🔴 The repost is **asynchronous**, so a panel reading straight after a
+  save can show a figure about to change and must say so.
+  **No cutoff out of the box:** `stock_frozen_upto`, `stock_frozen_upto_days` (both bypassed by
+  `stock_auth_role`) and `role_allowed_to_create_edit_back_dated_transactions` all unset here.
+  **No "negative stock" report exists** — Stock Balance shows negatives as rows, Stock Ledger shows
+  the cause per item, and *FIFO Queue vs Qty After Transaction* / *Stock Ledger Invariant Check* are
+  the audits. Not built: OI-178, walk-through at `docs/mockups/negative-inventory-timeline.html`.
+- 🔴 **A pending repost makes stored numbers read wrong, not blank.** `outstanding_amount`,
+  invoice status, stock queues and valuations are all **stored** and rebuilt by
+  `Repost Item Valuation`; until it runs they agree with each other and are stale together (seen
+  2026-09-26: 29 AR + 31 AP invoices "unpaid" with payments allocated in full, both 0 after the queue
+  drained; a queue totalling 540 units against a balance of 172). So any costing or ageing figure the
+  shell shows must check for an unfinished repost over that item/voucher. Most drain as **Skipped**
+  (ERPNext collapses redundant ones); one can **fail permanently** — check `status='Failed'` after a
+  bulk seed. Recipe and cause in `docs/gotchas.md` G14.
+- 🔴 **The negative-stock guess comes from four sources, and a Purchase Order is not one of them.**
+  `get_valuation_rate` stops at the first that answers: (1) the **last SLE's `valuation_rate`** for
+  that *item + warehouse*, `>= 0` and with **no date filter**; (2) `Item.valuation_rate`;
+  (3) `Item.standard_rate`; (4) the buying `Item Price.price_list_rate`. Source 1 wins whenever the
+  item has any movement in that warehouse, so only a **new SKU (or new warehouse)** ever reaches the
+  rest — and that is the case where the guess is often **0** and the shipment books no cost at all.
+  ERPNext *does* already record the PO's price: `Item.last_purchase_rate`, written by
+  `update_last_purchase_rate` (`buying/utils.py:14`) on **Purchase Order** submit
+  (`Buying Settings.disable_last_purchase_rate` = 0 here) — it is just not one of the four. Live:
+  `SAMPLE-RS-NEG-B1` had `last_purchase_rate` 55.00, the true cost, while costing its shipment at
+  `valuation_rate` 61.00. Source 4 can be made to track each PO by turning on
+  `Stock Settings.update_existing_price_list_rate` (0 here; `auto_insert_price_list_rate_if_missing`
+  is already 1, so `insert_item_price` creates the Standard Buying row once and never moves it —
+  `SAMPLE-RS-01` is stuck at 20.00 after a year of purchases). OI-178.
+- **`posting_date` has no restriction against past dates**, so backdating a payment is ordinary
+  usage. Default to today; do not forbid it.
+- 🔴 **Amending an amendment does not stack a suffix.** `_set_amended_name` (`naming.py:549`)
+  strips the trailing counter and increments it: `…-00231-1` → `…-00231-2`, not `…-00231-1-1`. And
+  the whole scheme is a site setting — with `Document Naming Settings.default_amend_naming` set to
+  "Default Naming" the amendment takes a fresh series name and the next name cannot be predicted at
+  all. This instance is on **Amend Counter**. `predictAmendedName` in `src/doc-actions.js` mirrors it.
+- 🔴 **Cancelling is refused, harmlessly, by anything submitted that links back.**
+  `check_no_back_links_exist` (`document.py:1578`) runs *after* `on_cancel` and the raise rolls the
+  whole transaction back — so a refused cancel changes nothing and cannot strand a document. Each
+  doctype's `ignore_linked_doctypes` (set in its own `on_cancel`) decides what is exempt; ledger
+  entries are, receipts and invoices are not. This is why the shell *names* blockers and never
+  enforces them.
+- 🔴 **The Accounts Payable report returns rows that are not bills.** An **unallocated payment**
+  comes back with a negative `outstanding` and **no due date**, which threw in the bank-calendar
+  walk and silently emptied the whole Pay Outstanding board (fixed 2026-09-26). Amending a paid
+  bill *creates* these, so they are routine here, not exotic.
+- **An existing `payment_schedule` survives validate.** `set_payment_schedule`
+  (`accounts_controller.py:2633`) only builds rows when there are none, so a `mode_of_payment`
+  written onto copied rows sticks — *except* when `automatically_fetch_payment_terms` and the
+  template's `allocate_payment_based_on_payment_terms` are both on and the bill came from an order,
+  where it refetches the schedule wholesale. The shell reads the value back rather than trusting it.
+- 🔴 **Payment schedule rows are only maintained when the Template sets
+  `allocate_payment_based_on_payment_terms`.** With it off, payments never touch
+  `paid_amount`/`outstanding` on the rows while the invoice's own outstanding falls. Split payment
+  itself is always allowed and terms never constrain it; a schedule row needs no Payment Term at
+  all (only `due_date` + `payment_amount`), rows must sum to the grand total, and **no two rows may
+  share a due date**.

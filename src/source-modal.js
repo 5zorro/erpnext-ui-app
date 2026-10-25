@@ -6,7 +6,7 @@
  */
 
 /**
- * @typedef {{ label: string, kind: "nic" | "po" | "pr", name?: string, draft?: boolean, loading?: boolean }} SourceItem
+ * @typedef {{ label: string, kind: "nic" | "po" | "pr" | "mr" | "sq" | "so", name?: string, draft?: boolean, loading?: boolean }} SourceItem
  * @typedef {{ id?: string, name: string, items: SourceItem[], loading?: boolean, error?: string }} SourceGroup
  */
 
@@ -132,43 +132,14 @@ export function sourceModalKeyAction(key) {
 }
 
 /**
- * Unique non-empty PO names from Purchase Receipt Item rows.
- * @param {Array<{ parent?: string, purchase_order?: string }>} itemRows
- * @returns {Record<string, string[]>} parent PR name → PO names
- */
-export function purchaseOrdersByReceipt(itemRows = []) {
-  /** @type {Record<string, string[]>} */
-  const map = {};
-  for (const row of itemRows || []) {
-    const parent = row && row.parent;
-    const po = row && row.purchase_order;
-    if (!parent || !po) continue;
-    if (!map[parent]) map[parent] = [];
-    if (!map[parent].includes(po)) map[parent].push(po);
-  }
-  return map;
-}
-
-/**
- * Attach `purchase_orders: string[]` onto PR list rows.
- * @param {object[]} receipts
- * @param {Array<{ parent?: string, purchase_order?: string }>} itemRows
- */
-export function enrichReceiptsWithPurchaseOrders(receipts = [], itemRows = []) {
-  const byPr = purchaseOrdersByReceipt(itemRows);
-  return (receipts || []).map((r) => ({
-    ...r,
-    purchase_orders: byPr[r.name] || r.purchase_orders || [],
-  }));
-}
-
-/**
  * @param {{ name?: string, title?: string, transaction_date?: string, posting_date?: string, grand_total?: number, purchase_orders?: string[], purchase_order?: string }} row
  * @param {"po" | "pr"} kind
  * @param {boolean} [draft]
  * @returns {SourceItem}
  */
 export function sourceItemFromRow(row, kind, draft = false) {
+  // The Purchase Order's sources (plan 2026-10-12 S3) — always submitted, so never a draft row.
+  if (kind === "mr" || kind === "sq" || kind === "so") return poSourceItemFromRow(row, kind);
   const date = kind === "po" ? row.transaction_date : row.posting_date;
   const logbook =
     kind === "po" && row.title != null && String(row.title).trim()
@@ -192,10 +163,11 @@ export function sourceItemFromRow(row, kind, draft = false) {
   }
   const money = formatSourceMoney(row.grand_total);
   if (kind === "pr") {
-    const pos = row.purchase_orders || (row.purchase_order ? [row.purchase_order] : []);
-    const poLabel = pos.length ? `PO ${pos.join(", ")}` : "no PO";
+    const pos = row.purchase_orders || (row.purchase_order ? [row.purchase_order] : null);
+    // "no PO" only when the receipt's lines were read and name none (review R7-3).
+    const poBit = pos ? `   ·   ${pos.length ? `PO ${pos.join(", ")}` : "no PO"}` : "";
     return {
-      label: `${row.name || ""}   ·   ${poLabel}   ·   ${date || ""}   ·   ${money}`,
+      label: `${row.name || ""}${poBit}   ·   ${date || ""}   ·   ${money}`,
       kind,
       name: row.name,
     };
@@ -210,57 +182,36 @@ export function sourceItemFromRow(row, kind, draft = false) {
 }
 
 /**
- * @param {{
- *   purchaseOrders?: object[],
- *   purchaseReceipts?: object[],
- *   purchaseOrdersDraft?: object[],
- *   purchaseReceiptsDraft?: object[],
- * }} lists
- * @returns {SourceGroup[]}
+ * A Material Request, Supplier Quotation or Sales Order as a PO source row. What tells them apart
+ * at a glance: an MR's title and when it is needed, a quotation's total and how long it is good
+ * for, a Sales Order's customer and how many lines are still to order.
+ * @param {{ name?: string, title?: string, transaction_date?: string, schedule_date?: string, valid_till?: string,
+ *   grand_total?: number, customer?: string, customer_name?: string, lines_to_order?: number }} row
+ * @param {"mr" | "sq" | "so"} kind
+ * @returns {SourceItem}
  */
-export function buildBillSourceGroups(lists = {}) {
-  const pos = lists.purchaseOrders || [];
-  const prs = lists.purchaseReceipts || [];
-  const posD = lists.purchaseOrdersDraft || [];
-  const prsD = lists.purchaseReceiptsDraft || [];
-
-  /** @type {SourceGroup[]} */
-  const groups = [
-    {
-      id: "nic",
-      name: "Not in computer (NIC)",
-      items: [{ label: "NIC — enter this Bill manually (no source)", kind: "nic" }],
-    },
-  ];
-  if (pos.length) {
-    groups.push({
-      id: "po_submitted",
-      name: `Purchase Orders — submitted (${pos.length})`,
-      items: pos.map((p) => sourceItemFromRow(p, "po", false)),
-    });
+export function poSourceItemFromRow(row, kind) {
+  const r = row || {};
+  const sep = "   ·   ";
+  const bits = [String(r.name || "")];
+  if (kind === "mr") {
+    const title = r.title != null && String(r.title).trim() && String(r.title).trim() !== r.name ? String(r.title).trim() : "";
+    if (title) bits.push(title);
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    if (r.schedule_date) bits.push(`needed by ${r.schedule_date}`);
+  } else if (kind === "sq") {
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    const money = formatSourceMoney(r.grand_total);
+    if (money) bits.push(money);
+    if (r.valid_till) bits.push(`good till ${r.valid_till}`);
+  } else {
+    const who = String(r.customer_name || r.customer || "").trim();
+    if (who) bits.push(who);
+    if (r.transaction_date) bits.push(String(r.transaction_date));
+    const n = Number(r.lines_to_order);
+    if (Number.isFinite(n) && n > 0) bits.push(`${n} line${n === 1 ? "" : "s"} to order`);
   }
-  if (prs.length) {
-    groups.push({
-      id: "pr_submitted",
-      name: `Item Receipts — submitted (${prs.length})`,
-      items: prs.map((p) => sourceItemFromRow(p, "pr", false)),
-    });
-  }
-  if (posD.length) {
-    groups.push({
-      id: "po_draft",
-      name: "Purchase Orders — draft (not selectable)",
-      items: posD.map((p) => sourceItemFromRow(p, "po", true)),
-    });
-  }
-  if (prsD.length) {
-    groups.push({
-      id: "pr_draft",
-      name: "Item Receipts — draft (not selectable)",
-      items: prsD.map((p) => sourceItemFromRow(p, "pr", true)),
-    });
-  }
-  return groups;
+  return { label: bits.join(sep), kind, name: r.name };
 }
 
 /**

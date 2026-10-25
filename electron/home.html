@@ -76,6 +76,17 @@
     .item[data-wash-role="fulfill"] { --role-accent: var(--accent-fulfill); }
     .item[data-wash-role="invoice"] { --role-accent: var(--accent-invoice); }
     .item[data-wash-role="payment"] { --role-accent: var(--accent-payment); }
+    .item[data-wash-role="request"] { --hatch-base: var(--wash-request); }
+    .item[data-wash-role="order"] { --hatch-base: var(--wash-order); }
+    .item[data-wash-role="fulfill"] { --hatch-base: var(--wash-fulfill); }
+    .item[data-wash-role="invoice"] { --hatch-base: var(--wash-invoice); }
+    .item[data-wash-role="payment"] { --hatch-base: var(--wash-payment); }
+    .item[data-wash-role="request"]:hover { --hatch-base: color-mix(in srgb, var(--wash-request) 55%, white); }
+    .item[data-wash-role="order"]:hover { --hatch-base: color-mix(in srgb, var(--wash-order) 55%, white); }
+    .item[data-wash-role="fulfill"]:hover { --hatch-base: color-mix(in srgb, var(--wash-fulfill) 55%, white); }
+    .item[data-wash-role="invoice"]:hover { --hatch-base: color-mix(in srgb, var(--wash-invoice) 55%, white); }
+    .item[data-wash-role="payment"]:hover { --hatch-base: color-mix(in srgb, var(--wash-payment) 55%, white); }
+    .item .ic.hatch-clear { width: fit-content; margin-inline: auto; padding: 2px 4px; }
     html[data-pattern="ar"] .item[data-desk="ar"],
     html[data-pattern="ap"] .item[data-desk="ap"],
     html[data-pattern="both"] .item[data-desk] { background-image: var(--hatch-desk); }
@@ -216,7 +227,7 @@
       b.dataset.testid = `tile-${t.id}`;
       if (t.washRole) b.dataset.washRole = t.washRole;
       if (t.desk) b.dataset.desk = t.desk;
-      b.innerHTML = `<div class="ic">${homeTileIconHtml(t.id)}</div>${t.label}`;
+      b.innerHTML = `<div class="ic hatch-clear">${homeTileIconHtml(t.id)}</div><span class="lbl hatch-clear">${t.label}</span>`;
       if (t.disabled) {
         b.title = "Requires an ERP module that may not be installed";
       } else if (t.id === "bill-new" && api.openEntry) {

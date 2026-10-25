@@ -38,9 +38,9 @@ describe("DOC_SKIN_PROFILES", () => {
     assert.equal(po?.memoLabel, undefined);
   });
 
-  it("PO excludes taxes/source; IR includes taxes/source/memo", () => {
+  it("PO excludes taxes, has its own sources (plan 2026-10-12 S3); IR includes taxes/source/memo", () => {
     assert.equal(DOC_SKIN_PROFILES.po.features.taxes, false);
-    assert.equal(DOC_SKIN_PROFILES.po.features.sourceModal, false);
+    assert.equal(DOC_SKIN_PROFILES.po.features.sourceModal, true);
     assert.equal(DOC_SKIN_PROFILES.po.features.memo, false);
     assert.equal(DOC_SKIN_PROFILES.po.features.addressPicker, true);
     assert.equal(DOC_SKIN_PROFILES.bill.features.addressPicker, true);

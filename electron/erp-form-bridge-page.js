@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 23;
+  var VERSION = 29;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -19,6 +19,79 @@
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  /**
+   * The last `SomeError: message` line of a Frappe traceback (`r.exc`, a JSON list of them) — what
+   * the clerk should read when a refused save carries no `_server_messages` (review 10-19 R6b-2:
+   * the status line once got the whole ~3,000-character traceback). Mirrors
+   * `frappeExcMessage` in src/erp-form-bridge.js.
+   */
+  function frappeExcMessage(exc) {
+    var text = String(exc == null ? "" : exc);
+    try {
+      var parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) text = parsed.join("\n");
+      else if (typeof parsed === "string") text = parsed;
+    } catch (eParse) {}
+    var lines = text.split(/\r?\n/);
+    for (var i = lines.length - 1; i >= 0; i--) {
+      var m = /^\s*(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*(?:Error|Exception))\s*:\s*(.+?)\s*$/.exec(lines[i]);
+      if (m) return stripHtml(m[2]);
+    }
+    return "";
+  }
+
+  /** ERPNext's reason for a refused call: its messages, else the traceback's last line. */
+  function refusalText(r) {
+    var msg = "";
+    try {
+      if (r && r._server_messages) {
+        var parsed = JSON.parse(r._server_messages);
+        if (Array.isArray(parsed)) {
+          var all = parsed.map(function (m) {
+            try {
+              return typeof m === "string" ? JSON.parse(m) : m;
+            } catch (eMap) {
+              return { message: m };
+            }
+          });
+          // The reply also carries notes ERPNext printed on the way ("Expense Head changed…");
+          // the refusal is the one it raised.
+          var raised = all.filter(function (o) {
+            return o && (o.raise_exception || o.indicator === "red");
+          });
+          msg = (raised.length ? raised : all)
+            .map(function (o) {
+              return stripHtml((o && o.message) || "");
+            })
+            .filter(Boolean)
+            .join(" · ");
+        }
+      }
+    } catch (eMsg) {}
+    return msg || frappeExcMessage(r && r.exc);
+  }
+
+  // xList / xValue: frappe.db.get_list never settles on a refusal (review 10-19 R7-5, G19). The
+  // same text as src/erp-refusal-reason.js ERP_LIST_JS (tests/erp-no-frappe-db.test.js keeps them equal).
+  function xList(doctype, args) {
+    var a = {};
+    var src = args || {};
+    for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) a[k] = src[k];
+    a.doctype = doctype;
+    if (!a.fields) a.fields = ["name"];
+    if (!("limit" in a)) a.limit = 20;
+    return frappe.xcall("frappe.desk.reportview.get_list", a);
+  }
+  function xValue(doctype, filters, fieldname) {
+    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+  }
+
+  /** A refused xList / xValue: its own message, else the reply ERPNext refused with. */
+  function listRefusal(e) {
+    var said = (e && e.message) || refusalText(window.frappe && frappe.last_response);
+    return said || String(e == null ? "ERPNext refused without saying why." : e);
   }
 
   function clearSaveLocks() {
@@ -62,6 +135,28 @@
       if (frappe && frappe.throw_msg) push(frappe.throw_msg);
     } catch (eT) {}
     return parts;
+  }
+
+  /**
+   * A Bill's posting date is a stamp — the day it is saved or submitted (5zorro 2026-10-10). Untick
+   * Edit Posting Date and stamp today, so a draft left with it ticked (the 2026-09-26 rule, now
+   * reversed) cannot post on an old date. Direct assignment: no triggers fire mid-save.
+   */
+  function stampBillPostingDate(f) {
+    try {
+      if (!f || !f.doc || f.doc.doctype !== "Purchase Invoice") return null;
+      var today = frappe.datetime.get_today();
+      if (!Number(f.doc.set_posting_time) && f.doc.posting_date === today) return null;
+      var prev = f.doc.posting_date;
+      f.doc.set_posting_time = 0;
+      f.doc.posting_date = today;
+      try {
+        f.refresh_fields(["set_posting_time", "posting_date"]);
+      } catch (eRf) {}
+      return { from: prev, to: today };
+    } catch (e) {
+      return null;
+    }
   }
 
   /**
@@ -353,6 +448,8 @@
         clearSaveLocks();
         installSaveWatch();
 
+        // A Bill posts the day it is saved or submitted.
+        stampBillPostingDate(f);
         // Avoid hanging on ERPNext posting-date confirm (hidden under Doc skin).
         alignPostingDateLikeVanillaOk(f);
 
@@ -440,32 +537,18 @@
               callback: function (r) {
                 clearTimeout(timer);
                 if (r && r.exc) {
-                  var msg = "";
-                  try {
-                    if (r._server_messages) {
-                      var parsed = JSON.parse(r._server_messages);
-                      if (Array.isArray(parsed)) {
-                        msg = parsed
-                          .map(function (m) {
-                            try {
-                              var o = typeof m === "string" ? JSON.parse(m) : m;
-                              return stripHtml((o && o.message) || m);
-                            } catch (eMap) {
-                              return stripHtml(m);
-                            }
-                          })
-                          .filter(Boolean)
-                          .join(" ");
-                      }
-                    }
-                  } catch (eMsg) {}
+                  var msg = refusalText(r);
                   if (!msg) {
                     var scrapedExc = collectVisibleVanillaErrors();
                     if (scrapedExc.length) msg = scrapedExc.join(" · ");
                   }
+                  // The refusal's dialog would stay open in the hidden page; its text is in hand.
+                  try {
+                    if (msg && frappe.msg_dialog && frappe.msg_dialog.display) frappe.msg_dialog.hide();
+                  } catch (eHide) {}
                   finish({
                     ok: false,
-                    reason: msg || stripHtml(String(r.exc)) || "Save failed.",
+                    reason: msg || "Save failed — ERPNext gave no reason.",
                     blockers: msg ? [msg] : undefined,
                   });
                   return;
@@ -521,15 +604,21 @@
               },
               error: function (r) {
                 clearTimeout(timer);
-                var scrapedErr = collectVisibleVanillaErrors();
-                var errMsg = stripHtml((r && (r.message || r.exc)) || "");
+                // A refusal (HTTP 417) lands here, not in `callback`: read ERPNext's own message
+                // first — the scraped dialog carries its chrome ("Message … Confirm") — R6b-2.
+                var errMsg = refusalText(r);
+                var scrapedErr = errMsg ? [] : collectVisibleVanillaErrors();
+                if (!errMsg && !scrapedErr.length) errMsg = stripHtml((r && typeof r.message === "string" && r.message) || "");
+                try {
+                  if (errMsg && frappe.msg_dialog && frappe.msg_dialog.display) frappe.msg_dialog.hide();
+                } catch (eHide2) {}
                 finish({
                   ok: false,
                   reason:
-                    (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
                     errMsg ||
+                    (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
                     "Save request failed.",
-                  blockers: scrapedErr.length ? scrapedErr : errMsg ? [errMsg] : undefined,
+                  blockers: errMsg ? [errMsg] : scrapedErr.length ? scrapedErr : undefined,
                 });
               },
               always: function () {
@@ -572,8 +661,20 @@
     }
   }
 
-  function afterAjaxQuiet(maxWaitMs) {
+  /**
+   * @param {number} [maxWaitMs]
+   * @param {number} [minMs] a polling loop passes its pace here; one-off waits leave it at 0
+   */
+  function afterAjaxQuiet(maxWaitMs, minMs) {
     maxWaitMs = maxWaitMs || 12000;
+    // 🔴 `frappe.after_ajax` calls back at once when no request is out. Resolving there let a
+    // `while (…) await afterAjaxQuiet()` loop spin on microtasks without ever yielding: the page
+    // froze for the loop's whole deadline, ERPNext's own replies could not land (so the wait
+    // always ran out), and each spin logged a timing entry (plan 2026-10-21 D3: vendor writes took
+    // ~38 s under chaos and could freeze the ERPNext page). Quiet now still waits a real turn —
+    // `setTimeout` 0 for a one-off wait (31 callers; a floor on each would slow every cell write),
+    // and the polling loops pass their own pace.
+    minMs = Math.min(minMs || 0, maxWaitMs);
     return new Promise(function (resolve) {
       var done = false;
       function finish() {
@@ -581,15 +682,18 @@
         done = true;
         resolve();
       }
+      function quiet() {
+        setTimeout(finish, minMs);
+      }
       try {
         if (window.frappe && typeof frappe.after_ajax === "function") {
-          frappe.after_ajax(finish);
+          frappe.after_ajax(quiet);
         } else {
-          finish();
+          quiet();
           return;
         }
       } catch (e) {
-        finish();
+        quiet();
         return;
       }
       setTimeout(finish, maxWaitMs);
@@ -889,8 +993,8 @@
             return;
           }
           var slice = supplierSnapshotWaitSliceMs(deadline, Date.now());
-          timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
-          await afterAjaxQuiet(slice);
+          if (timing.length < 100) timing.push({ event: "wait_slice", ms: slice, remaining: deadline - Date.now() });
+          await afterAjaxQuiet(slice, 50);
         }
         if (!done) finish(tryReady());
       })();
@@ -1021,9 +1125,43 @@
           return { ok: true, rows: sched.length };
         }
       } catch (eW) {}
-      await afterAjaxQuiet(400);
+      await afterAjaxQuiet(400, 100);
     }
     return { ok: false, rows: 0, reason: "payment_schedule empty (timeout)" };
+  }
+
+  /**
+   * The payment schedule the way ERPNext's own save builds it (accounts_controller
+   * set_payment_schedule): counted from `bill_date or posting_date`, passing that date AS the posting
+   * date. The form-side call (transaction.js payment_terms_template) passes the real posting date,
+   * and get_payment_term_details pulls any due date earlier than it up to the posting date — on a
+   * backdated invoice that gives "today", which the save then refuses ("Due Date cannot be after
+   * <invoice date + terms>"). Hidden while a Bill posted on its Invoice date; exposed when the
+   * posting date became a stamp (5zorro 2026-10-10).
+   * @returns {Promise<boolean>} true when a schedule was set
+   */
+  async function fetchScheduleLikeSave(f) {
+    try {
+      var d = f && f.doc;
+      if (!d || d.doctype !== "Purchase Invoice" || !d.bill_date || !d.payment_terms_template || d.is_return) return false;
+      var r = await frappe.call({
+        method: "erpnext.controllers.accounts_controller.get_payment_terms",
+        args: {
+          terms_template: d.payment_terms_template,
+          posting_date: d.bill_date,
+          grand_total: d.rounded_total || d.grand_total,
+          base_grand_total: d.base_rounded_total || d.base_grand_total,
+          bill_date: d.bill_date,
+        },
+      });
+      if (!r || !Array.isArray(r.message) || !r.message.length) return false;
+      var ret = f.set_value("payment_schedule", r.message);
+      if (ret && typeof ret.then === "function") await ret;
+      await afterAjaxQuiet(2000);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   async function fetchPartyDueDate(f) {
@@ -1060,10 +1198,11 @@
         var child = frappe.model.add_child(f.doc, "Payment Schedule", "payment_schedule");
         if (child) {
           child.due_date = due;
-          child.payment_amount =
-            f.doc.grand_total != null && f.doc.grand_total !== ""
-              ? f.doc.grand_total
-              : f.doc.rounded_total || 0;
+          // 🔴 A portion, not only an amount (review 10-19 R6b-1): ERPNext's set_payment_schedule
+          // rescales only rows with an invoice_portion, so a bare amount (0.00 on an empty bill)
+          // stayed and every save was refused "must be equal to Grand / Rounded Total".
+          child.invoice_portion = 100;
+          child.payment_amount = f.doc.rounded_total || f.doc.grand_total || 0;
         }
       } else if (sched.length === 1) {
         sched[0].due_date = due;
@@ -1170,6 +1309,7 @@
         var retTerms = f.trigger("payment_terms_template");
         if (retTerms && typeof retTerms.then === "function") await retTerms;
         var waitSched = await waitForPaymentScheduleRows(f, 12000);
+        if (await fetchScheduleLikeSave(f)) waitSched = { ok: true, rows: (f.doc.payment_schedule || []).length };
         meta.waited_ms = Date.now() - t0;
         meta.schedule_rows = waitSched.rows || 0;
         if (!waitSched.ok) meta.reason = waitSched.reason || "schedule timeout";
@@ -1186,6 +1326,7 @@
           var retRecalc = f.trigger("payment_terms_template");
           if (retRecalc && typeof retRecalc.then === "function") await retRecalc;
           var waitSched2 = await waitForPaymentScheduleRows(f, 12000);
+          if (await fetchScheduleLikeSave(f)) waitSched2 = { ok: true, rows: (f.doc.payment_schedule || []).length };
           meta.waited_ms = Date.now() - t0;
           meta.schedule_rows = waitSched2.rows || 0;
           if (!waitSched2.ok) meta.reason = waitSched2.reason || "schedule timeout";
@@ -1222,13 +1363,10 @@
   /**
    * @param {string} field
    * @param {unknown} value
-   * @param {{ keepTypedPostingDate?: boolean, postingDateFollows?: boolean }} [opts]
+   * @param {{ keepTypedPostingDate?: boolean }} [opts]
    *   keepTypedPostingDate: tick `set_posting_time` first, so ERPNext keeps a typed posting
    *   date instead of resetting it to today on save (Invoice, Item Receipt; what Vanilla's
    *   "Edit Posting Date and Time" box does).
-   *   postingDateFollows (Bill's Invoice date): the typed date is also the posting date — the
-   *   rule ERPNext itself uses for due dates, `bill_date or posting_date` (5zorro 2026-09-26:
-   *   "use typed date and if not exists, then posted date"). Clearing it goes back to today.
    */
   function setHeader(field, value, opts) {
     return (async function () {
@@ -1250,21 +1388,14 @@
           var tick = f.set_value("set_posting_time", 1);
           if (tick && typeof tick.then === "function") await tick;
         }
-        // Posting date first, then the typed date: the terms settle below keys off bill_date and
-        // must run last, or the posting_date script would recompute the due date after it.
-        if (opts && opts.postingDateFollows && hasPostingTime) {
-          var typed = value != null ? String(value).trim() : "";
-          var follow = typed
-            ? f.set_value({ set_posting_time: 1, posting_date: typed })
-            : f.set_value({ set_posting_time: 0, posting_date: frappe.datetime.get_today() });
-          if (follow && typeof follow.then === "function") await follow;
-          await afterAjaxQuiet();
-        }
         var ret = f.set_value(field, value);
         if (ret && typeof ret.then === "function") await ret;
         await afterAjaxQuiet();
         if (field === "payment_terms_template" || field === "bill_date") {
           paymentTermsSettle = await settlePaymentTermsAfterHeaderChange(f, field);
+        } else if (field === "supplier" && f.doc.bill_date && f.doc.payment_terms_template) {
+          // The vendor's terms arrive through the form-side call; re-count them from the Invoice date.
+          if (await fetchScheduleLikeSave(f)) syncHeaderDueDateFromSchedule(f);
         } else if (field === "due_date") {
           dueDateScheduleSync = syncScheduleFromHeaderDueDate(f, value);
         }
@@ -1399,7 +1530,7 @@
 
         if (field === "item_code" && row && value && rowNeedsEnrichment(row)) {
           try {
-            var iv = await frappe.db.get_value("Item", value, [
+            var iv = await xValue("Item", value, [
               "item_name",
               "description",
               "standard_rate",
@@ -1452,7 +1583,8 @@
       try {
         var f = window.cur_frm;
         if (!f) return { ok: false, reason: "No form." };
-        if (!src || !src.items) return { ok: false, reason: "No items mapped from source." };
+        // An empty list too: clearing the lines for nothing is never a merge (review R7-1).
+        if (!src || !src.items || !src.items.length) return { ok: false, reason: "No items mapped from source." };
         var headerPlan = plan && typeof plan === "object" ? plan : null;
         var partyList = headerPlan && headerPlan.party ? headerPlan.party : [];
         for (var pi = 0; pi < partyList.length; pi++) {
@@ -1553,7 +1685,7 @@
             }
           } else if (code && !stripHtml(row.description)) {
             try {
-              var iv = await frappe.db.get_value("Item", code, [
+              var iv = await xValue("Item", code, [
                 "item_name",
                 "description",
                 "standard_rate",
@@ -1659,6 +1791,54 @@
     add_deduct_tax: true,
   };
 
+  /**
+   * DF-02: each item line keeps a copy of the tax rates (`item_tax_rate`) taken when it was added,
+   * and ERPNext computes a % row from that copy, not from the row. So a new Rate % showed the old
+   * amount until save, when the server rebuilds the copies (`taxes_and_totals.update_item_tax_map`
+   * → `get_item_tax_map`). Rebuild them here the same way: lines without an Item Tax Template get
+   * { account: rate } of every row not set by an item template. Lines with a template keep theirs.
+   */
+  function rebuildItemTaxMaps(f) {
+    var map = {};
+    (f.doc.taxes || []).forEach(function (t) {
+      if (!t.set_by_item_tax_template && t.account_head) map[t.account_head] = t.rate;
+    });
+    var json = JSON.stringify(map);
+    (f.doc.items || []).forEach(function (it) {
+      if (!it.item_tax_template) it.item_tax_rate = json;
+    });
+  }
+
+  /**
+   * DF-02 J: point bill lines at the just-in-time receipt lines made for them. Update Stock goes
+   * off — ERPNext refuses it on a bill whose lines come from a receipt.
+   * @param {{ rowIndex: number, purchase_receipt: string, pr_detail: string }[]} links
+   */
+  function linkReceiptLines(links) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f) return { ok: false, reason: "No form." };
+        if (Number(f.doc.update_stock)) {
+          await f.set_value("update_stock", 0);
+          await afterAjaxQuiet();
+        }
+        for (var i = 0; i < (links || []).length; i++) {
+          var l = links[i];
+          var row = (f.doc.items || [])[l.rowIndex];
+          if (!row) return { ok: false, reason: "Bill line " + (l.rowIndex + 1) + " is gone." };
+          await setValueAsync(row.doctype, row.name, "purchase_receipt", l.purchase_receipt);
+          await setValueAsync(row.doctype, row.name, "pr_detail", l.pr_detail);
+        }
+        await afterAjaxQuiet();
+        await refreshTaxesAndTotals(f);
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
   function setTaxRow(rowIndex, field, value) {
     return (async function () {
       try {
@@ -1678,6 +1858,7 @@
         }
         await setValueAsync(row.doctype, row.name, field, value);
         await afterAjaxQuiet();
+        if (field === "rate" && row.charge_type !== "Actual") rebuildItemTaxMaps(f);
         await refreshTaxesAndTotals(f);
         await afterAjaxQuiet();
         return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)) };
@@ -1753,25 +1934,28 @@
 
   async function fetchPoLineMeta(poDetails, prDetails, poNames) {
     try {
-      if (!window.frappe || !frappe.db || !frappe.db.get_list) {
+      if (!window.frappe || !frappe.xcall) {
         return { ok: false, reason: "frappe not ready", poItems: [], poHeaders: [], prItems: [] };
       }
+      // A child table's rows: name the parent, or ERPNext refuses anyone but Administrator.
       var poItems = poDetails && poDetails.length
-        ? await frappe.db.get_list("Purchase Order Item", {
+        ? await xList("Purchase Order Item", {
+            parent_doctype: "Purchase Order",
             filters: [["name", "in", poDetails]],
             fields: ["name", "idx", "sales_order", "customer", "parent", "qty", "rate", "amount", "billed_amt"],
             limit: poDetails.length,
           })
         : [];
       var prItems = prDetails && prDetails.length
-        ? await frappe.db.get_list("Purchase Receipt Item", {
+        ? await xList("Purchase Receipt Item", {
+            parent_doctype: "Purchase Receipt",
             filters: [["name", "in", prDetails]],
             fields: ["name", "idx", "parent", "qty", "rate", "amount", "billed_amt"],
             limit: prDetails.length,
           })
         : [];
       var poHeaders = poNames && poNames.length
-        ? await frappe.db.get_list("Purchase Order", {
+        ? await xList("Purchase Order", {
             filters: [["name", "in", poNames]],
             fields: ["name", "customer", "customer_name"],
             limit: poNames.length,
@@ -1781,7 +1965,7 @@
     } catch (e) {
       return {
         ok: false,
-        reason: String(e && e.message ? e.message : e),
+        reason: listRefusal(e),
         poItems: [],
         poHeaders: [],
         prItems: [],
@@ -1834,6 +2018,7 @@
     zeroAllQty: zeroAllQty,
     clearRow: clearRow,
     setTaxRow: setTaxRow,
+    linkReceiptLines: linkReceiptLines,
     addTaxRow: addTaxRow,
     deleteTaxRow: deleteTaxRow,
     afterAjaxQuiet: afterAjaxQuiet,

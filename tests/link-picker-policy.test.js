@@ -5,7 +5,9 @@ import {
   nextLinkHighlightIndex,
   resolveLinkPickIndex,
   linkPickerKeyAction,
+  linkPickOwnsCommit,
   linkPickerOpenQuery,
+  linkPickerCommitPlan,
   nextFieldAfterLinkPick,
   nextItemFieldAfterEdit,
   nextItemFocusAfterEdit,
@@ -50,6 +52,15 @@ describe("linkPickerKeyAction", () => {
     assert.equal(linkPickerKeyAction("Escape", { dropdownOpen: true, optionCount: 2 }), "close");
     assert.equal(linkPickerKeyAction("ArrowDown", { dropdownOpen: false, optionCount: 0 }), "search");
     assert.equal(linkPickerKeyAction("ArrowDown", { dropdownOpen: true, optionCount: 3 }), "move_down");
+  });
+  it("Tab/Enter before the first list is in are the picker's to hold (review 2026-10-22)", () => {
+    assert.equal(linkPickerKeyAction("Tab", { dropdownOpen: false, optionCount: 0, searchPending: true }), "pick");
+    assert.equal(linkPickerKeyAction("Enter", { dropdownOpen: true, optionCount: 0, searchPending: true }), "pick");
+    // Nothing on its way (Esc closed it, or "No matches" is the answer): Tab leaves the box.
+    assert.equal(linkPickerKeyAction("Tab", { dropdownOpen: true, optionCount: 0, searchPending: false }), "none");
+    // Esc in the typing pause, before the list opens, still cancels the search on its way.
+    assert.equal(linkPickerKeyAction("Escape", { dropdownOpen: false, optionCount: 0, searchPending: true }), "close");
+    assert.equal(linkPickerKeyAction("Escape", { dropdownOpen: false, optionCount: 0 }), "none");
   });
 });
 
@@ -225,5 +236,38 @@ describe("linkPickerOpenQuery", () => {
   it("does not throw on junk", () => {
     assert.equal(linkPickerOpenQuery(null, null), "");
     assert.equal(linkPickerOpenQuery(undefined, undefined), "");
+  });
+});
+
+describe("linkPickerCommitPlan (review 10-19 R5b-1)", () => {
+  const list = ["ABC-1", "ABC-10", "ABC-12"];
+  it("a list fetched for the typed text picks its highlighted option, as before", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: "ABC", values: list, hi: 2 }), { kind: "pick", index: 2 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: "ABC", values: list, hi: -1 }), { kind: "pick", index: 0 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ZZ", listFor: "ZZ", values: [], hi: -1 }), { kind: "none" });
+  });
+  it("an older list never commits its highlighted option for other text", () => {
+    // Typed ABC-12 fast; the list on screen is still ABC-1's with ABC-1 highlighted.
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-12", listFor: "ABC-1", values: ["ABC-1"], hi: 0 }), { kind: "hold" });
+  });
+  it("the typed text naming an option of an older list picks it at once (5zorro's fast Tab)", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-12", listFor: "ABC-1", values: list, hi: 0 }), { kind: "pick", index: 2 });
+    assert.deepEqual(linkPickerCommitPlan({ typed: " abc-1 ", listFor: "AB", values: list, hi: 1 }), { kind: "pick", index: 0 });
+  });
+  it("a Create… row is never an exact match, and no list yet means hold", () => {
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC-9", listFor: "ABC", values: list.concat([null]), hi: 0 }), { kind: "hold" });
+    assert.deepEqual(linkPickerCommitPlan({ typed: "ABC", listFor: null, values: [], hi: -1 }), { kind: "hold" });
+  });
+  it("chevron-opened on a committed value: the list is current, the arrowed option wins", () => {
+    // linkPickerOpenQuery searches "" but the box still holds the committed text it started from.
+    assert.deepEqual(linkPickerCommitPlan({ typed: "Net 30", listFor: "Net 30", values: ["Net 30", "Net 60"], hi: 1 }), { kind: "pick", index: 1 });
+  });
+});
+
+describe("linkPickOwnsCommit (review 2026-10-22)", () => {
+  it("the blur does not write what a pick is writing", () => {
+    assert.equal(linkPickOwnsCommit("SUMMIT TRADERS", "SUMMIT TRADERS "), true);
+    assert.equal(linkPickOwnsCommit("SUMMIT TRADERS", "ALPINE"), false);
+    assert.equal(linkPickOwnsCommit(undefined, "SUMMIT TRADERS"), false);
   });
 });

@@ -76,6 +76,7 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-due-date", kind: "date", modeSwitch: "date" },
   { id: "doc-caps", kind: "button", modeSwitch: "none", notes: "OI-111 ALL-CAPS toggle" },
   { id: "doc-number-lead", kind: "button", modeSwitch: "none", notes: "OI-170 which number leads (theirs / ours), app-wide" },
+  { id: "doc-papers", kind: "button", modeSwitch: "none", notes: "Compare pane: the document's papers beside it" },
   {
     id: "bill-lines-section",
     kind: "section",
@@ -121,6 +122,18 @@ const BILL_DOC_STATIC = Object.freeze([
   { id: "bill-tax-amount", kind: "money", modeSwitch: "tenkey" },
   { id: "bill-add-tax", kind: "button", modeSwitch: "none" },
   {
+    id: "bill-remove-all-tax",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "DF-02: clears every tax row and the template; stays removed until save (mouse only)",
+  },
+  {
+    id: "bill-tax-default",
+    kind: "button",
+    modeSwitch: "none",
+    notes: "DF-02 ⓘ: why these taxes (Default template / vendor Tax Rule) and how to change them",
+  },
+  {
     id: "bill-open-landed-cost",
     kind: "button",
     modeSwitch: "none",
@@ -154,7 +167,7 @@ const BILL_DOC_STATIC = Object.freeze([
 ]);
 
 /**
- * One representative item line (runtime-rendered; not in static bill.html).
+ * One representative item line (runtime-rendered; not in the static fragment).
  * @returns {CuratedInteractable[]}
  */
 function billDocLineTemplate() {
@@ -162,6 +175,7 @@ function billDocLineTemplate() {
   const rows = [];
   for (const col of BILL_ITEM_COLS) {
     if (!col.field) continue; // Amount display-only
+    if (String(col.field).startsWith("__rec_")) continue; // one click target, below
     const money = col.field === "qty" || col.field === "rate";
     rows.push({
       id: `bill-line-template:${col.field}`,
@@ -171,6 +185,13 @@ function billDocLineTemplate() {
       notes: `Item col ${col.label}`,
     });
   }
+  rows.push({
+    id: "bill-line-template:received",
+    kind: "button",
+    modeSwitch: "none",
+    synthetic: true,
+    notes: "DF-02 J: Rec'd by / Rec'd Date — one click opens the line's receive editor (mouse)",
+  });
   rows.push({
     id: "bill-line-template:delete",
     kind: "button",

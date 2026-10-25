@@ -184,7 +184,8 @@ export const DOC_SKIN_PROFILES = {
       amountDue: false,
       taxes: false,
       expensesTab: false,
-      sourceModal: false,
+      // NIC / Material Request / Supplier Quotation / Sales Order (plan 2026-10-12 S3).
+      sourceModal: true,
       memo: false,
       lineTotals: true,
       dateExpected: true,
@@ -243,7 +244,8 @@ export const DOC_SKIN_PROFILES = {
     shell: "doc-form",
     desk: "ar",
     partyField: "customer",
-    features: { ...AR_FEATURES, progress: true },
+    // createMenu: Create ▾ (plan 2026-10-12 S2) — the Sales Order is the A/R dashboard.
+    features: { ...AR_FEATURES, progress: true, createMenu: true },
   },
   invoice: {
     id: "invoice",
@@ -462,7 +464,8 @@ export function docFormUiPayload(profileId) {
       leavingLabel: "leaving this Purchase Order",
       findLabel: findButtonLabel(p.doctypeKey),
       newLabel: "New Purchase Order",
-      sourceLabel: null,
+      // NIC / Material Request / Supplier Quotation / Sales Order (plan 2026-10-12 S3).
+      sourceLabel: "Select source",
       attachTitle: "Opens Vanilla Desk attach for this Purchase Order (save draft first if new).",
       hint:
         "Use the ▾ / search on Vendor, Item, and Sales Order (type a few letters). " +

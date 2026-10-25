@@ -113,7 +113,9 @@ describe("Bill anchor N_d / N_v (plan S0)", () => {
     assert.ok(ceiling.targets.expandedMin <= N_v);
 
     // Stable snapshot for marketing / mockup discussions (update when inventory intentional).
-    assert.ok(N_d >= 30 && N_d <= 60, `unexpected N_d=${N_d}`);
+    // 60 → 70 on 2026-10-03: the No.: toggle (OI-170) and Papers (compare pane) are two deliberate
+    // controls. The advertising rule above (Vanilla > Doc) is the one that matters.
+    assert.ok(N_d >= 30 && N_d <= 70, `unexpected N_d=${N_d}`);
     assert.ok(N_v >= 50 && N_v <= 80, `unexpected N_v=${N_v}`);
   });
 

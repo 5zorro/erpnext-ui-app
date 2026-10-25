@@ -185,7 +185,8 @@
     }
     #panel-items { overflow-x: auto; }
     #panel-items table { min-width: 760px; }
-    .bill-section-taxes { overflow-x: auto; }
+    /* The panel scrolls, never the section: the section's padding is outside the table's room. */
+    .tax-panel { overflow-x: auto; }
     .bill-section-taxes table { min-width: 520px; }
 
     /* Items table column widths */
@@ -249,8 +250,74 @@
     #items-body tr[data-wash-source="order"] td { background-color: var(--wash-order); }
     #items-body tr[data-wash-source="fulfill"] td { background-color: var(--wash-fulfill); }
     #items-body tr[data-wash-source="invoice"] td { background-color: var(--wash-invoice); }
+    /* DF-02 J: Rec'd by / Rec'd Date are the Item Receipt's facts — its wash on every row. */
+    #items-body tr[data-wash-source] td.rec-col,
+    #items-head-row th.rec-col { background-color: var(--wash-fulfill); }
+    /* Customer / Sales order(s) are read through the line's PO (5zorro 2026-10-11): the header wears
+       the order wash plain (it lives on the PO); the cells add the A/R desk hatch when the clerk
+       hatches A/R — Sales Order facts on an A/P page. Their text sits in a hatch-free box. */
+    #items-head-row th.so-col { background-color: var(--wash-order); }
+    #items-body tr[data-wash-source] td.so-cell {
+      --hatch-base: var(--wash-order);
+      --role-accent: var(--accent-order);
+      background-color: var(--wash-order);
+    }
+    html[data-pattern="ar"] #items-body tr[data-wash-source] td.so-cell,
+    html[data-pattern="both"] #items-body tr[data-wash-source] td.so-cell { background-image: var(--hatch-desk); }
     #items-body tr[data-wash-source] td input,
     #items-body tr[data-wash-source] td .ro { background-color: transparent; }
+    #items-body tr[data-wash-source] td.so-cell .hatch-clear { background-color: var(--hatch-base); }
+    /* Sources on the Sales Order's lines (plan 2026-10-12 S4): a chip per source in its document's
+       wash; A/P documents (PO, Material Request) wear the desk hatch when the clerk hatches A/P, as
+       Home's tiles do. The text sits in a hatch-free box. */
+    td.so-sources { white-space: normal; min-width: 180px; }
+    .src-chip {
+      display: inline-flex; align-items: center; margin: 1px 4px 1px 0; padding: 1px 6px;
+      border: 1px solid color-mix(in srgb, var(--role-accent, #94a3b8) 45%, #cbd5e1);
+      border-left: 3px solid var(--role-accent, #94a3b8); border-radius: 5px;
+      --hatch-base: #fff; background-color: var(--hatch-base); color: #1e293b;
+      font-size: 11px; line-height: 1.35; white-space: nowrap;
+    }
+    .src-chip[data-role="order"] { --hatch-base: var(--wash-order); --role-accent: var(--accent-order); }
+    .src-chip[data-role="request"] { --hatch-base: var(--wash-request); --role-accent: var(--accent-request); }
+    .src-chip[data-role="fulfill"] { --hatch-base: var(--wash-fulfill); --role-accent: var(--accent-fulfill); }
+    .src-chip[data-kind="none"] { --hatch-base: #f8fafc; --role-accent: #94a3b8; color: #475569; font-style: italic; }
+    /* Costing: how a Bill's split filled this line (plan 10-19 R6b-4 step 8) — amber, as the box's title. */
+    .src-chip[data-kind="costing"] { --hatch-base: #fffbeb; --role-accent: #f59e0b; color: #92400e; }
+    html[data-pattern="ap"] .src-chip[data-desk="ap"],
+    html[data-pattern="both"] .src-chip[data-desk="ap"],
+    html[data-pattern="ar"] .src-chip[data-desk="ar"],
+    html[data-pattern="both"] .src-chip[data-desk="ar"] { background-image: var(--hatch-desk); }
+    .src-chip .hatch-clear { background-color: var(--hatch-base); padding: 0 2px; border-radius: 3px; }
+    button.src-chip { cursor: pointer; font: inherit; font-size: 11px; }
+    button.src-chip:hover, button.src-chip:focus-visible { outline: 2px solid var(--role-accent); outline-offset: 1px; }
+    /* Create ▾ entries and flowchart boxes on the Sales Order (plan 2026-10-12 S5): each in its
+       document's wash; A/P documents hatched when the clerk hatches A/P, A/R ones when A/R — as on
+       Home. The words sit in a hatch-free box. */
+    .sc-entry {
+      display: block; width: 100%; box-sizing: border-box; text-align: left; margin: 2px 0; padding: 7px 10px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--role-accent, #94a3b8) 40%, #cbd5e1);
+      border-left: 4px solid var(--role-accent, #94a3b8);
+      --hatch-base: #fff; background-color: var(--hatch-base); color: #0f172a; font-size: 13px;
+    }
+    button.sc-entry { cursor: pointer; font: inherit; font-size: 13px; }
+    button.sc-entry:hover, button.sc-entry:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .sc-entry[data-role="request"] { --hatch-base: var(--wash-request); --role-accent: var(--accent-request); }
+    .sc-entry[data-role="order"] { --hatch-base: var(--wash-order); --role-accent: var(--accent-order); }
+    .sc-entry[data-role="fulfill"] { --hatch-base: var(--wash-fulfill); --role-accent: var(--accent-fulfill); }
+    .sc-entry[data-role="invoice"] { --hatch-base: var(--wash-invoice); --role-accent: var(--accent-invoice); }
+    .sc-entry[data-role="payment"] { --hatch-base: var(--wash-payment); --role-accent: var(--accent-payment); }
+    html[data-pattern="ap"] .sc-entry[data-desk="ap"],
+    html[data-pattern="both"] .sc-entry[data-desk="ap"],
+    html[data-pattern="ar"] .sc-entry[data-desk="ar"],
+    html[data-pattern="both"] .sc-entry[data-desk="ar"] { background-image: var(--hatch-desk); }
+    .sc-entry .hatch-clear { background-color: var(--hatch-base); padding: 0 2px; border-radius: 3px; }
+    .order-peek {
+      display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 1px 5px;
+      border: 1px solid color-mix(in srgb, var(--accent-order) 45%, #cbd5e1); border-radius: 5px;
+      background: #fff; color: #1e3a5f; font-size: 10.5px; line-height: 1.3; cursor: pointer; vertical-align: middle;
+    }
+    .order-peek:hover, .order-peek:focus-visible { background: #eaf4ff; }
     #items-body tr[data-wash-source] td.num .amount-back-in { background-color: transparent; }
 
     .amount-due-row {

@@ -96,10 +96,53 @@ export function paymentTermName(input) {
 }
 
 /**
+ * The first field on which an existing Payment Term disagrees with the one this plan would create,
+ * or null when they are the same term. Only the fields that decide a due date, a method or a
+ * discount are compared — the description is prose, and the master's own `invoice_portion` is
+ * overridden by every template row.
+ *
+ * @param {Record<string, unknown>} existing a Payment Term as `frappe.client.get_list` returns it
+ * @param {Record<string, unknown>} fields this plan's fields
+ * @returns {{ field: string, label: string, theirs: string, ours: string }|null}
+ */
+export function paymentTermFieldMismatch(existing, fields) {
+  const e = existing || {};
+  const f = fields || {};
+  const str = (v) => (v == null ? "" : String(v));
+  const num = (v) => Number(v) || 0;
+  const hasDiscount = num(f.discount) > 0;
+  /** @type {[string, string, (v: unknown) => string|number][]} */
+  const checks = [
+    ["mode_of_payment", "method of payment", str],
+    ["due_date_based_on", "due date basis", str],
+    ["credit_days", "credit period (days)", num],
+    ["credit_months", "credit period (months)", num],
+    ["discount", "early-payment discount", num],
+  ];
+  if (hasDiscount) {
+    checks.push(
+      ["discount_type", "discount type", str],
+      ["discount_validity", "discount period (days)", num],
+      ["discount_validity_based_on", "discount period basis", str],
+    );
+  }
+  for (const [field, label, norm] of checks) {
+    const theirs = norm(e[field]);
+    const ours = norm(f[field]);
+    if (theirs !== ours) {
+      const show = (v) => (v === "" ? "blank" : String(v));
+      return { field, label, theirs: show(theirs), ours: show(ours) };
+    }
+  }
+  return null;
+}
+
+/**
  * The full plan: name, folded credit period, both documents, and the copy.
  *
  * @param {PaymentTermInput} input
- * @param {{ existingNames?: string[] }} [opts] names already in ERPNext, for the collision message
+ * @param {{ existingNames?: string[], existingTerms?: Record<string, unknown>[] }} [opts] what is
+ *   already in ERPNext: bare names (a collision is refused) or whole terms (a matching one is reused)
  * @returns {PaymentTermPlan}
  */
 export function planPaymentTermCreate(input, opts = {}) {
@@ -137,15 +180,12 @@ export function planPaymentTermCreate(input, opts = {}) {
   }
 
   const name = paymentTermName({ ...i, contractDays, graceDays, dueDateBasedOn });
-  const existing = (opts.existingNames || []).map((n) => String(n));
-  if (existing.includes(name)) {
-    // Ahead of `unique: 1`'s traceback, which is what a clerk would otherwise see.
-    errors.push(
-      `A Payment Term called "${name}" already exists. Terms are named by their own numbers, so a ` +
-        `second one with the same period, method and grace would be the same term. Use the existing ` +
-        `one, or change a number.`,
-    );
-  }
+  const existingTerms = Array.isArray(opts.existingTerms) ? opts.existingTerms.filter(Boolean) : [];
+  const existing = [
+    ...(opts.existingNames || []).map((n) => String(n)),
+    ...existingTerms.map((d) => String(d.name || "")),
+  ];
+  const nameTaken = existing.includes(name);
 
   if (!i.method) {
     warnings.push(
@@ -180,9 +220,34 @@ export function planPaymentTermCreate(input, opts = {}) {
     fields.discount_validity = Math.trunc(Number(i.discountValidity) || 0);
   }
 
+  // Review 10-19 R10c-3: a term's name is built from its numbers, so an existing term with this
+  // name IS this term — reuse it rather than refuse, once its numbers are checked. Refusing made a
+  // half-finished create (term landed, template did not) impossible to finish from the modal.
+  let reuse = false;
+  if (nameTaken) {
+    const doc = existingTerms.find((d) => String(d.name || "") === name);
+    const diff = doc ? paymentTermFieldMismatch(doc, fields) : null;
+    if (doc && !diff) {
+      reuse = true;
+    } else if (diff) {
+      errors.push(
+        `A Payment Term called "${name}" already exists, but its ${diff.label} is ${diff.theirs}, not ` +
+          `${diff.ours}. Change a number here, or correct that term in ERPNext.`,
+      );
+    } else {
+      // Ahead of `unique: 1`'s traceback, which is what a clerk would otherwise see.
+      errors.push(
+        `A Payment Term called "${name}" already exists. Terms are named by their own numbers, so a ` +
+          `second one with the same period, method and grace would be the same term. Use the existing ` +
+          `one, or change a number.`,
+      );
+    }
+  }
+
   return {
     ok: errors.length === 0,
     name,
+    reuse,
     contractDays,
     graceDays,
     creditDays,
@@ -238,7 +303,7 @@ export function planPaymentTermCreate(input, opts = {}) {
  *    row here creates a real master rather than inline numbers.
  *
  * @param {{ installments?: PaymentTermInput[] } & PaymentTermInput & { templateName?: string }} input
- * @param {{ existingNames?: string[], existingTemplateNames?: string[] }} [opts]
+ * @param {{ existingNames?: string[], existingTerms?: Record<string, unknown>[], existingTemplateNames?: string[] }} [opts]
  * @returns {PaymentTermsPlan}
  */
 export function planPaymentTermsCreate(input, opts = {}) {
@@ -252,7 +317,10 @@ export function planPaymentTermsCreate(input, opts = {}) {
   // template whose rows disagree about how the vendor is paid.
   const shared = { method: i.method, dueDateBasedOn: i.dueDateBasedOn };
   const plans = rows.map((row, n) => {
-    const plan = planPaymentTermCreate({ ...shared, ...row }, { existingNames: opts.existingNames || [] });
+    const plan = planPaymentTermCreate(
+      { ...shared, ...row },
+      { existingNames: opts.existingNames || [], existingTerms: opts.existingTerms || [] },
+    );
     for (const e of plan.errors) errors.push(single ? e : `Payment ${n + 1}: ${e}`);
     for (const w of plan.warnings) if (!warnings.includes(w)) warnings.push(w);
     return plan;
@@ -301,12 +369,15 @@ export function planPaymentTermsCreate(input, opts = {}) {
 
   // Unique term documents only: a repeated name is already an error above, and inserting it twice
   // would turn one readable message into a database traceback.
+  // A reused term (R10c-3) is already in ERPNext: the template names it, nothing inserts it.
   const terms = [];
+  const reused = [];
   const emitted = new Set();
   for (const plan of plans) {
     if (emitted.has(plan.name)) continue;
     emitted.add(plan.name);
-    terms.push(plan.term);
+    if (plan.reuse) reused.push(plan.name);
+    else terms.push(plan.term);
   }
 
   return {
@@ -314,6 +385,7 @@ export function planPaymentTermsCreate(input, opts = {}) {
     templateName,
     plans,
     terms,
+    reused,
     template: {
       doctype: "Payment Terms Template",
       template_name: templateName,

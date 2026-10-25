@@ -32,10 +32,28 @@ export function billApiFromErpDoc(api) {
     findBills: (prefill) => api.findDocs(prefill || {}),
     refocusListFilter: (fieldname) => api.refocusListFilter(fieldname || "bill_no"),
     newBill: () => api.newDoc(),
-    printBill: () => api.printDoc(),
+    papersList: (sources) => api.papersList(sources),
+    papersBytes: (fileUrl) => api.papersBytes(fileUrl),
+    papersUpload: (req) => api.papersUpload(req),
+    papersOpen: (req) => api.papersOpen(req),
+    papersZip: (req) => api.papersZip(req),
+    papersPrintedPdf: (doc) => api.papersPrintedPdf(doc),
+    papersPdf: (req) => api.papersPdf(req),
+    printOptions: (doctype) => api.printOptions(doctype),
+    printBlockReason: (doc, settings) => api.printBlockReason(doc, settings),
+    printRun: (req) => api.printRun(req),
+    printQueueGet: () => api.printQueueGet(),
+    printJobStatus: (jobs) => api.printJobStatus(jobs),
+    printQueueAdd: (items) => api.printQueueAdd(items),
+    printQueueRemove: (items) => api.printQueueRemove(items),
+    printQueueClear: () => api.printQueueClear(),
+    printQueueRun: (req) => api.printQueueRun(req),
     searchLink: (doctype, txt, filters) => api.searchLink(doctype, txt || "", filters || null),
+    refreshLinkList: (doctype) =>
+      api.refreshLinkList ? api.refreshLinkList(doctype || "") : Promise.resolve({ ok: false }),
+    linkExists: (doctype, name) =>
+      api.linkExists ? api.linkExists(doctype || "", name || "") : Promise.resolve({ ok: true, exists: null }),
     checkAccountCompanies: () => api.checkAccountCompanies(),
-    listSources: (supplier) => api.listSources(supplier || ""),
     listSourceSlice: (supplier, sliceId) =>
       api.listSourceSlice ? api.listSourceSlice(supplier || "", sliceId || "") : Promise.resolve({ ok: false }),
     fetchSourceTerms: (refs) => api.fetchSourceTerms(refs || []),
@@ -52,7 +70,8 @@ export function billApiFromErpDoc(api) {
     listProjectsForPicker: (customer) => api.listProjectsForPicker(customer || ""),
     applyLineAllocation: (rowIndex, payload) =>
       api.applyLineAllocation(rowIndex, payload || {}),
-    bridgeSalesOrderToPo: (payload) => api.bridgeSalesOrderToPo(payload || {}),
+    planLineAllocation: (rowIndex, payload) =>
+      api.planLineAllocation ? api.planLineAllocation(rowIndex, payload || {}) : Promise.resolve({ ok: true, plan: null }),
     retryLoad: () => api.retryLoad(),
     openVanilla: () => api.openVanilla(),
     openVendorAdd: () => api.openVendorAdd(),
@@ -63,11 +82,16 @@ export function billApiFromErpDoc(api) {
     appendCalcHistory: (entry) => api.appendCalcHistory(entry || {}),
     getCalcHistory: () => api.getCalcHistory(),
     copyCalcHistory: (id, mode) => api.copyCalcHistory(id, mode || "table"),
+    getSiteRounding: () => api.getSiteRounding(),
     onSnapshot: (cb) => api.onSnapshot(cb),
     onOpenNavGate: (cb) => api.onOpenNavGate(cb),
     onCancelNavGate: (cb) => api.onCancelNavGate(cb),
     resolveNavGate: (token, proceed) => api.resolveNavGate(token, !!proceed),
     softPeekRoute: (route) => api.softPeekRoute(route || ""),
+    makeJitReceipts: (groups) =>
+      api.makeJitReceipts ? api.makeJitReceipts(groups || []) : Promise.resolve({ ok: false, reason: "Receipts API missing — restart the shell." }),
+    taxDefaultFacts: (supplier) =>
+      api.taxDefaultFacts ? api.taxDefaultFacts(supplier || "") : Promise.resolve({ ok: false }),
     billReceiveFacts: (codes, company) =>
       api.billReceiveFacts ? api.billReceiveFacts(codes || [], company || "") : Promise.resolve({ ok: false }),
     setBillReceiveAsk: (on) => (api.setBillReceiveAsk ? api.setBillReceiveAsk(on) : Promise.resolve(on)),

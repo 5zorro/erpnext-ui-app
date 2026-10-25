@@ -65,6 +65,18 @@ const TERM_NUMBER_FIELDS = Object.freeze({
   discount_validity: "discountValidity",
 });
 
+/** The Payment Schedule fields the board reads (one `get_list`, review 10-19 R10b-1). */
+export const OUTSTANDING_SCHEDULE_FIELDS = Object.freeze([
+  "parent",
+  "idx",
+  "due_date",
+  "discount_date",
+  "discount_type",
+  "discount",
+  ...Object.keys(TERM_STRING_FIELDS),
+  ...Object.keys(TERM_NUMBER_FIELDS),
+]);
+
 /**
  * The term fields present on one `payment_schedule` row, as a partial `OutstandingBillRow`.
  *
@@ -233,6 +245,81 @@ export function buildOutstandingBillRows(reportRow, paymentScheduleRows) {
   const exploded = explodeInstallments(base, paymentScheduleRows);
   if (exploded) return exploded;
   return [attachTermFields(attachDiscountWindow(base, paymentScheduleRows), paymentScheduleRows)];
+}
+
+/**
+ * The schedule rows, each carrying the outstanding ERPNext's A/P report gives its term (matched by
+ * due date — ERPNext refuses two rows on one date). Rows the report no longer lists are paid (0).
+ * When some are still owed, only those are returned, so a paid installment's term or discount is
+ * never put on what is left.
+ * @param {Array<Record<string, unknown>>} schedule
+ * @param {Array<Record<string, unknown>>} termRows the report's rows for this invoice
+ * @returns {Array<Record<string, unknown>>}
+ */
+export function scheduleWithReportOutstanding(schedule, termRows) {
+  const rows = Array.isArray(schedule) ? schedule : [];
+  const owed = new Map();
+  for (const t of Array.isArray(termRows) ? termRows : []) {
+    if (t && t.due_date) owed.set(String(t.due_date), numOrZero(t.outstanding));
+  }
+  const out = rows.map((s) => ({ ...s, outstanding: owed.get(String(s && s.due_date)) ?? 0 }));
+  const unpaid = out.filter((s) => Number(s.outstanding) > 0);
+  return unpaid.length ? unpaid : rows;
+}
+
+/**
+ * Every bill row for the board from the Accounts Payable report run **with
+ * `based_on_payment_terms: 1`** (review 10-19 R10a-1). In that mode ERPNext splits each invoice
+ * into one row per unpaid term and assigns payments and debit notes to the terms itself, earliest
+ * due first (`accounts_receivable.py` `allocate_outstanding_based_on_payment_terms`). The schedule
+ * rows' own `outstanding` is kept up to date only when the terms template allocates by term, so
+ * reading it (as this module did) overstated a part-paid installment bill.
+ *
+ * Rows that are not money owed (an unallocated payment, an overpaid invoice's credit) pass through
+ * as they are; the batching engine sets them aside as `unschedulable`.
+ * @param {Array<Record<string, unknown>>} reportRows the report's `result` rows (with `voucher_no`)
+ * @param {Record<string, Array<Record<string, unknown>>>} schedulesByInvoice Payment Schedule rows by parent
+ * @returns {OutstandingBillRow[]}
+ */
+export function buildBillRowsFromTermReport(reportRows, schedulesByInvoice) {
+  const bySchedule = schedulesByInvoice && typeof schedulesByInvoice === "object" ? schedulesByInvoice : {};
+  /** @type {Map<string, Array<Record<string, unknown>>>} */
+  const owed = new Map();
+  /** @type {Array<{ voucher?: string, row?: Record<string, unknown> }>} */
+  const order = [];
+  for (const r of Array.isArray(reportRows) ? reportRows : []) {
+    if (!r || !r.voucher_no) continue;
+    const v = String(r.voucher_no);
+    if (!(numOrZero(r.outstanding) > 0) || !r.due_date) {
+      order.push({ row: r });
+      continue;
+    }
+    if (!owed.has(v)) {
+      owed.set(v, []);
+      order.push({ voucher: v });
+    }
+    owed.get(v).push(r);
+  }
+  /** @type {OutstandingBillRow[]} */
+  const out = [];
+  for (const o of order) {
+    if (o.row) {
+      out.push(normalizeAccountsPayableRow(o.row));
+      continue;
+    }
+    const terms = owed.get(o.voucher);
+    const last = terms.reduce((a, t) => (String(t.due_date) > String(a.due_date) ? t : a), terms[0]);
+    const invoiceRow = {
+      ...last,
+      // A term row's `invoiced` is the term's share; the bill's total is what a % discount is of.
+      invoiced: last.invoice_grand_total ?? last.invoiced,
+      outstanding: round2(terms.reduce((a, t) => a + numOrZero(t.outstanding), 0)),
+    };
+    out.push(
+      ...buildOutstandingBillRows(invoiceRow, scheduleWithReportOutstanding(bySchedule[o.voucher] || [], terms)),
+    );
+  }
+  return out;
 }
 
 /** @param {unknown} v */

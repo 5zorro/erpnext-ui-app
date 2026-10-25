@@ -1,6 +1,12 @@
 /**
- * Refuse sample-data writes outside an allowlisted sandbox.
- * SSoT for the ops runner + unit tests (OI-055).
+ * Refuse sample-data writes outside an allowlisted sandbox (OI-055) — the rule, stated once and
+ * unit-tested here. The guards that actually run are two mirrors of it: `ops/sample-data/run-seed.sh`
+ * (preflight) and `seed_corpus.py` `_assert_sandbox` (re-checked inside every write, the one that
+ * matters). Change all three together (architecture review 2026-10-19, R14-2).
+ *
+ * The site half is weak on purpose: `frontend` is frappe_docker's default name for *every* site,
+ * so the check really rests on the company name containing "sandbox". That is enough only while
+ * the runner can reach nothing but this machine's own container (`docker exec`) — R14-3.
  */
 
 /** Sites we will seed without an override. */

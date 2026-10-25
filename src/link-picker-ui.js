@@ -11,21 +11,42 @@ import {
   isCreateProjectLinkAction,
   isCreateItemLinkAction,
   itemCreateRoute,
+  isCreateCustomerLinkAction,
+  customerCreateRoute,
 } from "./link-search.js";
 import {
   initialLinkHighlightIndex,
   nextLinkHighlightIndex,
-  resolveLinkPickIndex,
   linkPickerKeyAction,
   linkPickerOpenQuery,
+  linkPickerCommitPlan,
   scrollLinkOptionIntoView,
 } from "./link-picker-policy.js";
 import { logFocus } from "./focus-debug-client.js";
+import { linkDropdownPlacement } from "./link-dropdown-place.js";
 import { uiIconHtml } from "./ui-icons.js";
+import { createOpenPickerSet } from "./link-picker-open-set.js";
+import { linkListAsOfText } from "./link-list-cache.js";
+
+/** Pause after a keystroke before searching: ERPNext's round trip, or the main process's copy. */
+const SEARCH_PAUSE_MS = 280;
+const SEARCH_PAUSE_COPY_MS = 40;
+
+/** One set of page-wide listeners for every picker on the page (review 10-19 R5-1). */
+const openPickers = createOpenPickerSet(
+  typeof window !== "undefined" ? window : null,
+  typeof document !== "undefined" ? document : null,
+);
+
+/** Close every open dropdown — the page now shows another document (plan 2026-10-21 D1). */
+export function closeAllLinkDropdowns() {
+  openPickers.closeAll();
+}
 
 /**
  * @typedef {{
- *   searchLink?: (doctype: string, query: string) => Promise<{ ok?: boolean, reason?: string, results?: unknown[] }>,
+ *   searchLink?: (doctype: string, query: string) => Promise<{ ok?: boolean, reason?: string, results?: unknown[], source?: "copy"|"live", asOf?: number }>,
+ *   refreshLinkList?: (doctype: string) => Promise<{ ok?: boolean, reason?: string, asOf?: number }>,
  *   openVendorAdd?: () => void,
  *   openPaymentTermsAdd?: () => void,
  *   openProjectAdd?: () => void,
@@ -73,7 +94,7 @@ function attrsToString(attrs) {
  */
 export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   const { refocusAfterPick = true } = pickOpts;
-  const { api, linkMounted, setStatus, onBeforePick, optionDataAttrs } = deps;
+  const { api, linkMounted, setStatus, onBeforePick, optionDataAttrs, onCreatePeek } = deps;
   if (!input || linkMounted.get(input)) return;
   linkMounted.set(input, true);
   const wrap = document.createElement("div");
@@ -92,10 +113,55 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   dd.hidden = true;
   wrap.appendChild(dd);
 
+  /** Against the window, not the cell: a line cell clips what overflows it (DF-01). */
+  function placeDropdown() {
+    if (dd.hidden) return;
+    const r = wrap.getBoundingClientRect();
+    const p = linkDropdownPlacement(r, { width: window.innerWidth, height: window.innerHeight });
+    dd.classList.add("link-dd-floating");
+    dd.style.left = `${p.left}px`;
+    dd.style.width = `${p.width}px`;
+    dd.style.maxHeight = `${p.maxHeight}px`;
+    dd.style.top = p.top == null ? "auto" : `${p.top}px`;
+    dd.style.bottom = p.bottom == null ? "auto" : `${p.bottom}px`;
+  }
+  // One entry per picker, so re-opening (every search does) cannot add it twice.
+  const openEntry = { wrap, dd, place: placeDropdown };
+  function showDropdown() {
+    dd.hidden = false;
+    openPickers.opened(openEntry);
+    placeDropdown();
+  }
+
   let timer = null;
   /** @type {HTMLButtonElement[]} */
   let opts = [];
   let hi = -1;
+  // Review 10-19 R5b-1: which text the list on screen was fetched for, so Tab / Enter never
+  // commits an option from an earlier search. Only the newest search may paint.
+  /** @type {string|null} */
+  let listFor = null;
+  /** @type {Array<string|null>} option values, null for a "Create…" row */
+  let optValues = [];
+  let searchSeq = 0;
+  /** The text a search is waiting for (typing pause or in flight); null when none is. */
+  /** @type {string|null} */
+  let pendingFor = null;
+  /** A Tab / Enter waiting for the list of the text it was pressed on. */
+  /** @type {{ key: string, shiftKey: boolean, text: string }|null} */
+  let held = null;
+  /** Where the list on screen came from, for the pause and the trail (plan 2026-10-21). */
+  let listSource = "live";
+
+  /**
+   * The focus-log detail for a pick or a hold: enough to tell, from the trail alone, what was
+   * typed, which list was on screen and why that option won (5zorro 2026-10-21, chaos dogfood).
+   * @param {string} rule @param {string} [picked]
+   */
+  function trail(rule, picked) {
+    const clip = (v) => JSON.stringify(String(v ?? "").slice(0, 60));
+    return `${doctype} typed=${clip(input.value)} list=${listFor == null ? "none" : clip(listFor)} rule=${rule}${picked != null ? ` picked=${clip(picked)}` : ""} src=${listSource}`;
+  }
 
   function setHi(i) {
     opts.forEach((b) => b.classList.remove("active"));
@@ -111,7 +177,8 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       isCreateSupplierLinkAction(v) ||
       isCreatePaymentTermsLinkAction(v) ||
       isCreateProjectLinkAction(v) ||
-      isCreateItemLinkAction(v)
+      isCreateItemLinkAction(v) ||
+      isCreateCustomerLinkAction(v)
     ) {
       dd.hidden = true;
       hi = -1;
@@ -123,7 +190,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       input.value = restore;
       if (isCreateSupplierLinkAction(v)) {
         if (api && api.openVendorAdd) {
-          setStatus("Opening Vendor add in Vanilla…");
+          setStatus("Opening a new Vendor in Vanilla (Esc returns here)…");
           api.openVendorAdd();
         } else {
           setStatus("Vendor add API missing — restart the shell.", "err");
@@ -139,9 +206,23 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
         }
         return;
       }
+      if (isCreateCustomerLinkAction(v)) {
+        if (api && api.softPeekRoute) {
+          setStatus("Opening a new Customer in Vanilla (Esc returns here)…");
+          // Esc back lands in this box, holding the new Customer if it was saved (DF-03).
+          if (onCreatePeek) onCreatePeek(input, "Customer");
+          const res = await api.softPeekRoute(customerCreateRoute(typed));
+          if (res && res.ok === false) setStatus(res.reason || "Could not open a new Customer.", "err");
+        } else {
+          setStatus("Customer add API missing — restart the shell.", "err");
+        }
+        return;
+      }
       if (isCreateItemLinkAction(v)) {
         if (api && api.softPeekRoute) {
           setStatus("Opening a new Item in Vanilla (Esc returns here)…");
+          // Esc back lands in this cell, holding the new Item if it was saved (DF-02).
+          if (onCreatePeek) onCreatePeek(input, "Item");
           const res = await api.softPeekRoute(itemCreateRoute(typed));
           if (res && res.ok === false) setStatus(res.reason || "Could not open a new Item.", "err");
         } else {
@@ -150,7 +231,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
         return;
       }
       if (api && api.openProjectAdd) {
-        setStatus("Opening Project add in Vanilla…");
+        setStatus("Opening a new Project in Vanilla (Esc returns here)…");
         api.openProjectAdd();
       } else {
         setStatus("Project add API missing — restart the shell.", "err");
@@ -162,9 +243,17 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       opts.find((b) => (b.getAttribute("data-value") || "") === v) ||
       null;
     if (onBeforePick) onBeforePick(v, doctype, btnOpt);
-    logFocus("link-pick", doctype);
+    logFocus("link-pick", trail("chosen", v));
+    // A search still waiting (typing pause or in flight) is for text this pick replaces.
+    clearTimeout(timer);
+    searchSeq++;
+    pendingFor = null;
+    held = null;
     input.value = v;
     input.dataset.linkCommitted = v;
+    // The box's own `change` (it fires when the box loses focus after typing) must not write this
+    // value a second time while the pick writes it (`linkPickOwnsCommit`).
+    input.dataset.linkPicking = v;
     dd.hidden = true;
     hi = -1;
     if (refocusAfterPick) {
@@ -175,7 +264,11 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       }
       logFocus("link-pick-blur", doctype);
     }
-    await onPicked(v);
+    try {
+      await onPicked(v);
+    } finally {
+      if (input.dataset.linkPicking === v) delete input.dataset.linkPicking;
+    }
     if (refocusAfterPick) {
       try {
         input.focus({ preventScroll: false });
@@ -188,32 +281,45 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
 
   async function runSearch(q) {
     if (!api || !api.searchLink) {
-      dd.hidden = false;
+      showDropdown();
       dd.innerHTML = `<div class="link-muted">Search API missing — restart the shell.</div>`;
       return;
     }
-    dd.hidden = false;
+    const seq = ++searchSeq;
+    const forText = input.value;
+    pendingFor = forText;
+    showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
     const res = await api.searchLink(doctype, q || "");
+    // A newer search owns the box; this answer is for text no longer there.
+    if (seq !== searchSeq) return;
+    pendingFor = null;
+    listFor = forText;
+    listSource = res && res.source === "copy" ? "copy" : "live";
+    opts = [];
+    optValues = [];
     if (!res || !res.ok) {
       dd.innerHTML = `<div class="link-muted">${escapeHtml((res && res.reason) || "Search failed — is Vanilla logged in?")}</div>`;
-      opts = [];
+      replayHeld();
       return;
     }
     const rows = withEmptySearchActions(res.results || [], doctype);
     if (!rows.length) {
       dd.innerHTML = `<div class="link-muted">No matches${q ? ` for “${escapeHtml(q)}”` : ""}</div>`;
-      opts = [];
+      replayHeld();
       return;
     }
-    dd.innerHTML = rows
-      .map((o) => {
-        const extra = optionDataAttrs ? optionDataAttrs(o) : {};
-        const dataValue = escapeHtml(o.value);
-        return `<button type="button" class="${linkOptionClassNames(o)}" tabindex="-1" data-value="${dataValue}"${attrsToString(extra)}>${escapeHtml(linkOptionLabel(o))}</button>`;
-      })
-      .join("");
+    dd.innerHTML =
+      rows
+        .map((o) => {
+          const extra = optionDataAttrs ? optionDataAttrs(o) : {};
+          const dataValue = escapeHtml(o.value);
+          return `<button type="button" class="${linkOptionClassNames(o)}" tabindex="-1" data-value="${dataValue}"${attrsToString(extra)}>${escapeHtml(linkOptionLabel(o))}</button>`;
+        })
+        .join("") + listFootHtml(res);
+    wireListFoot();
     opts = [...dd.querySelectorAll(".link-opt")];
+    optValues = rows.map((o) => (o && o.action ? null : String(o.value ?? "")));
     hi = initialLinkHighlightIndex(opts.length);
     if (hi === 0) {
       opts[0].classList.add("active");
@@ -227,11 +333,55 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
         await pickValue(b.getAttribute("data-value") || "", b);
       };
     });
+    replayHeld();
+  }
+
+  /**
+   * Under a list answered from the main process's copy: how old it is, and Refresh.
+   * @param {{ source?: string, asOf?: number }} res
+   */
+  function listFootHtml(res) {
+    if (!res || res.source !== "copy" || !api || !api.refreshLinkList) return "";
+    const asOf = escapeHtml(linkListAsOfText(doctype, Number(res.asOf) || Date.now()));
+    return `<div class="link-list-foot"><span>${asOf}</span><button type="button" class="link-list-refresh" tabindex="-1" title="Read this list from ERPNext again">Refresh</button></div>`;
+  }
+
+  function wireListFoot() {
+    const b = dd.querySelector(".link-list-refresh");
+    if (!b) return;
+    // The cursor stays in the box: a click here is not a click away.
+    b.onmousedown = (ev) => ev.preventDefault();
+    b.onclick = async () => {
+      logFocus("link-list-refresh", doctype);
+      b.disabled = true;
+      b.textContent = "Refreshing…";
+      const r = await api.refreshLinkList(doctype);
+      if (r && r.ok === false && r.reason) setStatus(r.reason, "warn");
+      await runSearch(input.value);
+    };
+  }
+
+  /**
+   * The list for the held key's text is in: press the key again, so it does what it would have
+   * done had the clerk waited — the picker picks, then the line cell moves on as usual.
+   */
+  function replayHeld() {
+    const h = held;
+    held = null;
+    if (!h || h.text !== input.value || listFor !== input.value) return;
+    if (document.activeElement !== input) return;
+    logFocus("link-held-replay", trail("held"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: h.key, shiftKey: h.shiftKey, bubbles: true, cancelable: true }),
+    );
   }
 
   input.addEventListener("input", () => {
+    if (held) logFocus("link-held-cancel", trail("typed-on"));
+    held = null;
     clearTimeout(timer);
-    timer = setTimeout(() => runSearch(input.value), 280);
+    pendingFor = input.value;
+    timer = setTimeout(() => runSearch(input.value), listSource === "copy" ? SEARCH_PAUSE_COPY_MS : SEARCH_PAUSE_MS);
   });
   if (input.dataset.linkCommitted == null) {
     input.dataset.linkCommitted = String(input.value || "");
@@ -240,8 +390,15 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     const act = linkPickerKeyAction(ev.key, {
       dropdownOpen: !dd.hidden,
       optionCount: opts.length,
+      searchPending: pendingFor !== null && pendingFor === input.value,
     });
     if (act === "close") {
+      held = null;
+      // Esc means "not the list": a search still waiting would re-open it, and would make the next
+      // Tab wait for it.
+      clearTimeout(timer);
+      searchSeq++;
+      pendingFor = null;
       dd.hidden = true;
       hi = -1;
       return;
@@ -255,8 +412,22 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     if (act === "none") return;
     if (act === "pick") {
       ev.preventDefault();
-      const idx = resolveLinkPickIndex(hi, opts.length);
+      const plan = linkPickerCommitPlan({ typed: input.value, listFor, values: optValues, hi });
+      if (plan.kind === "hold") {
+        // The line cell's own Tab would commit the half-typed text: this key is the picker's.
+        ev.stopImmediatePropagation();
+        held = { key: ev.key, shiftKey: !!ev.shiftKey, text: input.value };
+        logFocus("link-held", trail("held"));
+        clearTimeout(timer);
+        runSearch(input.value);
+        return;
+      }
+      const idx = plan.kind === "pick" ? plan.index : -1;
       const pick = idx >= 0 ? opts[idx] : null;
+      if (pick) {
+        const rule = listFor === input.value ? "current" : "exact";
+        logFocus("link-pick-key", trail(rule, pick.getAttribute("data-value") || ""));
+      }
       if (pick) await pickValue(pick.getAttribute("data-value") || "", pick);
       else {
         dd.hidden = true;
@@ -273,13 +444,14 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       setHi(nextLinkHighlightIndex(hi, opts.length, "up"));
     }
   });
+  input.addEventListener("blur", () => {
+    if (held) logFocus("link-held-cancel", trail("left-box"));
+    held = null;
+  });
   btn.addEventListener("click", (ev) => {
     ev.preventDefault();
     // Not `input.value`: a committed value is not a filter, or the field's own dropdown offers
     // only the value it already has. See linkPickerOpenQuery.
     runSearch(linkPickerOpenQuery(input.value, input.dataset.linkCommitted));
-  });
-  document.addEventListener("click", (ev) => {
-    if (!wrap.contains(/** @type {Node} */ (ev.target))) dd.hidden = true;
   });
 }

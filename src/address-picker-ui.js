@@ -203,7 +203,7 @@ export function showAddressPickerModal(opts) {
         meta.party === "supplier" && opts.onEditVendor
           ? `<div class="addr-modal-foot">
         <button type="button" data-addr-edit-vendor data-testid="${editVendorTestId}">
-          Discard draft and edit available addresses for this vendor
+          Edit this vendor's addresses… (Esc returns here)
         </button>
       </div>`
           : ""
