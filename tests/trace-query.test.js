@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { traceChain } from "./fixtures/trace-chain.js";
-import { downstreamQueries, upstreamKeys, fetchTrace } from "../src/trace-query.js";
+import { downstreamQueries, upstreamKeys, fetchTrace, TRACE_PARALLEL } from "../src/trace-query.js";
 import { TABLE_DOCTYPE } from "../src/trace-links.js";
 
 const K = (dt, n) => `${dt}::${n}`;
@@ -91,3 +91,53 @@ describe("trace-query: fetchTrace", () => {
     assert.ok([...counts.values()].every((n) => n === 1), JSON.stringify([...counts]));
   });
 });
+
+describe("trace-query: asks together, a few at a time (review 10-19 R13-3)", () => {
+  /** The fake ERPNext, each answer taking `ms`, counting how many questions are out at once. */
+  function slowErp(docs, ms) {
+    const erp = fakeErp(docs);
+    let out = 0;
+    const seen = { most: 0 };
+    const slow = (fn) => async (...a) => {
+      out++;
+      seen.most = Math.max(seen.most, out);
+      await new Promise((r) => setTimeout(r, ms));
+      try { return await fn(...a); } finally { out--; }
+    };
+    return { ...erp, getDoc: slow(erp.getDoc), getList: slow(erp.getList), seen };
+  }
+
+  it("finds the same documents as one at a time, asking at most TRACE_PARALLEL at once", async () => {
+    const one = fakeErp(traceChain());
+    const serial = await fetchTrace({ focus: [K("Sales Order", "SAL-ORD-0543")], getDoc: one.getDoc, getList: one.getList, parallel: 1 });
+    const erp = slowErp(traceChain(), 5);
+    const t = await fetchTrace({ focus: [K("Sales Order", "SAL-ORD-0543")], getDoc: erp.getDoc, getList: erp.getList });
+    assert.deepEqual(t.docs.map((d) => d.name).sort(), serial.docs.map((d) => d.name).sort());
+    assert.equal(t.asked, serial.asked);
+    assert.ok(erp.seen.most > 1, "questions overlap");
+    assert.ok(erp.seen.most <= TRACE_PARALLEL, `at most ${TRACE_PARALLEL} at once, saw ${erp.seen.most}`);
+  });
+
+  it("is faster than asking in series by the overlap", async () => {
+    const a = slowErp(traceChain(), 20);
+    let t0 = Date.now();
+    const serial = await fetchTrace({ focus: [K("Sales Order", "SAL-ORD-0543")], getDoc: a.getDoc, getList: a.getList, parallel: 1 });
+    const serialMs = Date.now() - t0;
+    const b = slowErp(traceChain(), 20);
+    t0 = Date.now();
+    await fetchTrace({ focus: [K("Sales Order", "SAL-ORD-0543")], getDoc: b.getDoc, getList: b.getList });
+    const waveMs = Date.now() - t0;
+    assert.ok(serial.asked > 20, `a real walk (${serial.asked} questions)`);
+    assert.ok(waveMs * 2 < serialMs, `together ${waveMs} ms vs one at a time ${serialMs} ms`);
+  });
+
+  it("a draft does not use up the size limit, and is asked for once", async () => {
+    const docs = traceChain();
+    docs.find((d) => d.name === "PUR-ORD-0404").docstatus = 0;
+    const erp = fakeErp(docs);
+    const t = await fetchTrace({ focus: [K("Sales Order", "SAL-ORD-0543")], getDoc: erp.getDoc, getList: erp.getList, maxDocs: 4 });
+    assert.equal(t.docs.length, 4);
+    assert.equal(erp.calls.doc.filter((k) => k === K("Purchase Order", "PUR-ORD-0404")).length <= 1, true);
+  });
+});
+
