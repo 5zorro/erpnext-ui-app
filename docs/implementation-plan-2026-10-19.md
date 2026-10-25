@@ -91,7 +91,17 @@ built, being dogfooded). It edits no code.
 > The Sales Order look-back (step 8) was built after it, the same day.
 > 2026-10-23: a held/closed Sales Order needs nothing in the split; the **dogfood check and setup**
 > (§ Dogfood check and setup — every residual row has a probe, 25/25 pass; DC-1–3 fixed, DC-4 open).
-> Reviewed through `d1e2f79` (2026-10-24). Next: session 6 (R7 + R8 + R12).
+> Reviewed through `d1e2f79` (2026-10-24).
+> **Session 6 ✅ 2026-10-24** (R7, R8, R12), at `a20a71d`: 10 findings, all open, two medium.
+> **R7-1**: the Item Receipt lists POs with the Bill's filter (`per_billed`, not `per_received`):
+> a billed-not-received PO is missing from its picker, and a received-not-billed one maps no lines
+> and clears the receipt. **R7-4**: the source slices use `frappe.db.get_list` (G19), so a slice the
+> clerk may not read (a Purchase User and Sales Orders) spins for good. The rest are low: dead
+> pre-streaming source code (R7-2), "no PO" on every receipt row (R7-3), Create ▾ › PO's second set
+> after Cancel or an interrupted save (R8-1), an unticked twin line ordered anyway (R8-2), the
+> Sources column's six reads in series (R8-3), and Simplified's teardown leaving a dead refresh hook
+> (R12-1), no install handshake (R12-2), no *After an ERPNext upgrade* list in HANDOFF (R12-3).
+> Next: session 7 (R13 + R15), which closes this plan.
 > Code baseline was `4c10e30`. Re-sized the same day (7 sessions, not 20).
 
 ---
@@ -542,7 +552,22 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
 - **Questions:**
   1. The source modal is shared by three skins: one copy of the vendor/party filter, or several?
   2. Picking sources then saving: mapper call failures — partial PO / receipt left behind?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R7-1 | S | med | `src/source-list-slices.js` `SOURCE_SLICES_BY_SKIN.receipt`; `main.js` `fetchBillSourceSlice` `po_submitted` | Since S3 (`9bc376b`) the Item Receipt lists POs with the **Bill's** slice, whose filter is `per_billed < 100`, not `per_received < 100`. Two results. (a) A PO that has been billed but not yet received (the clerk's *Bill only*, then the goods arrive) is **missing** from the receipt's picker. The clerk types the lines by hand, the receipt never links the PO, and the PO stays "To Receive" for good. (b) A PO received in full but not billed **is** offered. ERPNext's `make_purchase_receipt` maps only lines with `received_qty < qty` (`purchase_order.py:809`), so it returns no lines. `doc-merge-source` does not check for that: `mergeFromMapped` clears the receipt's lines, adds nothing, and the page says "Pulled from …". Also, neither PO slice has Vanilla's `status not in (Closed, On Hold)` or company filters (`purchase_invoice.js:167`, `purchase_receipt.js:233`). ERPNext then refuses a held or closed PO at **save** (`check_for_on_hold_or_closed_status`), after the clerk has typed the whole document | Give the receipt its own slice (`po_to_receive`: `per_received < 99.99`, not Closed / On Hold, this company), and add the status and company filters to the Bill's `po_submitted`. Have `doc-merge-source` refuse a mapping with no lines before it touches the form ("every line of X is already received"), the way `mergeBillSources` already does | open |
+| R7-2 | M | low | `main.js` `bill-list-sources`, `doc-list-sources`; `src/receipt-source.js`; `source-modal.js` `buildBillSourceGroups`, `enrichReceiptsWithPurchaseOrders`, `purchaseOrdersByReceipt`; `doc-form-preload.cjs` / `bill-doc-api-adapter.js` `listSources` | **Q1:** the vendor filter has **one live copy**, `fetchBillSourceSlice`'s spec table, which all three skins stream through. The second copy is the pre-streaming path: two IPC handlers, a receipt group builder and two enrich helpers. No page has called it since streaming. It is dead, and it is the copy that had the receipt's filter right (`per_received`), which is how R7-1 slipped in unnoticed | Delete the dead path and its tests, keeping `combineMappedBillSources` and `sourceItemFromRow` | open |
+| R7-3 | M | low | `source-modal.js` `sourceItemFromRow` (kind `pr`) | Every Item Receipt row in the Bill's picker reads "**no PO**", even when the receipt came from a PO. The label reads `row.purchase_orders`, which only the dead enrich filled. That enrich was dropped after a 403 on `Purchase Receipt Item` (`bill-feature-catalog.js:247`) | Ask for the child field on the parent list (`` `tabPurchase Receipt Item`.purchase_order ``, which is how `so_submitted` reads its lines, under the receipt's own read permission) and roll up per receipt. Or at least leave the bit out when it is unknown | open |
+| R7-4 | S | med | `main.js` `fetchBillSourceSlice` | Every slice is `frappe.db.get_list` inside an `erpEval` with no deadline. When the server refuses, that call never settles (G19). A **Purchase User** cannot read Sales Order: its role list is Sales User / Manager, Maintenance, Accounts and Stock User (`sales_order.json`). So on the PO's picker the Sales Orders slice would say "Still loading…" for good. The stream's `Promise.all` would never finish, so "Sources loaded" / "Some sources failed" never shows, and one `pendingErpEvals` entry is held until the page reloads. Read from code and ERPNext's role table, not reproduced (Administrator here reads everything) | `frappe.xcall("frappe.client.get_list", …)` plus a `raceTimeout` per slice, so a refused or slow slice shows its error row | open |
+
+**Q2, checked and fine:** no mapper here writes anything. `make_purchase_invoice` /
+`make_purchase_receipt` and the MR / SQ mappers return unsaved documents. The Sales Order mapper is
+asked with no vendor, so it returns its PO unsaved too (`sales_order.py:1766`: the `doc.insert()`
+runs only for a named supplier). The Bill's multi-source merge maps every source before it touches
+the form, and stops at the first failure. A failed merge therefore leaves only the form's own
+unsaved lines, which is what the dirty gate protects. The one way a merge goes wrong without any
+failure is R7-1 (b).
 
 ### R8 — A/R skins and the Sales Order dashboard (S, M) — read ~22k
 
@@ -557,7 +582,26 @@ Checked and fine: **Q2's overwrite inside one bill**: the background loop stops 
   2. The Sources column queries per line — count requests on a 30-line order.
   3. Receive Payment shares Payment Entry with Pay Bills (`layoutOnly`): any A/P assumption that
      leaks into A/R (payment direction, party type)?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R8-1 | S | low | `src/so-create-po-ui.js` Save; `main.js` `so-create-pos` | **Q1:** a double click is safe, because Save is disabled in the same tick. Two ways still make a second set of draft POs. (a) **Cancel and Esc stay live while saving.** Closing, then opening Create ▾ › Purchase Order again before the first answer, reads the draft POs before the first set exists, so its Save orders the same lines again. (b) **A Save retried after the ERPNext page reloaded mid-save** (R2-1: "may already be done") is re-enabled with the `pending` quantities read when the dialog opened. ERPNext counts only *submitted* POs as ordered, so the retry orders everything again. The main side has no guard per order | Refuse a second `so-create-pos` for the same order while one runs. On an interrupted result (no answer from the script, as opposed to a refusal), close the dialog with "may already have been made — check Drafts" rather than re-enabling Save. Read the draft POs again at Save time, not only when the dialog opens | open |
+| R8-2 | S | low | `so-create-po-ui.js` (`pending` built from every line); `main.js` `so-create-pos` trim | Ticking **one** of two order lines that share an item code still orders **both**. ERPNext maps by item code (`filter_items` in `sales_order.py`, `items_to_map[item_code]`), so the unticked twin comes along. `pending` carries every line's open quantity, so the trim keeps it. `poSelection` already refuses two vendors for one item; it does not cover a twin left unticked | Send `pending: 0` for unticked lines: the trim then drops them and re-saves, and a PO left with no lines is deleted, which the code already handles | open |
+| R8-3 | P | low | `main.js` `so-line-sources` | **Q2:** not per line. The Sources column reads 5 lists plus the order's docinfo **once per order**, cached by `name` + `modified`, so a 30-line order costs 6 requests. But they run **one after another** (`await` in series), so the column waits for the sum of six round trips. It reloads on every save and every peek return (`refresh(true)`) | `Promise.all` the six reads (each already fails on its own to `null`) | open |
+
+**Q3, checked and fine:** a Payment Entry route reaches the Receive Payment skin only through
+`payment-doc.html`, which hands a `payment_type = Receive` document to it (`payment-doc-open-receive`).
+`profileByDoctypeKey` never answers with a `layoutOnly` profile. A new one is given `payment_type` **and**
+`party_type`, so the order of ERPNext's two form scripts does not matter. `fetchOutstanding` picks
+the party account by `payment_type` (`paid_from` for Receive), and `frappe.flags.allocate_payment_amount`
+is set exactly as Vanilla's own refresh sets it (`payment_entry.js:259`). D2's missing-vendor banner
+and the source picker run only for `supplier`. Receive Payment drafts stay off the Drafts shelf, as
+plan 09-26 decided (they share the doctype with the Pay pages, which have no shelf). One shared fact
+to know, not a leak: the lens is remembered per doctype, so Vanilla chosen on a Receive Payment is
+Vanilla for Pay payments too.
+Create ▾'s other entries run only the catalog's own Vanilla handlers (`so-vanilla-create`). The
+Sources chips and the Create dialog escape every value.
 
 ### R9 — Editing a submitted document (S) — read ~22k
 
@@ -709,7 +753,22 @@ Checked and fine: `lp` / SumatraPDF / `lpoptions` run as argument arrays (`execF
      closed, shows Vanilla) or break the form?
   2. Teardown: everything the payload adds (listeners, observers, styles) removed on lens switch?
   3. The generated seed file (`npm run seeds:simplified`): is `--check` in `npm test`?
-- **Reviewed through:** — **Findings:** none yet.
+- **Reviewed through:** `a20a71d` (session 6, 2026-10-24).
+
+| ID | Lens | Sev | Where | What | Proposed fix | Status |
+|----|------|-----|-------|------|--------------|--------|
+| R12-1 | S | low (the lens is not dogfooded) | `assume-applier-payload.js` `hookFrappeRefresh`, `destroy()`; `main.js` `ensureSimplifiedSkin` | **Q2:** teardown does not take back the `Form.prototype.refresh` patch or its `__ssRefreshPatched` mark. The teardown runs **without a reload** on every in-page hop to a page that is not Simplified (`did-navigate-in-page` → `ensureSimplifiedSkin` → `removeSimplifiedSkin`). Coming back in-page re-injects, but the new copy sees the mark and does not hook. ERPNext's refresh keeps calling the **destroyed** copy's `apply`, which returns at once. So the re-injected skin applies once (its 100 ms timer) and never again in that page. A new Bill opened next gets no assumed values and nothing dimmed while the toolbar says Simplified. The payload's idempotence check means a re-inject on that route does not apply either. `destroy()` also leaves the tab panes forced open and the `click.ssScrollNav` handlers bound, with Frappe's own stripped. Its comment says main reloads for that, but the in-page path does not | Have the patch call whichever copy is current (`window.__simplifiedSkin && window.__simplifiedSkin.apply(this)`), not its own closure's. In `destroy()`, `off(".ssScrollNav")` and undo the forced `display` / `show`. Frappe's tab handlers come back only with a reload, so either stop stripping them, or have the in-page teardown mark the form for a reload on its next open | open |
+| R12-2 | S | low | `main.js` `ensureSimplifiedSkin` | `simplifiedSkinInstalled = true` once `erpExec(payload)` resolves, whether or not the payload took. It returns early without installing when its core does not load (`"[simplified-skin] core failed to load"`), which is what an ERPNext / Frappe change would cause. The bridge has a version handshake (`ensureErpFormBridge` reads `__docFormBridge.version` back); Simplified has none. A skin that did not take is therefore invisible: the toolbar says Simplified over a plain Vanilla page, and `nav-debug.log` says nothing | Read `window.__simplifiedSkin.version` back after injecting. If it is missing, log `simplified-skin-missing` and leave the flag false | open |
+| R12-3 | M | low | `HANDOFF.md` (no upgrade note) | **Q3:** `--check` itself is not in `npm test`, but the drift test (`tests/simplified-seed-generator.test.js`) is, and it is the same comparison. It compares against the **snapshot** of ERPNext's field lists (`tests/fixtures/simplified-seed-meta/`, v16.32.1), so after an ERPNext upgrade nothing fails until someone runs `npm run seeds:simplified -- --refresh-meta`. That step is written only in plan 09-26 (to be deleted) and the gitignored local notes file. HANDOFF has no "after an ERPNext upgrade" list at all, though the shell leans on several ERPNext internals by name: the Create ▾ catalog's `cscript` handlers, `get_outstanding_documents`, the tab DOM (G2 / G4) and `Form.prototype.refresh` | Add a short *After an ERPNext upgrade* list to HANDOFF: refresh the seed snapshot and regenerate, run `dogfood:check` and the full `nav:check`, and re-read G2 / G4 | open |
+
+**Q1, checked:** an ERPNext upgrade fails soft, apart from R12-2's silence. Every step of `apply`
+and the scroll-nav is in its own `try`. A field the profile names that no longer exists is a no-op
+(Frappe's `set_df_property` does nothing without a docfield, `form.js:1707`). An assumed field
+that becomes mandatory with no value is flagged and left editable (`checkProfile`). The generated
+seeds place only L1 / L2, never hide, so a field that becomes mandatory on a condition stays on
+screen. The bar and its labels are built with `textContent`. The worst case is a half-applied
+scroll-nav if the tab DOM changes (G2): panes forced open, links not wired. That form is still
+usable, and a reload clears it.
 
 ### R13 — Calculator, trace, dev tools (S, M) — read ~24k
 
@@ -785,7 +844,7 @@ money first, structure later.
 | 3 ✅ | R2 + R3 + R4 | ~69k | R1 (already done; `main.js` again) | `main.js` structure, the nav spine it wires, the toolbar / Find on top | done |
 | 4 ✅ | R5 + R5b + R6a | ~72k | any other R6 | the shared form page and the Bill page side by side — the duplication question | done |
 | 5 ✅ | R6b + R10a + R10b | ~72k | anything | all the money math and dates, and the board that shows it | done |
-| 6 | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | |
+| 6 ✅ | R7 + R8 + R12 | ~63k | R13 (would make ~87k listed) | the remaining skins and the lens injected into Vanilla | done |
 | 7 | R13 + R15 | ~32k | — | small tools, then fold everything and close this plan | |
 
 Rules that fall out of the numbers:
