@@ -8,8 +8,9 @@
 >
 > **Next, in this order (5zorro 2026-10-24 — recorded, not started; he is away and will come back to
 > it):**
-> 1. **Build answer 5** below — a sort toggle on the Submitted section.
-> 2. **Then the review of everything this session built** (`03b3b42` … `fa0bb6e6`): the two-part
+> 1. ~~**Build answer 5** below — a sort toggle on the Submitted section.~~ **Built 2026-10-24**
+>    (see answer 5).
+> 2. **Next: the review of everything this session built** (`03b3b42` … `fa0bb6e6`): the two-part
 >    end-of-session review — the stability / security, maintainability, performance pass over the
 >    nav fixes N-1 … N-7, DC-4, the matrix driver and `nav:check`, and moving any context-only
 >    detail into durable files. 5zorro asked that it wait until answer 5 is built.
@@ -174,4 +175,13 @@ Not re-run on the old code (the matrix's first run is the "before" for N-1 and D
    have bounced between some specific forms from today."* So the Submitted section gets a two-way
    switch: **Submitted** (default — newest submission first, as today) ⇄ **Viewed** (the one opened
    most recently first). The choice is remembered per user (a pref, as the rail's collapse is), and
-   opening a document from Submitted records when it was viewed. Not built yet — next.
+   opening a document from Submitted records when it was viewed. **Built 2026-10-24:** a *Sort
+   Submitted ◯ Viewed* switch at the top of the Submitted panel (`data-testid="submitted-sort"`),
+   kept in `nav-state.json` as `submittedSort`. "Viewed" counts any time the submitted document is on
+   screen — either lens, any door, a peek too (`noteSubmittedViewed` in `sendHistory`), not only a
+   click in the panel: 5zorro's case is bouncing between forms. A row never viewed counts from its
+   submission; in Viewed order the "Earlier sessions" divider is dropped (rows interleave) and each
+   row shows when it was viewed (hover: both times). Pure: `src/submitted-docs.js`
+   (`sortSubmitted`, `markSubmittedViewed`, `normalizeSubmittedSort`). Proven by
+   `leaves-records/nav-submitted-backtrack`: default order unchanged by a reopen; the switch puts the
+   one viewed last first and is kept; viewing the other re-sorts.

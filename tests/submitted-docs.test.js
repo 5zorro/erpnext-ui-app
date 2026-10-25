@@ -108,3 +108,35 @@ describe("submittedEntryRoute", () => {
     assert.equal(submittedEntryRoute(null), "");
   });
 });
+
+describe("sorting the panel (plan 2026-10-24 answer 5)", async () => {
+  const { normalizeSubmittedSort, markSubmittedViewed, sortSubmitted } = await import("../src/submitted-docs.js");
+  const row = (name, at, viewedAt) => ({ doctypeKey: "purchase-invoice", name, route: `/app/purchase-invoice/${name}`, label: "Bill", detail: name, at, ...(viewedAt ? { viewedAt } : {}) });
+  // Newest submission first, as pushSubmittedDoc keeps it.
+  const list = [row("C", "2026-10-24T10:00:00Z"), row("B", "2026-10-24T09:00:00Z"), row("A", "2026-10-24T08:00:00Z")];
+
+  it("defaults to submission order; anything else but 'viewed' is the default", () => {
+    assert.equal(normalizeSubmittedSort(undefined), "submitted");
+    assert.equal(normalizeSubmittedSort("bogus"), "submitted");
+    assert.equal(normalizeSubmittedSort("viewed"), "viewed");
+    assert.deepEqual(sortSubmitted(list, "submitted").map((e) => e.name), ["C", "B", "A"]);
+  });
+
+  it("by viewed: the one looked at last comes first; never viewed counts from its submission", () => {
+    const seen = markSubmittedViewed(list, "purchase-invoice", "A", "2026-10-24T11:00:00Z");
+    assert.deepEqual(sortSubmitted(seen, "viewed").map((e) => e.name), ["A", "C", "B"]);
+    const again = markSubmittedViewed(seen, "purchase-invoice", "B", "2026-10-24T11:05:00Z");
+    assert.deepEqual(sortSubmitted(again, "viewed").map((e) => e.name), ["B", "A", "C"]);
+    // The submission order is untouched by viewing.
+    assert.deepEqual(sortSubmitted(again, "submitted").map((e) => e.name), ["C", "B", "A"]);
+  });
+
+  it("marking returns the same list when nothing changes (no needless save)", () => {
+    assert.equal(markSubmittedViewed(list, "purchase-invoice", "ZZ", "2026-10-24T11:00:00Z"), list);
+    // C is already the most recently "viewed" (its submission is newest).
+    assert.equal(markSubmittedViewed(list, "purchase-invoice", "C", "2026-10-24T11:00:00Z"), list);
+    const seen = markSubmittedViewed(list, "Purchase Invoice", "A", "2026-10-24T11:00:00Z");
+    assert.notEqual(seen, list);
+    assert.equal(list[2].viewedAt, undefined);
+  });
+});

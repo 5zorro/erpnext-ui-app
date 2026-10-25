@@ -336,6 +336,9 @@ import {
   submittedEntryFromDoc,
   pushSubmittedDoc,
   markSubmittedPriorSession,
+  markSubmittedViewed,
+  sortSubmitted,
+  normalizeSubmittedSort,
   submittedRowSummary,
   submittedEntryRoute,
 } from "../src/submitted-docs.js";
@@ -576,6 +579,8 @@ let peekLinks = {};
 let simplifiedSkinInstalled = false;
 /** Recent/Drafts rail collapsed to a grab strip (persisted; 4K-quarter windows). */
 let histCollapsed = false;
+/** The Submitted panel's order — "submitted" (default) or "viewed" — kept per clerk (plan 10-24 answer 5). */
+let submittedSort = "submitted";
 /** Submit-and-move-on trail: Drafts drops a doc on submit and Recent keeps one row per doctype. */
 let submittedDocs = [];
 /** Active company abbr from ERP (OI-118 history hygiene). */
@@ -804,6 +809,7 @@ function loadPrefs() {
       pruneCalcHistory(Array.isArray(nav.calcHistory) ? nav.calcHistory : []),
     );
     histCollapsed = !!nav.histCollapsed;
+    submittedSort = normalizeSubmittedSort(nav.submittedSort);
     submittedDocs = markSubmittedPriorSession(
       Array.isArray(nav.submittedDocs) ? nav.submittedDocs : [],
     );
@@ -902,7 +908,7 @@ function saveNavState() {
   try {
     fs.writeFileSync(
       navStatePath(),
-      JSON.stringify({ shelved: shelvedDrafts, calcHistory, histCollapsed, submittedDocs }, null, 0),
+      JSON.stringify({ shelved: shelvedDrafts, calcHistory, histCollapsed, submittedDocs, submittedSort }, null, 0),
     );
   } catch {
     /* ignore */
@@ -1362,6 +1368,7 @@ function sendUiState() {
 
 function sendHistory() {
   calcHistory = pruneCalcHistory(calcHistory);
+  noteSubmittedViewed();
   if (hist && !hist.webContents.isDestroyed()) {
     hist.webContents.send("history", {
       items: applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks),
@@ -4203,7 +4210,28 @@ function closeSubmittedDropdown() {
 }
 
 function submittedPayload() {
-  return { submitted: submittedDocs.map((e) => ({ ...e })) };
+  return { submitted: sortSubmitted(submittedDocs, submittedSort).map((e) => ({ ...e })), sort: submittedSort };
+}
+
+/**
+ * A submitted document is on screen (either lens, any door, a peek too): note when, for the panel's
+ * "Viewed" order. Saves only when that changes the order.
+ */
+function noteSubmittedViewed() {
+  if (surfaceMode !== "doc" && surfaceMode !== "erp") return;
+  const info = routeInfo(currentRoute, ERP_BASE);
+  if (!info.doctype || !info.record) return;
+  let name = info.record;
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    /* as is */
+  }
+  const next = markSubmittedViewed(submittedDocs, info.doctype, name);
+  if (next === submittedDocs) return;
+  submittedDocs = next;
+  saveNavState();
+  pushSubmittedDropdown();
 }
 
 function pushSubmittedDropdown() {
@@ -10897,6 +10925,14 @@ ipcMain.on("open-submitted", (_e, anchor) => {
   openSubmittedDropdown(anchor && typeof anchor === "object" ? anchor : {});
 });
 ipcMain.on("submitted-dropdown-close", () => closeSubmittedDropdown());
+ipcMain.on("submitted-sort", (_e, sort) => {
+  const next = normalizeSubmittedSort(sort);
+  if (next === submittedSort) return;
+  submittedSort = next;
+  navDebug("submitted-sort", next);
+  saveNavState();
+  pushSubmittedDropdown();
+});
 ipcMain.on("submitted-open-doc", (_e, route) => {
   const r = submittedEntryRoute({ route: typeof route === "string" ? route : "" }, ERP_BASE);
   if (!r) return;

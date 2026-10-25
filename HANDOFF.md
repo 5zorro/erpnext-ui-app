@@ -480,7 +480,10 @@ fixed (2026-10-24):
   started it: an ERPNext reload (said, DC-4) and a Vanilla open overtaken by a quick Doc-tab click
   (silent, N-7). `loadErpUrl` records the surface the move was *asked from*, before its drain.
 - **Recent keeps one row per doctype — a feature.** The way back to a submitted document is the
-  rail's *Submitted* section (newest first, once each) — 5zorro 2026-10-24.
+  rail's *Submitted* section, once each, sorted by a per-clerk switch: by submission (default) or
+  by when last viewed — viewing counts in either lens and through any door (5zorro 2026-10-24: not
+  one order for every user). `src/submitted-docs.js`; the choice is `submittedSort` in
+  `nav-state.json`.
 
 **Every surface claims a route.** A `surfaceMode` that renders a document must set
 `currentRoute` (and push its Recent row) the moment it is shown — an ERP navigation does this
