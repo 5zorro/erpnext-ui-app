@@ -6,7 +6,8 @@
 > yourself'. that is going to be a separate session."* Its own goal: changing the app gets cheaper
 > and safer; nothing a clerk sees changes.
 >
-> **First, one question for 5zorro (below).** Then the sessions in the order under *Order*.
+> **Share, not merge (5zorro, 2026-10-25), with every data-entry form in view** (*Decided* below).
+> Then the sessions in the order under *Order*.
 >
 > **2026-10-25, added: step 0.** 5zorro's DF-03 dogfood found three bugs in the items table's
 > keys, in code both pages carry (*Step 0* below). He chose to do this plan before finishing that
@@ -35,22 +36,31 @@ dropped — then update HANDOFF's registry and the local notes file, and delete 
 
 ---
 
-## Question for 5zorro before building
+## Decided: share, with every data-entry form in view (2026-10-25)
 
-**Recommended: share** (proposed 2026-10-25; confirm at the start of the session). Step 0 is a
-share either way.
+**Share, not merge.** 5zorro, 2026-10-25: *"There are other document forms that might share in the
+future: the AR forms, the Journal entry form, the payment entry form … if we are doing a specific
+maintainability pass on the "data entry forms" then we need to consider those. … sharing makes the
+most sense here and keeping that perspective might make this review extend further (or be prepared
+to extend further) by the end of it."* Both pages stay as entry points; what they share moves into
+modules both import (as `item-import-ui.js` and `address-picker-ui.js` already are), with each
+page's extras passed in as hooks.
 
-**Merge the two pages, or share their code?** 5zorro said *"merge doc form and bill form"*. The
-review's proposal (R6a-1) is **not** to merge the pages into one but to move what they share into
-modules both import (as `item-import-ui.js` and `address-picker-ui.js` already are), with the
-differences — the Bill's account-company blockers, Rec'd editor, Assign, its own save path; the
-doc-form's direct save — passed in as hooks. Both end with each piece of code written once; the
-difference is risk and size of step:
+**Which forms are in view.** The doc-form page already runs more than the A/P pair: Purchase Order,
+Item Receipt, and on the A/R side Estimate, Sales Order, Invoice and Receive Payment (a Payment
+Entry whose lines are `references`, not `items`). Not yet on a shared page: the Pay Outstanding
+pages (Payment Entry, their own pages) and Journal Entry (no page yet). So a shared module serves
+six forms today, not two.
 
-- **Share (the review's proposal):** small steps, each one provable by itself; the two pages stay
-  as entry points. Drift ends piece by piece.
-- **Merge into one page:** one page for every skin, the Bill's extras switched on by its layout.
-  Fewer files at the end, but one big step that has to be proven all at once.
+**Rules for every shared module in this plan:**
+- Talk about *lines*, not items. The lines table comes from the layout (`linesTable`, default
+  `items`); a module never reads `doc.items` or `item_code` itself. Where a rule really is about
+  items (the empty-Item line is deleted on Tab), it is a hook the layout supplies.
+- A/P-only or Bill-only behaviour (Rec'd editor, Assign, account-company blockers, the Bill's own
+  save) comes in as a hook, never as a `profileId` branch inside the module.
+- Build nothing for Journal Entry or Pay Outstanding now. Each step notes, in its commit or here,
+  what one of them would still need; the closeout lists what a new form would reuse, which is where
+  the review can extend.
 
 ## Step 0 — the items table's keys, written once, then three fixes (DF-03)
 
@@ -68,6 +78,14 @@ table element, `lastDoc`, `navFields`, `apply`, `api.addItem` / `deleteItem`, an
 cells. The Bill passes no `navFields` today, so it moves through the default columns
 (`DEFAULT_ITEM_NAV_FIELDS`), not its own; keep that in 0a, then check whether the Bill's columns
 differ, and if they do, ask 5zorro before 0b changes it.
+
+**Found while planning 0a (2026-10-25, not yet proven):** the key handler, `focusAfterItemEdit` and
+`cleanupEmptyItemRow` read `lastDoc.items` and `item_code`, not the layout's lines table. On
+Receive Payment (`references`) that would make the row count 0 (↓ from a Payment cell goes
+nowhere) and every line look like one with an empty Item (Tab takes the "delete the blank line and
+leave" path). 0a keeps that behaviour but routes it through the deps (`lines(doc)`, `lineKey(row)`),
+so the fix is one place; a probe on Receive Payment, as an A/R clerk, must show the fault before it
+is fixed, in 0b.
 
 **0b — the three fixes, each in that module, each with a test that fails on the old code:**
 
