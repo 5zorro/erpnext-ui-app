@@ -100,6 +100,15 @@ describe("AI-session sizing policy", () => {
     GIT_COMMITTER_NAME: "5zorro",
     GIT_COMMITTER_EMAIL: "25825485+5zorro@users.noreply.github.com",
   };
+  // One per pattern in SIZING_RE; zero and zz mark them as synthetic.
+  const models = ["claude", "gemini", "gpt", "llama"];
+  const probes = [
+    "zz 0% context zz",
+    "zz context 0% zz",
+    "zz 0k tokens zz",
+    "zz 1m window zz",
+    ...models.map((m) => `zz ${m} 0 zz`),
+  ];
   function scanStaged(content) {
     const dir = mkdtempSync(join(tmpdir(), "commit-policy-staged-"));
     git(dir, ["init", "-q"]);
@@ -114,23 +123,18 @@ describe("AI-session sizing policy", () => {
   }
 
   it("rejects a message that sizes the session", () => {
-    for (const message of [
-      "docs: zz 0% context zz\n",
-      "docs: zz 1m window zz\n",
-      "review: zz 0k tokens zz\n",
-      "docs: zz context 0% zz\n",
-    ]) {
-      const result = scanMessage(message);
-      assert.equal(result.status, 1, message);
-      assert.match(result.stderr, /sizes an AI session/, message);
+    for (const probe of probes) {
+      const result = scanMessage(`docs: ${probe}\n`);
+      assert.equal(result.status, 1, probe);
+      assert.match(result.stderr, /sizes an AI session/, probe);
     }
   });
 
-  it("rejects a staged line naming the model with its version or the context reading", () => {
-    for (const line of ["zz llama 0 zz\n", "zz context 0% zz\n", "zz 0k tokens zz\n"]) {
-      const result = scanStaged(line);
-      assert.equal(result.status, 1, line);
-      assert.match(result.stderr, /staged change adds a line that sizes an AI session/, line);
+  it("rejects a staged line that sizes the session", () => {
+    for (const probe of probes) {
+      const result = scanStaged(`${probe}\n`);
+      assert.equal(result.status, 1, probe);
+      assert.match(result.stderr, /staged change adds a line that sizes an AI session/, probe);
     }
   });
 
