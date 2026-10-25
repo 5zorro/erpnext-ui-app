@@ -1,11 +1,11 @@
 /**
  * Review 10-19 R13-1 (5zorro 2026-10-25), as the AP clerk on a new Bill's Amount Due:
- * 1. `10.05*0.5` Enter goes in as 5.02 (this site's Banker's Rounding, read from ERPNext), and the
- *    tape stays up with a yellow "Rounds to 5.02 — remainder 5/1000" for ~5 s, then fades.
- * 2. Round up, picked on the tape mid-calculation, makes the same sum 5.03 ("remainder −5/1000");
+ * 1. `10.05*0.5` Enter goes in as 5.03 (Round is mathematical, not the site's Banker's 5.02), and
+ *    the tape stays up with a yellow "Rounds to 5.03 — remainder −5/1000" for ~5 s, then fades.
+ * 2. Round up, picked on the tape mid-calculation: `10/3` goes in as 3.34 ("remainder −7/1000");
  *    the ⓘ says the rule in words.
- * 3. `+`, then ↩ on that calculation in the tape's history, carries on from 5.025 (not 5.03):
- *    + 5.025 Enter goes in as 10.05 with no remainder (from 5.03 it would be 10.06).
+ * 3. `+`, then ↩ on that calculation in the tape's history, carries on from 3.3333333333 (not
+ *    3.34): + 6.6666666667 Enter goes in as 10.00 with no remainder (from 3.34, rounded up: 10.01).
  * Makes no records (the Bill is never saved). Puts back the remembered convention (page storage,
  * which run-probe's prefs backup does not cover).
  */
@@ -57,28 +57,28 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await sleep(4000);
     const at7 = await tape(app);
     report("round", { at0, at3, at7 });
-    expect(at0.value).toMatch(/^\$?5\.02$/);
-    expect(at0.remainder).toBe("Rounds to 5.02 — remainder 5/1000");
+    expect(at0.value).toMatch(/^\$?5\.03$/);
+    expect(at0.remainder).toBe("Rounds to 5.03 — remainder −5/1000");
     expect(at3.shown && !at3.fading).toBe(true);
     expect(at7.shown).toBe(false);
 
     // 2. Round up, picked mid-calculation; the ⓘ.
     await freshBox(app);
-    await keys(app, "10.05*");
+    await keys(app, "10/");
     await sleep(300);
     await click(app, "doc-calc-convention-up");
     await click(app, "doc-calc-convention-info");
     const note = await inDoc(app, `document.querySelector('[data-testid="doc-calc-convention-note"]').textContent`);
-    await keys(app, "0.5\n");
+    await keys(app, "3\n");
     await sleep(400);
     const up = await tape(app);
     report("up", { up, note });
     expect(note).toMatch(/^Round up: anything past the cent goes up/);
-    expect(up.value).toMatch(/^\$?5\.03$/);
-    expect(up.remainder).toBe("Rounds to 5.03 — remainder −5/1000");
+    expect(up.value).toMatch(/^\$?3\.34$/);
+    expect(up.remainder).toBe("Rounds to 3.34 — remainder −7/1000");
     await click(app, "doc-calc-convention-info"); // close the ⓘ again
 
-    // 3. ↩ resume from 5.025, not the 5.03 in the box.
+    // 3. ↩ resume from 3.3333333333, not the 3.34 in the box (Round up is still on).
     await sleep(6500);
     await focusTestId(app, "bill-amount-due");
     await keys(app, "+");
@@ -86,12 +86,12 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await inDoc(app, `(() => { document.getElementById("calc-overlay").dispatchEvent(new MouseEvent("mouseenter")); return true; })()`);
     await expect.poll(() => inDoc(app, `document.querySelectorAll('[data-testid="doc-calc-resume"]').length`), { timeout: 10_000 }).toBeGreaterThan(0);
     const resumed = await inDoc(app, `(() => { const all = [...document.querySelectorAll('[data-testid="doc-calc-resume"]')]; const b = all[all.length - 1]; const t = b.title; b.click(); return t; })()`);
-    await keys(app, "5.025\n");
+    await keys(app, "6.6666666667\n");
     await sleep(400);
     const res = await tape(app);
     report("resume", { resumed, res });
-    expect(resumed).toMatch(/from 5\.025 /);
-    expect(res.value).toMatch(/^\$?10\.05$/);
+    expect(resumed).toMatch(/from 3\.3333333333 /);
+    expect(res.value).toMatch(/^\$?10(\.00)?$/);
     expect(res.remainder).toBe("");
   } finally {
     await inDoc(app, `(() => { try { const v = ${JSON.stringify(priorConvention)}; if (v == null) localStorage.removeItem("calc-rounding-convention"); else localStorage.setItem("calc-rounding-convention", v); } catch {} return true; })()`).catch(() => {});

@@ -1,7 +1,8 @@
 /**
- * Review 10-19 R13-1 (5zorro 2026-10-25): the calculator never rounds quietly. It rounds the way the
- * site does (or by the clerk's convention: round / round up / round down), only the result that goes
- * into the box, and says what was dropped: "Rounds to 5.02 — remainder 5/1000".
+ * Review 10-19 R13-1 (5zorro 2026-10-25): the calculator never rounds quietly. It rounds by the
+ * clerk's convention (Round = mathematical, add half and drop the rest; Round up; Round down) to the
+ * site's places, only the result that goes into the box, and says what was dropped:
+ * "Rounds to 5.03 — remainder −5/1000".
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -82,19 +83,23 @@ describe("roundByConvention — round / round up / round down", () => {
     assert.equal(roundByConvention(1.1 * 3, { ...CENTS, convention: "down" }), 3.3);
   });
 
-  it("round is the site's method", () => {
-    assert.equal(roundByConvention(5.025, { ...CENTS, convention: "round" }), 5.02);
-    assert.equal(roundByConvention(5.025, { precision: 2, method: ROUNDING_COMMERCIAL }), 5.03);
+  it("round is mathematical rounding, whatever the site's method (5zorro: a tape has no set to balance)", () => {
+    assert.equal(roundByConvention(5.025, { ...CENTS, convention: "round" }), 5.03);
+    assert.equal(roundByConvention(5.035, { ...CENTS, convention: "round" }), 5.04);
+    assert.equal(roundByConvention(1.005, { ...CENTS, convention: "round" }), 1.01); // a half as typed
+    assert.equal(roundByConvention(-5.025, { ...CENTS, convention: "round" }), -5.03);
+    assert.equal(roundByConvention(5.024, { ...CENTS, convention: "round" }), 5.02);
   });
 });
 
 describe("roundingRemainder / remainderNote", () => {
   it("counts what was dropped one place finer than the box", () => {
-    const r = roundingRemainder(5.025, CENTS);
+    const r = roundingRemainder(5.024, CENTS);
     assert.equal(r.rounded, 5.02);
-    assert.equal(r.units, 5);
+    assert.equal(r.units, 4);
     assert.equal(r.scale, 1000);
-    assert.equal(remainderNote(r, 2), "Rounds to 5.02 — remainder 5/1000");
+    assert.equal(remainderNote(r, 2), "Rounds to 5.02 — remainder 4/1000");
+    assert.equal(remainderNote(roundingRemainder(5.025, CENTS), 2), "Rounds to 5.03 — remainder −5/1000");
   });
 
   it("rounding up is a negative remainder; quantities count ten-thousandths", () => {
@@ -116,14 +121,12 @@ describe("roundingRemainder / remainderNote", () => {
 });
 
 describe("conventionNote — the ⓘ, in plain words at the box's places", () => {
-  it("Banker's says the even-cent rule with examples the code produced", () => {
+  it("Round reads 'add half, then drop', with examples the code produced, on a Banker's site too", () => {
     const t = conventionNote({ ...CENTS, convention: "round" });
-    assert.match(t, /nearest cent/);
-    assert.match(t, /5\.025 → 5\.02/);
-    assert.match(t, /5\.035 → 5\.04/);
+    assert.equal(t, "Round: add half a cent, then drop everything past the cent. 5.024 → 5.02, 5.025 → 5.03.");
   });
 
-  it("half-up sites read 'add half, then drop'; up / down; quantities speak of thousandths", () => {
+  it("up / down; quantities speak of thousandths", () => {
     assert.match(conventionNote({ precision: 2, method: ROUNDING_COMMERCIAL }), /add half a cent, then drop everything past the cent/);
     assert.match(conventionNote({ ...CENTS, convention: "up" }), /5\.021 → 5\.03/);
     assert.match(conventionNote({ ...CENTS, convention: "down" }), /5\.029 → 5\.02/);
@@ -132,10 +135,10 @@ describe("conventionNote — the ⓘ, in plain words at the box's places", () =>
 });
 
 describe("the calculator: only the result that goes in is rounded", () => {
-  it("10.05 × 0.5 goes in as 5.02 and says so", () => {
+  it("10.05 × 0.5 goes in as 5.03 and says so", () => {
     const r = calc("10.05", "*0.5", "rate", CENTS);
-    assert.equal(r.commitValue, "5.02");
-    assert.equal(r.remainder, "Rounds to 5.02 — remainder 5/1000");
+    assert.equal(r.commitValue, "5.03");
+    assert.equal(r.remainder, "Rounds to 5.03 — remainder −5/1000");
   });
 
   it("a ten-step chain is not rounded step by step (5zorro: only the last one)", () => {
@@ -166,7 +169,7 @@ describe("the calculator: only the result that goes in is rounded", () => {
 
 describe("the taxes Add box (a sum the tape never saw)", () => {
   it("rounds the site's way and says what it dropped", () => {
-    assert.deepEqual(moneyOrSum("5.025", CENTS), { amount: 5.02, remainder: "Rounds to 5.02 — remainder 5/1000" });
+    assert.deepEqual(moneyOrSum("5.025", CENTS), { amount: 5.03, remainder: "Rounds to 5.03 — remainder −5/1000" });
     assert.deepEqual(moneyOrSum("12.50", CENTS), { amount: 12.5, remainder: "" });
     assert.equal(parseMoneyOrSum("169.00*1.0845", CENTS), 183.28);
     assert.deepEqual(moneyOrSum("5*", CENTS), { amount: null, remainder: "" });

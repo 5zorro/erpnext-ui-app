@@ -1,14 +1,20 @@
 /**
- * Rounding the way the ERPNext site rounds, so the calculator never rounds quietly (review 10-19
- * R13-1; 5zorro 2026-10-25: "i don't want rounding to be quiet"). A result with more digits than
- * the box keeps is rounded here exactly as ERPNext will store it, and the part dropped is named:
- * "Rounds to 5.02 — remainder 5/1000".
+ * Rounding on the calculator tape, never quietly (review 10-19 R13-1; 5zorro 2026-10-25: "i don't
+ * want rounding to be quiet"). A result with more places than the box keeps is rounded once, as it
+ * goes in, and the part dropped is named: "Rounds to 5.03 — remainder −5/1000".
  *
- * Three site settings decide it (`frappe.boot.sysdefaults`, read once per run by main.js
- * `calc-site-rounding`): `rounding_method`, `currency_precision` (blank → the number format's
- * decimals, 2 for `#,###.##`) and `float_precision` (quantities; Frappe's fallback is 3).
- * The remainder is reported one place finer than the box: thousandths on money, ten-thousandths
- * on quantities.
+ * **Round is mathematical rounding** (add half, then drop the rest; halves away from zero), not the
+ * site's Banker's Rounding (5zorro 2026-10-25). Banker's sends halves to the even digit so that
+ * *many* roundings of one set (an allocation, a column of totals) do not drift up together; one
+ * typed calculation has no set to balance, and the tape cannot know what the number is for (a
+ * third of an asset's life may need rounding down everywhere). ERPNext stores the rounded number
+ * as given: it has nothing past the box's places left to round.
+ *
+ * The **places** come from the site (`frappe.boot.sysdefaults`, read by main.js
+ * `calc-site-rounding`): `currency_precision` (blank → the number format's decimals, 2 for
+ * `#,###.##`) and `float_precision` (quantities; Frappe's fallback is 3). The remainder is reported
+ * one place finer than the box: thousandths on money, ten-thousandths on quantities.
+ * `roundLikeFrappe` mirrors all three of Frappe's methods; the tape uses its Commercial Rounding.
  */
 
 export const ROUNDING_LEGACY = "Banker's Rounding (legacy)";
@@ -17,8 +23,8 @@ export const ROUNDING_COMMERCIAL = "Commercial Rounding";
 
 /**
  * The clerk's rounding convention, a toggle pinned to the top of the tape (5zorro 2026-10-25):
- * Round (the site's own method), Round up (anything past the last place goes up one), Round down
- * (drop what is past the last place). Up and down count away from / toward zero.
+ * Round (mathematical: add half, drop the rest), Round up (anything past the last place goes up
+ * one), Round down (drop what is past the last place). All count away from / toward zero.
  */
 export const CONVENTION_ROUND = "round";
 export const CONVENTION_UP = "up";
@@ -99,7 +105,8 @@ export function roundLikeFrappe(num, precision, method = ROUNDING_LEGACY) {
 }
 
 /**
- * Round `num` to `precision` by the clerk's convention: Round is the site's method.
+ * Round `num` to `precision` by the clerk's convention: Round is mathematical rounding (Frappe's
+ * Commercial Rounding: halves away from zero, with its guard so 1.005 is a half and goes to 1.01).
  * Up / down step at the last place; `toFixed(8)` first, as Frappe does, so 0.29 × 100 = 28.999…
  * is not "past" 29.
  * @param {number} num
@@ -109,7 +116,7 @@ export function roundLikeFrappe(num, precision, method = ROUNDING_LEGACY) {
 export function roundByConvention(num, rounding) {
   const precision = Math.trunc(Number(rounding.precision) || 0);
   const convention = normalizeConvention(rounding.convention);
-  if (convention === CONVENTION_ROUND) return roundLikeFrappe(num, precision, rounding.method);
+  if (convention === CONVENTION_ROUND) return roundLikeFrappe(num, precision, ROUNDING_COMMERCIAL);
   const m = 10 ** precision;
   const n = +(Math.abs(num) * m).toFixed(8);
   const r = (convention === CONVENTION_UP ? Math.ceil(n) : Math.floor(n)) / m;
@@ -188,9 +195,6 @@ export function conventionNote(rounding) {
   }
   if (convention === CONVENTION_DOWN) {
     return `Round down: everything past the ${place} is dropped. ${show(x(0, 1))}, ${show(x(0, 9))}.`;
-  }
-  if (rounding.method === ROUNDING_BANKERS) {
-    return `Round: to the nearest ${place}. An exact half goes to the even ${place} (this site's setting, Banker's Rounding): ${show(x(0, 5))}, ${show(x(step, 5))}. Otherwise, under half drops and over half goes up: ${show(x(0, 4))}, ${show(x(0, 6))}.`;
   }
   return `Round: add half a ${place}, then drop everything past the ${place}. ${show(x(0, 4))}, ${show(x(0, 5))}.`;
 }
