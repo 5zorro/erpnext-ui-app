@@ -230,6 +230,9 @@ second amend; the undo is `Unreconcile Payment`.
 
 ### ERP site settings this shell reads (never assumes)
 
+(The ERPNext behaviour behind these, and more, read from source: [docs/gotchas.md](docs/gotchas.md)
+§ *ERPNext behaviour verified from source*.)
+
 🔴 **Clean Core forbids editing vendor code; it does not forbid configuring ERPNext.** A value in
 Accounts Settings or Document Naming Settings is site *data*, written through ERPNext's own form —
 it is the surface ERPNext provides precisely so that nobody patches. What the shell must not do is
@@ -821,5 +824,21 @@ Now each leftover is sorted and goes where it belongs; a plan never exists just 
 ```bash
 cd ~/erpnext-ui-app && npm test && npm start
 ```
+
+| Command | What |
+|---|---|
+| `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
+| `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
+| `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
+| `npm run probe -- <name>` | One probe against the real app and the sandbox (`tests/probes/README.md`) |
+| `npm run dogfood:check` · `npm run dogfood:setup -- <row>` | Every `@dogfood` probe before a round; a row's scene left on the sandbox |
+| `npm run nav:check [-- --ongoing]` | The navigation matrix (§ Navigation spine) |
+| `npm run dogfood:for-change [base]` | Which tests and papers a change needs |
+| `npm run seeds:simplified [-- --check \| --refresh-meta]` | Regenerate Simplified's defaults (after an ERPNext upgrade: § *After an ERPNext upgrade*) |
+| `npm run seed:sample` | The sandbox's sample data, ~15 min (`ops/sample-data/README.md`) |
+| `npm run report:input-count` | The field-count report |
+
+`electron/pay-outstanding.html` is **generated**: edit `pay-outstanding.src.html`, then
+`node scripts/assemble-pay-outstanding-html.js`.
 
 **Git workflow:** Cursor/agents **commit** as often as useful (local checkpoints on `wip/…` or `alpha`). Only **5zorro** **pushes** to GitHub. Fix CI locally (`npm test`) before asking for a push.

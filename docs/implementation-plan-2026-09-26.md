@@ -1166,6 +1166,9 @@ Found on the DF-02 paper (blank bench). Agreed item by item with 5zorro before b
   text (R11-6); and check that **Open** / **Download** on Windows mark a paper as "from the
   internet" (file Properties → *This file came from another computer*) — written, never run (R11-2).
   macOS has its own mark (the `com.apple.quarantine` attribute), which is **not** written yet.
+  And ignore the chaos-lag settings in a packaged build (`ERP_CHAOS_LAG_MS` / `_PCT`, a stress tool
+  for development: they are read from the environment in any build today, with nothing on screen
+  saying they are on — R13-4; gate on `app.isPackaged`).
 
 **Questions for 5zorro when it starts:** which systems (Windows first? macOS? Linux?); an installer
 or a portable app; signed or not; whether it should update itself.

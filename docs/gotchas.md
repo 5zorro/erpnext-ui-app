@@ -794,3 +794,168 @@ nothing, and DC-4's cause (plan 2026-10-24).
 showing" when Electron answered it first; a `page.on("dialog")` listener of the probe's own turns
 that off. A real `dialog.showMessageBoxSync` would block the probe — stub it in main
 (`app.evaluate(({ dialog }) => …)`).
+
+---
+
+## ERPNext behaviour verified from source (read the bullet you need; don't re-derive)
+
+Facts about the ERPNext / Frappe this shell drives, read from the source at the sandbox's tags
+(ERPNext v16.32.1, Frappe v16.31.0) and proven on the sandbox. Each one cost real time to
+establish. Moved here from the local agent notes 2026-10-25 (review 10-19 R15-1), so an agent
+off this machine has them too. `HANDOFF.md` § *ERP site settings this shell reads* is the table of
+the settings among them.
+
+- **List filters ride in the address** (2026-09-26, frappe `router.js` `set_route_options_from_url`
+  → `list_view.js` `parse_filters_from_route_options`): `/app/purchase-invoice?supplier=X&bill_no=Y`
+  opens the list already filtered and replaces its saved filters. A bare list address instead
+  **restores the last saved filters** (seen live: a leftover `?name=…&supplier=…`). v16 shows
+  `/app/…` in the address bar as `/desk/…` — assert either. `/<doctype>/view/<kind>` is a list view,
+  never a record (`routeInfo` now agrees).
+
+Read from source and from this instance. Each of these cost real time to establish.
+
+- **Amend is client-side.** There is no server-side amend call: `frappe.client.cancel`, then
+  `frappe.model.copy_doc(doc, 1)` with `amended_from` set, then insert — exactly what
+  `form.js::amend_doc` does. 🔴 `from_amend` **keeps** `no_copy` fields rather than stripping them,
+  and the copy carries a temporary local name that `set_new_name` discards. A document may be
+  amended **once** (`frappe.client.is_document_amended`), and amending renames it to `<name>-1`,
+  so the ERP id changes while the vendor ref and logbook number do not — that is OI-170's reason.
+- 🔴 **Amending a v16 invoice with `Tax Withholding Entry` rows fails from code, not from Desk.**
+  Those rows link back to the invoice itself, and a bare `copy_doc(doc, 1)` + insert keeps them, so
+  `_validate_links` rejects the insert before anything could rebuild them. **Vanilla's Amend button
+  works** — the form's `onload` empties the table on any new document (`purchase_invoice.js:706`;
+  Sales Invoice and Payment Entry have the same clear), and ERPNext rebuilds the rows on save.
+  5zorro confirmed it by hand 2026-09-24 on ACC-PINV-2026-00243 → `-1`, which has a withholding
+  row. So the shell's drop-the-self-links fix is copying what the form does; it is **not** an
+  upstream bug, and `erpnext-issue-draft.md` (repo root, untracked) must **not** be filed. The
+  earlier claim that Vanilla fails too was inferred from the code path and never clicked. Both the
+  code comment (`src/doc-actions.js`) and the plan's P1 finding 2 are corrected (2026-09-26).
+  🔴 Testing withholding needs a supplier **with** a Tax Withholding Category (SAMPLE Vendor 01/02
+  here) — the tickbox alone creates no rows, and no rows means nothing to test.
+- **Cancelling an invoice detaches its payments here** — `unlink_payment_on_cancellation_of_invoice`
+  is on, so payments survive unallocated and the invoice's outstanding goes back up. They are not
+  re-applied to the amendment automatically.
+- 🔴 **And ERPNext keeps no record of what the payment paid.** `unlink_ref_doc_from_payment_entries`
+  (`accounts/utils.py:1025`) zeroes then *deletes* the Payment Entry Reference row, blanks
+  `against_voucher` on GL and Payment Ledger entries, and writes through the query builder so the
+  removal is not in the document's version history either. Confirmed by querying all three on this
+  sandbox. So the pairing can only be inferred, never looked up — and ERPNext's own
+  `allocate_entries` infers it badly (greedy over a `posting_date` sort, blind to amendments).
+  `src/payment-relink.js` proposes it from `amended_from` + an exact amount match instead, and
+  hands the chosen pairing to Payment Reconciliation to post. **Payment Reconciliation is a virtual
+  doctype** and is driven over HTTP with `run_doc_method` + `docs` as a JSON *string* — its own
+  `load_from_db` comment says that is the intended path, and it works (proven 2026-09-26).
+- 🔴 **Re-linking a payment is an update-after-submit, NOT a cancel-and-amend.**
+  `reconcile_against_document`'s docstring says "Cancel PE or JV … and resubmit", but the
+  implementation is `update_reference_in_payment_entry(do_not_save=True)` then `doc.save()` on a
+  submitted document, followed by deleting and rebuilding its ledger entries
+  (`accounts/utils.py:553`). Proven 2026-09-26: the payment kept its name and `docstatus`. So there
+  is **no second amendment** to chase when a payment is put back on an amended bill.
+- **The undo is `Unreconcile Payment`** — its `on_submit` calls the same
+  `unlink_ref_doc_from_payment_entries` and restores outstanding, and the Payment Entry form
+  carries an *UnReconcile* button. Also no amend.
+  🔴 But driving it over HTTP left this sandbox with the invoice's stored `outstanding_amount` (9.00,
+  Unpaid) disagreeing with its own Payment Ledger (net 0, i.e. paid), and the reconciliation tool
+  then offered neither side. Repaired with
+  `bench --site frontend execute erpnext.accounts.utils.update_voucher_outstanding --kwargs "{...}"`,
+  which is the recipe to remember for any stale outstanding. Prefer the Desk button over the
+  whitelisted `create_unreconcile_doc_for_selection` until that is understood.
+- **Provenance is a Comment; the review request is an assignment. Two records, on purpose.**
+  An assignment *closes*, and a closed one is invisible — so on its own it cannot answer "did a
+  person type this allocation or did a rule post it?", which is what a reviewer needs afterwards
+  (5zorro 2026-09-26). So every re-link also writes a permanent Comment via the whitelisted
+  `frappe.desk.form.utils.add_comment`, opening with the token `Allocation source:` and then
+  `AUTO-LINK` or `PERSON`. The difference it records is **blast radius**: a wrong auto-link means
+  the matching rule is wrong and others may be wrong the same way; a wrong manual one stops there.
+  Both paths write one, because "no comment" would otherwise mean three different things.
+- **Frappe assignments are the review flag.** `frappe.desk.form.assign_to.add` / `.close` (both
+  whitelisted) put a ToDo plus `_assign` on a document — an Open/Closed status, visible on the form
+  in a plain browser, and no custom field, so the site's schema is untouched. The shell finds its own
+  flags again by querying ToDo for the phrase `Auto-linked by the Doc shell`, which makes that
+  phrase load-bearing (`relinkReviewNote` in `src/payment-relink.js`).
+- 🔴 **`auto_reconcile_payments` is a gate, not an automation** — it only enables the *Process
+  Payment Reconciliation* tool, whose cron processes PPR documents somebody already queued. Turning
+  it on reconciles nothing by itself, and when it does run it allocates oldest-invoice-first. Left
+  **off** deliberately (5zorro 2026-09-26). `HANDOFF.md` § *ERP site settings this shell reads* is
+  the public table of this and the four others; all are at stock default here.
+- 🔴 **Cost layers are stored on every movement, not derived.** `Stock Ledger Entry.stock_queue` is
+  a Long Text holding `[[qty, rate], ...]` **as of that transaction** (`stock_ledger.py:1019`;
+  classes in `erpnext/stock/valuation.py`), and `stock_value_difference` on the same row is the COGS
+  it booked. A costing panel must **read** those — recomputing FIFO shell-side would be a second
+  opinion that drifts the first time a backdated entry reposts. `valuation_method` is per **Item**
+  (Select: `FIFO` / `Moving Average` / `LIFO` — all three exist in v16), and **Moving Average writes
+  no queue at all** (`get_moving_average_values`, `:1561`) — `stock_queue` stays `[]`. Verified on
+  this sandbox 2026-09-26 with the seed's three costing SKUs (buy 2 @ 50, buy 1 @ 75, sell 2): one
+  unit on hand under all three, worth 75.00 / 50.00 / 58.33, and the same sale booking COGS of
+  100.00 / 125.00 / 116.67. OI-177.
+- 🔴 **Shipping before receiving: whether the guess is ever corrected turns on the receipt's
+  posting date, nothing else.** Enabled by `Stock Settings.allow_negative_stock` **or** per item by
+  `Item.allow_negative_stock` (`is_negative_stock_allowed`, `stock_ledger.py:2417`). The outgoing
+  movement books COGS at a guess: `get_fallback_rate` (`:1708`) → last SLE valuation rate →
+  `Item.valuation_rate` → `standard_rate` → buying Item Price, landing on **0** if none exist. The
+  queue keeps a negative bin at *the rate of the last layer it consumed*, or that fallback
+  (`valuation.py` `remove_stock`: `[-qty, outgoing_rate or fifo_bin[RATE]]`) — **never** a future
+  receipt's rate. Then, proven live 2026-09-26 (ship 2 on Aug 1 with master rate 60, receive 3 @ 50):
+  - **receipt dated *after* the sale → no repost, ever.** The sale keeps 60.00 / −120.00 permanently.
+    The receipt absorbs the difference instead: 150.00 of goods moves **170.00** of value. Balance
+    sheet right, margin on that sale wrong in its own period and wrong in the receipt's, silently.
+  - **receipt *backdated* before the sale → `Repost Item Valuation` (Queued, async) → the sale is
+    genuinely rewritten** 60.00 → 50.00, −120.00 → −100.00. Costs land in the right periods.
+  So the one prompt worth building is at receipt time: *date this when the goods arrived and the
+  shipment corrects itself.* 🔴 The repost is **asynchronous**, so a panel reading straight after a
+  save can show a figure about to change and must say so.
+  **No cutoff out of the box:** `stock_frozen_upto`, `stock_frozen_upto_days` (both bypassed by
+  `stock_auth_role`) and `role_allowed_to_create_edit_back_dated_transactions` all unset here.
+  **No "negative stock" report exists** — Stock Balance shows negatives as rows, Stock Ledger shows
+  the cause per item, and *FIFO Queue vs Qty After Transaction* / *Stock Ledger Invariant Check* are
+  the audits. Not built: OI-178, walk-through at `docs/mockups/negative-inventory-timeline.html`.
+- 🔴 **A pending repost makes stored numbers read wrong, not blank.** `outstanding_amount`,
+  invoice status, stock queues and valuations are all **stored** and rebuilt by
+  `Repost Item Valuation`; until it runs they agree with each other and are stale together (seen
+  2026-09-26: 29 AR + 31 AP invoices "unpaid" with payments allocated in full, both 0 after the queue
+  drained; a queue totalling 540 units against a balance of 172). So any costing or ageing figure the
+  shell shows must check for an unfinished repost over that item/voucher. Most drain as **Skipped**
+  (ERPNext collapses redundant ones); one can **fail permanently** — check `status='Failed'` after a
+  bulk seed. Recipe and cause in `docs/gotchas.md` G14.
+- 🔴 **The negative-stock guess comes from four sources, and a Purchase Order is not one of them.**
+  `get_valuation_rate` stops at the first that answers: (1) the **last SLE's `valuation_rate`** for
+  that *item + warehouse*, `>= 0` and with **no date filter**; (2) `Item.valuation_rate`;
+  (3) `Item.standard_rate`; (4) the buying `Item Price.price_list_rate`. Source 1 wins whenever the
+  item has any movement in that warehouse, so only a **new SKU (or new warehouse)** ever reaches the
+  rest — and that is the case where the guess is often **0** and the shipment books no cost at all.
+  ERPNext *does* already record the PO's price: `Item.last_purchase_rate`, written by
+  `update_last_purchase_rate` (`buying/utils.py:14`) on **Purchase Order** submit
+  (`Buying Settings.disable_last_purchase_rate` = 0 here) — it is just not one of the four. Live:
+  `SAMPLE-RS-NEG-B1` had `last_purchase_rate` 55.00, the true cost, while costing its shipment at
+  `valuation_rate` 61.00. Source 4 can be made to track each PO by turning on
+  `Stock Settings.update_existing_price_list_rate` (0 here; `auto_insert_price_list_rate_if_missing`
+  is already 1, so `insert_item_price` creates the Standard Buying row once and never moves it —
+  `SAMPLE-RS-01` is stuck at 20.00 after a year of purchases). OI-178.
+- **`posting_date` has no restriction against past dates**, so backdating a payment is ordinary
+  usage. Default to today; do not forbid it.
+- 🔴 **Amending an amendment does not stack a suffix.** `_set_amended_name` (`naming.py:549`)
+  strips the trailing counter and increments it: `…-00231-1` → `…-00231-2`, not `…-00231-1-1`. And
+  the whole scheme is a site setting — with `Document Naming Settings.default_amend_naming` set to
+  "Default Naming" the amendment takes a fresh series name and the next name cannot be predicted at
+  all. This instance is on **Amend Counter**. `predictAmendedName` in `src/doc-actions.js` mirrors it.
+- 🔴 **Cancelling is refused, harmlessly, by anything submitted that links back.**
+  `check_no_back_links_exist` (`document.py:1578`) runs *after* `on_cancel` and the raise rolls the
+  whole transaction back — so a refused cancel changes nothing and cannot strand a document. Each
+  doctype's `ignore_linked_doctypes` (set in its own `on_cancel`) decides what is exempt; ledger
+  entries are, receipts and invoices are not. This is why the shell *names* blockers and never
+  enforces them.
+- 🔴 **The Accounts Payable report returns rows that are not bills.** An **unallocated payment**
+  comes back with a negative `outstanding` and **no due date**, which threw in the bank-calendar
+  walk and silently emptied the whole Pay Outstanding board (fixed 2026-09-26). Amending a paid
+  bill *creates* these, so they are routine here, not exotic.
+- **An existing `payment_schedule` survives validate.** `set_payment_schedule`
+  (`accounts_controller.py:2633`) only builds rows when there are none, so a `mode_of_payment`
+  written onto copied rows sticks — *except* when `automatically_fetch_payment_terms` and the
+  template's `allocate_payment_based_on_payment_terms` are both on and the bill came from an order,
+  where it refetches the schedule wholesale. The shell reads the value back rather than trusting it.
+- 🔴 **Payment schedule rows are only maintained when the Template sets
+  `allocate_payment_based_on_payment_terms`.** With it off, payments never touch
+  `paid_amount`/`outstanding` on the rows while the invoice's own outstanding falls. Split payment
+  itself is always allowed and terms never constrain it; a schedule row needs no Payment Term at
+  all (only `due_date` + `payment_amount`), rows must sum to the grand total, and **no two rows may
+  share a due date**.
