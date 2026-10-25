@@ -66,7 +66,8 @@ driver, `nav-spine.js`; `src/nav-spine.js` judges them. `npm run nav:check [-- <
 prints the matrix; `NAV_ONLY=<start>/<state>/<move>,…` runs single cells. The driver empties
 `nav-state.json` before each launch (fresh rail) — it refuses unless `npm run probe` backed the
 prefs up (`ERP_PROBE_PREFS_BACKUP`). It makes `ZZ-NAV-A` / `ZZ-NAV-B` drafts and deletes them, and
-any draft a cell saved (refs `ZZNAV…`). Lessons from building it:
+any draft a cell saved (refs `ZZNAV…`) — **sandbox only** (`assertSandboxSite` at launch): every draft
+uses up a Bill number, so on company data it would leave gaps in the invoice series. Lessons from building it:
 
 - **Recent is one row per doctype**: "another document" is a Drafts row, and the way back is the
   Recent row (it reopens the last Bill) or the Drafts row.
