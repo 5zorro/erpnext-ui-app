@@ -1,7 +1,8 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
-> Next: R6a-1 step 3 with R6a-2's `paintItems` / `paintTaxes` (its own session).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> R6a-1 step 3: the item rows built (2026-10-26); next the taxes table, one for every form, the
+> Bill's way (5zorro, 2026-10-26).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -220,6 +221,44 @@ Proof: `npm test` (`tests/doc-form-commit-gate.test.js`: toolbar, discard, save 
 navigation, the preflight's ordering, direct save, both pages wired); specs `scaffold-receive-gate`
 (Save from the gate) and `scaffold-peek-return-focus` *unsaved bill → a PO* (Cancel stays); probe
 `nav-desk-after-discard`. The full `nav:check` drives the gate from every door on both skins.
+
+## R6a-1 step 3 — the lines table's rows, written once (item rows built 2026-10-26)
+
+Measured again first (same-named functions): the Bill's `paintItems` is 342 lines, doc-form's 330.
+`src/doc-form-item-rows-ui.js` (`createItemRows(deps)`) now paints the rows and wires every cell
+for both pages: the shared cells (Line, Amount and its back-in button, Rate / money, checkbox, date,
+Qty, text, read-only), and each cell's resting text, typed value, write, focus after the write (a
+new line, an empty Item removed), pick list, tape, date filter, × and Amount. Each page keeps the
+sorting and its own cells and buttons: the Bill's Source line, Sales order(s) with Assign and the
+peeks, Customer and Rec'd (`billLineCellHtml`, wired after `itemRows.paint`); doc-form's Sources.
+What differs comes in through `deps`: the test-id prefix, the columns read off a line, caps, the
+Bill's line delete that keeps Rec'd, its Qty-over-the-PO split (from the tape or a refused write),
+and its repaint after × cleared the only line. `lineApplyInFlight` moved with the write
+(`itemRows.applyInFlight()`, which Save waits on). Gone: the Bill's one branch no column reached
+(`col.scratch && col.readOnly`: every such column has its own cell) and its own line-key lookup
+for the focus after a write (the shared one gives the same answer).
+
+**Kept as found:** the Bill's × is in the Tab order, doc-form's is not (`tabindex="-1"`); the Bill
+upper-cases a typed line value when caps are on, doc-form's line cells do not. Each page says which
+(`deleteSkipsTab`, `capsOn`).
+
+Proof: `npm test` (`tests/doc-form-item-rows.test.js`: both pages' cells, a write, a refused write
+the page takes or not, Tab past the last box, ×); probes `item-table-keys` (same key path, PO and
+Bill) and `df03-item-table` (6 of 6); specs `scaffold-bill`, `scaffold-ar-doc-skins`,
+`scaffold-peek-return-focus`, `scaffold-pure-wiring`: 19 pass, and the 11 that fail fail the same
+on the code before (the Sales Order lens prefs and blank-sandbox ones from step 0, and OI-190);
+`scaffold-receive-gate`, `scaffold-bill-taxes`, `scaffold-jit-receipt`, `scaffold-typed-dates`:
+15 of 15.
+
+**The taxes table: one for every form, the Bill's way.** The two tables had drifted: the Bill's has
+the keyboard walk (Tab and the arrows between Account and the row's number, out to the Add box
+or back to Add tax), commits on a move or leaving the box, a rate typed on a fixed row works out
+its amount, and Rate % shows from the net total. doc-form's has none of that. 5zorro, 2026-10-26:
+*"bill probably has the better tax table stuff, please merge the navigation"*, and of the rate
+rule: *"normally the tax rate isn't "known" until the bill is received. so my testing and edits
+were on the bill entry page. I don't see a reason why the tax rate should be different, can you
+make them the same (again preferring the bill right)?"* So this part changes what a clerk sees on
+the PO and the other forms: their taxes act like the Bill's. Allocate into items stays the Bill's.
 
 ## The findings (verbatim from plan 2026-10-19)
 

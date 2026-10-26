@@ -391,10 +391,14 @@ describe("T-1: the sort holds still while the clerk types (DF-03)", () => {
 });
 
 describe("item-table-keys-ui: both pages use it", () => {
+  it("the shared rows wire every item cell through the keys", () => {
+    assert.match(read("../src/doc-form-item-rows-ui.js"), /itemKeys\.wireCell\(inp, \{[^}]*navFields/);
+  });
   for (const page of ["../src/bill-form-page.js", "../src/doc-form-page.js"]) {
     const src = read(page);
     it(`${page}: wires every item cell through the shared keys, with its own columns`, () => {
-      assert.match(src, /itemKeys\.wireCell\(inp, \{[^}]*navFields/);
+      // The cell wiring is shared (src/doc-form-item-rows-ui.js); each page passes its own columns.
+      assert.match(src, /createItemRows\(\{[\s\S]*?navFields: \(\) =>/);
       assert.doesNotMatch(src, /itemTableKeyDecision|neighborItemCell/, "a copy of the key handler is back");
     });
   }

@@ -94,10 +94,8 @@ import {
   sortHeaderState as taxSortHeaderState,
 } from "../src/bill-tax-sort.js";
 import {
-  shouldBlockDeleteLastItemRow,
   emptyItemRowCleanupAction,
   LAST_ITEM_ROW_TOAST,
-  isEmptyItemCode,
 } from "../src/bill-item-guard.js";
 import {
   billRowHasSource,
@@ -158,6 +156,7 @@ import { wireDateField } from "../src/doc-form-date-field-ui.js";
 import { setLineTab, wireLineTabs } from "../src/doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "../src/doc-form-tax-notes-ui.js";
 import { createCommitGate } from "../src/doc-form-commit-gate-ui.js";
+import { createItemRows } from "../src/doc-form-item-rows-ui.js";
 
 /**
  * The Bill's editable columns, in the order Tab walks them. Until plan 10-25 0a the Bill passed
@@ -202,7 +201,6 @@ import {
   mayAutoOpenSourcePicker,
 } from "../src/source-picker-flow.js";
 import { wireCommitGateChrome } from "../src/doc-commit-gate-ui.js";
-import { shouldForceCapsOnElement, applyDocCapsValue } from "../src/doc-caps.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
 import { collectBillSourceRefs, sourceTermsDisplayBlocks } from "../src/doc-source-terms.js";
@@ -386,8 +384,6 @@ export async function bootBillFormPage(api) {
   let taxSortSpecs = [{ key: "lineNo", asc: true }];
   let itemsHeadWired = false;
   let taxesHeadWired = false;
-  /** @type {Promise<void>|null} */
-  let lineApplyInFlight = null;
   /** @type {boolean} */
   let saveInFlight = false;
   /** The site's rounding (R13-1; src/calc/site-rounding-ask.js, shared with the doc-form page). */
@@ -688,6 +684,68 @@ export async function bootBillFormPage(api) {
   const userMoves = createUserMoveGuard();
   document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
   document.addEventListener("pointerdown", () => userMoves.bump(), true);
+
+  /** The lines table's rows (src/doc-form-item-rows-ui.js, shared with the doc-form page). */
+  const itemRows = createItemRows({
+    table: () => el && el.items,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    painting: () => painting,
+    editable: () => editable(),
+    lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+    keyField: "item_code",
+    itemKeys,
+    calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+    testIdPrefix: "bill",
+    rateLabel: "Cost",
+    cellsOf: (model) => [model.lineNo, model.poLine, ...model.cells],
+    cellHtml: billLineCellHtml,
+    rowAttrs: (model) => ` data-wash-source="${model.washRole}"`,
+    canDeleteLines: () => true,
+    deleteSkipsTab: false,
+    afterRows: (doc) => {
+      paintLineTotals(doc);
+      sizeItemColumns();
+    },
+    navFields: () => BILL_NAV_FIELDS,
+    isMoneyField: (field) => field === "rate",
+    capsOn: () => docCapsOn,
+    linkDoctype: (field) => linkDoctypeForBillField(field),
+    mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
+    attachCalc: (inp, opts) => wireFieldCalc(inp, opts),
+    // A Qty over the PO's splits the line (maybeSplitQtyOverPoLimit), from the tape or a refused write.
+    beforeCalcCommit: async (field, ri, value) => field === "qty" && (await maybeSplitQtyOverPoLimit(ri, value)),
+    afterRefused: async (field, ri, value, reason) =>
+      field === "qty" && isOverBillingError(reason) && (await maybeSplitQtyOverPoLimit(ri, value)),
+    deleteLine: (ri) => deleteLineKeepingReceived(ri),
+    repaint: (res) => paint(res.doc, amountDue),
+    repaintCleared: (res, ri) => {
+      if (lineAllocations && typeof lineAllocations === "object") {
+        delete lineAllocations[ri];
+        delete lineAllocations[String(ri)];
+      }
+      if (poLineMeta && typeof poLineMeta === "object") {
+        delete poLineMeta[ri];
+        delete poLineMeta[String(ri)];
+      }
+      paint(res.doc, amountDue, {
+        lineAllocations,
+        poLineMeta,
+      });
+    },
+    lastRowToast: () => LAST_ITEM_ROW_TOAST,
+    showToast,
+    setStatus,
+    noteUserEdit,
+    setItemCellMode,
+    focusItemCell,
+    focusAfterLeaving: () => focusAfterLeavingItemsTable(),
+    userMoves,
+    logFocus,
+    refresh: () => refresh(),
+    cleanupEmptyLine: (ri, code) => cleanupEmptyItemRow(ri, code),
+    beginAmountBackIn,
+  });
   /** The clerk's move count when the bill on screen first appeared (focusVendorField). */
   let docShownMoveMark = 0;
   let docShownName = "";
@@ -2062,325 +2120,12 @@ export async function bootBillFormPage(api) {
       ),
       doc,
     );
-    const canEdit = editable();
-    el.items.innerHTML = models
-      .map((model) => {
-        const ri = model.rowIndex;
-        const r = [model.lineNo, model.poLine, ...model.cells];
-        const cells = BILL_ITEM_COLS.map((col, ci) => {
-          const val = r[ci] ?? "";
-          if (col.displayOnly || col.field == null) {
-            const html = formatUsdAmountHtml(val);
-            if (col.label === "Amount" && canEdit) {
-              return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Cost)" data-testid="bill-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
-            }
-            if (col.label === "Amount") {
-              return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
-            }
-            if (col.label === "Line" || col.label === "Source line") {
-              return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
-            }
-          }
-          if (col.field === ALLOC_SALES_ORDERS_FIELD) {
-            const assignBtn = canEdit
-              ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
-              : "";
-            // Peek the Sales Order, and the PO the link lives on (change it there, or void & amend).
-            const peeks = billLineOrderPeeks(model.alloc, model.item)
-              .map((p) => {
-                const label = linkedSourcePeekKindLabel(p.kind);
-                const tag = p.kind === "sales-order" ? "SO" : "PO";
-                return `<button type="button" class="order-peek" tabindex="-1" data-peek-route="${escapeHtml(p.route)}" data-peek-kind="${p.kind}" data-testid="bill-peek-${ri}-${tag.toLowerCase()}" title="Peek ${label} ${escapeHtml(p.name)} — Esc returns to this bill" aria-label="Peek ${label} ${escapeHtml(p.name)}">${uiIconHtml("eye", { size: 12 })}${tag}</button>`;
-              })
-              .join("");
-            return `<td class="alloc-so so-cell"><span class="ro alloc-so-text hatch-clear">${escapeHtml(val) || "—"}</span>${peeks}${assignBtn}</td>`;
-          }
-          if (col.field === ALLOC_CUSTOMER_FIELD) {
-            return `<td class="so-cell"><span class="ro hatch-clear">${escapeHtml(val) || "—"}</span></td>`;
-          }
-          if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
-            const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
-            const which = col.field === REC_BY_FIELD ? "by" : "on";
-            if (canEdit && lineCanBeReceived(model.item)) {
-              return `<td class="rec-cell rec-col"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
-            }
-            const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
-            return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
-          }
-          if (col.scratch && col.readOnly) {
-            return `<td><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
-          }
-          // Cost: #,###.## (editable text so commas work)
-          if (col.field === "rate") {
-            const shown = val === "" || val == null ? "" : formatGroupedNumber(val);
-            if (!canEdit) {
-              return `<td class="num"><span class="ro money-cost">${escapeHtml(shown)}</span></td>`;
-            }
-            return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="bill-cell-${ri}-rate" /></td>`;
-          }
-          if (!canEdit) {
-            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
-          }
-          // Qty: text + decimal keypad — no spinner; ↑/↓ navigate rows only.
-          if (col.field === "qty") {
-            return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-qty" /></td>`;
-          }
-          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
-        }).join("");
-        const del = canEdit
-          ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
-          : `<td></td>`;
-        return `<tr data-rowidx="${ri}" data-wash-source="${model.washRole}">${cells}${del}</tr>`;
-      })
-      .join("");
-  
-    paintLineTotals(doc);
-    sizeItemColumns();
-  
-    el.items.querySelectorAll("input[data-row]").forEach((inp) => {
-      // Keep the resting text layer in step with the editor. The text is hidden
-      // while the input has focus, so this is not load-bearing for correctness
-      // mid-edit -- it is here so a cell reads right the instant you leave it,
-      // without waiting for a repaint that may never come.
-      const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-      if (cellText) {
-        const syncCellText = () => {
-          cellText.textContent = inp.value;
-        };
-        inp.addEventListener("input", syncCellText);
-        inp.addEventListener("change", syncCellText);
-      }
-      const field = inp.getAttribute("data-field");
-      const ri = Number(inp.getAttribute("data-row"));
-      const linkDt = linkDoctypeForBillField(field);
-      const readCellValue = () => {
-        const kind = dirtyCompareKindForField(field);
-        let next =
-          kind === "number" ? inp.value : normalizeEditableText(inp.value);
-        if (field === "rate") {
-          const n = parseMoney(inp.value);
-          next = n == null ? "" : String(n);
-        }
-        if (shouldForceCapsOnElement(docCapsOn, inp) && kind !== "number") {
-          next = applyDocCapsValue(next, docCapsOn);
-        }
-        return next;
-      };
-      const focusAfterItemEdit = async (docAfter, cellValue) => {
-        const dest = itemKeys.nextAfterEdit(field, ri, docAfter, {
-          cellValue,
-          fields: BILL_NAV_FIELDS,
-          rowItemCode: docAfter?.items?.[ri]?.item_code ?? lastDoc?.items?.[ri]?.item_code ?? "",
-        });
-        if (dest.deleteRow && dest.leaveTable) {
-          if (!api || !editable()) return;
-          const rowCountNow =
-            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-          const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
-          if (shouldBlockDeleteLastItemRow(rowCountNow)) {
-            showToast(LAST_ITEM_ROW_TOAST);
-            focusAfterLeavingItemsTable();
-            return;
-          }
-          setStatus("Removing empty line…");
-          const removed = await deleteLineKeepingReceived(deleteRi);
-          if (removed && removed.ok) {
-            noteUserEdit();
-            paint(removed.doc, amountDue);
-            setStatus("Left items table.");
-            focusAfterLeavingItemsTable();
-          } else if (removed && removed.blockedLastRow) {
-            showToast(removed.reason || LAST_ITEM_ROW_TOAST);
-          } else {
-            setStatus((removed && removed.reason) || "Could not remove empty line.", "err");
-          }
-          return;
-        }
-        if (dest.field) {
-          focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-          return;
-        }
-        if (!dest.addRow || !api || !editable()) return;
-        setStatus("Adding line…");
-        const added = await api.addItem();
-        if (added && added.ok) {
-          noteUserEdit();
-          paint(added.doc, amountDue);
-          const newRi =
-            added.doc && Array.isArray(added.doc.items)
-              ? added.doc.items.length - 1
-              : ri + 1;
-          focusItemCell(Math.max(0, newRi), "item_code", { mode: CELL_MODE_NAV });
-          setStatus("Line added.");
-        } else {
-          setStatus((added && added.reason) || "Add line failed.", "err");
-        }
-      };
-      const apply = async (value, opts = {}) => {
-        if (!api || painting) return;
-        const run = async () => {
-          setStatus(`Updating ${field}…`);
-          const moveMark = userMoves.mark();
-          const res = await api.setItem(ri, field, value);
-          if (res && res.ok) {
-            noteUserEdit();
-            paint(res.doc, amountDue);
-            setStatus("Line updated.");
-            if (userMoves.movedSince(moveMark)) {
-              // The clerk moved on while ERPNext answered: leave focus where they put it.
-              logFocus("focus-after-edit-skipped", field);
-            } else if (opts.focus && opts.focus.field) {
-              focusItemCell(opts.focus.rowIndex, opts.focus.field, {
-                mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
-              });
-            } else if (!opts.stay) {
-              await focusAfterItemEdit(res.doc, value);
-            }
-          } else {
-            const reason = (res && res.reason) || "";
-            if (field === "qty" && isOverBillingError(reason)) {
-              const handled = await maybeSplitQtyOverPoLimit(ri, value);
-              if (handled) return;
-            }
-            setStatus(reason || "Line update failed.", "err");
-            await refresh();
-          }
-        };
-        lineApplyInFlight = run();
-        try {
-          await lineApplyInFlight;
-        } finally {
-          lineApplyInFlight = null;
-        }
-      };
-      if (linkDt) {
-        mountBillLinkPicker(inp, linkDt, apply);
-      }
-      inp.addEventListener("focus", () => {
-        if (inp.dataset.navFocus === "1") {
-          setItemCellMode(CELL_MODE_NAV);
-          delete inp.dataset.navFocus;
-        } else {
-          setItemCellMode(CELL_MODE_EDIT);
-        }
-      });
-      if (field === "item_code") {
-        inp.addEventListener("blur", () => {
-          // Click-away from Item picker / leave cell without Tab — drop blank extras.
-          window.setTimeout(() => {
-            if (!editable() || painting || itemKeys.busy()) return;
-            const wrap = inp.closest(".link-wrap");
-            if (wrap && wrap.contains(document.activeElement)) return;
-            const code = normalizeEditableText(inp.value);
-            if (!isEmptyItemCode(code)) return;
-            void cleanupEmptyItemRow(ri, code);
-          }, 180);
-        });
-      }
-      if (field === "rate") {
-        inp.addEventListener("focus", () => {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = String(n);
-        });
-        inp.addEventListener("blur", () => {
-          if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-          else if (normalizeEditableText(inp.value) === "") inp.value = "";
-        });
-      }
-      if (field === "qty" || field === "rate") {
-        wireFieldCalc(inp, {
-          kind: field,
-          onCommit: async (value) => {
-            let next = value;
-            if (field === "rate") {
-              const n = parseMoney(value);
-              next = n == null ? "" : String(n);
-              if (n != null) inp.value = formatGroupedNumber(n);
-            }
-            if (field === "qty") {
-              const handled = await maybeSplitQtyOverPoLimit(ri, next);
-              if (handled) return;
-            }
-            await apply(next);
-          },
-        });
-      }
-      itemKeys.wireCell(inp, {
-        field,
-        rowIndex: ri,
-        navFields: BILL_NAV_FIELDS,
-        readValue: readCellValue,
-        apply,
-        afterEdit: focusAfterItemEdit,
-      });
-      inp.addEventListener("change", async () => {
-        if (!api || painting || itemKeys.busy()) return;
-        if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-        let next = readCellValue();
-        if (field === "rate") {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-        }
-        const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
-        const kind = dirtyCompareKindForField(field);
-        if (valuesMeaningfullyEqual(prev, next, { kind })) {
-          if (field === "rate" && parseMoney(prev) != null) {
-            inp.value = formatGroupedNumber(prev);
-          } else if (kind !== "number") {
-            inp.value = normalizeEditableText(String(prev ?? ""));
-          }
-          return;
-        }
-        await apply(next);
-      });
-    });
+    itemRows.paint(doc, models, BILL_ITEM_COLS);
     // The whole cell opens the editor, not only its text (5zorro DF-02: a blank cell is mostly padding).
     el.items.querySelectorAll("td.rec-cell").forEach((td) => {
       const btn = td.querySelector("button[data-rec]");
       if (!btn) return;
       td.addEventListener("click", () => openReceivedEditor(Number(btn.getAttribute("data-rec"))));
-    });
-    el.items.querySelectorAll("button[data-del]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!api) return;
-        const ri = Number(btn.getAttribute("data-del"));
-        setStatus("Removing line…");
-        const res = await deleteLineKeepingReceived(ri);
-        if (res && res.ok && res.clearedLastRow) {
-          noteUserEdit();
-          if (lineAllocations && typeof lineAllocations === "object") {
-            delete lineAllocations[ri];
-            delete lineAllocations[String(ri)];
-          }
-          if (poLineMeta && typeof poLineMeta === "object") {
-            delete poLineMeta[ri];
-            delete poLineMeta[String(ri)];
-          }
-          paint(res.doc, amountDue, {
-            lineAllocations,
-            poLineMeta,
-          });
-          showToast(res.reason || LAST_ITEM_ROW_TOAST);
-          setStatus("Last line cleared.");
-        } else if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc, amountDue);
-          setStatus("Line removed.");
-        } else if (res && res.blockedLastRow) {
-          showToast(res.reason || LAST_ITEM_ROW_TOAST);
-        } else {
-          setStatus((res && res.reason) || "Delete failed.", "err");
-        }
-      });
-    });
-    el.items.querySelectorAll("button[data-back-in]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (!editable() || painting) return;
-        const ri = Number(btn.getAttribute("data-back-in"));
-        beginAmountBackIn(btn, ri);
-      });
     });
     el.items.querySelectorAll("button[data-assign]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2396,6 +2141,41 @@ export async function bootBillFormPage(api) {
         void requestLinkedSourcePeek(btn.getAttribute("data-peek-route") || "", btn.getAttribute("data-peek-kind") || "");
       });
     });
+  }
+
+  /** The Bill's own line cells: Source line, Sales order(s) with Assign and the peeks, Customer, Rec'd. */
+  function billLineCellHtml(col, val, model, canEdit) {
+    const ri = model.rowIndex;
+    if (col.label === "Source line") {
+      return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
+    }
+    if (col.field === ALLOC_SALES_ORDERS_FIELD) {
+      const assignBtn = canEdit
+        ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
+        : "";
+      // Peek the Sales Order, and the PO the link lives on (change it there, or void & amend).
+      const peeks = billLineOrderPeeks(model.alloc, model.item)
+        .map((p) => {
+          const label = linkedSourcePeekKindLabel(p.kind);
+          const tag = p.kind === "sales-order" ? "SO" : "PO";
+          return `<button type="button" class="order-peek" tabindex="-1" data-peek-route="${escapeHtml(p.route)}" data-peek-kind="${p.kind}" data-testid="bill-peek-${ri}-${tag.toLowerCase()}" title="Peek ${label} ${escapeHtml(p.name)} — Esc returns to this bill" aria-label="Peek ${label} ${escapeHtml(p.name)}">${uiIconHtml("eye", { size: 12 })}${tag}</button>`;
+        })
+        .join("");
+      return `<td class="alloc-so so-cell"><span class="ro alloc-so-text hatch-clear">${escapeHtml(val) || "—"}</span>${peeks}${assignBtn}</td>`;
+    }
+    if (col.field === ALLOC_CUSTOMER_FIELD) {
+      return `<td class="so-cell"><span class="ro hatch-clear">${escapeHtml(val) || "—"}</span></td>`;
+    }
+    if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
+      const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
+      const which = col.field === REC_BY_FIELD ? "by" : "on";
+      if (canEdit && lineCanBeReceived(model.item)) {
+        return `<td class="rec-cell rec-col"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
+      }
+      const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
+      return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
+    }
+    return null;
   }
   
   /**
@@ -5093,7 +4873,7 @@ export async function bootBillFormPage(api) {
     saveInFlight = true;
     try {
       const flush = await flushPendingFieldEdits({
-        getInFlight: () => lineApplyInFlight,
+        getInFlight: () => itemRows.applyInFlight(),
         waitMs: 5000,
       });
       if (flush && flush.timedOut) {

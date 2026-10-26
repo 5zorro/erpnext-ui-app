@@ -15,7 +15,8 @@
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
    `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
-   the commit gate); next step 3. Decided: share, not merge, with every data-entry form in view
+   the commit gate); step 3's item rows built (`src/doc-form-item-rows-ui.js`), its taxes next
+   (one table for every form, the Bill's way). Decided: share, not merge, with every data-entry form in view
    (the doc-form page already runs six; Pay Outstanding and Journal Entry may follow).
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
