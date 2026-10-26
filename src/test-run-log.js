@@ -187,13 +187,27 @@ export function appendCapped(current, entry, maxBytes) {
 }
 
 /**
- * Which run logs to delete: everything past the newest `keep` (`npm test`'s `.tap`, Playwright's
- * `.log`). Names sort by time (they start with an ISO timestamp).
+ * Which run logs to delete: everything past the newest `keep` **of each kind** — `npm test`'s
+ * `.tap`, the specs' `.e2e.log`, the probes' `.probe.log` — so a `dogfood:check` (one log per
+ * probe) never pushes out the unit runs' logs. Names sort by time (they start with an ISO
+ * timestamp, and the kind is everything from the first dot).
  * @param {string[]} names @param {number} keep
  */
 export function logsToRotate(names, keep) {
-  const sorted = [...names].filter((n) => n.endsWith(".tap") || n.endsWith(".log")).sort();
-  return sorted.slice(0, Math.max(0, sorted.length - keep));
+  /** @type {Map<string, string[]>} */
+  const byKind = new Map();
+  for (const n of names) {
+    if (!(n.endsWith(".tap") || n.endsWith(".log"))) continue;
+    const kind = n.slice(n.indexOf("."));
+    if (!byKind.has(kind)) byKind.set(kind, []);
+    byKind.get(kind).push(n);
+  }
+  const gone = [];
+  for (const list of byKind.values()) {
+    list.sort();
+    gone.push(...list.slice(0, Math.max(0, list.length - keep)));
+  }
+  return gone.sort();
 }
 
 /**

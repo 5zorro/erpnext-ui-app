@@ -142,9 +142,10 @@ describe("logsToRotate", () => {
     assert.deepEqual(logsToRotate(names, 2), ["2026-10-20T09-00-00-000Z-a.tap"]);
     assert.deepEqual(logsToRotate(names, 5), []);
   });
-  it("Playwright's run logs (.log) rotate with npm test's (.tap)", () => {
-    const names = ["2026-10-26T01-00-00-000Z-a.e2e.log", "2026-10-26T02-00-00-000Z-a.tap", "2026-10-26T03-00-00-000Z-a.probe.log"];
-    assert.deepEqual(logsToRotate(names, 2), ["2026-10-26T01-00-00-000Z-a.e2e.log"]);
+  it("each kind keeps its own newest: a burst of probe logs never pushes out the unit runs' logs", () => {
+    const probes = [1, 2, 3].map((h) => `2026-10-26T0${h}-00-00-000Z-a.probe.log`);
+    const names = ["2026-10-25T01-00-00-000Z-a.tap", "2026-10-25T02-00-00-000Z-a.e2e.log", ...probes];
+    assert.deepEqual(logsToRotate(names, 2), [probes[0]]);
   });
 });
 

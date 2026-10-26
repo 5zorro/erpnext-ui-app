@@ -95,7 +95,8 @@ after it with the same path, key for key. Smoke specs: `scaffold-bill`, `scaffol
 the move too: the Sales Order ones open in ERPNext because the specs read the user's own
 `lens-prefs.json` (`"sales-order": "vanilla"`) instead of setting the lens, and the Estimate one
 expects a price (100) the blank sandbox does not have (residual: the specs should set their own
-lens and scene). For another form: Journal Entry would pass `lines: (d) => d.accounts`,
+lens and scene). Found 2026-10-26: `scaffold-bill`'s void-and-amend test fails on this commit too
+(museum OI-190), so it was failing then as well and is not one of the 10 named here. For another form: Journal Entry would pass `lines: (d) => d.accounts`,
 `lineKey: (l) => l.account`. Two item names remain: ↑ / ↓ always move in `qty` (no spinner), and
 `nextItemFocusAfterEdit` lands on the next line's `item_code`; both would become layout settings
 when a form without them shares the module.
@@ -210,7 +211,11 @@ calls whose result nothing read are gone (the function is pure).
 
 **Kept as found, noted for later:** on a save that timed out the Bill's gate says "Save did not
 finish" and points to Vanilla; doc-form's says "ERPNext rejected the save". Each page still passes
-its own wording.
+its own wording. On doc-form, a navigation gate whose Save ERPNext refuses turns into the
+direct-save gate (doc-form's `doSave` opens it), and main's waiting navigation is released only by
+the next navigation (main supersedes it; nothing hangs). The Bill's `doSave` reads the same
+preflight as its gate (mandatory fields + account companies) but keeps the prior blockers when the
+read fails, where the gate clears them; `commitGateEls` (11 lines) is still one per page.
 Proof: `npm test` (`tests/doc-form-commit-gate.test.js`: toolbar, discard, save from the gate,
 navigation, the preflight's ordering, direct save, both pages wired); specs `scaffold-receive-gate`
 (Save from the gate) and `scaffold-peek-return-focus` *unsaved bill → a PO* (Cancel stays); probe
