@@ -2,7 +2,8 @@
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
-> way (5zorro). Next: R6a-2's four dialogs.** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> way (5zorro). Next: R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
+> lines get the Line column and sortable headers (end of the step 3 section).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -298,7 +299,11 @@ After step 3 the two pages are 7,816 lines (8,778 before it).
 Item Receipt switch in one window (doc-form's items head and the shared taxes head re-wired on
 every layout switch; gotchas G24, spec `scaffold-form-switch`, failed on the code before). Seen,
 not changed: the Item Receipt's lines have no Line column and no sortable headers
-(`RECEIPT_ITEM_COLS` has no `sortKey`; the PO's and the Bill's have both) — a question for 5zorro.
+(`RECEIPT_ITEM_COLS` has no `sortKey`; the PO's and the Bill's have both). **5zorro, 2026-10-26:
+match them — "yes".** To build (not started): give `RECEIPT_ITEM_COLS` (`src/receipt-map.js`) the
+Line column and a `sortKey` on each column, as `PO_ITEM_COLS` has; then the hold-the-order rules
+(T-1) and the walk follow on screen order there too. Proof: a probe or spec that sorts an Item
+Receipt's lines and fails on the code before.
 `.taxes-table` / `.taxes-add` in `doc-fields.css` no longer style a doc-form page but stay: a test
 keeps them as the vocabulary the check/ACH document will reuse. The item rows' `deps` is long
 (about 35 hooks); the next steps (R6a-2) shrink the Bill's closure, which most of them reach into.
