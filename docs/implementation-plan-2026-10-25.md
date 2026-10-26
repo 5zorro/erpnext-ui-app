@@ -238,9 +238,14 @@ and its repaint after × cleared the only line. `lineApplyInFlight` moved with t
 (`col.scratch && col.readOnly`: every such column has its own cell) and its own line-key lookup
 for the focus after a write (the shared one gives the same answer).
 
-**Kept as found:** the Bill's × is in the Tab order, doc-form's is not (`tabindex="-1"`); the Bill
-upper-cases a typed line value when caps are on, doc-form's line cells do not. Each page says which
-(`deleteSkipsTab`, `capsOn`).
+**Two differences found, settled by 5zorro (2026-10-26):** the Bill's × was in the Tab order and
+doc-form's was not — *"the x should not be tabbable"*, so × is mouse-only on both. The Bill also
+upper-cased a line value when it wrote it, a second layer under the ALL CAPS toggle that
+upper-cases as the clerk types: the write-time one came first (2026-08-23), the as-typed one a
+week later (2026-08-30, `src/doc-caps-ui.js`), on every page since. 5zorro: *"why not make it only
+one layer? … the user should have default be caps on, but should be able to choose after that"*,
+so the write-time layer is gone; the toggle is on by default on every form (checked on a new Bill,
+PO and Item Receipt) and the clerk may turn it off for the page (spec `scaffold-typed-dates`).
 
 Proof: `npm test` (`tests/doc-form-item-rows.test.js`: both pages' cells, a write, a refused write
 the page takes or not, Tab past the last box, ×); probes `item-table-keys` (same key path, PO and
@@ -273,13 +278,16 @@ fixed row's Rate % shown from the net total (before: 0.00), and the Bill's statu
 Bill, the browser's Tab order no longer enters the rows (the clerk clicks in, then walks) and × is
 out of the Tab order. The Add box's own order (Account → Amount → Add tax) was already the same.
 
-**Kept apart, for 5zorro:** the layout. The Bill's table has a Line column, a Taxes subtotal footer
-and fixed column widths (`electron/doc-form.html`); doc-form's has none of them and sorts by Account
-first.
+**The layout too (5zorro: *"yeah make the layout match the bills layout"*).** doc-form's taxes
+section (`electron/doc-form-body.fragment.html`) is now the Bill's: the title row, the Line column
+first and sorted by it, fixed column widths, the Taxes subtotal footer (painted by the shared
+table), the Add row. `DOC_TAX_SORTABLE_HEADERS` (the Bill's columns without Line) is gone. The A/R
+forms' listed taxes get the same layout.
 
 Proof: `npm test` (`tests/doc-form-tax-table.test.js`: Rate % from the net total, the walk on a %
 and a fixed row, Tab out to the Add box, a Rate on a fixed row, an Amount on a % row, the Bill's ×
-lock); spec `scaffold-bill-taxes` *the Item Receipt's taxes act like the Bill's* failed on the code
+lock, the subtotal); spec `scaffold-bill-taxes` *the Item Receipt's taxes act like the Bill's* (it
+also checks the layout: Line first, the subtotal, no sideways scroll, × out of the Tab order) failed on the code
 before (Rate % showed 0.00; the old page had no key handler on a tax cell, so the walk and the
 Rate's commit could not run either) and passes, with the Bill's 7 (14 of 14 with
 `scaffold-receive-gate` and `scaffold-jit-receipt`); the smoke specs fail the same 12 as the code

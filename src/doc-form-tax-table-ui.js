@@ -10,16 +10,17 @@
  *   - a cell commits on change, on blur, or on a move; one write at a time per cell;
  *   - a Rate typed on a fixed row works out its Amount from the net total; a typed Amount on a
  *     percentage row makes it fixed (and the ⓘ note says so — src/doc-form-tax-notes-ui.js);
- *   - × per row.
- * The Bill and doc-form pages both call this; what differs comes in through `deps`: the columns
- * (the Bill's has Line), whether the clerk may type in it (A/R follows the customer's template),
- * the page's own row buttons (the Bill's Allocate into items) and footer (its Taxes subtotal).
+ *   - × per row; the Taxes subtotal under the table.
+ * Both pages lay the table out the same (Line, fixed widths, the subtotal footer — 5zorro: "make the
+ * layout match the bills layout"). What differs comes in through `deps`: whether the clerk may type
+ * in it (A/R follows the customer's template), the page's own chrome and row buttons (the Bill's
+ * Allocate into items).
  */
 
 import { uiIconHtml } from "./ui-icons.js";
 import { formatGroupedNumber, formatUsdAmountHtml, parseMoney } from "./money.js";
 import { valuesMeaningfullyEqual, dirtyCompareKindForField, normalizeEditableText } from "./dirty-gate.js";
-import { readBillTaxRowsForSort, sortBillTaxRows } from "./bill-tax-sort.js";
+import { billTaxesSubtotal, readBillTaxRowsForSort, sortBillTaxRows } from "./bill-tax-sort.js";
 import { applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./item-sort-specs.js";
 import { neighborTaxCell, nextTaxCellTab, taxNavPos, taxRowNavFields } from "./bill-tax-table-nav.js";
 import { displayTaxRateForRow, taxAmountFromRate, taxRateBaseFromDoc } from "./bill-tax-sync.js";
@@ -36,7 +37,8 @@ function escapeHtml(v) {
  * @typedef {{ label: string, sortKey: string, className?: string }} TaxHeader
  *
  * @typedef {{
- *   el: () => { taxesBody?: HTMLElement|null, taxesAdd?: HTMLElement|null, removeAllTax?: HTMLButtonElement|null,
+ *   el: () => { taxesBody?: HTMLElement|null, taxesTotals?: HTMLElement|null, taxesSubtotal?: HTMLElement|null,
+ *     taxesAdd?: HTMLElement|null, removeAllTax?: HTMLButtonElement|null,
  *     taxAccount?: HTMLElement|null, memo?: HTMLTextAreaElement|null, addTax?: HTMLButtonElement|null } | null,
  *   head: () => HTMLElement | null,
  *   api: () => { setTax?: Function, deleteTax?: Function } | null | undefined,
@@ -65,8 +67,7 @@ function escapeHtml(v) {
  * `shown`: false when the layout has no taxes (doc-form's A/R Receive Payment). `readOnly`: the
  * clerk may not type here though the document is editable (A/R: the customer's Sales Taxes
  * template makes the rows). `headers`: the sortable columns; a `lineNo` header adds the Line
- * column. `beforeRows`: the page's own chrome around the table (the Bill's subtotal footer,
- * doc-form's template ⓘ). `rowButtonsHtml` / `wireRowButtons`: buttons beside ×. `deleteBlockedReason`:
+ * column. `beforeRows`: the page's own chrome around the table (doc-form's template ⓘ). `rowButtonsHtml` / `wireRowButtons`: buttons beside ×. `deleteBlockedReason`:
  * why × may not run now ("" when it may).
  */
 
@@ -427,6 +428,10 @@ export function createTaxTable(deps) {
     if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
     if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
     if (deps.beforeRows) deps.beforeRows(doc, rows.length);
+    if (el.taxesTotals) el.taxesTotals.hidden = !rows.length;
+    if (rows.length && el.taxesSubtotal) {
+      el.taxesSubtotal.innerHTML = formatUsdAmountHtml(billTaxesSubtotal(doc)) || "0.00";
+    }
     if (!rows.length) {
       body.innerHTML = `<tr><td colspan="${colCount}" class="link-muted">No tax/charge rows yet.</td></tr>`;
       deps.paintMoneyStack(doc);

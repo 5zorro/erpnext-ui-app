@@ -16,7 +16,6 @@ import { CELL_MODE_EDIT, CELL_MODE_NAV } from "./item-table-nav.js";
 import { isEmptyItemCode, shouldBlockDeleteLastItemRow } from "./bill-item-guard.js";
 import { valuesMeaningfullyEqual, dirtyCompareKindForField, normalizeEditableText } from "./dirty-gate.js";
 import { filterDateInputValue, parseDocDate, formatDocDateDisplay } from "./doc-date.js";
-import { shouldForceCapsOnElement, applyDocCapsValue } from "./doc-caps.js";
 import { wireDateField } from "./doc-form-date-field-ui.js";
 
 function escapeHtml(v) {
@@ -51,11 +50,9 @@ function escapeHtml(v) {
  *   cellHtml?: (col: LineCol, val: any, model: any, canEdit: boolean, doc: any) => string | null,
  *   rowAttrs?: (model: any) => string,
  *   canDeleteLines: () => boolean,
- *   deleteSkipsTab: boolean,
  *   afterRows: (doc: any) => void,
  *   navFields: () => readonly string[],
  *   isMoneyField: (field: string) => boolean,
- *   capsOn?: () => boolean,
  *   linkDoctype: (field: string) => string | null | undefined,
  *   mountLinkPicker: (inp: HTMLInputElement, doctype: string, apply: Function) => void,
  *   attachCalc: (inp: HTMLInputElement, opts: { kind: string, onCommit: (value: string) => Promise<void> }) => void,
@@ -80,8 +77,9 @@ function escapeHtml(v) {
  *
  * `keyField`: the field that names a line ("item_code"); a new line is focused there, and leaving
  * it empty removes the line. `testIdPrefix`: "bill" or "doc". `rateLabel`: what the Amount
- * button's title calls the rate ("Cost" on the Bill). `deleteSkipsTab`: × is out of the Tab order
- * (doc-form; the Bill's × is not — kept as found). `repaintCleared`: the repaint after × cleared
+ * button's title calls the rate ("Cost" on the Bill). ALL CAPS is not done here: the page's toggle
+ * (src/doc-caps-ui.js) upper-cases text as it is typed, on by default, the clerk's to turn off.
+ * `repaintCleared`: the repaint after × cleared
  * the only line (the Bill also drops that line's assignment); default `repaint`.
  * `beforeCalcCommit` / `afterRefused`: a page's chance to take a tape commit or a refused write
  * itself (the Bill splits a Qty over the PO's), returning true when it did.
@@ -163,9 +161,9 @@ export function createItemRows(deps) {
             return own != null ? own : sharedCellHtml(col, val, ri, canEdit);
           })
           .join("");
-        const skipTab = deps.deleteSkipsTab ? ` tabindex="-1"` : "";
+        // × is mouse-only (5zorro 2026-10-26: "the x should not be tabbable").
         const del = canEdit && deps.canDeleteLines()
-          ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line"${skipTab} data-testid="${p}-del-${ri}">×</button></td>`
+          ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" tabindex="-1" data-testid="${p}-del-${ri}">×</button></td>`
           : `<td></td>`;
         const attrs = deps.rowAttrs ? deps.rowAttrs(model) : "";
         return `<tr data-rowidx="${ri}"${attrs}>${cells}${del}</tr>`;
@@ -214,9 +212,6 @@ export function createItemRows(deps) {
         if (!raw) return "";
         const parsed = parseDocDate(raw);
         if (parsed.ok) return parsed.iso;
-      }
-      if (deps.capsOn && shouldForceCapsOnElement(deps.capsOn(), inp) && kind !== "number") {
-        next = applyDocCapsValue(next, deps.capsOn());
       }
       return next;
     };

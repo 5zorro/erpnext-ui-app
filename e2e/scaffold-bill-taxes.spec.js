@@ -246,6 +246,24 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
       webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", snap);
     }, built.snap);
     const n = built.n;
+    // Laid out like the Bill's (5zorro 2026-10-26): Line first, the Taxes subtotal, no sideways scroll; × mouse-only.
+    await expect
+      .poll(async () => inDoc(app, `(document.querySelector("#taxes-head-row th") || {}).textContent || ""`), { timeout: 10_000 })
+      .toMatch(/^Line\s+▲$/);
+    const layout = await inDoc(
+      app,
+      `(() => {
+        const p = document.querySelector('[data-testid="doc-tax-panel"]');
+        return { foot: !document.querySelector('[data-testid="doc-taxes-totals"]').hidden,
+          subtotal: document.querySelector('[data-testid="doc-taxes-subtotal"]').textContent,
+          overflow: p.scrollWidth - p.clientWidth,
+          delTab: [document.querySelector('[data-testid="doc-tax-del-${built.n}"]').tabIndex, document.querySelector('[data-testid="doc-del-0"]').tabIndex] };
+      })()`,
+    );
+    expect(layout.foot).toBe(true);
+    expect(layout.subtotal).toMatch(/\d/);
+    expect(layout.overflow).toBeLessThanOrEqual(0);
+    expect(layout.delTab).toEqual([-1, -1]);
     // A fixed 20.00 on a 400.00 net shows as 5% (the Bill's displayTaxRateForRow).
     await expect
       .poll(async () => inDoc(app, `(document.querySelector('[data-testid="doc-tax-${n}-rate"]') || {}).value`), { timeout: 10_000 })

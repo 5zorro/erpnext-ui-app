@@ -86,7 +86,6 @@ import {
 } from "../src/bill-charge-allocate.js";
 import {
   BILL_TAX_SORTABLE_HEADERS,
-  billTaxesSubtotal,
 } from "../src/bill-tax-sort.js";
 import {
   emptyItemRowCleanupAction,
@@ -306,14 +305,6 @@ export async function bootBillFormPage(api) {
     noteUserEdit,
     sizeColumns: () => sizeTaxColumns(),
     paintMoneyStack,
-    beforeRows: (doc, rowCount) => {
-      const taxesFoot = document.getElementById("taxes-totals");
-      const totTaxes = document.getElementById("tot-taxes");
-      if (taxesFoot) taxesFoot.hidden = !rowCount;
-      if (rowCount && totTaxes) {
-        totTaxes.innerHTML = formatUsdAmountHtml(billTaxesSubtotal(doc)) || "0.00";
-      }
-    },
     rowButtonsHtml: (taxRow, idx, canEdit) =>
       canEdit && isAllocatableChargeRow(taxRow)
         ? `<button type="button" class="alloc-btn" data-tax-alloc="${idx}" tabindex="-1" data-testid="bill-tax-alloc-${idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
@@ -669,6 +660,8 @@ export async function bootBillFormPage(api) {
     clearQty: document.getElementById("btn-clear-qty"),
     attach: document.getElementById("btn-attach"),
     taxesBody: document.getElementById("taxes-body"),
+    taxesTotals: document.getElementById("taxes-totals"),
+    taxesSubtotal: document.getElementById("tot-taxes"),
     taxesAdd: document.getElementById("taxes-add"),
     taxAccount: document.getElementById("f-tax-account"),
     taxAmount: document.getElementById("f-tax-amount"),
@@ -724,14 +717,12 @@ export async function bootBillFormPage(api) {
     cellHtml: billLineCellHtml,
     rowAttrs: (model) => ` data-wash-source="${model.washRole}"`,
     canDeleteLines: () => true,
-    deleteSkipsTab: false,
     afterRows: (doc) => {
       paintLineTotals(doc);
       sizeItemColumns();
     },
     navFields: () => BILL_NAV_FIELDS,
     isMoneyField: (field) => field === "rate",
-    capsOn: () => docCapsOn,
     linkDoctype: (field) => linkDoctypeForBillField(field),
     mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
     attachCalc: (inp, opts) => wireFieldCalc(inp, opts),

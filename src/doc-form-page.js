@@ -14,7 +14,7 @@ import {
 import { docFormMapFor } from "./doc-skin-registry.js";
 import { salesProgressCells } from "./sales-doc-map.js";
 import { billMoneyStack } from "./bill-map.js";
-import { DOC_TAX_SORTABLE_HEADERS } from "./bill-tax-sort.js";
+import { BILL_TAX_SORTABLE_HEADERS } from "./bill-tax-sort.js";
 import {
   formatGroupedNumber,
   formatUsdAmountHtml,
@@ -169,8 +169,8 @@ const taxTable = createTaxTable({
   // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
   // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
   readOnly: () => !!(ui && ui.features.taxesReadOnly),
-  headers: DOC_TAX_SORTABLE_HEADERS,
-  defaultSort: { key: "account_head", asc: true },
+  headers: BILL_TAX_SORTABLE_HEADERS,
+  defaultSort: { key: "lineNo", asc: true },
   testIdPrefix: "doc",
   taxNotes,
   mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
@@ -339,6 +339,8 @@ function buildDocFormEl() {
     taxesBlock: document.getElementById("doc-taxes-block"),
     taxesHead: document.getElementById("taxes-head-row"),
     taxesBody: document.getElementById("taxes-body"),
+    taxesTotals: document.getElementById("taxes-totals"),
+    taxesSubtotal: document.getElementById("tot-taxes"),
     taxesAdd: document.getElementById("taxes-add"),
     taxAccount: document.getElementById("f-tax-account"),
     taxAmount: document.getElementById("f-tax-amount"),
@@ -424,7 +426,6 @@ const itemRows = createItemRows({
     return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
   },
   canDeleteLines: () => linesAreAddable(),
-  deleteSkipsTab: true,
   afterRows: (doc) => {
     paintLineTotals(doc);
     sizeItemColumns();

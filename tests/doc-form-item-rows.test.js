@@ -90,7 +90,6 @@ function setup(over = {}) {
     rateLabel: "Rate",
     cellsOf: (model) => model.cells,
     canDeleteLines: () => true,
-    deleteSkipsTab: true,
     afterRows: () => calls.push(["afterRows"]),
     navFields: () => ["item_code", "qty", "rate"],
     isMoneyField: (field) => field === "rate",
@@ -122,7 +121,7 @@ const models = [
 ];
 
 describe("the shared rows: what each page paints", () => {
-  it("doc-form: the line number names the document; × is out of the Tab order", () => {
+  it("doc-form: the line number names the document; × is out of the Tab order (5zorro 2026-10-26)", () => {
     const { rows } = setup({ lineNoTitle: () => "Purchase Order line number" });
     const html = rows.rowsHtml({}, models, COLS);
     assert.match(html, /<span class="ro" title="Purchase Order line number">1<\/span>/);
@@ -131,17 +130,16 @@ describe("the shared rows: what each page paints", () => {
     assert.match(html, /data-testid="doc-cell-1-rate"/);
   });
 
-  it("the Bill: its own cells first, its row attributes, × kept in the Tab order, Amount backs into Cost", () => {
+  it("the Bill: its own cells first, its row attributes, × out of the Tab order too, Amount backs into Cost", () => {
     const { rows } = setup({
       testIdPrefix: "bill",
       rateLabel: "Cost",
-      deleteSkipsTab: false,
       rowAttrs: (m) => ` data-wash-source="w${m.rowIndex}"`,
       cellHtml: (col) => (col.field === "item_code" ? "<td>BILL-OWN</td>" : null),
     });
     const html = rows.rowsHtml({}, models, COLS);
     assert.match(html, /<tr data-rowidx="0" data-wash-source="w0"><td class="num line-meta"><span class="ro">1<\/span><\/td><td>BILL-OWN<\/td>/);
-    assert.match(html, /data-del="1" title="Remove line" data-testid="bill-del-1"/);
+    assert.match(html, /data-del="1" title="Remove line" tabindex="-1" data-testid="bill-del-1"/);
     assert.match(html, /Amount ÷ Qty → Cost\)" data-testid="bill-amt-0"/);
     assert.doesNotMatch(html, /doc-/);
   });
@@ -179,13 +177,13 @@ describe("the shared rows: a cell's write", () => {
     assert.equal(calls.some((c) => c[0] === "setItem"), false);
   });
 
-  it("caps: text is upper-cased when the page has caps on; doc-form passes none", async () => {
-    const { rows, calls, state } = setup({ capsOn: () => true });
+  it("caps is the page toggle's job (as typed, src/doc-caps-ui.js): the write sends what the box holds", async () => {
+    const { rows, calls, state } = setup();
     const item = cell("item_code", 0, "abc");
     state.inputs = [item];
     rows.paint(state.doc, models, COLS);
     await item.fire("change");
-    assert.deepEqual(calls.find((c) => c[0] === "setItem"), ["setItem", 0, "item_code", "ABC"]);
+    assert.deepEqual(calls.find((c) => c[0] === "setItem"), ["setItem", 0, "item_code", "abc"]);
   });
 
   it("a refused write the page takes (the Bill's Qty over the PO) shows no error and does not reload", async () => {

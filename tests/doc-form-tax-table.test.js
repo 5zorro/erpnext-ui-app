@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createTaxTable } from "../src/doc-form-tax-table-ui.js";
-import { BILL_TAX_SORTABLE_HEADERS, DOC_TAX_SORTABLE_HEADERS } from "../src/bill-tax-sort.js";
+import { BILL_TAX_SORTABLE_HEADERS } from "../src/bill-tax-sort.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 globalThis.requestAnimationFrame = (fn) => fn();
@@ -63,7 +63,13 @@ function setup(over = {}) {
     },
   };
   const taxAccount = { focused: 0, focus() { taxAccount.focused += 1; } };
-  const el = { taxesBody: body, taxAccount, addTax: { disabled: false, focus() {} } };
+  const el = {
+    taxesBody: body,
+    taxesTotals: { hidden: true },
+    taxesSubtotal: { innerHTML: "" },
+    taxAccount,
+    addTax: { disabled: false, focus() {} },
+  };
   const fixedByClerk = new Map();
   const api = {
     setTax: async (ri, field, value) => {
@@ -79,8 +85,8 @@ function setup(over = {}) {
     lastDoc: () => state.doc,
     painting: () => false,
     editable: () => true,
-    headers: DOC_TAX_SORTABLE_HEADERS,
-    defaultSort: { key: "account_head", asc: true },
+    headers: BILL_TAX_SORTABLE_HEADERS,
+    defaultSort: { key: "lineNo", asc: true },
     testIdPrefix: "doc",
     taxNotes: {
       fixedByClerk,
@@ -108,15 +114,25 @@ describe("the shared taxes table: what it paints", () => {
     assert.match(html, /value="5\.00" data-testid="doc-tax-1-rate"/);
   });
 
-  it("the Bill's columns add Line; the Bill's own buttons sit beside ×", () => {
+  it("the Line column; the Bill's own buttons sit beside ×", () => {
     const { table, state } = setup({
-      headers: BILL_TAX_SORTABLE_HEADERS,
       testIdPrefix: "bill",
       rowButtonsHtml: (_t, idx) => `<button data-tax-alloc="${idx}"></button>`,
     });
     const html = table.rowsHtml(state.doc, [{ idx: 0, lineNo: 1, account_head: "VAT", description: "", charge_type: "On Net Total", rate: 6, tax_amount: 24, add_deduct_tax: "Add" }], true);
     assert.match(html, /<td><span class="ro">1<\/span><\/td>/);
     assert.match(html, /<button data-tax-alloc="0"><\/button>\s*<button type="button" class="del"/);
+  });
+});
+
+describe("the shared taxes table: the Taxes subtotal under it (both pages, the Bill's layout)", () => {
+  it("shows the sum of the rows, and hides with no rows", () => {
+    const { table, state, el } = setup();
+    table.paint(state.doc);
+    assert.equal(el.taxesTotals.hidden, false);
+    assert.equal(el.taxesSubtotal.innerHTML, `$44.<span class="money-cents">00</span>`);
+    table.paint({ ...state.doc, taxes: [] });
+    assert.equal(el.taxesTotals.hidden, true);
   });
 });
 
@@ -192,7 +208,7 @@ describe("the shared taxes table: both pages use it", () => {
   ]) {
     it(`${page.slice(7)} keeps no tax walk of its own`, () => {
       const src = read(page);
-      assert.match(src, new RegExp(`createTaxTable\\(\\{[\\s\\S]*?testIdPrefix: "${prefix}"`));
+      assert.match(src, new RegExp(`createTaxTable\\(\\{[\\s\\S]*?headers: BILL_TAX_SORTABLE_HEADERS,\\s*defaultSort: \\{ key: "lineNo"[\\s\\S]*?testIdPrefix: "${prefix}"`));
       assert.doesNotMatch(src, /function paintTaxes\(|taxTabGuard|neighborTaxCell|syncTaxRateAndAmount/);
     });
   }

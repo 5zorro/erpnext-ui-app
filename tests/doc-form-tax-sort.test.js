@@ -1,25 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  DOC_TAX_SORTABLE_HEADERS,
-  readBillTaxRowsForSort,
-  sortBillTaxRows,
-} from "../src/bill-tax-sort.js";
+import { readBillTaxRowsForSort, sortBillTaxRows } from "../src/bill-tax-sort.js";
 
-describe("DOC_TAX_SORTABLE_HEADERS (IR doc-form)", () => {
-  it("excludes Line# column present on Bill", () => {
-    const keys = DOC_TAX_SORTABLE_HEADERS.map((h) => h.sortKey);
-    assert.equal(keys.includes("lineNo"), false);
-    assert.deepEqual(keys, [
-      "account_head",
-      "description",
-      "charge_type",
-      "rate",
-      "tax_amount",
-      "add_deduct_tax",
-    ]);
-  });
-
+// Since plan 10-25 step 3 the IR's taxes are laid out like the Bill's, Line column included
+// (5zorro 2026-10-26); tests/doc-form-tax-table.test.js checks both pages pass the Bill's headers.
+describe("IR doc-form tax rows", () => {
   it("sorts IR tax rows by amount without losing ERP idx", () => {
     const rows = sortBillTaxRows(
       readBillTaxRowsForSort({

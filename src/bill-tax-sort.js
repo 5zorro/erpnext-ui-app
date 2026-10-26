@@ -38,11 +38,6 @@ export const BILL_TAX_SORTABLE_HEADERS = Object.freeze([
   { label: "Add/Deduct", sortKey: "add_deduct_tax" },
 ]);
 
-/** Doc-form IR taxes table — same columns as Bill minus Line# (no allocate). */
-export const DOC_TAX_SORTABLE_HEADERS = Object.freeze(
-  BILL_TAX_SORTABLE_HEADERS.filter((h) => h.sortKey !== "lineNo"),
-);
-
 /**
  * @param {object|null|undefined} doc
  * @returns {BillTaxRow[]}
