@@ -40,6 +40,7 @@ import { createSiteRoundingAsk } from "./calc/site-rounding-ask.js";
 import { wireDateField } from "./doc-form-date-field-ui.js";
 import { setLineTab, wireLineTabs } from "./doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "./doc-form-tax-notes-ui.js";
+import { createCommitGate } from "./doc-form-commit-gate-ui.js";
 import {
   emptyItemRowCleanupAction,
   isEmptyItemCode,
@@ -65,15 +66,9 @@ import {
   formatDocDateDisplay,
 } from "./doc-date.js";
 import {
-  shouldOpenCommitGate,
-  normalizeCommitGateChoice,
-  commitGateAllowsAction,
-} from "./bill-toolbar.js";
-import {
   billExpensesTaxOrientation,
   commitGateProgressLabel,
   commitGateSuccessLabel,
-  nextAfterGate,
   formatSaveFailureReason,
 } from "./bill-action-flow.js";
 import {
@@ -82,7 +77,6 @@ import {
   docCommitGateSaveWarning,
   docCommitGateErpFailureView,
   commitGateSaveEnabled,
-  reduceCommitGatePhase,
   linkDoctypeForDocField,
   focusTargetAfterDocSourceModal,
   splitHeaderColumns,
@@ -109,15 +103,7 @@ import { taxRowNavFields } from "./bill-tax-table-nav.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
-import {
-  paintCommitGateValidation,
-  setCommitGateBusy,
-  commitGateTitleText,
-  configureDirectSaveGateChrome,
-  showCommitGate,
-  hideCommitGateEl,
-  wireCommitGateChrome,
-} from "./doc-commit-gate-ui.js";
+import { wireCommitGateChrome } from "./doc-commit-gate-ui.js";
 import {
   docLifecyclePill,
   focusFinalizeControl,
@@ -198,11 +184,8 @@ let lineSources = null;
 let lineApplyInFlight = null;
 /** @type {boolean} */
 let saveInFlight = false;
-/** @type {import("./bill-action-flow.js").GateTrigger|null} */
-let pendingGate = null;
 /** @type {string[]} */
 let metaBlockers = [];
-let metaPreflightSeq = 0;
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
 const sourceModalOpenRef = { current: false };
@@ -739,173 +722,53 @@ function currentSaveBlockers() {
   );
 }
 
-function hideCommitGate() {
-  pendingGate = null;
-  configureDirectSaveGateChrome(commitGateEls(), { active: false, copyEl: el.commitGateCopy });
-  hideCommitGateEl(commitGateEls());
-  setGateBusy(false);
-}
-
-function gateToolbarAction() {
-  if (!pendingGate) return "";
-  if (pendingGate.kind === "toolbar") return pendingGate.action;
-  if (pendingGate.kind === "direct-save") return "direct-save";
-  return "";
-}
-
-function openDirectSaveBlockedGate(blockers, opts = {}) {
-  pendingGate = { kind: "direct-save", submit: !!opts.submit };
-  if (el.commitGateTitle) {
-    el.commitGateTitle.textContent = opts.submit ? "Cannot submit yet" : "Cannot save yet";
-  }
-  configureDirectSaveGateChrome(commitGateEls(), {
-    submit: !!opts.submit,
-    active: true,
-    copyEl: el.commitGateCopy,
-  });
-  const title = docTitle();
-  if (opts.erpFailure) {
-    paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(opts.reason, title));
-  } else {
-    paintCommitGateValidation(commitGateEls(), {
-      blockers,
-      blocked: true,
-      title: "Save is blocked by:",
-      cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
-    });
-  }
-  setGateBusy(false);
-  showCommitGate(commitGateEls(), {
-    focusSurface: () => {
-      if (api && api.focusSurface) api.focusSurface();
+/**
+ * The commit gate (src/doc-form-commit-gate-ui.js, shared with the Bill page): the one gate over
+ * unsaved work, opened by Find / New / Print or a navigation, and the direct-save gate that shows
+ * why a Save or Submit was refused.
+ */
+const commitGate = createCommitGate({
+  els: commitGateEls,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  userEdited: () => userEdited,
+  setStatus: (text, cls) => setStatus(text, cls),
+  focusSurface: () => {
+    if (api && api.focusSurface) api.focusSurface();
+  },
+  saveBlockers: () => currentSaveBlockers(),
+  setMetaBlockers: (blockers) => {
+    metaBlockers = blockers;
+  },
+  preflight: {
+    can: () => !!(api && api.listMandatory),
+    read: async () => {
+      await flushDateExpectedFromInput();
+      return api.listMandatory();
     },
-  });
-  void refreshMetaPreflight();
-}
-
-async function handleDirectSaveGateChoice(choice) {
-  const blockers = currentSaveBlockers();
-  if (!commitGateSaveEnabled(blockers)) {
-    refreshCommitGateHint();
-    setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
-    return;
-  }
-  reduceCommitGatePhase("idle", { type: "start-save", choice });
-  setGateBusy(true);
-  const saveRes = await doSave(choice === "submit");
-  if (!(saveRes && saveRes.ok)) {
-    const reason = (saveRes && saveRes.reason) || "Save failed.";
-    reduceCommitGatePhase("saving", { type: "error", reason });
-    setGateBusy(false);
-    if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
-      metaBlockers = saveRes.blockers;
-      paintCommitGateValidation(commitGateEls(), {
-        blockers: mergeSaveBlockers(
-          listDocFormSaveBlockers({
-            doc: lastDoc,
-            supplier: supplierInput() && supplierInput().value,
-          }),
-          saveRes.blockers,
-        ),
-        blocked: true,
-        title: "Save is blocked by:",
-        cancelHint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
-      });
-    } else {
-      paintCommitGateValidation(
-        commitGateEls(),
-        docCommitGateErpFailureView(reason, docTitle()),
-      );
-    }
-    return;
-  }
-  hideCommitGate();
-}
-
-function gateIsNewDoc() {
-  return !!(
-    lastDoc &&
-    (lastDoc.__islocal ||
-      !lastDoc.name ||
-      String(lastDoc.name).startsWith("new") ||
-      lastDoc.name === "new")
-  );
-}
-
-function setGateBusy(busy) {
-  setCommitGateBusy(commitGateEls(), {
-    busy,
-    toolbarAction: gateToolbarAction(),
-    isNewDoc: gateIsNewDoc(),
-    docTitle: docTitle(),
-    getSaveBlockers: currentSaveBlockers,
-  });
-}
-
-function refreshCommitGateHint() {
-  const blockers = currentSaveBlockers();
-  const title = docTitle();
-  paintCommitGateValidation(commitGateEls(), {
-    blockers,
-    blocked: blockers.length > 0,
-    title: blockers.length ? "Save is blocked by:" : `${title} + live ERP meta preflight passed`,
-    cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
-    saveWarning: () => docCommitGateSaveWarning(blockers, title),
-  });
-  setGateBusy(false);
-}
-
-function openGate(trigger) {
-  if (
-    pendingGate &&
-    pendingGate.kind === "nav" &&
-    pendingGate.navToken &&
-    !(trigger && trigger.kind === "nav" && trigger.navToken === pendingGate.navToken) &&
-    api &&
-    api.resolveNavGate
-  ) {
-    api.resolveNavGate(pendingGate.navToken, false);
-  }
-  pendingGate = trigger;
-  if (el.commitGateTitle) {
-    el.commitGateTitle.textContent = commitGateTitleText(
-      docGateTriggerLabel(trigger, gateLabels()),
-    );
-  }
-  refreshCommitGateHint();
-  showCommitGate(commitGateEls(), {
-    focusSurface: () => {
-      if (api && api.focusSurface) api.focusSurface();
+    apply: (res) => {
+      metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
+      if (res && res.doc) paint(res.doc, res.scratch || scratch);
     },
-  });
-  void refreshMetaPreflight();
-}
-
-function cancelCommitGateFromOutside() {
-  if (!el.commitGate || el.commitGate.hidden) return;
-  const cancel = el.commitGate.querySelector("[data-gate='cancel']");
-  if (cancel && !cancel.disabled) resolveCommitGate("cancel");
-}
-
-async function refreshMetaPreflight() {
-  if (!api || !api.listMandatory) return;
-  const seq = ++metaPreflightSeq;
-  try {
-    await flushDateExpectedFromInput();
-    const res = await api.listMandatory();
-    if (seq !== metaPreflightSeq) return;
-    metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
-    if (res && res.doc) {
-      paint(res.doc, (res.scratch || scratch));
-    }
-  } catch {
-    if (seq !== metaPreflightSeq) return;
-    metaBlockers = [];
-  }
-  if (pendingGate && el.commitGate && !el.commitGate.hidden) {
-    refreshCommitGateHint();
-  }
-}
+  },
+  save: (submit) => doSave(submit),
+  afterDiscard: (res) => {
+    userEdited = false;
+    paint(res.doc, res.scratch || {});
+    paintDirtyPill();
+  },
+  runAction: (action) => runPendingAction(action),
+  announceBlocker: (text) => setStatus(text, "warn"),
+  text: {
+    title: () => docTitle(),
+    triggerLabel: (trigger) => docGateTriggerLabel(trigger, gateLabels()),
+    readyTitle: () => `${docTitle()} + live ERP meta preflight passed`,
+    cancelHint: () => `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
+    saveWarning: (blockers) => docCommitGateSaveWarning(blockers, docTitle()),
+    erpFailureView: (reason) => docCommitGateErpFailureView(reason, docTitle()),
+  },
+  directSave: { copyEl: () => el && el.commitGateCopy },
+});
 
 function docFindPrefill() {
   if (!ui || ui.profileId !== "po" || !lastDoc) return {};
@@ -953,105 +816,6 @@ async function runPendingAction(action) {
   if (action === "print") {
     // In place: the dialog prints / saves ERPNext's own output; the page never moves.
     await openPrintDialog({ api, doc: lastDoc, label: docTitle() });
-  }
-}
-
-async function requestToolbarAction(action) {
-  if (!api) return;
-  if (!shouldOpenCommitGate(userEdited)) {
-    hideCommitGate();
-    await runPendingAction(action);
-    return;
-  }
-  openGate({ kind: "toolbar", action });
-}
-
-async function resolveCommitGate(choiceRaw) {
-  const choice = normalizeCommitGateChoice(choiceRaw);
-  const trigger = pendingGate;
-  const navToken = trigger && trigger.kind === "nav" ? trigger.navToken : null;
-
-  if (!trigger || !choice || choice === "cancel") {
-    hideCommitGate();
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-    return;
-  }
-
-  if (trigger.kind === "direct-save") {
-    if (choice === "save" || choice === "submit") {
-      await handleDirectSaveGateChoice(choice);
-    }
-    return;
-  }
-
-  if (trigger.kind === "toolbar") {
-    const isNew = gateIsNewDoc();
-    const allow = commitGateAllowsAction(trigger.action, choice, { isNew });
-    if (!allow.ok) {
-      setStatus(allow.reason || "Cannot continue.", "warn");
-      return;
-    }
-  }
-
-  const plan = nextAfterGate(trigger, choice);
-  if (plan.then === "close") {
-    hideCommitGate();
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-    return;
-  }
-
-  if (choice === "discard") {
-    setGateBusy(true);
-    setStatus("Discarding unsaved changes…");
-    const res = await api.revertUnsaved();
-    if (!(res && res.ok)) {
-      setStatus((res && res.reason) || "Discard failed.", "err");
-      setGateBusy(false);
-      return;
-    }
-    userEdited = false;
-    paint(res.doc, res.scratch || {});
-    paintDirtyPill();
-  } else if (choice === "save" || choice === "submit") {
-    const blockers = currentSaveBlockers();
-    if (!commitGateSaveEnabled(blockers)) {
-      refreshCommitGateHint();
-      setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
-      return;
-    }
-    reduceCommitGatePhase("idle", { type: "start-save", choice });
-    setGateBusy(true);
-    const saveRes = await doSave(choice === "submit");
-    if (!(saveRes && saveRes.ok)) {
-      const reason = (saveRes && saveRes.reason) || "Save failed.";
-      reduceCommitGatePhase("saving", { type: "error", reason });
-      setGateBusy(false);
-      if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
-        metaBlockers = saveRes.blockers;
-        paintCommitGateValidation(commitGateEls(), {
-          blockers: mergeSaveBlockers(
-            listDocFormSaveBlockers({
-              doc: lastDoc,
-              supplier: supplierInput() && supplierInput().value,
-            }),
-            saveRes.blockers,
-          ),
-          blocked: true,
-          title: "Save is blocked by:",
-          hint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
-        });
-      } else {
-        paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(reason, docTitle()));
-      }
-      return;
-    }
-  }
-
-  hideCommitGate();
-  if (plan.then === "proceed-nav") {
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, true);
-  } else {
-    await runPendingAction(trigger.action);
   }
 }
 
@@ -2736,7 +2500,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
-      openDirectSaveBlockedGate(blockers, { submit });
+      commitGate.openDirectSaveBlocked(blockers, { submit });
       setStatus(blockers[0] || "Fix save prerequisites first.", "err");
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
@@ -2768,7 +2532,7 @@ async function doSave(submit) {
       }),
       r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
     );
-    openDirectSaveBlockedGate(mergedBlockers, {
+    commitGate.openDirectSaveBlocked(mergedBlockers, {
       submit,
       erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
       reason,
@@ -2947,9 +2711,9 @@ function wireStaticControls() {
       });
     };
   }
-  if (el.find) el.find.onclick = () => requestToolbarAction("find");
-  if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
-  if (el.print) el.print.onclick = () => requestToolbarAction("print");
+  if (el.find) el.find.onclick = () => commitGate.requestToolbarAction("find");
+  if (el.newDoc) el.newDoc.onclick = () => commitGate.requestToolbarAction("new");
+  if (el.print) el.print.onclick = () => commitGate.requestToolbarAction("print");
   const btnBackTop = el.backTop;
   if (btnBackTop) {
     btnBackTop.onclick = () => {
@@ -2960,8 +2724,8 @@ function wireStaticControls() {
 
   if (el.commitGate) {
     wireCommitGateChrome(commitGateEls(), {
-      onResolveChoice: (choice) => resolveCommitGate(choice),
-      onCancelOutside: () => cancelCommitGateFromOutside(),
+      onResolveChoice: (choice) => commitGate.resolve(choice),
+      onCancelOutside: () => commitGate.cancelFromOutside(),
     });
   }
 
@@ -3231,27 +2995,13 @@ export async function bootDocFormPage(injectedApi) {
   }
 
   if (api.onOpenNavGate) {
-    api.onOpenNavGate((payload) => {
-      const token = payload && payload.token;
-      if (!token) return;
-      if (!shouldOpenCommitGate(userEdited)) {
-        if (api.resolveNavGate) api.resolveNavGate(token, true);
-        return;
-      }
-      openGate({
-        kind: "nav",
-        navToken: token,
-        label: payload.label || (ui && ui.leavingLabel),
-      });
-    });
+    api.onOpenNavGate((payload) =>
+      commitGate.navRequested(payload && payload.token, payload && (payload.label || (ui && ui.leavingLabel))),
+    );
   }
 
   if (api.onCancelNavGate) {
-    api.onCancelNavGate((token) => {
-      if (pendingGate && pendingGate.kind === "nav" && pendingGate.navToken === token) {
-        hideCommitGate();
-      }
-    });
+    api.onCancelNavGate((token) => commitGate.navCancelled(token));
   }
 
   // Don't refresh until a skin is active — getSnapshot would fail with no profile.

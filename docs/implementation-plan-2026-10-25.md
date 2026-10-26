@@ -1,7 +1,7 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
-> **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 step 1 built (2026-10-26). Next:
-> R6a-1 step 2 (the commit gate).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
+> Next: R6a-1 step 3 with R6a-2's `paintItems` / `paintTaxes` (its own session).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -192,6 +192,29 @@ Proof: `npm test` (`tests/doc-form-shared-leaves.test.js`, the asker's timing in
 `tests/site-rounding.test.js`); specs `scaffold-bill-taxes`, `scaffold-typed-dates` and `scaffold-bill`
 — 11 of 12 pass; the twelfth (`scaffold-bill` *OI-171 void and amend*) fails the same way on the
 code before step 1 (museum OI-190, below).
+
+## R6a-1 step 2 — the commit gate, written once (built 2026-10-26)
+
+`src/doc-form-commit-gate-ui.js` (`createCommitGate(deps)`) holds the gate's flow; the DOM helpers
+it paints with stay in `src/doc-commit-gate-ui.js`. Moved from both pages: `openGate`,
+`hideCommitGate`, `setGateBusy`, `refreshCommitGateHint`, `refreshMetaPreflight` (only the newest
+read applies), `cancelCommitGateFromOutside`, `requestToolbarAction`, `resolveCommitGate`, the
+navigation gate's two handlers, and doc-form's direct-save gate (`openDirectSaveBlockedGate`,
+`handleDirectSaveGateChoice`; a page opts in with `directSave`, the Bill does not). `pendingGate`
+and the preflight's sequence number live in the module. Each page passes what differs: its words
+(`text`), its save blockers and how its preflight reads them (the Bill also asks for account
+companies; doc-form first commits a typed date and repaints from the answer), its save, what a
+discard repaints (the Bill skips that on the way to Find), its toolbar actions, and how a blocker is
+announced (the Bill's `announceSaveBlocker`, doc-form's status line). Four `reduceCommitGatePhase`
+calls whose result nothing read are gone (the function is pure).
+
+**Kept as found, noted for later:** on a save that timed out the Bill's gate says "Save did not
+finish" and points to Vanilla; doc-form's says "ERPNext rejected the save". Each page still passes
+its own wording.
+Proof: `npm test` (`tests/doc-form-commit-gate.test.js`: toolbar, discard, save from the gate,
+navigation, the preflight's ordering, direct save, both pages wired); specs `scaffold-receive-gate`
+(Save from the gate) and `scaffold-peek-return-focus` *unsaved bill → a PO* (Cancel stays); probe
+`nav-desk-after-discard`. The full `nav:check` drives the gate from every door on both skins.
 
 ## The findings (verbatim from plan 2026-10-19)
 
