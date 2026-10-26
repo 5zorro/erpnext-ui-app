@@ -164,3 +164,88 @@ describe("AI-session sizing policy", () => {
     }
   });
 });
+
+describe("cited commits", () => {
+  const identity = {
+    GIT_AUTHOR_NAME: "5zorro",
+    GIT_AUTHOR_EMAIL: "25825485+5zorro@users.noreply.github.com",
+    GIT_COMMITTER_NAME: "5zorro",
+    GIT_COMMITTER_EMAIL: "25825485+5zorro@users.noreply.github.com",
+  };
+  // A repository with one commit to cite; `missing` is a hash it does not have.
+  function repo() {
+    const dir = mkdtempSync(join(tmpdir(), "commit-policy-cite-"));
+    git(dir, ["init", "-q"]);
+    git(dir, ["commit", "--allow-empty", "-q", "-m", "first"], identity);
+    const sha = git(dir, ["rev-parse", "HEAD"]).stdout.trim();
+    const missing = sha.startsWith("0") ? "1a2b3c4d" : "0a1b2c3d";
+    return { dir, sha, short: sha.slice(0, 7), missing };
+  }
+  function scan(dir, message, staged = {}) {
+    for (const [name, content] of Object.entries(staged)) {
+      writeFileSync(join(dir, name), content);
+      git(dir, ["add", name]);
+    }
+    writeFileSync(join(dir, "msg.txt"), message);
+    return spawnSync("bash", [scanner, "--message-file", join(dir, "msg.txt")], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, ...identity },
+    });
+  }
+
+  it("accepts a message citing a commit the repository has, short or full", () => {
+    const r = repo();
+    assert.equal(scan(r.dir, `fix: the gap left by ${r.short} (see ${r.sha})\n`).status, 0);
+  });
+
+  it("rejects a message citing a commit the repository does not have", () => {
+    const r = repo();
+    const result = scan(r.dir, `fix: the gap left by ${r.missing}\n`);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, new RegExp(`cites commit ${r.missing}, which is not in this repository`));
+  });
+
+  it("skips another repository's commit, words without a digit or a letter, and git's own comment lines", () => {
+    const r = repo();
+    const message = [
+      `fix: as upstream did in frappe/frappe@${r.missing}`,
+      "the deadbeef case; 12345678 rows",
+      "# Please enter the commit message for your changes.",
+      "# ------------------------ >8 ------------------------",
+      `index ${r.missing}..1f2e3d4c 100644`,
+      "",
+    ].join("\n");
+    const result = scan(r.dir, message);
+    assert.equal(result.status, 0, result.stderr);
+  });
+
+  it("checks a staged Markdown line whole, and only code spans elsewhere", () => {
+    let r = repo();
+    let result = scan(r.dir, "docs: plan\n", { "plan.md": `Fixed in ${r.missing}.\n` });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /the staged change cites commit/);
+
+    r = repo();
+    result = scan(r.dir, "docs: plan\n", { "plan.md": `Fixed in ${r.short}.\n` });
+    assert.equal(result.status, 0, result.stderr);
+
+    r = repo();
+    result = scan(r.dir, "test: bytes\n", { "a.test.js": `assert.match(listing, /notes 68656c6c6f2062/); // ${r.missing}\n` });
+    assert.equal(result.status, 0, result.stderr);
+
+    r = repo();
+    result = scan(r.dir, "fix: probe\n", { "a.probe.js": `// It failed before \`${r.missing}\`.\n` });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /the staged change cites commit/);
+  });
+
+  it("checks each commit's message and added lines across a range", () => {
+    const r = repo();
+    git(r.dir, ["commit", "--allow-empty", "-q", "-m", `fix: after ${r.missing}`], identity);
+    const head = git(r.dir, ["rev-parse", "HEAD"]).stdout.trim();
+    const result = spawnSync("bash", [scanner, "--range", `${r.sha}..${head}`], { cwd: r.dir, encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /cites commit/);
+  });
+});
