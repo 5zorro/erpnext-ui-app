@@ -1,7 +1,8 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
-> **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. Next: 5zorro dogfoods the table
-> (DF-05 is the paper), then R6a-1 steps 1–2.** Promoted from the architecture review (plan 2026-10-19,
+> **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 step 1 built (2026-10-26). Next:
+> R6a-1 step 2 (the commit gate).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
 > yourself'. that is going to be a separate session."* Its own goal: changing the app gets cheaper
@@ -166,6 +167,31 @@ dogfood*) is the paper to dogfood it with.
 and fixed then: the Item list ran under the taxes (`f18d0b2`, probe `df03-item-picker-visible`). The PO's focus after the source picker and
 the Bill's ↗ peeks taking Tab were fixed outside this plan (`355249b`; probe
 `df03-po-source-focus`).
+
+Found while proving R6a-1 step 1, there before it: a second Bill opened while a new Bill is still
+loading can land on the new one (museum OI-190; `scaffold-bill`'s void-and-amend test, cause read
+from the log, not yet proved).
+
+## R6a-1 step 1 — the identical leaves, written once (built 2026-10-26)
+
+Measured again after step 0 (same-named functions, trimmed lines). Fourteen were 100% the same; the
+ones with a body worth sharing moved, each to a module that takes what differs as `deps`:
+
+| Module | What moved (from both pages) |
+|--------|------------------------------|
+| `src/calc/site-rounding-ask.js` | `loadSiteRounding` / `moneyRounding` and their three variables: `createSiteRoundingAsk` → `ask()` for the tape, `money()` for the taxes Add box |
+| `src/doc-form-date-field-ui.js` | `wireDateField` |
+| `src/doc-form-line-tabs-ui.js` | `setLineTab`, and the two tab clicks (`wireLineTabs`) |
+| `src/doc-form-tax-notes-ui.js` | `taxFixedNote` / `…RowHtml` / `…MarkerHtml` and the ⓘ clicks, `keepTaxesRemoved`, `collapseTaxDefaultNote`, `toggleTaxDefaultNote`; the maps and sets they share (`fixedByClerk`, `removedOn`) live in the module, which the pages' Remove all and first save still write to |
+
+Left in each page on purpose: one- to five-line wrappers over page state (`setStatus`,
+`noteUserEdit`, `peekHoldsRow`, `setItemCellMode`, `focusItemCell`) — sharing them would cost
+more lines than it saves. `cancelCommitGateFromOutside` goes with step 2. One thing kept exactly:
+the default note reads the document again after ERPNext answers, as both pages did.
+Proof: `npm test` (`tests/doc-form-shared-leaves.test.js`, the asker's timing in
+`tests/site-rounding.test.js`); specs `scaffold-bill-taxes`, `scaffold-typed-dates` and `scaffold-bill`
+— 11 of 12 pass; the twelfth (`scaffold-bill` *OI-171 void and amend*) fails the same way on the
+code before step 1 (museum OI-190, below).
 
 ## The findings (verbatim from plan 2026-10-19)
 

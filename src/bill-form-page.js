@@ -153,6 +153,10 @@ import {
 } from "./item-col-resize.js";
 import { CELL_MODE_EDIT, CELL_MODE_NAV } from "../src/item-table-nav.js";
 import { createItemTableKeys } from "../src/item-table-keys-ui.js";
+import { createSiteRoundingAsk } from "../src/calc/site-rounding-ask.js";
+import { wireDateField } from "../src/doc-form-date-field-ui.js";
+import { setLineTab, wireLineTabs } from "../src/doc-form-line-tabs-ui.js";
+import { createTaxNotes } from "../src/doc-form-tax-notes-ui.js";
 
 /**
  * The Bill's editable columns, in the order Tab walks them. Until plan 10-25 0a the Bill passed
@@ -180,7 +184,6 @@ import {
   vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
-import { taxDefaultWhy } from "../src/tax-default-why.js";
 import {
   fieldsSettlingFor,
   remainingHoldMs,
@@ -221,7 +224,6 @@ import {
 } from "../src/bill-header-paint.js";
 import {
   filterDateInputValue,
-  isAllowedDateInputChar,
   parseDocDate,
   formatDocDateDisplay,
 } from "../src/doc-date.js";
@@ -248,7 +250,6 @@ import {
   formatSalesOrderPickerLabel,
 } from "../src/so-picker.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
-import { DEFAULT_SITE_ROUNDING } from "../src/calc/site-rounding.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 import {
   taxAmountFromRate,
@@ -304,11 +305,20 @@ export async function bootBillFormPage(api) {
   let attachList = null;
   /** Suppress blur while Tab/arrow moves between tax cells. */
   let taxTabGuard = false;
-  /** Tax rows whose Amount the clerk typed over a percentage this entry: row name → the old rate. */
-  const taxRowsFixedByClerk = new Map();
-  /** DF-02 Remove all: bills (under every name each has had) whose taxes the clerk removed. */
-  const taxesRemovedOn = new Set();
   let removingTaxes = false;
+  /**
+   * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the doc-form page): the ⓘ on
+   * a row the clerk made a fixed amount, "Vendor tax template default ⓘ", and holding Remove all.
+   */
+  const taxNotes = createTaxNotes({
+    el: () => el,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    setStatus: (text, cls) => setStatus(text, cls),
+    removingTaxes: () => removingTaxes,
+    removeAllTaxes: (opts) => removeAllTaxes(opts),
+    testIdPrefix: "bill",
+  });
   /**
    * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last
    * box (src/item-table-keys-ui.js, shared with the doc-form page). `itemKeys.busy()` is true
@@ -396,34 +406,8 @@ export async function bootBillFormPage(api) {
   let lineApplyInFlight = null;
   /** @type {boolean} */
   let saveInFlight = false;
-  /** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
-  let siteRounding = null;
-  let siteRoundingAsked = false;
-  let siteRoundingAskedAt = 0;
-  /**
-   * Ask main for it until the site has really answered (a read during a reload gets the default) —
-   * at most every 10 s: the tape asks on every key, and ERPNext may be down for a while.
-   */
-  function loadSiteRounding() {
-    if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
-    if (Date.now() - siteRoundingAskedAt < 10_000) return;
-    siteRoundingAskedAt = Date.now();
-    siteRoundingAsked = true;
-    api
-      .getSiteRounding()
-      .then((r) => {
-        if (r && r.known) siteRounding = r;
-      })
-      .catch(() => {})
-      .finally(() => {
-        siteRoundingAsked = false;
-      });
-  }
-  /** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
-  function moneyRounding() {
-    const site = siteRounding || DEFAULT_SITE_ROUNDING;
-    return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
-  }
+  /** The site's rounding (R13-1; src/calc/site-rounding-ask.js, shared with the doc-form page). */
+  const siteRounding = createSiteRoundingAsk({ api: () => api, convention: () => calcUi.getConvention() });
   const calcUi = createFieldCalcUi({
     overlay: document.getElementById("calc-overlay"),
     exprEl: document.getElementById("calc-expr"),
@@ -432,12 +416,9 @@ export async function bootBillFormPage(api) {
     getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
     copyHistory: (id, mode) =>
       api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
-    getSiteRounding: () => {
-      loadSiteRounding();
-      return siteRounding;
-    },
+    getSiteRounding: () => siteRounding.ask(),
   });
-  loadSiteRounding();
+  siteRounding.ask();
   
   /**
    * Max billable qty from enrich/merge cache only (OI-151 — no JIT fetch at qty commit or save).
@@ -817,7 +798,7 @@ export async function bootBillFormPage(api) {
     jumpItems.textContent = orient.itemsJumpLabel || "click here";
     jumpItems.addEventListener("click", (ev) => {
       ev.preventDefault();
-      setLineTab("items");
+      setLineTab(el, "items");
     });
     li1.append(jumpItems, document.createTextNode(")."));
     const li2 = document.createElement("li");
@@ -829,7 +810,7 @@ export async function bootBillFormPage(api) {
     jumpTaxes.textContent = "Taxes and Charges section below";
     jumpTaxes.addEventListener("click", (ev) => {
       ev.preventDefault();
-      setLineTab("items");
+      setLineTab(el, "items");
       const block = document.getElementById("bill-taxes-block");
       if (block && typeof block.scrollIntoView === "function") {
         block.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -838,20 +819,6 @@ export async function bootBillFormPage(api) {
     li2.append(jumpTaxes, document.createTextNode(" (related accounting)."));
     list.append(li1, li2);
     el.expenseNote.append(lead, list);
-  }
-  
-  function setLineTab(which) {
-    const expenses = which === "expenses";
-    if (el.tabItems) {
-      el.tabItems.classList.toggle("active", !expenses);
-      el.tabItems.setAttribute("aria-selected", expenses ? "false" : "true");
-    }
-    if (el.tabExpenses) {
-      el.tabExpenses.classList.toggle("active", expenses);
-      el.tabExpenses.setAttribute("aria-selected", expenses ? "true" : "false");
-    }
-    if (el.panelItems) el.panelItems.hidden = expenses;
-    if (el.panelExpenses) el.panelExpenses.hidden = !expenses;
   }
   
   function setStatus(text, cls) {
@@ -1656,30 +1623,6 @@ export async function bootBillFormPage(api) {
     return taxRowNavFields(lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null);
   }
 
-  /** Why a row is fixed, when the clerk typed its Amount over a percentage this entry; else "". */
-  function taxFixedNote(taxRaw) {
-    const name = taxRaw && taxRaw.name ? String(taxRaw.name) : "";
-    if (!name || !taxRowsFixedByClerk.has(name) || taxRaw.charge_type !== "Actual") return "";
-    const was = taxRowsFixedByClerk.get(name);
-    const pct = was === "" || was == null ? "a percentage" : `${formatGroupedNumber(Number(was))}%`;
-    return `Was ${pct} of the net total. You typed this row's Amount, so it is a fixed amount now and no longer follows the item lines.`;
-  }
-
-  /** The note opens as a full-width line under its row (a narrow Type cell made the row a tower). */
-  function taxFixedNoteRowHtml(taxRaw, idx, cols) {
-    const note = taxFixedNote(taxRaw);
-    return note
-      ? `<tr class="row-note-row" data-tax-note-text="${idx}" hidden><td colspan="${cols}" class="row-note">${escapeHtml(note)}</td></tr>`
-      : "";
-  }
-
-  /** ⓘ on a row whose Amount the clerk typed over a percentage; the note opens on click. */
-  function taxFixedMarkerHtml(taxRaw, idx) {
-    const note = taxFixedNote(taxRaw);
-    if (!note) return "";
-    return ` <button type="button" class="row-note-btn" data-tax-note="${idx}" tabindex="-1" title="${escapeHtml(note)}" aria-label="Why this row is a fixed amount" data-testid="bill-tax-${idx}-fixed">${uiIconHtml("info", { size: 12 })}</button>`;
-  }
-
   function paintTaxes(doc) {
     if (!el.taxesBody) return;
     paintTaxesHead();
@@ -1731,7 +1674,7 @@ export async function bootBillFormPage(api) {
           <td><span class="ro">${escapeHtml(String(r.lineNo))}</span></td>
           <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
           <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
-          <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxFixedMarkerHtml(taxRaw, r.idx)}</td>
+          <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxNotes.fixedMarkerHtml(taxRaw, r.idx)}</td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
           <td>
@@ -1744,7 +1687,7 @@ export async function bootBillFormPage(api) {
             ${allocBtn}
             <button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="bill-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button>
           </td>
-        </tr>${taxFixedNoteRowHtml(taxRaw, r.idx, 8)}`;
+        </tr>${taxNotes.fixedNoteRowHtml(taxRaw, r.idx, 8)}`;
       })
       .join("");
     sizeTaxColumns();
@@ -1809,7 +1752,7 @@ export async function bootBillFormPage(api) {
         const isPercentRow = !!rowNow && rowNow.charge_type !== "Actual";
         if (editedField === "tax_amount") {
           // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
-          if (isPercentRow && rowNow.name) taxRowsFixedByClerk.set(String(rowNow.name), rowNow.rate);
+          if (isPercentRow && rowNow.name) taxNotes.fixedByClerk.set(String(rowNow.name), rowNow.rate);
           await apply(String(n), applyOpts);
           return;
         }
@@ -1976,12 +1919,7 @@ export async function bootBillFormPage(api) {
         }
       });
     });
-    el.taxesBody.querySelectorAll("[data-tax-note]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const t = el.taxesBody.querySelector(`[data-tax-note-text="${btn.getAttribute("data-tax-note")}"]`);
-        if (t) t.hidden = !t.hidden;
-      });
-    });
+    taxNotes.wireFixedNotes();
     const allocBtns = [...el.taxesBody.querySelectorAll("[data-tax-alloc]")];
     allocBtns.forEach((btn) => {
       btn.tabIndex = -1;
@@ -1991,8 +1929,7 @@ export async function bootBillFormPage(api) {
       });
     });
     paintMoneyStack(doc);
-    keepTaxesRemoved(doc);
-    if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
+    taxNotes.followDoc(doc);
   }
 
   /**
@@ -2008,7 +1945,7 @@ export async function bootBillFormPage(api) {
     removingTaxes = true;
     try {
       const name = String(lastDoc.name || "");
-      taxesRemovedOn.add(name);
+      taxNotes.removedOn.add(name);
       let doc = lastDoc;
       if (doc.taxes_and_charges) {
         const r = await api.setHeader("taxes_and_charges", "");
@@ -2037,74 +1974,6 @@ export async function bootBillFormPage(api) {
       removingTaxes = false;
     }
   }
-
-  /** Re-clears per document: a refill that keeps coming back is reported, not fought forever. */
-  const taxReclears = new Map();
-
-  /** A vendor change refills taxes from a template; on a bill the clerk emptied, empty them again. */
-  function keepTaxesRemoved(doc) {
-    if (removingTaxes || !doc || !taxesRemovedOn.has(String(doc.name || ""))) return;
-    if (!doc.taxes_and_charges || !(Array.isArray(doc.taxes) && doc.taxes.length)) return;
-    const key = String(doc.name || "");
-    const n = (taxReclears.get(key) || 0) + 1;
-    taxReclears.set(key, n);
-    if (n > 3) {
-      taxesRemovedOn.delete(key);
-      setStatus("ERPNext keeps putting the template's taxes back here; leaving them. Remove all again, or check the vendor's tax defaults (ⓘ).", "warn");
-      return;
-    }
-    void removeAllTaxes({ quiet: true });
-  }
-
-  /** Which bill + vendor the open note explains; anything else closes it (5zorro DF-02). */
-  let taxNoteKey = "";
-  const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
-
-  /** Close the note: on Refresh, on a fresh snapshot, or when the bill or vendor changes. */
-  function collapseTaxDefaultNote() {
-    if (el.taxDefaultNote) el.taxDefaultNote.hidden = true;
-    taxNoteKey = "";
-  }
-
-  /** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
-  async function toggleTaxDefaultNote() {
-    const note = el.taxDefaultNote;
-    if (!note) return;
-    if (!note.hidden) {
-      collapseTaxDefaultNote();
-      return;
-    }
-    note.hidden = false;
-    taxNoteKey = taxNoteKeyOf(lastDoc);
-    note.textContent = "Reading the tax defaults…";
-    const supplier = (lastDoc && lastDoc.supplier) || "";
-    const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
-    if (!(facts && facts.ok)) {
-      note.textContent = (facts && facts.reason) || "Could not read the tax defaults.";
-      return;
-    }
-    const why = taxDefaultWhy({
-      supplier,
-      current: (lastDoc && lastDoc.taxes_and_charges) || "",
-      defaultTemplate: facts.defaultTemplate,
-      vendorRule: facts.vendorRule,
-      removed: taxesRemovedOn.has(String((lastDoc && lastDoc.name) || "")),
-    });
-    note.innerHTML =
-      why.lines.map((l) => `<p>${escapeHtml(l)}</p>`).join("") +
-      `<div class="tax-default-links">${why.links
-        .map((k, i) => `<button type="button" class="linkish" data-tax-default-link="${i}" tabindex="-1">${escapeHtml(k.label)} ↗</button>`)
-        .join("")}</div>`;
-    note.querySelectorAll("[data-tax-default-link]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const link = why.links[Number(b.getAttribute("data-tax-default-link"))];
-        if (!link || !api || !api.softPeekRoute) return;
-        setStatus(`Opening ${link.label} (Esc returns here)…`);
-        void api.softPeekRoute(link.route);
-      });
-    });
-  }
-  
 
     /**
      * Packet T C — size the line grid from its content, then arm the drag
@@ -4980,7 +4849,7 @@ export async function bootBillFormPage(api) {
 
   async function refresh(opts = {}) {
     if (!api) return;
-    collapseTaxDefaultNote();
+    taxNotes.collapseDefaultNote();
     setStatus("Refreshing…");
     const snap = await api.getSnapshot();
     paint(snap && snap.doc, snap && snap.amountDue, {
@@ -5132,33 +5001,6 @@ export async function bootBillFormPage(api) {
     if (res && res.ok) noteUserEdit();
     await refresh();
     if (field === "bill_no") await runBillRefCheck(next);
-  }
-  
-  function wireDateField(input) {
-    input.addEventListener("beforeinput", (ev) => {
-      if (ev.inputType && ev.inputType.startsWith("delete")) return;
-      if (ev.inputType === "insertFromPaste" || ev.inputType === "insertFromDrop") return;
-      if (ev.data && [...ev.data].some((c) => !isAllowedDateInputChar(c))) {
-        ev.preventDefault();
-      }
-    });
-    input.addEventListener("input", () => {
-      const filtered = filterDateInputValue(input.value);
-      if (filtered !== input.value) {
-        const pos = input.selectionStart;
-        input.value = filtered;
-        try {
-          input.setSelectionRange(pos - 1, pos - 1);
-        } catch {
-          /* ignore */
-        }
-      }
-    });
-    input.addEventListener("paste", (ev) => {
-      ev.preventDefault();
-      const text = filterDateInputValue(ev.clipboardData.getData("text") || "");
-      document.execCommand("insertText", false, text);
-    });
   }
   
   /** DF-01 R — bills answered "bill only" this session, under every name each has had. */
@@ -5464,7 +5306,7 @@ export async function bootBillFormPage(api) {
       if (r && r.ok) {
         // A new draft is renamed on its first save; keep "bill only" answered under the new name.
         if (receiveAnswered.has(nameBeforeSave) && r.doc && r.doc.name) receiveAnswered.add(String(r.doc.name));
-        if (taxesRemovedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxesRemovedOn.add(String(r.doc.name));
+        if (taxNotes.removedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxNotes.removedOn.add(String(r.doc.name));
         if (receive.offLines > 0) {
           showBlockingToast(`${receiveAskOffNote(receive.offLines)} Click to ask at save again.`, () => {
             if (api.setBillReceiveAsk) void api.setBillReceiveAsk(true);
@@ -5807,8 +5649,7 @@ export async function bootBillFormPage(api) {
       trapTab: true,
     });
   }
-  if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
-  if (el.tabExpenses) el.tabExpenses.onclick = () => setLineTab("expenses");
+  wireLineTabs(el);
   if (el.revert) {
     el.revert.onclick = async () => {
       if (!api || !api.revertUnsaved) {
@@ -5922,7 +5763,7 @@ export async function bootBillFormPage(api) {
   if (el.removeAllTax) el.removeAllTax.onclick = () => void removeAllTaxes();
   if (el.taxDefault) {
     el.taxDefault.insertAdjacentHTML("beforeend", uiIconHtml("info", { size: 12 }));
-    el.taxDefault.onclick = () => void toggleTaxDefaultNote();
+    el.taxDefault.onclick = () => void taxNotes.toggleDefaultNote();
   }
   if (el.addTax) {
     el.addTax.onclick = async () => {
@@ -5930,7 +5771,7 @@ export async function bootBillFormPage(api) {
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
       // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
       const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
-      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
+      const { amount: n, remainder } = moneyOrSum(typed, siteRounding.money());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
@@ -6052,7 +5893,7 @@ export async function bootBillFormPage(api) {
     api.onSnapshot((snap) => {
       // A fresh copy of the document (load, reload, back from a peek) starts with the note closed;
       // background enrich progress is the same page filling in, not a reload.
-      if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
+      if (!(snap && snap.enrichProgress)) taxNotes.collapseDefaultNote();
       if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
