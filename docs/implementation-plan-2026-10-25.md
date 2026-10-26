@@ -1,8 +1,8 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
-> R6a-1 step 3: the item rows built (2026-10-26); next the taxes table, one for every form, the
-> Bill's way (5zorro, 2026-10-26).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
+> way (5zorro). Next: R6a-2's four dialogs.** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -259,6 +259,32 @@ rule: *"normally the tax rate isn't "known" until the bill is received. so my te
 were on the bill entry page. I don't see a reason why the tax rate should be different, can you
 make them the same (again preferring the bill right)?"* So this part changes what a clerk sees on
 the PO and the other forms: their taxes act like the Bill's. Allocate into items stays the Bill's.
+
+**Built (2026-10-26).** `src/doc-form-tax-table-ui.js` (`createTaxTable(deps)`) is the Bill's table
+moved out of its page: the sortable head, the rows (Rate % from the net total on a fixed row,
+`displayTaxRateForRow`), the walk (`bill-tax-table-nav.js`), commit on change / blur / a move, the
+rate-to-amount rule (`bill-tax-sync.js`), ×. The pages pass their columns (the Bill's has Line),
+their own chrome (the Bill's Taxes subtotal footer, doc-form's template ⓘ), the Bill's Allocate
+into items and its × lock while Allocate is open, and doc-form's A/R rule (a Sales Taxes template
+makes the rows, so they are listed, not typed). What the doc-form forms gain (the Item Receipt is
+the purchase form with taxes; the PO skin has none): the walk, a typed box committed when the
+clerk moves or leaves it (before: only on change), a Rate on a fixed row writing its Amount, a
+fixed row's Rate % shown from the net total (before: 0.00), and the Bill's status words. As on the
+Bill, the browser's Tab order no longer enters the rows (the clerk clicks in, then walks) and × is
+out of the Tab order. The Add box's own order (Account → Amount → Add tax) was already the same.
+
+**Kept apart, for 5zorro:** the layout. The Bill's table has a Line column, a Taxes subtotal footer
+and fixed column widths (`electron/doc-form.html`); doc-form's has none of them and sorts by Account
+first.
+
+Proof: `npm test` (`tests/doc-form-tax-table.test.js`: Rate % from the net total, the walk on a %
+and a fixed row, Tab out to the Add box, a Rate on a fixed row, an Amount on a % row, the Bill's ×
+lock); spec `scaffold-bill-taxes` *the Item Receipt's taxes act like the Bill's* failed on the code
+before (Rate % showed 0.00; the old page had no key handler on a tax cell, so the walk and the
+Rate's commit could not run either) and passes, with the Bill's 7 (14 of 14 with
+`scaffold-receive-gate` and `scaffold-jit-receipt`); the smoke specs fail the same 12 as the code
+before (the 11 above and `scaffold-peek-return-focus` :1018, which failed on the old code too).
+After step 3 the two pages are 7,816 lines (8,778 before it).
 
 ## The findings (verbatim from plan 2026-10-19)
 

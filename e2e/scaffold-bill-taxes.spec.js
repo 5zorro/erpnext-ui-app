@@ -203,6 +203,65 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     await expect.poll(async () => inDoc(app, `document.querySelector('[data-testid="doc-tax-amount"]').value`), { timeout: 10_000 }).toBe("183.28");
   });
 
+  // Plan 10-25 step 3 (5zorro 2026-10-26): one taxes table for every form, the Bill's way.
+  test("the Item Receipt's taxes act like the Bill's: Rate % from the net total, the Tab walk, a Rate works out the Amount", async () => {
+    test.setTimeout(150_000);
+    await e2eCall(app, "openReceipt", "/app/purchase-receipt/new");
+    await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+    await expect
+      .poll(async () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return !!(s && s.ok && s.doc); })()`), {
+        timeout: 40_000,
+      })
+      .toBe(true);
+    const facts = await inErp(
+      app,
+      `(async () => {
+        const s = await frappe.db.get_list("Supplier", { limit: 1 });
+        const i = await frappe.db.get_list("Item", { filters: { is_stock_item: 1, disabled: 0 }, limit: 1 });
+        const t = await frappe.call({ method: "frappe.client.get_list", args: { doctype: "Purchase Taxes and Charges",
+          parent: "Purchase Taxes and Charges Template", filters: { parenttype: "Purchase Taxes and Charges Template" },
+          fields: ["account_head"], limit_page_length: 1 } });
+        return { supplier: (s[0] && s[0].name) || "", item: (i[0] && i[0].name) || "", acct: (t.message && t.message[0] && t.message[0].account_head) || "" };
+      })()`,
+    );
+    test.skip(!facts.supplier || !facts.item || !facts.acct, "sandbox needs a Supplier, a stock Item and a purchase tax template");
+    const built = await inDoc(
+      app,
+      `(async () => {
+        const d = window.erpDoc;
+        await d.setHeader("supplier", ${JSON.stringify(facts.supplier)});
+        let s = await d.getSnapshot();
+        if (!(s.doc.items || []).length) await d.addItem();
+        await d.setItem(0, "item_code", ${JSON.stringify(facts.item)});
+        await d.setItem(0, "qty", 10);
+        await d.setItem(0, "rate", 40);
+        const r = await d.addTax(${JSON.stringify(facts.acct)}, 20, "");
+        s = await d.getSnapshot();
+        return { ok: !!(r && r.ok), snap: s, n: (s.doc.taxes || []).length - 1, net: s.doc.net_total };
+      })()`,
+    );
+    expect(built.ok).toBe(true);
+    expect(Number(built.net)).toBe(400);
+    await app.evaluate(({ webContents }, snap) => {
+      webContents.getAllWebContents().find((w) => /doc-form\.html/.test(w.getURL())).send("doc-snapshot", snap);
+    }, built.snap);
+    const n = built.n;
+    // A fixed 20.00 on a 400.00 net shows as 5% (the Bill's displayTaxRateForRow).
+    await expect
+      .poll(async () => inDoc(app, `(document.querySelector('[data-testid="doc-tax-${n}-rate"]') || {}).value`), { timeout: 10_000 })
+      .toBe("5.00");
+    // The walk on a fixed row: Account → Amount.
+    await inDoc(app, `(() => { const i = document.querySelector('[data-testid="doc-tax-${n}-account"]'); i.focus(); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); })()`);
+    await expect
+      .poll(async () => inDoc(app, `document.activeElement && document.activeElement.getAttribute("data-testid")`), { timeout: 10_000 })
+      .toBe(`doc-tax-${n}-amount`);
+    // A Rate typed on the fixed row works out its Amount from the net total, and the row stays fixed.
+    await inDoc(app, typeThenKey(`doc-tax-${n}-rate`, "10", "Tab"));
+    await expect
+      .poll(async () => (await inDoc(app, TAXES)).rows[n], { timeout: 20_000 })
+      .toMatchObject({ type: "Actual", amount: 40 });
+  });
+
   // 5zorro 2026-10-11, DF-02: 14.28 of tax allocated, the lines rose 14.27 (submitted with a hardcode).
   test("Allocate puts exactly the charge into the lines: 3 @ 21.00 + 4 @ 26.50, 14.28 → +14.28", async () => {
     test.setTimeout(150_000);

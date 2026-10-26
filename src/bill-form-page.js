@@ -86,12 +86,7 @@ import {
 } from "../src/bill-charge-allocate.js";
 import {
   BILL_TAX_SORTABLE_HEADERS,
-  readBillTaxRowsForSort,
-  sortBillTaxRows,
   billTaxesSubtotal,
-  applyHeaderSortClick as applyTaxHeaderSortClick,
-  sortHeaderArrow as taxSortHeaderArrow,
-  sortHeaderState as taxSortHeaderState,
 } from "../src/bill-tax-sort.js";
 import {
   emptyItemRowCleanupAction,
@@ -157,6 +152,7 @@ import { setLineTab, wireLineTabs } from "../src/doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "../src/doc-form-tax-notes-ui.js";
 import { createCommitGate } from "../src/doc-form-commit-gate-ui.js";
 import { createItemRows } from "../src/doc-form-item-rows-ui.js";
+import { createTaxTable } from "../src/doc-form-tax-table-ui.js";
 
 /**
  * The Bill's editable columns, in the order Tab walks them. Until plan 10-25 0a the Bill passed
@@ -237,11 +233,6 @@ import {
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 import {
-  taxAmountFromRate,
-  taxRateBaseFromDoc,
-  displayTaxRateForRow,
-} from "../src/bill-tax-sync.js";
-import {
   applyDocWashToDocument,
   setDocWashVariant,
   setWashSourceAttr,
@@ -261,13 +252,7 @@ import { uiIconHtml } from "../src/ui-icons.js";
 import { renderCostingBox } from "../src/costing-box-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
-import {
-  neighborTaxCell,
-  nextTaxAddRowTabTarget,
-  nextTaxCellTab,
-  taxNavPos,
-  taxRowNavFields,
-} from "../src/bill-tax-table-nav.js";
+import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
 
 export async function bootBillFormPage(api) {
   if (!api) throw new Error('Bill API missing');
@@ -288,8 +273,6 @@ export async function bootBillFormPage(api) {
   let comparePane = null;
   /** The attached files under the notes (src/attachment-list-ui.js). */
   let attachList = null;
-  /** Suppress blur while Tab/arrow moves between tax cells. */
-  let taxTabGuard = false;
   let removingTaxes = false;
   /**
    * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the doc-form page): the ⓘ on
@@ -303,6 +286,48 @@ export async function bootBillFormPage(api) {
     removingTaxes: () => removingTaxes,
     removeAllTaxes: (opts) => removeAllTaxes(opts),
     testIdPrefix: "bill",
+  });
+  /** The taxes table (src/doc-form-tax-table-ui.js, shared with the doc-form page). */
+  const taxTable = createTaxTable({
+    el: () => el,
+    head: () => document.getElementById("taxes-head-row"),
+    api: () => api,
+    lastDoc: () => lastDoc,
+    painting: () => painting,
+    editable: () => editable(),
+    headers: BILL_TAX_SORTABLE_HEADERS,
+    defaultSort: { key: "lineNo", asc: true },
+    testIdPrefix: "bill",
+    taxNotes,
+    mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
+    repaint: (res) => paint(res.doc, amountDue),
+    refresh: () => refresh(),
+    setStatus,
+    noteUserEdit,
+    sizeColumns: () => sizeTaxColumns(),
+    paintMoneyStack,
+    beforeRows: (doc, rowCount) => {
+      const taxesFoot = document.getElementById("taxes-totals");
+      const totTaxes = document.getElementById("tot-taxes");
+      if (taxesFoot) taxesFoot.hidden = !rowCount;
+      if (rowCount && totTaxes) {
+        totTaxes.innerHTML = formatUsdAmountHtml(billTaxesSubtotal(doc)) || "0.00";
+      }
+    },
+    rowButtonsHtml: (taxRow, idx, canEdit) =>
+      canEdit && isAllocatableChargeRow(taxRow)
+        ? `<button type="button" class="alloc-btn" data-tax-alloc="${idx}" tabindex="-1" data-testid="bill-tax-alloc-${idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
+        : "",
+    wireRowButtons: (body) => {
+      body.querySelectorAll("[data-tax-alloc]").forEach((btn) => {
+        btn.tabIndex = -1;
+        btn.addEventListener("click", () => {
+          openAllocateChargeModal(Number(btn.getAttribute("data-tax-alloc")));
+        });
+      });
+    },
+    deleteBlockedReason: () =>
+      taxRowDeleteAllowed(allocateChargeModalOpen) ? "" : "Finish or cancel Allocate to stock before removing a tax row.",
   });
   /**
    * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last
@@ -380,10 +405,7 @@ export async function bootBillFormPage(api) {
   /** @type {{ key: string, asc: boolean }} */
   /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
   let itemSortSpecs = [{ key: "lineNo", asc: true }];
-  /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
-  let taxSortSpecs = [{ key: "lineNo", asc: true }];
   let itemsHeadWired = false;
-  let taxesHeadWired = false;
   /** @type {boolean} */
   let saveInFlight = false;
   /** The site's rounding (R13-1; src/calc/site-rounding-ask.js, shared with the doc-form page). */
@@ -1461,370 +1483,6 @@ export async function bootBillFormPage(api) {
     }
   }
   
-  function paintTaxesHead() {
-    const thead = document.getElementById("taxes-head-row");
-    if (!thead) return;
-    thead.innerHTML =
-      BILL_TAX_SORTABLE_HEADERS.map((h) => {
-        const st = taxSortHeaderState(taxSortSpecs, h.sortKey);
-        const arrow = taxSortHeaderArrow(taxSortSpecs, h.sortKey);
-        const cls = [
-          "sortable",
-          st.active ? "sorted" : "",
-          h.className || "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
-      }).join("") + `<th data-col-key="tax_actions"></th>`;
-    if (!taxesHeadWired) {
-      taxesHeadWired = true;
-      thead.addEventListener("click", (ev) => {
-        const th = ev.target && /** @type {HTMLElement} */ (ev.target).closest("[data-tax-sort]");
-        if (!th) return;
-        const key = th.getAttribute("data-tax-sort");
-        if (!key) return;
-        taxSortSpecs = applyTaxHeaderSortClick(taxSortSpecs, key, {
-          ctrlKey: ev.ctrlKey,
-          metaKey: ev.metaKey,
-        });
-        paintTaxes(lastDoc);
-      });
-    }
-  }
-
-  function focusTaxCell(rowIndex, field) {
-    if (!el.taxesBody || taxNavPos(field) < 0) return;
-    const inp = el.taxesBody.querySelector(
-      `[data-tax-row="${rowIndex}"][data-tax-field="${field}"]`,
-    );
-    if (!inp || typeof inp.focus !== "function") return;
-    try {
-      inp.focus({ preventScroll: false });
-      if (typeof inp.select === "function") inp.select();
-    } catch {
-      try {
-        inp.focus();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  /** The keyboard walk for tax row `ri` — Rate % on a percentage row, Amount on a fixed one. */
-  function taxFieldsForRow(ri) {
-    return taxRowNavFields(lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null);
-  }
-
-  function paintTaxes(doc) {
-    if (!el.taxesBody) return;
-    paintTaxesHead();
-    const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
-    const canEdit = editable();
-    if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
-    if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
-    const taxesFoot = document.getElementById("taxes-totals");
-    const totTaxes = document.getElementById("tot-taxes");
-    if (!rows.length) {
-      el.taxesBody.innerHTML =
-        `<tr><td colspan="8" class="link-muted">No tax/charge rows yet.</td></tr>`;
-      if (taxesFoot) taxesFoot.hidden = true;
-      paintMoneyStack(doc);
-      return;
-    }
-    if (taxesFoot) taxesFoot.hidden = false;
-    if (totTaxes) {
-      totTaxes.innerHTML = formatUsdAmountHtml(billTaxesSubtotal(doc)) || "0.00";
-    }
-    el.taxesBody.innerHTML = rows
-      .map((r) => {
-        const taxRaw =
-          lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[r.idx] : null;
-        const canAlloc = canEdit && isAllocatableChargeRow(taxRaw || r);
-        const allocBtn = canAlloc
-          ? `<button type="button" class="alloc-btn" data-tax-alloc="${r.idx}" tabindex="-1" data-testid="bill-tax-alloc-${r.idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
-          : "";
-        if (!canEdit) {
-          return `<tr>
-            <td>${escapeHtml(String(r.lineNo))}</td>
-            <td>${escapeHtml(r.account_head)}</td>
-            <td>${escapeHtml(r.description)}</td>
-            <td>${escapeHtml(r.charge_type)}</td>
-            <td class="num">${escapeHtml(r.rate === "" ? "" : String(r.rate))}</td>
-            <td class="num">${formatUsdAmountHtml(r.tax_amount) || escapeHtml(String(r.tax_amount ?? ""))}</td>
-            <td>${escapeHtml(r.add_deduct_tax)}</td>
-            <td></td>
-          </tr>`;
-        }
-        const rateVal = displayTaxRateForRow(r, doc);
-        const rateShown =
-          rateVal === "" || rateVal == null ? "" : formatGroupedNumber(Number(rateVal));
-        const amtShown =
-          r.tax_amount === "" || r.tax_amount == null
-            ? ""
-            : formatGroupedNumber(r.tax_amount);
-        return `<tr data-taxidx="${r.idx}">
-          <td><span class="ro">${escapeHtml(String(r.lineNo))}</span></td>
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
-          <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxNotes.fixedMarkerHtml(taxRaw, r.idx)}</td>
-          <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
-          <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
-          <td>
-            <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="bill-tax-${r.idx}-adddeduct">
-              <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
-              <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
-            </select>
-          </td>
-          <td style="white-space:nowrap">
-            ${allocBtn}
-            <button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="bill-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button>
-          </td>
-        </tr>${taxNotes.fixedNoteRowHtml(taxRaw, r.idx, 8)}`;
-      })
-      .join("");
-    sizeTaxColumns();
-  
-    el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
-      // Same resting-text sync as the items grid (Packet T step B).
-      const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-      if (taxCellText) {
-        const syncTaxCellText = () => {
-          taxCellText.textContent = inp.value;
-        };
-        inp.addEventListener("input", syncTaxCellText);
-        inp.addEventListener("change", syncTaxCellText);
-      }
-      const field = inp.getAttribute("data-tax-field");
-      const ri = Number(inp.getAttribute("data-tax-row"));
-      inp.tabIndex = -1;
-      let taxBusy = false;
-      const readTaxValue = () => {
-        const kind = dirtyCompareKindForField(field);
-        let next =
-          kind === "number" ? inp.value : normalizeEditableText(inp.value);
-        if (field === "rate" || field === "tax_amount") {
-          const n = parseMoney(inp.value);
-          next = n == null ? "" : String(n);
-        }
-        return next;
-      };
-      const apply = async (value, applyOpts = {}) => {
-        if (!api || painting || !api.setTax || taxBusy) return null;
-        taxBusy = true;
-        try {
-          setStatus(`Updating tax ${field}…`);
-          const res = await api.setTax(ri, field, value);
-          if (res && res.ok) {
-            noteUserEdit();
-            paint(res.doc, amountDue);
-            if (applyOpts.focus) {
-              requestAnimationFrame(() =>
-                focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-              );
-            }
-            setStatus("Tax row updated — totals refreshed.");
-          } else {
-            setStatus((res && res.reason) || "Tax update failed.", "err");
-            await refresh();
-          }
-          return res;
-        } finally {
-          taxBusy = false;
-        }
-      };
-      const syncTaxRateAndAmount = async (editedField, rawValue, applyOpts = {}) => {
-        if (!api || painting || !api.setTax || taxBusy) return;
-        const base = taxRateBaseFromDoc(lastDoc);
-        const n = parseMoney(rawValue);
-        if (n == null) {
-          await apply(String(rawValue), applyOpts);
-          return;
-        }
-        const rowNow = lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-        const isPercentRow = !!rowNow && rowNow.charge_type !== "Actual";
-        if (editedField === "tax_amount") {
-          // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
-          if (isPercentRow && rowNow.name) taxNotes.fixedByClerk.set(String(rowNow.name), rowNow.rate);
-          await apply(String(n), applyOpts);
-          return;
-        }
-        if (editedField === "rate" && isPercentRow) {
-          // ERPNext's own rule: a % row is typed by its rate and computes its amount.
-          await apply(String(n), applyOpts);
-          return;
-        }
-        if (editedField === "rate") {
-          const amt = taxAmountFromRate(n, base);
-          if (amt == null) {
-            await apply(String(n), applyOpts);
-            return;
-          }
-          taxBusy = true;
-          try {
-            setStatus("Updating tax amount from rate…");
-            const resAmt = await api.setTax(ri, "tax_amount", String(amt));
-            if (resAmt && resAmt.ok) {
-              noteUserEdit();
-              paint(resAmt.doc, amountDue);
-              if (applyOpts.focus) {
-                requestAnimationFrame(() =>
-                  focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-                );
-              }
-              setStatus("Tax row updated — totals refreshed.");
-              if (Math.abs(n - Number(resAmt.doc?.taxes?.[ri]?.rate ?? n)) > 0.001) {
-                const resRate = await api.setTax(ri, "rate", String(n));
-                if (resRate && resRate.ok) {
-                  paint(resRate.doc, amountDue);
-                  if (applyOpts.focus) {
-                    requestAnimationFrame(() =>
-                      focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-                    );
-                  }
-                }
-              }
-            } else {
-              setStatus((resAmt && resAmt.reason) || "Tax update failed.", "err");
-              await refresh();
-            }
-          } finally {
-            taxBusy = false;
-          }
-        }
-      };
-      if (field === "account_head") {
-        mountBillLinkPicker(inp, "Account", apply);
-      }
-      const commitTaxCell = async (applyOpts = {}) => {
-        // A Tab / arrow move commits through here itself (fromMove); the guard only keeps the
-        // blur that the move causes from committing a second time. DF-02: the guard used to
-        // stop the move's own commit too, so Tab out of an edited Amount dropped the edit.
-        if (!api || painting || taxBusy || (taxTabGuard && !applyOpts.fromMove)) return;
-        let next = readTaxValue();
-        if (field === "rate" || field === "tax_amount") {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-        }
-        const row =
-          lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-        let prev = row && row[field] != null ? row[field] : "";
-        if (field === "rate" && row) {
-          prev = displayTaxRateForRow(row, lastDoc);
-        }
-        const kind = dirtyCompareKindForField(field);
-        if (valuesMeaningfullyEqual(prev, next, { kind })) return;
-        if (field === "rate" || field === "tax_amount") {
-          await syncTaxRateAndAmount(field, inp.value, applyOpts);
-          return;
-        }
-        await apply(next, applyOpts);
-      };
-      inp.addEventListener("change", () => {
-        void commitTaxCell();
-      });
-      inp.addEventListener("blur", () => {
-        if (taxTabGuard) return;
-        void commitTaxCell();
-      });
-      if (taxNavPos(field) >= 0) {
-        inp.addEventListener("focus", () => {
-          if (field === "tax_amount" || field === "rate") {
-            const n = parseMoney(inp.value);
-            if (n != null) inp.value = String(n);
-          }
-        });
-        inp.addEventListener("keydown", (ev) => {
-          if (!editable() || painting) return;
-          const rowCount =
-            lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes.length : 0;
-
-          const runMove = async (dest, leaveForward, leaveBackward) => {
-            taxTabGuard = true;
-            try {
-              let next = readTaxValue();
-              const row =
-                lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-              let prev = row && row[field] != null ? row[field] : "";
-              const kind = dirtyCompareKindForField(field);
-              const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
-              if (!dest) {
-                if (dirty) await commitTaxCell({ fromMove: true });
-                if (leaveForward) {
-                  if (el.taxAccount) el.taxAccount.focus();
-                  else if (el.memo && !el.memo.readOnly) el.memo.focus();
-                } else if (leaveBackward) {
-                  if (el.addTax && !el.addTax.disabled) el.addTax.focus();
-                }
-                return;
-              }
-              if (dirty) {
-                await commitTaxCell({ focus: dest, fromMove: true });
-              } else {
-                focusTaxCell(dest.rowIndex, dest.field);
-              }
-            } finally {
-              taxTabGuard = false;
-            }
-          };
-
-          if (ev.key === "Tab") {
-            ev.preventDefault();
-            const dest = nextTaxCellTab(field, ri, rowCount, !!ev.shiftKey, taxFieldsForRow);
-            void runMove(dest, !ev.shiftKey && !dest, !!ev.shiftKey && !dest);
-            return;
-          }
-          const dir =
-            ev.key === "ArrowUp"
-              ? "up"
-              : ev.key === "ArrowDown"
-                ? "down"
-                : ev.key === "ArrowLeft"
-                  ? "left"
-                  : ev.key === "ArrowRight"
-                    ? "right"
-                    : null;
-          if (!dir) return;
-          ev.preventDefault();
-          const dest = neighborTaxCell(field, ri, rowCount, dir, taxFieldsForRow);
-          void runMove(dest, false, false);
-        });
-      }
-    });
-    el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
-      btn.tabIndex = -1;
-      if (allocateChargeModalOpen) btn.disabled = true;
-      btn.addEventListener("click", async () => {
-        if (!taxRowDeleteAllowed(allocateChargeModalOpen)) {
-          setStatus("Finish or cancel Allocate to stock before removing a tax row.", "warn");
-          return;
-        }
-        if (!api || !api.deleteTax) return;
-        const ri = Number(btn.getAttribute("data-tax-del"));
-        setStatus("Removing tax row…");
-        const res = await api.deleteTax(ri);
-        if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc, amountDue);
-          setStatus("Tax row removed.");
-        } else {
-          setStatus((res && res.reason) || "Delete tax failed.", "err");
-        }
-      });
-    });
-    taxNotes.wireFixedNotes();
-    const allocBtns = [...el.taxesBody.querySelectorAll("[data-tax-alloc]")];
-    allocBtns.forEach((btn) => {
-      btn.tabIndex = -1;
-      btn.addEventListener("click", () => {
-        const ri = Number(btn.getAttribute("data-tax-alloc"));
-        openAllocateChargeModal(ri);
-      });
-    });
-    paintMoneyStack(doc);
-    taxNotes.followDoc(doc);
-  }
-
   /**
    * Clear the template field first (or ERPNext refills the rows from it), then every row.
    * @param {{ quiet?: boolean }} [opts]
@@ -4399,7 +4057,7 @@ export async function bootBillFormPage(api) {
     if (el.attach) el.attach.disabled = !canAttachTo(doc);
     if (el.addTax) el.addTax.disabled = !canEdit;
     paintItems(doc);
-    paintTaxes(doc);
+    taxTable.paint(doc);
     ensureHeaderLinkPickers();
     const name = doc.name || "(new)";
     if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };

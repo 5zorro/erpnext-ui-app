@@ -14,11 +14,7 @@ import {
 import { docFormMapFor } from "./doc-skin-registry.js";
 import { salesProgressCells } from "./sales-doc-map.js";
 import { billMoneyStack } from "./bill-map.js";
-import {
-  readBillTaxRowsForSort,
-  sortBillTaxRows,
-  DOC_TAX_SORTABLE_HEADERS,
-} from "./bill-tax-sort.js";
+import { DOC_TAX_SORTABLE_HEADERS } from "./bill-tax-sort.js";
 import {
   formatGroupedNumber,
   formatUsdAmountHtml,
@@ -42,6 +38,7 @@ import { setLineTab, wireLineTabs } from "./doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "./doc-form-tax-notes-ui.js";
 import { createCommitGate } from "./doc-form-commit-gate-ui.js";
 import { createItemRows } from "./doc-form-item-rows-ui.js";
+import { createTaxTable } from "./doc-form-tax-table-ui.js";
 import {
   emptyItemRowCleanupAction,
   lastItemRowToast,
@@ -98,7 +95,6 @@ import {
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { uiIconHtml } from "./ui-icons.js";
-import { taxRowNavFields } from "./bill-tax-table-nav.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
@@ -160,6 +156,34 @@ const taxNotes = createTaxNotes({
   removingTaxes: () => removingTaxes,
   removeAllTaxes: (opts) => removeAllTaxes(opts),
   testIdPrefix: "doc",
+});
+/** The taxes table (src/doc-form-tax-table-ui.js, shared with the Bill page; the Bill's way). */
+const taxTable = createTaxTable({
+  el: () => el,
+  head: () => el && el.taxesHead,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  painting: () => painting,
+  editable: () => editable(),
+  shown: () => !!(ui && ui.features.taxes),
+  // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
+  // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
+  readOnly: () => !!(ui && ui.features.taxesReadOnly),
+  headers: DOC_TAX_SORTABLE_HEADERS,
+  defaultSort: { key: "account_head", asc: true },
+  testIdPrefix: "doc",
+  taxNotes,
+  mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
+  repaint: (res) => paint(res.doc, res.scratch || scratch),
+  refresh: () => refresh(),
+  setStatus: (text, cls) => setStatus(text, cls),
+  noteUserEdit: () => noteUserEdit(),
+  sizeColumns: () => sizeTaxColumns(),
+  paintMoneyStack: (doc) => paintMoneyStack(doc),
+  // The ⓘ explains purchase templates; A/R taxes follow the customer's Sales Taxes template.
+  beforeRows: (doc) => {
+    if (el.taxDefault) el.taxDefault.hidden = !isPurchaseTaxDoc(doc);
+  },
 });
 /** @type {{ dateExpected?: string }} */
 let scratch = {};
@@ -224,9 +248,6 @@ function setItemCellMode(mode) {
 /** @type {import("./item-sort-specs.js").SortSpec[]} */
 let itemSortSpecs = [{ key: "lineNo", asc: true }];
 let itemsHeadWired = false;
-/** @type {import("./item-sort-specs.js").SortSpec[]} */
-let taxSortSpecs = [{ key: "account_head", asc: true }];
-let taxesHeadWired = false;
 /** @type {Record<string, HTMLInputElement|HTMLTextAreaElement>} */
 const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
@@ -1238,162 +1259,6 @@ function paintProgress(doc) {
     .join("");
 }
 
-function paintTaxesHead() {
-  if (!el.taxesHead || !ui || !ui.features.taxes) return;
-  el.taxesHead.innerHTML =
-    DOC_TAX_SORTABLE_HEADERS.map((h) => {
-      const st = sortHeaderState(taxSortSpecs, h.sortKey);
-      const arrow = sortHeaderArrow(taxSortSpecs, h.sortKey);
-      const cls = ["sortable", st.active ? "sorted" : "", h.className || ""].filter(Boolean).join(" ");
-      return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
-    }).join("") + `<th data-col-key="tax_actions"></th>`;
-  if (!taxesHeadWired) {
-    taxesHeadWired = true;
-    el.taxesHead.addEventListener("click", (ev) => {
-      const th = /** @type {HTMLElement|null} */ (
-        /** @type {HTMLElement} */ (ev.target).closest("[data-tax-sort]")
-      );
-      if (!th) return;
-      const key = th.getAttribute("data-tax-sort");
-      if (!key) return;
-      taxSortSpecs = applyHeaderSortClick(taxSortSpecs, key, {
-        ctrlKey: !!ev.ctrlKey,
-        metaKey: !!ev.metaKey,
-      });
-      if (lastDoc) paintTaxes(lastDoc);
-    });
-  }
-}
-
-function paintTaxes(doc) {
-  if (!el.taxesBody || !ui || !ui.features.taxes) return;
-  paintTaxesHead();
-  const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
-  // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
-  // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
-  const canEdit = editable() && !ui.features.taxesReadOnly;
-  if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
-  if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
-  // The ⓘ explains purchase templates; A/R taxes follow the customer's Sales Taxes template.
-  if (el.taxDefault) el.taxDefault.hidden = !isPurchaseTaxDoc(doc);
-  if (!rows.length) {
-    el.taxesBody.innerHTML =
-      `<tr><td colspan="7" class="link-muted">No tax/charge rows yet.</td></tr>`;
-    paintMoneyStack(doc);
-    return;
-  }
-  el.taxesBody.innerHTML = rows
-    .map((r) => {
-      if (!canEdit) {
-        return `<tr>
-          <td>${escapeHtml(r.account_head)}</td>
-          <td>${escapeHtml(r.description)}</td>
-          <td>${escapeHtml(r.charge_type)}</td>
-          <td class="num">${escapeHtml(r.rate === "" ? "" : String(r.rate))}</td>
-          <td class="num">${formatUsdAmountHtml(r.tax_amount) || escapeHtml(String(r.tax_amount ?? ""))}</td>
-          <td>${escapeHtml(r.add_deduct_tax)}</td>
-          <td></td>
-        </tr>`;
-      }
-      const rateShown = r.rate === "" || r.rate == null ? "" : formatGroupedNumber(r.rate);
-      const amtShown =
-        r.tax_amount === "" || r.tax_amount == null ? "" : formatGroupedNumber(r.tax_amount);
-      return `<tr data-taxidx="${r.idx}">
-        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
-        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
-        <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxNotes.fixedMarkerHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx)}</td>
-        <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="doc-tax-${r.idx}-rate" /></td>
-        <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="doc-tax-${r.idx}-amount" /></td>
-        <td>
-          <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="doc-tax-${r.idx}-adddeduct">
-            <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
-            <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
-          </select>
-        </td>
-        <td><button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="doc-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button></td>
-      </tr>${taxNotes.fixedNoteRowHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx, 7)}`;
-    })
-    .join("");
-  sizeTaxColumns();
-
-  el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
-    // Same resting-text sync as the items grid (Packet T step B).
-    const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-    if (taxCellText) {
-      const syncTaxCellText = () => {
-        taxCellText.textContent = inp.value;
-      };
-      inp.addEventListener("input", syncTaxCellText);
-      inp.addEventListener("change", syncTaxCellText);
-    }
-    const field = inp.getAttribute("data-tax-field");
-    const ri = Number(inp.getAttribute("data-tax-row"));
-    const taxRow = doc && Array.isArray(doc.taxes) ? doc.taxes[ri] : null;
-    // ERPNext's rule (DF-02): Tab reaches Rate % on a percentage row, Amount on a fixed one; the
-    // other number is mouse-only.
-    if ((field === "rate" || field === "tax_amount") && !taxRowNavFields(taxRow).includes(field)) inp.tabIndex = -1;
-    const apply = async (value) => {
-      if (!api || painting || !api.setTax) return;
-      // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
-      if (field === "tax_amount" && taxRow && taxRow.charge_type !== "Actual" && taxRow.name) {
-        taxNotes.fixedByClerk.set(String(taxRow.name), taxRow.rate);
-      }
-      setStatus(`Updating tax ${field}…`);
-      const res = await api.setTax(ri, field, value);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Tax row updated.");
-      } else {
-        setStatus((res && res.reason) || "Tax update failed.", "err");
-        await refresh();
-      }
-    };
-    if (field === "account_head") {
-      mountDocLinkPicker(inp, "Account", apply);
-    }
-    if (field === "rate" || field === "tax_amount") {
-      inp.addEventListener("focus", () => {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = String(n);
-      });
-      inp.addEventListener("blur", () => {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = formatGroupedNumber(n);
-      });
-    }
-    inp.addEventListener("change", async () => {
-      if (!api || painting) return;
-      const kind = dirtyCompareKindForField(field);
-      let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
-      if (field === "rate" || field === "tax_amount") {
-        const n = parseMoney(inp.value);
-        next = n == null ? "" : String(n);
-        if (n != null) inp.value = formatGroupedNumber(n);
-      }
-      await apply(next);
-    });
-  });
-  el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!api || !api.deleteTax) return;
-      const ri = Number(btn.getAttribute("data-tax-del"));
-      setStatus("Removing tax row…");
-      const res = await api.deleteTax(ri);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Tax row removed.");
-      } else {
-        setStatus((res && res.reason) || "Delete tax failed.", "err");
-      }
-    });
-  });
-  taxNotes.wireFixedNotes();
-  paintMoneyStack(doc);
-  taxNotes.followDoc(doc);
-}
-
 function isPurchaseTaxDoc(doc) {
   return !!doc && (doc.doctype === "Purchase Order" || doc.doctype === "Purchase Receipt");
 }
@@ -2024,7 +1889,7 @@ function paint(doc, snapScratch, opts = {}) {
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
-  paintTaxes(doc);
+  taxTable.paint(doc);
   paintProgress(doc);
   ensureHeaderLinkPickers();
 
@@ -2346,8 +2211,7 @@ function applyUiConfig(config) {
 
   itemSortSpecs = [{ key: "lineNo", asc: true }];
   itemsHeadWired = false;
-  taxSortSpecs = [{ key: "account_head", asc: true }];
-  taxesHeadWired = false;
+  taxTable.reset();
   paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
 

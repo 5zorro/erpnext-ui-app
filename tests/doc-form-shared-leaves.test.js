@@ -168,6 +168,11 @@ describe("createTaxNotes: the taxes table's notes", () => {
 });
 
 describe("both pages call the shared copy and keep none of their own", () => {
+  it("the shared taxes table hands the notes the document and a typed Amount", () => {
+    const table = read("../src/doc-form-tax-table-ui.js");
+    assert.match(table, /deps\.taxNotes\.followDoc\(doc\)/);
+    assert.match(table, /deps\.taxNotes\.fixedByClerk\.set\(/);
+  });
   for (const [page, prefix] of [
     ["../src/bill-form-page.js", "bill"],
     ["../src/doc-form-page.js", "doc"],
@@ -175,8 +180,8 @@ describe("both pages call the shared copy and keep none of their own", () => {
     const src = read(page);
     it(`${page.slice(7)}`, () => {
       assert.match(src, new RegExp(`createTaxNotes\\(\\{[\\s\\S]*?testIdPrefix: "${prefix}"`));
-      assert.match(src, /taxNotes\.followDoc\(doc\)/);
-      assert.match(src, /taxNotes\.fixedByClerk\.set\(/);
+      // The taxes table that follows the document and marks a typed Amount is shared too (step 3).
+      assert.match(src, /createTaxTable\(\{[\s\S]*?taxNotes,/);
       assert.match(src, /wireLineTabs\(el\)/);
       assert.match(src, /wireDateField\(/);
       for (const gone of ["function wireDateField", "function setLineTab", "function taxFixedNote", "function keepTaxesRemoved", "function toggleTaxDefaultNote", "function loadSiteRounding"]) {
