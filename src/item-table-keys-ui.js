@@ -1,13 +1,15 @@
 /**
- * The lines table's keys, written once for every Doc form page (plan 2026-10-25, step 0a):
+ * The lines table's keys, written once for every Doc form page (plan 2026-10-25, step 0):
  * Excel-like edit / nav mode, Tab / Shift+Tab / arrows between cells, adding a line past the last
  * one, and putting focus back on a cell after a repaint. The Bill and doc-form pages both call
  * this; what differs between them comes in through `deps` and each cell's `wireCell` options.
+ * DF-03's fixes live here once: a move while the last one is still working is dropped (T-3), moves
+ * follow the order on screen (T-2), and the order holds while the clerk types, with the "out of
+ * date" banner (T-1, the order itself in `item-sort-hold.js`).
  *
- * 🔴 Shared modules in plan 10-25 talk about *lines*, not items: the doc-form page runs six forms,
- * and Receive Payment's lines are `references`. `deps.lines` / `deps.lineKey` say what a line is.
- * Today both pages pass `doc.items` / `item_code` (behaviour unchanged in 0a); plan 10-25 step 0
- * records why that is wrong for Receive Payment, to be proven before it is fixed.
+ * 🔴 Shared modules in plan 10-25 talk about *lines*, not items: the doc-form page runs six forms.
+ * `deps.lines` / `deps.lineKey` say what a line is; both pages pass `doc.items` / `item_code`.
+ * Receive Payment's lines are `references` — left alone at 5zorro's word (plan 10-25 step 0).
  */
 
 import { nextItemFocusAfterEdit } from "./link-picker-policy.js";
@@ -26,6 +28,12 @@ import { holdLineOrder } from "./item-sort-hold.js";
  * from a cell is another page, so the Doc page sees no focus move at all.
  */
 const KEEPS_TABLE = ".link-dd, #calc-overlay";
+
+/**
+ * T-3 drops a move while the last one is still working, but no longer than this: a write that
+ * never answers must not leave Tab and the arrows dead in the table for the rest of the session.
+ */
+export const BUSY_HOLD_MS = 10_000;
 
 /**
  * @typedef {{
@@ -71,6 +79,8 @@ export function createItemTableKeys(deps) {
   let itemCellMode = CELL_MODE_EDIT;
   /** Set while a Tab / arrow commits a cell: the cell's `change` and `blur` handlers stand down. */
   let itemTabGuard = false;
+  /** When the guard went up (`Date.now()`), for `BUSY_HOLD_MS`. */
+  let busySince = 0;
 
   // T-1: the order on screen holds while the clerk is in the table (src/item-sort-hold.js).
   /** Focus last moved into the table (or a cell's pick list / the tape), not out of it. */
@@ -168,17 +178,17 @@ export function createItemTableKeys(deps) {
    * @returns {number[]}
    */
   function screenOrder(count) {
-    /** @type {number[]} */
-    const order = [];
+    /** @type {Set<number>} */
+    const order = new Set();
     const table = deps.table();
     if (table && typeof table.querySelectorAll === "function") {
       for (const inp of table.querySelectorAll("input[data-row]")) {
         const r = Number(inp.dataset.row);
-        if (Number.isInteger(r) && r >= 0 && r < count && !order.includes(r)) order.push(r);
+        if (Number.isInteger(r) && r >= 0 && r < count) order.add(r);
       }
     }
-    for (let r = 0; r < count; r++) if (!order.includes(r)) order.push(r);
-    return order;
+    for (let r = 0; r < count; r++) order.add(r);
+    return [...order];
   }
 
   /**
@@ -391,9 +401,13 @@ export function createItemTableKeys(deps) {
         decision.action === "tab" ||
         (decision.action === "passthrough" && ev.key === "Tab" && !ev.shiftKey && !calcActive);
       if (itemTabGuard && isMove) {
-        if (decision.action !== "passthrough") ev.preventDefault();
-        if (deps.log) deps.log("item-key-dropped", `${ev.shiftKey ? "Shift+" : ""}${ev.key} on line ${ri + 1} ${field}: the last move is still working`);
-        return;
+        const keyName = `${ev.shiftKey ? "Shift+" : ""}${ev.key} on line ${ri + 1} ${field}`;
+        if (Date.now() - busySince < BUSY_HOLD_MS) {
+          if (decision.action !== "passthrough") ev.preventDefault();
+          if (deps.log) deps.log("item-key-dropped", `${keyName}: the last move is still working`);
+          return;
+        }
+        if (deps.log) deps.log("item-key-busy-stale", `${keyName}: the last move has not answered in ${BUSY_HOLD_MS / 1000} s; this one goes ahead`);
       }
 
       if (decision.action === "passthrough") {
@@ -409,6 +423,7 @@ export function createItemTableKeys(deps) {
       ) {
         setItemCellMode(CELL_MODE_NAV);
         itemTabGuard = true;
+        busySince = Date.now();
         void (async () => {
           try {
             const next = readValue();
@@ -443,6 +458,7 @@ export function createItemTableKeys(deps) {
       ev.preventDefault();
       setItemCellMode(CELL_MODE_NAV);
       itemTabGuard = true;
+      busySince = Date.now();
       void (async () => {
         try {
           const next = readValue();

@@ -204,6 +204,30 @@ describe("T-3: a Tab while an earlier one is still working is dropped (DF-03)", 
     assert.deepEqual(writes, ["5"]);
   });
 
+  it("a write that never answers does not freeze the keys: after the hold, a move goes through", async () => {
+    const realNow = Date.now;
+    let now = 1_000_000;
+    Date.now = () => now;
+    try {
+      const writes = [];
+      const { cell } = setup({ apply: (v) => (writes.push(v), new Promise(() => {})) });
+      const qty = cell(0, "qty");
+      qty.value = "5";
+      qty.key("ArrowDown");
+      await settle();
+      now += 2_000;
+      qty.key("ArrowDown");
+      await settle();
+      assert.equal(writes.length, 1, "held while young");
+      now += 10_000;
+      qty.key("ArrowDown");
+      await settle();
+      assert.equal(writes.length, 2, "let through once the hold is over");
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it("typing and Escape still go through while it works", async () => {
     let finish;
     const { keys, cell } = setup({ apply: () => new Promise((r) => (finish = r)) });

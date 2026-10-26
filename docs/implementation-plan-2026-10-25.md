@@ -126,7 +126,9 @@ dashboard and has had no development of its own, so it is not dug into here. The
   dropped key is logged (`item-key-dropped` in `focus-debug.log`).
 
 **T-3 and T-2 built (2026-10-25).** T-3: the module's keydown drops a Tab or move while its busy
-flag is up and logs `item-key-dropped`. T-2: the module reads the painted order from the table
+flag is up and logs `item-key-dropped` — for at most `BUSY_HOLD_MS` (10 s): a write that never
+answers would otherwise leave the keys dead in the table, so after that a move goes ahead and
+`item-key-busy-stale` is logged (end-of-session review 2026-10-25). T-2: the module reads the painted order from the table
 (`screenOrder`, the `data-row` of its inputs in document order) and steps through it for arrows,
 Shift+Tab and Tab (`neighborOnScreen`, `nextAfterEdit`); both pages' after-write focus asks
 `itemKeys.nextAfterEdit`, so `rowItemCodeAt` is gone from both. Proof: `tests/item-table-keys.test.js`
