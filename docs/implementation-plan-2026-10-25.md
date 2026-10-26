@@ -158,7 +158,10 @@ row = ERPNext's line index), so a jump is a row change other than to the next li
 dogfood*) is the paper to dogfood it with.
 
 **Not in this plan:** the slow new PO, the slow added line, and the wait after a create-Item errand
-(museum OI-187: causes found, each its own small look). The PO's focus after the source picker and
+(museum OI-187: causes found, each its own small look). Raised while dogfooding step 0
+(2026-10-25), ideas to plan later: renumber the lines as shown, after a sort or a drag, on a draft
+(museum OI-189); ask before closing the window on unsaved work, close on a second X (OI-188). Found
+and fixed then: the Item list ran under the taxes (`f18d0b2`, probe `df03-item-picker-visible`). The PO's focus after the source picker and
 the Bill's ↗ peeks taking Tab were fixed outside this plan (`355249b`; probe
 `df03-po-source-focus`).
 
