@@ -9,7 +9,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
-  reporter: [["list"]],
+  // Every run is logged for `npm run test:flaky` (scripts/playwright-run-log.js); a --reporter flag drops that.
+  reporter: [["list"], ["./scripts/playwright-run-log.js", { kind: "e2e" }]],
   projects: [
     {
       name: "electron-shell",

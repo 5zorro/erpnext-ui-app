@@ -163,7 +163,7 @@ export const ARCHITECTURE_FAMILIES = [
     label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log, the dogfood check",
     modules: ["architecture-families", "test-run-log", "dogfood-check"],
     paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "scripts/run-tests.js", "scripts/test-flaky.js",
-      "scripts/dogfood-check.js", "scripts/dogfood-setup.js", "package.json", "package-lock.json", "playwright.config.js"],
+      "scripts/test-run-record.js", "scripts/playwright-run-log.js", "scripts/dogfood-check.js", "scripts/dogfood-setup.js", "package.json", "package-lock.json", "playwright.config.js"],
     e2e: [],
     noPaper: "process, not product",
   },

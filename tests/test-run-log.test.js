@@ -8,6 +8,8 @@ import {
   flakyReportText,
   appendCapped,
   logsToRotate,
+  playwrightRunRows,
+  playwrightScope,
   RUN_COLUMNS,
 } from "../src/test-run-log.js";
 
@@ -139,5 +141,62 @@ describe("logsToRotate", () => {
     const names = ["2026-10-21T10-00-00-000Z-a.tap", "2026-10-20T09-00-00-000Z-a.tap", "2026-10-21T11-00-00-000Z-b.tap", "notes.txt"];
     assert.deepEqual(logsToRotate(names, 2), ["2026-10-20T09-00-00-000Z-a.tap"]);
     assert.deepEqual(logsToRotate(names, 5), []);
+  });
+  it("Playwright's run logs (.log) rotate with npm test's (.tap)", () => {
+    const names = ["2026-10-26T01-00-00-000Z-a.e2e.log", "2026-10-26T02-00-00-000Z-a.tap", "2026-10-26T03-00-00-000Z-a.probe.log"];
+    assert.deepEqual(logsToRotate(names, 2), ["2026-10-26T01-00-00-000Z-a.e2e.log"]);
+  });
+});
+
+describe("Playwright runs (specs and probes) in runs.tsv", () => {
+  const fakeHash = (text) => String(text.length).padStart(8, "0") + "ffff";
+  const A = "e2e/scaffold-bill.spec.js › Doc Bill view › void and amend";
+  const B = "e2e/scaffold-bill.spec.js › Doc Bill view › mounts";
+  const run = { time: "t1", commit: "abc", dirty: 0, fingerprint: "abc", log: "t1-abc.e2e.log", scope: "e2e x" };
+
+  it("the scope names the kind and the spec files, and tells a -g run from a whole-file run", () => {
+    const whole = playwrightScope("e2e", [B, A], fakeHash);
+    assert.match(whole, /^e2e e2e\/scaffold-bill\.spec\.js #\w{8}$/);
+    assert.equal(playwrightScope("e2e", [A, B], fakeHash), whole);
+    assert.notEqual(playwrightScope("e2e", [A], fakeHash), whole);
+  });
+
+  it("one row per repeat: a test that fails in one repeat and passes in another is flaky", () => {
+    const rows = playwrightRunRows(
+      [
+        { name: A, repeat: 0, status: "failed", ms: 20 },
+        { name: B, repeat: 0, status: "passed", ms: 5 },
+        { name: A, repeat: 1, status: "passed", ms: 18 },
+        { name: B, repeat: 1, status: "skipped", ms: 0 },
+      ],
+      run,
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.pass, r.fail, r.ms, r.failures]),
+      [
+        [1, 1, 25, [A]],
+        [1, 0, 18, []],
+      ],
+    );
+    const back = parseRunsTsv(rows.map(runRowToTsv).join("\n"));
+    assert.equal(findFlakyTests(back)[0].test, A);
+  });
+
+  it("a timeout is a failure; failing every repeat is broken, not flaky", () => {
+    const rows = playwrightRunRows(
+      [
+        { name: A, repeat: 0, status: "timedOut", ms: 60_000 },
+        { name: A, repeat: 1, status: "failed", ms: 20 },
+      ],
+      run,
+    );
+    assert.deepEqual(rows.map((r) => r.failures), [[A], [A]]);
+    assert.deepEqual(findFlakyTests(parseRunsTsv(rows.map(runRowToTsv).join("\n"))), []);
+  });
+
+  it("an interrupted run has no counts, so it counts for nothing", () => {
+    const [r] = playwrightRunRows([{ name: A, repeat: 0, status: "failed", ms: 1 }], { ...run, interrupted: true });
+    assert.deepEqual([r.pass, r.fail], ["", ""]);
+    assert.equal("interrupted" in r, false);
   });
 });

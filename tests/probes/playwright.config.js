@@ -12,5 +12,6 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 300_000,
-  reporter: [["line"]],
+  // Every run is logged for `npm run test:flaky` (scripts/playwright-run-log.js).
+  reporter: [["line"], ["../../scripts/playwright-run-log.js", { kind: "probe" }]],
 });
