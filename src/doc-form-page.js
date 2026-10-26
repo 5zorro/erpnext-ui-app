@@ -220,6 +220,9 @@ const itemKeys = createItemTableKeys({
   leaveBackward: () => {
     focusLastHeaderBeforeItems();
   },
+  repaint: () => {
+    if (lastDoc) paintItems(lastDoc);
+  },
 });
 
 /** @param {"edit"|"nav"} mode */
@@ -1333,6 +1336,7 @@ function paintItemsHead() {
         ctrlKey: !!ev.ctrlKey,
         metaKey: !!ev.metaKey,
       });
+      itemKeys.sortNow();
       paintItemsHead();
       if (lastDoc) paintItems(lastDoc);
     });
@@ -1737,11 +1741,9 @@ function paintItems(doc) {
   paintItemsHead();
   const cols = ui.itemCols;
   const navFields = itemNavFieldsFromCols(cols);
-  const models = sortDocItemRowModels(
+  const models = itemKeys.orderForPaint(
+    sortDocItemRowModels(doc, cols, (d) => mapHelpers().readItemRows(d), itemSortSpecs),
     doc,
-    cols,
-    (d) => mapHelpers().readItemRows(d),
-    itemSortSpecs,
   );
   const canEdit = editable();
   el.items.innerHTML = models

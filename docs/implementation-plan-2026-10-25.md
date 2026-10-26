@@ -1,6 +1,7 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
-> **Status: step 0a, T-3 and T-2 built (2026-10-25); next, T-1.** Promoted from the architecture review (plan 2026-10-19,
+> **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. Next: 5zorro dogfoods the table
+> (DF-05 is the paper), then R6a-1 steps 1–2.** Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
 > yourself'. that is going to be a separate session."* Its own goal: changing the app gets cheaper
@@ -131,8 +132,22 @@ Shift+Tab and Tab (`neighborOnScreen`, `nextAfterEdit`); both pages' after-write
 `itemKeys.nextAfterEdit`, so `rowItemCodeAt` is gone from both. Proof: `tests/item-table-keys.test.js`
 (failed first: 2 for T-3, 8 for T-2); probe `df03-item-table` (`--grep=T-3` under its own 1200 ms
 lag, `--grep=T-2` sorted by Qty) failed on the code before each fix on both pages and passes now;
-`item-table-keys` walks the same path as before. Until T-1 lands, a write that re-sorts the table
-still moves the line, and T-2 then steps from where it landed.
+`item-table-keys` walks the same path as before.
+
+**T-1 built (2026-10-25).** `src/item-sort-hold.js` (`holdLineOrder`, pure) keeps the lines in the
+order last shown, keyed by ERPNext's row `name`; new lines go at the bottom. The keys module decides
+when to hold: focus last moved into the table, a cell's pick list (`.link-dd`) or the tape
+(`#calc-overlay`). It sorts on a header click (`sortNow`), on 🔄, and when focus moves anywhere else
+on the page (a `focusin` outside); a doc under a new name (a first save) is sorted, not held. Each
+page's paint goes through `itemKeys.orderForPaint`; the banner (`items-sort-stale`, the yellow of the
+tape's remainder note, `electron/doc-fields.css`) shows only while the order shown is not the sort's.
+🔄 does not take focus, and the cell keeps it while its line moves. Proof: `tests/item-table-keys.test.js`;
+probe `df03-item-table --grep=T-1` (sorted by Qty, type 9 over the top line's 1, Tab): before, the line
+and cursor jumped to the bottom on the Bill and the PO; now it stays with the banner, 🔄 sorts, and
+clicking a header box sorts. All eight table probes pass together. Smoke specs: the same 10 failures
+as before step 0 (lens prefs, blank sandbox); two more failed once in a full run
+(`scaffold-peek-return-focus` :577, :850) and pass alone on this code, and :850 failed alone once on
+the code before T-1 — timing, not T-1.
 
 **Proof for 0b:** unit tests on the pure order helpers (`src/item-table-nav.js`,
 `src/link-picker-policy.js`, `src/doc-item-sort.js`); a probe per fix on both skins, as a

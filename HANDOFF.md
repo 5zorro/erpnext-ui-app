@@ -13,8 +13,8 @@
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
-   once — R2-5, R6a-1, R6a-2 from the review) — plan only; starts with step 0, the items table's
-   keys written once and three navigation fixes (DF-03). Decided: share, not merge, with every
+   once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
+   `src/item-table-keys-ui.js`, and three DF-03 fixes); next R6a-1. Decided: share, not merge, with every
    data-entry form in view (the doc-form page already runs six; Pay Outstanding and Journal Entry
    may follow).
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;

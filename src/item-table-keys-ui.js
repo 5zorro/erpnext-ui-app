@@ -19,6 +19,13 @@ import {
   shouldLeaveItemTableBackward,
 } from "./item-table-nav.js";
 import { valuesMeaningfullyEqual, dirtyCompareKindForField } from "./dirty-gate.js";
+import { holdLineOrder } from "./item-sort-hold.js";
+
+/**
+ * Focus here is still "in the table" for T-1: a cell's pick list and the calculator tape. A peek
+ * from a cell is another page, so the Doc page sees no focus move at all.
+ */
+const KEEPS_TABLE = ".link-dd, #calc-overlay";
 
 /**
  * @typedef {{
@@ -30,13 +37,15 @@ import { valuesMeaningfullyEqual, dirtyCompareKindForField } from "./dirty-gate.
  *   lines: (doc: object|null|undefined) => object[],
  *   lineKey: (line: object|null|undefined) => string|number|null|undefined,
  *   leaveBackward: () => void,
+ *   repaint: () => void,
  *   log?: (event: string, detail: string) => void,
  * }} ItemTableKeysDeps
  *
  * `table`: the lines table's body (`el.items`). `lines` / `lineKey`: the doc's lines and the
  * value that makes a line real (empty = a blank line). `leaveBackward`: Shift+Tab / ← out of the
- * first box of the first line — each page knows what sits before its table. `log`: the page's
- * focus log (`focus-debug.log`).
+ * first box of the first line — each page knows what sits before its table. `repaint`: paint
+ * the lines again from the last doc (T-1 re-sorts through it). `log`: the page's focus log
+ * (`focus-debug.log`).
  */
 
 /**
@@ -62,6 +71,17 @@ export function createItemTableKeys(deps) {
   let itemCellMode = CELL_MODE_EDIT;
   /** Set while a Tab / arrow commits a cell: the cell's `change` and `blur` handlers stand down. */
   let itemTabGuard = false;
+
+  // T-1: the order on screen holds while the clerk is in the table (src/item-sort-hold.js).
+  /** Focus last moved into the table (or a cell's pick list / the tape), not out of it. */
+  let inTable = false;
+  /** The doc and its lines' keys in the order last painted. @type {{ doc: string, keys: string[] }|null} */
+  let shown = null;
+  /** The next paint sorts, held or not (a header click, 🔄, clicking away). */
+  let sortNext = false;
+  let stale = false;
+  /** @type {HTMLElement|null} */
+  let banner = null;
 
   /**
    * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
@@ -212,6 +232,106 @@ export function createItemTableKeys(deps) {
   }
 
   /**
+   * The lines in the order to paint them: the sort's order, or — while the clerk is in the table —
+   * the order last shown. Shows or hides the "out of date" banner.
+   * @template {{ rowIndex: number }} M
+   * @param {M[]} sorted the lines in the current sort's order
+   * @param {object|null|undefined} doc
+   * @returns {M[]}
+   */
+  function orderForPaint(sorted, doc) {
+    const docName = String((doc && /** @type {{ name?: string }} */ (doc).name) || "");
+    const lines = deps.lines(doc);
+    const keyOf = (ri) => {
+      const line = /** @type {{ name?: string }|undefined} */ (lines[ri]);
+      return line && line.name ? String(line.name) : `#${ri}`;
+    };
+    // A doc saved for the first time comes back under its new name, its lines renamed too: sort.
+    const hold = inTable && !sortNext && shown && shown.doc === docName;
+    sortNext = false;
+    const { models, outOfDate } = holdLineOrder(sorted, keyOf, hold && shown ? shown.keys : null);
+    shown = { doc: docName, keys: models.map((m) => keyOf(m.rowIndex)) };
+    showStale(outOfDate);
+    return models;
+  }
+
+  /** @param {boolean} on */
+  function showStale(on) {
+    stale = on;
+    if (!banner && on && typeof document !== "undefined") banner = makeBanner();
+    if (banner) banner.hidden = !on;
+  }
+
+  /** "Sort is out of date — it refreshes when you click away. 🔄", over the table. */
+  function makeBanner() {
+    const table = deps.table();
+    const host = table && table.closest ? table.closest("table") : null;
+    if (!host) return null;
+    const box = document.createElement("div");
+    box.className = "sort-stale";
+    box.setAttribute("role", "status");
+    box.dataset.testid = "items-sort-stale";
+    const text = document.createElement("span");
+    text.textContent = "Sort is out of date — it refreshes when you click away.";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sort-stale-refresh";
+    btn.tabIndex = -1;
+    btn.textContent = "🔄";
+    btn.title = "Sort now";
+    btn.setAttribute("aria-label", "Sort now");
+    btn.dataset.testid = "items-sort-refresh";
+    // The cursor stays in its cell: the click must not take focus (that would count as away).
+    btn.addEventListener("mousedown", (ev) => ev.preventDefault());
+    btn.addEventListener("click", () => sortAgain("🔄"));
+    box.append(text, " ", btn);
+    host.before(box);
+    return box;
+  }
+
+  /**
+   * Sort the lines now. The cell the clerk is in keeps focus: its line moves to its sorted place.
+   * @param {string} why
+   */
+  function sortAgain(why) {
+    const table = deps.table();
+    const a = typeof document !== "undefined" ? document.activeElement : null;
+    const cell =
+      a && table && table.contains(a) && a instanceof HTMLElement && a.dataset.row != null
+        ? { row: Number(a.dataset.row), field: a.dataset.field || "" }
+        : null;
+    sortNext = true;
+    if (deps.log) deps.log("item-sort-refreshed", why);
+    deps.repaint();
+    if (cell && Number.isInteger(cell.row) && cell.field) focusItemCell(cell.row, cell.field, { mode: itemCellMode });
+  }
+
+  /**
+   * Where focus just went. Into the table (or a cell's pick list / the tape) holds the order; out
+   * of it re-sorts a stale order — "click away" (5zorro, DF-03).
+   * @param {EventTarget|null} target
+   * @param {boolean} inside
+   */
+  function noteFocus(target, inside) {
+    if (inside) {
+      inTable = true;
+      return;
+    }
+    const was = inTable;
+    inTable = false;
+    if (was && stale) sortAgain("clicked away");
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("focusin", (ev) => {
+      const t = /** @type {HTMLElement|null} */ (ev.target);
+      const table = deps.table();
+      if (!t || !table) return;
+      noteFocus(t, table.contains(t) || !!(t.closest && t.closest(KEEPS_TABLE)));
+    });
+  }
+
+  /**
    * The cell's keydown: mode switches, moves, and Tab past the last box.
    * @param {HTMLInputElement} inp
    * @param {ItemCellKeys} cell
@@ -356,5 +476,12 @@ export function createItemTableKeys(deps) {
     lineKeyAt,
     nextAfterEdit,
     wireCell,
+    orderForPaint,
+    /** The next paint sorts (a header click). */
+    sortNow: () => {
+      sortNext = true;
+    },
+    sortIsStale: () => stale,
+    noteFocus,
   };
 }

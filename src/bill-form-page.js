@@ -324,6 +324,9 @@ export async function bootBillFormPage(api) {
     lineKey: (line) => line.item_code,
     log: logFocus,
     leaveBackward: () => focusBeforeItemsTable(),
+    repaint: () => {
+      if (lastDoc) paintItems(lastDoc);
+    },
   });
 
   /** @param {"edit"|"nav"} mode */
@@ -2339,6 +2342,7 @@ export async function bootBillFormPage(api) {
           ctrlKey: !!ev.ctrlKey,
           metaKey: !!ev.metaKey,
         });
+        itemKeys.sortNow();
         paintItemsHead();
         if (lastDoc) paintItems(lastDoc);
       });
@@ -2347,9 +2351,12 @@ export async function bootBillFormPage(api) {
   
   function paintItems(doc) {
     paintItemsHead();
-    const models = sortBillItemRowModels(
-      buildBillItemRowModels(doc, lineAllocations, poLineMeta, receivedRowsFor(doc)),
-      itemSortSpecs,
+    const models = itemKeys.orderForPaint(
+      sortBillItemRowModels(
+        buildBillItemRowModels(doc, lineAllocations, poLineMeta, receivedRowsFor(doc)),
+        itemSortSpecs,
+      ),
+      doc,
     );
     const canEdit = editable();
     el.items.innerHTML = models

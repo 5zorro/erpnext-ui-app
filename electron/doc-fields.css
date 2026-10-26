@@ -656,3 +656,17 @@ td.rec-cell:hover .rec-btn { color: #0f172a; text-decoration-color: #0f172a; }
 .rec-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #475569; }
 .rec-fields input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
 .rec-all { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; margin-bottom: 6px; }
+
+/* T-1 (plan 2026-10-25): the lines' order is held while the clerk types; this says when it is not
+   the sort's any more, with 🔄 to sort now. Same yellow as the tape's remainder note. */
+.sort-stale {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 0 4px; padding: 3px 8px; border-radius: 4px;
+  background: #fde68a; color: #422006;
+  font-size: 12px; font-weight: 600; line-height: 1.35;
+}
+.sort-stale[hidden] { display: none !important; }
+.sort-stale-refresh {
+  border: 0; background: transparent; padding: 0 2px; cursor: pointer;
+  font-size: 14px; line-height: 1;
+}

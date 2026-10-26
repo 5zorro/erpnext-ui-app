@@ -9,11 +9,15 @@
  *   Question: do ↓ / ↑ / Tab past a line's last box follow the screen? Before the fix they stepped
  *   through ERPNext's order: ↓ from the middle line on screen went nowhere, and Tab past it added
  *   a line.
+ * - T-1: lines with qty 1, 2, 3, sorted by Qty; the clerk types 9 over the top line's qty and
+ *   Tabs. Question: does the line stay where it is? Before the fix it jumped to the bottom with the
+ *   cursor ("it jumped to the wrong row"). Now it stays, a banner says the sort is out of date, 🔄
+ *   sorts (the cursor goes with its line), and clicking a header box sorts too.
  * Makes no records (nothing is saved).
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { sleep, keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -152,6 +156,62 @@ for (const { skin, route, lastBox } of SKINS) {
       expect(w.lines).toBe(3);
     } finally {
       if (path.length) report(`t2-${skin}`, path);
+      if (clerk) await clerk.retire();
+      if (app) await app.close().catch(() => {});
+    }
+  });
+}
+
+/** Is the "out of date" banner showing? */
+const staleShown = (app) =>
+  inDoc(app, `(() => { const b = document.querySelector('[data-testid="items-sort-stale"]'); return !!b && !b.hidden; })()`);
+
+for (const { skin, route } of SKINS) {
+  test(`T-1 (${skin}): sorted by Qty, an edited line stays put until the clerk sorts or clicks away`, async () => {
+    test.setTimeout(6 * 60_000);
+    let app = null;
+    let clerk = null;
+    const path = [];
+    const step = async (label) => {
+      await sleep(1500);
+      const w = await where(app);
+      const rows = await screenRows(app);
+      const stale = await staleShown(app);
+      path.push(`${label} → ${w.at} rows ${rows.join(",")}${stale ? " [out of date]" : ""}`);
+      return { ...w, rows, stale };
+    };
+    try {
+      ({ app, clerk } = await openWithLines(skin, route, [1, 2, 3]));
+      await inDoc(app, `(() => { document.querySelector('th[data-sort="qty"]').click(); return true; })()`);
+      expect((await step("sorted by Qty")).rows).toEqual([0, 1, 2]);
+
+      await inDoc(app, `(() => { const i = document.querySelector('input[data-row="0"][data-field="qty"]'); i.focus(); i.select(); return true; })()`);
+      await keys(app, "9");
+      await press(app, "Tab");
+      const typed = await step("typed 9 in the top line's qty, Tab");
+      expect(typed.rows).toEqual([0, 1, 2]);
+      expect(typed.at).toBe("0:rate");
+      expect(typed.stale).toBe(true);
+
+      await inDoc(app, `(() => { document.querySelector('[data-testid="items-sort-refresh"]').click(); return true; })()`);
+      const refreshed = await step("🔄");
+      expect(refreshed.rows).toEqual([1, 2, 0]);
+      expect(refreshed.at).toBe("0:rate");
+      expect(refreshed.stale).toBe(false);
+
+      // Shown: qty 2, 3, 9. Line 3's 3 becomes 1: the sort wants it first; it stays in the middle.
+      await inDoc(app, `(() => { const i = document.querySelector('input[data-row="2"][data-field="qty"]'); i.focus(); i.select(); return true; })()`);
+      await keys(app, "1");
+      await press(app, "Tab");
+      const held = await step("typed 1 in line 3's qty, Tab");
+      expect(held.rows).toEqual([1, 2, 0]);
+      expect(held.stale).toBe(true);
+      await inDoc(app, `(() => { const h = [...document.querySelectorAll("input[data-field], textarea[data-field]")].find((x) => x.dataset.row == null && !x.disabled && x.offsetParent); h.focus(); return h.dataset.field; })()`);
+      const away = await step("clicked a header box");
+      expect(away.rows).toEqual([2, 1, 0]);
+      expect(away.stale).toBe(false);
+    } finally {
+      if (path.length) report(`t1-${skin}`, path);
       if (clerk) await clerk.retire();
       if (app) await app.close().catch(() => {});
     }

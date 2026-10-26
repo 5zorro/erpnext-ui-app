@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createItemTableKeys } from "../src/item-table-keys-ui.js";
+import { holdLineOrder } from "../src/item-sort-hold.js";
 import { DEFAULT_ITEM_NAV_FIELDS } from "../src/link-picker-policy.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -65,6 +66,7 @@ function setup({ lines, lineKey, doc, leaveBackward = () => {}, apply, afterEdit
     lines: lines || ((d) => (d && Array.isArray(d.items) ? d.items : [])),
     lineKey: lineKey || ((l) => l.item_code),
     leaveBackward,
+    repaint: () => {},
   });
   const calls = [];
   const all = lines ? lines(lastDoc) : lastDoc.items;
@@ -285,6 +287,82 @@ describe("T-2: moves between lines follow the order on screen (DF-03)", () => {
     const { keys } = setup({ doc: blank, screen: [2, 1, 0] });
     const d = keys.nextAfterEdit("project", 1, blank, { cellValue: "P" });
     assert.deepEqual([d.rowIndex, d.deleteRow, d.leaveTable], [0, true, true]);
+  });
+});
+
+describe("T-1: the sort holds still while the clerk types (DF-03)", () => {
+  const m = (rowIndex) => ({ rowIndex });
+  const key = (ri) => ["a", "b", "c", "d"][ri];
+
+  it("not holding: the sort's own order", () => {
+    const sorted = [m(1), m(0)];
+    assert.deepEqual(holdLineOrder(sorted, key, null), { models: sorted, outOfDate: false });
+  });
+
+  it("holding: the order last shown, and out of date when the sort would differ", () => {
+    // Shown a, b, c; an edit makes the sort want c, a, b.
+    const r = holdLineOrder([m(2), m(0), m(1)], key, ["a", "b", "c"]);
+    assert.deepEqual(r.models.map((x) => x.rowIndex), [0, 1, 2]);
+    assert.equal(r.outOfDate, true);
+  });
+
+  it("a new line goes at the bottom; a deleted one drops out", () => {
+    const r = holdLineOrder([m(3), m(0), m(2)], key, ["c", "b", "a"]);
+    assert.deepEqual(r.models.map((x) => x.rowIndex), [2, 0, 3]);
+  });
+
+  it("held and sorted the same: not out of date", () => {
+    assert.equal(holdLineOrder([m(0), m(1)], key, ["a", "b"]).outOfDate, false);
+  });
+
+  /** A page's paint through the module: sorted by qty, lines named by `name`. */
+  function painter() {
+    const doc = { name: "PO-1", items: [{ name: "a", qty: 1 }, { name: "b", qty: 2 }, { name: "c", qty: 3 }] };
+    const { keys } = setup({ doc });
+    const bySort = () => doc.items.map((l, rowIndex) => ({ rowIndex, qty: l.qty })).sort((x, y) => x.qty - y.qty);
+    const paint = () => keys.orderForPaint(bySort(), doc).map((x) => doc.items[x.rowIndex].name).join("");
+    return { doc, keys, paint };
+  }
+  const inCell = { closest: () => null };
+
+  it("in the table, an edit does not move the line, and the banner says the sort is out of date", () => {
+    const { doc, keys, paint } = painter();
+    assert.equal(paint(), "abc");
+    keys.noteFocus(inCell, true);
+    doc.items[0].qty = 9;
+    assert.equal(paint(), "abc");
+    assert.equal(keys.sortIsStale(), true);
+  });
+
+  it("clicking away sorts it", () => {
+    const { doc, keys, paint } = painter();
+    paint();
+    keys.noteFocus(inCell, true);
+    doc.items[0].qty = 9;
+    paint();
+    keys.noteFocus(inCell, false);
+    assert.equal(paint(), "bca");
+    assert.equal(keys.sortIsStale(), false);
+  });
+
+  it("a header click (or 🔄) sorts now, even with the clerk in the table", () => {
+    const { doc, keys, paint } = painter();
+    paint();
+    keys.noteFocus(inCell, true);
+    doc.items[0].qty = 9;
+    paint();
+    keys.sortNow();
+    assert.equal(paint(), "bca");
+    assert.equal(keys.sortIsStale(), false);
+  });
+
+  it("another document (or a new one saved under its name) is sorted, not held", () => {
+    const { doc, keys, paint } = painter();
+    paint();
+    keys.noteFocus(inCell, true);
+    doc.items[0].qty = 9;
+    doc.name = "PO-2";
+    assert.equal(paint(), "bca");
   });
 });
 
