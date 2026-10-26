@@ -136,6 +136,21 @@ describe("the shared taxes table: the Taxes subtotal under it (both pages, the B
   });
 });
 
+describe("the shared taxes table: the header", () => {
+  it("a layout switch (PO → Item Receipt) puts the default sort back but wires the header click once", () => {
+    const listeners = [];
+    const head = { innerHTML: "", addEventListener: (_ev, fn) => listeners.push(fn) };
+    const { table, state } = setup({ head: () => head });
+    table.paint(state.doc);
+    table.reset();
+    table.paint(state.doc);
+    table.reset();
+    table.paint(state.doc);
+    assert.equal(listeners.length, 1);
+    assert.match(head.innerHTML, /data-tax-sort="lineNo"[^>]*>Line\s*▲/);
+  });
+});
+
 describe("the shared taxes table: the walk and the writes (the Bill's way)", () => {
   it("every cell is out of the browser's Tab order; the walk moves it", () => {
     const { table, state } = setup();

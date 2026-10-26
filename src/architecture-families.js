@@ -78,7 +78,7 @@ export const ARCHITECTURE_FAMILIES = [
     paths: ["electron/doc-form.html", "electron/doc-form.head.html", "electron/doc-form.footer.html", "electron/doc-form-body.fragment.html",
       "electron/doc-chrome.fragment.html", "electron/doc-form-preload.cjs", "electron/doc-skin.css", "electron/doc-fields.css",
       "electron/erp-form-bridge-page.js", "scripts/assemble-doc-form-html.js"],
-    e2e: ["scaffold-typed-dates.spec.js"],
+    e2e: ["scaffold-typed-dates.spec.js", "scaffold-form-switch.spec.js"],
   },
   {
     id: "sources",

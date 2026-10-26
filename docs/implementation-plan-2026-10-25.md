@@ -294,6 +294,15 @@ Rate's commit could not run either) and passes, with the Bill's 7 (14 of 14 with
 before (the 11 above and `scaffold-peek-return-focus` :1018, which failed on the old code too).
 After step 3 the two pages are 7,816 lines (8,778 before it).
 
+**End-of-session review (2026-10-26).** Found and fixed: a header click sorted twice after a PO →
+Item Receipt switch in one window (doc-form's items head and the shared taxes head re-wired on
+every layout switch; gotchas G24, spec `scaffold-form-switch`, failed on the code before). Seen,
+not changed: the Item Receipt's lines have no Line column and no sortable headers
+(`RECEIPT_ITEM_COLS` has no `sortKey`; the PO's and the Bill's have both) — a question for 5zorro.
+`.taxes-table` / `.taxes-add` in `doc-fields.css` no longer style a doc-form page but stay: a test
+keeps them as the vocabulary the check/ACH document will reuse. The item rows' `deps` is long
+(about 35 hooks); the next steps (R6a-2) shrink the Bill's closure, which most of them reach into.
+
 ## The findings (verbatim from plan 2026-10-19)
 
 | ID | Lens | Sev | Where | What | Proposed fix | Status |

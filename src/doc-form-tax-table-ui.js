@@ -109,10 +109,12 @@ export function createTaxTable(deps) {
     }
   }
 
-  /** Back to the default sort (a new document layout); the head is wired again. */
+  /**
+   * Back to the default sort (a new document layout). The head element stays the same, so its click
+   * stays wired once: wiring it again ran every header click twice after a PO → Item Receipt switch.
+   */
   function reset() {
     sortSpecs = [deps.defaultSort];
-    headWired = false;
   }
 
   /** @param {any} doc */

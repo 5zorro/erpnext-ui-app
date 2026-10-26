@@ -2210,8 +2210,9 @@ function applyUiConfig(config) {
 
   buildHeaderFields(ui.headerFields);
 
+  // The head row is the same element across layouts, so its click stays wired once (wiring it again
+  // here ran every header click twice after a PO → Item Receipt switch: the sort looked stuck).
   itemSortSpecs = [{ key: "lineNo", asc: true }];
-  itemsHeadWired = false;
   taxTable.reset();
   paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
