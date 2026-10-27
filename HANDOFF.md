@@ -12,6 +12,10 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
+   `implementation-plan-2026-10-26.md` (tests that run while the app is open: each test run gets
+   its own profile folder; then time each stage of a test) — step 1 built (`scripts/test-profile.js`),
+   step 2 next; slotted in
+   before 10-25's R6a-2.
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
    `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
@@ -283,8 +287,8 @@ code. So after any ERPNext or Frappe upgrade:
 1. **Simplified's field lists:** run `npm run seeds:simplified -- --refresh-meta`, then
    `npm run seeds:simplified`, and commit both. The drift test checks against the snapshot in
    `tests/fixtures/simplified-seed-meta/`, not against the live site.
-2. **`npm run dogfood:check`** and the **full `npm run nav:check -- --ongoing`** (app closed, about
-   55 min together). These drive the real pages against the upgraded site.
+2. **`npm run dogfood:check`** and the **full `npm run nav:check -- --ongoing`** (about 55 min
+   together; the app may stay open — each run has its own profile folder). These drive the real pages against the upgraded site.
 3. **Re-read what is named in code:** the Create ▾ catalog's `cscript` handlers
    (`so-create-menu.js`), Receive Payment's `get_outstanding_documents` (`erp-form-bridge-page.js`),
    the tab DOM and `Form.prototype.refresh` that Simplified rewires (G2, G4,
@@ -503,9 +507,9 @@ cell on *lands*, *typing* (never lost without a question), *back* and *focus* (`
 `-- --ongoing` adds a scripted long session and the cruft check on the rail's lists
 (`src/nav-cruft.js`). **When to run it (5zorro 2026-10-24):** after a navigation change, only the
 cells it touches — `NAV_ONLY=<start>/<state>/<move>,…`, one start (`npm run nav:check -- drafts`,
-2–4 min) or the probe that reproduced the bug; the **full** `npm run nav:check -- --ongoing` (~30 min,
-the app closed the whole time) only when 5zorro says he is about to push. A full run blocks him from
-opening the app, so it is not the default. A cell that changes is a finding to explain, not a test
+2–4 min) or the probe that reproduced the bug; the **full** `npm run nav:check -- --ongoing` (~30 min)
+only when 5zorro says he is about to push. Since plan 2026-10-26 it no longer blocks him from using
+the app (each run has its own profile folder), but it is still long and loads the machine. A cell that changes is a finding to explain, not a test
 to update. The rules it
 fixed (2026-10-24):
 
@@ -703,7 +707,7 @@ and a live ERPNext dependency.
 | **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope) — and so does every Playwright run of the specs (layer 3) and probes (3b), one line per `--repeat-each` repeat, through the reporter `scripts/playwright-run-log.js` in both configs (a `--reporter=…` flag replaces it: leave it off); `npm run test:flaky` lists tests that failed and passed on the same code, unit or Playwright; the last 50 logs of each kind (unit, spec, probe) are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
 | **2. ERP workflow e2e** (bulk of “full suite”) | Doc/Desk paths against unmodified ERP | Playwright **as a browser** → `ERP_BASE` | Optional; **skip-OK** if ERP down |
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
-| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — backs up and restores the prefs, refuses while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
+| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — each run in its own throwaway profile folder (`scripts/test-profile.js`), so it never touches the clerk's prefs or login and runs while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
 | **4. Manual** | Feel / dogfood | You (+ **ERP console**) | Never a substitute for layer 1 |
 
 **Gotcha summary:** WebContentsViews are not reliable Playwright Pages — drive via `evaluate` /

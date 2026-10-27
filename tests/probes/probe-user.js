@@ -8,8 +8,8 @@
  *
  * `back()` returns the app to Administrator without a password: the app's own ERPNext cookies
  * are saved before the switch and put back. `retire()` = `back()`, then disable the user and end
- * its sessions (probe-user-retire.js). If the probe dies first, `run-probe` retires it and restores
- * the app's Cookies file — and failing that, the next `run-probe` does.
+ * its sessions (probe-user-retire.js). If the probe dies first, `run-probe` retires it — and
+ * failing that, the next `run-probe` does. The cookies are the run's own (its profile folder).
  */
 import { randomBytes } from "node:crypto";
 import { expect } from "@playwright/test";

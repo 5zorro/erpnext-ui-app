@@ -13,19 +13,20 @@
  * it stays, cancelled) and a draft Bill (deleted).
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
+import { runProfileDir } from "../../../scripts/test-profile.js";
 import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report } from "../probe-helpers.js";
 import { SCENES } from "../dogfood-scenes.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../../../src/bill-enrich-pending.js";
 
 const scene = SCENES["bill-from-po"];
-const NAV_LOG = path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-debug.log");
+/** The app's trail, in the run's own profile folder. */
+const navLog = () => path.join(runProfileDir(), "nav-debug.log");
 /** The app's own trail: the background retry's give-up line for this bill, after `since`. */
 const gaveUpLine = (bill, since) =>
-  fs.readFileSync(NAV_LOG, "utf8").split("\n").filter((l) => l.includes('"bill-enrich-stop"') && l.includes(bill) && /max_rounds/.test(l)).find((l) => {
+  fs.readFileSync(navLog(), "utf8").split("\n").filter((l) => l.includes('"bill-enrich-stop"') && l.includes(bill) && /max_rounds/.test(l)).find((l) => {
     const at = /"at":"([^"]+)"/.exec(l);
     return at && Date.parse(at[1]) >= since;
   }) || null;

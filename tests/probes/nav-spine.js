@@ -13,10 +13,10 @@
  * each ask and answers Stay, or Leave while a cell is being cleared away.
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { runProfileDir } from "../../scripts/test-profile.js";
 import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 import { spineCells, judgeCell, cellLine, cellPassed, isTyped, isNew } from "../../src/nav-spine.js";
@@ -45,10 +45,9 @@ const DOC_PAGE = `(async () => { const s = await window.erpDoc.getSnapshot(); co
 const ACTIVE = `(() => { const a = document.activeElement; return a && a.dataset && a.dataset.field ? { field: a.dataset.field, row: a.dataset.row } : null; })()`;
 const GATE = `(() => { const g = document.querySelector('[data-testid="doc-commit-gate"]'); return !!(g && !g.hidden); })()`;
 
-/** Empty `nav-state.json` before a launch — only when run-probe has backed the prefs up. */
+/** Empty `nav-state.json` before a launch — in the run's own profile folder, never the clerk's. */
 function freshNavState() {
-  if (!process.env.ERP_PROBE_PREFS_BACKUP) throw new Error("run through `npm run probe` (it backs up the prefs this empties)");
-  fs.rmSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json"), { force: true });
+  fs.rmSync(path.join(runProfileDir(), "nav-state.json"), { force: true });
 }
 
 /** @param {{ keepNavState?: boolean }} [opts] keepNavState: a restart, not a fresh start */
@@ -346,7 +345,7 @@ async function move(app, cell, docs, seen) {
       seen.stayKept = (await surface(app)) === "doc" && (await inDoc(app, DOC_PAGE)).ref === mark;
       // Stay leaves the lens as it was (review RV-6): Bills still open on the Doc lens.
       try {
-        seen.lensAfterStay = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "lens-prefs.json"), "utf8"))["purchase-invoice"] || "";
+        seen.lensAfterStay = JSON.parse(fs.readFileSync(path.join(runProfileDir(), "lens-prefs.json"), "utf8"))["purchase-invoice"] || "";
       } catch {
         seen.lensAfterStay = "";
       }
@@ -584,7 +583,7 @@ async function cruftNow(app, label) {
   const docstatus = new Map((Array.isArray(status) ? status : []).map(([dt, n, s]) => [vanishedKey(dt, n), s]));
   let navStateBytes = 0;
   try {
-    navStateBytes = fs.statSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json")).size;
+    navStateBytes = fs.statSync(path.join(runProfileDir(), "nav-state.json")).size;
   } catch {
     /* not written yet */
   }

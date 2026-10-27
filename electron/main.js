@@ -376,6 +376,11 @@ import {
 } from "../src/erp-unload-guard.js";
 import { createRequire } from "node:module";
 
+// A test run's own profile folder (plan 2026-10-26 step 1, scripts/test-profile.js): prefs, login
+// cookies, Local Storage and the debug logs, so specs and probes never touch the clerk's and can
+// run while the app is open. Before anything reads userData; only test runs (E2E=1) can move it.
+if (process.env.E2E === "1" && process.env.ERP_USER_DATA_DIR) app.setPath("userData", process.env.ERP_USER_DATA_DIR);
+
 const require = createRequire(import.meta.url);
 const PKG = require("../package.json");
 const APP_VERSION = PKG.version || "0.0.0";

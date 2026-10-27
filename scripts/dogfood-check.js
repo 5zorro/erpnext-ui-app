@@ -2,7 +2,7 @@
 /**
  * `npm run dogfood:check [-- <row> …]` — the check before 5zorro dogfoods (tests/probes/README.md
  * § Dogfood residuals): runs every probe tagged `@dogfood <row>` (or only those for the rows named),
- * one at a time through `run-probe.js` (the app must be closed; prefs backed up and restored), then
+ * one at a time through `run-probe.js` (each run in its own profile folder, so the app may stay open), then
  * prints the *Dogfood residuals* table (tests/probes/README.md) as pass / FAIL / yours. Probes that leave records run
  * too — this is for the sandbox (each one checks it is, before writing). Each probe's output goes to
  * `test-logs/dogfood-check/<stamp>/<probe>.log`, and the table to `…/table.md`.
@@ -55,10 +55,6 @@ for (const [i, probe] of toRun.entries()) {
     maxBuffer: 64 * 1024 * 1024,
   });
   fs.writeFileSync(path.join(outDir, `${probe}.log`), `${run.stdout || ""}${run.stderr || ""}`);
-  if (run.status === 3) {
-    console.log("not run — the app is open; close it and run again");
-    process.exit(3);
-  }
   results[probe] = run.status === 0 ? "pass" : "fail";
   console.log(results[probe] === "pass" ? "pass" : `FAIL — ${path.relative(ROOT, path.join(outDir, `${probe}.log`))}`);
 }

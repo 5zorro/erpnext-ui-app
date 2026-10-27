@@ -2,7 +2,8 @@
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
-> way (5zorro). Next: R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
+> way (5zorro). Next: plan 2026-10-26 first (tests that run while the app is open — 5zorro's ask,
+since R6a-2 needs many probe runs), then R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
