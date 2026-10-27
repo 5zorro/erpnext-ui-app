@@ -5,8 +5,8 @@
  * each cell and prints the matrix; `npm run nav:check` runs every `nav-spine-*` probe.
  *
  * Fresh state: each launch starts from an empty `nav-state.json` (no Drafts, no Submitted list) —
- * run only through `npm run probe`, which backs up and restores the prefs (the driver refuses
- * otherwise). A cell that fails relaunches the app so one failure does not spill into the next.
+ * in the run's own profile folder (`runProfileDir()`; the driver refuses outside a run, so the
+ * clerk's is never emptied). A cell that fails relaunches the app so one failure does not spill into the next.
  * Records: two draft Bills `ZZ-NAV-A` / `ZZ-NAV-B` (made if missing, deleted at the end); a
  * submitted bill is only read. Nothing is ever saved by a cell: typing is discarded.
  * The shell's own "Unsaved changes" box is stubbed (a real one would block the probe): it records

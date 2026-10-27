@@ -7,7 +7,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { assignLanes, traceEvents, traceFileName, testChart, parseSpansFile, failuresToRotate, staleTraces } from "../src/test-trace.js";
+import { assignLanes, traceEvents, traceFileName, testChart, parseSpansFile, failuresToRotate, staleTraces, logTail } from "../src/test-trace.js";
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const span = (group, name, start, end) => ({ group, name, start, end });
@@ -85,6 +85,12 @@ describe("test trace: what is kept", () => {
     assert.deepEqual(failuresToRotate(names.slice(0, 5)), []);
   });
 
+  it("a failure keeps the end of the run's log, from a line start; a short log whole", () => {
+    const log = Buffer.from("old line\nmiddle line\nlast line\n");
+    assert.equal(logTail(log, 15).toString(), "last line\n");
+    assert.equal(logTail(log, 1000).toString(), log.toString());
+  });
+
   it("a chart not rewritten for 30 days is a renamed or deleted test's", () => {
     const now = Date.parse("2026-12-01");
     const entries = [
@@ -98,7 +104,7 @@ describe("test trace: what is kept", () => {
     const reporter = read("../scripts/playwright-run-log.js");
     assert.match(reporter, /const FAILED = new Set\(\["failed", "timedOut", "interrupted"\]\);/);
     assert.match(reporter, /if \(FAILED\.has\(result\.status\)\) keepFailure\(title, trace\);/);
-    assert.match(reporter, /for \(const log of \["nav-debug\.log", "focus-debug\.log"\]\)/);
+    assert.match(reporter, /for \(const log of \["nav-debug\.log", "focus-debug\.log"\]\)[\s\S]*logTail\(fs\.readFileSync\(src\)\)/);
     assert.match(reporter, /onBegin\(config, suite\) \{\n    this\.started = new Date\(\);\n    sweepStaleTraces\(\);/);
   });
 });

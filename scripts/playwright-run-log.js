@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { playwrightRunRows, playwrightScope } from "../src/test-run-log.js";
-import { parseSpansFile, testChart, traceFileName, failuresToRotate, staleTraces } from "../src/test-trace.js";
+import { parseSpansFile, testChart, traceFileName, failuresToRotate, staleTraces, logTail } from "../src/test-trace.js";
 import { ROOT, RUNS_DIR, codeFingerprint, recordRuns, runLogName } from "./test-run-record.js";
 
 const sha1 = (text) => crypto.createHash("sha1").update(text).digest("hex");
@@ -31,7 +31,7 @@ const FAILED = new Set(["failed", "timedOut", "interrupted"]);
  * its own spans and the app's (`test-spans.jsonl` in the run's profile folder), written to
  * `test-logs/traces/` (the latest run of each test) — never `test-results/`, which Playwright
  * empties at the start of a spec run. A test that failed or timed out also keeps its chart and the
- * run's debug trail so far in `test-logs/failures/<time> <test>/` (the newest 30), so a pass on the
+ * end of the run's debug trail (512 KB) in `test-logs/failures/<time> <test>/` (the newest 30), so a pass on the
  * next run cannot overwrite the breadcrumbs. Returns the test's timing with `chaosClock` added when the test ran under chaos mode.
  */
 function chartTest(test, result) {
@@ -63,7 +63,7 @@ function keepFailure(title, trace) {
   fs.writeFileSync(path.join(dir, "chart.json"), JSON.stringify(trace));
   for (const log of ["nav-debug.log", "focus-debug.log"]) {
     const src = process.env.ERP_USER_DATA_DIR && path.join(process.env.ERP_USER_DATA_DIR, log);
-    if (src && fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, log));
+    if (src && fs.existsSync(src)) fs.writeFileSync(path.join(dir, log), logTail(fs.readFileSync(src)));
   }
   for (const old of failuresToRotate(fs.readdirSync(FAILURES))) fs.rmSync(path.join(FAILURES, old), { recursive: true, force: true });
 }

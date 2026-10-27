@@ -76,6 +76,10 @@ describe("a test run's own profile folder", () => {
       assert.match(read(cfg), /globalSetup: "[./]*scripts\/playwright-test-profile\.js"/);
     }
     assert.match(read("../electron/main.js"), /if \(process\.env\.E2E === "1" && process\.env\.ERP_USER_DATA_DIR\) app\.setPath\("userData"/);
-    assert.doesNotMatch(read("../scripts/run-probe.js"), /appIsOpen|restorePrefs/);
+    const runner = read("../scripts/run-probe.js");
+    assert.doesNotMatch(runner, /appIsOpen|restorePrefs/);
+    // …but still one probe run at a time, taken before a leftover probe user is retired.
+    assert.match(runner, /await takeRunLock\(\);[\s\S]*const leftover = retireLockedProbeUsers\(\);/);
+    assert.match(runner, /\{ flag: "wx" \}/);
   });
 });

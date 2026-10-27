@@ -23,7 +23,10 @@ touches 5zorro's prefs, login, Drafts shelf or `nav-debug.log`, and **runs while
 (`--with-app-open`, from before, is ignored). After the run, its `nav-debug.log` / `focus-debug.log`
 are kept in `test-logs/profile-logs/probe/` and the folder is deleted. `scripts/run-probe.js`
 runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared (a window on his desktop takes his
-keyboard). Proven 2026-10-26: a probe run left nothing changed in the real folder (the code before
+keyboard). **One probe run at a time:** a second waits for the first (`test-logs/probe-run.lock.json`,
+up to an hour), because a run starts by retiring any probe user left in the lock, which would end
+the other run's clerk mid-test. The seed copy is taken while his app may be writing: a torn
+`Cookies` copy would show as a probe that is not logged in — run it again. Proven 2026-10-26: a probe run left nothing changed in the real folder (the code before
 changed 12 files there), and ran beside a second copy of the app (the code before refused, exit 3).
 
 ## Probes that leave records — `leaves-records/`

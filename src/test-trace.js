@@ -104,6 +104,20 @@ export function parseSpansFile(text) {
   return out;
 }
 
+/** Of a run's debug log, a failure keeps only the end — the breadcrumbs nearest the failure — so 30 folders stay small. */
+export const FAILURE_LOG_TAIL_BYTES = 512 * 1024;
+
+/**
+ * The last `maxBytes` of a log, from a line start.
+ * @param {Buffer} buf
+ */
+export function logTail(buf, maxBytes = FAILURE_LOG_TAIL_BYTES) {
+  if (buf.length <= maxBytes) return buf;
+  const cut = buf.subarray(buf.length - maxBytes);
+  const nl = cut.indexOf(10);
+  return nl < 0 ? cut : cut.subarray(nl + 1);
+}
+
 /** Failure folders kept (`test-logs/failures/`): the newest, by name (each starts with its time). */
 export const KEEP_FAILURES = 30;
 /** Charts in `test-logs/traces/` not rewritten for this long belong to renamed or deleted tests. */

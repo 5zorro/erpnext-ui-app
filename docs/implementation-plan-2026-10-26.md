@@ -187,6 +187,17 @@ helpful in tracing the breadcrumbs to the culprit."* So:
   `test-logs/failures/<time>-<test>/`, the newest 30, so a pass on the next run cannot overwrite the
   breadcrumbs. The app's span file lives and dies with the run's profile folder. Proven with the
   hanging throwaway probe: its failure folder had the chart and both logs.
+- **End-of-session review (2026-10-26), fixed:** (1) **two probe runs at once broke each other**
+  — the old "app is open" refusal had also kept a second run out (it saw the first run's app), and
+  a run starts by retiring any probe user in the lock, which would end the other run's clerk
+  mid-test; now one probe run at a time, a second waits (up to an hour) — proven: started 6 s
+  apart, the second printed "waiting" and ran after the first, both passed, lock gone after.
+  (2) A failure folder copied the run's whole debug log (up to 5 MB, ×11 known smoke failures per
+  run): it keeps the last 512 KB, the breadcrumbs nearest the failure. (3) `erpEval`'s two doc
+  comments merged; `nav-spine.js`'s header still said the runner backs the prefs up. Checked and
+  fine: nothing new waits without a deadline (the lock gives up after an hour); the spans hold
+  method, caller and channel names only; the copied login lives in a 0700 temp folder, deleted
+  after the run (a killed run's, after a day).
 - **Chaos: one delay per call** (museum OI-191, his word: *"If it could happen in real life, then
   it should do it … We should probably remove the double lag"*). A bridge call used to be delayed
   twice on one trip (in `bridgeCall`, then in the `erpEval` it ends in); now only `erpEval`

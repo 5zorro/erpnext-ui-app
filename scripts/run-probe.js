@@ -7,7 +7,9 @@
  *    nothing needs restoring (`--with-app-open`, from before, is accepted and ignored);
  * 2. runs headless with WAYLAND_DISPLAY and DISPLAY cleared (e2e/GOTCHAS.md #12: a window on his
  *    desktop steals his keyboard);
- * 3. if the run used a restricted probe user (tests/probes/probe-user.js), retires it — disabled,
+ * 3. one run at a time: a second waits for the first (`test-logs/probe-run.lock.json`), since a
+ *    run starts by retiring any probe user left in the lock, which would end the other's clerk;
+ * 4. if the run used a restricted probe user (tests/probes/probe-user.js), retires it — disabled,
  *    its sessions ended — however the run ended. A user a killed `run-probe` left enabled is
  *    retired at the start of the next run.
  * Environment passes through, so `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- x` works.
@@ -27,6 +29,62 @@ import { PROBE_USER_LOCK, readProbeUserLock, retireLockedProbeUsers } from "../t
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROBES = path.join(ROOT, "tests", "probes");
+
+// One probe run at a time (plan 2026-10-26 review). Runs no longer refuse while the app is open,
+// which used to keep a second run out too (it saw the first run's app); and a run starts by retiring
+// any probe user in the lock, which would end another run's clerk mid-test. A second run waits for
+// the first — up to an hour, then gives up — and the lock goes when this process ends, however.
+const RUN_LOCK = path.join(ROOT, "test-logs", "probe-run.lock.json");
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+async function takeRunLock() {
+  const deadline = Date.now() + 60 * 60_000;
+  let said = false;
+  for (;;) {
+    try {
+      fs.mkdirSync(path.dirname(RUN_LOCK), { recursive: true });
+      fs.writeFileSync(RUN_LOCK, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), args: process.argv.slice(2) }), { flag: "wx" });
+      return;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let other = null;
+    try {
+      other = JSON.parse(fs.readFileSync(RUN_LOCK, "utf8"));
+    } catch {
+      // Unreadable: being written this instant, or left torn — torn for a minute means stale.
+      const age = Date.now() - (fs.statSync(RUN_LOCK, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+      if (age > 60_000) fs.rmSync(RUN_LOCK, { force: true });
+    }
+    if (other && !alive(other.pid)) {
+      fs.rmSync(RUN_LOCK, { force: true }); // its run was killed
+      continue;
+    }
+    if (Date.now() > deadline) {
+      console.error(`Another probe run (pid ${other?.pid}) has held the lock for over an hour — not running. Its lock: ${RUN_LOCK}`);
+      process.exit(5);
+    }
+    if (!said && other) {
+      console.log(`Another probe run is going (pid ${other.pid}, since ${other.startedAt}: ${(other.args || []).join(" ")}) — waiting for it to finish…`);
+      said = true;
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
+await takeRunLock();
+process.on("exit", () => {
+  try {
+    if (JSON.parse(fs.readFileSync(RUN_LOCK, "utf8")).pid === process.pid) fs.rmSync(RUN_LOCK, { force: true });
+  } catch {
+    /* gone already */
+  }
+});
 
 // A restricted probe user an earlier, killed run left enabled (plan 10-19 § A restricted probe user)
 // — first, so a bare `npm run probe` cleans it up too.

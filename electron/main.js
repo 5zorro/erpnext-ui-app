@@ -2936,8 +2936,10 @@ function noteChaosLag(channel, ms, callName = "") {
  * Review 10-19 R9-2: `notRun: true` marks a refusal made before anything was sent. Any other
  * failure here (the page reloading or dying mid-script) says nothing about what the script got
  * done, so a write path must not read it as "nothing happened" — see `voidAmendOutcome`.
+ * @param {string} js
+ * @param {string} [chaosChannel]
+ * @param {string} [bridgeMethod] set by bridgeCall: the test's chart names the call and its delay by it
  */
-/** @param {string} [bridgeMethod] set by bridgeCall: the chart names the call and its delay by it */
 async function erpEval(js, chaosChannel = "erpEval", bridgeMethod = "") {
   const caller = bridgeMethod || testCallerName(); // before the first await, while the caller is on the stack
   if (!erp || erp.webContents.isDestroyed()) {
