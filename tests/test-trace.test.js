@@ -7,7 +7,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { assignLanes, traceEvents, traceFileName, testChart, parseSpansFile } from "../src/test-trace.js";
+import { assignLanes, traceEvents, traceFileName, testChart, parseSpansFile, failuresToRotate, staleTraces } from "../src/test-trace.js";
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const span = (group, name, start, end) => ({ group, name, start, end });
@@ -75,5 +75,30 @@ describe("test trace: where the spans come from", () => {
     assert.match(reporter, /timing: chartTest\(test, result\)/);
     assert.match(reporter, /path\.join\(ROOT, "test-logs", "traces"\)/);
     assert.match(read("../tests/probes/probe-helpers.js"), /noteWait\(ms\)/);
+  });
+});
+
+describe("test trace: what is kept", () => {
+  it("failure folders: the newest 30 by name (each starts with its time)", () => {
+    const names = Array.from({ length: 32 }, (_, i) => `2026-10-${String(i + 1).padStart(2, "0")}T00-df03-T-3`);
+    assert.deepEqual(failuresToRotate(names), [names[0], names[1]]);
+    assert.deepEqual(failuresToRotate(names.slice(0, 5)), []);
+  });
+
+  it("a chart not rewritten for 30 days is a renamed or deleted test's", () => {
+    const now = Date.parse("2026-12-01");
+    const entries = [
+      { name: "old.json", mtimeMs: Date.parse("2026-10-01") },
+      { name: "fresh.json", mtimeMs: Date.parse("2026-11-20") },
+    ];
+    assert.deepEqual(staleTraces(entries, now), ["old.json"]);
+  });
+
+  it("the reporter keeps a failed or timed-out test's chart and the run's trail apart from the latest", () => {
+    const reporter = read("../scripts/playwright-run-log.js");
+    assert.match(reporter, /const FAILED = new Set\(\["failed", "timedOut", "interrupted"\]\);/);
+    assert.match(reporter, /if \(FAILED\.has\(result\.status\)\) keepFailure\(title, trace\);/);
+    assert.match(reporter, /for \(const log of \["nav-debug\.log", "focus-debug\.log"\]\)/);
+    assert.match(reporter, /onBegin\(config, suite\) \{\n    this\.started = new Date\(\);\n    sweepStaleTraces\(\);/);
   });
 });

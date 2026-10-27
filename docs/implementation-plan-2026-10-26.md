@@ -180,6 +180,13 @@ helpful in tracing the breadcrumbs to the culprit."* So:
   call it delayed and its channel (`setRow (bridge)`). First reading: most of a probe's ERPNext
   calls are the bridge check before each bridge call (127 in T-3's 80 s) and the save-drain poll
   (86), not the test's own edits.
+- **What is kept (his question, 2026-10-26: "what is the log rotation going to look like?"):**
+  `test-logs/traces/` holds the latest run of each test (overwritten; a chart not rewritten for
+  30 days — a renamed or deleted test's — is swept at the next run). A test that **failed or timed
+  out** also keeps its chart and the run's `nav-debug.log` / `focus-debug.log` so far in
+  `test-logs/failures/<time>-<test>/`, the newest 30, so a pass on the next run cannot overwrite the
+  breadcrumbs. The app's span file lives and dies with the run's profile folder. Proven with the
+  hanging throwaway probe: its failure folder had the chart and both logs.
 - **Chaos: one delay per call** (museum OI-191, his word: *"If it could happen in real life, then
   it should do it … We should probably remove the double lag"*). A bridge call used to be delayed
   twice on one trip (in `bridgeCall`, then in the `erpEval` it ends in); now only `erpEval`

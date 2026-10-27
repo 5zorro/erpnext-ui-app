@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { playwrightRunRows, playwrightScope } from "../src/test-run-log.js";
-import { parseSpansFile, testChart, traceFileName } from "../src/test-trace.js";
+import { parseSpansFile, testChart, traceFileName, failuresToRotate, staleTraces } from "../src/test-trace.js";
 import { ROOT, RUNS_DIR, codeFingerprint, recordRuns, runLogName } from "./test-run-record.js";
 
 const sha1 = (text) => crypto.createHash("sha1").update(text).digest("hex");
@@ -23,12 +23,16 @@ function nameOf(test) {
 }
 
 const TRACES = path.join(ROOT, "test-logs", "traces");
+const FAILURES = path.join(ROOT, "test-logs", "failures");
+const FAILED = new Set(["failed", "timedOut", "interrupted"]);
 
 /**
  * Plan 2026-10-26 step 2b, at the test's end (passed, failed or timed out): its timeline chart from
  * its own spans and the app's (`test-spans.jsonl` in the run's profile folder), written to
- * `test-logs/traces/` — never `test-results/`, which Playwright empties at the start of a spec run.
- * Returns the test's timing with `chaosClock` added when the test ran under chaos mode.
+ * `test-logs/traces/` (the latest run of each test) — never `test-results/`, which Playwright
+ * empties at the start of a spec run. A test that failed or timed out also keeps its chart and the
+ * run's debug trail so far in `test-logs/failures/<time> <test>/` (the newest 30), so a pass on the
+ * next run cannot overwrite the breadcrumbs. Returns the test's timing with `chaosClock` added when the test ran under chaos mode.
  */
 function chartTest(test, result) {
   const notes = [...(result.annotations || []), ...(test.annotations || [])];
@@ -43,11 +47,34 @@ function chartTest(test, result) {
     const { trace, chaosClock } = testChart({ testSpans, appSpans, start, end: start + result.duration, title });
     fs.mkdirSync(TRACES, { recursive: true });
     fs.writeFileSync(path.join(TRACES, traceFileName(title)), JSON.stringify(trace));
+    if (FAILED.has(result.status)) keepFailure(title, trace);
     const timing = timingText ? JSON.parse(timingText) : {};
     if (timing.chaosMode) timing.chaosClock = chaosClock;
     return Object.keys(timing).length ? JSON.stringify(timing) : "";
   } catch {
     return timingText; // a chart is a convenience; never lose the run log over it
+  }
+}
+
+function keepFailure(title, trace) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = path.join(FAILURES, `${stamp}-${traceFileName(title).replace(/\.json$/, "")}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "chart.json"), JSON.stringify(trace));
+  for (const log of ["nav-debug.log", "focus-debug.log"]) {
+    const src = process.env.ERP_USER_DATA_DIR && path.join(process.env.ERP_USER_DATA_DIR, log);
+    if (src && fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, log));
+  }
+  for (const old of failuresToRotate(fs.readdirSync(FAILURES))) fs.rmSync(path.join(FAILURES, old), { recursive: true, force: true });
+}
+
+/** Charts of renamed or deleted tests: gone after 30 days without a rewrite. */
+function sweepStaleTraces() {
+  try {
+    const entries = fs.readdirSync(TRACES).map((name) => ({ name, mtimeMs: fs.statSync(path.join(TRACES, name)).mtimeMs }));
+    for (const name of staleTraces(entries, Date.now())) fs.rmSync(path.join(TRACES, name), { force: true });
+  } catch {
+    /* no charts yet */
   }
 }
 
@@ -65,6 +92,7 @@ export default class PlaywrightRunLog {
 
   onBegin(config, suite) {
     this.started = new Date();
+    sweepStaleTraces();
     this.code = codeFingerprint();
     this.scope = playwrightScope(this.kind, suite.allTests().map(nameOf), sha1);
   }

@@ -2,9 +2,10 @@
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
-> way (5zorro). Next: plan 2026-10-26 first (tests that run while the app is open — 5zorro's ask,
-since R6a-2 needs many probe runs), then R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
-> lines get the Line column and sortable headers (end of the step 3 section).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> way (5zorro). Plan 2026-10-26 (tests that run while the app is open, and where their time goes)
+> built 2026-10-26. Next: R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
+> lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
+> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -324,6 +325,16 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
 2. **R6a-1 step 3 with R6a-2's `paintItems` / `paintTaxes`** (its own session, both skins' smoke
    specs). Builds on step 0's module.
 3. **R6a-2's four dialogs** to `src/bill-*-modal-ui.js` (Assign's steps as a pure reducer).
+3b. **A performance deep dive** (added 2026-10-26, 5zorro: *"perhaps we should add to the refactor, a
+   deep dive into the results of the entire probe tests getting ran for performance smells"*):
+   run every probe (`npm run nav:check -- --ongoing`, `npm run dogfood:check`, then the rest),
+   read `npm run test:times` and the charts (`test-logs/traces/`, plan 2026-10-26), and list each
+   smell with its numbers — the call, how often, how long, which tests — before changing anything.
+   Already seen in one T-3 chart: the bridge check (`ensureErpFormBridge`) runs before every bridge
+   call (127 times in 80 s), and the save-drain poll (`drainErpSaveIntoShelved`) 86 times. Each
+   smell found gets one line: fix it in R2-5 (which moves that code anyway), a later plan, or
+   leave it with the reason. Before R2-5 on purpose: most smells live in `main.js`, and the split
+   should carry the fix, not move the smell. Report, not code: what to fix is 5zorro's call.
 4. **R2-5** in its order (print IPC → Papers → Find → payment settings → re-link / method change →
    health / incidents → the warm pick lists block → doc-form → Bill), each family to
    `electron/ipc/<family>.js` taking a `deps` object.

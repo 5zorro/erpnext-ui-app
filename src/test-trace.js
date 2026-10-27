@@ -103,3 +103,15 @@ export function parseSpansFile(text) {
   }
   return out;
 }
+
+/** Failure folders kept (`test-logs/failures/`): the newest, by name (each starts with its time). */
+export const KEEP_FAILURES = 30;
+/** Charts in `test-logs/traces/` not rewritten for this long belong to renamed or deleted tests. */
+export const STALE_TRACE_MS = 30 * 24 * 3600_000;
+
+/** Which failure folders to delete: all but the newest `keep`. */
+export const failuresToRotate = (names, keep = KEEP_FAILURES) => [...names].sort().slice(0, Math.max(0, names.length - keep));
+
+/** Which charts are stale: `{ name, mtimeMs }[]` → names. */
+export const staleTraces = (entries, now, maxAgeMs = STALE_TRACE_MS) =>
+  entries.filter((e) => e.name.endsWith(".json") && now - e.mtimeMs > maxAgeMs).map((e) => e.name);
