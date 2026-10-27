@@ -14,7 +14,7 @@
    **In flight:**
    `implementation-plan-2026-10-26.md` (tests that run while the app is open: each test run gets
    its own profile folder; then time each stage of a test) — step 1 built (`scripts/test-profile.js`),
-   step 2 built (`npm run test:times`), step 2b built (each test's timeline chart); slotted in
+   step 2 built (`npm run test:times`), step 2b built (each test's timeline chart); all built, closes at the next review; slotted in
    before 10-25's R6a-2.
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,

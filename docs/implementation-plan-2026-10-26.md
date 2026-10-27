@@ -2,8 +2,10 @@
 
 > **Status: step 1 built 2026-10-26 (each test run has its own profile folder); step 2 built
 > 2026-10-26 (`npm run test:times`); step 2b built 2026-10-26 (each test's timeline chart,
-> `test-logs/traces/`). Next: 5zorro looks at a chart and the numbers, and picks what to cut
-> (*After step 2*).** A short tooling plan, slotted in before plan
+> `test-logs/traces/`; then a chart for every test's end, timed-out ones included). 5zorro, after
+> looking: nothing to cut for now — the charts are for tracing the next timeout. Built; to close
+> out (HANDOFF § *Closing a plan*) at the next end-of-session review. Next work: plan 10-25's
+> R6a-2.** A short tooling plan, slotted in before plan
 > 2026-10-25's R6a-2 (that refactor needs many probe runs). Nothing a clerk sees changes.
 
 ## Why
