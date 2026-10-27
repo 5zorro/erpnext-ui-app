@@ -12,10 +12,6 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
-   `implementation-plan-2026-10-26.md` (tests that run while the app is open: each test run gets
-   its own profile folder; then time each stage of a test) — step 1 built (`scripts/test-profile.js`),
-   step 2 built (`npm run test:times`), step 2b built (each test's timeline chart); all built, closes at the next review; slotted in
-   before 10-25's R6a-2.
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
    `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
@@ -40,7 +36,11 @@
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-19.md` (the architecture review, 2026-10-19 → 25) —
+   **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
+   where their time goes; built and closed 2026-10-26) — folded into **Test strategy** below (the
+   rules) and *Run / validate* (`npm run test:times`, the charts); its performance follow-up is
+   plan 10-25's step 3b. Code comments citing "plan 2026-10-26" mean that section.
+   `implementation-plan-2026-10-19.md` (the architecture review, 2026-10-19 → 25) —
    folded into **Reviewing what was built** below; its dogfood table moved to
    `tests/probes/README.md` § Dogfood residuals (what `npm run dogfood:check` reads); the test-run
    log and probe rules are in **Test strategy** and `tests/probes/README.md`.
@@ -710,6 +710,30 @@ and a live ERPNext dependency.
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
 | **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — each run in its own throwaway profile folder (`scripts/test-profile.js`), so it never touches the clerk's prefs or login and runs while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
 | **4. Manual** | Feel / dogfood | You (+ **ERP console**) | Never a substitute for layer 1 |
+
+**Test runs never touch the clerk's app (plan 2026-10-26, closed; 5zorro: *"the biggest thing was
+the 'i can't work while the probes are running'"*).**
+- **Own profile folder.** Every spec and probe run gets a throwaway profile folder
+  (`scripts/test-profile.js`, both Playwright configs' global setup). It is seeded with the prefs
+  and the login, not the logs or Local Storage. The app moves `userData` there only when
+  `E2E=1` and `ERP_USER_DATA_DIR` are set. So no backup or restore, and **runs go while his app is
+  open**. A new test tool must keep this: find the shared resource rather than ask him to close the
+  app.
+- **What is still shared:** the ERPNext sandbox (scenes change `ZZ DF …` records) and the machine
+  (timing probes may be flakier while he works).
+- **One probe run at a time** (`test-logs/probe-run.lock.json`; a second waits, up to an hour). A
+  run starts by retiring any leftover probe user, which would end another run's clerk. A spec run
+  can go alongside.
+- **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
+  A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
+  `test-logs/failures/` (the newest 30). Nothing kept goes under `test-results/`, which Playwright
+  empties at the start of every spec run.
+- **Chaos mode** delays each ERPNext call once, as real life would.
+- **Known limit of `test:times`:** a polling loop written with `sleep` counts as the test's own
+  wait, though it is waiting on the app; `expect.poll` does not (≤ 4 s where seen).
+- **Not done:** the smoke specs still start from a copy of the clerk's prefs, so the ones that read
+  `lens-prefs.json` fail on his `"sales-order": "vanilla"`. They should set their own lens and
+  scene; easier now that each run has its own folder.
 
 **Gotcha summary:** WebContentsViews are not reliable Playwright Pages — drive via `evaluate` /
 `execInView`, not `firstWindow()` clicks. Pure logic stays in `npm test`. Details: `e2e/GOTCHAS.md`.

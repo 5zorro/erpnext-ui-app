@@ -3,7 +3,7 @@
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
 > way (5zorro). Plan 2026-10-26 (tests that run while the app is open, and where their time goes)
-> built 2026-10-26. Next: R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
+> built and closed 2026-10-26 (HANDOFF § *Test strategy*). Next: R6a-2's four dialogs; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
@@ -328,7 +328,7 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
 3b. **A performance deep dive** (added 2026-10-26, 5zorro: *"perhaps we should add to the refactor, a
    deep dive into the results of the entire probe tests getting ran for performance smells"*):
    run every probe (`npm run nav:check -- --ongoing`, `npm run dogfood:check`, then the rest),
-   read `npm run test:times` and the charts (`test-logs/traces/`, plan 2026-10-26), and list each
+   read `npm run test:times` and the charts (`test-logs/traces/`; HANDOFF § *Test strategy*), and list each
    smell with its numbers — the call, how often, how long, which tests — before changing anything.
    Already seen in one T-3 chart: the bridge check (`ensureErpFormBridge`) runs before every bridge
    call (127 times in 80 s), and the save-drain poll (`drainErpSaveIntoShelved`) 86 times. Each
