@@ -5,6 +5,7 @@ import {
   shouldChaosLag,
   maybeChaosLag,
   chaosSleep,
+  addLagInterval,
 } from "../src/erp-chaos-lag.js";
 
 describe("erp-chaos-lag", () => {
@@ -57,5 +58,19 @@ describe("erp-chaos-lag", () => {
     const t0 = Date.now();
     await chaosSleep(0);
     assert.ok(Date.now() - t0 < 20);
+  });
+});
+
+// Plan 2026-10-26 step 2: chaos lag as clock time, for `npm run test:times`.
+describe("addLagInterval: chaos lag as clock time", () => {
+  const run = (pairs) => pairs.reduce((c, [s, e]) => addLagInterval(c, s, e), { intervals: [], total: 0 });
+
+  it("delays on parallel calls count once (the 236 s of delays in an 87 s probe)", () => {
+    assert.equal(run([[0, 1000], [200, 1200], [500, 900]]).total, 1200);
+  });
+
+  it("delays one after another add up; a gap between them is not lag", () => {
+    assert.equal(run([[0, 1000], [3000, 4000]]).total, 2000);
+    assert.equal(run([[0, 3000], [4000, 6000], [2000, 5000]]).total, 6000);
   });
 });

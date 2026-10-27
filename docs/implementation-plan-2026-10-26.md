@@ -1,6 +1,7 @@
 # Implementation plan 2026-10-26 — tests that run while the app is open, and how long they take
 
-> **Status: step 1 built 2026-10-26 (each test run has its own profile folder); step 2 next.** A short tooling plan, slotted in before plan
+> **Status: step 1 built 2026-10-26 (each test run has its own profile folder); step 2 built
+> 2026-10-26 (`npm run test:times`); step 2b (the timeline chart) next.** A short tooling plan, slotted in before plan
 > 2026-10-25's R6a-2 (that refactor needs many probe runs). Nothing a clerk sees changes.
 
 ## Why
@@ -110,6 +111,48 @@ Then a chaos run that got slower can be read: more injected lag, or more work.
 
 **Proof:** a unit test for the summary; one probe run shows the split; the same probe in chaos mode
 shows the chaos lag grow while the work stays about the same.
+
+**Built 2026-10-26.** What it changed on the way: summing the chaos delays was useless — T-3
+showed 236 s of delays inside an 87 s run (parallel calls overlap) — so main counts them as clock
+time, overlapping delays once (`addLagInterval`, `src/erp-chaos-lag.js`): 71–81 s of 76–83 s runs.
+That in turn showed "work = total − waits − chaos lag" says nothing under 100% chaos (some delay is
+running nearly all the time), so a chaos-mode run is not split into work: it shows how much of it a
+delay was running and how much longer it took than the same test's plain runs.
+
+**What the first numbers say (2026-10-26)** — the opposite of the guess above:
+- starting the app is **not** the cost: launch ~0.5 s, the app ready at once, a Doc form loaded
+  2–10 s, the clerk's login 0.2–1.7 s;
+- `nav-desk-after-discard`: 90 of its 95 s are its own pauses (8 tries × ~11 s, mostly a 6 s "does
+  it stay on Desk?" watch per try);
+- `df03-item-table` T-2 plain ~24 s (work 14–15 s, waits 11.7 s); the same under chaos ~80 s:
+  **+58 s vs its plain runs**, waits unchanged. T-1: work 17–25 s, waits 15 s.
+- Not exact: a polling loop written with `sleep` (`for … await sleep(20)`) counts as the test's
+  wait though it is waiting on the app; `expect.poll` does not. Small where seen (≤ 4 s).
+- Noticed on the way, filed, not changed: chaos mode delays a bridge call twice (museum OI-191).
+
+## Step 2b — each test's timeline as a chart (a Gantt view)
+
+5zorro, 2026-10-26: *"If im trying to understand a async series, a gantt chart works for me as i
+understand shapes best … do we have to reinvent the wheel here"*. No: Chrome's **trace event
+format** (a JSON list of spans — name, lane, start, length) is what browsers, Node and Electron
+write, and existing viewers draw it as bars on lanes: Chrome DevTools' Performance panel (*Load
+profile…*, offline) or Perfetto (ui.perfetto.dev, reads the file in the browser, no upload). We only
+write the file.
+
+**What changes:**
+- Each test that closes its app writes `test-results/traces/<test title>.json` (rewritten at each
+  close, so a restart adds to it). Lanes:
+  1. **test** — the stages (launch, app ready, form loaded, clerk login) and each deliberate wait;
+  2. **ERPNext calls** — each bridge call (named by its method, e.g. `setRow`) and each other
+     `erpEval` (named by its channel), from start to answer;
+  3. **chaos lag** — each injected delay, named by its channel. Delays that overlap go on extra
+     lanes ("chaos lag 2", "3" …), so the overlap is a shape, not a number.
+- The app records its spans only in test runs (`E2E=1`), capped, and hands them over at close
+  through `__erpE2e`; the test side keeps its own. A pure module turns both into the trace format
+  and spreads overlapping spans over lanes. Names only — no document contents, no scripts.
+
+**Proof:** a unit test for the lanes and the format; one T-3 run's trace opened in the viewer shows
+the three lanes, with chaos delays stacked.
 
 ## After step 2 — decide with 5zorro, not built here
 

@@ -3,8 +3,13 @@
  */
 import { expect } from "@playwright/test";
 import { e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { addTiming, timed } from "../../e2e/test-timing.js";
 
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** A deliberate pause: counted on the test's timing as its own wait, not the app's work. */
+export const sleep = (ms) => {
+  addTiming("waits", ms);
+  return new Promise((r) => setTimeout(r, ms));
+};
 
 /** Run `js` in a view, giving up after `ms` (a stalled ERPNext page must not hang the probe). */
 function inView(app, view, js, ms = 8000) {
@@ -46,6 +51,10 @@ export const focusTestId = (app, testid) =>
  * @param {"bill"|"po"|"receipt"} skin
  */
 export async function openNewDoc(app, skin, route) {
+  return timed("formLoaded", () => openNewDocUntimed(app, skin, route));
+}
+
+async function openNewDocUntimed(app, skin, route) {
   const opener = { bill: "openBill", po: "openPo", receipt: "openReceipt" }[skin];
   await e2eCall(app, opener, route);
   await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");

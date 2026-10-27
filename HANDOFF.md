@@ -14,7 +14,7 @@
    **In flight:**
    `implementation-plan-2026-10-26.md` (tests that run while the app is open: each test run gets
    its own profile folder; then time each stage of a test) — step 1 built (`scripts/test-profile.js`),
-   step 2 next; slotted in
+   step 2 built (`npm run test:times`), step 2b next (each test's timeline as a chart); slotted in
    before 10-25's R6a-2.
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
@@ -704,7 +704,7 @@ and a live ERPNext dependency.
 
 | Layer | Role | Tool | CI gate? |
 |-------|------|------|----------|
-| **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope) — and so does every Playwright run of the specs (layer 3) and probes (3b), one line per `--repeat-each` repeat, through the reporter `scripts/playwright-run-log.js` in both configs (a `--reporter=…` flag replaces it: leave it off); `npm run test:flaky` lists tests that failed and passed on the same code, unit or Playwright; the last 50 logs of each kind (unit, spec, probe) are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
+| **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope) — and so does every Playwright run of the specs (layer 3) and probes (3b), one line per `--repeat-each` repeat, through the reporter `scripts/playwright-run-log.js` in both configs (a `--reporter=…` flag replaces it: leave it off); `npm run test:flaky` lists tests that failed and passed on the same code, unit or Playwright, and `npm run test:times` where each spec's and probe's time goes; the last 50 logs of each kind (unit, spec, probe) are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
 | **2. ERP workflow e2e** (bulk of “full suite”) | Doc/Desk paths against unmodified ERP | Playwright **as a browser** → `ERP_BASE` | Optional; **skip-OK** if ERP down |
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
 | **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — each run in its own throwaway profile folder (`scripts/test-profile.js`), so it never touches the clerk's prefs or login and runs while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
@@ -906,6 +906,7 @@ cd ~/erpnext-ui-app && npm test && npm start
 |---|---|
 | `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
+| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26) |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
 | `npm run probe -- <name>` | One probe against the real app and the sandbox (`tests/probes/README.md`) |
 | `npm run dogfood:check` · `npm run dogfood:setup -- <row>` | Every `@dogfood` probe before a round; a row's scene left on the sandbox |

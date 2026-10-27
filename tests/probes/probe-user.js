@@ -14,6 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { expect } from "@playwright/test";
 import { e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { timed } from "../../e2e/test-timing.js";
 import { inErp, assertSandboxSite, report } from "./probe-helpers.js";
 import { lockProbeUser, retireLockedProbeUsers } from "./probe-user-retire.js";
 
@@ -81,6 +82,10 @@ async function reloadAs(app, user) {
  * @returns {Promise<{ user: string, back: () => Promise<void>, retire: () => Promise<string[]> }>}
  */
 export async function loginAsProbeUser(app, roles, opts = {}) {
+  return timed("clerkLogin", () => loginAsProbeUserUntimed(app, roles, opts));
+}
+
+async function loginAsProbeUserUntimed(app, roles, opts) {
   await assertSandboxSite(app);
   const admin = await loggedUser(app);
   const base = await e2eGet(app, "erpBase");

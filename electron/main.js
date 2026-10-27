@@ -317,7 +317,7 @@ import {
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
 import { withBillRefToken } from "../src/credit-memo.js";
-import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
+import { maybeChaosLag, readChaosLagConfig, addLagInterval } from "../src/erp-chaos-lag.js";
 import { siteRoundingFrom } from "../src/calc/site-rounding.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
 import {
@@ -1042,6 +1042,8 @@ function syncE2eApi() {
     },
     showingHome: showingHome(),
     surfaceMode,
+    // Plan 2026-10-26 step 2: what chaos mode injected, so a test's time splits into lag and work.
+    chaosLagTotal: () => chaosLagClock.total,
     erpBase: ERP_BASE,
     getErpUrl: () =>
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
@@ -2901,12 +2903,18 @@ function erpExec(js) {
  * failure here (the page reloading or dying mid-script) says nothing about what the script got
  * done, so a write path must not read it as "nothing happened" — see `voidAmendOutcome`.
  */
+/** Chaos mode's injected delay so far, as clock time — overlapping delays count once (tests read it: e2e/test-timing.js). */
+let chaosLagClock = { intervals: [], total: 0 };
+
 async function erpEval(js, chaosChannel = "erpEval") {
   if (!erp || erp.webContents.isDestroyed()) {
     return { ok: false, notRun: true, reason: "ERP view not ready" };
   }
   const chaosMs = await maybeChaosLag(chaosChannel);
-  if (chaosMs > 0) navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
+  if (chaosMs > 0) {
+    chaosLagClock = addLagInterval(chaosLagClock, Date.now() - chaosMs, Date.now());
+    navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
+  }
   return new Promise((resolve) => {
     let done = false;
     /** @param {any} value */
@@ -3218,7 +3226,10 @@ async function bridgeCall(method, ...args) {
       : "bridge";
   await ensureErpFormBridge();
   const chaosMs = await maybeChaosLag(chaosChannel);
-  if (chaosMs > 0) navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
+  if (chaosMs > 0) {
+    chaosLagClock = addLagInterval(chaosLagClock, Date.now() - chaosMs, Date.now());
+    navDebug("chaos-lag", `channel=${chaosChannel} ms=${chaosMs}`);
+  }
   const payload = JSON.stringify(args);
   return erpEval(
     `(async function(){

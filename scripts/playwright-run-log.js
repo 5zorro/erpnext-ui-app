@@ -46,6 +46,8 @@ export default class PlaywrightRunLog {
       repeat: test.repeatEachIndex,
       status: result.status,
       ms: result.duration,
+      // e2e/test-timing.js: stages, the test's own waits and chaos lag (plan 2026-10-26 step 2).
+      timing: [...(result.annotations || []), ...(test.annotations || [])].find((a) => a.type === "timing")?.description || "",
       error: plain(result.error && (result.error.message || result.error.value)).split("\n").slice(0, 6).join("\n"),
     });
   }
@@ -58,7 +60,7 @@ export default class PlaywrightRunLog {
       fs.mkdirSync(RUNS_DIR, { recursive: true });
       const lines = [`# ${this.kind} run ${this.started.toISOString()} at ${this.code.fingerprint}: ${result.status}`, `# scope: ${this.scope}`];
       for (const r of results) {
-        lines.push(`${r.status.toUpperCase()} ${r.name}${r.repeat ? ` [repeat ${r.repeat}]` : ""} (${r.ms} ms)`);
+        lines.push(`${r.status.toUpperCase()} ${r.name}${r.repeat ? ` [repeat ${r.repeat}]` : ""} (${r.ms} ms)${r.timing ? ` timing=${r.timing}` : ""}`);
         if (r.error) lines.push(r.error.replace(/^/gm, "    "));
       }
       fs.writeFileSync(path.join(RUNS_DIR, log), lines.join("\n") + "\n");

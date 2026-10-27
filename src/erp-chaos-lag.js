@@ -58,3 +58,35 @@ export async function maybeChaosLag(
   await chaosSleep(actual);
   return actual;
 }
+
+/**
+ * Chaos lag as clock time (plan 2026-10-26 step 2): delays on parallel calls overlap, so their sum
+ * can exceed the run (236 s of delays in an 87 s probe). Each delay is added as the interval it
+ * covered, and only the part no earlier delay covered counts. Intervals older than `keepMs` before
+ * this one's start are dropped (no later delay can reach back that far: one lasts at most 2× ms).
+ * @param {{ intervals: [number, number][], total: number }} clock merged, sorted intervals so far
+ * @param {number} start
+ * @param {number} end
+ * @param {number} [keepMs]
+ * @returns {{ intervals: [number, number][], total: number }}
+ */
+export function addLagInterval(clock, start, end, keepMs = 10 * 60_000) {
+  if (!(end > start)) return clock;
+  let covered = 0;
+  let s = start;
+  let e = end;
+  const kept = [];
+  for (const [a, b] of clock.intervals) {
+    if (b < start - keepMs) continue;
+    if (b < s || a > e) {
+      kept.push([a, b]);
+      continue;
+    }
+    covered += Math.min(b, end) - Math.max(a, start);
+    s = Math.min(s, a);
+    e = Math.max(e, b);
+  }
+  kept.push([s, e]);
+  kept.sort((x, y) => x[0] - y[0]);
+  return { intervals: kept, total: clock.total + (end - start) - covered };
+}
