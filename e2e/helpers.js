@@ -9,7 +9,7 @@ import { _electron as electron } from "@playwright/test";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { addTiming, setTimingLabel, timed } from "./test-timing.js";
+import { addTiming, setTimingLabel, timed, writeTrace } from "./test-timing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..");
@@ -26,7 +26,7 @@ export const ELECTRON_ARGS = [
 
 /**
  * Start the app. Its start-up time, and at close the chaos lag it injected, go on the test's timing
- * (e2e/test-timing.js).
+ * (e2e/test-timing.js); at close the test's timeline chart is written (test-results/traces/).
  * @returns {Promise<import('@playwright/test').ElectronApplication>}
  */
 export async function launchShell() {
@@ -46,8 +46,11 @@ export async function launchShell() {
   );
   const close = app.close.bind(app);
   app.close = async () => {
-    const lag = await app.evaluate(() => globalThis.__erpE2e?.chaosLagTotal?.() || 0).catch(() => 0);
-    addTiming("chaosClock", lag);
+    const got = await app
+      .evaluate(() => ({ lag: globalThis.__erpE2e?.chaosLagTotal?.() || 0, spans: globalThis.__erpE2e?.traceSpans?.() || [] }))
+      .catch(() => ({ lag: 0, spans: [] }));
+    addTiming("chaosClock", got.lag);
+    writeTrace(got.spans);
     return close();
   };
   return app;

@@ -1,7 +1,9 @@
 # Implementation plan 2026-10-26 — tests that run while the app is open, and how long they take
 
 > **Status: step 1 built 2026-10-26 (each test run has its own profile folder); step 2 built
-> 2026-10-26 (`npm run test:times`); step 2b (the timeline chart) next.** A short tooling plan, slotted in before plan
+> 2026-10-26 (`npm run test:times`); step 2b built 2026-10-26 (each test's timeline chart,
+> `test-results/traces/`). Next: 5zorro looks at a chart and the numbers, and picks what to cut
+> (*After step 2*).** A short tooling plan, slotted in before plan
 > 2026-10-25's R6a-2 (that refactor needs many probe runs). Nothing a clerk sees changes.
 
 ## Why
@@ -153,6 +155,13 @@ write the file.
 
 **Proof:** a unit test for the lanes and the format; one T-3 run's trace opened in the viewer shows
 the three lanes, with chaos delays stacked.
+
+**Built 2026-10-26.** A T-3 (Bill) run wrote a chart spanning 79 of its 82 s: the test's 4 stages
+(10.3 s), its 5 waits (22.5 s), 284 ERPNext calls on up to **8 lanes at once**, and 190 chaos
+delays on up to **7** — the overlap that made a summed chaos number meaningless, now a shape. It
+holds method and channel names only (checked: no document or user names). Not yet seen in a viewer
+by 5zorro. Most calls are named just `erpEval` (the default channel); naming them by their caller
+is a follow-up if the chart is useful.
 
 ## After step 2 — decide with 5zorro, not built here
 

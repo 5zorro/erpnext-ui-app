@@ -2,12 +2,14 @@
  * Plan 2026-10-26 step 2b: a test's timeline as a chart (5zorro: "a gantt chart works for me as i
  * understand shapes best"), in Chrome's trace event format so DevTools or Perfetto draws it.
  *
- * @covers src/test-trace.js
+ * @covers src/test-trace.js e2e/test-timing.js
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { assignLanes, traceEvents, traceFileName } from "../src/test-trace.js";
 
+const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const span = (group, name, start, end) => ({ group, name, start, end });
 
 describe("test trace: lanes", () => {
@@ -36,5 +38,17 @@ describe("test trace: the file", () => {
 
   it("a file name from the test's title", () => {
     assert.equal(traceFileName("T-3 (bill): two quick Tabs"), "T-3-bill-two-quick-Tabs.json");
+  });
+});
+
+describe("test trace: where the spans come from", () => {
+  it("the app charts ERPNext calls and chaos delays in test runs only, and hands them over at close", () => {
+    const main = read("../electron/main.js");
+    assert.match(main, /function noteTestSpan\(group, name, start, end = Date\.now\(\)\) \{\n  if \(process\.env\.E2E !== "1"/);
+    assert.match(main, /noteTestSpan\("chaos lag", channel, end - ms, end\)/);
+    assert.match(main, /noteTestSpan\("ERPNext calls", method, start\)/);
+    assert.match(main, /traceSpans: \(\) => testTraceSpans\.slice\(\)/);
+    assert.match(read("../e2e/helpers.js"), /writeTrace\(got\.spans\)/);
+    assert.match(read("../tests/probes/probe-helpers.js"), /noteWait\(ms\)/);
   });
 });

@@ -14,7 +14,7 @@
    **In flight:**
    `implementation-plan-2026-10-26.md` (tests that run while the app is open: each test run gets
    its own profile folder; then time each stage of a test) — step 1 built (`scripts/test-profile.js`),
-   step 2 built (`npm run test:times`), step 2b next (each test's timeline as a chart); slotted in
+   step 2 built (`npm run test:times`), step 2b built (each test's timeline chart); slotted in
    before 10-25's R6a-2.
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
@@ -906,7 +906,7 @@ cd ~/erpnext-ui-app && npm test && npm start
 |---|---|
 | `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
-| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26) |
+| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Each test that closes its app also writes its **timeline chart**, `test-results/traces/<test title>.json` (lanes: the test's stages and waits, ERPNext calls, chaos delays): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
 | `npm run probe -- <name>` | One probe against the real app and the sandbox (`tests/probes/README.md`) |
 | `npm run dogfood:check` · `npm run dogfood:setup -- <row>` | Every `@dogfood` probe before a round; a row's scene left on the sandbox |

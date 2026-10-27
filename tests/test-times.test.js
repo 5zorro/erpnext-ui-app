@@ -83,11 +83,12 @@ describe("test:times — the summary", () => {
 
 describe("test:times — where the numbers come from", () => {
   it("launch, app ready, a form loading, the clerk's login and a probe's sleep are timed; main counts chaos lag", () => {
-    assert.match(read("../e2e/helpers.js"), /timed\("launch"[\s\S]*addTiming\("chaosClock", lag\)[\s\S]*timed\("appReady"/);
-    assert.match(read("../tests/probes/probe-helpers.js"), /addTiming\("waits", ms\)[\s\S]*timed\("formLoaded"/);
+    assert.match(read("../e2e/helpers.js"), /timed\("launch"[\s\S]*addTiming\("chaosClock", got\.lag\)[\s\S]*timed\("appReady"/);
+    assert.match(read("../tests/probes/probe-helpers.js"), /noteWait\(ms\)[\s\S]*timed\("formLoaded"/);
     assert.match(read("../tests/probes/probe-user.js"), /timed\("clerkLogin"/);
     const main = read("../electron/main.js");
-    assert.equal(main.match(/chaosLagClock = addLagInterval\(chaosLagClock, Date\.now\(\) - chaosMs, Date\.now\(\)\);/g).length, 2);
+    assert.equal(main.match(/noteChaosLag\(chaosChannel, await maybeChaosLag\(chaosChannel\)\);/g).length, 2);
+    assert.match(main, /chaosLagClock = addLagInterval\(chaosLagClock, end - ms, end\);/);
     assert.match(main, /chaosLagTotal: \(\) => chaosLagClock\.total/);
     assert.match(read("../scripts/playwright-run-log.js"), /timing=\$\{r\.timing\}/);
   });

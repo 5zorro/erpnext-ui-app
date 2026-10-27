@@ -3,11 +3,11 @@
  */
 import { expect } from "@playwright/test";
 import { e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { addTiming, timed } from "../../e2e/test-timing.js";
+import { noteWait, timed } from "../../e2e/test-timing.js";
 
 /** A deliberate pause: counted on the test's timing as its own wait, not the app's work. */
 export const sleep = (ms) => {
-  addTiming("waits", ms);
+  noteWait(ms);
   return new Promise((r) => setTimeout(r, ms));
 };
 
