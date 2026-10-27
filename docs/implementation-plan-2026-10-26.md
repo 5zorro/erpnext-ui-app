@@ -2,7 +2,7 @@
 
 > **Status: step 1 built 2026-10-26 (each test run has its own profile folder); step 2 built
 > 2026-10-26 (`npm run test:times`); step 2b built 2026-10-26 (each test's timeline chart,
-> `test-results/traces/`). Next: 5zorro looks at a chart and the numbers, and picks what to cut
+> `test-logs/traces/`). Next: 5zorro looks at a chart and the numbers, and picks what to cut
 > (*After step 2*).** A short tooling plan, slotted in before plan
 > 2026-10-25's R6a-2 (that refactor needs many probe runs). Nothing a clerk sees changes.
 
@@ -44,7 +44,7 @@ measures it).
    **Not copied:** the logs (a run starts its own trail), the Local Storage (column widths and the
    calculator's rounding start at their defaults — a probe no longer sees, or changes, his), and
    `db-ro.env` (a database password the app does not read). After the run it copies the run's
-   `nav-debug.log` / `focus-debug.log` into `test-results/<kind>-profile-logs/` (for reading a
+   `nav-debug.log` / `focus-debug.log` into `test-logs/profile-logs/<kind>/` (for reading a
    failure) and deletes the folder, cookies and all.
 3. Both Playwright configs (`playwright.config.js`, `tests/probes/playwright.config.js`) get a
    global setup and teardown that do 2 and pass the folder to every launch through
@@ -142,8 +142,7 @@ profile…*, offline) or Perfetto (ui.perfetto.dev, reads the file in the browse
 write the file.
 
 **What changes:**
-- Each test that closes its app writes `test-results/traces/<test title>.json` (rewritten at each
-  close, so a restart adds to it). Lanes:
+- Each test writes `test-logs/traces/<file> <test title>.json` at its end. Lanes:
   1. **test** — the stages (launch, app ready, form loaded, clerk login) and each deliberate wait;
   2. **ERPNext calls** — each bridge call (named by its method, e.g. `setRow`) and each other
      `erpEval` (named by its channel), from start to answer;
@@ -159,9 +158,31 @@ the three lanes, with chaos delays stacked.
 **Built 2026-10-26.** A T-3 (Bill) run wrote a chart spanning 79 of its 82 s: the test's 4 stages
 (10.3 s), its 5 waits (22.5 s), 284 ERPNext calls on up to **8 lanes at once**, and 190 chaos
 delays on up to **7** — the overlap that made a summed chaos number meaningless, now a shape. It
-holds method and channel names only (checked: no document or user names). Not yet seen in a viewer
-by 5zorro. Most calls are named just `erpEval` (the default channel); naming them by their caller
-is a follow-up if the chart is useful.
+holds method and channel names only (checked: no document or user names). **Then, from 5zorro's first look (2026-10-26):** *"the gantt chart from chrome seems to be pretty
+enlightening regarding where the time is going, but … we should probably have slightly more detail
+than erpeval"*; and nothing to cut — *"when (not if) a probe is timing out, then this will be really
+helpful in tracing the breadcrumbs to the culprit."* So:
+- **A chart for every test's end, timed-out ones included.** The first version wrote it when the
+  test closed its app, so a test that failed in its setup or timed out got none (seen: a T-3 whose
+  clerk login timed out under load). Now the app appends each span to `test-spans.jsonl` in the
+  run's profile folder as it ends, the test keeps its own spans on a `spans` annotation, and the
+  run-log reporter writes the chart at the test's end from both, cut to the test's time — and works
+  out the chaos clock from the same spans (main's counter and the close hook are gone). Proven with
+  a throwaway probe that hangs until its timeout: its chart was written.
+- **Charts live in `test-logs/traces/`**, not `test-results/`: Playwright empties `test-results/`
+  at the start of every spec run, which is why 5zorro found no T-3 chart (a spec run after it had
+  wiped it). The profile logs moved for the same reason (`test-logs/profile-logs/<kind>/`).
+- **Each bar names who made the call:** a bridge call by its method (`setRow`, `snapshot`), any
+  other ERPNext call by the function that made it (`ensureErpFormBridge`, `drainErpSaveIntoShelved`,
+  or `main.js:<line>` for an unnamed one; test runs only, read from the stack); a chaos bar by the
+  call it delayed and its channel (`setRow (bridge)`). First reading: most of a probe's ERPNext
+  calls are the bridge check before each bridge call (127 in T-3's 80 s) and the save-drain poll
+  (86), not the test's own edits.
+- **Chaos: one delay per call** (museum OI-191, his word: *"If it could happen in real life, then
+  it should do it … We should probably remove the double lag"*). A bridge call used to be delayed
+  twice on one trip (in `bridgeCall`, then in the `erpEval` it ends in); now only `erpEval`
+  delays it. The bridge check before it is a separate trip and keeps its own delay, as it would in
+  real life.
 
 ## After step 2 — decide with 5zorro, not built here
 

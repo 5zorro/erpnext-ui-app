@@ -21,7 +21,7 @@ the login cookies, not the logs or the Doc page's Local Storage (column widths a
 rounding start at their defaults). The app moves its `userData` there when `E2E=1`. So a probe never
 touches 5zorro's prefs, login, Drafts shelf or `nav-debug.log`, and **runs while his app is open**
 (`--with-app-open`, from before, is ignored). After the run, its `nav-debug.log` / `focus-debug.log`
-are kept in `test-results/probe-profile-logs/` and the folder is deleted. `scripts/run-probe.js`
+are kept in `test-logs/profile-logs/probe/` and the folder is deleted. `scripts/run-probe.js`
 runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared (a window on his desktop takes his
 keyboard). Proven 2026-10-26: a probe run left nothing changed in the real folder (the code before
 changed 12 files there), and ran beside a second copy of the app (the code before refused, exit 3).

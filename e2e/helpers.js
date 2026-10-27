@@ -9,7 +9,7 @@ import { _electron as electron } from "@playwright/test";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { addTiming, setTimingLabel, timed, writeTrace } from "./test-timing.js";
+import { setTimingLabel, timed } from "./test-timing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..");
@@ -25,13 +25,13 @@ export const ELECTRON_ARGS = [
 ];
 
 /**
- * Start the app. Its start-up time, and at close the chaos lag it injected, go on the test's timing
- * (e2e/test-timing.js); at close the test's timeline chart is written (test-results/traces/).
+ * Start the app. Its start-up time, and chaos mode if on, go on the test's timing
+ * (e2e/test-timing.js).
  * @returns {Promise<import('@playwright/test').ElectronApplication>}
  */
 export async function launchShell() {
   if (process.env.ERP_CHAOS_LAG_MS) setTimingLabel("chaosMode", `${process.env.ERP_CHAOS_LAG_MS}ms/${process.env.ERP_CHAOS_LAG_PCT || 0}%`);
-  const app = await timed("launch", () =>
+  return timed("launch", () =>
     electron.launch({
       executablePath: electronBinary,
       args: ELECTRON_ARGS,
@@ -44,16 +44,6 @@ export async function launchShell() {
       timeout: 60_000,
     }),
   );
-  const close = app.close.bind(app);
-  app.close = async () => {
-    const got = await app
-      .evaluate(() => ({ lag: globalThis.__erpE2e?.chaosLagTotal?.() || 0, spans: globalThis.__erpE2e?.traceSpans?.() || [] }))
-      .catch(() => ({ lag: 0, spans: [] }));
-    addTiming("chaosClock", got.lag);
-    writeTrace(got.spans);
-    return close();
-  };
-  return app;
 }
 
 /** Wait until main published __erpE2e (after createWindow + syncE2eApi). */

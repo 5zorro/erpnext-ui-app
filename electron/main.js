@@ -317,7 +317,7 @@ import {
 import { DOC_FORM_BRIDGE_VERSION, doctypeKeyFromErpDoctype } from "../src/erp-form-bridge.js";
 import { planMappedHeaderApply } from "../src/mapped-header-fields.js";
 import { withBillRefToken } from "../src/credit-memo.js";
-import { maybeChaosLag, readChaosLagConfig, addLagInterval } from "../src/erp-chaos-lag.js";
+import { maybeChaosLag, readChaosLagConfig } from "../src/erp-chaos-lag.js";
 import { siteRoundingFrom } from "../src/calc/site-rounding.js";
 import { buildSimplifiedPayload, buildSimplifiedTeardown } from "../src/assume-applier-payload.js";
 import {
@@ -1042,9 +1042,6 @@ function syncE2eApi() {
     },
     showingHome: showingHome(),
     surfaceMode,
-    // Plan 2026-10-26 step 2: what chaos mode injected, so a test's time splits into lag and work.
-    chaosLagTotal: () => chaosLagClock.total,
-    traceSpans: () => testTraceSpans.slice(),
     erpBase: ERP_BASE,
     getErpUrl: () =>
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
@@ -2899,26 +2896,39 @@ function erpExec(js) {
   return erp.webContents.executeJavaScript(js);
 }
 
-/** Chaos mode's injected delay so far, as clock time — overlapping delays count once (tests read it: e2e/test-timing.js). */
-let chaosLagClock = { intervals: [], total: 0 };
 /**
- * Plan 2026-10-26 step 2b: in test runs only, the app's spans for the test's timeline chart
- * (src/test-trace.js) — ERPNext calls and chaos delays, by method or channel name, never contents.
- * Capped; a test reads them through `__erpE2e.traceSpans()` when it closes the app.
- * @type {{ group: string, name: string, start: number, end: number }[]}
+ * Who called: the function name two frames up (or "main.js:<line>" for an unnamed one), so the
+ * chart says what made each ERPNext call. Test runs only — a stack is not free.
  */
-const testTraceSpans = [];
-function noteTestSpan(group, name, start, end = Date.now()) {
-  if (process.env.E2E !== "1" || testTraceSpans.length >= 50_000) return;
-  testTraceSpans.push({ group, name: String(name), start, end });
+function testCallerName() {
+  if (process.env.E2E !== "1") return "";
+  const frame = String(new Error().stack || "").split("\n")[3] || "";
+  const named = frame.match(/at (?:async )?([\w$.]+) \(/);
+  if (named) return named[1];
+  const line = frame.match(/main\.js:(\d+)/);
+  return line ? `main.js:${line[1]}` : "";
 }
 
-/** A chaos delay that just ended: counted as clock time, charted, and logged. */
-function noteChaosLag(channel, ms) {
+/**
+ * Plan 2026-10-26 step 2b: in test runs only, a span for the test's timeline chart — an ERPNext
+ * call or a chaos delay, by method, caller or channel name, never contents. Appended to
+ * `test-spans.jsonl` in the run's own profile folder as it ends, so the run-log reporter can chart
+ * a test that failed or timed out too (scripts/playwright-run-log.js, src/test-trace.js).
+ */
+function noteTestSpan(group, name, start, end = Date.now()) {
+  if (process.env.E2E !== "1" || !process.env.ERP_USER_DATA_DIR) return;
+  try {
+    fs.appendFileSync(path.join(app.getPath("userData"), "test-spans.jsonl"), JSON.stringify({ group, name: String(name), start, end }) + "\n");
+  } catch {
+    /* a chart is a convenience */
+  }
+}
+
+/** A chaos delay that just ended: charted (by the call it delayed) and logged. */
+function noteChaosLag(channel, ms, callName = "") {
   if (!(ms > 0)) return;
   const end = Date.now();
-  chaosLagClock = addLagInterval(chaosLagClock, end - ms, end);
-  noteTestSpan("chaos lag", channel, end - ms, end);
+  noteTestSpan("chaos lag", callName ? `${callName} (${channel})` : channel, end - ms, end);
   navDebug("chaos-lag", `channel=${channel} ms=${ms}`);
 }
 
@@ -2927,20 +2937,22 @@ function noteChaosLag(channel, ms) {
  * failure here (the page reloading or dying mid-script) says nothing about what the script got
  * done, so a write path must not read it as "nothing happened" — see `voidAmendOutcome`.
  */
-async function erpEval(js, chaosChannel = "erpEval") {
+/** @param {string} [bridgeMethod] set by bridgeCall: the chart names the call and its delay by it */
+async function erpEval(js, chaosChannel = "erpEval", bridgeMethod = "") {
+  const caller = bridgeMethod || testCallerName(); // before the first await, while the caller is on the stack
   if (!erp || erp.webContents.isDestroyed()) {
     return { ok: false, notRun: true, reason: "ERP view not ready" };
   }
   const start = Date.now();
-  noteChaosLag(chaosChannel, await maybeChaosLag(chaosChannel));
+  noteChaosLag(chaosChannel, await maybeChaosLag(chaosChannel), caller);
   return new Promise((resolve) => {
     let done = false;
     /** @param {any} value */
     const finish = (value) => {
       if (done) return;
       done = true;
-      // The test's timeline chart; a bridge call is charted by its method (bridgeCall), not again here.
-      if (chaosChannel !== "bridge" && chaosChannel !== "billEnrich") noteTestSpan("ERPNext calls", chaosChannel, start);
+      // The test's timeline chart; a bridge call is charted by bridgeCall (from before the bridge check), not again here.
+      if (!bridgeMethod) noteTestSpan("ERPNext calls", caller || chaosChannel, start);
       pendingErpEvals.delete(interrupt);
       resolve(value);
     };
@@ -3254,7 +3266,8 @@ async function bridgeCallUncharted(method, ...args) {
       ? args.pop()
       : "bridge";
   await ensureErpFormBridge();
-  noteChaosLag(chaosChannel, await maybeChaosLag(chaosChannel));
+  // No chaos delay here: the erpEval below delays this call once, on this channel (museum OI-191,
+  // 5zorro 2026-10-26: chaos should do what could happen in real life — one delay per call).
   const payload = JSON.stringify(args);
   return erpEval(
     `(async function(){
@@ -3268,6 +3281,7 @@ async function bridgeCallUncharted(method, ...args) {
       }
     })()`,
     chaosChannel,
+    method,
   );
 }
 

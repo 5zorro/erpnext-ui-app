@@ -7,6 +7,7 @@
  * The viewers need spans on one lane to nest, so overlapping spans of a group (parallel calls,
  * parallel chaos delays) are spread over extra lanes: "chaos lag", "chaos lag 2", …
  */
+import { addLagInterval } from "./erp-chaos-lag.js";
 
 /** @typedef {{ group: string, name: string, start: number, end: number }} Span  ms since the epoch */
 
@@ -74,3 +75,31 @@ function rank(group) {
 /** A file name from a test's title: letters, digits and dashes. */
 export const traceFileName = (title) =>
   `${String(title || "test").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "test"}.json`;
+
+/**
+ * One test's chart and chaos clock, from its own spans and the app's (the whole run's, cut to the
+ * test's time). Built at the test's end by the run-log reporter, so a failed or timed-out test
+ * gets one too.
+ * @param {{ testSpans: Span[], appSpans: Span[], start: number, end: number, title: string }} t
+ * @returns {{ trace: ReturnType<typeof traceEvents>, chaosClock: number }}
+ */
+export function testChart({ testSpans, appSpans, start, end, title }) {
+  const mine = appSpans.filter((s) => s.end >= start && s.start <= end);
+  let clock = { intervals: [], total: 0 };
+  for (const s of mine.filter((x) => x.group === "chaos lag")) clock = addLagInterval(clock, Math.max(s.start, start), Math.min(s.end, end));
+  return { trace: traceEvents([...testSpans, ...mine], { title }), chaosClock: clock.total };
+}
+
+/** The app's spans file (`test-spans.jsonl`), one span per line; a torn last line is skipped. */
+export function parseSpansFile(text) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skipped */
+    }
+  }
+  return out;
+}

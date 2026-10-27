@@ -82,14 +82,17 @@ describe("test:times — the summary", () => {
 });
 
 describe("test:times — where the numbers come from", () => {
-  it("launch, app ready, a form loading, the clerk's login and a probe's sleep are timed; main counts chaos lag", () => {
-    assert.match(read("../e2e/helpers.js"), /timed\("launch"[\s\S]*addTiming\("chaosClock", got\.lag\)[\s\S]*timed\("appReady"/);
+  it("launch, app ready, a form loading, the clerk's login and a probe's sleep are timed; chaos lag is one delay per call", () => {
+    assert.match(read("../e2e/helpers.js"), /setTimingLabel\("chaosMode"[\s\S]*timed\("launch"[\s\S]*timed\("appReady"/);
     assert.match(read("../tests/probes/probe-helpers.js"), /noteWait\(ms\)[\s\S]*timed\("formLoaded"/);
     assert.match(read("../tests/probes/probe-user.js"), /timed\("clerkLogin"/);
     const main = read("../electron/main.js");
-    assert.equal(main.match(/noteChaosLag\(chaosChannel, await maybeChaosLag\(chaosChannel\)\);/g).length, 2);
-    assert.match(main, /chaosLagClock = addLagInterval\(chaosLagClock, end - ms, end\);/);
-    assert.match(main, /chaosLagTotal: \(\) => chaosLagClock\.total/);
-    assert.match(read("../scripts/playwright-run-log.js"), /timing=\$\{r\.timing\}/);
+    // One chaos delay per call (museum OI-191): erpEval's, which a bridge call ends in.
+    assert.equal(main.match(/await maybeChaosLag\(/g).length, 1);
+    assert.match(main, /noteChaosLag\(chaosChannel, await maybeChaosLag\(chaosChannel\), caller\);/);
+    // The reporter adds the chaos clock from the app's spans and writes the timing on the line.
+    const reporter = read("../scripts/playwright-run-log.js");
+    assert.match(reporter, /if \(timing\.chaosMode\) timing\.chaosClock = chaosClock;/);
+    assert.match(reporter, /timing=\$\{r\.timing\}/);
   });
 });

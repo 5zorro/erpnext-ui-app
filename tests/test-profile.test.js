@@ -38,13 +38,13 @@ describe("a test run's own profile folder", () => {
   it("after the run, keeps the debug trail for reading a failure and deletes the folder, cookies and all", () => {
     const from = realProfile();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tp-tmp-"));
-    const results = fs.mkdtempSync(path.join(os.tmpdir(), "tp-results-"));
+    const logs = fs.mkdtempSync(path.join(os.tmpdir(), "tp-logs-"));
     const dir = makeTestProfile({ from, tmp });
     fs.writeFileSync(path.join(dir, "nav-debug.log"), "the run's trail");
-    closeTestProfile(dir, "probe", { results });
+    closeTestProfile(dir, "probe", { logs });
     assert.equal(fs.existsSync(dir), false);
-    assert.equal(fs.readFileSync(path.join(results, "probe-profile-logs", "nav-debug.log"), "utf8"), "the run's trail");
-    for (const d of [from, tmp, results]) fs.rmSync(d, { recursive: true });
+    assert.equal(fs.readFileSync(path.join(logs, "profile-logs", "probe", "nav-debug.log"), "utf8"), "the run's trail");
+    for (const d of [from, tmp, logs]) fs.rmSync(d, { recursive: true });
   });
 
   it("sweeps a killed run's folder a day old, and leaves a younger one (a run going at the same time)", () => {

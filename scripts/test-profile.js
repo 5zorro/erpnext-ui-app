@@ -9,7 +9,8 @@
  * Not copied: the logs (a run starts its own trail), the Local Storage (column widths and the
  * calculator's rounding start at their defaults), and anything else — `db-ro.env` is a database
  * password the app does not read. After the run the trail is kept in
- * `test-results/<kind>-profile-logs/` for reading a failure, and the folder is deleted.
+ * `test-logs/profile-logs/<kind>/` for reading a failure, and the folder is deleted. Not under
+ * `test-results/`: Playwright empties that at the start of every spec run.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -48,10 +49,10 @@ export function makeTestProfile({ from = REAL_PROFILE, tmp = os.tmpdir(), now = 
  * Keep the run's debug trail, then delete the folder (cookies and all).
  * @param {string} dir
  * @param {string} kind "e2e" | "probe"
- * @param {{ results?: string }} [opts]
+ * @param {{ logs?: string }} [opts]
  */
-export function closeTestProfile(dir, kind, { results = path.join(ROOT, "test-results") } = {}) {
-  const keep = path.join(results, `${kind}-profile-logs`);
+export function closeTestProfile(dir, kind, { logs = path.join(ROOT, "test-logs") } = {}) {
+  const keep = path.join(logs, "profile-logs", kind);
   fs.rmSync(keep, { recursive: true, force: true });
   fs.mkdirSync(keep, { recursive: true });
   for (const name of LOGS) {
