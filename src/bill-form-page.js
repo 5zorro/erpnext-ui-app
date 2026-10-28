@@ -226,9 +226,6 @@ import {
   formatSaveFailureReason,
 } from "../src/bill-action-flow.js";
 import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
-import {
-  formatSalesOrderPickerLabel,
-} from "../src/so-picker.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 import {
@@ -248,7 +245,7 @@ import {
   LINKED_SOURCE_GAVE_UP_PLACEHOLDER,
 } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
-import { renderCostingBox } from "../src/costing-box-ui.js";
+import { openAssignModal } from "../src/bill-assign-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
@@ -2793,7 +2790,7 @@ export async function bootBillFormPage(api) {
   }
   
   /**
-   * OI-134: per-line Assign — customer → multi SO → Project.
+   * OI-134: per-line Assign — customer → multi SO → Project (src/bill-assign-modal-ui.js).
    * @param {number} rowIndex
    */
   async function openLineAllocationPicker(rowIndex) {
@@ -2813,284 +2810,18 @@ export async function bootBillFormPage(api) {
       setStatus("Pick a vendor before Assign.", "warn");
       return;
     }
-  
-    allocationPickerOpen = true;
-    let step = "customer";
-    let customerRows = [];
-    let soRows = [];
-    let projectRows = [];
-    let ci = 0;
-    let customerFilter = "";
-    let customerName = "";
-    /** @type {Set<string>} */
-    const selectedSos = new Set();
-    let projectIdx = 0;
-    /** Review 10-19 R6b-4: Sales Orders the clerk ticked "fill from stock" in the costing step. */
-    const fromStock = new Set();
-    /** The plan shown in the costing step; its key goes with the Okay. */
-    let costingPlan = null;
-  
-    const back = document.createElement("div");
-    back.className = "src-back";
-    back.dataset.testid = "bill-allocation-picker";
-    const box = document.createElement("div");
-    box.className = "src-box";
-    box.tabIndex = -1;
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", "Assign deal");
-    box.innerHTML = `<div class="src-title" data-alloc-title>Assign — customer</div>
-      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
-        <input type="text" data-alloc-search placeholder="Search…" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
-      </div>
-      <div class="src-body"></div>
-      <div class="src-foot">
-        <button type="button" data-act="back" hidden>Back</button>
-        <button type="button" class="primary" data-act="pick">Continue</button>
-        <button type="button" data-act="cancel">Cancel</button>
-      </div>`;
-    back.appendChild(box);
-    document.body.appendChild(back);
-    const body = box.querySelector(".src-body");
-    const titleEl = box.querySelector("[data-alloc-title]");
-    const searchEl = box.querySelector("[data-alloc-search]");
-    const pickBtn = box.querySelector('[data-act="pick"]');
-    const backBtn = box.querySelector('[data-act="back"]');
-  
-    function billLinesForMargin() {
-      const items = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items : [];
-      const row = items[rowIndex];
-      return row
-        ? [{ item_code: row.item_code, qty: row.qty, rate: row.rate, amount: row.amount }]
-        : items.map((r) => ({
-            item_code: r.item_code,
-            qty: r.qty,
-            rate: r.rate,
-            amount: r.amount,
-          }));
-    }
-  
-    async function loadCustomers(q) {
-      if (!api.searchLink) return [];
-      const res = await api.searchLink("Customer", q || "");
-      return res && res.ok && Array.isArray(res.results) ? res.results : [];
-    }
-  
-    async function loadSalesOrders(customer) {
-      const res = await api.listSalesOrdersForPicker({
-        supplier: sup,
-        customer: customer || "",
-        billLines: billLinesForMargin(),
-      });
-      return res && res.ok && Array.isArray(res.orders) ? res.orders : [];
-    }
-  
-    async function loadProjects(customer) {
-      if (!api.listProjectsForPicker) return [];
-      const res = await api.listProjectsForPicker(customer || "");
-      return res && res.ok && Array.isArray(res.projects) ? res.projects : [];
-    }
-  
-    function activeCustomer() {
-      if (ci === 0) return { value: "", description: "All customers" };
-      return customerRows[ci - 1];
-    }
-  
-    function close() {
-      allocationPickerOpen = false;
-      document.removeEventListener("keydown", onKey, true);
-      if (back.parentNode) back.parentNode.removeChild(back);
-    }
-  
-    function drawCustomers() {
-      step = "customer";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — pick customer`;
-      pickBtn.textContent = "Next: Sales orders";
-      backBtn.hidden = true;
-      searchEl.parentElement.hidden = false;
-      searchEl.placeholder = "Customer search…";
-      body.innerHTML = "";
-      const allBtn = document.createElement("button");
-      allBtn.type = "button";
-      allBtn.className = "src-item" + (ci === 0 ? " active" : "");
-      allBtn.textContent = "All customers";
-      allBtn.onclick = () => {
-        ci = 0;
-        drawCustomers();
-      };
-      body.appendChild(allBtn);
-      customerRows.forEach((row, idx) => {
-        const r = document.createElement("button");
-        r.type = "button";
-        r.className = "src-item" + (ci === idx + 1 ? " active" : "");
-        r.textContent = row.description || row.value;
-        r.onclick = () => {
-          ci = idx + 1;
-          drawCustomers();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    function drawSalesOrders() {
-      step = "so";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — select Sales order(s)`;
-      pickBtn.textContent = "Next: Project";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = true;
-      body.innerHTML = "";
-      if (!soRows.length) {
-        const empty = document.createElement("div");
-        empty.className = "src-group";
-        empty.textContent = "No Sales Orders — continue to assign Project only.";
-        body.appendChild(empty);
-        return;
-      }
-      soRows.forEach((row) => {
-        if (row.draft) return;
-        const r = document.createElement("button");
-        r.type = "button";
-        const on = selectedSos.has(row.name);
-        r.className =
-          "src-item" + (on ? " selected" : "") + (row.negativeMargin ? " negative" : "");
-        const mark = document.createElement("span");
-        mark.className = "src-check";
-        mark.setAttribute("aria-hidden", "true");
-        mark.innerHTML = uiIconHtml(on ? "checkbox-checked" : "checkbox", { size: 12 });
-        const lab = document.createElement("span");
-        lab.className = "src-item-label";
-        lab.textContent = formatSalesOrderPickerLabel(row);
-        r.appendChild(mark);
-        r.appendChild(lab);
-        r.onclick = () => {
-          if (selectedSos.has(row.name)) selectedSos.delete(row.name);
-          else selectedSos.add(row.name);
-          drawSalesOrders();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    function drawProjects() {
-      step = "project";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — Project`;
-      pickBtn.textContent = "Apply to line";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = false;
-      searchEl.placeholder = "Project search…";
-      body.innerHTML = "";
-      const noneBtn = document.createElement("button");
-      noneBtn.type = "button";
-      noneBtn.className = "src-item" + (projectIdx === 0 ? " active" : "");
-      noneBtn.textContent = "— No project —";
-      noneBtn.onclick = () => {
-        projectIdx = 0;
-        drawProjects();
-      };
-      body.appendChild(noneBtn);
-      if (!projectRows.length) {
-        const empty = document.createElement("button");
-        empty.type = "button";
-        empty.className = "src-item link-action";
-        empty.textContent = "No projects found — create Project in Vanilla…";
-        empty.onclick = () => {
-          if (api.openProjectAdd) api.openProjectAdd();
-        };
-        body.appendChild(empty);
-      }
-      projectRows.forEach((row, idx) => {
-        const r = document.createElement("button");
-        r.type = "button";
-        r.className = "src-item" + (projectIdx === idx + 1 ? " active" : "");
-        const label = row.project_name || row.name;
-        const cust = row.customer_name || row.customer || "";
-        r.textContent = cust ? `${label} · ${cust}` : label;
-        r.onclick = () => {
-          projectIdx = idx + 1;
-          drawProjects();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    async function goToSalesOrders() {
-      const cust = activeCustomer();
-      customerFilter = cust && cust.value ? cust.value : "";
-      customerName = cust && cust.description ? cust.description : customerFilter;
-      setStatus("Loading Sales Orders…");
-      soRows = await loadSalesOrders(customerFilter);
-      drawSalesOrders();
-    }
-  
-    async function goToProjects() {
-      setStatus("Loading projects…");
-      projectRows = await loadProjects(customerFilter);
-      projectIdx = 0;
-      drawProjects();
-    }
-  
-    /**
-     * "Costing Assumptions!" (review 10-19 R6b-4): the by-need split, per Sales Order, before
-     * anything is made — the clerk can fill an order from stock instead, or say Okay.
-     * @param {any} plan
-     */
-    function drawCosting(plan) {
-      step = "costing";
-      costingPlan = plan;
-      titleEl.textContent = `Assign line ${rowIndex + 1} — check the costing`;
-      pickBtn.textContent = "Okay, I still want to do this";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = true;
-      body.innerHTML = "";
-      body.appendChild(
-        renderCostingBox(plan, {
-          onToggleStock: async (so, on) => {
-            if (on) fromStock.add(so);
-            else fromStock.delete(so);
-            const again = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
-            if (again && again.ok && again.plan) drawCosting(again.plan);
-            else setStatus((again && again.reason) || "Could not work out the split.", "err");
-          },
-        }),
-      );
-      setStatus("The split is not exact — check what comes from stock, then Okay or Cancel.", "warn");
-    }
 
-    async function applyAllocation() {
-      const project =
-        projectIdx > 0 && projectRows[projectIdx - 1]
-          ? projectRows[projectIdx - 1].name
-          : "";
-      if (step !== "costing" && selectedSos.size && api.planLineAllocation) {
-        setStatus("Working out the split…");
-        const pr = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
-        if (!(pr && pr.ok)) {
-          setStatus((pr && pr.reason) || "Could not work out the split.", "err");
-          return;
-        }
-        if (pr.plan && pr.plan.needsConfirm) {
-          drawCosting(pr.plan);
-          return;
-        }
-      }
-      setStatus("Applying allocation…");
-      const res = await api.applyLineAllocation(rowIndex, {
-        customer: customerFilter,
-        customerName,
-        salesOrders: [...selectedSos],
-        project,
-        supplier: sup,
-        fromStock: [...fromStock],
-        confirmedKey: step === "costing" && costingPlan ? costingPlan.key : undefined,
-      });
-      if (res && res.needsConfirm && res.plan) {
-        // The orders changed since the box was drawn (another PO against them): show it again.
-        drawCosting(res.plan);
-        setStatus("The orders changed since you looked — check the costing again.", "warn");
-        return;
-      }
-      close();
-      if (res && res.ok) {
+    allocationPickerOpen = true;
+    await openAssignModal({
+      api,
+      rowIndex,
+      supplier: sup,
+      items: () => (lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items : []),
+      setStatus,
+      onClose: () => {
+        allocationPickerOpen = false;
+      },
+      onApplied: (res) => {
         noteUserEdit();
         if (res.poLineMeta) poLineMeta = res.poLineMeta;
         if (res.lineAllocations) lineAllocations = res.lineAllocations;
@@ -3100,80 +2831,11 @@ export async function bootBillFormPage(api) {
           lineAllocations: res.lineAllocations,
           poLineMeta: res.poLineMeta,
         });
-        const poNote = res.bridgePo ? ` · PO ${res.bridgePo}` : "";
-        // Review 10-19 R2-2: the line is assigned either way; a missing PO is said, not hidden.
-        if (res.bridgeFailure) setStatus(`Line ${rowIndex + 1} assigned${poNote}. ${res.bridgeFailure}`, "warn");
-        else setStatus(`Line ${rowIndex + 1} assigned${poNote}.`);
-      } else {
-        setStatus((res && res.reason) || "Could not apply allocation.", "err");
-        await refresh();
-      }
-    }
-  
-    async function onPrimary() {
-      if (step === "customer") await goToSalesOrders();
-      else if (step === "so") await goToProjects();
-      else await applyAllocation();
-    }
-  
-    function onKey(ev) {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        close();
-      } else if (ev.key === "Enter") {
-        ev.preventDefault();
-        onPrimary();
-      }
-    }
-  
-    let searchTimer = null;
-    // Only the newest search may paint: a slow answer for older text must not replace it (R5b-1).
-    let searchSeq = 0;
-    searchEl.oninput = () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(async () => {
-        const seq = ++searchSeq;
-        if (step === "customer") {
-          const rows = await loadCustomers(searchEl.value);
-          if (seq !== searchSeq || step !== "customer") return;
-          customerRows = rows;
-          ci = Math.min(ci, customerRows.length);
-          drawCustomers();
-        } else if (step === "project") {
-          const q = normalizeEditableText(searchEl.value).toLowerCase();
-          const rows = await loadProjects(customerFilter);
-          if (seq !== searchSeq || step !== "project") return;
-          projectRows = rows.filter((p) => {
-            const blob = `${p.name} ${p.project_name || ""} ${p.customer_name || ""}`.toLowerCase();
-            return !q || blob.includes(q);
-          });
-          drawProjects();
-        }
-      }, 180);
-    };
-  
-    pickBtn.onclick = () => onPrimary();
-    backBtn.onclick = () => {
-      if (step === "so") drawCustomers();
-      else if (step === "project") drawSalesOrders();
-      else if (step === "costing") drawProjects();
-    };
-    box.querySelector('[data-act="cancel"]').onclick = () => close();
-    back.addEventListener("click", (ev) => {
-      if (ev.target === back) close();
+      },
+      refresh,
     });
-    document.addEventListener("keydown", onKey, true);
-  
-    customerRows = await loadCustomers("");
-    drawCustomers();
-    try {
-      if (api.focusBillSurface) api.focusBillSurface();
-    } catch {
-      /* ignore */
-    }
-    searchEl.focus();
   }
-  
+
   /**
    * Run an async header write with a visible "still filling in" state on the fields that write
    * repopulates (5zorro 2026-09-09: a slow vendor settle under chaos read as a bug, because an
