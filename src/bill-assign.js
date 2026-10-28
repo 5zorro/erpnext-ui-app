@@ -4,8 +4,9 @@
  * the by-need split is not exact. The dialog (src/bill-assign-modal-ui.js) keeps one state, changes
  * it only through `assignStep`, and draws what `assignView` says.
  *
- * Choices are by position, as the clerk sees them: customer 0 is "All customers", project 0 is
- * "— No project —". A new search keeps the customer position (cut to the new list's length).
+ * Picks are kept by name (museum OI-192): "" is "All customers" / "— No project —", and a search
+ * that hides the pick falls back to that, so what is highlighted is what Apply sends. Only the
+ * Sales Orders on the list shown stay ticked: a new list (another customer) drops the others.
  */
 import { normalizeEditableText } from "./dirty-gate.js";
 
@@ -15,13 +16,13 @@ import { normalizeEditableText } from "./dirty-gate.js";
  * @typedef {{
  *   step: AssignStepName,
  *   customers: Array<{ value: string, description?: string }>,
- *   customerIndex: number,
+ *   customerPick: string,
  *   customer: string,
  *   customerName: string,
  *   salesOrders: Array<{ name: string, draft?: boolean, negativeMargin?: boolean }>,
  *   selected: string[],
  *   projects: Array<{ name: string, project_name?: string, customer?: string, customer_name?: string }>,
- *   projectIndex: number,
+ *   projectPick: string,
  *   fromStock: string[],
  *   plan: any,
  * }} AssignState
@@ -32,22 +33,23 @@ export function assignStart() {
   return {
     step: "customer",
     customers: [],
-    customerIndex: 0,
+    customerPick: "",
     customer: "",
     customerName: "",
     salesOrders: [],
     selected: [],
     projects: [],
-    projectIndex: 0,
+    projectPick: "",
     fromStock: [],
     plan: null,
   };
 }
 
-/** The customer at the current position: `{ value: "" }` for "All customers". */
+const ALL_CUSTOMERS = Object.freeze({ value: "", description: "All customers" });
+
+/** The picked customer's row: `{ value: "" }` for "All customers". */
 export function assignActiveCustomer(state) {
-  if (state.customerIndex === 0) return { value: "", description: "All customers" };
-  return state.customers[state.customerIndex - 1];
+  return (state.customerPick && state.customers.find((c) => c.value === state.customerPick)) || ALL_CUSTOMERS;
 }
 
 /** The customer filter and name the Sales Order step loads with, from the current position. */
@@ -57,17 +59,20 @@ export function assignCustomerChoice(state) {
   return { customer, customerName: c && c.description ? c.description : customer };
 }
 
+/** A pick still on the list, else "" (All customers / No project). */
+const kept = (pick, rows, key) => (pick && rows.some((r) => r[key] === pick) ? pick : "");
 const toggled = (list, name) => (list.includes(name) ? list.filter((x) => x !== name) : [...list, name]);
 
 /**
  * @param {AssignState} state
  * @param {{ type: string, [k: string]: any }} action
  *   - `customers` { rows } — a customer search answered
- *   - `pickCustomer` { index } / `pickProject` { index } — a row clicked
- *   - `salesOrders` { customer, customerName, rows } — on to the Sales Order step
+ *   - `pickCustomer` { value } / `pickProject` { name } — a row clicked ("" for All / No project)
+ *   - `salesOrders` { customer, customerName, rows } — on to the Sales Order step; ticks not on
+ *     the new list are dropped
  *   - `toggleSalesOrder` { name }
  *   - `projects` { rows } — on to the Project step, "— No project —" chosen
- *   - `projectsFound` { rows } — a project search answered; the position stays
+ *   - `projectsFound` { rows } — a project search answered; the pick stays if it is listed
  *   - `costing` { plan } — on to (or redraw) the costing step
  *   - `toggleStock` { salesOrder, on }
  *   - `back`
@@ -76,19 +81,28 @@ const toggled = (list, name) => (list.includes(name) ? list.filter((x) => x !== 
 export function assignStep(state, action) {
   switch (action.type) {
     case "customers":
-      return { ...state, customers: action.rows, customerIndex: Math.min(state.customerIndex, action.rows.length) };
+      return { ...state, customers: action.rows, customerPick: kept(state.customerPick, action.rows, "value") };
     case "pickCustomer":
-      return { ...state, customerIndex: action.index };
-    case "salesOrders":
-      return { ...state, step: "so", customer: action.customer, customerName: action.customerName, salesOrders: action.rows };
+      return { ...state, customerPick: action.value };
+    case "salesOrders": {
+      const offered = action.rows.filter((row) => !row.draft).map((row) => row.name);
+      return {
+        ...state,
+        step: "so",
+        customer: action.customer,
+        customerName: action.customerName,
+        salesOrders: action.rows,
+        selected: state.selected.filter((name) => offered.includes(name)),
+      };
+    }
     case "toggleSalesOrder":
       return { ...state, selected: toggled(state.selected, action.name) };
     case "projects":
-      return { ...state, step: "project", projects: action.rows, projectIndex: 0 };
+      return { ...state, step: "project", projects: action.rows, projectPick: "" };
     case "projectsFound":
-      return { ...state, projects: action.rows };
+      return { ...state, projects: action.rows, projectPick: kept(state.projectPick, action.rows, "name") };
     case "pickProject":
-      return { ...state, projectIndex: action.index };
+      return { ...state, projectPick: action.name };
     case "costing":
       return { ...state, step: "costing", plan: action.plan };
     case "toggleStock": {
@@ -136,10 +150,7 @@ export function assignPrimaryAction(state) {
 export const assignOfferedSalesOrders = (state) => state.salesOrders.filter((row) => !row.draft);
 
 /** The chosen project's name, "" for none. */
-export function assignProject(state) {
-  const p = state.projectIndex > 0 && state.projects[state.projectIndex - 1];
-  return p ? p.name : "";
-}
+export const assignProject = (state) => kept(state.projectPick, state.projects, "name");
 
 /** Whether Apply must first work out the split: Sales Orders are ticked and the costing was not shown yet. */
 export const assignNeedsPlan = (state) => state.step !== "costing" && state.selected.length > 0;

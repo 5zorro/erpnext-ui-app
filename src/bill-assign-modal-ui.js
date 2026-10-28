@@ -9,7 +9,9 @@ import {
   assignStep,
   assignView,
   assignPrimaryAction,
+  assignActiveCustomer,
   assignCustomerChoice,
+  assignProject,
   assignOfferedSalesOrders,
   assignNeedsPlan,
   assignPlanRequest,
@@ -126,12 +128,13 @@ export async function openAssignModal(deps) {
   }
 
   function drawCustomers() {
-    row("All customers", "src-item" + (state.customerIndex === 0 ? " active" : ""), () => dispatch({ type: "pickCustomer", index: 0 }));
-    state.customers.forEach((c, idx) => {
-      row(c.description || c.value, "src-item" + (state.customerIndex === idx + 1 ? " active" : ""), () =>
-        dispatch({ type: "pickCustomer", index: idx + 1 }),
+    const picked = assignActiveCustomer(state).value;
+    row("All customers", "src-item" + (picked === "" ? " active" : ""), () => dispatch({ type: "pickCustomer", value: "" }));
+    for (const c of state.customers) {
+      row(c.description || c.value, "src-item" + (picked === c.value ? " active" : ""), () =>
+        dispatch({ type: "pickCustomer", value: c.value }),
       );
-    });
+    }
   }
 
   function drawSalesOrders() {
@@ -160,7 +163,8 @@ export async function openAssignModal(deps) {
   }
 
   function drawProjects() {
-    row("— No project —", "src-item" + (state.projectIndex === 0 ? " active" : ""), () => dispatch({ type: "pickProject", index: 0 }));
+    const picked = assignProject(state);
+    row("— No project —", "src-item" + (picked === "" ? " active" : ""), () => dispatch({ type: "pickProject", name: "" }));
     if (!state.projects.length) {
       const empty = document.createElement("button");
       empty.type = "button";
@@ -171,11 +175,9 @@ export async function openAssignModal(deps) {
       };
       body.appendChild(empty);
     }
-    state.projects.forEach((p, idx) => {
-      row(assignProjectLabel(p), "src-item" + (state.projectIndex === idx + 1 ? " active" : ""), () =>
-        dispatch({ type: "pickProject", index: idx + 1 }),
-      );
-    });
+    for (const p of state.projects) {
+      row(assignProjectLabel(p), "src-item" + (picked === p.name ? " active" : ""), () => dispatch({ type: "pickProject", name: p.name }));
+    }
   }
 
   /**

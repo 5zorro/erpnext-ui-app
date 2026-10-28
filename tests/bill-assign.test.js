@@ -31,8 +31,8 @@ const PROJECTS = [
 ];
 
 /** Through the customer step to the Sales Orders, as the dialog does it. */
-function toOrders(index, state = run([{ type: "customers", rows: CUSTOMERS }])) {
-  const s = assignStep(state, { type: "pickCustomer", index });
+function toOrders(value, state = run([{ type: "customers", rows: CUSTOMERS }])) {
+  const s = assignStep(state, { type: "pickCustomer", value });
   return assignStep(s, { type: "salesOrders", ...assignCustomerChoice(s), rows: ORDERS });
 }
 
@@ -47,22 +47,29 @@ describe("Assign — the customer step", () => {
 
   it("a picked customer is the filter; a customer with no description is named by its id", () => {
     const s = run([{ type: "customers", rows: CUSTOMERS }]);
-    assert.deepEqual(assignCustomerChoice(assignStep(s, { type: "pickCustomer", index: 1 })), { customer: "CUST-A", customerName: "Acme" });
-    assert.deepEqual(assignCustomerChoice(assignStep(s, { type: "pickCustomer", index: 3 })), { customer: "CUST-C", customerName: "CUST-C" });
+    assert.deepEqual(assignCustomerChoice(assignStep(s, { type: "pickCustomer", value: "CUST-A" })), { customer: "CUST-A", customerName: "Acme" });
+    assert.deepEqual(assignCustomerChoice(assignStep(s, { type: "pickCustomer", value: "CUST-C" })), { customer: "CUST-C", customerName: "CUST-C" });
   });
 
-  it("a search keeps the position, cut to the new list", () => {
-    const s = run([{ type: "customers", rows: CUSTOMERS }, { type: "pickCustomer", index: 3 }]);
-    const fewer = assignStep(s, { type: "customers", rows: CUSTOMERS.slice(0, 2) });
-    assert.equal(fewer.customerIndex, 2);
-    assert.equal(assignActiveCustomer(fewer).value, "CUST-B");
-    assert.equal(assignStep(s, { type: "customers", rows: [] }).customerIndex, 0);
+  it("a search keeps the picked customer wherever it moves in the list (OI-192)", () => {
+    const s = run([{ type: "customers", rows: CUSTOMERS }, { type: "pickCustomer", value: "CUST-C" }]);
+    const moved = assignStep(s, { type: "customers", rows: [CUSTOMERS[2], CUSTOMERS[0]] });
+    assert.equal(assignActiveCustomer(moved).value, "CUST-C");
+  });
+
+  it("a search that hides the picked customer falls back to All customers (OI-192)", () => {
+    const s = run([{ type: "customers", rows: CUSTOMERS }, { type: "pickCustomer", value: "CUST-C" }]);
+    const hidden = assignStep(s, { type: "customers", rows: CUSTOMERS.slice(0, 2) });
+    assert.equal(hidden.customerPick, "");
+    assert.deepEqual(assignCustomerChoice(hidden), { customer: "", customerName: "All customers" });
+    // and stays there when the customer comes back: the clerk sees All customers highlighted
+    assert.equal(assignActiveCustomer(assignStep(hidden, { type: "customers", rows: CUSTOMERS })).value, "");
   });
 });
 
 describe("Assign — the Sales Order step", () => {
   it("loads for the chosen customer and offers no drafts", () => {
-    const s = toOrders(2);
+    const s = toOrders("CUST-B");
     assert.equal(s.step, "so");
     assert.equal(s.customer, "CUST-B");
     assert.equal(s.customerName, "Bolt");
@@ -71,29 +78,51 @@ describe("Assign — the Sales Order step", () => {
   });
 
   it("ticks and unticks orders, keeping the order they were ticked in", () => {
-    let s = toOrders(0);
+    let s = toOrders("");
     for (const name of ["SO-2", "SO-1", "SO-2", "SO-2"]) s = assignStep(s, { type: "toggleSalesOrder", name });
     assert.deepEqual(s.selected, ["SO-1", "SO-2"]);
+  });
+
+  it("an order ticked under one customer is dropped when another customer's list has no such order (OI-192)", () => {
+    const a = assignStep(toOrders("CUST-A"), { type: "toggleSalesOrder", name: "SO-1" });
+    const b = run([{ type: "back" }, { type: "pickCustomer", value: "CUST-B" }], a);
+    const atB = assignStep(b, { type: "salesOrders", ...assignCustomerChoice(b), rows: [{ name: "SO-9" }] });
+    assert.deepEqual(atB.selected, []);
+    assert.equal(assignNeedsPlan(atB), false);
+    assert.deepEqual(assignApplyRequest(atB, "V").salesOrders, []);
+  });
+
+  it("ticks on the new list stay; a tick on an order that is now a draft does not", () => {
+    const s = run([{ type: "toggleSalesOrder", name: "SO-1" }, { type: "toggleSalesOrder", name: "SO-2" }, { type: "back" }], toOrders(""));
+    const again = assignStep(s, { type: "salesOrders", customer: "", customerName: "All customers", rows: [{ name: "SO-1" }, { name: "SO-2", draft: true }] });
+    assert.deepEqual(again.selected, ["SO-1"]);
   });
 });
 
 describe("Assign — the Project step", () => {
-  const atProjects = () => assignStep(assignStep(toOrders(1), { type: "toggleSalesOrder", name: "SO-1" }), { type: "projects", rows: PROJECTS });
+  const atProjects = () => assignStep(assignStep(toOrders("CUST-A"), { type: "toggleSalesOrder", name: "SO-1" }), { type: "projects", rows: PROJECTS });
 
   it("starts on No project, every time it is reached", () => {
-    const s = assignStep(atProjects(), { type: "pickProject", index: 2 });
+    const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-2" });
     assert.equal(assignProject(s), "PROJ-2");
     const again = assignStep(assignStep(s, { type: "back" }), { type: "projects", rows: PROJECTS });
-    assert.equal(again.projectIndex, 0);
+    assert.equal(again.projectPick, "");
     assert.equal(assignProject(again), "");
     assert.equal(assignPrimaryAction(again), "apply");
   });
 
-  it("a project search changes the list, not the position", () => {
-    const s = assignStep(atProjects(), { type: "pickProject", index: 1 });
+  it("a project search keeps the picked project when it is still listed (OI-192)", () => {
+    const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-2" });
     const found = assignStep(s, { type: "projectsFound", rows: filterAssignProjects(PROJECTS, "  BATH ") });
     assert.deepEqual(found.projects.map((p) => p.name), ["PROJ-2"]);
-    assert.equal(found.projectIndex, 1);
+    assert.equal(assignProject(found), "PROJ-2");
+  });
+
+  it("a project search that hides the pick falls back to No project, so Apply sends what is highlighted (OI-192)", () => {
+    const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-3" });
+    const found = assignStep(s, { type: "projectsFound", rows: filterAssignProjects(PROJECTS, "kitchen") });
+    assert.equal(found.projectPick, "");
+    assert.equal(assignApplyRequest(found, "V").project, "");
   });
 
   it("the search matches name, title or customer name, any case; blank matches all", () => {
@@ -117,7 +146,7 @@ describe("Assign — the Project step", () => {
   });
 
   it("applies with no costing key before the costing was shown", () => {
-    const s = assignStep(atProjects(), { type: "pickProject", index: 1 });
+    const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-1" });
     assert.deepEqual(assignApplyRequest(s, "VEND"), {
       customer: "CUST-A",
       customerName: "Acme",
@@ -133,7 +162,7 @@ describe("Assign — the Project step", () => {
 describe("Assign — the costing step", () => {
   const plan = { key: "k1", needsConfirm: true };
   const atCosting = () =>
-    run([{ type: "toggleSalesOrder", name: "SO-1" }, { type: "projects", rows: PROJECTS }, { type: "costing", plan }], toOrders(0));
+    run([{ type: "toggleSalesOrder", name: "SO-1" }, { type: "projects", rows: PROJECTS }, { type: "costing", plan }], toOrders(""));
 
   it("Okay applies with the plan's key and does not work out the split again", () => {
     const s = atCosting();

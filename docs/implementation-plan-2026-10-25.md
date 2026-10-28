@@ -5,7 +5,8 @@
 > way (5zorro). Plan 2026-10-26 (tests that run while the app is open, and where their time goes)
 > built and closed 2026-10-26 (HANDOFF § *Test strategy*). R6a-2's four dialogs: Assign moved
 > 2026-10-27 (`src/bill-assign.js` its steps, pure and tested; `src/bill-assign-modal-ui.js` the
-> dialog); next the informal link, the source picker, allocate charge; also owed, decided 2026-10-26: the Item Receipt's
+> dialog), then museum OI-192 fixed at 5zorro's word (a tick on an order no longer listed is dropped;
+> customer and project picks kept by name); next the informal link, the source picker, allocate charge; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
