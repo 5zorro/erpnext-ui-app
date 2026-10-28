@@ -3,6 +3,15 @@
  * Shared ranking/labels for OI-028 / OI-036 later; do not fork a second SO SSoT.
  */
 
+/**
+ * The Bill lines a Sales Order list works margins out from: code, qty, rate and amount only.
+ * @param {Array<any>|null|undefined} items
+ * @returns {Array<{ item_code?: string, qty?: number, rate?: number, amount?: number }>}
+ */
+export function soPickerBillLines(items) {
+  return (Array.isArray(items) ? items : []).map((r) => ({ item_code: r.item_code, qty: r.qty, rate: r.rate, amount: r.amount }));
+}
+
 /** Non-color-only negative-margin marker (a11y). */
 export const NEGATIVE_MARGIN_MARK = "(!)";
 

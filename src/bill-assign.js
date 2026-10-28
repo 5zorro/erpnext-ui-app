@@ -9,6 +9,7 @@
  * Sales Orders on the list shown stay ticked: a new list (another customer) drops the others.
  */
 import { normalizeEditableText } from "./dirty-gate.js";
+import { soPickerBillLines } from "./so-picker.js";
 
 /** @typedef {"customer"|"so"|"project"|"costing"} AssignStepName */
 
@@ -184,8 +185,7 @@ export function assignApplyRequest(state, supplier) {
  */
 export function assignMarginLines(items, rowIndex) {
   const rows = Array.isArray(items) ? items : [];
-  const pick = (r) => ({ item_code: r.item_code, qty: r.qty, rate: r.rate, amount: r.amount });
-  return rows[rowIndex] ? [pick(rows[rowIndex])] : rows.map(pick);
+  return soPickerBillLines(rows[rowIndex] ? [rows[rowIndex]] : rows);
 }
 
 /** The project search: name, title or customer contains the text, any case. */

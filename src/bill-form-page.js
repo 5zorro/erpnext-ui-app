@@ -246,6 +246,7 @@ import {
 } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
 import { openAssignModal } from "../src/bill-assign-modal-ui.js";
+import { openInformalLinkModal } from "../src/bill-informal-link-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
@@ -2997,18 +2998,8 @@ export async function bootBillFormPage(api) {
   }
 
   /**
-   * Informal link picker for credit memos (OI-147/164, OI-165 SO half) — writes a plain-text
-   * token into Remarks, never the real ERP `return_against` field. "Bill" defaults to the
-   * current vendor's submitted Bills; typing a name searches any vendor (2026-09-07 decision).
-   * "Sales Order" reuses the OI-134 line-allocation fetch as-is — rough first pass, not
-   * dogfooded yet (5zorro 2026-09-07: "won't verify it until later").
-   *
-   * `purpose: "source"` (Bill only) is the same list opened at a different moment: right
-   * after the clerk flips **Credit memo? → Yes** on a Bill they did *not* reach from a
-   * submitted Bill, so nothing has set `return_against` yet. Picking there routes through
-   * `planCreditMemoSource()` — an untouched draft is rebuilt via the native make_debit_note
-   * path (real `return_against`, correct expense account); a draft with lines already on it
-   * falls back to the informal token rather than silently destroying that work.
+   * Informal link picker for credit memos (OI-147/164, OI-165 SO half), and the "which Bill is
+   * this credit against?" list (`purpose: "source"`): src/bill-informal-link-modal-ui.js.
    * @param {"bill"|"so"} kind
    * @param {{ purpose?: "link"|"source" }} [opts]
    */
@@ -3018,208 +3009,25 @@ export async function bootBillFormPage(api) {
       return;
     }
     if (informalLinkPickerOpen || sourceModalOpenRef.current || allocationPickerOpen) return;
-    const isBill = kind === "bill";
-    const isSourcePick = isBill && opts.purpose === "source";
-    const label = isBill ? "Bill" : "Sales Order";
     const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
     const supplier =
       normalizeEditableText(lastDoc && lastDoc.supplier) || normalizeEditableText(el.vendor.value);
 
     informalLinkPickerOpen = true;
-    let rows = [];
-    let query = "";
-
-    const back = document.createElement("div");
-    back.className = "src-back";
-    back.dataset.testid = isSourcePick
-      ? "bill-credit-source-picker"
-      : `bill-informal-link-picker-${kind}`;
-    const dialogLabel = isSourcePick
-      ? "Which Bill is this credit against?"
-      : `Informal link to ${label}`;
-    const box = document.createElement("div");
-    box.className = "src-box";
-    box.tabIndex = -1;
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", dialogLabel);
-    const subtitle = isSourcePick
-      ? " — same vendor by default; type/paste a name to search any vendor. Skip this and the credit posts with no Bill behind it."
-      : isBill
-        ? " — same vendor by default; type/paste a name to search any vendor"
-        : " (Sales Order picker — not restricted by vendor)";
-    box.innerHTML = `<div class="src-title">${dialogLabel}${subtitle}</div>
-      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
-        <input type="text" data-link-search placeholder="${
-          isBill ? "Search Bills…" : "Filter Sales Orders…"
-        }" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
-      </div>
-      <div class="src-body"></div>
-      <div class="src-foot">
-        <button type="button" data-act="clear">${
-          isSourcePick ? "Decide later" : "Clear link"
-        }</button>
-        <button type="button" data-act="cancel">Cancel</button>
-      </div>`;
-    back.appendChild(box);
-    document.body.appendChild(back);
-    const body = box.querySelector(".src-body");
-    const searchEl = box.querySelector("[data-link-search]");
-    const clearBtn = box.querySelector('[data-act="clear"]');
-    const cancelBtn = box.querySelector('[data-act="cancel"]');
-
-    function close() {
-      if (searchDebounce) clearTimeout(searchDebounce);
-      informalLinkPickerOpen = false;
-      document.removeEventListener("keydown", onKey, true);
-      if (back.parentNode) back.parentNode.removeChild(back);
-    }
-
-    async function applyLink(name) {
-      setStatus(
-        name ? `Linking informally to ${label} ${name}…` : `Clearing informal ${label} link…`,
-      );
-      try {
-        const res = await writeInformalLinkToken(kind, name);
-        if (res.ok) {
-          setStatus(
-            name
-              ? `Noted in Remarks: informal link to ${label} ${name}.`
-              : `Informal ${label} link cleared.`,
-          );
-        } else {
-          setStatus(res.reason, "err");
-        }
-      } finally {
-        close();
-      }
-    }
-
-    /**
-     * Source-pick route (toggle → Yes) — routing lives in commitCreditSource(), which the
-     * source modal's Credit memo switch calls too, so the two doors cannot drift apart.
-     */
-    async function chooseSourceBill(name) {
-      close();
-      await commitCreditSource(name);
-    }
-
-    function drawRows() {
-      body.innerHTML = "";
-      const q = query.trim().toLowerCase();
-      const filtered = q
-        ? rows.filter((r) => `${r.value} ${r.description || ""}`.toLowerCase().includes(q))
-        : rows;
-      if (!filtered.length) {
-        const empty = document.createElement("div");
-        empty.className = "src-empty";
-        empty.textContent =
-          isBill && !q
-            ? `No submitted Bills found for ${supplier || "this vendor"}. Type to search any vendor.`
-            : "No matches.";
-        body.appendChild(empty);
-        return;
-      }
-      filtered.forEach((r) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "src-item";
-        btn.dataset.testid = isSourcePick
-          ? "bill-credit-source-row"
-          : `bill-informal-link-${kind}-row`;
-        btn.textContent =
-          r.description && r.description !== r.value ? `${r.value} — ${r.description}` : r.value;
-        btn.onclick = () => (isSourcePick ? chooseSourceBill(r.value) : applyLink(r.value));
-        body.appendChild(btn);
-      });
-    }
-
-    async function loadBillRows(q) {
-      return searchSourceBillRows(q, supplier, currentName);
-    }
-
-    async function loadSoRows() {
-      if (!api.listSalesOrdersForPicker) return [];
-      const items =
-        lastDoc && Array.isArray(lastDoc.items)
-          ? lastDoc.items.map((r) => ({
-              item_code: r.item_code,
-              qty: r.qty,
-              rate: r.rate,
-              amount: r.amount,
-            }))
-          : [];
-      const res = await api.listSalesOrdersForPicker({
-        supplier: supplier || "",
-        customer: "",
-        billLines: items,
-      });
-      const list = res && res.ok && Array.isArray(res.orders) ? res.orders : [];
-      return list.map((so) => ({
-        value: so.name,
-        description: `${so.customer_name || so.customer || ""}${
-          so.grand_total ? ` — $${so.grand_total}` : ""
-        }`.trim(),
-      }));
-    }
-
-    // A throw anywhere in here used to leave informalLinkPickerOpen stuck true, locking the
-    // picker out for the rest of the session with no way back short of reopening the Bill.
-    async function reload() {
-      body.innerHTML = `<div class="src-empty">Loading…</div>`;
-      try {
-        rows = isBill ? await loadBillRows(query.trim()) : await loadSoRows();
-      } catch (err) {
-        rows = [];
-        body.innerHTML = "";
-        const failed = document.createElement("div");
-        failed.className = "src-empty";
-        failed.dataset.testid = "bill-link-picker-error";
-        failed.textContent = `Could not load ${label}s: ${String(
-          err && err.message ? err.message : err,
-        )}`;
-        body.appendChild(failed);
-        return;
-      }
-      drawRows();
-    }
-
-    let searchDebounce = null;
-    searchEl.addEventListener("input", () => {
-      query = searchEl.value || "";
-      if (isBill) {
-        if (searchDebounce) clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(reload, 220);
-      } else {
-        drawRows(); // SO rows are fetched once; filtered client-side while typing.
-      }
+    await openInformalLinkModal({
+      api,
+      kind,
+      purpose: opts.purpose,
+      supplier,
+      items: () => lastDoc && lastDoc.items,
+      searchBills: (q) => searchSourceBillRows(q, supplier, currentName),
+      writeLink: writeInformalLinkToken,
+      chooseSource: commitCreditSource,
+      setStatus,
+      onClose: () => {
+        informalLinkPickerOpen = false;
+      },
     });
-
-    function onKey(ev) {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        close();
-      }
-    }
-    document.addEventListener("keydown", onKey, true);
-    back.addEventListener("mousedown", (ev) => {
-      if (ev.target === back) close();
-    });
-    // "Decide later" must not strip an existing token — it only declines to add one now.
-    clearBtn.onclick = () => {
-      if (!isSourcePick) return applyLink("");
-      close();
-      setStatus(
-        "Credit memo left with no Bill behind it — the Return Against warning below stays up " +
-          "until you link one.",
-        "warn",
-      );
-      return undefined;
-    };
-    cancelBtn.onclick = () => close();
-
-    await reload();
-    searchEl.focus();
   }
 
   function setFormBlocked(blocked, reason) {
