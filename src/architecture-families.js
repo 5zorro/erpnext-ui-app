@@ -78,7 +78,7 @@ export const ARCHITECTURE_FAMILIES = [
     paths: ["electron/doc-form.html", "electron/doc-form.head.html", "electron/doc-form.footer.html", "electron/doc-form-body.fragment.html",
       "electron/doc-chrome.fragment.html", "electron/doc-form-preload.cjs", "electron/doc-skin.css", "electron/doc-fields.css",
       "electron/erp-form-bridge-page.js", "scripts/assemble-doc-form-html.js"],
-    e2e: ["scaffold-typed-dates.spec.js"],
+    e2e: ["scaffold-typed-dates.spec.js", "scaffold-form-switch.spec.js"],
   },
   {
     id: "sources",
@@ -160,10 +160,11 @@ export const ARCHITECTURE_FAMILIES = [
   },
   {
     id: "repo",
-    label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log, the dogfood check",
-    modules: ["architecture-families", "test-run-log", "dogfood-check"],
+    label: "Repo process — the coverage map itself, the commit-attribution hook, the test-run log, the dogfood check, a test run's own profile folder, where test time goes",
+    modules: ["architecture-families", "test-run-log", "test-times", "test-trace", "dogfood-check"],
     paths: ["scripts/check-commit-attribution.sh", "scripts/dogfood-for-change.js", "scripts/run-tests.js", "scripts/test-flaky.js",
-      "scripts/dogfood-check.js", "scripts/dogfood-setup.js", "package.json", "package-lock.json", "playwright.config.js"],
+      "scripts/test-run-record.js", "scripts/playwright-run-log.js", "scripts/dogfood-check.js", "scripts/dogfood-setup.js", "package.json", "package-lock.json", "playwright.config.js",
+      "scripts/test-profile.js", "scripts/playwright-test-profile.js", "scripts/test-times.js", "e2e/test-timing.js"],
     e2e: [],
     noPaper: "process, not product",
   },

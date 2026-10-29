@@ -136,6 +136,12 @@ html[data-doc-desk="ar"] .card::before {
   position: relative;
   z-index: 1;
 }
+/* Each section is its own layer, so a pick list opened in one was painted under the next: the
+   Item list ran under the taxes (5zorro DF-03, 2026-10-25). The section with an open list rises
+   above its neighbours. Probe df03-item-picker-visible. */
+.card > .bill-section:not(.bill-section-summary):has(.link-dd:not([hidden])) {
+  z-index: 2;
+}
 
 /* Pattern preference: hatch on layer-2 chrome (not the grey page canvas) */
 html[data-pattern="ap"][data-doc-desk="ap"] .tb-group,

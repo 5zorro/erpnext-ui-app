@@ -1,62 +1,115 @@
 #!/usr/bin/env node
 /**
- * `npm run probe -- <name> [<name>…] [--with-app-open]` — run probes from `tests/probes/`
- * (README there) without disturbing 5zorro's app:
- * 1. refuses while his app is open: a restore would roll back what it saves meanwhile (local notes,
- *    trap 6) — `--with-app-open` to run anyway;
- * 2. backs up `~/.config/erpnext-ui-app/*.json` fresh, right before the run;
- * 3. runs headless with WAYLAND_DISPLAY and DISPLAY cleared (e2e/GOTCHAS.md #12: a window on his
+ * `npm run probe -- <name> [<name>…]` — run probes from `tests/probes/` (README there) without
+ * disturbing 5zorro's app, open or not:
+ * 1. each run has its own profile folder (plan 2026-10-26: the probe config's global setup,
+ *    scripts/test-profile.js), so the app's prefs, login and Drafts shelf are never touched and
+ *    nothing needs restoring (`--with-app-open`, from before, is accepted and ignored);
+ * 2. runs headless with WAYLAND_DISPLAY and DISPLAY cleared (e2e/GOTCHAS.md #12: a window on his
  *    desktop steals his keyboard);
- * 4. restores the backup and removes any prefs file the run created — pass or fail;
- * 5. if the run used a restricted probe user (tests/probes/probe-user.js), retires it — disabled,
- *    its sessions ended — and puts the app's login `Cookies` back, however the run ended. A user a
- *    killed `run-probe` left enabled is retired at the start of the next run.
+ * 3. one run at a time: a second waits for the first (`test-logs/probe-run.lock.json`), since a
+ *    run starts by retiring any probe user left in the lock, which would end the other's clerk;
+ * 4. if the run used a restricted probe user (tests/probes/probe-user.js), retires it — disabled,
+ *    its sessions ended — however the run ended. A user a killed `run-probe` left enabled is
+ *    retired at the start of the next run.
  * Environment passes through, so `ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- x` works.
+ * `--grep=<pattern>` runs only the tests whose title matches (Playwright's `--grep`), e.g.
+ * `npm run probe -- df03-item-table --grep=T-2`.
  *
  * Probes in `tests/probes/leaves-records/` leave records in ERPNext they cannot delete (a submitted
  * document, once cancelled, stays — its ledger entries link to it). They run only with
  * `--leaves-records` (5zorro 2026-10-22: fine on this sandbox; on company data, think twice), and
  * each one checks it is on the sandbox before writing (`assertSandboxSite`).
  */
-import { spawnSync, execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROBE_USER_LOCK, readProbeUserLock, retireLockedProbeUsers } from "../tests/probes/probe-user-retire.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROBES = path.join(ROOT, "tests", "probes");
-const PREFS = path.join(os.homedir(), ".config", "erpnext-ui-app");
+
+// One probe run at a time (plan 2026-10-26 review). Runs no longer refuse while the app is open,
+// which used to keep a second run out too (it saw the first run's app); and a run starts by retiring
+// any probe user in the lock, which would end another run's clerk mid-test. A second run waits for
+// the first — up to an hour, then gives up — and the lock goes when this process ends, however.
+const RUN_LOCK = path.join(ROOT, "test-logs", "probe-run.lock.json");
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+async function takeRunLock() {
+  const deadline = Date.now() + 60 * 60_000;
+  let said = false;
+  for (;;) {
+    try {
+      fs.mkdirSync(path.dirname(RUN_LOCK), { recursive: true });
+      fs.writeFileSync(RUN_LOCK, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), args: process.argv.slice(2) }), { flag: "wx" });
+      return;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let other = null;
+    try {
+      other = JSON.parse(fs.readFileSync(RUN_LOCK, "utf8"));
+    } catch {
+      // Unreadable: being written this instant, or left torn — torn for a minute means stale.
+      const age = Date.now() - (fs.statSync(RUN_LOCK, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+      if (age > 60_000) fs.rmSync(RUN_LOCK, { force: true });
+    }
+    if (other && !alive(other.pid)) {
+      fs.rmSync(RUN_LOCK, { force: true }); // its run was killed
+      continue;
+    }
+    if (Date.now() > deadline) {
+      console.error(`Another probe run (pid ${other?.pid}) has held the lock for over an hour — not running. Its lock: ${RUN_LOCK}`);
+      process.exit(5);
+    }
+    if (!said && other) {
+      console.log(`Another probe run is going (pid ${other.pid}, since ${other.startedAt}: ${(other.args || []).join(" ")}) — waiting for it to finish…`);
+      said = true;
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
+await takeRunLock();
+process.on("exit", () => {
+  try {
+    if (JSON.parse(fs.readFileSync(RUN_LOCK, "utf8")).pid === process.pid) fs.rmSync(RUN_LOCK, { force: true });
+  } catch {
+    /* gone already */
+  }
+});
 
 // A restricted probe user an earlier, killed run left enabled (plan 10-19 § A restricted probe user)
 // — first, so a bare `npm run probe` cleans it up too.
 const leftover = retireLockedProbeUsers();
-if (leftover.length) {
-  console.log(`probe user left enabled by an earlier run — retired:\n  ${leftover.join("\n  ")}`);
-  console.log("  (its Cookies were not restored then: if the app shows Log in, log in again.)");
-}
+if (leftover.length) console.log(`probe user left enabled by an earlier run — retired:\n  ${leftover.join("\n  ")}`);
 if (readProbeUserLock()?.retired) fs.rmSync(PROBE_USER_LOCK, { force: true });
-// A run killed outright (kill -9) never restored the prefs. Say where its backup is; never restore
-// it unasked — the app may have been used since (local notes, trap 6).
+// Runs before 2026-10-26 backed the prefs up and left this mark if killed: say where it is, once.
 const RUN_MARK = path.join(ROOT, "test-logs", "probe-run.json");
 try {
   const mark = JSON.parse(fs.readFileSync(RUN_MARK, "utf8"));
-  console.log(`An earlier probe run (${mark.startedAt}) was killed before it restored the prefs and login cookies.\n  Its backup: ${mark.backup}${fs.existsSync(mark.backup) ? "" : " (gone)"} — copy it back into ~/.config/erpnext-ui-app only if the app has not been used since.`);
+  console.log(`A probe run (${mark.startedAt}) was killed before it restored the prefs and login cookies.\n  Its backup: ${mark.backup}${fs.existsSync(mark.backup) ? "" : " (gone)"} — copy it back into ~/.config/erpnext-ui-app only if the app has not been used since.`);
   fs.rmSync(RUN_MARK, { force: true });
 } catch {
   /* none */
 }
 
 const args = process.argv.slice(2);
-const withAppOpen = args.includes("--with-app-open");
 const leavesRecords = args.includes("--leaves-records");
+const grep = args.filter((a) => a.startsWith("--grep=")).flatMap((a) => ["--grep", a.slice("--grep=".length)]);
 const names = args.filter((a) => !a.startsWith("--"));
 const LEAVES = path.join(PROBES, "leaves-records");
 const probesIn = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".probe.js")).map((f) => f.replace(/\.probe\.js$/, "")) : []);
 if (!names.length) {
   console.log(
-    `usage: npm run probe -- <name> [--with-app-open] [--leaves-records]\nprobes: ${probesIn(PROBES).join(", ") || "(none)"}\n` +
+    `usage: npm run probe -- <name> [--leaves-records] [--grep=<test title>]\nprobes: ${probesIn(PROBES).join(", ") || "(none)"}\n` +
       `leave records in ERPNext (need --leaves-records): ${probesIn(LEAVES).join(", ") || "(none)"}`,
   );
   process.exit(2);
@@ -80,77 +133,33 @@ for (const n of names) {
   }
 }
 
-function appIsOpen() {
-  try {
-    return execSync("ps -eo args", { encoding: "utf8" })
-      .split("\n")
-      .some((l) => /electron/i.test(l) && l.includes(ROOT) && !l.includes("run-probe"));
-  } catch {
-    return false;
-  }
-}
-if (appIsOpen() && !withAppOpen) {
-  console.error("The app is open. A probe restores the prefs after it runs, which would undo what the app saves meanwhile.\nClose it, or pass --with-app-open (then say so to 5zorro).");
-  process.exit(3);
+function retireAfter() {
+  // This run signed in as a probe user: retire it (a no-op when the probe already did).
+  if (!readProbeUserLock()) return;
+  const lines = retireLockedProbeUsers();
+  if (lines.length) console.log(`probe user retired after the run:\n  ${lines.join("\n  ")}`);
+  if (readProbeUserLock()?.retired) fs.rmSync(PROBE_USER_LOCK, { force: true });
 }
 
-const jsonIn = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".json")) : []);
-const before = jsonIn(PREFS);
-const backup = fs.mkdtempSync(path.join(os.tmpdir(), "erpnext-ui-probe-prefs-"));
-for (const f of before) fs.copyFileSync(path.join(PREFS, f), path.join(backup, f));
-// The app's ERPNext login: put back only if the run signed in as a probe user.
-const COOKIE_FILES = ["Cookies", "Cookies-journal"];
-const cookiesBefore = COOKIE_FILES.filter((f) => fs.existsSync(path.join(PREFS, f)));
-for (const f of cookiesBefore) fs.copyFileSync(path.join(PREFS, f), path.join(backup, f));
-console.log(`prefs backed up: ${before.length} file(s) + login cookies → ${backup}`);
-fs.mkdirSync(path.dirname(RUN_MARK), { recursive: true });
-fs.writeFileSync(RUN_MARK, JSON.stringify({ backup, startedAt: new Date().toISOString() }));
-
-let restored = false;
-function restorePrefs() {
-  if (restored) return;
-  restored = true;
-  for (const f of before) fs.copyFileSync(path.join(backup, f), path.join(PREFS, f));
-  const created = jsonIn(PREFS).filter((f) => !before.includes(f));
-  for (const f of created) fs.rmSync(path.join(PREFS, f));
-  if (readProbeUserLock()) {
-    // This run signed in as a probe user: retire it (a no-op when the probe already did) and give
-    // the app back the login it had before.
-    const lines = retireLockedProbeUsers();
-    if (lines.length) console.log(`probe user retired after the run:\n  ${lines.join("\n  ")}`);
-    for (const f of COOKIE_FILES) {
-      if (cookiesBefore.includes(f)) fs.copyFileSync(path.join(backup, f), path.join(PREFS, f));
-      else fs.rmSync(path.join(PREFS, f), { force: true });
-    }
-    if (readProbeUserLock()?.retired) fs.rmSync(PROBE_USER_LOCK, { force: true });
-    console.log("login cookies restored");
-  }
-  fs.rmSync(backup, { recursive: true, force: true });
-  fs.rmSync(RUN_MARK, { force: true });
-  console.log(`prefs restored: ${before.length} file(s)${created.length ? `; removed new: ${created.join(", ")}` : ""}`);
-}
-
-// Ctrl+C reaches the probe too (same terminal) and ends it; this process stays up to restore.
-process.on("SIGINT", () => console.log("\nCtrl+C — restoring the prefs after the probe stops…"));
-// A SIGTERM (`timeout`, a killed parent) reaches only this process: restore now, then go
-// (2026-10-23: a `timeout`-wrapped run left its backup behind, unrestored).
+// Ctrl+C reaches the probe too (same terminal) and ends it; this process stays up to retire the user.
+process.on("SIGINT", () => console.log("\nCtrl+C — retiring any probe user after the probe stops…"));
+// A SIGTERM (`timeout`, a killed parent) reaches only this process: retire now, then go.
 process.on("SIGTERM", () => {
-  restorePrefs();
+  retireAfter();
   process.exit(143);
 });
 
 let status = 1;
 try {
-  // ERP_PROBE_PREFS_BACKUP: a probe may change the prefs only when they will be restored (nav-spine empties nav-state.json).
-  const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "", ERP_PROBE_PREFS_BACKUP: backup };
+  const env = { ...process.env, WAYLAND_DISPLAY: "", DISPLAY: "" };
   const run = spawnSync(
     "xvfb-run",
-    ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...files],
+    ["-a", "npx", "playwright", "test", "-c", path.join("tests", "probes", "playwright.config.js"), ...grep, ...files],
     { cwd: ROOT, env, stdio: "inherit" },
   );
   if (run.error) console.error(`could not run the probe: ${run.error.message}`);
   status = run.status ?? 1;
 } finally {
-  restorePrefs();
+  retireAfter();
 }
 process.exit(status);

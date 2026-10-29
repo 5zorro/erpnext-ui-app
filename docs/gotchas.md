@@ -818,6 +818,18 @@ that off. A real `dialog.showMessageBoxSync` would block the probe — stub it i
 
 ---
 
+## G24 — One doc-form page lives through every PO / Item Receipt / A/R form opened in it (2026-10-26)
+
+**Observed:** a PO, then an Item Receipt, then a PO in one window: one click on a column header
+sorted it ▼ instead of ▲, and every later click looked stuck.
+**Why:** main reloads `doc-form.html` only when the *kind* of page changes (Bill ↔ doc-form,
+`needsDocShellReload`); between doc-form layouts it keeps the page and `applyUiConfig` swaps the
+layout. The header row is the same element throughout, but `applyUiConfig` reset the "head wired"
+flag, so each switch added another click listener and one click ran the sort twice.
+**Rule:** anything `applyUiConfig` (or a shared module's `reset`) sets up on an element that
+outlives it is wired once; a layout switch resets state (the sort), never listeners.
+**Proof:** `e2e/scaffold-form-switch.spec.js` (failed on the code before: "Description ▼").
+
 ## ERPNext behaviour verified from source (read the bullet you need; don't re-derive)
 
 Facts about the ERPNext / Frappe this shell drives, read from the source at the sandbox's tags

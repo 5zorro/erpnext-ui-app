@@ -13,7 +13,13 @@
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
    `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
-   once — R2-5, R6a-1, R6a-2 from the review) — plan only; one question for 5zorro first.
+   once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
+   `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
+   the commit gate); step 3 built (the item rows, `src/doc-form-item-rows-ui.js`;
+   one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); next R6a-2's
+   four dialogs, then a performance deep dive over every probe's times and charts (3b), then R2-5.
+   Decided: share, not merge, with every data-entry form in view
+   (the doc-form page already runs six; Pay Outstanding and Journal Entry may follow).
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
@@ -30,7 +36,11 @@
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-19.md` (the architecture review, 2026-10-19 → 25) —
+   **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
+   where their time goes; built and closed 2026-10-26) — folded into **Test strategy** below (the
+   rules) and *Run / validate* (`npm run test:times`, the charts); its performance follow-up is
+   plan 10-25's step 3b. Code comments citing "plan 2026-10-26" mean that section.
+   `implementation-plan-2026-10-19.md` (the architecture review, 2026-10-19 → 25) —
    folded into **Reviewing what was built** below; its dogfood table moved to
    `tests/probes/README.md` § Dogfood residuals (what `npm run dogfood:check` reads); the test-run
    log and probe rules are in **Test strategy** and `tests/probes/README.md`.
@@ -278,8 +288,8 @@ code. So after any ERPNext or Frappe upgrade:
 1. **Simplified's field lists:** run `npm run seeds:simplified -- --refresh-meta`, then
    `npm run seeds:simplified`, and commit both. The drift test checks against the snapshot in
    `tests/fixtures/simplified-seed-meta/`, not against the live site.
-2. **`npm run dogfood:check`** and the **full `npm run nav:check -- --ongoing`** (app closed, about
-   55 min together). These drive the real pages against the upgraded site.
+2. **`npm run dogfood:check`** and the **full `npm run nav:check -- --ongoing`** (about 55 min
+   together; the app may stay open — each run has its own profile folder). These drive the real pages against the upgraded site.
 3. **Re-read what is named in code:** the Create ▾ catalog's `cscript` handlers
    (`so-create-menu.js`), Receive Payment's `get_outstanding_documents` (`erp-form-bridge-page.js`),
    the tab DOM and `Form.prototype.refresh` that Simplified rewires (G2, G4,
@@ -439,7 +449,7 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
 | Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |
-| In-field calculator | `src/calc/` (`calc-engine.js`, `attach-field-calc.js`, `field-calc.js`, `back-in-amount.js`, `session-history.js`, `site-rounding.js`) | Doc form numeric fields (Bill / PO / IR) + left-rail Calculator history; 24h prune in `nav-state.json`. **The tape (5zorro 2026-10-25, review 10-19 R13-1):** only the result going in is rounded, to the site's places, by *Round* (mathematical) / *Round up* / *Round down* — a toggle pinned to the tape's top, remembered in the Doc page's local storage (`calc-rounding-convention`), with an ⓘ in plain words; what was dropped shows in a yellow row ("Rounds to 5.03 — remainder −5/1000") that stays ~5 s after Enter. `=` on a box at rest opens the tape; ↩ on a past calculation in its history resumes from the unrounded result (history entries keep `exact`). Typed operands keep their places on the tape. **Known limit:** the places are the site's (`currency_precision` / `float_precision`), not a field's own precision set in Customize Form — a field customized to more places would be rounded to fewer than ERPNext keeps |
+| In-field calculator | `src/calc/` (`calc-engine.js`, `attach-field-calc.js`, `field-calc.js`, `back-in-amount.js`, `session-history.js`, `site-rounding.js`, `site-rounding-ask.js`) | Doc form numeric fields (Bill / PO / IR) + left-rail Calculator history; 24h prune in `nav-state.json`. **The tape (5zorro 2026-10-25, review 10-19 R13-1):** only the result going in is rounded, to the site's places, by *Round* (mathematical) / *Round up* / *Round down* — a toggle pinned to the tape's top, remembered in the Doc page's local storage (`calc-rounding-convention`), with an ⓘ in plain words; what was dropped shows in a yellow row ("Rounds to 5.03 — remainder −5/1000") that stays ~5 s after Enter. `=` on a box at rest opens the tape; ↩ on a past calculation in its history resumes from the unrounded result (history entries keep `exact`). Typed operands keep their places on the tape. **Known limit:** the places are the site's (`currency_precision` / `float_precision`), not a field's own precision set in Customize Form — a field customized to more places would be rounded to fewer than ERPNext keeps |
 | Link search (T1) | `link-search.js`, `vendor-activity.js`, `link-picker-open-set.js`, `link-list-cache.js`, `missing-vendor.js`, `missing-vendor-ui.js` | Normalize `search_link` rows; idle/never-PO vendors sink (OI-131). A picker adds **no** page-wide listener of its own: the line tables are rebuilt on every paint, so per-picker `window`/`document` listeners piled up all day (review 10-19 R5-1). Page-wide resize / scroll / click-outside go through the one open-dropdown set. **Tab / Enter never commits from a list fetched for other text** (review 10-19 R5b-1, `linkPickerCommitPlan`): only the newest search paints; an exact match of the typed text is taken at once; otherwise the key is held and replayed when the list for the typed text is in, so a fast Tab does what a slow one would — **also before the box's first list has come back** (a search pending for the typed text holds the key; without that, a fast typist's first Tab in a box left the half-typed text behind; review 2026-10-22). *Create …* (Vendor, Item, …) is offered only when nothing matches, so a held Tab lands on it only then — warm list or not. A held Tab whose search fails, or finds nothing with no *Create* row, stays in the box showing why; the next Tab leaves. Esc cancels a search still on its way. **A pick owns its write:** the box's own `change` (it fires on leaving the box after typing, and a vendor pick moves focus into the source picker at once) does not write the picked value again (`linkPickOwnsCommit`, `data-link-picking`) — the doubled vendor write answered ~9 s later and its repaint dropped the clerk out of the line they were typing; the PO's vendor-pick repaint keeps the clerk's place too. **Warm pick lists** (plan 2026-10-21, `link-list-cache.js`): main keeps a copy of 8 rarely-changed lists (vendors, customers, items, terms, methods, projects, tax templates) per logged-in user and answers *unfiltered* searches from it **in ERPNext's own order** (which 25: where the text sits in the name, then `idx`, then the list's sort; shown prefix-first then string order; vendors re-ranked by PO activity) — a copy that ordered differently would change what a fast Tab picks. A miss asks ERPNext; a Doc page opening runs "changed since" (count mismatch → reload); *Refresh* under the dropdown reloads; a login change drops the copies. ERP-page calls there use `frappe.xcall` only (`docs/gotchas.md` G19). **An open dropdown never outlives its page:** leaving the Doc surface (main's `setSurfaceMode` → `doc-surface-left`), a different document painted, or the window losing focus closes it (plan 2026-10-21 D1). **A vendor is checked live before the Bill, PO or Item Receipt uses it** (`doc-link-exists`, not the copy): a missing one gets a banner and opens no sources (D2, R5b-5). Waits inside the ERPNext page yield a real turn — `frappe.after_ajax` calls back synchronously when idle (G20) |
 | Doc skin UI (M3c–d + T1) | `bill-map` + `electron/bill.html` | Doc Bill; lines `set_value`; ▾ Link pickers |
 | **Fixed** Source modal after vendor | `docs/bug-bounty-source-modal-vendor-pick.md` | HAR: PR Item 403; enrich removed (`4c8f72b`) |
@@ -498,9 +508,9 @@ cell on *lands*, *typing* (never lost without a question), *back* and *focus* (`
 `-- --ongoing` adds a scripted long session and the cruft check on the rail's lists
 (`src/nav-cruft.js`). **When to run it (5zorro 2026-10-24):** after a navigation change, only the
 cells it touches — `NAV_ONLY=<start>/<state>/<move>,…`, one start (`npm run nav:check -- drafts`,
-2–4 min) or the probe that reproduced the bug; the **full** `npm run nav:check -- --ongoing` (~30 min,
-the app closed the whole time) only when 5zorro says he is about to push. A full run blocks him from
-opening the app, so it is not the default. A cell that changes is a finding to explain, not a test
+2–4 min) or the probe that reproduced the bug; the **full** `npm run nav:check -- --ongoing` (~30 min)
+only when 5zorro says he is about to push. Since plan 2026-10-26 it no longer blocks him from using
+the app (each run has its own profile folder), but it is still long and loads the machine. A cell that changes is a finding to explain, not a test
 to update. The rules it
 fixed (2026-10-24):
 
@@ -695,11 +705,35 @@ and a live ERPNext dependency.
 
 | Layer | Role | Tool | CI gate? |
 |-------|------|------|----------|
-| **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope); `npm run test:flaky` lists tests that failed and passed on the same code; the last 50 logs are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
+| **1. Pure unit** | Business logic in `src/` | `node --test` via `npm test` (`scripts/run-tests.js`): every run also leaves a TAP copy in untracked `test-logs/runs/` and a line in `test-logs/runs.tsv` (code fingerprint, counts, failing names, scope) — and so does every Playwright run of the specs (layer 3) and probes (3b), one line per `--repeat-each` repeat, through the reporter `scripts/playwright-run-log.js` in both configs (a `--reporter=…` flag replaces it: leave it off); `npm run test:flaky` lists tests that failed and passed on the same code, unit or Playwright, and `npm run test:times` where each spec's and probe's time goes (a failed or timed-out test's chart and the run's debug trail are also kept in `test-logs/failures/`, the newest 30; charts not rewritten for 30 days are swept); the last 50 logs of each kind (unit, spec, probe) are kept, and the flaky report is appended to `test-logs/flaky-history.md` (64 KB, oldest entries cut) before any is deleted. A red run is evidence: read its log before re-running | **Yes — required** |
 | **2. ERP workflow e2e** (bulk of “full suite”) | Doc/Desk paths against unmodified ERP | Playwright **as a browser** → `ERP_BASE` | Optional; **skip-OK** if ERP down |
 | **3. Shell smoke e2e** | One smoke per scaffold | Playwright `_electron` + `E2E=1` `__erpE2e` surface (see `e2e/GOTCHAS.md`). Specs: `scaffold-*.spec.js`. | Optional; **not** merge gate |
-| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — backs up and restores the prefs, refuses while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
+| **3b. Probes** | One question against the real app and the live sandbox ("does this still happen?"), kept so the next session does not write it again (5zorro 2026-10-22) | `tests/probes/*.probe.js` via `npm run probe -- <name>` — each run in its own throwaway profile folder (`scripts/test-profile.js`), so it never touches the clerk's prefs or login and runs while the app is open; rules in `tests/probes/README.md`. A probe that should stay proven moves to `e2e/`. Probes tagged `@dogfood <row>` are the check before a dogfood round: `npm run dogfood:check` (pass / FAIL / yours per row of the active plan's *Dogfood residuals*), and `npm run dogfood:setup -- <row>` leaves that row's `ZZ DF …` records on the sandbox for a person. Probes tagged `@nav` are the navigation matrix: `npm run nav:check` (see § Navigation spine). A probe can act as a **restricted sandbox user** (`tests/probes/probe-user.js`: set the scene as Administrator, drive the pages as a clerk with only some roles). It is retired (disabled, sessions ended) even when the run is interrupted. 5zorro 2026-10-24: most real users have limited permissions, so new probes act as one | Never |
 | **4. Manual** | Feel / dogfood | You (+ **ERP console**) | Never a substitute for layer 1 |
+
+**Test runs never touch the clerk's app (plan 2026-10-26, closed; 5zorro: *"the biggest thing was
+the 'i can't work while the probes are running'"*).**
+- **Own profile folder.** Every spec and probe run gets a throwaway profile folder
+  (`scripts/test-profile.js`, both Playwright configs' global setup). It is seeded with the prefs
+  and the login, not the logs or Local Storage. The app moves `userData` there only when
+  `E2E=1` and `ERP_USER_DATA_DIR` are set. So no backup or restore, and **runs go while his app is
+  open**. A new test tool must keep this: find the shared resource rather than ask him to close the
+  app.
+- **What is still shared:** the ERPNext sandbox (scenes change `ZZ DF …` records) and the machine
+  (timing probes may be flakier while he works).
+- **One probe run at a time** (`test-logs/probe-run.lock.json`; a second waits, up to an hour). A
+  run starts by retiring any leftover probe user, which would end another run's clerk. A spec run
+  can go alongside.
+- **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
+  A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
+  `test-logs/failures/` (the newest 30). Nothing kept goes under `test-results/`, which Playwright
+  empties at the start of every spec run.
+- **Chaos mode** delays each ERPNext call once, as real life would.
+- **Known limit of `test:times`:** a polling loop written with `sleep` counts as the test's own
+  wait, though it is waiting on the app; `expect.poll` does not (≤ 4 s where seen).
+- **Not done:** the smoke specs still start from a copy of the clerk's prefs, so the ones that read
+  `lens-prefs.json` fail on his `"sales-order": "vanilla"`. They should set their own lens and
+  scene; easier now that each run has its own folder.
 
 **Gotcha summary:** WebContentsViews are not reliable Playwright Pages — drive via `evaluate` /
 `execInView`, not `firstWindow()` clicks. Pure logic stays in `npm test`. Details: `e2e/GOTCHAS.md`.
@@ -897,6 +931,7 @@ cd ~/erpnext-ui-app && npm test && npm start
 |---|---|
 | `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
+| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
 | `npm run probe -- <name>` | One probe against the real app and the sandbox (`tests/probes/README.md`) |
 | `npm run dogfood:check` · `npm run dogfood:setup -- <row>` | Every `@dogfood` probe before a round; a row's scene left on the sandbox |

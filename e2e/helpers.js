@@ -9,6 +9,7 @@ import { _electron as electron } from "@playwright/test";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { setTimingLabel, timed } from "./test-timing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..");
@@ -23,23 +24,34 @@ export const ELECTRON_ARGS = [
   "--disable-dev-shm-usage",
 ];
 
-/** @returns {Promise<import('@playwright/test').ElectronApplication>} */
+/**
+ * Start the app. Its start-up time, and chaos mode if on, go on the test's timing
+ * (e2e/test-timing.js).
+ * @returns {Promise<import('@playwright/test').ElectronApplication>}
+ */
 export async function launchShell() {
-  return electron.launch({
-    executablePath: electronBinary,
-    args: ELECTRON_ARGS,
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      E2E: "1",
-      ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
-    },
-    timeout: 60_000,
-  });
+  if (process.env.ERP_CHAOS_LAG_MS) setTimingLabel("chaosMode", `${process.env.ERP_CHAOS_LAG_MS}ms/${process.env.ERP_CHAOS_LAG_PCT || 0}%`);
+  return timed("launch", () =>
+    electron.launch({
+      executablePath: electronBinary,
+      args: ELECTRON_ARGS,
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        E2E: "1",
+        ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
+      },
+      timeout: 60_000,
+    }),
+  );
 }
 
 /** Wait until main published __erpE2e (after createWindow + syncE2eApi). */
 export async function waitForE2eApi(app, timeoutMs = 20_000) {
+  return timed("appReady", () => waitForE2eApiUntimed(app, timeoutMs));
+}
+
+async function waitForE2eApiUntimed(app, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const ok = await app.evaluate(() => !!globalThis.__erpE2e);

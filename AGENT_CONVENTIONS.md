@@ -40,6 +40,10 @@ rules directory it replaces. `HANDOFF.md` is the tracked, public architecture SS
    effort level, window size, context-usage percentage or token count per file or session. Size
    review sessions by slice count. `scripts/check-commit-attribution.sh` (the commit-msg hook and the
    CI range check) refuses the common forms in messages and in added lines.
+8. **A cited commit must exist.** A commit hash in a message or an added line names a commit in this
+   repository — never one from a branch that was not pushed, or from before a rebase. The same
+   script refuses a hash it cannot find: in messages and Markdown any 7–40 hex word with a digit and
+   a letter, in other files only inside `code spans`. Cite another repository as `owner/repo@hash`.
 
 ## Process
 

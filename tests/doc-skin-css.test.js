@@ -14,6 +14,14 @@ const docFormPage = readFileSync(
   join(fileURLToPath(new URL("../src/doc-form-page.js", import.meta.url))),
   "utf8",
 );
+const itemRows = readFileSync(
+  join(fileURLToPath(new URL("../src/doc-form-item-rows-ui.js", import.meta.url))),
+  "utf8",
+);
+const itemTableKeys = readFileSync(
+  join(fileURLToPath(new URL("../src/item-table-keys-ui.js", import.meta.url))),
+  "utf8",
+);
 const docSkinCss = readFileSync(join(electronDir, "doc-skin.css"), "utf8");
 const billDashboardCss = readFileSync(join(electronDir, "bill-dashboard.css"), "utf8");
 const docFieldsCss = readFileSync(join(electronDir, "doc-fields.css"), "utf8");
@@ -154,42 +162,37 @@ describe("Packet T step B — display layer (2026-09-06)", () => {
     assert.match(docFieldsCss, /\[data-cell-mode="nav"\] td\.cell-wrap:focus-within \{[^}]*background:/s);
   });
 
-  it("both row builders emit the display layer, and keep their testids", () => {
+  it("the shared row builder emits the display layer, and each page keeps its testids", () => {
+    // Since plan 10-25 R6a-1 step 3 both pages paint their lines through src/doc-form-item-rows-ui.js.
+    assert.match(
+      itemRows,
+      /<td class="cell-wrap"><span class="cell-text">\$\{escapeHtml\(val\)\}<\/span>/,
+      "row builder lost its text layer",
+    );
+    assert.match(itemRows, /data-testid="\$\{p\}-cell-\$\{ri\}-\$\{col\.field\}"/, "row builder lost its cell testid");
     for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      const prefix = label === "bill" ? "bill" : "doc";
-      assert.match(
-        src,
-        new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(val\\)\\}</span>`),
-        `${label} row builder lost its text layer`,
-      );
-      assert.match(
-        src,
-        new RegExp(`data-testid="${prefix}-cell-\\$\\{ri\\}-\\$\\{col\\.field\\}"`),
-        `${label} row builder lost its cell testid`,
-      );
+      assert.match(src, /createItemRows\(\{/, `${label} does not use the shared rows`);
+      assert.match(src, new RegExp(`testIdPrefix: "${label}"`), `${label} lost its testid prefix`);
     }
   });
 
   it("read-only cells wrap too — reading a submitted doc is still reading", () => {
-    for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(
-        src,
-        /<td class="cell-wrap"><span class="cell-text ro">/,
-        `${label} read-only branch does not wrap`,
-      );
-    }
+    assert.match(itemRows, /<td class="cell-wrap"><span class="cell-text ro">/, "read-only branch does not wrap");
   });
 
   it("mirrors the cell mode to the DOM through a single setter", () => {
     // The mode used to live only in a module-local variable, so no stylesheet
     // could see it. Every assignment must go through the setter or the CSS
-    // silently desyncs from the real mode.
+    // silently desyncs from the real mode. Since plan 10-25 0a the mode lives in
+    // the shared lines-table keys module, and both pages go through it.
+    assert.match(itemTableKeys, /function setItemCellMode\(mode\) \{/, "no setter");
+    assert.match(itemTableKeys, /table\.dataset\.cellMode = itemCellMode;/, "does not mirror");
+    // Only the setter itself may assign the variable directly.
+    const direct = [...itemTableKeys.matchAll(/^\s*itemCellMode = /gm)];
+    assert.equal(direct.length, 1, `${direct.length} raw itemCellMode assignments`);
     for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(src, /function setItemCellMode\(mode\) \{/, `${label} has no setter`);
-      assert.match(src, /el\.items\.dataset\.cellMode = itemCellMode;/, `${label} does not mirror`);
-      // Only the setter itself may assign the variable directly.
-      const direct = [...src.matchAll(/^\s*itemCellMode = /gm)];
-      assert.equal(direct.length, 1, `${label} has ${direct.length} raw itemCellMode assignments`);
+      assert.match(src, /createItemTableKeys\(\{/, `${label} does not use the shared keys`);
+      assert.doesNotMatch(src, /itemCellMode/, `${label} keeps its own cell mode`);
     }
   });
 });

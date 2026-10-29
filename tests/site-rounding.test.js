@@ -23,6 +23,7 @@ import {
 import { createFieldCalcState, reduceFieldCalc, commitFieldCalc, resumeFieldCalc } from "../src/calc/field-calc.js";
 import { makeCalcHistoryEntry } from "../src/calc/session-history.js";
 import { moneyOrSum } from "../src/money.js";
+import { createSiteRoundingAsk, SITE_ROUNDING_ASK_MS } from "../src/calc/site-rounding-ask.js";
 
 const CENTS = { precision: 2, method: ROUNDING_BANKERS };
 
@@ -189,13 +190,72 @@ describe("wiring", () => {
   for (const page of ["doc-form-page.js", "bill-form-page.js"]) {
     it(`${page}: the tape and the Add box use the site's rounding and the clerk's convention`, () => {
       const src = fs.readFileSync(new URL(`../src/${page}`, import.meta.url), "utf8");
-      assert.match(src, /getSiteRounding: \(\) => \{\s*loadSiteRounding\(\);\s*return siteRounding;/);
-      assert.match(src, /if \(r && r\.known\) siteRounding = r;/); // a default answer is asked for again
-      assert.match(src, /moneyOrSum\(typed, moneyRounding\(\)\)/);
-      assert.match(src, /convention: calcUi\.getConvention\(\)/);
+      assert.match(src, /const siteRounding = createSiteRoundingAsk\(\{ api: \(\) => api, convention: \(\) => calcUi\.getConvention\(\) \}\)/);
+      assert.match(src, /getSiteRounding: \(\) => siteRounding\.ask\(\)/);
+      assert.match(src, /moneyOrSum\(typed, siteRounding\.money\(\)\)/);
       assert.doesNotMatch(src, /parseMoneyOrSum\(/);
     });
   }
+});
+
+describe("createSiteRoundingAsk (one copy for the Bill and doc-form pages, plan 10-25 R6a-1)", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  function setup(answers) {
+    let t = 0;
+    const asked = [];
+    const api = {
+      getSiteRounding: () => {
+        asked.push(t);
+        return Promise.resolve(answers.shift());
+      },
+    };
+    const site = createSiteRoundingAsk({ api: () => api, convention: () => "up", now: () => t });
+    return { site, asked, advance: (ms) => (t += ms) };
+  }
+  const KNOWN = { known: true, method: ROUNDING_BANKERS, currency: 2, float: 3 };
+
+  it("the site's answer is kept and never asked for again", async () => {
+    const { site, asked, advance } = setup([KNOWN]);
+    assert.equal(site.ask(), null);
+    await settle();
+    assert.equal(site.ask(), KNOWN);
+    advance(60_000);
+    site.ask();
+    assert.equal(asked.length, 1);
+  });
+
+  it("a default answer (read during a reload) is asked for again, at most every 10 s", async () => {
+    const { site, asked, advance } = setup([{ known: false }, KNOWN]);
+    site.ask();
+    await settle();
+    assert.equal(site.ask(), null);
+    advance(SITE_ROUNDING_ASK_MS - 1);
+    site.ask();
+    assert.equal(asked.length, 1);
+    advance(1);
+    site.ask();
+    await settle();
+    assert.equal(asked.length, 2);
+    assert.equal(site.ask(), KNOWN);
+  });
+
+  it("one question at a time; none without an api", async () => {
+    const { site, asked, advance } = setup([]);
+    site.ask();
+    advance(SITE_ROUNDING_ASK_MS);
+    site.ask();
+    assert.equal(asked.length, 1);
+    const none = createSiteRoundingAsk({ api: () => null, convention: () => "round" });
+    assert.equal(none.ask(), null);
+  });
+
+  it("the Add box rounds to the stock default until the site answers, by the clerk's convention", async () => {
+    const { site } = setup([{ ...KNOWN, currency: 3 }]);
+    assert.deepEqual(site.money(), { precision: DEFAULT_SITE_ROUNDING.currency, method: DEFAULT_SITE_ROUNDING.method, convention: "up" });
+    site.ask();
+    await settle();
+    assert.deepEqual(site.money(), { precision: 3, method: ROUNDING_BANKERS, convention: "up" });
+  });
 });
 
 describe("↩ resume a past calculation before rounding (5zorro 2026-10-25)", () => {

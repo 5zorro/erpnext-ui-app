@@ -14,11 +14,7 @@ import {
 import { docFormMapFor } from "./doc-skin-registry.js";
 import { salesProgressCells } from "./sales-doc-map.js";
 import { billMoneyStack } from "./bill-map.js";
-import {
-  readBillTaxRowsForSort,
-  sortBillTaxRows,
-  DOC_TAX_SORTABLE_HEADERS,
-} from "./bill-tax-sort.js";
+import { BILL_TAX_SORTABLE_HEADERS } from "./bill-tax-sort.js";
 import {
   formatGroupedNumber,
   formatUsdAmountHtml,
@@ -26,7 +22,6 @@ import {
   moneyOrSum,
 } from "./money.js";
 import {
-  nextItemFocusAfterEdit,
   itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "./link-picker-policy.js";
@@ -35,18 +30,18 @@ import {
   mountColResize,
   mountDensityControl,
 } from "./item-col-resize.js";
-import {
-  CELL_MODE_EDIT,
-  CELL_MODE_NAV,
-  itemTableKeyDecision,
-  neighborItemCell,
-  shouldLeaveItemTableBackward,
-} from "./item-table-nav.js";
+import { CELL_MODE_EDIT, CELL_MODE_NAV } from "./item-table-nav.js";
+import { createItemTableKeys } from "./item-table-keys-ui.js";
+import { createSiteRoundingAsk } from "./calc/site-rounding-ask.js";
+import { wireDateField } from "./doc-form-date-field-ui.js";
+import { setLineTab, wireLineTabs } from "./doc-form-line-tabs-ui.js";
+import { createTaxNotes } from "./doc-form-tax-notes-ui.js";
+import { createCommitGate } from "./doc-form-commit-gate-ui.js";
+import { createItemRows } from "./doc-form-item-rows-ui.js";
+import { createTaxTable } from "./doc-form-tax-table-ui.js";
 import {
   emptyItemRowCleanupAction,
-  isEmptyItemCode,
   lastItemRowToast,
-  shouldBlockDeleteLastItemRow,
 } from "./bill-item-guard.js";
 import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
@@ -63,20 +58,13 @@ import {
 } from "./dirty-gate.js";
 import {
   filterDateInputValue,
-  isAllowedDateInputChar,
   parseDocDate,
   formatDocDateDisplay,
 } from "./doc-date.js";
 import {
-  shouldOpenCommitGate,
-  normalizeCommitGateChoice,
-  commitGateAllowsAction,
-} from "./bill-toolbar.js";
-import {
   billExpensesTaxOrientation,
   commitGateProgressLabel,
   commitGateSuccessLabel,
-  nextAfterGate,
   formatSaveFailureReason,
 } from "./bill-action-flow.js";
 import {
@@ -85,7 +73,6 @@ import {
   docCommitGateSaveWarning,
   docCommitGateErpFailureView,
   commitGateSaveEnabled,
-  reduceCommitGatePhase,
   linkDoctypeForDocField,
   focusTargetAfterDocSourceModal,
   splitHeaderColumns,
@@ -107,21 +94,11 @@ import {
   vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
-import { taxDefaultWhy } from "./tax-default-why.js";
 import { uiIconHtml } from "./ui-icons.js";
-import { taxRowNavFields } from "./bill-tax-table-nav.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
-import {
-  paintCommitGateValidation,
-  setCommitGateBusy,
-  commitGateTitleText,
-  configureDirectSaveGateChrome,
-  showCommitGate,
-  hideCommitGateEl,
-  wireCommitGateChrome,
-} from "./doc-commit-gate-ui.js";
+import { wireCommitGateChrome } from "./doc-commit-gate-ui.js";
 import {
   docLifecyclePill,
   focusFinalizeControl,
@@ -130,7 +107,6 @@ import {
   REFRESH_BUTTON_TITLE,
 } from "./doc-chrome.js";
 import { createFieldCalcUi } from "./calc/attach-field-calc.js";
-import { DEFAULT_SITE_ROUNDING } from "./calc/site-rounding.js";
 import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
 import { addressTextareaRows } from "./address-format.js";
@@ -167,11 +143,48 @@ let api = null;
 /** @type {import("./doc-skin-registry.js").ReturnType<import("./doc-skin-registry.js").docFormUiPayload>} */
 let ui = null;
 let lastDoc = null;
-/** DF-02 taxes: rows whose Amount the clerk typed over a percentage (row name → old rate). */
-const taxRowsFixedByClerk = new Map();
-/** DF-02 Remove all: documents (under every name each has had) whose taxes the clerk removed. */
-const taxesRemovedOn = new Set();
 let removingTaxes = false;
+/**
+ * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the Bill page): the ⓘ on a
+ * row the clerk made a fixed amount, "Vendor tax template default ⓘ", and holding Remove all.
+ */
+const taxNotes = createTaxNotes({
+  el: () => el,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  setStatus: (text, cls) => setStatus(text, cls),
+  removingTaxes: () => removingTaxes,
+  removeAllTaxes: (opts) => removeAllTaxes(opts),
+  testIdPrefix: "doc",
+});
+/** The taxes table (src/doc-form-tax-table-ui.js, shared with the Bill page; the Bill's way). */
+const taxTable = createTaxTable({
+  el: () => el,
+  head: () => el && el.taxesHead,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  painting: () => painting,
+  editable: () => editable(),
+  shown: () => !!(ui && ui.features.taxes),
+  // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
+  // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
+  readOnly: () => !!(ui && ui.features.taxesReadOnly),
+  headers: BILL_TAX_SORTABLE_HEADERS,
+  defaultSort: { key: "lineNo", asc: true },
+  testIdPrefix: "doc",
+  taxNotes,
+  mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
+  repaint: (res) => paint(res.doc, res.scratch || scratch),
+  refresh: () => refresh(),
+  setStatus: (text, cls) => setStatus(text, cls),
+  noteUserEdit: () => noteUserEdit(),
+  sizeColumns: () => sizeTaxColumns(),
+  paintMoneyStack: (doc) => paintMoneyStack(doc),
+  // The ⓘ explains purchase templates; A/R taxes follow the customer's Sales Taxes template.
+  beforeRows: (doc) => {
+    if (el.taxDefault) el.taxDefault.hidden = !isPurchaseTaxDoc(doc);
+  },
+});
 /** @type {{ dateExpected?: string }} */
 let scratch = {};
 let painting = false;
@@ -190,15 +203,10 @@ let attachList = null;
 let soCreate = null;
 /** The Sources column on the Sales Order (src/so-line-sources-ui.js, plan 2026-10-12 S4). */
 let lineSources = null;
-/** @type {Promise<void>|null} */
-let lineApplyInFlight = null;
 /** @type {boolean} */
 let saveInFlight = false;
-/** @type {import("./bill-action-flow.js").GateTrigger|null} */
-let pendingGate = null;
 /** @type {string[]} */
 let metaBlockers = [];
-let metaPreflightSeq = 0;
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
 const sourceModalOpenRef = { current: false };
@@ -209,67 +217,44 @@ let sourcePickerInflight = null;
 /** @type {string} */
 let sourcePickerInflightSupplier = "";
 const addressPickerOpenRef = { current: false };
-/** Suppress blur cleanup while Tab/arrow handlers are mid-flight. */
-let itemTabGuard = false;
-/** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
-let itemCellMode = CELL_MODE_EDIT;
-
 /**
- * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
- * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
- * (it is a one-shot handoff to the focus handler), so nothing survives for a
- * stylesheet to match on.
- * @param {"edit"|"nav"} mode
+ * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last box
+ * (src/item-table-keys-ui.js, shared with the Bill page). `itemKeys.busy()` is true while a Tab or
+ * arrow is committing a cell.
  */
+const itemKeys = createItemTableKeys({
+  table: () => el && el.items,
+  editable: () => editable(),
+  painting: () => painting,
+  calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+  lastDoc: () => lastDoc,
+  lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+  lineKey: (line) => line.item_code,
+  log: logFocus,
+  leaveBackward: () => {
+    focusLastHeaderBeforeItems();
+  },
+  repaint: () => {
+    if (lastDoc) paintItems(lastDoc);
+  },
+});
+
+/** @param {"edit"|"nav"} mode */
 function setItemCellMode(mode) {
-  itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-  try {
-    if (el && el.items) el.items.dataset.cellMode = itemCellMode;
-  } catch {
-    /* mode mirroring is cosmetic; never let it break navigation */
-  }
+  itemKeys.setMode(mode);
 }
 
 /** @type {{ key: string, asc: boolean }} */
 /** @type {import("./item-sort-specs.js").SortSpec[]} */
 let itemSortSpecs = [{ key: "lineNo", asc: true }];
 let itemsHeadWired = false;
-/** @type {import("./item-sort-specs.js").SortSpec[]} */
-let taxSortSpecs = [{ key: "account_head", asc: true }];
-let taxesHeadWired = false;
 /** @type {Record<string, HTMLInputElement|HTMLTextAreaElement>} */
 const headerInputs = {};
 /** @type {{ qtyIdx: number, amtIdx: number }} */
 let totalsLayout = { qtyIdx: 2, amtIdx: 4 };
 
-/** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
-let siteRounding = null;
-let siteRoundingAsked = false;
-let siteRoundingAskedAt = 0;
-/**
- * Ask main for it until the site has really answered (a read during a reload gets the default) —
- * at most every 10 s: the tape asks on every key, and ERPNext may be down for a while.
- */
-function loadSiteRounding() {
-  if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
-  if (Date.now() - siteRoundingAskedAt < 10_000) return;
-  siteRoundingAskedAt = Date.now();
-  siteRoundingAsked = true;
-  api
-    .getSiteRounding()
-    .then((r) => {
-      if (r && r.known) siteRounding = r;
-    })
-    .catch(() => {})
-    .finally(() => {
-      siteRoundingAsked = false;
-    });
-}
-/** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
-function moneyRounding() {
-  const site = siteRounding || DEFAULT_SITE_ROUNDING;
-  return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
-}
+/** The site's rounding (R13-1; src/calc/site-rounding-ask.js, shared with the Bill page). */
+const siteRounding = createSiteRoundingAsk({ api: () => api, convention: () => calcUi.getConvention() });
 const calcUi = createFieldCalcUi({
   overlay: document.getElementById("calc-overlay"),
   exprEl: document.getElementById("calc-expr"),
@@ -278,10 +263,7 @@ const calcUi = createFieldCalcUi({
   getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
   copyHistory: (id, mode) =>
     api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
-  getSiteRounding: () => {
-    loadSiteRounding();
-    return siteRounding;
-  },
+  getSiteRounding: () => siteRounding.ask(),
 });
 
 function publishCalcHistory(payload) {
@@ -357,6 +339,8 @@ function buildDocFormEl() {
     taxesBlock: document.getElementById("doc-taxes-block"),
     taxesHead: document.getElementById("taxes-head-row"),
     taxesBody: document.getElementById("taxes-body"),
+    taxesTotals: document.getElementById("taxes-totals"),
+    taxesSubtotal: document.getElementById("tot-taxes"),
     taxesAdd: document.getElementById("taxes-add"),
     taxAccount: document.getElementById("f-tax-account"),
     taxAmount: document.getElementById("f-tax-amount"),
@@ -419,6 +403,60 @@ function commitGateEls() {
 const userMoves = createUserMoveGuard();
 document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
 document.addEventListener("pointerdown", () => userMoves.bump(), true);
+
+/** The lines table's rows (src/doc-form-item-rows-ui.js, shared with the Bill). */
+const itemRows = createItemRows({
+  table: () => el && el.items,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  painting: () => painting,
+  editable: () => editable(),
+  lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+  keyField: "item_code",
+  itemKeys,
+  calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+  testIdPrefix: "doc",
+  rateLabel: "Rate",
+  lineNoTitle: () => `${docTitle()} line number`,
+  cellsOf: (model) => model.cells,
+  cellHtml: (col, _val, model, _canEdit, doc) => {
+    if (!col.sources) return null;
+    const ri = model.rowIndex;
+    const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
+    return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
+  },
+  canDeleteLines: () => linesAreAddable(),
+  afterRows: (doc) => {
+    paintLineTotals(doc);
+    sizeItemColumns();
+  },
+  navFields: () => itemNavFieldsFromCols(ui.itemCols),
+  isMoneyField: (field) => field === "rate" || isMoneyCol(field),
+  linkDoctype: (field) => linkDoctypeForDocField(field, ui.headerFields, ui.itemCols),
+  mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
+  attachCalc: (inp, opts) =>
+    calcUi.attach(inp, {
+      kind: opts.kind,
+      isPainting: () => painting,
+      isEditable: () => editable(),
+      onHistory: publishCalcHistory,
+      onCommit: opts.onCommit,
+    }),
+  deleteLine: (ri) => api.deleteItem(ri),
+  repaint: (res) => paint(res.doc, res.scratch || scratch),
+  lastRowToast: () => lastItemRowToast(docTitle()),
+  showToast,
+  setStatus,
+  noteUserEdit,
+  setItemCellMode,
+  focusItemCell,
+  focusAfterLeaving: () => focusAfterLeavingItemsTable(),
+  userMoves,
+  logFocus,
+  refresh: () => refresh(),
+  cleanupEmptyLine: (ri, code) => cleanupEmptyItemRow(ri, code),
+  beginAmountBackIn,
+});
 
 /** The line cell a "create …" peek was opened from (DF-02). */
 let peekReturn = null;
@@ -758,173 +796,53 @@ function currentSaveBlockers() {
   );
 }
 
-function hideCommitGate() {
-  pendingGate = null;
-  configureDirectSaveGateChrome(commitGateEls(), { active: false, copyEl: el.commitGateCopy });
-  hideCommitGateEl(commitGateEls());
-  setGateBusy(false);
-}
-
-function gateToolbarAction() {
-  if (!pendingGate) return "";
-  if (pendingGate.kind === "toolbar") return pendingGate.action;
-  if (pendingGate.kind === "direct-save") return "direct-save";
-  return "";
-}
-
-function openDirectSaveBlockedGate(blockers, opts = {}) {
-  pendingGate = { kind: "direct-save", submit: !!opts.submit };
-  if (el.commitGateTitle) {
-    el.commitGateTitle.textContent = opts.submit ? "Cannot submit yet" : "Cannot save yet";
-  }
-  configureDirectSaveGateChrome(commitGateEls(), {
-    submit: !!opts.submit,
-    active: true,
-    copyEl: el.commitGateCopy,
-  });
-  const title = docTitle();
-  if (opts.erpFailure) {
-    paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(opts.reason, title));
-  } else {
-    paintCommitGateValidation(commitGateEls(), {
-      blockers,
-      blocked: true,
-      title: "Save is blocked by:",
-      cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
-    });
-  }
-  setGateBusy(false);
-  showCommitGate(commitGateEls(), {
-    focusSurface: () => {
-      if (api && api.focusSurface) api.focusSurface();
+/**
+ * The commit gate (src/doc-form-commit-gate-ui.js, shared with the Bill page): the one gate over
+ * unsaved work, opened by Find / New / Print or a navigation, and the direct-save gate that shows
+ * why a Save or Submit was refused.
+ */
+const commitGate = createCommitGate({
+  els: commitGateEls,
+  api: () => api,
+  lastDoc: () => lastDoc,
+  userEdited: () => userEdited,
+  setStatus: (text, cls) => setStatus(text, cls),
+  focusSurface: () => {
+    if (api && api.focusSurface) api.focusSurface();
+  },
+  saveBlockers: () => currentSaveBlockers(),
+  setMetaBlockers: (blockers) => {
+    metaBlockers = blockers;
+  },
+  preflight: {
+    can: () => !!(api && api.listMandatory),
+    read: async () => {
+      await flushDateExpectedFromInput();
+      return api.listMandatory();
     },
-  });
-  void refreshMetaPreflight();
-}
-
-async function handleDirectSaveGateChoice(choice) {
-  const blockers = currentSaveBlockers();
-  if (!commitGateSaveEnabled(blockers)) {
-    refreshCommitGateHint();
-    setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
-    return;
-  }
-  reduceCommitGatePhase("idle", { type: "start-save", choice });
-  setGateBusy(true);
-  const saveRes = await doSave(choice === "submit");
-  if (!(saveRes && saveRes.ok)) {
-    const reason = (saveRes && saveRes.reason) || "Save failed.";
-    reduceCommitGatePhase("saving", { type: "error", reason });
-    setGateBusy(false);
-    if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
-      metaBlockers = saveRes.blockers;
-      paintCommitGateValidation(commitGateEls(), {
-        blockers: mergeSaveBlockers(
-          listDocFormSaveBlockers({
-            doc: lastDoc,
-            supplier: supplierInput() && supplierInput().value,
-          }),
-          saveRes.blockers,
-        ),
-        blocked: true,
-        title: "Save is blocked by:",
-        cancelHint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
-      });
-    } else {
-      paintCommitGateValidation(
-        commitGateEls(),
-        docCommitGateErpFailureView(reason, docTitle()),
-      );
-    }
-    return;
-  }
-  hideCommitGate();
-}
-
-function gateIsNewDoc() {
-  return !!(
-    lastDoc &&
-    (lastDoc.__islocal ||
-      !lastDoc.name ||
-      String(lastDoc.name).startsWith("new") ||
-      lastDoc.name === "new")
-  );
-}
-
-function setGateBusy(busy) {
-  setCommitGateBusy(commitGateEls(), {
-    busy,
-    toolbarAction: gateToolbarAction(),
-    isNewDoc: gateIsNewDoc(),
-    docTitle: docTitle(),
-    getSaveBlockers: currentSaveBlockers,
-  });
-}
-
-function refreshCommitGateHint() {
-  const blockers = currentSaveBlockers();
-  const title = docTitle();
-  paintCommitGateValidation(commitGateEls(), {
-    blockers,
-    blocked: blockers.length > 0,
-    title: blockers.length ? "Save is blocked by:" : `${title} + live ERP meta preflight passed`,
-    cancelHint: `Choose Cancel to return to the ${title} and fix these fields.`,
-    saveWarning: () => docCommitGateSaveWarning(blockers, title),
-  });
-  setGateBusy(false);
-}
-
-function openGate(trigger) {
-  if (
-    pendingGate &&
-    pendingGate.kind === "nav" &&
-    pendingGate.navToken &&
-    !(trigger && trigger.kind === "nav" && trigger.navToken === pendingGate.navToken) &&
-    api &&
-    api.resolveNavGate
-  ) {
-    api.resolveNavGate(pendingGate.navToken, false);
-  }
-  pendingGate = trigger;
-  if (el.commitGateTitle) {
-    el.commitGateTitle.textContent = commitGateTitleText(
-      docGateTriggerLabel(trigger, gateLabels()),
-    );
-  }
-  refreshCommitGateHint();
-  showCommitGate(commitGateEls(), {
-    focusSurface: () => {
-      if (api && api.focusSurface) api.focusSurface();
+    apply: (res) => {
+      metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
+      if (res && res.doc) paint(res.doc, res.scratch || scratch);
     },
-  });
-  void refreshMetaPreflight();
-}
-
-function cancelCommitGateFromOutside() {
-  if (!el.commitGate || el.commitGate.hidden) return;
-  const cancel = el.commitGate.querySelector("[data-gate='cancel']");
-  if (cancel && !cancel.disabled) resolveCommitGate("cancel");
-}
-
-async function refreshMetaPreflight() {
-  if (!api || !api.listMandatory) return;
-  const seq = ++metaPreflightSeq;
-  try {
-    await flushDateExpectedFromInput();
-    const res = await api.listMandatory();
-    if (seq !== metaPreflightSeq) return;
-    metaBlockers = res && Array.isArray(res.blockers) ? res.blockers : [];
-    if (res && res.doc) {
-      paint(res.doc, (res.scratch || scratch));
-    }
-  } catch {
-    if (seq !== metaPreflightSeq) return;
-    metaBlockers = [];
-  }
-  if (pendingGate && el.commitGate && !el.commitGate.hidden) {
-    refreshCommitGateHint();
-  }
-}
+  },
+  save: (submit) => doSave(submit),
+  afterDiscard: (res) => {
+    userEdited = false;
+    paint(res.doc, res.scratch || {});
+    paintDirtyPill();
+  },
+  runAction: (action) => runPendingAction(action),
+  announceBlocker: (text) => setStatus(text, "warn"),
+  text: {
+    title: () => docTitle(),
+    triggerLabel: (trigger) => docGateTriggerLabel(trigger, gateLabels()),
+    readyTitle: () => `${docTitle()} + live ERP meta preflight passed`,
+    cancelHint: () => `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
+    saveWarning: (blockers) => docCommitGateSaveWarning(blockers, docTitle()),
+    erpFailureView: (reason) => docCommitGateErpFailureView(reason, docTitle()),
+  },
+  directSave: { copyEl: () => el && el.commitGateCopy },
+});
 
 function docFindPrefill() {
   if (!ui || ui.profileId !== "po" || !lastDoc) return {};
@@ -975,138 +893,8 @@ async function runPendingAction(action) {
   }
 }
 
-async function requestToolbarAction(action) {
-  if (!api) return;
-  if (!shouldOpenCommitGate(userEdited)) {
-    hideCommitGate();
-    await runPendingAction(action);
-    return;
-  }
-  openGate({ kind: "toolbar", action });
-}
-
-async function resolveCommitGate(choiceRaw) {
-  const choice = normalizeCommitGateChoice(choiceRaw);
-  const trigger = pendingGate;
-  const navToken = trigger && trigger.kind === "nav" ? trigger.navToken : null;
-
-  if (!trigger || !choice || choice === "cancel") {
-    hideCommitGate();
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-    return;
-  }
-
-  if (trigger.kind === "direct-save") {
-    if (choice === "save" || choice === "submit") {
-      await handleDirectSaveGateChoice(choice);
-    }
-    return;
-  }
-
-  if (trigger.kind === "toolbar") {
-    const isNew = gateIsNewDoc();
-    const allow = commitGateAllowsAction(trigger.action, choice, { isNew });
-    if (!allow.ok) {
-      setStatus(allow.reason || "Cannot continue.", "warn");
-      return;
-    }
-  }
-
-  const plan = nextAfterGate(trigger, choice);
-  if (plan.then === "close") {
-    hideCommitGate();
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-    return;
-  }
-
-  if (choice === "discard") {
-    setGateBusy(true);
-    setStatus("Discarding unsaved changes…");
-    const res = await api.revertUnsaved();
-    if (!(res && res.ok)) {
-      setStatus((res && res.reason) || "Discard failed.", "err");
-      setGateBusy(false);
-      return;
-    }
-    userEdited = false;
-    paint(res.doc, res.scratch || {});
-    paintDirtyPill();
-  } else if (choice === "save" || choice === "submit") {
-    const blockers = currentSaveBlockers();
-    if (!commitGateSaveEnabled(blockers)) {
-      refreshCommitGateHint();
-      setStatus(blockers[0] || "Fix save prerequisites first.", "warn");
-      return;
-    }
-    reduceCommitGatePhase("idle", { type: "start-save", choice });
-    setGateBusy(true);
-    const saveRes = await doSave(choice === "submit");
-    if (!(saveRes && saveRes.ok)) {
-      const reason = (saveRes && saveRes.reason) || "Save failed.";
-      reduceCommitGatePhase("saving", { type: "error", reason });
-      setGateBusy(false);
-      if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
-        metaBlockers = saveRes.blockers;
-        paintCommitGateValidation(commitGateEls(), {
-          blockers: mergeSaveBlockers(
-            listDocFormSaveBlockers({
-              doc: lastDoc,
-              supplier: supplierInput() && supplierInput().value,
-            }),
-            saveRes.blockers,
-          ),
-          blocked: true,
-          title: "Save is blocked by:",
-          hint: `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
-        });
-      } else {
-        paintCommitGateValidation(commitGateEls(), docCommitGateErpFailureView(reason, docTitle()));
-      }
-      return;
-    }
-  }
-
-  hideCommitGate();
-  if (plan.then === "proceed-nav") {
-    if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, true);
-  } else {
-    await runPendingAction(trigger.action);
-  }
-}
-
 function focusItemCell(rowIndex, field, opts = {}) {
-  const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-  setItemCellMode(mode);
-  const wantSelect =
-    opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
-  const tryFocus = () => {
-    const inp = el.items.querySelector(`input[data-row="${rowIndex}"][data-field="${field}"]`);
-    if (!inp) return false;
-    try {
-      if (mode === CELL_MODE_NAV) inp.dataset.navFocus = "1";
-      inp.focus({ preventScroll: false });
-      if (wantSelect && typeof inp.select === "function") inp.select();
-    } catch {
-      try {
-        inp.focus();
-      } catch {
-        /* ignore */
-      }
-    }
-    return true;
-  };
-  if (tryFocus()) return;
-  requestAnimationFrame(() => {
-    tryFocus();
-    setTimeout(tryFocus, 50);
-  });
-}
-
-function isItemLinkDropdownOpen(inp) {
-  const wrap = inp && inp.closest ? inp.closest(".link-wrap") : null;
-  if (!wrap) return false;
-  const dd = wrap.querySelector(".link-dd");
-  return !!(dd && !dd.hidden);
+  itemKeys.focusCell(rowIndex, field, opts);
 }
 
 function showToast(text) {
@@ -1134,7 +922,7 @@ async function ensureAtLeastOneItemRow(doc) {
  * @param {string} itemCode
  */
 async function cleanupEmptyItemRow(rowIndex, itemCode) {
-  if (!api || !editable() || painting || itemTabGuard) return;
+  if (!api || !editable() || painting || itemKeys.busy()) return;
   if (peekHoldsRow(rowIndex)) {
     logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
     return;
@@ -1281,12 +1069,6 @@ function focusAfterLeavingItemsTable() {
   }
 }
 
-function rowItemCodeAt(doc, rowIndex) {
-  const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  const row = items[rowIndex];
-  return row && row.item_code != null ? String(row.item_code).trim() : "";
-}
-
 /**
  * Packet T C — size the line grid from its content, then arm the drag handles.
  * Runs after every repaint because the header row is rebuilt each time; both
@@ -1373,6 +1155,7 @@ function paintItemsHead() {
         ctrlKey: !!ev.ctrlKey,
         metaKey: !!ev.metaKey,
       });
+      itemKeys.sortNow();
       paintItemsHead();
       if (lastDoc) paintItems(lastDoc);
     });
@@ -1477,194 +1260,8 @@ function paintProgress(doc) {
     .join("");
 }
 
-function paintTaxesHead() {
-  if (!el.taxesHead || !ui || !ui.features.taxes) return;
-  el.taxesHead.innerHTML =
-    DOC_TAX_SORTABLE_HEADERS.map((h) => {
-      const st = sortHeaderState(taxSortSpecs, h.sortKey);
-      const arrow = sortHeaderArrow(taxSortSpecs, h.sortKey);
-      const cls = ["sortable", st.active ? "sorted" : "", h.className || ""].filter(Boolean).join(" ");
-      return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
-    }).join("") + `<th data-col-key="tax_actions"></th>`;
-  if (!taxesHeadWired) {
-    taxesHeadWired = true;
-    el.taxesHead.addEventListener("click", (ev) => {
-      const th = /** @type {HTMLElement|null} */ (
-        /** @type {HTMLElement} */ (ev.target).closest("[data-tax-sort]")
-      );
-      if (!th) return;
-      const key = th.getAttribute("data-tax-sort");
-      if (!key) return;
-      taxSortSpecs = applyHeaderSortClick(taxSortSpecs, key, {
-        ctrlKey: !!ev.ctrlKey,
-        metaKey: !!ev.metaKey,
-      });
-      if (lastDoc) paintTaxes(lastDoc);
-    });
-  }
-}
-
-function paintTaxes(doc) {
-  if (!el.taxesBody || !ui || !ui.features.taxes) return;
-  paintTaxesHead();
-  const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
-  // A/R: the tax lines follow the customer's Sales Taxes template (the header field), so they are
-  // listed, not typed — ERPNext would recompute a typed amount from the template's rate anyway.
-  const canEdit = editable() && !ui.features.taxesReadOnly;
-  if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
-  if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
-  // The ⓘ explains purchase templates; A/R taxes follow the customer's Sales Taxes template.
-  if (el.taxDefault) el.taxDefault.hidden = !isPurchaseTaxDoc(doc);
-  if (!rows.length) {
-    el.taxesBody.innerHTML =
-      `<tr><td colspan="7" class="link-muted">No tax/charge rows yet.</td></tr>`;
-    paintMoneyStack(doc);
-    return;
-  }
-  el.taxesBody.innerHTML = rows
-    .map((r) => {
-      if (!canEdit) {
-        return `<tr>
-          <td>${escapeHtml(r.account_head)}</td>
-          <td>${escapeHtml(r.description)}</td>
-          <td>${escapeHtml(r.charge_type)}</td>
-          <td class="num">${escapeHtml(r.rate === "" ? "" : String(r.rate))}</td>
-          <td class="num">${formatUsdAmountHtml(r.tax_amount) || escapeHtml(String(r.tax_amount ?? ""))}</td>
-          <td>${escapeHtml(r.add_deduct_tax)}</td>
-          <td></td>
-        </tr>`;
-      }
-      const rateShown = r.rate === "" || r.rate == null ? "" : formatGroupedNumber(r.rate);
-      const amtShown =
-        r.tax_amount === "" || r.tax_amount == null ? "" : formatGroupedNumber(r.tax_amount);
-      return `<tr data-taxidx="${r.idx}">
-        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="doc-tax-${r.idx}-account" /></td>
-        <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="doc-tax-${r.idx}-desc" /></td>
-        <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxFixedMarkerHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx)}</td>
-        <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="doc-tax-${r.idx}-rate" /></td>
-        <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="doc-tax-${r.idx}-amount" /></td>
-        <td>
-          <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="doc-tax-${r.idx}-adddeduct">
-            <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
-            <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
-          </select>
-        </td>
-        <td><button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="doc-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button></td>
-      </tr>${taxFixedNoteRowHtml(doc && Array.isArray(doc.taxes) ? doc.taxes[r.idx] : null, r.idx, 7)}`;
-    })
-    .join("");
-  sizeTaxColumns();
-
-  el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
-    // Same resting-text sync as the items grid (Packet T step B).
-    const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-    if (taxCellText) {
-      const syncTaxCellText = () => {
-        taxCellText.textContent = inp.value;
-      };
-      inp.addEventListener("input", syncTaxCellText);
-      inp.addEventListener("change", syncTaxCellText);
-    }
-    const field = inp.getAttribute("data-tax-field");
-    const ri = Number(inp.getAttribute("data-tax-row"));
-    const taxRow = doc && Array.isArray(doc.taxes) ? doc.taxes[ri] : null;
-    // ERPNext's rule (DF-02): Tab reaches Rate % on a percentage row, Amount on a fixed one; the
-    // other number is mouse-only.
-    if ((field === "rate" || field === "tax_amount") && !taxRowNavFields(taxRow).includes(field)) inp.tabIndex = -1;
-    const apply = async (value) => {
-      if (!api || painting || !api.setTax) return;
-      // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
-      if (field === "tax_amount" && taxRow && taxRow.charge_type !== "Actual" && taxRow.name) {
-        taxRowsFixedByClerk.set(String(taxRow.name), taxRow.rate);
-      }
-      setStatus(`Updating tax ${field}…`);
-      const res = await api.setTax(ri, field, value);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Tax row updated.");
-      } else {
-        setStatus((res && res.reason) || "Tax update failed.", "err");
-        await refresh();
-      }
-    };
-    if (field === "account_head") {
-      mountDocLinkPicker(inp, "Account", apply);
-    }
-    if (field === "rate" || field === "tax_amount") {
-      inp.addEventListener("focus", () => {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = String(n);
-      });
-      inp.addEventListener("blur", () => {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = formatGroupedNumber(n);
-      });
-    }
-    inp.addEventListener("change", async () => {
-      if (!api || painting) return;
-      const kind = dirtyCompareKindForField(field);
-      let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
-      if (field === "rate" || field === "tax_amount") {
-        const n = parseMoney(inp.value);
-        next = n == null ? "" : String(n);
-        if (n != null) inp.value = formatGroupedNumber(n);
-      }
-      await apply(next);
-    });
-  });
-  el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!api || !api.deleteTax) return;
-      const ri = Number(btn.getAttribute("data-tax-del"));
-      setStatus("Removing tax row…");
-      const res = await api.deleteTax(ri);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Tax row removed.");
-      } else {
-        setStatus((res && res.reason) || "Delete tax failed.", "err");
-      }
-    });
-  });
-  el.taxesBody.querySelectorAll("[data-tax-note]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const t = el.taxesBody.querySelector(`[data-tax-note-text="${btn.getAttribute("data-tax-note")}"]`);
-      if (t) t.hidden = !t.hidden;
-    });
-  });
-  paintMoneyStack(doc);
-  keepTaxesRemoved(doc);
-  if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
-}
-
 function isPurchaseTaxDoc(doc) {
   return !!doc && (doc.doctype === "Purchase Order" || doc.doctype === "Purchase Receipt");
-}
-
-/** Why a row is fixed, when the clerk typed its Amount over a percentage this entry; else "". */
-function taxFixedNote(taxRaw) {
-  const name = taxRaw && taxRaw.name ? String(taxRaw.name) : "";
-  if (!name || !taxRowsFixedByClerk.has(name) || taxRaw.charge_type !== "Actual") return "";
-  const was = taxRowsFixedByClerk.get(name);
-  const pct = was === "" || was == null ? "a percentage" : `${formatGroupedNumber(Number(was))}%`;
-  return `Was ${pct} of the net total. You typed this row's Amount, so it is a fixed amount now and no longer follows the item lines.`;
-}
-
-/** The note opens as a full-width line under its row (a narrow Type cell made the row a tower). */
-function taxFixedNoteRowHtml(taxRaw, idx, cols) {
-  const note = taxFixedNote(taxRaw);
-  return note
-    ? `<tr class="row-note-row" data-tax-note-text="${idx}" hidden><td colspan="${cols}" class="row-note">${escapeHtml(note)}</td></tr>`
-    : "";
-}
-
-/** ⓘ on a row whose Amount the clerk typed over a percentage; the note opens on click. */
-function taxFixedMarkerHtml(taxRaw, idx) {
-  const note = taxFixedNote(taxRaw);
-  if (!note) return "";
-  return ` <button type="button" class="row-note-btn" data-tax-note="${idx}" tabindex="-1" title="${escapeHtml(note)}" aria-label="Why this row is a fixed amount" data-testid="doc-tax-${idx}-fixed">${uiIconHtml("info", { size: 12 })}</button>`;
 }
 
 /** Clear the template field first (or ERPNext refills the rows from it), then every row. */
@@ -1672,7 +1269,7 @@ async function removeAllTaxes(opts = {}) {
   if (!api || !editable() || !lastDoc || removingTaxes) return;
   removingTaxes = true;
   try {
-    taxesRemovedOn.add(String(lastDoc.name || ""));
+    taxNotes.removedOn.add(String(lastDoc.name || ""));
     let doc = lastDoc;
     let sc = scratch;
     if (doc.taxes_and_charges) {
@@ -1705,533 +1302,15 @@ async function removeAllTaxes(opts = {}) {
   }
 }
 
-/** Re-clears per document: a refill that keeps coming back is reported, not fought forever. */
-const taxReclears = new Map();
-
-/** A vendor change refills taxes from a template; on a document the clerk emptied, empty them again. */
-function keepTaxesRemoved(doc) {
-  if (removingTaxes || !doc || !taxesRemovedOn.has(String(doc.name || ""))) return;
-  if (!doc.taxes_and_charges || !(Array.isArray(doc.taxes) && doc.taxes.length)) return;
-  const key = String(doc.name || "");
-  const n = (taxReclears.get(key) || 0) + 1;
-  taxReclears.set(key, n);
-  if (n > 3) {
-    taxesRemovedOn.delete(key);
-    setStatus("ERPNext keeps putting the template's taxes back here; leaving them. Remove all again, or check the vendor's tax defaults (ⓘ).", "warn");
-    return;
-  }
-  void removeAllTaxes({ quiet: true });
-}
-
-/** Which document + vendor the open note explains; anything else closes it (5zorro DF-02). */
-let taxNoteKey = "";
-const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
-
-/** Close the note: on Refresh, on a fresh snapshot, or when the document or vendor changes. */
-function collapseTaxDefaultNote() {
-  if (el && el.taxDefaultNote) el.taxDefaultNote.hidden = true;
-  taxNoteKey = "";
-}
-
-/** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
-async function toggleTaxDefaultNote() {
-  const note = el.taxDefaultNote;
-  if (!note) return;
-  if (!note.hidden) {
-    collapseTaxDefaultNote();
-    return;
-  }
-  note.hidden = false;
-  taxNoteKey = taxNoteKeyOf(lastDoc);
-  note.textContent = "Reading the tax defaults…";
-  const supplier = (lastDoc && lastDoc.supplier) || "";
-  const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
-  if (!(facts && facts.ok)) {
-    note.textContent = (facts && facts.reason) || "Could not read the tax defaults.";
-    return;
-  }
-  const why = taxDefaultWhy({
-    supplier,
-    current: (lastDoc && lastDoc.taxes_and_charges) || "",
-    defaultTemplate: facts.defaultTemplate,
-    vendorRule: facts.vendorRule,
-    removed: taxesRemovedOn.has(String((lastDoc && lastDoc.name) || "")),
-  });
-  note.innerHTML =
-    why.lines.map((l) => `<p>${escapeHtml(l)}</p>`).join("") +
-    `<div class="tax-default-links">${why.links
-      .map((k, i) => `<button type="button" class="linkish" data-tax-default-link="${i}" tabindex="-1">${escapeHtml(k.label)} ↗</button>`)
-      .join("")}</div>`;
-  note.querySelectorAll("[data-tax-default-link]").forEach((b) => {
-    b.addEventListener("click", () => {
-      const link = why.links[Number(b.getAttribute("data-tax-default-link"))];
-      if (!link || !api || !api.softPeekRoute) return;
-      setStatus(`Opening ${link.label} (Esc returns here)…`);
-      void api.softPeekRoute(link.route);
-    });
-  });
-}
-
 function paintItems(doc) {
   if (!ui) return;
   paintItemsHead();
   const cols = ui.itemCols;
-  const navFields = itemNavFieldsFromCols(cols);
-  const models = sortDocItemRowModels(
+  const models = itemKeys.orderForPaint(
+    sortDocItemRowModels(doc, cols, (d) => mapHelpers().readItemRows(d), itemSortSpecs),
     doc,
-    cols,
-    (d) => mapHelpers().readItemRows(d),
-    itemSortSpecs,
   );
-  const canEdit = editable();
-  el.items.innerHTML = models
-    .map((model) => {
-      const ri = model.rowIndex;
-      const r = model.cells;
-      const cells = cols
-        .map((col, ci) => {
-          const val = r[ci] ?? "";
-          if (col.sources) {
-            const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
-            return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
-          }
-          if (col.displayOnly || col.field == null) {
-            const isLine = col.sortKey === "lineNo" || col.field === "__line_no";
-            const isAmount = /^amount$/i.test(col.label || "");
-            const html = isAmount || col.money || /rec'd|received/i.test(col.label || "")
-              ? formatUsdAmountHtml(val)
-              : "";
-            if (isLine) {
-              return `<td class="num line-meta"><span class="ro" title="${escapeHtml(docTitle())} line number">${escapeHtml(val) || "—"}</span></td>`;
-            }
-            if (col.type === "date") {
-              return `<td><span class="ro">${escapeHtml(formatDocDateDisplay(val) || val || "")}</span></td>`;
-            }
-            if (isAmount && canEdit) {
-              return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Rate)" data-testid="doc-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
-            }
-            return `<td class="num"><span class="ro money-amt" data-testid="doc-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
-          }
-          if (col.field === "rate" || col.money) {
-            const shown = val === "" || val == null ? "" : formatGroupedNumber(val);
-            if (!canEdit) {
-              return `<td class="num"><span class="ro money-cost">${escapeHtml(shown)}</span></td>`;
-            }
-            return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
-          }
-          if (col.type === "checkbox") {
-            const checked = val === 1 || val === true || val === "1";
-            if (!canEdit) {
-              return `<td class="num"><span class="ro">${checked ? "Yes" : "—"}</span></td>`;
-            }
-            return `<td class="num"><input type="checkbox" data-row="${ri}" data-field="${col.field}" data-check="1" ${checked ? "checked" : ""} data-testid="doc-cell-${ri}-${col.field}" title="Vendor delivers direct to customer" /></td>`;
-          }
-          if (col.type === "date" || col.field === "schedule_date") {
-            const shown = formatDocDateDisplay(val) || val || "";
-            if (!canEdit) {
-              return `<td><span class="ro">${escapeHtml(shown)}</span></td>`;
-            }
-            return `<td><input type="text" inputmode="numeric" placeholder="MM/DD/YYYY" data-row="${ri}" data-field="${col.field}" data-date="1" value="${escapeHtml(shown)}" data-testid="doc-cell-${ri}-${col.field}" autocomplete="off" /></td>`;
-          }
-          if (!canEdit) {
-            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
-          }
-          if (col.field === "qty") {
-            return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-qty" /></td>`;
-          }
-          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="doc-cell-${ri}-${col.field}" /></td>`;
-        })
-        .join("");
-      const del = canEdit && linesAreAddable()
-        ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" tabindex="-1" data-testid="doc-del-${ri}">×</button></td>`
-        : `<td></td>`;
-      return `<tr data-rowidx="${ri}">${cells}${del}</tr>`;
-    })
-    .join("");
-
-  paintLineTotals(doc);
-  sizeItemColumns();
-
-  el.items.querySelectorAll("input[data-row]").forEach((inp) => {
-    // Keep the resting text layer in step with the editor. The text is hidden
-    // while the input has focus, so this is not load-bearing for correctness
-    // mid-edit -- it is here so a cell reads right the instant you leave it,
-    // without waiting for a repaint that may never come.
-    const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-    if (cellText) {
-      const syncCellText = () => {
-        cellText.textContent = inp.value;
-      };
-      inp.addEventListener("input", syncCellText);
-      inp.addEventListener("change", syncCellText);
-    }
-    const field = inp.getAttribute("data-field");
-    const ri = Number(inp.getAttribute("data-row"));
-    const linkDt = linkDoctypeForDocField(field, ui.headerFields, ui.itemCols);
-    const readCellValue = () => {
-      const kind = dirtyCompareKindForField(field);
-      let next = kind === "number" ? inp.value : normalizeEditableText(inp.value);
-      if (inp.type === "checkbox" || inp.dataset.check === "1") {
-        return inp.checked ? 1 : 0;
-      }
-      if (field === "rate" || isMoneyCol(field)) {
-        const n = parseMoney(inp.value);
-        next = n == null ? "" : String(n);
-      }
-      if (inp.dataset.date === "1") {
-        const raw = filterDateInputValue(inp.value).trim();
-        if (!raw) return "";
-        const parsed = parseDocDate(raw);
-        if (parsed.ok) return parsed.iso;
-      }
-      return next;
-    };
-    const focusAfterItemEdit = async (docAfter, cellValue) => {
-      const rowCount =
-        docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
-      const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-        cellValue,
-        fields: navFields,
-        rowItemCode: docAfter?.items?.[ri]?.item_code ?? "",
-        nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
-      });
-      if (dest.deleteRow && dest.leaveTable) {
-        if (!api || !editable()) return;
-        const rowCountNow =
-          lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-        const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
-        if (shouldBlockDeleteLastItemRow(rowCountNow)) {
-          showToast(lastItemRowToast(docTitle()));
-          focusAfterLeavingItemsTable();
-          return;
-        }
-        setStatus("Removing empty line…");
-        const removed = await api.deleteItem(deleteRi);
-        if (removed && removed.ok) {
-          noteUserEdit();
-          paint(removed.doc, removed.scratch || scratch);
-          setStatus("Left items table.");
-          focusAfterLeavingItemsTable();
-        } else if (removed && removed.blockedLastRow) {
-          showToast(removed.reason || lastItemRowToast(docTitle()));
-        } else {
-          setStatus((removed && removed.reason) || "Could not remove empty line.", "err");
-        }
-        return;
-      }
-      if (dest.field) {
-        focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-        return;
-      }
-      if (!dest.addRow || !api || !editable()) return;
-      setStatus("Adding line…");
-      const added = await api.addItem();
-      if (added && added.ok) {
-        noteUserEdit();
-        paint(added.doc, added.scratch || scratch);
-        const newRi =
-          added.doc && Array.isArray(added.doc.items)
-            ? added.doc.items.length - 1
-            : ri + 1;
-        focusItemCell(Math.max(0, newRi), "item_code", { mode: CELL_MODE_NAV });
-        setStatus("Line added.");
-      } else {
-        setStatus((added && added.reason) || "Add line failed.", "err");
-      }
-    };
-    const apply = async (value, opts = {}) => {
-      if (!api || painting) return;
-      const run = async () => {
-        setStatus(`Updating ${field}…`);
-        const moveMark = userMoves.mark();
-        const res = await api.setItem(ri, field, value);
-        if (res && res.ok) {
-          noteUserEdit();
-          if (res.scratch) scratch = res.scratch;
-          paint(res.doc, res.scratch || scratch);
-          setStatus("Line updated.");
-          if (userMoves.movedSince(moveMark)) {
-            // The clerk moved on while ERPNext answered: leave focus where they put it.
-            logFocus("focus-after-edit-skipped", field);
-          } else if (opts.focus && opts.focus.field) {
-            focusItemCell(opts.focus.rowIndex, opts.focus.field, {
-              mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
-            });
-          } else if (!opts.stay) {
-            await focusAfterItemEdit(res.doc, value);
-          }
-        } else {
-          setStatus((res && res.reason) || "Line update failed.", "err");
-          await refresh();
-        }
-      };
-      lineApplyInFlight = run();
-      try {
-        await lineApplyInFlight;
-      } finally {
-        lineApplyInFlight = null;
-      }
-    };
-    if (linkDt) {
-      mountDocLinkPicker(inp, linkDt, apply);
-    }
-    if (inp.dataset.date === "1") {
-      wireDateField(inp);
-    }
-    inp.addEventListener("focus", () => {
-      if (inp.dataset.navFocus === "1") {
-        setItemCellMode(CELL_MODE_NAV);
-        delete inp.dataset.navFocus;
-      } else {
-        setItemCellMode(CELL_MODE_EDIT);
-      }
-    });
-    if (field === "item_code") {
-      inp.addEventListener("blur", () => {
-        window.setTimeout(() => {
-          if (!editable() || painting || itemTabGuard) return;
-          const wrap = inp.closest(".link-wrap");
-          if (wrap && wrap.contains(document.activeElement)) return;
-          const code = normalizeEditableText(inp.value);
-          if (!isEmptyItemCode(code)) return;
-          void cleanupEmptyItemRow(ri, code);
-        }, 180);
-      });
-    }
-    if (field === "rate") {
-      inp.addEventListener("focus", () => {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = String(n);
-      });
-      inp.addEventListener("blur", () => {
-        if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = formatGroupedNumber(n);
-        else if (normalizeEditableText(inp.value) === "") inp.value = "";
-      });
-    }
-    if (field === "qty" || field === "rate") {
-      calcUi.attach(inp, {
-        kind: field,
-        isPainting: () => painting,
-        isEditable: () => editable(),
-        onHistory: publishCalcHistory,
-        onCommit: async (value) => {
-          let next = value;
-          if (field === "rate") {
-            const n = parseMoney(value);
-            next = n == null ? "" : String(n);
-            if (n != null) inp.value = formatGroupedNumber(n);
-          }
-          await apply(next);
-        },
-      });
-    }
-    inp.addEventListener("keydown", (ev) => {
-      if (!editable() || painting) return;
-      const calcActive =
-        calcUi.getState().mode === "active" && calcUi.getInput() === inp;
-      const decision = itemTableKeyDecision({
-        mode: itemCellMode,
-        key: ev.key,
-        shiftKey: !!ev.shiftKey,
-        ctrlKey: !!ev.ctrlKey,
-        metaKey: !!ev.metaKey,
-        altKey: !!ev.altKey,
-        selectionStart: inp.selectionStart,
-        selectionEnd: inp.selectionEnd,
-        valueLength: String(inp.value ?? "").length,
-        linkDropdownOpen: isItemLinkDropdownOpen(inp),
-        calcActive,
-        verticalArrowsAlwaysNav: field === "qty",
-      });
-
-      if (decision.action === "leave_edit") {
-        if (decision.preventDefault) ev.preventDefault();
-        setItemCellMode(CELL_MODE_NAV);
-        try {
-          if (typeof inp.select === "function") inp.select();
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-
-      if (decision.action === "enter_edit") {
-        setItemCellMode(CELL_MODE_EDIT);
-        if (ev.key === "F2") {
-          ev.preventDefault();
-          try {
-            const len = String(inp.value ?? "").length;
-            inp.setSelectionRange(len, len);
-          } catch {
-            /* ignore */
-          }
-        }
-        return;
-      }
-
-      if (decision.action === "passthrough") {
-        if (ev.key !== "Tab" || ev.shiftKey) return;
-      } else if (decision.preventDefault) {
-        ev.preventDefault();
-      }
-
-      if (
-        decision.action === "move" ||
-        decision.action === "leave_edit_move" ||
-        (decision.action === "tab" && decision.direction === "left")
-      ) {
-        setItemCellMode(CELL_MODE_NAV);
-        itemTabGuard = true;
-        void (async () => {
-          try {
-            const next = readCellValue();
-            const rowCount =
-              lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-            const dest = neighborItemCell(
-              field,
-              ri,
-              rowCount,
-              decision.direction || "left",
-              navFields,
-            );
-            const prev =
-              (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-              "";
-            const kind = dirtyCompareKindForField(field);
-            const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
-            if (!dest) {
-              if (dirty) await apply(next, { stay: true });
-              if (shouldLeaveItemTableBackward(dest, decision.direction)) {
-                focusLastHeaderBeforeItems();
-              }
-              return;
-            }
-            if (dirty) {
-              await apply(next, {
-                focus: {
-                  rowIndex: dest.rowIndex,
-                  field: dest.field,
-                  mode: CELL_MODE_NAV,
-                },
-              });
-            } else {
-              focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-            }
-          } finally {
-            itemTabGuard = false;
-          }
-        })();
-        return;
-      }
-
-      if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
-      ev.preventDefault();
-      setItemCellMode(CELL_MODE_NAV);
-      itemTabGuard = true;
-      void (async () => {
-        try {
-          const next = readCellValue();
-          const rowCount =
-            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-          const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-            cellValue: next,
-            fields: navFields,
-            rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
-            nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
-          });
-          if (dest.deleteRow && dest.leaveTable) {
-            await focusAfterItemEdit(lastDoc, next);
-            return;
-          }
-          const prev =
-            (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-            "";
-          const kind = dirtyCompareKindForField(field);
-          if (!valuesMeaningfullyEqual(prev, next, { kind })) {
-            await apply(next);
-          } else if (dest.field) {
-            focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-          } else if (dest.addRow) {
-            await focusAfterItemEdit(lastDoc, next);
-          }
-        } finally {
-          itemTabGuard = false;
-        }
-      })();
-    });
-    inp.addEventListener("change", async () => {
-      if (!api || painting || itemTabGuard) return;
-      if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-      let next = readCellValue();
-      if (field === "rate") {
-        const n = parseMoney(inp.value);
-        if (n != null) inp.value = formatGroupedNumber(n);
-      }
-      if (inp.dataset.date === "1") {
-        const raw = filterDateInputValue(inp.value).trim();
-        if (!raw) {
-          inp.value = formatDocDateDisplay(
-            (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) || "",
-          );
-          return;
-        }
-        const parsed = parseDocDate(raw);
-        if (!parsed.ok) {
-          setStatus(parsed.reason || "Invalid date — use MM/DD/YYYY", "warn");
-          inp.value = formatDocDateDisplay(
-            (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) || "",
-          );
-          return;
-        }
-        next = parsed.iso;
-        inp.value = parsed.display;
-      }
-      const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
-      const kind = dirtyCompareKindForField(field);
-      if (valuesMeaningfullyEqual(prev, next, { kind })) {
-        if (field === "rate" && parseMoney(prev) != null) {
-          inp.value = formatGroupedNumber(prev);
-        } else if (inp.dataset.date === "1") {
-          inp.value = formatDocDateDisplay(prev) || "";
-        } else if (kind !== "number") {
-          inp.value = normalizeEditableText(String(prev ?? ""));
-        }
-        return;
-      }
-      await apply(next);
-    });
-  });
-  el.items.querySelectorAll("button[data-del]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!api) return;
-      const ri = Number(btn.getAttribute("data-del"));
-      setStatus("Removing line…");
-      const res = await api.deleteItem(ri);
-      if (res && res.ok && res.clearedLastRow) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        showToast(res.reason || lastItemRowToast(docTitle()));
-        setStatus("Last line cleared.");
-      } else if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus("Line removed.");
-      } else if (res && res.blockedLastRow) {
-        showToast(res.reason || lastItemRowToast(docTitle()));
-      } else {
-        setStatus((res && res.reason) || "Delete failed.", "err");
-      }
-    });
-  });
-  el.items.querySelectorAll("button[data-back-in]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!editable() || painting) return;
-      const ri = Number(btn.getAttribute("data-back-in"));
-      beginAmountBackIn(btn, ri);
-    });
-  });
+  itemRows.paint(doc, models, cols);
 }
 
 /**
@@ -2298,33 +1377,6 @@ function beginAmountBackIn(btn, ri) {
   } catch {
     /* ignore */
   }
-}
-
-function wireDateField(input) {
-  input.addEventListener("beforeinput", (ev) => {
-    if (ev.inputType && ev.inputType.startsWith("delete")) return;
-    if (ev.inputType === "insertFromPaste" || ev.inputType === "insertFromDrop") return;
-    if (ev.data && [...ev.data].some((c) => !isAllowedDateInputChar(c))) {
-      ev.preventDefault();
-    }
-  });
-  input.addEventListener("input", () => {
-    const filtered = filterDateInputValue(input.value);
-    if (filtered !== input.value) {
-      const pos = input.selectionStart;
-      input.value = filtered;
-      try {
-        input.setSelectionRange(pos - 1, pos - 1);
-      } catch {
-        /* ignore */
-      }
-    }
-  });
-  input.addEventListener("paste", (ev) => {
-    ev.preventDefault();
-    const text = filterDateInputValue(ev.clipboardData.getData("text") || "");
-    document.execCommand("insertText", false, text);
-  });
 }
 
 function buildHeaderFields(fields) {
@@ -2838,7 +1890,7 @@ function paint(doc, snapScratch, opts = {}) {
   if (el.addTax) el.addTax.disabled = !canEdit;
 
   paintItems(doc);
-  paintTaxes(doc);
+  taxTable.paint(doc);
   paintProgress(doc);
   ensureHeaderLinkPickers();
 
@@ -2868,7 +1920,7 @@ function paint(doc, snapScratch, opts = {}) {
 /** @param {{ keepFocus?: boolean }} [opts] */
 async function refresh(opts = {}) {
   if (!api) return;
-  collapseTaxDefaultNote();
+  taxNotes.collapseDefaultNote();
   setStatus("Refreshing…");
   const snap = await api.getSnapshot();
   paint(snap && snap.doc, (snap && snap.scratch) || {}, {
@@ -3028,7 +2080,7 @@ async function doSave(submit) {
   saveInFlight = true;
   try {
     const flush = await flushPendingFieldEdits({
-      getInFlight: () => lineApplyInFlight,
+      getInFlight: () => itemRows.applyInFlight(),
       waitMs: 5000,
     });
     if (flush && flush.timedOut) {
@@ -3050,7 +2102,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
-      openDirectSaveBlockedGate(blockers, { submit });
+      commitGate.openDirectSaveBlocked(blockers, { submit });
       setStatus(blockers[0] || "Fix save prerequisites first.", "err");
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
@@ -3059,7 +2111,7 @@ async function doSave(submit) {
     const nameBeforeSave = String((lastDoc && lastDoc.name) || "");
     const r = await api.save({ submit: !!submit });
     if (r && r.ok) {
-      if (taxesRemovedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxesRemovedOn.add(String(r.doc.name));
+      if (taxNotes.removedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxNotes.removedOn.add(String(r.doc.name));
       userEdited = false;
       metaBlockers = [];
       paint(r.doc, r.scratch || scratch);
@@ -3082,7 +2134,7 @@ async function doSave(submit) {
       }),
       r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
     );
-    openDirectSaveBlockedGate(mergedBlockers, {
+    commitGate.openDirectSaveBlocked(mergedBlockers, {
       submit,
       erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
       reason,
@@ -3096,20 +2148,6 @@ async function doSave(submit) {
   } finally {
     saveInFlight = false;
   }
-}
-
-function setLineTab(which) {
-  const expenses = which === "expenses";
-  if (el.tabItems) {
-    el.tabItems.classList.toggle("active", !expenses);
-    el.tabItems.setAttribute("aria-selected", expenses ? "false" : "true");
-  }
-  if (el.tabExpenses) {
-    el.tabExpenses.classList.toggle("active", expenses);
-    el.tabExpenses.setAttribute("aria-selected", expenses ? "true" : "false");
-  }
-  if (el.panelItems) el.panelItems.hidden = expenses;
-  if (el.panelExpenses) el.panelExpenses.hidden = !expenses;
 }
 
 function buildExpenseNote() {
@@ -3132,7 +2170,7 @@ function buildExpenseNote() {
   jumpItems.textContent = orient.itemsJumpLabel || "click here";
   jumpItems.addEventListener("click", (ev) => {
     ev.preventDefault();
-    setLineTab("items");
+    setLineTab(el, "items");
   });
   li1.append(jumpItems, document.createTextNode(")."));
   const li2 = document.createElement("li");
@@ -3143,7 +2181,7 @@ function buildExpenseNote() {
   jumpTaxes.textContent = "Taxes and Charges section below";
   jumpTaxes.addEventListener("click", (ev) => {
     ev.preventDefault();
-    setLineTab("items");
+    setLineTab(el, "items");
     if (el.taxesBlock && typeof el.taxesBlock.scrollIntoView === "function") {
       el.taxesBlock.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -3172,10 +2210,10 @@ function applyUiConfig(config) {
 
   buildHeaderFields(ui.headerFields);
 
+  // The head row is the same element across layouts, so its click stays wired once (wiring it again
+  // here ran every header click twice after a PO → Item Receipt switch: the sort looked stuck).
   itemSortSpecs = [{ key: "lineNo", asc: true }];
-  itemsHeadWired = false;
-  taxSortSpecs = [{ key: "account_head", asc: true }];
-  taxesHeadWired = false;
+  taxTable.reset();
   paintItemsHead();
   buildLineTotalsFoot(ui.itemCols);
 
@@ -3275,9 +2313,9 @@ function wireStaticControls() {
       });
     };
   }
-  if (el.find) el.find.onclick = () => requestToolbarAction("find");
-  if (el.newDoc) el.newDoc.onclick = () => requestToolbarAction("new");
-  if (el.print) el.print.onclick = () => requestToolbarAction("print");
+  if (el.find) el.find.onclick = () => commitGate.requestToolbarAction("find");
+  if (el.newDoc) el.newDoc.onclick = () => commitGate.requestToolbarAction("new");
+  if (el.print) el.print.onclick = () => commitGate.requestToolbarAction("print");
   const btnBackTop = el.backTop;
   if (btnBackTop) {
     btnBackTop.onclick = () => {
@@ -3288,13 +2326,12 @@ function wireStaticControls() {
 
   if (el.commitGate) {
     wireCommitGateChrome(commitGateEls(), {
-      onResolveChoice: (choice) => resolveCommitGate(choice),
-      onCancelOutside: () => cancelCommitGateFromOutside(),
+      onResolveChoice: (choice) => commitGate.resolve(choice),
+      onCancelOutside: () => commitGate.cancelFromOutside(),
     });
   }
 
-  if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
-  if (el.tabExpenses) el.tabExpenses.onclick = () => setLineTab("expenses");
+  wireLineTabs(el);
 
   if (el.revert) {
     el.revert.onclick = async () => {
@@ -3360,7 +2397,7 @@ function wireStaticControls() {
     if (el.taxDefault && !el.taxDefault.querySelector(".ui-ico")) {
       el.taxDefault.insertAdjacentHTML("beforeend", uiIconHtml("info", { size: 12 }));
     }
-    if (el.taxDefault) el.taxDefault.onclick = () => void toggleTaxDefaultNote();
+    if (el.taxDefault) el.taxDefault.onclick = () => void taxNotes.toggleDefaultNote();
     // The calculator on the Add amount box, as on the line cells (5zorro 2026-10-11).
     if (el.taxAmount && !el.taxAmount.dataset.calcWired) {
       el.taxAmount.dataset.calcWired = "1";
@@ -3380,7 +2417,7 @@ function wireStaticControls() {
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
       // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
       const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
-      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
+      const { amount: n, remainder } = moneyOrSum(typed, siteRounding.money());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
@@ -3469,7 +2506,7 @@ export async function bootDocFormPage(injectedApi) {
     setStatus("Doc API unavailable — preload missing.", "err");
     return;
   }
-  loadSiteRounding();
+  siteRounding.ask();
   wireStaticControls();
 
   docCapsUi = wireDocCapsUi({
@@ -3543,7 +2580,7 @@ export async function bootDocFormPage(injectedApi) {
 
   if (api.onSnapshot) {
     api.onSnapshot(async (snap) => {
-      collapseTaxDefaultNote();
+      taxNotes.collapseDefaultNote();
       if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       await ensureUiConfig();
       paint(snap && snap.doc, (snap && snap.scratch) || {}, {
@@ -3560,27 +2597,13 @@ export async function bootDocFormPage(injectedApi) {
   }
 
   if (api.onOpenNavGate) {
-    api.onOpenNavGate((payload) => {
-      const token = payload && payload.token;
-      if (!token) return;
-      if (!shouldOpenCommitGate(userEdited)) {
-        if (api.resolveNavGate) api.resolveNavGate(token, true);
-        return;
-      }
-      openGate({
-        kind: "nav",
-        navToken: token,
-        label: payload.label || (ui && ui.leavingLabel),
-      });
-    });
+    api.onOpenNavGate((payload) =>
+      commitGate.navRequested(payload && payload.token, payload && (payload.label || (ui && ui.leavingLabel))),
+    );
   }
 
   if (api.onCancelNavGate) {
-    api.onCancelNavGate((token) => {
-      if (pendingGate && pendingGate.kind === "nav" && pendingGate.navToken === token) {
-        hideCommitGate();
-      }
-    });
+    api.onCancelNavGate((token) => commitGate.navCancelled(token));
   }
 
   // Don't refresh until a skin is active — getSnapshot would fail with no profile.

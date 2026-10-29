@@ -3,8 +3,7 @@
  * `npm run dogfood:setup -- <row> …` — make a dogfood row's records on the sandbox and leave them
  * for 5zorro (tests/probes/README.md § Dogfood residuals); `-- --clear <row> …` removes them again;
  * `-- --list` says which rows have a scene and what each makes. The scenes are
- * `tests/probes/dogfood-scenes.js`; this runs them through `run-probe.js` (the app must be closed —
- * open it after) as the probe `leaves-records/dogfood-setup`.
+ * `tests/probes/dogfood-scenes.js`; this runs them through `run-probe.js` as the probe `leaves-records/dogfood-setup`.
  */
 import { spawnSync } from "node:child_process";
 import path from "node:path";

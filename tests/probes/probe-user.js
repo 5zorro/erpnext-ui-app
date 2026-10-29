@@ -8,12 +8,13 @@
  *
  * `back()` returns the app to Administrator without a password: the app's own ERPNext cookies
  * are saved before the switch and put back. `retire()` = `back()`, then disable the user and end
- * its sessions (probe-user-retire.js). If the probe dies first, `run-probe` retires it and restores
- * the app's Cookies file — and failing that, the next `run-probe` does.
+ * its sessions (probe-user-retire.js). If the probe dies first, `run-probe` retires it — and
+ * failing that, the next `run-probe` does. The cookies are the run's own (its profile folder).
  */
 import { randomBytes } from "node:crypto";
 import { expect } from "@playwright/test";
 import { e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { timed } from "../../e2e/test-timing.js";
 import { inErp, assertSandboxSite, report } from "./probe-helpers.js";
 import { lockProbeUser, retireLockedProbeUsers } from "./probe-user-retire.js";
 
@@ -81,6 +82,10 @@ async function reloadAs(app, user) {
  * @returns {Promise<{ user: string, back: () => Promise<void>, retire: () => Promise<string[]> }>}
  */
 export async function loginAsProbeUser(app, roles, opts = {}) {
+  return timed("clerkLogin", () => loginAsProbeUserUntimed(app, roles, opts));
+}
+
+async function loginAsProbeUserUntimed(app, roles, opts) {
   await assertSandboxSite(app);
   const admin = await loggedUser(app);
   const base = await e2eGet(app, "erpBase");

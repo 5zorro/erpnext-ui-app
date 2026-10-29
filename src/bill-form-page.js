@@ -86,18 +86,10 @@ import {
 } from "../src/bill-charge-allocate.js";
 import {
   BILL_TAX_SORTABLE_HEADERS,
-  readBillTaxRowsForSort,
-  sortBillTaxRows,
-  billTaxesSubtotal,
-  applyHeaderSortClick as applyTaxHeaderSortClick,
-  sortHeaderArrow as taxSortHeaderArrow,
-  sortHeaderState as taxSortHeaderState,
 } from "../src/bill-tax-sort.js";
 import {
-  shouldBlockDeleteLastItemRow,
   emptyItemRowCleanupAction,
   LAST_ITEM_ROW_TOAST,
-  isEmptyItemCode,
 } from "../src/bill-item-guard.js";
 import {
   billRowHasSource,
@@ -143,7 +135,7 @@ import {
   accountCompanyMismatchPickMessage,
 } from "../src/account-company.js";
 import {
-  nextItemFocusAfterEdit,
+  itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "../src/link-picker-policy.js";
 import {
@@ -151,13 +143,21 @@ import {
   mountColResize,
   mountDensityControl,
 } from "./item-col-resize.js";
-import {
-  CELL_MODE_EDIT,
-  CELL_MODE_NAV,
-  itemTableKeyDecision,
-  neighborItemCell,
-  shouldLeaveItemTableBackward,
-} from "../src/item-table-nav.js";
+import { CELL_MODE_EDIT, CELL_MODE_NAV } from "../src/item-table-nav.js";
+import { createItemTableKeys } from "../src/item-table-keys-ui.js";
+import { createSiteRoundingAsk } from "../src/calc/site-rounding-ask.js";
+import { wireDateField } from "../src/doc-form-date-field-ui.js";
+import { setLineTab, wireLineTabs } from "../src/doc-form-line-tabs-ui.js";
+import { createTaxNotes } from "../src/doc-form-tax-notes-ui.js";
+import { createCommitGate } from "../src/doc-form-commit-gate-ui.js";
+import { createItemRows } from "../src/doc-form-item-rows-ui.js";
+import { createTaxTable } from "../src/doc-form-tax-table-ui.js";
+
+/**
+ * The Bill's editable columns, in the order Tab walks them. Until plan 10-25 0a the Bill passed
+ * none and fell back to the default list, which happened to be the same five.
+ */
+const BILL_NAV_FIELDS = itemNavFieldsFromCols(BILL_ITEM_COLS);
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
 import { openPrintDialog } from "../src/print-dialog-ui.js";
@@ -179,7 +179,6 @@ import {
   vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
 import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
-import { taxDefaultWhy } from "../src/tax-default-why.js";
 import {
   fieldsSettlingFor,
   remainingHoldMs,
@@ -196,15 +195,7 @@ import {
   runSourcePickerFlow,
   mayAutoOpenSourcePicker,
 } from "../src/source-picker-flow.js";
-import {
-  paintCommitGateValidation,
-  setCommitGateBusy,
-  commitGateTitleText,
-  showCommitGate,
-  hideCommitGateEl,
-  wireCommitGateChrome,
-} from "../src/doc-commit-gate-ui.js";
-import { shouldForceCapsOnElement, applyDocCapsValue } from "../src/doc-caps.js";
+import { wireCommitGateChrome } from "../src/doc-commit-gate-ui.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
 import { collectBillSourceRefs, sourceTermsDisplayBlocks } from "../src/doc-source-terms.js";
@@ -220,40 +211,23 @@ import {
 } from "../src/bill-header-paint.js";
 import {
   filterDateInputValue,
-  isAllowedDateInputChar,
   parseDocDate,
   formatDocDateDisplay,
 } from "../src/doc-date.js";
-import {
-  shouldOpenCommitGate,
-  normalizeCommitGateChoice,
-  commitGateAllowsAction,
-} from "../src/bill-toolbar.js";
 import {
   commitGateProgressLabel,
   commitGateSuccessLabel,
   listLocalSaveBlockers,
   commitGateSaveWarning,
   commitGateSaveEnabled,
-  reduceCommitGatePhase,
   billExpensesTaxOrientation,
   gateTriggerLabel,
-  nextAfterGate,
   commitGateErpFailureView,
   formatSaveFailureReason,
 } from "../src/bill-action-flow.js";
 import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
-import {
-  formatSalesOrderPickerLabel,
-} from "../src/so-picker.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
-import { DEFAULT_SITE_ROUNDING } from "../src/calc/site-rounding.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
-import {
-  taxAmountFromRate,
-  taxRateBaseFromDoc,
-  displayTaxRateForRow,
-} from "../src/bill-tax-sync.js";
 import {
   applyDocWashToDocument,
   setDocWashVariant,
@@ -271,16 +245,11 @@ import {
   LINKED_SOURCE_GAVE_UP_PLACEHOLDER,
 } from "../src/bill-enrich-pending.js";
 import { uiIconHtml } from "../src/ui-icons.js";
-import { renderCostingBox } from "../src/costing-box-ui.js";
+import { openAssignModal } from "../src/bill-assign-modal-ui.js";
+import { openInformalLinkModal } from "../src/bill-informal-link-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
-import {
-  neighborTaxCell,
-  nextTaxAddRowTabTarget,
-  nextTaxCellTab,
-  taxNavPos,
-  taxRowNavFields,
-} from "../src/bill-tax-table-nav.js";
+import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
 
 export async function bootBillFormPage(api) {
   if (!api) throw new Error('Bill API missing');
@@ -301,42 +270,98 @@ export async function bootBillFormPage(api) {
   let comparePane = null;
   /** The attached files under the notes (src/attachment-list-ui.js). */
   let attachList = null;
-  /** Suppress change while Tab keydown commits the item cell. */
-  let itemTabGuard = false;
-  /** Suppress blur while Tab/arrow moves between tax cells. */
-  let taxTabGuard = false;
-  /** Tax rows whose Amount the clerk typed over a percentage this entry: row name → the old rate. */
-  const taxRowsFixedByClerk = new Map();
-  /** DF-02 Remove all: bills (under every name each has had) whose taxes the clerk removed. */
-  const taxesRemovedOn = new Set();
   let removingTaxes = false;
-  /** Excel-like: edit (caret in cell) vs nav (arrows move cells). */
-  let itemCellMode = CELL_MODE_EDIT;
-
   /**
-   * Mirror the cell mode onto the DOM so CSS can show which mode you are in.
-   * `data-nav-focus` cannot serve here: it is deleted the moment focus lands
-   * (it is a one-shot handoff to the focus handler), so nothing survives for a
-   * stylesheet to match on.
-   * @param {"edit"|"nav"} mode
+   * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the doc-form page): the ⓘ on
+   * a row the clerk made a fixed amount, "Vendor tax template default ⓘ", and holding Remove all.
    */
+  const taxNotes = createTaxNotes({
+    el: () => el,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    setStatus: (text, cls) => setStatus(text, cls),
+    removingTaxes: () => removingTaxes,
+    removeAllTaxes: (opts) => removeAllTaxes(opts),
+    testIdPrefix: "bill",
+  });
+  /** The taxes table (src/doc-form-tax-table-ui.js, shared with the doc-form page). */
+  const taxTable = createTaxTable({
+    el: () => el,
+    head: () => document.getElementById("taxes-head-row"),
+    api: () => api,
+    lastDoc: () => lastDoc,
+    painting: () => painting,
+    editable: () => editable(),
+    headers: BILL_TAX_SORTABLE_HEADERS,
+    defaultSort: { key: "lineNo", asc: true },
+    testIdPrefix: "bill",
+    taxNotes,
+    mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
+    repaint: (res) => paint(res.doc, amountDue),
+    refresh: () => refresh(),
+    setStatus,
+    noteUserEdit,
+    sizeColumns: () => sizeTaxColumns(),
+    paintMoneyStack,
+    rowButtonsHtml: (taxRow, idx, canEdit) =>
+      canEdit && isAllocatableChargeRow(taxRow)
+        ? `<button type="button" class="alloc-btn" data-tax-alloc="${idx}" tabindex="-1" data-testid="bill-tax-alloc-${idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
+        : "",
+    wireRowButtons: (body) => {
+      body.querySelectorAll("[data-tax-alloc]").forEach((btn) => {
+        btn.tabIndex = -1;
+        btn.addEventListener("click", () => {
+          openAllocateChargeModal(Number(btn.getAttribute("data-tax-alloc")));
+        });
+      });
+    },
+    deleteBlockedReason: () =>
+      taxRowDeleteAllowed(allocateChargeModalOpen) ? "" : "Finish or cancel Allocate to stock before removing a tax row.",
+  });
+  /**
+   * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last
+   * box (src/item-table-keys-ui.js, shared with the doc-form page). `itemKeys.busy()` is true
+   * while a Tab or arrow is committing a cell.
+   */
+  const itemKeys = createItemTableKeys({
+    table: () => el && el.items,
+    editable: () => editable(),
+    painting: () => painting,
+    calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+    lastDoc: () => lastDoc,
+    lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+    lineKey: (line) => line.item_code,
+    log: logFocus,
+    leaveBackward: () => focusBeforeItemsTable(),
+    repaint: () => {
+      if (lastDoc) paintItems(lastDoc);
+    },
+  });
+
+  /** @param {"edit"|"nav"} mode */
   function setItemCellMode(mode) {
-    itemCellMode = mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
+    itemKeys.setMode(mode);
+  }
+
+  /** Shift+Tab / ← out of the first line's first box: Amount Due, or the bill number. */
+  function focusBeforeItemsTable() {
     try {
-      if (el && el.items) el.items.dataset.cellMode = itemCellMode;
+      if (el.amountdue && !el.amountdue.disabled) {
+        el.amountdue.focus({ preventScroll: false });
+        if (typeof el.amountdue.select === "function") el.amountdue.select();
+      } else if (el.billno) {
+        el.billno.focus({ preventScroll: false });
+      }
     } catch {
-      /* mode mirroring is cosmetic; never let it break navigation */
+      /* ignore */
     }
   }
 
   let userEdited = false;
-  /** @type {"find"|"new"|"print"|null} */
-  let pendingGate = null; // GateTrigger | null — SSoT for the one commit-gate
   /** @type {string[]} live ERP meta mandatory blockers from last preflight */
   let metaBlockers = [];
   /** @type {string[]} Account company ≠ Bill company (OI-141) */
   let accountCompanyBlockers = [];
-  let metaPreflightSeq = 0;
   /** @type {WeakMap<HTMLElement, true>} */
   const linkMounted = new WeakMap();
   /** Prevent stacking multiple source modals. */
@@ -369,42 +394,11 @@ export async function bootBillFormPage(api) {
   /** @type {{ key: string, asc: boolean }} */
   /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
   let itemSortSpecs = [{ key: "lineNo", asc: true }];
-  /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
-  let taxSortSpecs = [{ key: "lineNo", asc: true }];
   let itemsHeadWired = false;
-  let taxesHeadWired = false;
-  /** @type {Promise<void>|null} */
-  let lineApplyInFlight = null;
   /** @type {boolean} */
   let saveInFlight = false;
-  /** The site's rounding (R13-1), once main.js has read it; the stock default until then. */
-  let siteRounding = null;
-  let siteRoundingAsked = false;
-  let siteRoundingAskedAt = 0;
-  /**
-   * Ask main for it until the site has really answered (a read during a reload gets the default) —
-   * at most every 10 s: the tape asks on every key, and ERPNext may be down for a while.
-   */
-  function loadSiteRounding() {
-    if (siteRounding || siteRoundingAsked || !api || !api.getSiteRounding) return;
-    if (Date.now() - siteRoundingAskedAt < 10_000) return;
-    siteRoundingAskedAt = Date.now();
-    siteRoundingAsked = true;
-    api
-      .getSiteRounding()
-      .then((r) => {
-        if (r && r.known) siteRounding = r;
-      })
-      .catch(() => {})
-      .finally(() => {
-        siteRoundingAsked = false;
-      });
-  }
-  /** The taxes Add box keeps money places, rounded by the tape's convention (the site's way by default). */
-  function moneyRounding() {
-    const site = siteRounding || DEFAULT_SITE_ROUNDING;
-    return { precision: site.currency, method: site.method, convention: calcUi.getConvention() };
-  }
+  /** The site's rounding (R13-1; src/calc/site-rounding-ask.js, shared with the doc-form page). */
+  const siteRounding = createSiteRoundingAsk({ api: () => api, convention: () => calcUi.getConvention() });
   const calcUi = createFieldCalcUi({
     overlay: document.getElementById("calc-overlay"),
     exprEl: document.getElementById("calc-expr"),
@@ -413,12 +407,9 @@ export async function bootBillFormPage(api) {
     getHistory: () => (api && api.getCalcHistory ? api.getCalcHistory() : Promise.resolve([])),
     copyHistory: (id, mode) =>
       api && api.copyCalcHistory ? api.copyCalcHistory(id, mode) : Promise.resolve({ ok: false }),
-    getSiteRounding: () => {
-      loadSiteRounding();
-      return siteRounding;
-    },
+    getSiteRounding: () => siteRounding.ask(),
   });
-  loadSiteRounding();
+  siteRounding.ask();
   
   /**
    * Max billable qty from enrich/merge cache only (OI-151 — no JIT fetch at qty commit or save).
@@ -667,6 +658,8 @@ export async function bootBillFormPage(api) {
     clearQty: document.getElementById("btn-clear-qty"),
     attach: document.getElementById("btn-attach"),
     taxesBody: document.getElementById("taxes-body"),
+    taxesTotals: document.getElementById("taxes-totals"),
+    taxesSubtotal: document.getElementById("tot-taxes"),
     taxesAdd: document.getElementById("taxes-add"),
     taxAccount: document.getElementById("f-tax-account"),
     taxAmount: document.getElementById("f-tax-amount"),
@@ -704,6 +697,66 @@ export async function bootBillFormPage(api) {
   const userMoves = createUserMoveGuard();
   document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
   document.addEventListener("pointerdown", () => userMoves.bump(), true);
+
+  /** The lines table's rows (src/doc-form-item-rows-ui.js, shared with the doc-form page). */
+  const itemRows = createItemRows({
+    table: () => el && el.items,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    painting: () => painting,
+    editable: () => editable(),
+    lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
+    keyField: "item_code",
+    itemKeys,
+    calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
+    testIdPrefix: "bill",
+    rateLabel: "Cost",
+    cellsOf: (model) => [model.lineNo, model.poLine, ...model.cells],
+    cellHtml: billLineCellHtml,
+    rowAttrs: (model) => ` data-wash-source="${model.washRole}"`,
+    canDeleteLines: () => true,
+    afterRows: (doc) => {
+      paintLineTotals(doc);
+      sizeItemColumns();
+    },
+    navFields: () => BILL_NAV_FIELDS,
+    isMoneyField: (field) => field === "rate",
+    linkDoctype: (field) => linkDoctypeForBillField(field),
+    mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
+    attachCalc: (inp, opts) => wireFieldCalc(inp, opts),
+    // A Qty over the PO's splits the line (maybeSplitQtyOverPoLimit), from the tape or a refused write.
+    beforeCalcCommit: async (field, ri, value) => field === "qty" && (await maybeSplitQtyOverPoLimit(ri, value)),
+    afterRefused: async (field, ri, value, reason) =>
+      field === "qty" && isOverBillingError(reason) && (await maybeSplitQtyOverPoLimit(ri, value)),
+    deleteLine: (ri) => deleteLineKeepingReceived(ri),
+    repaint: (res) => paint(res.doc, amountDue),
+    repaintCleared: (res, ri) => {
+      if (lineAllocations && typeof lineAllocations === "object") {
+        delete lineAllocations[ri];
+        delete lineAllocations[String(ri)];
+      }
+      if (poLineMeta && typeof poLineMeta === "object") {
+        delete poLineMeta[ri];
+        delete poLineMeta[String(ri)];
+      }
+      paint(res.doc, amountDue, {
+        lineAllocations,
+        poLineMeta,
+      });
+    },
+    lastRowToast: () => LAST_ITEM_ROW_TOAST,
+    showToast,
+    setStatus,
+    noteUserEdit,
+    setItemCellMode,
+    focusItemCell,
+    focusAfterLeaving: () => focusAfterLeavingItemsTable(),
+    userMoves,
+    logFocus,
+    refresh: () => refresh(),
+    cleanupEmptyLine: (ri, code) => cleanupEmptyItemRow(ri, code),
+    beginAmountBackIn,
+  });
   /** The clerk's move count when the bill on screen first appeared (focusVendorField). */
   let docShownMoveMark = 0;
   let docShownName = "";
@@ -798,7 +851,7 @@ export async function bootBillFormPage(api) {
     jumpItems.textContent = orient.itemsJumpLabel || "click here";
     jumpItems.addEventListener("click", (ev) => {
       ev.preventDefault();
-      setLineTab("items");
+      setLineTab(el, "items");
     });
     li1.append(jumpItems, document.createTextNode(")."));
     const li2 = document.createElement("li");
@@ -810,7 +863,7 @@ export async function bootBillFormPage(api) {
     jumpTaxes.textContent = "Taxes and Charges section below";
     jumpTaxes.addEventListener("click", (ev) => {
       ev.preventDefault();
-      setLineTab("items");
+      setLineTab(el, "items");
       const block = document.getElementById("bill-taxes-block");
       if (block && typeof block.scrollIntoView === "function") {
         block.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -819,20 +872,6 @@ export async function bootBillFormPage(api) {
     li2.append(jumpTaxes, document.createTextNode(" (related accounting)."));
     list.append(li1, li2);
     el.expenseNote.append(lead, list);
-  }
-  
-  function setLineTab(which) {
-    const expenses = which === "expenses";
-    if (el.tabItems) {
-      el.tabItems.classList.toggle("active", !expenses);
-      el.tabItems.setAttribute("aria-selected", expenses ? "false" : "true");
-    }
-    if (el.tabExpenses) {
-      el.tabExpenses.classList.toggle("active", expenses);
-      el.tabExpenses.setAttribute("aria-selected", expenses ? "true" : "false");
-    }
-    if (el.panelItems) el.panelItems.hidden = expenses;
-    if (el.panelExpenses) el.panelExpenses.hidden = !expenses;
   }
   
   function setStatus(text, cls) {
@@ -1001,15 +1040,9 @@ export async function bootBillFormPage(api) {
       /* ignore */
     }
   }
-
-  function rowItemCodeAt(doc, rowIndex) {
-    const items = doc && Array.isArray(doc.items) ? doc.items : [];
-    const row = items[rowIndex];
-    return row && row.item_code != null ? String(row.item_code).trim() : "";
-  }
   
   async function cleanupEmptyItemRow(rowIndex, itemCode) {
-    if (!api || !editable() || painting || itemTabGuard) return;
+    if (!api || !editable() || painting || itemKeys.busy()) return;
     if (peekHoldsRow(rowIndex)) {
       logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
       return;
@@ -1051,12 +1084,6 @@ export async function bootBillFormPage(api) {
     paintDirtyPill();
   }
   
-  function hideCommitGate() {
-    pendingGate = null;
-    hideCommitGateEl(commitGateEls());
-    setGateBusy(false);
-  }
-  
   function currentSaveBlockers() {
     return mergeSaveBlockers(
       listLocalSaveBlockers({
@@ -1069,95 +1096,57 @@ export async function bootBillFormPage(api) {
     );
   }
   
-  // One gate, opened by either a toolbar action or a navigation (SSoT).
-  function openGate(trigger) {
-    // Last click wins: releasing a superseded nav waiter so main can't leak it.
-    if (
-      pendingGate &&
-      pendingGate.kind === "nav" &&
-      pendingGate.navToken &&
-      !(trigger && trigger.kind === "nav" && trigger.navToken === pendingGate.navToken) &&
-      api &&
-      api.resolveNavGate
-    ) {
-      api.resolveNavGate(pendingGate.navToken, false);
-    }
-    pendingGate = trigger;
-    if (el.commitGateTitle) {
-      el.commitGateTitle.textContent = commitGateTitleText(gateTriggerLabel(trigger));
-    }
-    refreshCommitGateHint();
-    showCommitGate(commitGateEls(), {
-      focusSurface: () => {
-        if (api && api.focusBillSurface) api.focusBillSurface();
+  /**
+   * The commit gate (src/doc-form-commit-gate-ui.js, shared with the doc-form page): the one gate
+   * over unsaved work, opened by Find / New / Print or a navigation. The Bill keeps its own words.
+   */
+  const commitGate = createCommitGate({
+    els: commitGateEls,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    userEdited: () => userEdited,
+    setStatus: (text, cls) => setStatus(text, cls),
+    focusSurface: () => {
+      if (api && api.focusBillSurface) api.focusBillSurface();
+    },
+    saveBlockers: () => currentSaveBlockers(),
+    setMetaBlockers: (blockers) => {
+      metaBlockers = blockers;
+    },
+    preflight: {
+      can: () => !!api,
+      read: () =>
+        Promise.all([
+          api.listMandatory ? api.listMandatory() : null,
+          api.checkAccountCompanies ? api.checkAccountCompanies() : null,
+        ]),
+      apply: (r) => {
+        const [mand, acct] = r || [];
+        metaBlockers = mand && Array.isArray(mand.blockers) ? mand.blockers : [];
+        accountCompanyBlockers = acct && Array.isArray(acct.blockers) ? acct.blockers.filter(Boolean) : [];
       },
-    });
-    void refreshMetaPreflight();
-  }
-  
-  function cancelCommitGateFromOutside() {
-    if (!el.commitGate || el.commitGate.hidden) return;
-    const cancel = el.commitGate.querySelector("[data-gate='cancel']");
-    if (cancel && !cancel.disabled) resolveCommitGate("cancel");
-  }
-  
-  async function refreshMetaPreflight() {
-    if (!api) return;
-    const seq = ++metaPreflightSeq;
-    try {
-      const jobs = [];
-      if (api.listMandatory) jobs.push(api.listMandatory());
-      else jobs.push(Promise.resolve(null));
-      if (api.checkAccountCompanies) jobs.push(api.checkAccountCompanies());
-      else jobs.push(Promise.resolve(null));
-      const [mand, acct] = await Promise.all(jobs);
-      if (seq !== metaPreflightSeq) return; // superseded
-      metaBlockers = mand && Array.isArray(mand.blockers) ? mand.blockers : [];
-      accountCompanyBlockers =
-        acct && Array.isArray(acct.blockers) ? acct.blockers.filter(Boolean) : [];
-    } catch {
-      if (seq !== metaPreflightSeq) return;
-      metaBlockers = [];
-      accountCompanyBlockers = [];
-    }
-    if (pendingGate && el.commitGate && !el.commitGate.hidden) {
-      refreshCommitGateHint();
-    }
-  }
-  
-  function gateIsNewBill() {
-    return !!(
-      lastDoc &&
-      (lastDoc.__islocal ||
-        !lastDoc.name ||
-        String(lastDoc.name).startsWith("new") ||
-        lastDoc.name === "new")
-    );
-  }
-  
-  function setGateBusy(busy) {
-    setCommitGateBusy(commitGateEls(), {
-      busy,
-      toolbarAction: pendingGate && pendingGate.kind === "toolbar" ? pendingGate.action : "",
-      isNewDoc: gateIsNewBill(),
-      docTitle: "Bill",
-      getSaveBlockers: currentSaveBlockers,
-    });
-  }
-  
-  function refreshCommitGateHint() {
-    const blockers = currentSaveBlockers();
-    paintCommitGateValidation(commitGateEls(), {
-      blockers,
-      blocked: blockers.length > 0,
-      title: blockers.length
-        ? "Save is blocked by:"
-        : "Doc Bill + live ERP meta preflight passed",
-      cancelHint: "Choose Cancel to return to the Bill and fix these fields.",
-      saveWarning: () => commitGateSaveWarning(blockers),
-    });
-    setGateBusy(false);
-  }
+    },
+    save: (submit) => doSave(submit),
+    afterDiscard: (res, trigger) => {
+      userEdited = false;
+      // Find goes on to the Bill list: no repaint of the Bill on the way out.
+      if (!(trigger.kind === "toolbar" && trigger.action === "find")) {
+        paint(res.doc, res.amountDue != null ? res.amountDue : "");
+        paintDirtyPill();
+      }
+    },
+    runAction: (action, trigger) => runPendingAction(action, trigger),
+    announceBlocker: (text, blockers) => announceSaveBlocker(text, blockers),
+    afterSaveRefused: (reason, blockers) => announceSaveBlocker(reason, blockers),
+    text: {
+      title: () => "Bill",
+      triggerLabel: gateTriggerLabel,
+      readyTitle: () => "Doc Bill + live ERP meta preflight passed",
+      cancelHint: () => "Choose Cancel to return to the Bill and fix these fields.",
+      saveWarning: commitGateSaveWarning,
+      erpFailureView: commitGateErpFailureView,
+    },
+  });
   
   async function runPendingAction(action, trigger = null) {
     if (!api) return;
@@ -1209,19 +1198,6 @@ export async function bootBillFormPage(api) {
     }
   }
   
-  async function requestToolbarAction(action, extra = null) {
-    if (!api) return;
-    const trigger =
-      extra && typeof extra === "object"
-        ? { kind: "toolbar", action, ...extra }
-        : { kind: "toolbar", action };
-    if (!shouldOpenCommitGate(userEdited)) {
-      hideCommitGate();
-      await runPendingAction(action, trigger);
-      return;
-    }
-    openGate(trigger);
-  }
 
   function openFindFromRefDupeWarning() {
     if (!billRefCheckHasDupeWarning(lastRefCheckResult)) return;
@@ -1229,99 +1205,7 @@ export async function bootBillFormPage(api) {
     const supplier = resolveSupplierForRefCheck();
     const prefill = billFindPrefillFromDupeWarning({ billNo, supplier });
     if (!prefill) return;
-    void requestToolbarAction("find", { findPrefill: prefill });
-  }
-  
-  async function resolveCommitGate(choiceRaw) {
-    const choice = normalizeCommitGateChoice(choiceRaw);
-    const trigger = pendingGate;
-    const navToken = trigger && trigger.kind === "nav" ? trigger.navToken : null;
-  
-    // Cancel / unknown / nothing pending → stay; release any nav waiter in main.
-    if (!trigger || !choice || choice === "cancel") {
-      hideCommitGate();
-      if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-      return;
-    }
-  
-    // Toolbar-only guard: e.g. Print on a brand-new (unsaved) Bill after discard.
-    if (trigger.kind === "toolbar") {
-      const isNew = gateIsNewBill();
-      const allow = commitGateAllowsAction(trigger.action, choice, { isNew });
-      if (!allow.ok) {
-        setStatus(allow.reason || "Cannot continue.", "warn");
-        return;
-      }
-    }
-  
-    const plan = nextAfterGate(trigger, choice);
-    if (plan.then === "close") {
-      hideCommitGate();
-      if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, false);
-      return;
-    }
-  
-    // Perform the chosen side effect. On failure, KEEP the gate open (no hang, no orphan).
-    if (choice === "discard") {
-      setGateBusy(true);
-      setStatus("Discarding unsaved changes…");
-      const res = await api.revertUnsaved();
-      if (!(res && res.ok)) {
-        setStatus((res && res.reason) || "Discard failed.", "err");
-        setGateBusy(false);
-        return;
-      }
-      userEdited = false;
-      const continuesToFind =
-        trigger.kind === "toolbar" && trigger.action === "find";
-      if (!continuesToFind) {
-        paint(res.doc, res.amountDue != null ? res.amountDue : "");
-        paintDirtyPill();
-      }
-    } else if (choice === "save" || choice === "submit") {
-      const blockers = currentSaveBlockers();
-      if (!commitGateSaveEnabled(blockers)) {
-        refreshCommitGateHint();
-        announceSaveBlocker(blockers[0] || "Fix save prerequisites first.", blockers);
-        return;
-      }
-      reduceCommitGatePhase("idle", { type: "start-save", choice });
-      setGateBusy(true);
-      const saveRes = await doSave(choice === "submit");
-      if (!(saveRes && saveRes.ok)) {
-        const reason = (saveRes && saveRes.reason) || "Save failed.";
-        reduceCommitGatePhase("saving", { type: "error", reason });
-        setGateBusy(false);
-        if (saveRes && Array.isArray(saveRes.blockers) && saveRes.blockers.length) {
-          metaBlockers = saveRes.blockers;
-          paintCommitGateValidation(commitGateEls(), {
-            blockers: mergeSaveBlockers(
-              listLocalSaveBlockers({
-                amountDue,
-                doc: lastDoc,
-                supplier: el.vendor && el.vendor.value,
-              }),
-              accountCompanyBlockers,
-              saveRes.blockers,
-            ),
-            blocked: true,
-            title: "Save is blocked by:",
-            hint: "Choose Cancel to return to the Bill and fix these fields.",
-          });
-        } else {
-          paintCommitGateValidation(commitGateEls(), commitGateErpFailureView(reason));
-        }
-        announceSaveBlocker(reason, saveRes && Array.isArray(saveRes.blockers) ? saveRes.blockers : undefined);
-        return;
-      }
-    }
-  
-    hideCommitGate();
-    if (plan.then === "proceed-nav") {
-      if (navToken && api && api.resolveNavGate) api.resolveNavGate(navToken, true);
-    } else {
-      await runPendingAction(trigger.action, trigger);
-    }
+    void commitGate.requestToolbarAction("find", { findPrefill: prefill });
   }
   
   function escapeHtml(v) {
@@ -1548,40 +1432,7 @@ export async function bootBillFormPage(api) {
   }
   
   function focusItemCell(rowIndex, field, opts = {}) {
-    const mode = opts.mode === CELL_MODE_NAV ? CELL_MODE_NAV : CELL_MODE_EDIT;
-    setItemCellMode(mode);
-    const wantSelect =
-      opts.selectAll === true || (opts.selectAll !== false && mode === CELL_MODE_NAV);
-    const tryFocus = () => {
-      const inp = el.items.querySelector(
-        `input[data-row="${rowIndex}"][data-field="${field}"]`,
-      );
-      if (!inp) return false;
-      try {
-        if (mode === CELL_MODE_NAV) inp.dataset.navFocus = "1";
-        inp.focus({ preventScroll: false });
-        if (wantSelect && typeof inp.select === "function") inp.select();
-      } catch {
-        try {
-          inp.focus();
-        } catch {
-          /* ignore */
-        }
-      }
-      return true;
-    };
-    if (tryFocus()) return;
-    requestAnimationFrame(() => {
-      tryFocus();
-      setTimeout(tryFocus, 50);
-    });
-  }
-  
-  function isItemLinkDropdownOpen(inp) {
-    const wrap = inp && inp.closest ? inp.closest(".link-wrap") : null;
-    if (!wrap) return false;
-    const dd = wrap.querySelector(".link-dd");
-    return !!(dd && !dd.hidden);
+    itemKeys.focusCell(rowIndex, field, opts);
   }
   
   function editable() {
@@ -1621,400 +1472,6 @@ export async function bootBillFormPage(api) {
     }
   }
   
-  function paintTaxesHead() {
-    const thead = document.getElementById("taxes-head-row");
-    if (!thead) return;
-    thead.innerHTML =
-      BILL_TAX_SORTABLE_HEADERS.map((h) => {
-        const st = taxSortHeaderState(taxSortSpecs, h.sortKey);
-        const arrow = taxSortHeaderArrow(taxSortSpecs, h.sortKey);
-        const cls = [
-          "sortable",
-          st.active ? "sorted" : "",
-          h.className || "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        return `<th class="${cls}" data-tax-sort="${escapeHtml(h.sortKey)}" title="Sort by ${escapeHtml(h.label)}">${escapeHtml(h.label)}${arrow ? ` ${arrow}` : ""}</th>`;
-      }).join("") + `<th data-col-key="tax_actions"></th>`;
-    if (!taxesHeadWired) {
-      taxesHeadWired = true;
-      thead.addEventListener("click", (ev) => {
-        const th = ev.target && /** @type {HTMLElement} */ (ev.target).closest("[data-tax-sort]");
-        if (!th) return;
-        const key = th.getAttribute("data-tax-sort");
-        if (!key) return;
-        taxSortSpecs = applyTaxHeaderSortClick(taxSortSpecs, key, {
-          ctrlKey: ev.ctrlKey,
-          metaKey: ev.metaKey,
-        });
-        paintTaxes(lastDoc);
-      });
-    }
-  }
-
-  function focusTaxCell(rowIndex, field) {
-    if (!el.taxesBody || taxNavPos(field) < 0) return;
-    const inp = el.taxesBody.querySelector(
-      `[data-tax-row="${rowIndex}"][data-tax-field="${field}"]`,
-    );
-    if (!inp || typeof inp.focus !== "function") return;
-    try {
-      inp.focus({ preventScroll: false });
-      if (typeof inp.select === "function") inp.select();
-    } catch {
-      try {
-        inp.focus();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  /** The keyboard walk for tax row `ri` — Rate % on a percentage row, Amount on a fixed one. */
-  function taxFieldsForRow(ri) {
-    return taxRowNavFields(lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null);
-  }
-
-  /** Why a row is fixed, when the clerk typed its Amount over a percentage this entry; else "". */
-  function taxFixedNote(taxRaw) {
-    const name = taxRaw && taxRaw.name ? String(taxRaw.name) : "";
-    if (!name || !taxRowsFixedByClerk.has(name) || taxRaw.charge_type !== "Actual") return "";
-    const was = taxRowsFixedByClerk.get(name);
-    const pct = was === "" || was == null ? "a percentage" : `${formatGroupedNumber(Number(was))}%`;
-    return `Was ${pct} of the net total. You typed this row's Amount, so it is a fixed amount now and no longer follows the item lines.`;
-  }
-
-  /** The note opens as a full-width line under its row (a narrow Type cell made the row a tower). */
-  function taxFixedNoteRowHtml(taxRaw, idx, cols) {
-    const note = taxFixedNote(taxRaw);
-    return note
-      ? `<tr class="row-note-row" data-tax-note-text="${idx}" hidden><td colspan="${cols}" class="row-note">${escapeHtml(note)}</td></tr>`
-      : "";
-  }
-
-  /** ⓘ on a row whose Amount the clerk typed over a percentage; the note opens on click. */
-  function taxFixedMarkerHtml(taxRaw, idx) {
-    const note = taxFixedNote(taxRaw);
-    if (!note) return "";
-    return ` <button type="button" class="row-note-btn" data-tax-note="${idx}" tabindex="-1" title="${escapeHtml(note)}" aria-label="Why this row is a fixed amount" data-testid="bill-tax-${idx}-fixed">${uiIconHtml("info", { size: 12 })}</button>`;
-  }
-
-  function paintTaxes(doc) {
-    if (!el.taxesBody) return;
-    paintTaxesHead();
-    const rows = sortBillTaxRows(readBillTaxRowsForSort(doc), taxSortSpecs);
-    const canEdit = editable();
-    if (el.taxesAdd) el.taxesAdd.style.display = canEdit ? "" : "none";
-    if (el.removeAllTax) el.removeAllTax.disabled = !rows.length;
-    const taxesFoot = document.getElementById("taxes-totals");
-    const totTaxes = document.getElementById("tot-taxes");
-    if (!rows.length) {
-      el.taxesBody.innerHTML =
-        `<tr><td colspan="8" class="link-muted">No tax/charge rows yet.</td></tr>`;
-      if (taxesFoot) taxesFoot.hidden = true;
-      paintMoneyStack(doc);
-      return;
-    }
-    if (taxesFoot) taxesFoot.hidden = false;
-    if (totTaxes) {
-      totTaxes.innerHTML = formatUsdAmountHtml(billTaxesSubtotal(doc)) || "0.00";
-    }
-    el.taxesBody.innerHTML = rows
-      .map((r) => {
-        const taxRaw =
-          lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[r.idx] : null;
-        const canAlloc = canEdit && isAllocatableChargeRow(taxRaw || r);
-        const allocBtn = canAlloc
-          ? `<button type="button" class="alloc-btn" data-tax-alloc="${r.idx}" tabindex="-1" data-testid="bill-tax-alloc-${r.idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
-          : "";
-        if (!canEdit) {
-          return `<tr>
-            <td>${escapeHtml(String(r.lineNo))}</td>
-            <td>${escapeHtml(r.account_head)}</td>
-            <td>${escapeHtml(r.description)}</td>
-            <td>${escapeHtml(r.charge_type)}</td>
-            <td class="num">${escapeHtml(r.rate === "" ? "" : String(r.rate))}</td>
-            <td class="num">${formatUsdAmountHtml(r.tax_amount) || escapeHtml(String(r.tax_amount ?? ""))}</td>
-            <td>${escapeHtml(r.add_deduct_tax)}</td>
-            <td></td>
-          </tr>`;
-        }
-        const rateVal = displayTaxRateForRow(r, doc);
-        const rateShown =
-          rateVal === "" || rateVal == null ? "" : formatGroupedNumber(Number(rateVal));
-        const amtShown =
-          r.tax_amount === "" || r.tax_amount == null
-            ? ""
-            : formatGroupedNumber(r.tax_amount);
-        return `<tr data-taxidx="${r.idx}">
-          <td><span class="ro">${escapeHtml(String(r.lineNo))}</span></td>
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="bill-tax-${r.idx}-account" /></td>
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="bill-tax-${r.idx}-desc" /></td>
-          <td><span class="ro">${escapeHtml(r.charge_type)}</span>${taxFixedMarkerHtml(taxRaw, r.idx)}</td>
-          <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="bill-tax-${r.idx}-rate" /></td>
-          <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="bill-tax-${r.idx}-amount" /></td>
-          <td>
-            <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="bill-tax-${r.idx}-adddeduct">
-              <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
-              <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
-            </select>
-          </td>
-          <td style="white-space:nowrap">
-            ${allocBtn}
-            <button type="button" class="del" data-tax-del="${r.idx}" title="Remove this tax/charge" aria-label="Remove this tax/charge" data-testid="bill-tax-del-${r.idx}">${uiIconHtml("trash", { size: 13 })}</button>
-          </td>
-        </tr>${taxFixedNoteRowHtml(taxRaw, r.idx, 8)}`;
-      })
-      .join("");
-    sizeTaxColumns();
-  
-    el.taxesBody.querySelectorAll("[data-tax-row]").forEach((inp) => {
-      // Same resting-text sync as the items grid (Packet T step B).
-      const taxCellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-      if (taxCellText) {
-        const syncTaxCellText = () => {
-          taxCellText.textContent = inp.value;
-        };
-        inp.addEventListener("input", syncTaxCellText);
-        inp.addEventListener("change", syncTaxCellText);
-      }
-      const field = inp.getAttribute("data-tax-field");
-      const ri = Number(inp.getAttribute("data-tax-row"));
-      inp.tabIndex = -1;
-      let taxBusy = false;
-      const readTaxValue = () => {
-        const kind = dirtyCompareKindForField(field);
-        let next =
-          kind === "number" ? inp.value : normalizeEditableText(inp.value);
-        if (field === "rate" || field === "tax_amount") {
-          const n = parseMoney(inp.value);
-          next = n == null ? "" : String(n);
-        }
-        return next;
-      };
-      const apply = async (value, applyOpts = {}) => {
-        if (!api || painting || !api.setTax || taxBusy) return null;
-        taxBusy = true;
-        try {
-          setStatus(`Updating tax ${field}…`);
-          const res = await api.setTax(ri, field, value);
-          if (res && res.ok) {
-            noteUserEdit();
-            paint(res.doc, amountDue);
-            if (applyOpts.focus) {
-              requestAnimationFrame(() =>
-                focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-              );
-            }
-            setStatus("Tax row updated — totals refreshed.");
-          } else {
-            setStatus((res && res.reason) || "Tax update failed.", "err");
-            await refresh();
-          }
-          return res;
-        } finally {
-          taxBusy = false;
-        }
-      };
-      const syncTaxRateAndAmount = async (editedField, rawValue, applyOpts = {}) => {
-        if (!api || painting || !api.setTax || taxBusy) return;
-        const base = taxRateBaseFromDoc(lastDoc);
-        const n = parseMoney(rawValue);
-        if (n == null) {
-          await apply(String(rawValue), applyOpts);
-          return;
-        }
-        const rowNow = lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-        const isPercentRow = !!rowNow && rowNow.charge_type !== "Actual";
-        if (editedField === "tax_amount") {
-          // A typed Amount on a % row makes it Actual (bridge setTaxRow): the amount is the row's truth now.
-          if (isPercentRow && rowNow.name) taxRowsFixedByClerk.set(String(rowNow.name), rowNow.rate);
-          await apply(String(n), applyOpts);
-          return;
-        }
-        if (editedField === "rate" && isPercentRow) {
-          // ERPNext's own rule: a % row is typed by its rate and computes its amount.
-          await apply(String(n), applyOpts);
-          return;
-        }
-        if (editedField === "rate") {
-          const amt = taxAmountFromRate(n, base);
-          if (amt == null) {
-            await apply(String(n), applyOpts);
-            return;
-          }
-          taxBusy = true;
-          try {
-            setStatus("Updating tax amount from rate…");
-            const resAmt = await api.setTax(ri, "tax_amount", String(amt));
-            if (resAmt && resAmt.ok) {
-              noteUserEdit();
-              paint(resAmt.doc, amountDue);
-              if (applyOpts.focus) {
-                requestAnimationFrame(() =>
-                  focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-                );
-              }
-              setStatus("Tax row updated — totals refreshed.");
-              if (Math.abs(n - Number(resAmt.doc?.taxes?.[ri]?.rate ?? n)) > 0.001) {
-                const resRate = await api.setTax(ri, "rate", String(n));
-                if (resRate && resRate.ok) {
-                  paint(resRate.doc, amountDue);
-                  if (applyOpts.focus) {
-                    requestAnimationFrame(() =>
-                      focusTaxCell(applyOpts.focus.rowIndex, applyOpts.focus.field),
-                    );
-                  }
-                }
-              }
-            } else {
-              setStatus((resAmt && resAmt.reason) || "Tax update failed.", "err");
-              await refresh();
-            }
-          } finally {
-            taxBusy = false;
-          }
-        }
-      };
-      if (field === "account_head") {
-        mountBillLinkPicker(inp, "Account", apply);
-      }
-      const commitTaxCell = async (applyOpts = {}) => {
-        // A Tab / arrow move commits through here itself (fromMove); the guard only keeps the
-        // blur that the move causes from committing a second time. DF-02: the guard used to
-        // stop the move's own commit too, so Tab out of an edited Amount dropped the edit.
-        if (!api || painting || taxBusy || (taxTabGuard && !applyOpts.fromMove)) return;
-        let next = readTaxValue();
-        if (field === "rate" || field === "tax_amount") {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-        }
-        const row =
-          lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-        let prev = row && row[field] != null ? row[field] : "";
-        if (field === "rate" && row) {
-          prev = displayTaxRateForRow(row, lastDoc);
-        }
-        const kind = dirtyCompareKindForField(field);
-        if (valuesMeaningfullyEqual(prev, next, { kind })) return;
-        if (field === "rate" || field === "tax_amount") {
-          await syncTaxRateAndAmount(field, inp.value, applyOpts);
-          return;
-        }
-        await apply(next, applyOpts);
-      };
-      inp.addEventListener("change", () => {
-        void commitTaxCell();
-      });
-      inp.addEventListener("blur", () => {
-        if (taxTabGuard) return;
-        void commitTaxCell();
-      });
-      if (taxNavPos(field) >= 0) {
-        inp.addEventListener("focus", () => {
-          if (field === "tax_amount" || field === "rate") {
-            const n = parseMoney(inp.value);
-            if (n != null) inp.value = String(n);
-          }
-        });
-        inp.addEventListener("keydown", (ev) => {
-          if (!editable() || painting) return;
-          const rowCount =
-            lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes.length : 0;
-
-          const runMove = async (dest, leaveForward, leaveBackward) => {
-            taxTabGuard = true;
-            try {
-              let next = readTaxValue();
-              const row =
-                lastDoc && Array.isArray(lastDoc.taxes) ? lastDoc.taxes[ri] : null;
-              let prev = row && row[field] != null ? row[field] : "";
-              const kind = dirtyCompareKindForField(field);
-              const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
-              if (!dest) {
-                if (dirty) await commitTaxCell({ fromMove: true });
-                if (leaveForward) {
-                  if (el.taxAccount) el.taxAccount.focus();
-                  else if (el.memo && !el.memo.readOnly) el.memo.focus();
-                } else if (leaveBackward) {
-                  if (el.addTax && !el.addTax.disabled) el.addTax.focus();
-                }
-                return;
-              }
-              if (dirty) {
-                await commitTaxCell({ focus: dest, fromMove: true });
-              } else {
-                focusTaxCell(dest.rowIndex, dest.field);
-              }
-            } finally {
-              taxTabGuard = false;
-            }
-          };
-
-          if (ev.key === "Tab") {
-            ev.preventDefault();
-            const dest = nextTaxCellTab(field, ri, rowCount, !!ev.shiftKey, taxFieldsForRow);
-            void runMove(dest, !ev.shiftKey && !dest, !!ev.shiftKey && !dest);
-            return;
-          }
-          const dir =
-            ev.key === "ArrowUp"
-              ? "up"
-              : ev.key === "ArrowDown"
-                ? "down"
-                : ev.key === "ArrowLeft"
-                  ? "left"
-                  : ev.key === "ArrowRight"
-                    ? "right"
-                    : null;
-          if (!dir) return;
-          ev.preventDefault();
-          const dest = neighborTaxCell(field, ri, rowCount, dir, taxFieldsForRow);
-          void runMove(dest, false, false);
-        });
-      }
-    });
-    el.taxesBody.querySelectorAll("[data-tax-del]").forEach((btn) => {
-      btn.tabIndex = -1;
-      if (allocateChargeModalOpen) btn.disabled = true;
-      btn.addEventListener("click", async () => {
-        if (!taxRowDeleteAllowed(allocateChargeModalOpen)) {
-          setStatus("Finish or cancel Allocate to stock before removing a tax row.", "warn");
-          return;
-        }
-        if (!api || !api.deleteTax) return;
-        const ri = Number(btn.getAttribute("data-tax-del"));
-        setStatus("Removing tax row…");
-        const res = await api.deleteTax(ri);
-        if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc, amountDue);
-          setStatus("Tax row removed.");
-        } else {
-          setStatus((res && res.reason) || "Delete tax failed.", "err");
-        }
-      });
-    });
-    el.taxesBody.querySelectorAll("[data-tax-note]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const t = el.taxesBody.querySelector(`[data-tax-note-text="${btn.getAttribute("data-tax-note")}"]`);
-        if (t) t.hidden = !t.hidden;
-      });
-    });
-    const allocBtns = [...el.taxesBody.querySelectorAll("[data-tax-alloc]")];
-    allocBtns.forEach((btn) => {
-      btn.tabIndex = -1;
-      btn.addEventListener("click", () => {
-        const ri = Number(btn.getAttribute("data-tax-alloc"));
-        openAllocateChargeModal(ri);
-      });
-    });
-    paintMoneyStack(doc);
-    keepTaxesRemoved(doc);
-    if (taxNoteKey && taxNoteKey !== taxNoteKeyOf(doc)) collapseTaxDefaultNote();
-  }
-
   /**
    * Clear the template field first (or ERPNext refills the rows from it), then every row.
    * @param {{ quiet?: boolean }} [opts]
@@ -2028,7 +1485,7 @@ export async function bootBillFormPage(api) {
     removingTaxes = true;
     try {
       const name = String(lastDoc.name || "");
-      taxesRemovedOn.add(name);
+      taxNotes.removedOn.add(name);
       let doc = lastDoc;
       if (doc.taxes_and_charges) {
         const r = await api.setHeader("taxes_and_charges", "");
@@ -2057,74 +1514,6 @@ export async function bootBillFormPage(api) {
       removingTaxes = false;
     }
   }
-
-  /** Re-clears per document: a refill that keeps coming back is reported, not fought forever. */
-  const taxReclears = new Map();
-
-  /** A vendor change refills taxes from a template; on a bill the clerk emptied, empty them again. */
-  function keepTaxesRemoved(doc) {
-    if (removingTaxes || !doc || !taxesRemovedOn.has(String(doc.name || ""))) return;
-    if (!doc.taxes_and_charges || !(Array.isArray(doc.taxes) && doc.taxes.length)) return;
-    const key = String(doc.name || "");
-    const n = (taxReclears.get(key) || 0) + 1;
-    taxReclears.set(key, n);
-    if (n > 3) {
-      taxesRemovedOn.delete(key);
-      setStatus("ERPNext keeps putting the template's taxes back here; leaving them. Remove all again, or check the vendor's tax defaults (ⓘ).", "warn");
-      return;
-    }
-    void removeAllTaxes({ quiet: true });
-  }
-
-  /** Which bill + vendor the open note explains; anything else closes it (5zorro DF-02). */
-  let taxNoteKey = "";
-  const taxNoteKeyOf = (doc) => `${(doc && doc.name) || ""}|${(doc && doc.supplier) || ""}`;
-
-  /** Close the note: on Refresh, on a fresh snapshot, or when the bill or vendor changes. */
-  function collapseTaxDefaultNote() {
-    if (el.taxDefaultNote) el.taxDefaultNote.hidden = true;
-    taxNoteKey = "";
-  }
-
-  /** "Vendor tax template default ⓘ": why these taxes, and how to change them. */
-  async function toggleTaxDefaultNote() {
-    const note = el.taxDefaultNote;
-    if (!note) return;
-    if (!note.hidden) {
-      collapseTaxDefaultNote();
-      return;
-    }
-    note.hidden = false;
-    taxNoteKey = taxNoteKeyOf(lastDoc);
-    note.textContent = "Reading the tax defaults…";
-    const supplier = (lastDoc && lastDoc.supplier) || "";
-    const facts = api && api.taxDefaultFacts ? await api.taxDefaultFacts(supplier) : null;
-    if (!(facts && facts.ok)) {
-      note.textContent = (facts && facts.reason) || "Could not read the tax defaults.";
-      return;
-    }
-    const why = taxDefaultWhy({
-      supplier,
-      current: (lastDoc && lastDoc.taxes_and_charges) || "",
-      defaultTemplate: facts.defaultTemplate,
-      vendorRule: facts.vendorRule,
-      removed: taxesRemovedOn.has(String((lastDoc && lastDoc.name) || "")),
-    });
-    note.innerHTML =
-      why.lines.map((l) => `<p>${escapeHtml(l)}</p>`).join("") +
-      `<div class="tax-default-links">${why.links
-        .map((k, i) => `<button type="button" class="linkish" data-tax-default-link="${i}" tabindex="-1">${escapeHtml(k.label)} ↗</button>`)
-        .join("")}</div>`;
-    note.querySelectorAll("[data-tax-default-link]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const link = why.links[Number(b.getAttribute("data-tax-default-link"))];
-        if (!link || !api || !api.softPeekRoute) return;
-        setStatus(`Opening ${link.label} (Esc returns here)…`);
-        void api.softPeekRoute(link.route);
-      });
-    });
-  }
-  
 
     /**
      * Packet T C — size the line grid from its content, then arm the drag
@@ -2362,6 +1751,7 @@ export async function bootBillFormPage(api) {
           ctrlKey: !!ev.ctrlKey,
           metaKey: !!ev.metaKey,
         });
+        itemKeys.sortNow();
         paintItemsHead();
         if (lastDoc) paintItems(lastDoc);
       });
@@ -2370,459 +1760,19 @@ export async function bootBillFormPage(api) {
   
   function paintItems(doc) {
     paintItemsHead();
-    const models = sortBillItemRowModels(
-      buildBillItemRowModels(doc, lineAllocations, poLineMeta, receivedRowsFor(doc)),
-      itemSortSpecs,
+    const models = itemKeys.orderForPaint(
+      sortBillItemRowModels(
+        buildBillItemRowModels(doc, lineAllocations, poLineMeta, receivedRowsFor(doc)),
+        itemSortSpecs,
+      ),
+      doc,
     );
-    const canEdit = editable();
-    el.items.innerHTML = models
-      .map((model) => {
-        const ri = model.rowIndex;
-        const r = [model.lineNo, model.poLine, ...model.cells];
-        const cells = BILL_ITEM_COLS.map((col, ci) => {
-          const val = r[ci] ?? "";
-          if (col.displayOnly || col.field == null) {
-            const html = formatUsdAmountHtml(val);
-            if (col.label === "Amount" && canEdit) {
-              return `<td class="num"><button type="button" class="amount-back-in money-amt" data-back-in="${ri}" title="Back into unit cost from this amount (Amount ÷ Qty → Cost)" data-testid="bill-amt-${ri}">${html || escapeHtml(val) || "—"}</button></td>`;
-            }
-            if (col.label === "Amount") {
-              return `<td class="num"><span class="ro money-amt" data-testid="bill-amt-${ri}">${html || escapeHtml(val)}</span></td>`;
-            }
-            if (col.label === "Line" || col.label === "Source line") {
-              return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
-            }
-          }
-          if (col.field === ALLOC_SALES_ORDERS_FIELD) {
-            const assignBtn = canEdit
-              ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
-              : "";
-            // Peek the Sales Order, and the PO the link lives on (change it there, or void & amend).
-            const peeks = billLineOrderPeeks(model.alloc, model.item)
-              .map((p) => {
-                const label = linkedSourcePeekKindLabel(p.kind);
-                const tag = p.kind === "sales-order" ? "SO" : "PO";
-                return `<button type="button" class="order-peek" tabindex="-1" data-peek-route="${escapeHtml(p.route)}" data-peek-kind="${p.kind}" data-testid="bill-peek-${ri}-${tag.toLowerCase()}" title="Peek ${label} ${escapeHtml(p.name)} — Esc returns to this bill" aria-label="Peek ${label} ${escapeHtml(p.name)}">${uiIconHtml("eye", { size: 12 })}${tag}</button>`;
-              })
-              .join("");
-            return `<td class="alloc-so so-cell"><span class="ro alloc-so-text hatch-clear">${escapeHtml(val) || "—"}</span>${peeks}${assignBtn}</td>`;
-          }
-          if (col.field === ALLOC_CUSTOMER_FIELD) {
-            return `<td class="so-cell"><span class="ro hatch-clear">${escapeHtml(val) || "—"}</span></td>`;
-          }
-          if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
-            const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
-            const which = col.field === REC_BY_FIELD ? "by" : "on";
-            if (canEdit && lineCanBeReceived(model.item)) {
-              return `<td class="rec-cell rec-col"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
-            }
-            const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
-            return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
-          }
-          if (col.scratch && col.readOnly) {
-            return `<td><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
-          }
-          // Cost: #,###.## (editable text so commas work)
-          if (col.field === "rate") {
-            const shown = val === "" || val == null ? "" : formatGroupedNumber(val);
-            if (!canEdit) {
-              return `<td class="num"><span class="ro money-cost">${escapeHtml(shown)}</span></td>`;
-            }
-            return `<td class="num"><input type="text" inputmode="decimal" class="money-cost" data-row="${ri}" data-field="rate" value="${escapeHtml(shown)}" data-testid="bill-cell-${ri}-rate" /></td>`;
-          }
-          if (!canEdit) {
-            return `<td class="cell-wrap"><span class="cell-text ro">${escapeHtml(val)}</span></td>`;
-          }
-          // Qty: text + decimal keypad — no spinner; ↑/↓ navigate rows only.
-          if (col.field === "qty") {
-            return `<td class="num"><input type="text" inputmode="decimal" data-row="${ri}" data-field="qty" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-qty" /></td>`;
-          }
-          return `<td class="cell-wrap"><span class="cell-text">${escapeHtml(val)}</span><input type="text" data-row="${ri}" data-field="${col.field}" value="${escapeHtml(val)}" data-testid="bill-cell-${ri}-${col.field}" /></td>`;
-        }).join("");
-        const del = canEdit
-          ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" data-testid="bill-del-${ri}">×</button></td>`
-          : `<td></td>`;
-        return `<tr data-rowidx="${ri}" data-wash-source="${model.washRole}">${cells}${del}</tr>`;
-      })
-      .join("");
-  
-    paintLineTotals(doc);
-    sizeItemColumns();
-  
-    el.items.querySelectorAll("input[data-row]").forEach((inp) => {
-      // Keep the resting text layer in step with the editor. The text is hidden
-      // while the input has focus, so this is not load-bearing for correctness
-      // mid-edit -- it is here so a cell reads right the instant you leave it,
-      // without waiting for a repaint that may never come.
-      const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
-      if (cellText) {
-        const syncCellText = () => {
-          cellText.textContent = inp.value;
-        };
-        inp.addEventListener("input", syncCellText);
-        inp.addEventListener("change", syncCellText);
-      }
-      const field = inp.getAttribute("data-field");
-      const ri = Number(inp.getAttribute("data-row"));
-      const linkDt = linkDoctypeForBillField(field);
-      const readCellValue = () => {
-        const kind = dirtyCompareKindForField(field);
-        let next =
-          kind === "number" ? inp.value : normalizeEditableText(inp.value);
-        if (field === "rate") {
-          const n = parseMoney(inp.value);
-          next = n == null ? "" : String(n);
-        }
-        if (shouldForceCapsOnElement(docCapsOn, inp) && kind !== "number") {
-          next = applyDocCapsValue(next, docCapsOn);
-        }
-        return next;
-      };
-      const focusAfterItemEdit = async (docAfter, cellValue) => {
-        const rowCount =
-          docAfter && Array.isArray(docAfter.items) ? docAfter.items.length : 0;
-        const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-          cellValue,
-          rowItemCode: docAfter?.items?.[ri]?.item_code ?? lastDoc?.items?.[ri]?.item_code ?? "",
-          nextRowItemCode: rowItemCodeAt(docAfter, ri + 1),
-        });
-        if (dest.deleteRow && dest.leaveTable) {
-          if (!api || !editable()) return;
-          const rowCountNow =
-            lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-          const deleteRi = dest.rowIndex != null ? dest.rowIndex : ri;
-          if (shouldBlockDeleteLastItemRow(rowCountNow)) {
-            showToast(LAST_ITEM_ROW_TOAST);
-            focusAfterLeavingItemsTable();
-            return;
-          }
-          setStatus("Removing empty line…");
-          const removed = await deleteLineKeepingReceived(deleteRi);
-          if (removed && removed.ok) {
-            noteUserEdit();
-            paint(removed.doc, amountDue);
-            setStatus("Left items table.");
-            focusAfterLeavingItemsTable();
-          } else if (removed && removed.blockedLastRow) {
-            showToast(removed.reason || LAST_ITEM_ROW_TOAST);
-          } else {
-            setStatus((removed && removed.reason) || "Could not remove empty line.", "err");
-          }
-          return;
-        }
-        if (dest.field) {
-          focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-          return;
-        }
-        if (!dest.addRow || !api || !editable()) return;
-        setStatus("Adding line…");
-        const added = await api.addItem();
-        if (added && added.ok) {
-          noteUserEdit();
-          paint(added.doc, amountDue);
-          const newRi =
-            added.doc && Array.isArray(added.doc.items)
-              ? added.doc.items.length - 1
-              : ri + 1;
-          focusItemCell(Math.max(0, newRi), "item_code", { mode: CELL_MODE_NAV });
-          setStatus("Line added.");
-        } else {
-          setStatus((added && added.reason) || "Add line failed.", "err");
-        }
-      };
-      const apply = async (value, opts = {}) => {
-        if (!api || painting) return;
-        const run = async () => {
-          setStatus(`Updating ${field}…`);
-          const moveMark = userMoves.mark();
-          const res = await api.setItem(ri, field, value);
-          if (res && res.ok) {
-            noteUserEdit();
-            paint(res.doc, amountDue);
-            setStatus("Line updated.");
-            if (userMoves.movedSince(moveMark)) {
-              // The clerk moved on while ERPNext answered: leave focus where they put it.
-              logFocus("focus-after-edit-skipped", field);
-            } else if (opts.focus && opts.focus.field) {
-              focusItemCell(opts.focus.rowIndex, opts.focus.field, {
-                mode: opts.focus.mode === CELL_MODE_EDIT ? CELL_MODE_EDIT : CELL_MODE_NAV,
-              });
-            } else if (!opts.stay) {
-              await focusAfterItemEdit(res.doc, value);
-            }
-          } else {
-            const reason = (res && res.reason) || "";
-            if (field === "qty" && isOverBillingError(reason)) {
-              const handled = await maybeSplitQtyOverPoLimit(ri, value);
-              if (handled) return;
-            }
-            setStatus(reason || "Line update failed.", "err");
-            await refresh();
-          }
-        };
-        lineApplyInFlight = run();
-        try {
-          await lineApplyInFlight;
-        } finally {
-          lineApplyInFlight = null;
-        }
-      };
-      if (linkDt) {
-        mountBillLinkPicker(inp, linkDt, apply);
-      }
-      inp.addEventListener("focus", () => {
-        if (inp.dataset.navFocus === "1") {
-          setItemCellMode(CELL_MODE_NAV);
-          delete inp.dataset.navFocus;
-        } else {
-          setItemCellMode(CELL_MODE_EDIT);
-        }
-      });
-      if (field === "item_code") {
-        inp.addEventListener("blur", () => {
-          // Click-away from Item picker / leave cell without Tab — drop blank extras.
-          window.setTimeout(() => {
-            if (!editable() || painting || itemTabGuard) return;
-            const wrap = inp.closest(".link-wrap");
-            if (wrap && wrap.contains(document.activeElement)) return;
-            const code = normalizeEditableText(inp.value);
-            if (!isEmptyItemCode(code)) return;
-            void cleanupEmptyItemRow(ri, code);
-          }, 180);
-        });
-      }
-      if (field === "rate") {
-        inp.addEventListener("focus", () => {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = String(n);
-        });
-        inp.addEventListener("blur", () => {
-          if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-          else if (normalizeEditableText(inp.value) === "") inp.value = "";
-        });
-      }
-      if (field === "qty" || field === "rate") {
-        wireFieldCalc(inp, {
-          kind: field,
-          onCommit: async (value) => {
-            let next = value;
-            if (field === "rate") {
-              const n = parseMoney(value);
-              next = n == null ? "" : String(n);
-              if (n != null) inp.value = formatGroupedNumber(n);
-            }
-            if (field === "qty") {
-              const handled = await maybeSplitQtyOverPoLimit(ri, next);
-              if (handled) return;
-            }
-            await apply(next);
-          },
-        });
-      }
-      inp.addEventListener("keydown", (ev) => {
-        if (!editable() || painting) return;
-        const calcActive =
-          calcUi.getState().mode === "active" && calcUi.getInput() === inp;
-        const decision = itemTableKeyDecision({
-          mode: itemCellMode,
-          key: ev.key,
-          shiftKey: !!ev.shiftKey,
-          ctrlKey: !!ev.ctrlKey,
-          metaKey: !!ev.metaKey,
-          altKey: !!ev.altKey,
-          selectionStart: inp.selectionStart,
-          selectionEnd: inp.selectionEnd,
-          valueLength: String(inp.value ?? "").length,
-          linkDropdownOpen: isItemLinkDropdownOpen(inp),
-          calcActive,
-          verticalArrowsAlwaysNav: field === "qty",
-        });
-  
-        if (decision.action === "leave_edit") {
-          if (decision.preventDefault) ev.preventDefault();
-          setItemCellMode(CELL_MODE_NAV);
-          try {
-            if (typeof inp.select === "function") inp.select();
-          } catch {
-            /* ignore */
-          }
-          return;
-        }
-  
-        if (decision.action === "enter_edit") {
-          setItemCellMode(CELL_MODE_EDIT);
-          if (ev.key === "F2") {
-            ev.preventDefault();
-            try {
-              const len = String(inp.value ?? "").length;
-              inp.setSelectionRange(len, len);
-            } catch {
-              /* ignore */
-            }
-          }
-          return;
-        }
-  
-        if (decision.action === "passthrough") {
-          if (ev.key !== "Tab" || ev.shiftKey) return;
-        } else if (decision.preventDefault) {
-          ev.preventDefault();
-        }
-  
-        if (
-          decision.action === "move" ||
-          decision.action === "leave_edit_move" ||
-          (decision.action === "tab" && decision.direction === "left")
-        ) {
-          setItemCellMode(CELL_MODE_NAV);
-          itemTabGuard = true;
-          void (async () => {
-            try {
-              const next = readCellValue();
-              const rowCount =
-                lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-              const dest = neighborItemCell(field, ri, rowCount, decision.direction || "left");
-              const prev =
-                (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-                "";
-              const kind = dirtyCompareKindForField(field);
-              const dirty = !valuesMeaningfullyEqual(prev, next, { kind });
-              if (!dest) {
-                if (dirty) await apply(next, { stay: true });
-                if (shouldLeaveItemTableBackward(dest, decision.direction)) {
-                  try {
-                    if (el.amountdue && !el.amountdue.disabled) {
-                      el.amountdue.focus({ preventScroll: false });
-                      if (typeof el.amountdue.select === "function") el.amountdue.select();
-                    } else if (el.billno) {
-                      el.billno.focus({ preventScroll: false });
-                    }
-                  } catch {
-                    /* ignore */
-                  }
-                }
-                return;
-              }
-              if (dirty) {
-                await apply(next, {
-                  focus: {
-                    rowIndex: dest.rowIndex,
-                    field: dest.field,
-                    mode: CELL_MODE_NAV,
-                  },
-                });
-              } else {
-                focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-              }
-            } finally {
-              itemTabGuard = false;
-            }
-          })();
-          return;
-        }
-  
-        if (ev.key !== "Tab" || ev.shiftKey || calcActive) return;
-        ev.preventDefault();
-        setItemCellMode(CELL_MODE_NAV);
-        itemTabGuard = true;
-        void (async () => {
-          try {
-            const next = readCellValue();
-            const rowCount =
-              lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-            const dest = nextItemFocusAfterEdit(field, ri, rowCount, {
-              cellValue: next,
-              rowItemCode: lastDoc?.items?.[ri]?.item_code ?? "",
-              nextRowItemCode: rowItemCodeAt(lastDoc, ri + 1),
-            });
-            if (dest.deleteRow && dest.leaveTable) {
-              await focusAfterItemEdit(lastDoc, next);
-              return;
-            }
-            const prev =
-              (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ??
-              "";
-            const kind = dirtyCompareKindForField(field);
-            if (!valuesMeaningfullyEqual(prev, next, { kind })) {
-              await apply(next);
-            } else if (dest.field) {
-              focusItemCell(dest.rowIndex, dest.field, { mode: CELL_MODE_NAV });
-            } else if (dest.addRow) {
-              await focusAfterItemEdit(lastDoc, next);
-            }
-          } finally {
-            itemTabGuard = false;
-          }
-        })();
-      });
-      inp.addEventListener("change", async () => {
-        if (!api || painting || itemTabGuard) return;
-        if (calcUi.getState().mode === "active" && calcUi.getInput() === inp) return;
-        let next = readCellValue();
-        if (field === "rate") {
-          const n = parseMoney(inp.value);
-          if (n != null) inp.value = formatGroupedNumber(n);
-        }
-        const prev = (lastDoc && lastDoc.items && lastDoc.items[ri] && lastDoc.items[ri][field]) ?? "";
-        const kind = dirtyCompareKindForField(field);
-        if (valuesMeaningfullyEqual(prev, next, { kind })) {
-          if (field === "rate" && parseMoney(prev) != null) {
-            inp.value = formatGroupedNumber(prev);
-          } else if (kind !== "number") {
-            inp.value = normalizeEditableText(String(prev ?? ""));
-          }
-          return;
-        }
-        await apply(next);
-      });
-    });
+    itemRows.paint(doc, models, BILL_ITEM_COLS);
     // The whole cell opens the editor, not only its text (5zorro DF-02: a blank cell is mostly padding).
     el.items.querySelectorAll("td.rec-cell").forEach((td) => {
       const btn = td.querySelector("button[data-rec]");
       if (!btn) return;
       td.addEventListener("click", () => openReceivedEditor(Number(btn.getAttribute("data-rec"))));
-    });
-    el.items.querySelectorAll("button[data-del]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!api) return;
-        const ri = Number(btn.getAttribute("data-del"));
-        setStatus("Removing line…");
-        const res = await deleteLineKeepingReceived(ri);
-        if (res && res.ok && res.clearedLastRow) {
-          noteUserEdit();
-          if (lineAllocations && typeof lineAllocations === "object") {
-            delete lineAllocations[ri];
-            delete lineAllocations[String(ri)];
-          }
-          if (poLineMeta && typeof poLineMeta === "object") {
-            delete poLineMeta[ri];
-            delete poLineMeta[String(ri)];
-          }
-          paint(res.doc, amountDue, {
-            lineAllocations,
-            poLineMeta,
-          });
-          showToast(res.reason || LAST_ITEM_ROW_TOAST);
-          setStatus("Last line cleared.");
-        } else if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc, amountDue);
-          setStatus("Line removed.");
-        } else if (res && res.blockedLastRow) {
-          showToast(res.reason || LAST_ITEM_ROW_TOAST);
-        } else {
-          setStatus((res && res.reason) || "Delete failed.", "err");
-        }
-      });
-    });
-    el.items.querySelectorAll("button[data-back-in]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (!editable() || painting) return;
-        const ri = Number(btn.getAttribute("data-back-in"));
-        beginAmountBackIn(btn, ri);
-      });
     });
     el.items.querySelectorAll("button[data-assign]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2838,6 +1788,41 @@ export async function bootBillFormPage(api) {
         void requestLinkedSourcePeek(btn.getAttribute("data-peek-route") || "", btn.getAttribute("data-peek-kind") || "");
       });
     });
+  }
+
+  /** The Bill's own line cells: Source line, Sales order(s) with Assign and the peeks, Customer, Rec'd. */
+  function billLineCellHtml(col, val, model, canEdit) {
+    const ri = model.rowIndex;
+    if (col.label === "Source line") {
+      return `<td class="num line-meta"><span class="ro">${escapeHtml(val) || "—"}</span></td>`;
+    }
+    if (col.field === ALLOC_SALES_ORDERS_FIELD) {
+      const assignBtn = canEdit
+        ? `<button type="button" class="assign-deal" data-assign="${ri}" data-testid="bill-assign-${ri}" title="Customer → Sales orders → Project">Assign…</button>`
+        : "";
+      // Peek the Sales Order, and the PO the link lives on (change it there, or void & amend).
+      const peeks = billLineOrderPeeks(model.alloc, model.item)
+        .map((p) => {
+          const label = linkedSourcePeekKindLabel(p.kind);
+          const tag = p.kind === "sales-order" ? "SO" : "PO";
+          return `<button type="button" class="order-peek" tabindex="-1" data-peek-route="${escapeHtml(p.route)}" data-peek-kind="${p.kind}" data-testid="bill-peek-${ri}-${tag.toLowerCase()}" title="Peek ${label} ${escapeHtml(p.name)} — Esc returns to this bill" aria-label="Peek ${label} ${escapeHtml(p.name)}">${uiIconHtml("eye", { size: 12 })}${tag}</button>`;
+        })
+        .join("");
+      return `<td class="alloc-so so-cell"><span class="ro alloc-so-text hatch-clear">${escapeHtml(val) || "—"}</span>${peeks}${assignBtn}</td>`;
+    }
+    if (col.field === ALLOC_CUSTOMER_FIELD) {
+      return `<td class="so-cell"><span class="ro hatch-clear">${escapeHtml(val) || "—"}</span></td>`;
+    }
+    if (col.field === REC_BY_FIELD || col.field === REC_ON_FIELD) {
+      const shown = col.field === REC_ON_FIELD ? formatDocDateDisplay(val) || "" : String(val || "");
+      const which = col.field === REC_BY_FIELD ? "by" : "on";
+      if (canEdit && lineCanBeReceived(model.item)) {
+        return `<td class="rec-cell rec-col"><button type="button" class="rec-btn" data-rec="${ri}" tabindex="-1" data-testid="bill-rec-${ri}-${which}" title="Who received this line, and when — an Item Receipt is made from it at Submit">${escapeHtml(shown) || "—"}</button></td>`;
+      }
+      const from = model.received && model.received.from === "receipt" ? ` title="From ${escapeHtml(model.item.purchase_receipt)}"` : "";
+      return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
+    }
+    return null;
   }
   
   /**
@@ -3806,7 +2791,7 @@ export async function bootBillFormPage(api) {
   }
   
   /**
-   * OI-134: per-line Assign — customer → multi SO → Project.
+   * OI-134: per-line Assign — customer → multi SO → Project (src/bill-assign-modal-ui.js).
    * @param {number} rowIndex
    */
   async function openLineAllocationPicker(rowIndex) {
@@ -3826,284 +2811,18 @@ export async function bootBillFormPage(api) {
       setStatus("Pick a vendor before Assign.", "warn");
       return;
     }
-  
-    allocationPickerOpen = true;
-    let step = "customer";
-    let customerRows = [];
-    let soRows = [];
-    let projectRows = [];
-    let ci = 0;
-    let customerFilter = "";
-    let customerName = "";
-    /** @type {Set<string>} */
-    const selectedSos = new Set();
-    let projectIdx = 0;
-    /** Review 10-19 R6b-4: Sales Orders the clerk ticked "fill from stock" in the costing step. */
-    const fromStock = new Set();
-    /** The plan shown in the costing step; its key goes with the Okay. */
-    let costingPlan = null;
-  
-    const back = document.createElement("div");
-    back.className = "src-back";
-    back.dataset.testid = "bill-allocation-picker";
-    const box = document.createElement("div");
-    box.className = "src-box";
-    box.tabIndex = -1;
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", "Assign deal");
-    box.innerHTML = `<div class="src-title" data-alloc-title>Assign — customer</div>
-      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
-        <input type="text" data-alloc-search placeholder="Search…" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
-      </div>
-      <div class="src-body"></div>
-      <div class="src-foot">
-        <button type="button" data-act="back" hidden>Back</button>
-        <button type="button" class="primary" data-act="pick">Continue</button>
-        <button type="button" data-act="cancel">Cancel</button>
-      </div>`;
-    back.appendChild(box);
-    document.body.appendChild(back);
-    const body = box.querySelector(".src-body");
-    const titleEl = box.querySelector("[data-alloc-title]");
-    const searchEl = box.querySelector("[data-alloc-search]");
-    const pickBtn = box.querySelector('[data-act="pick"]');
-    const backBtn = box.querySelector('[data-act="back"]');
-  
-    function billLinesForMargin() {
-      const items = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items : [];
-      const row = items[rowIndex];
-      return row
-        ? [{ item_code: row.item_code, qty: row.qty, rate: row.rate, amount: row.amount }]
-        : items.map((r) => ({
-            item_code: r.item_code,
-            qty: r.qty,
-            rate: r.rate,
-            amount: r.amount,
-          }));
-    }
-  
-    async function loadCustomers(q) {
-      if (!api.searchLink) return [];
-      const res = await api.searchLink("Customer", q || "");
-      return res && res.ok && Array.isArray(res.results) ? res.results : [];
-    }
-  
-    async function loadSalesOrders(customer) {
-      const res = await api.listSalesOrdersForPicker({
-        supplier: sup,
-        customer: customer || "",
-        billLines: billLinesForMargin(),
-      });
-      return res && res.ok && Array.isArray(res.orders) ? res.orders : [];
-    }
-  
-    async function loadProjects(customer) {
-      if (!api.listProjectsForPicker) return [];
-      const res = await api.listProjectsForPicker(customer || "");
-      return res && res.ok && Array.isArray(res.projects) ? res.projects : [];
-    }
-  
-    function activeCustomer() {
-      if (ci === 0) return { value: "", description: "All customers" };
-      return customerRows[ci - 1];
-    }
-  
-    function close() {
-      allocationPickerOpen = false;
-      document.removeEventListener("keydown", onKey, true);
-      if (back.parentNode) back.parentNode.removeChild(back);
-    }
-  
-    function drawCustomers() {
-      step = "customer";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — pick customer`;
-      pickBtn.textContent = "Next: Sales orders";
-      backBtn.hidden = true;
-      searchEl.parentElement.hidden = false;
-      searchEl.placeholder = "Customer search…";
-      body.innerHTML = "";
-      const allBtn = document.createElement("button");
-      allBtn.type = "button";
-      allBtn.className = "src-item" + (ci === 0 ? " active" : "");
-      allBtn.textContent = "All customers";
-      allBtn.onclick = () => {
-        ci = 0;
-        drawCustomers();
-      };
-      body.appendChild(allBtn);
-      customerRows.forEach((row, idx) => {
-        const r = document.createElement("button");
-        r.type = "button";
-        r.className = "src-item" + (ci === idx + 1 ? " active" : "");
-        r.textContent = row.description || row.value;
-        r.onclick = () => {
-          ci = idx + 1;
-          drawCustomers();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    function drawSalesOrders() {
-      step = "so";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — select Sales order(s)`;
-      pickBtn.textContent = "Next: Project";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = true;
-      body.innerHTML = "";
-      if (!soRows.length) {
-        const empty = document.createElement("div");
-        empty.className = "src-group";
-        empty.textContent = "No Sales Orders — continue to assign Project only.";
-        body.appendChild(empty);
-        return;
-      }
-      soRows.forEach((row) => {
-        if (row.draft) return;
-        const r = document.createElement("button");
-        r.type = "button";
-        const on = selectedSos.has(row.name);
-        r.className =
-          "src-item" + (on ? " selected" : "") + (row.negativeMargin ? " negative" : "");
-        const mark = document.createElement("span");
-        mark.className = "src-check";
-        mark.setAttribute("aria-hidden", "true");
-        mark.innerHTML = uiIconHtml(on ? "checkbox-checked" : "checkbox", { size: 12 });
-        const lab = document.createElement("span");
-        lab.className = "src-item-label";
-        lab.textContent = formatSalesOrderPickerLabel(row);
-        r.appendChild(mark);
-        r.appendChild(lab);
-        r.onclick = () => {
-          if (selectedSos.has(row.name)) selectedSos.delete(row.name);
-          else selectedSos.add(row.name);
-          drawSalesOrders();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    function drawProjects() {
-      step = "project";
-      titleEl.textContent = `Assign line ${rowIndex + 1} — Project`;
-      pickBtn.textContent = "Apply to line";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = false;
-      searchEl.placeholder = "Project search…";
-      body.innerHTML = "";
-      const noneBtn = document.createElement("button");
-      noneBtn.type = "button";
-      noneBtn.className = "src-item" + (projectIdx === 0 ? " active" : "");
-      noneBtn.textContent = "— No project —";
-      noneBtn.onclick = () => {
-        projectIdx = 0;
-        drawProjects();
-      };
-      body.appendChild(noneBtn);
-      if (!projectRows.length) {
-        const empty = document.createElement("button");
-        empty.type = "button";
-        empty.className = "src-item link-action";
-        empty.textContent = "No projects found — create Project in Vanilla…";
-        empty.onclick = () => {
-          if (api.openProjectAdd) api.openProjectAdd();
-        };
-        body.appendChild(empty);
-      }
-      projectRows.forEach((row, idx) => {
-        const r = document.createElement("button");
-        r.type = "button";
-        r.className = "src-item" + (projectIdx === idx + 1 ? " active" : "");
-        const label = row.project_name || row.name;
-        const cust = row.customer_name || row.customer || "";
-        r.textContent = cust ? `${label} · ${cust}` : label;
-        r.onclick = () => {
-          projectIdx = idx + 1;
-          drawProjects();
-        };
-        body.appendChild(r);
-      });
-    }
-  
-    async function goToSalesOrders() {
-      const cust = activeCustomer();
-      customerFilter = cust && cust.value ? cust.value : "";
-      customerName = cust && cust.description ? cust.description : customerFilter;
-      setStatus("Loading Sales Orders…");
-      soRows = await loadSalesOrders(customerFilter);
-      drawSalesOrders();
-    }
-  
-    async function goToProjects() {
-      setStatus("Loading projects…");
-      projectRows = await loadProjects(customerFilter);
-      projectIdx = 0;
-      drawProjects();
-    }
-  
-    /**
-     * "Costing Assumptions!" (review 10-19 R6b-4): the by-need split, per Sales Order, before
-     * anything is made — the clerk can fill an order from stock instead, or say Okay.
-     * @param {any} plan
-     */
-    function drawCosting(plan) {
-      step = "costing";
-      costingPlan = plan;
-      titleEl.textContent = `Assign line ${rowIndex + 1} — check the costing`;
-      pickBtn.textContent = "Okay, I still want to do this";
-      backBtn.hidden = false;
-      searchEl.parentElement.hidden = true;
-      body.innerHTML = "";
-      body.appendChild(
-        renderCostingBox(plan, {
-          onToggleStock: async (so, on) => {
-            if (on) fromStock.add(so);
-            else fromStock.delete(so);
-            const again = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
-            if (again && again.ok && again.plan) drawCosting(again.plan);
-            else setStatus((again && again.reason) || "Could not work out the split.", "err");
-          },
-        }),
-      );
-      setStatus("The split is not exact — check what comes from stock, then Okay or Cancel.", "warn");
-    }
 
-    async function applyAllocation() {
-      const project =
-        projectIdx > 0 && projectRows[projectIdx - 1]
-          ? projectRows[projectIdx - 1].name
-          : "";
-      if (step !== "costing" && selectedSos.size && api.planLineAllocation) {
-        setStatus("Working out the split…");
-        const pr = await api.planLineAllocation(rowIndex, { salesOrders: [...selectedSos], fromStock: [...fromStock] });
-        if (!(pr && pr.ok)) {
-          setStatus((pr && pr.reason) || "Could not work out the split.", "err");
-          return;
-        }
-        if (pr.plan && pr.plan.needsConfirm) {
-          drawCosting(pr.plan);
-          return;
-        }
-      }
-      setStatus("Applying allocation…");
-      const res = await api.applyLineAllocation(rowIndex, {
-        customer: customerFilter,
-        customerName,
-        salesOrders: [...selectedSos],
-        project,
-        supplier: sup,
-        fromStock: [...fromStock],
-        confirmedKey: step === "costing" && costingPlan ? costingPlan.key : undefined,
-      });
-      if (res && res.needsConfirm && res.plan) {
-        // The orders changed since the box was drawn (another PO against them): show it again.
-        drawCosting(res.plan);
-        setStatus("The orders changed since you looked — check the costing again.", "warn");
-        return;
-      }
-      close();
-      if (res && res.ok) {
+    allocationPickerOpen = true;
+    await openAssignModal({
+      api,
+      rowIndex,
+      supplier: sup,
+      items: () => (lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items : []),
+      setStatus,
+      onClose: () => {
+        allocationPickerOpen = false;
+      },
+      onApplied: (res) => {
         noteUserEdit();
         if (res.poLineMeta) poLineMeta = res.poLineMeta;
         if (res.lineAllocations) lineAllocations = res.lineAllocations;
@@ -4113,80 +2832,11 @@ export async function bootBillFormPage(api) {
           lineAllocations: res.lineAllocations,
           poLineMeta: res.poLineMeta,
         });
-        const poNote = res.bridgePo ? ` · PO ${res.bridgePo}` : "";
-        // Review 10-19 R2-2: the line is assigned either way; a missing PO is said, not hidden.
-        if (res.bridgeFailure) setStatus(`Line ${rowIndex + 1} assigned${poNote}. ${res.bridgeFailure}`, "warn");
-        else setStatus(`Line ${rowIndex + 1} assigned${poNote}.`);
-      } else {
-        setStatus((res && res.reason) || "Could not apply allocation.", "err");
-        await refresh();
-      }
-    }
-  
-    async function onPrimary() {
-      if (step === "customer") await goToSalesOrders();
-      else if (step === "so") await goToProjects();
-      else await applyAllocation();
-    }
-  
-    function onKey(ev) {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        close();
-      } else if (ev.key === "Enter") {
-        ev.preventDefault();
-        onPrimary();
-      }
-    }
-  
-    let searchTimer = null;
-    // Only the newest search may paint: a slow answer for older text must not replace it (R5b-1).
-    let searchSeq = 0;
-    searchEl.oninput = () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(async () => {
-        const seq = ++searchSeq;
-        if (step === "customer") {
-          const rows = await loadCustomers(searchEl.value);
-          if (seq !== searchSeq || step !== "customer") return;
-          customerRows = rows;
-          ci = Math.min(ci, customerRows.length);
-          drawCustomers();
-        } else if (step === "project") {
-          const q = normalizeEditableText(searchEl.value).toLowerCase();
-          const rows = await loadProjects(customerFilter);
-          if (seq !== searchSeq || step !== "project") return;
-          projectRows = rows.filter((p) => {
-            const blob = `${p.name} ${p.project_name || ""} ${p.customer_name || ""}`.toLowerCase();
-            return !q || blob.includes(q);
-          });
-          drawProjects();
-        }
-      }, 180);
-    };
-  
-    pickBtn.onclick = () => onPrimary();
-    backBtn.onclick = () => {
-      if (step === "so") drawCustomers();
-      else if (step === "project") drawSalesOrders();
-      else if (step === "costing") drawProjects();
-    };
-    box.querySelector('[data-act="cancel"]').onclick = () => close();
-    back.addEventListener("click", (ev) => {
-      if (ev.target === back) close();
+      },
+      refresh,
     });
-    document.addEventListener("keydown", onKey, true);
-  
-    customerRows = await loadCustomers("");
-    drawCustomers();
-    try {
-      if (api.focusBillSurface) api.focusBillSurface();
-    } catch {
-      /* ignore */
-    }
-    searchEl.focus();
   }
-  
+
   /**
    * Run an async header write with a visible "still filling in" state on the fields that write
    * repopulates (5zorro 2026-09-09: a slow vendor settle under chaos read as a bug, because an
@@ -4348,18 +2998,8 @@ export async function bootBillFormPage(api) {
   }
 
   /**
-   * Informal link picker for credit memos (OI-147/164, OI-165 SO half) — writes a plain-text
-   * token into Remarks, never the real ERP `return_against` field. "Bill" defaults to the
-   * current vendor's submitted Bills; typing a name searches any vendor (2026-09-07 decision).
-   * "Sales Order" reuses the OI-134 line-allocation fetch as-is — rough first pass, not
-   * dogfooded yet (5zorro 2026-09-07: "won't verify it until later").
-   *
-   * `purpose: "source"` (Bill only) is the same list opened at a different moment: right
-   * after the clerk flips **Credit memo? → Yes** on a Bill they did *not* reach from a
-   * submitted Bill, so nothing has set `return_against` yet. Picking there routes through
-   * `planCreditMemoSource()` — an untouched draft is rebuilt via the native make_debit_note
-   * path (real `return_against`, correct expense account); a draft with lines already on it
-   * falls back to the informal token rather than silently destroying that work.
+   * Informal link picker for credit memos (OI-147/164, OI-165 SO half), and the "which Bill is
+   * this credit against?" list (`purpose: "source"`): src/bill-informal-link-modal-ui.js.
    * @param {"bill"|"so"} kind
    * @param {{ purpose?: "link"|"source" }} [opts]
    */
@@ -4369,208 +3009,25 @@ export async function bootBillFormPage(api) {
       return;
     }
     if (informalLinkPickerOpen || sourceModalOpenRef.current || allocationPickerOpen) return;
-    const isBill = kind === "bill";
-    const isSourcePick = isBill && opts.purpose === "source";
-    const label = isBill ? "Bill" : "Sales Order";
     const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
     const supplier =
       normalizeEditableText(lastDoc && lastDoc.supplier) || normalizeEditableText(el.vendor.value);
 
     informalLinkPickerOpen = true;
-    let rows = [];
-    let query = "";
-
-    const back = document.createElement("div");
-    back.className = "src-back";
-    back.dataset.testid = isSourcePick
-      ? "bill-credit-source-picker"
-      : `bill-informal-link-picker-${kind}`;
-    const dialogLabel = isSourcePick
-      ? "Which Bill is this credit against?"
-      : `Informal link to ${label}`;
-    const box = document.createElement("div");
-    box.className = "src-box";
-    box.tabIndex = -1;
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", dialogLabel);
-    const subtitle = isSourcePick
-      ? " — same vendor by default; type/paste a name to search any vendor. Skip this and the credit posts with no Bill behind it."
-      : isBill
-        ? " — same vendor by default; type/paste a name to search any vendor"
-        : " (Sales Order picker — not restricted by vendor)";
-    box.innerHTML = `<div class="src-title">${dialogLabel}${subtitle}</div>
-      <div class="src-so-search" style="padding:8px 14px;border-bottom:1px solid #e2e8f0;">
-        <input type="text" data-link-search placeholder="${
-          isBill ? "Search Bills…" : "Filter Sales Orders…"
-        }" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;" />
-      </div>
-      <div class="src-body"></div>
-      <div class="src-foot">
-        <button type="button" data-act="clear">${
-          isSourcePick ? "Decide later" : "Clear link"
-        }</button>
-        <button type="button" data-act="cancel">Cancel</button>
-      </div>`;
-    back.appendChild(box);
-    document.body.appendChild(back);
-    const body = box.querySelector(".src-body");
-    const searchEl = box.querySelector("[data-link-search]");
-    const clearBtn = box.querySelector('[data-act="clear"]');
-    const cancelBtn = box.querySelector('[data-act="cancel"]');
-
-    function close() {
-      if (searchDebounce) clearTimeout(searchDebounce);
-      informalLinkPickerOpen = false;
-      document.removeEventListener("keydown", onKey, true);
-      if (back.parentNode) back.parentNode.removeChild(back);
-    }
-
-    async function applyLink(name) {
-      setStatus(
-        name ? `Linking informally to ${label} ${name}…` : `Clearing informal ${label} link…`,
-      );
-      try {
-        const res = await writeInformalLinkToken(kind, name);
-        if (res.ok) {
-          setStatus(
-            name
-              ? `Noted in Remarks: informal link to ${label} ${name}.`
-              : `Informal ${label} link cleared.`,
-          );
-        } else {
-          setStatus(res.reason, "err");
-        }
-      } finally {
-        close();
-      }
-    }
-
-    /**
-     * Source-pick route (toggle → Yes) — routing lives in commitCreditSource(), which the
-     * source modal's Credit memo switch calls too, so the two doors cannot drift apart.
-     */
-    async function chooseSourceBill(name) {
-      close();
-      await commitCreditSource(name);
-    }
-
-    function drawRows() {
-      body.innerHTML = "";
-      const q = query.trim().toLowerCase();
-      const filtered = q
-        ? rows.filter((r) => `${r.value} ${r.description || ""}`.toLowerCase().includes(q))
-        : rows;
-      if (!filtered.length) {
-        const empty = document.createElement("div");
-        empty.className = "src-empty";
-        empty.textContent =
-          isBill && !q
-            ? `No submitted Bills found for ${supplier || "this vendor"}. Type to search any vendor.`
-            : "No matches.";
-        body.appendChild(empty);
-        return;
-      }
-      filtered.forEach((r) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "src-item";
-        btn.dataset.testid = isSourcePick
-          ? "bill-credit-source-row"
-          : `bill-informal-link-${kind}-row`;
-        btn.textContent =
-          r.description && r.description !== r.value ? `${r.value} — ${r.description}` : r.value;
-        btn.onclick = () => (isSourcePick ? chooseSourceBill(r.value) : applyLink(r.value));
-        body.appendChild(btn);
-      });
-    }
-
-    async function loadBillRows(q) {
-      return searchSourceBillRows(q, supplier, currentName);
-    }
-
-    async function loadSoRows() {
-      if (!api.listSalesOrdersForPicker) return [];
-      const items =
-        lastDoc && Array.isArray(lastDoc.items)
-          ? lastDoc.items.map((r) => ({
-              item_code: r.item_code,
-              qty: r.qty,
-              rate: r.rate,
-              amount: r.amount,
-            }))
-          : [];
-      const res = await api.listSalesOrdersForPicker({
-        supplier: supplier || "",
-        customer: "",
-        billLines: items,
-      });
-      const list = res && res.ok && Array.isArray(res.orders) ? res.orders : [];
-      return list.map((so) => ({
-        value: so.name,
-        description: `${so.customer_name || so.customer || ""}${
-          so.grand_total ? ` — $${so.grand_total}` : ""
-        }`.trim(),
-      }));
-    }
-
-    // A throw anywhere in here used to leave informalLinkPickerOpen stuck true, locking the
-    // picker out for the rest of the session with no way back short of reopening the Bill.
-    async function reload() {
-      body.innerHTML = `<div class="src-empty">Loading…</div>`;
-      try {
-        rows = isBill ? await loadBillRows(query.trim()) : await loadSoRows();
-      } catch (err) {
-        rows = [];
-        body.innerHTML = "";
-        const failed = document.createElement("div");
-        failed.className = "src-empty";
-        failed.dataset.testid = "bill-link-picker-error";
-        failed.textContent = `Could not load ${label}s: ${String(
-          err && err.message ? err.message : err,
-        )}`;
-        body.appendChild(failed);
-        return;
-      }
-      drawRows();
-    }
-
-    let searchDebounce = null;
-    searchEl.addEventListener("input", () => {
-      query = searchEl.value || "";
-      if (isBill) {
-        if (searchDebounce) clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(reload, 220);
-      } else {
-        drawRows(); // SO rows are fetched once; filtered client-side while typing.
-      }
+    await openInformalLinkModal({
+      api,
+      kind,
+      purpose: opts.purpose,
+      supplier,
+      items: () => lastDoc && lastDoc.items,
+      searchBills: (q) => searchSourceBillRows(q, supplier, currentName),
+      writeLink: writeInformalLinkToken,
+      chooseSource: commitCreditSource,
+      setStatus,
+      onClose: () => {
+        informalLinkPickerOpen = false;
+      },
     });
-
-    function onKey(ev) {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        close();
-      }
-    }
-    document.addEventListener("keydown", onKey, true);
-    back.addEventListener("mousedown", (ev) => {
-      if (ev.target === back) close();
-    });
-    // "Decide later" must not strip an existing token — it only declines to add one now.
-    clearBtn.onclick = () => {
-      if (!isSourcePick) return applyLink("");
-      close();
-      setStatus(
-        "Credit memo left with no Bill behind it — the Return Against warning below stays up " +
-          "until you link one.",
-        "warn",
-      );
-      return undefined;
-    };
-    cancelBtn.onclick = () => close();
-
-    await reload();
-    searchEl.focus();
   }
 
   function setFormBlocked(blocked, reason) {
@@ -4645,6 +3102,8 @@ export async function bootBillFormPage(api) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "linked-source-peek-btn";
+    // Mouse only, like the Bill's other peeks: Tab goes from box to box (5zorro DF-03).
+    btn.tabIndex = -1;
     btn.dataset.testid = testId;
     btn.title = `Go to ${label} (peek — Esc to return to Bill)`;
     btn.setAttribute("aria-label", `Peek ${label}`);
@@ -5059,7 +3518,7 @@ export async function bootBillFormPage(api) {
     if (el.attach) el.attach.disabled = !canAttachTo(doc);
     if (el.addTax) el.addTax.disabled = !canEdit;
     paintItems(doc);
-    paintTaxes(doc);
+    taxTable.paint(doc);
     ensureHeaderLinkPickers();
     const name = doc.name || "(new)";
     if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
@@ -5124,7 +3583,7 @@ export async function bootBillFormPage(api) {
 
   async function refresh(opts = {}) {
     if (!api) return;
-    collapseTaxDefaultNote();
+    taxNotes.collapseDefaultNote();
     setStatus("Refreshing…");
     const snap = await api.getSnapshot();
     paint(snap && snap.doc, snap && snap.amountDue, {
@@ -5276,33 +3735,6 @@ export async function bootBillFormPage(api) {
     if (res && res.ok) noteUserEdit();
     await refresh();
     if (field === "bill_no") await runBillRefCheck(next);
-  }
-  
-  function wireDateField(input) {
-    input.addEventListener("beforeinput", (ev) => {
-      if (ev.inputType && ev.inputType.startsWith("delete")) return;
-      if (ev.inputType === "insertFromPaste" || ev.inputType === "insertFromDrop") return;
-      if (ev.data && [...ev.data].some((c) => !isAllowedDateInputChar(c))) {
-        ev.preventDefault();
-      }
-    });
-    input.addEventListener("input", () => {
-      const filtered = filterDateInputValue(input.value);
-      if (filtered !== input.value) {
-        const pos = input.selectionStart;
-        input.value = filtered;
-        try {
-          input.setSelectionRange(pos - 1, pos - 1);
-        } catch {
-          /* ignore */
-        }
-      }
-    });
-    input.addEventListener("paste", (ev) => {
-      ev.preventDefault();
-      const text = filterDateInputValue(ev.clipboardData.getData("text") || "");
-      document.execCommand("insertText", false, text);
-    });
   }
   
   /** DF-01 R — bills answered "bill only" this session, under every name each has had. */
@@ -5560,7 +3992,7 @@ export async function bootBillFormPage(api) {
     saveInFlight = true;
     try {
       const flush = await flushPendingFieldEdits({
-        getInFlight: () => lineApplyInFlight,
+        getInFlight: () => itemRows.applyInFlight(),
         waitMs: 5000,
       });
       if (flush && flush.timedOut) {
@@ -5608,7 +4040,7 @@ export async function bootBillFormPage(api) {
       if (r && r.ok) {
         // A new draft is renamed on its first save; keep "bill only" answered under the new name.
         if (receiveAnswered.has(nameBeforeSave) && r.doc && r.doc.name) receiveAnswered.add(String(r.doc.name));
-        if (taxesRemovedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxesRemovedOn.add(String(r.doc.name));
+        if (taxNotes.removedOn.has(nameBeforeSave) && r.doc && r.doc.name) taxNotes.removedOn.add(String(r.doc.name));
         if (receive.offLines > 0) {
           showBlockingToast(`${receiveAskOffNote(receive.offLines)} Click to ask at save again.`, () => {
             if (api.setBillReceiveAsk) void api.setBillReceiveAsk(true);
@@ -5935,24 +4367,23 @@ export async function bootBillFormPage(api) {
       docCapsOn = v;
     },
   });
-  if (el.find) el.find.onclick = () => requestToolbarAction("find");
+  if (el.find) el.find.onclick = () => commitGate.requestToolbarAction("find");
   if (el.refWarn) {
     el.refWarn.addEventListener("click", () => openFindFromRefDupeWarning());
   }
   if (el.refStatus) {
     el.refStatus.addEventListener("click", () => openFindFromRefDupeWarning());
   }
-  if (el.newBill) el.newBill.onclick = () => requestToolbarAction("new");
-  if (el.print) el.print.onclick = () => requestToolbarAction("print");
+  if (el.newBill) el.newBill.onclick = () => commitGate.requestToolbarAction("new");
+  if (el.print) el.print.onclick = () => commitGate.requestToolbarAction("print");
   if (el.commitGate) {
     wireCommitGateChrome(commitGateEls(), {
-      onResolveChoice: (choice) => resolveCommitGate(choice),
-      onCancelOutside: () => cancelCommitGateFromOutside(),
+      onResolveChoice: (choice) => commitGate.resolve(choice),
+      onCancelOutside: () => commitGate.cancelFromOutside(),
       trapTab: true,
     });
   }
-  if (el.tabItems) el.tabItems.onclick = () => setLineTab("items");
-  if (el.tabExpenses) el.tabExpenses.onclick = () => setLineTab("expenses");
+  wireLineTabs(el);
   if (el.revert) {
     el.revert.onclick = async () => {
       if (!api || !api.revertUnsaved) {
@@ -6066,7 +4497,7 @@ export async function bootBillFormPage(api) {
   if (el.removeAllTax) el.removeAllTax.onclick = () => void removeAllTaxes();
   if (el.taxDefault) {
     el.taxDefault.insertAdjacentHTML("beforeend", uiIconHtml("info", { size: 12 }));
-    el.taxDefault.onclick = () => void toggleTaxDefaultNote();
+    el.taxDefault.onclick = () => void taxNotes.toggleDefaultNote();
   }
   if (el.addTax) {
     el.addTax.onclick = async () => {
@@ -6074,7 +4505,7 @@ export async function bootBillFormPage(api) {
       const acct = normalizeEditableText(el.taxAccount && el.taxAccount.value);
       // A sum typed in the box counts (5zorro 2026-10-11: `169.00*1.0845`, then Add did nothing).
       const typed = String((el.taxAmount && el.taxAmount.value) || "").trim();
-      const { amount: n, remainder } = moneyOrSum(typed, moneyRounding());
+      const { amount: n, remainder } = moneyOrSum(typed, siteRounding.money());
       if (!acct) {
         setStatus("Pick a tax/charge Account first.", "warn");
         return;
@@ -6196,7 +4627,7 @@ export async function bootBillFormPage(api) {
     api.onSnapshot((snap) => {
       // A fresh copy of the document (load, reload, back from a peek) starts with the note closed;
       // background enrich progress is the same page filling in, not a reload.
-      if (!(snap && snap.enrichProgress)) collapseTaxDefaultNote();
+      if (!(snap && snap.enrichProgress)) taxNotes.collapseDefaultNote();
       if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
@@ -6225,22 +4656,10 @@ export async function bootBillFormPage(api) {
   
   // Navigation (Home / Vanilla / Recent) routes through this SAME in-page gate.
   if (api && api.onOpenNavGate) {
-    api.onOpenNavGate((payload) => {
-      const token = payload && payload.token;
-      if (!token) return;
-      if (!shouldOpenCommitGate(userEdited)) {
-        if (api.resolveNavGate) api.resolveNavGate(token, true);
-        return;
-      }
-      openGate({ kind: "nav", navToken: token, label: payload.label });
-    });
+    api.onOpenNavGate((payload) => commitGate.navRequested(payload && payload.token, payload && payload.label));
   }
   if (api && api.onCancelNavGate) {
-    api.onCancelNavGate((token) => {
-      if (pendingGate && pendingGate.kind === "nav" && pendingGate.navToken === token) {
-        hideCommitGate();
-      }
-    });
+    api.onCancelNavGate((token) => commitGate.navCancelled(token));
   }
   ensureHeaderLinkPickers();
   installFocusRing();

@@ -13,6 +13,7 @@ const src = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf
 const resizeSrc = src("../src/item-col-resize.js");
 const billFormPage = src("../src/bill-form-page.js");
 const docFormPage = src("../src/doc-form-page.js");
+const taxTable = src("../src/doc-form-tax-table-ui.js");
 const docFieldsCss = src("../electron/doc-fields.css");
 
 describe("item-col-resize — total on a missing or empty table", () => {
@@ -95,8 +96,10 @@ describe("item-col-resize — wiring into both row painters", () => {
   it("both pages size their tax grid too", () => {
     for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
       assert.match(page, /function sizeTaxColumns\(\)/, `${label} has no tax sizer`);
-      assert.match(page, /\.join\(""\);\n\s*sizeTaxColumns\(\);/, `${label} does not size taxes after paint`);
+      assert.match(page, /sizeColumns: \(\) => sizeTaxColumns\(\)/, `${label} does not hand the shared table its sizer`);
     }
+    // The shared taxes table (plan 10-25 step 3) sizes right after it paints the rows.
+    assert.match(taxTable, /body\.innerHTML = rowsHtml\(doc, rows, canEdit\);\n\s*deps\.sizeColumns\(\);/);
   });
 
   it("PO and Item Receipt keep independent widths", () => {
@@ -180,21 +183,17 @@ describe("Packet T — the taxes grid gets the same treatment", () => {
   });
 
   it("tax account and description cells wrap like item cells", () => {
-    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      for (const field of ["account_head", "description"]) {
-        assert.match(
-          page,
-          new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(r\\.${field}\\)\\}</span>`),
-          `${label} tax ${field} does not wrap`,
-        );
-      }
+    for (const field of ["account_head", "description"]) {
+      assert.match(
+        taxTable,
+        new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(r\\.${field}\\)\\}</span>`),
+        `tax ${field} does not wrap`,
+      );
     }
   });
 
   it("tax cells keep their resting text in sync", () => {
-    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(page, /const taxCellText = inp\.closest\("td\.cell-wrap"\)\?\.querySelector\("\.cell-text"\);/, label);
-    }
+    assert.match(taxTable, /const taxCellText = inp\.closest\("td\.cell-wrap"\)\?\.querySelector\("\.cell-text"\);/);
   });
 
   it("the taxes grid opts out of frozen columns", () => {

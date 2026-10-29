@@ -11,6 +11,8 @@ const billFormPage = readFileSync(
   "utf8",
 );
 const docSkinCss = readFileSync(join(electronDir, "doc-skin.css"), "utf8");
+// The gate's flow, shared with the doc-form page (plan 2026-10-25 R6a-1 step 2).
+const gateFlow = readFileSync(fileURLToPath(new URL("../src/doc-form-commit-gate-ui.js", import.meta.url)), "utf8");
 
 describe("Bill commit-gate modal contract", () => {
   it("blocks the Bill visually and exposes modal semantics", () => {
@@ -25,7 +27,7 @@ describe("Bill commit-gate modal contract", () => {
     assert.ok(readiness >= 0, "save-readiness panel exists");
     assert.ok(choices > readiness, "save-readiness panel appears before choices");
     assert.match(docFormHtml, /id="commit-gate-blockers"/);
-    assert.match(billFormPage, /Save is blocked by:/);
+    assert.match(gateFlow, /Save is blocked by:/);
     assert.match(billFormPage, /Doc Bill \+ live ERP meta preflight passed/);
     assert.match(billFormPage, /listMandatory/);
     assert.match(billFormPage, /mergeSaveBlockers/);
@@ -39,7 +41,7 @@ describe("Bill commit-gate modal contract", () => {
     );
     assert.match(gateUi, /ev\.key === "Escape"/);
     assert.match(gateUi, /commitGateBackdrop/);
-    assert.match(billFormPage, /cancelCommitGateFromOutside/);
+    assert.match(billFormPage, /onCancelOutside: \(\) => commitGate\.cancelFromOutside\(\)/);
     assert.match(billFormPage, /wireCommitGateChrome/);
     assert.match(gateUi, /trapTab/);
     assert.match(gateUi, /\[data-gate\]:not\(:disabled\)/);

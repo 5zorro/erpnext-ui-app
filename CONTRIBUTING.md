@@ -44,7 +44,8 @@ commit, author **5zorro** + noreply. Zulip-level PR theater is not required for 
 ### Public identity guard
 
 `scripts/check-commit-attribution.sh` rejects co-author attribution and `@gmail` markers in
-commit messages, author identity, or committer identity.
+commit messages, author identity, or committer identity, and a cited commit hash that is not in the
+repository (AGENT_CONVENTIONS rule 8).
 
 - The tracked `.githooks/commit-msg` hook blocks a bad local commit. Enable it in a fresh clone with
   `git config core.hooksPath .githooks`.

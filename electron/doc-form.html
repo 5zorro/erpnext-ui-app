@@ -472,26 +472,50 @@
               </div>
             </section>
             <section class="bill-section bill-section-taxes" id="doc-taxes-block" data-testid="doc-taxes-block" hidden>
-                <span class="taxes-title">Taxes and Charges</span>
-                <button type="button" class="linkish" id="btn-tax-default" data-testid="doc-tax-default" tabindex="-1"
-                  title="Why these taxes, and how to change them">Vendor tax template default</button>
+                <!-- Laid out like the Bill's taxes (5zorro 2026-10-26: "make the layout match the bills
+                     layout"): the title row, Line, fixed widths, the Taxes subtotal, the Add row. -->
+                <div class="line-tabs line-tabs-static" role="presentation">
+                  <span class="line-tab active" aria-current="page">Taxes and Charges</span>
+                  <div class="line-tabs-tools">
+                    <button type="button" class="linkish" id="btn-tax-default" data-testid="doc-tax-default" tabindex="-1"
+                      title="Why these taxes, and how to change them">Vendor tax template default</button>
+                  </div>
+                </div>
                 <div class="tax-default-note" id="tax-default-note" data-testid="doc-tax-default-note" hidden></div>
                 <div class="line-panel tax-panel" data-testid="doc-tax-panel">
-                <table class="taxes-table">
+                <table class="taxes-tbl">
+                  <colgroup>
+                    <col class="c-line"><col class="c-acct"><col class="c-desc">
+                    <col class="c-type"><col class="c-rate"><col class="c-amount">
+                    <col class="c-addded"><col class="c-act">
+                  </colgroup>
                   <thead>
                     <tr id="taxes-head-row"></tr>
                   </thead>
                   <tbody id="taxes-body" data-testid="doc-taxes"></tbody>
+                  <tfoot id="taxes-totals" data-testid="doc-taxes-totals" hidden>
+                    <tr>
+                      <td colspan="5"></td>
+                      <td class="tot-cell num">
+                        <span class="tot-label">Taxes subtotal</span>
+                        <b id="tot-taxes" data-testid="doc-taxes-subtotal">0.00</b>
+                      </td>
+                      <td></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
                 </table>
                 </div>
-                <div class="taxes-add" id="taxes-add" data-testid="doc-taxes-add">
-                  <div class="field">
-                    <label for="f-tax-account">Account</label>
-                    <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
-                  </div>
-                  <div class="field" style="flex:0 0 120px;">
-                    <label for="f-tax-amount">Amount</label>
-                    <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+                <div class="line-actions" id="taxes-add" data-testid="doc-taxes-add">
+                  <div class="inline-add-fields">
+                    <div class="inline-field inline-field--account">
+                      <label for="f-tax-account">Account</label>
+                      <input id="f-tax-account" data-testid="doc-tax-account" autocomplete="off" />
+                    </div>
+                    <div class="inline-field inline-field--amount">
+                      <label for="f-tax-amount">Amount</label>
+                      <input id="f-tax-amount" data-testid="doc-tax-amount" inputmode="decimal" autocomplete="off" />
+                    </div>
                   </div>
                   <button type="button" id="btn-add-tax" data-testid="doc-add-tax">Add tax/charge</button>
                   <button type="button" class="ghost" id="btn-remove-all-tax" data-testid="doc-remove-all-tax" tabindex="-1"

@@ -59,9 +59,10 @@ describe("doc-action-flow", () => {
     assert.equal(linkDoctypeForDocField("description", PO_HEADER_FIELDS, PO_ITEM_COLS), null);
   });
 
-  it("focusTargetAfterDocSourceModal — receipt focuses packing list ref", () => {
+  it("focusTargetAfterDocSourceModal — receipt focuses packing list ref, PO its date", () => {
     assert.equal(focusTargetAfterDocSourceModal("receipt", "choose"), "lr_no");
-    assert.equal(focusTargetAfterDocSourceModal("po", "choose"), null);
+    assert.equal(focusTargetAfterDocSourceModal("po", "choose"), "transaction_date");
+    assert.equal(focusTargetAfterDocSourceModal("po", "cancel"), null);
     assert.equal(focusTargetAfterDocSourceModal("receipt", "cancel"), null);
   });
 

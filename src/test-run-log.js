@@ -187,11 +187,62 @@ export function appendCapped(current, entry, maxBytes) {
 }
 
 /**
- * Which run logs to delete: everything past the newest `keep`. Names sort by time (they start
- * with an ISO timestamp).
+ * Which run logs to delete: everything past the newest `keep` **of each kind** — `npm test`'s
+ * `.tap`, the specs' `.e2e.log`, the probes' `.probe.log` — so a `dogfood:check` (one log per
+ * probe) never pushes out the unit runs' logs. Names sort by time (they start with an ISO
+ * timestamp, and the kind is everything from the first dot).
  * @param {string[]} names @param {number} keep
  */
 export function logsToRotate(names, keep) {
-  const sorted = [...names].filter((n) => n.endsWith(".tap")).sort();
-  return sorted.slice(0, Math.max(0, sorted.length - keep));
+  /** @type {Map<string, string[]>} */
+  const byKind = new Map();
+  for (const n of names) {
+    if (!(n.endsWith(".tap") || n.endsWith(".log"))) continue;
+    const kind = n.slice(n.indexOf("."));
+    if (!byKind.has(kind)) byKind.set(kind, []);
+    byKind.get(kind).push(n);
+  }
+  const gone = [];
+  for (const list of byKind.values()) {
+    list.sort();
+    gone.push(...list.slice(0, Math.max(0, list.length - keep)));
+  }
+  return gone.sort();
+}
+
+/**
+ * What a Playwright run (specs or probes) ran, for `scope`: the kind, the spec files, and a short
+ * hash of the tests themselves — a `-g` run and a whole-file run ran different tests, and only runs
+ * of the same tests can show one as flaky.
+ * @param {"e2e"|"probe"} kind @param {string[]} testNames every test in the run, `file › … › title`
+ * @param {(text: string) => string} hash
+ */
+export function playwrightScope(kind, testNames, hash) {
+  const names = [...new Set(testNames)].sort();
+  const files = [...new Set(names.map((n) => n.split(" › ")[0]))];
+  return `${kind} ${files.join(" ")} #${hash(names.join("\n")).slice(0, 8)}`;
+}
+
+/**
+ * A Playwright run's results as `runs.tsv` rows: one per repeat (`--repeat-each`), so a test that
+ * fails in one repeat and passes in another is flaky by the same rule as two `npm test` runs.
+ * Skipped tests count for neither; an interrupted run has no counts (it did not finish).
+ * @param {Array<{ name: string, repeat: number, status: string, ms: number }>} results
+ * @param {{ time: string, commit: string, dirty: number, fingerprint: string, log: string, scope: string, interrupted?: boolean }} run
+ */
+export function playwrightRunRows(results, run) {
+  const repeats = [...new Set(results.map((r) => r.repeat))].sort((a, b) => a - b);
+  if (!repeats.length) repeats.push(0);
+  return repeats.map((repeat) => {
+    const mine = results.filter((r) => r.repeat === repeat);
+    const failed = mine.filter((r) => r.status === "failed" || r.status === "timedOut");
+    const { interrupted, ...row } = run;
+    return {
+      ...row,
+      pass: interrupted ? "" : mine.filter((r) => r.status === "passed").length,
+      fail: interrupted ? "" : failed.length,
+      ms: mine.reduce((sum, r) => sum + (r.ms || 0), 0),
+      failures: [...new Set(failed.map((r) => r.name))],
+    };
+  });
 }

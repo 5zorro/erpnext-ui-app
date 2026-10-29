@@ -14,6 +14,7 @@ const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)),
 const main = read("../electron/main.js");
 const docPage = read("../src/doc-form-page.js");
 const billPage = read("../src/bill-form-page.js");
+const assignModal = read("../src/bill-assign-modal-ui.js");
 const findPage = read("../electron/find-doc.html");
 
 /** From `async function <name>(` / `function <name>(` up to its closing line (template-safe). */
@@ -60,7 +61,7 @@ describe("R2-2: a Bill line's bridge Purchase Order is never lost silently", () 
     assert.match(body, /bridgeFailure = bridgePoFailureText\(bridge\)/);
     assert.match(body, /bridgeFailure: bridgeFailure \|\| undefined/);
     assert.ok((body.match(/navDebug\(\s*"bill-bridge-po"/g) || []).length >= 3);
-    assert.match(billPage, /if \(res\.bridgeFailure\) setStatus\(/);
+    assert.match(assignModal, /if \(res\.bridgeFailure\) setStatus\(/);
   });
 });
 

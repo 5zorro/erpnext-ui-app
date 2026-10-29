@@ -12,13 +12,22 @@ in the e2e coverage map (`e2e/` only).
 npm run probe                     # lists the probes
 npm run probe -- r5b5-po-missing-vendor [another …]
 ERP_CHAOS_LAG_MS=1200 ERP_CHAOS_LAG_PCT=100 npm run probe -- <name>   # 5zorro's chaos mode
+npm run probe -- df03-item-table --grep=T-2   # only the tests whose title matches
 ```
 
-`scripts/run-probe.js` refuses while 5zorro's app is open (a restore would undo what it saves
-meanwhile; `--with-app-open` overrides — then tell him), backs up `~/.config/erpnext-ui-app/*.json`
-right before the run, runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared, then restores
-the backup and removes any prefs file the run created — Ctrl+C included (proven 2026-10-22). It does **not** cover the Doc page's Local
-Storage (dragged column widths) — a probe that drags columns puts them back.
+**Each run has its own profile folder** (plan 2026-10-26; `scripts/test-profile.js`, the probe
+config's global setup): a throwaway copy of `~/.config/erpnext-ui-app/` seeded with the prefs and
+the login cookies, not the logs or the Doc page's Local Storage (column widths and the calculator's
+rounding start at their defaults). The app moves its `userData` there when `E2E=1`. So a probe never
+touches 5zorro's prefs, login, Drafts shelf or `nav-debug.log`, and **runs while his app is open**
+(`--with-app-open`, from before, is ignored). After the run, its `nav-debug.log` / `focus-debug.log`
+are kept in `test-logs/profile-logs/probe/` and the folder is deleted. `scripts/run-probe.js`
+runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared (a window on his desktop takes his
+keyboard). **One probe run at a time:** a second waits for the first (`test-logs/probe-run.lock.json`,
+up to an hour), because a run starts by retiring any probe user left in the lock, which would end
+the other run's clerk mid-test. The seed copy is taken while his app may be writing: a torn
+`Cookies` copy would show as a probe that is not logged in — run it again. Proven 2026-10-26: a probe run left nothing changed in the real folder (the code before
+changed 12 files there), and ran beside a second copy of the app (the code before refused, exit 3).
 
 ## Probes that leave records — `leaves-records/`
 
@@ -80,11 +89,10 @@ try {
   and reused. It is **disabled between runs**, and every run gives it a fresh random password that
   is never written down. Sandbox only (`assertSandboxSite`).
 - **Interrupted runs:** the lock file `test-logs/probe-user.lock.json` names the user while it may be
-  enabled. After the run ends any way (pass, fail, Ctrl+C, SIGTERM), `run-probe` retires it and puts
-  the app's login `Cookies` back. A `run-probe` that was itself killed (kill -9) leaves the lock, and
-  the next `npm run probe` (even with no probe named) retires the user then, and names the killed
-  run's prefs backup (`test-logs/probe-run.json`). It does not restore that backup on its own, since
-  the app may have been used since. Proven 2026-10-24: Ctrl+C mid-probe left the user disabled with
+  enabled. After the run ends any way (pass, fail, Ctrl+C, SIGTERM), `run-probe` retires it (its
+  login was only ever in the run's own profile folder). A `run-probe` that was itself killed
+  (kill -9) leaves the lock, and the next `npm run probe` (even with no probe named) retires the
+  user then. Proven 2026-10-24: Ctrl+C mid-probe left the user disabled with
   no sessions and the Cookies file byte-identical; after a kill -9 the next run retired it.
 - Retiring uses `bench execute` in the backend container (`ERP_BACKEND_CONTAINER`, `ERP_SITE` to
   override), so it needs no login.
@@ -115,8 +123,8 @@ never by changing a site setting.
 `nav-spine-<start>.probe.js` (one per start) run the cells of plan 2026-10-24's matrix through one
 driver, `nav-spine.js`; `src/nav-spine.js` judges them. `npm run nav:check [-- <start>…] [--ongoing]`
 prints the matrix; `NAV_ONLY=<start>/<state>/<move>,…` runs single cells. The driver empties
-`nav-state.json` before each launch (fresh rail) — it refuses unless `npm run probe` backed the
-prefs up (`ERP_PROBE_PREFS_BACKUP`). It makes `ZZ-NAV-A` / `ZZ-NAV-B` drafts and deletes them, and
+`nav-state.json` before each launch (fresh rail) — in the run's own profile folder
+(`runProfileDir()`, which refuses outside a run). It makes `ZZ-NAV-A` / `ZZ-NAV-B` drafts and deletes them, and
 any draft a cell saved (refs `ZZNAV…`) — **sandbox only** (`assertSandboxSite` at launch): every draft
 uses up a Bill number, so on company data it would leave gaps in the invoice series. Lessons from building it:
 
@@ -232,8 +240,8 @@ gets two things that share one piece of setup code:
    (cancelling what was submitted — those stay, cancelled). A new row costs one setup step.
 
 The setup code is `tests/probes/dogfood-scenes.js` (one *scene* per row: make, clear, where to
-look); the probes call the same makers and clear after. Both run through `run-probe.js` (the app
-must be closed; the prefs are backed up and restored) and the leaves-records rules
+look); the probes call the same makers and clear after. Both run through `run-probe.js` (each run in
+its own profile folder, so the app may stay open) and the leaves-records rules
 (`assertSandboxSite`; submitted records are cancelled, not deleted).
 
 **How the "ERPNext refuses" rows are made, from ERPNext's own checks (no site settings touched):**

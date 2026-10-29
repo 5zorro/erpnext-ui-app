@@ -12,10 +12,10 @@
  * (submitted, then cancelled at the end so the books are as before).
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
+import { runProfileDir } from "../../../scripts/test-profile.js";
 import { sleep, inDoc, inErp, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "../probe-helpers.js";
 import { billCompareTotal } from "../../../src/bill-map.js";
 
@@ -67,8 +67,7 @@ async function submitInDoc(app, name) {
 
 test("answer 4: a submitted Bill is found again under Submitted, newest first, once", async () => {
   test.setTimeout(10 * 60_000);
-  if (!process.env.ERP_PROBE_PREFS_BACKUP) throw new Error("run through `npm run probe` (it backs up the prefs this empties)");
-  fs.rmSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json"), { force: true });
+  fs.rmSync(path.join(runProfileDir(), "nav-state.json"), { force: true });
   const app = await launchShell();
   const made = [];
   try {
@@ -122,7 +121,7 @@ test("answer 4: a submitted Bill is found again under Submitted, newest first, o
     }
     expect(viewed.on).toBe("true");
     expect(namesOf(viewed.rows).slice(0, 2)).toEqual([made[0], made[1]]);
-    const kept = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".config", "erpnext-ui-app", "nav-state.json"), "utf8")).submittedSort;
+    const kept = JSON.parse(fs.readFileSync(path.join(runProfileDir(), "nav-state.json"), "utf8")).submittedSort;
     report("kept", { submittedSort: kept });
     expect(kept).toBe("viewed");
 

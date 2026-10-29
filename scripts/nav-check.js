@@ -2,8 +2,8 @@
 /**
  * `npm run nav:check [-- <start> …]` — the navigation spine (plan 2026-10-24): runs every
  * `tests/probes/nav-spine-<start>.probe.js` (or only the starts named: home, lens, rail, drafts,
- * erp-link, find, board), one at a time through `run-probe.js` (the app must be closed; prefs backed
- * up and restored), then prints the matrix — start × state × move, pass / FAIL / skipped — and each
+ * erp-link, find, board), one at a time through `run-probe.js` (each run in its own profile folder, so
+ * the app may stay open), then prints the matrix — start × state × move, pass / FAIL / skipped — and each
  * failure's reasons (`src/nav-spine.js`). A change to navigation runs this before and after.
  * Each probe's output goes to `test-logs/nav-check/<stamp>/<probe>.log`, the matrix to `…/matrix.md`.
  * `NAV_ONLY=<cell id>,…` passes through to run single cells. `-- --ongoing` adds the long-session
@@ -44,10 +44,6 @@ for (const [i, probe] of probes.entries()) {
   });
   const log = `${run.stdout || ""}${run.stderr || ""}`;
   fs.writeFileSync(path.join(outDir, `${probe}.log`), log);
-  if (run.status === 3) {
-    console.log("not run — the app is open; close it and run again");
-    process.exit(3);
-  }
   const cells = parseCellLines(log);
   Object.assign(results, cells);
   cruft = cruft.concat(parseCruftLines(log));

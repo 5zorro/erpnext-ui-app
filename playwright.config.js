@@ -9,7 +9,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
-  reporter: [["list"]],
+  // A throwaway profile folder per run, so specs run while the app is open (plan 2026-10-26).
+  globalSetup: "./scripts/playwright-test-profile.js",
+  // Every run is logged for `npm run test:flaky` (scripts/playwright-run-log.js); a --reporter flag drops that.
+  reporter: [["list"], ["./scripts/playwright-run-log.js", { kind: "e2e" }]],
   projects: [
     {
       name: "electron-shell",
