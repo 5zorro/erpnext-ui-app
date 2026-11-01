@@ -14,7 +14,8 @@
 > 5zorro's word: OI-193 (a cleared informal link leaves "Removed linked …" in Remarks, and the box
 > shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays. The Item Receipt's
 > lines got the Line column and sortable headers 2026-11-01 (decided 2026-10-26; end of the step 3 section). Then 3b, a
-> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*). **R2-5
+> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*): **run
+> 2026-11-01, report in § *3b — the performance report*; the picks are 5zorro's.** **R2-5
 > started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and payment
 > settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves wait for 3b
 > (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
@@ -372,6 +373,7 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    smell found gets one line: fix it in R2-5 (which moves that code anyway), a later plan, or
    leave it with the reason. Before R2-5 on purpose: most smells live in `main.js`, and the split
    should carry the fix, not move the smell. Report, not code: what to fix is 5zorro's call.
+   **Run 2026-11-01; the report is § *3b — the performance report*, waiting for his picks.**
 4. **R2-5** in its order (print IPC → Papers → Find → payment settings → re-link / method change →
    health / incidents → the warm pick lists block → doc-form → Bill), each family to
    `electron/ipc/<family>.js` taking a `deps` object.
@@ -407,6 +409,44 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
      5zorro to decide: it is one dev dependency.
 
 Each step is its own commit, behaviour unchanged, `npm test` green, the named probes re-run.
+
+## 3b — the performance report (2026-11-01)
+
+**What was run.** Every probe, on `5ab658a` (main.js did not change during the run; the other
+session's uncommitted edits were in the Item Receipt / doc-form lines), 06:51–07:49 UTC: `npm run
+nav:check -- --ongoing` (109 pass; after a long session 33 pass, cruft clean), `npm run
+dogfood:check` (25 pass), then the 20 other probes (all pass; `dogfood-setup` left out, it builds
+scenes). The numbers come from the 69 timeline charts written by that run (`test-logs/traces/`,
+one per test), because `test:times` keeps only the last 50 probe logs and the run's own volume
+pushed the first `@nav` runs out. Specs and `npm test` do not take the probe lock: one probe
+(`nav-spine-home`) overlapped a spec run and a unit run and was run again alone (below).
+
+**How to read the numbers.** A chart's "ERPNext calls" lane is every script the shell sends into the
+ERPNext page (`erpEval`, named by method or caller), timed in whole milliseconds. A script's time
+is mostly waiting for the page to be free (or for a page that is loading to finish), so the spans
+overlap and their sum is not time a clerk could get back. What a clerk feels is a script that
+something waits on.
+
+**Headline.** 3,286 s of probe time: **1,858 s (57%) are the probes' own fixed `sleep`s**, 1,428 s
+the app and ERPNext working. 21,295 scripts were sent into the ERPNext page.
+
+| # | Smell | Numbers | Cause | Proposal (5zorro's call) |
+|---|-------|---------|-------|--------------------------|
+| 1 | **Picking a vendor with no address takes about 9 s** (the Bill's header write) | `setHeader`: 131 calls, median 31 ms, p90 220 ms; **9 calls at 9.06–9.17 s**, one per test, none under chaos. 13 of the sandbox's 14 vendors have no address | `waitForSupplierBillingSnapshot` (`electron/erp-form-bridge-page.js`) waits up to `SUPPLIER_PARTY_SETTLE_MAX_MS` (12 s) for the vendor's billing address and accepts "no address" only in the last `SUPPLIER_PARTY_META_ONLY_GRACE_MS` (3 s): 12 − 3 = 9 s. During the wait the page answers other scripts in 0–2 ms, so nothing is busy; it is a timer | **Fix soon, its own small change** (bridge script, not main.js): once ERPNext's own calls for the vendor have gone quiet and the address is still empty, the vendor has none, so stop waiting. Check in ERPNext's source first that the party fetch sets `address_display` only from an existing address. A probe with an address-less vendor times the write before and after. Worth asking whether the clerk sees the 9 s (does the page hold typing meanwhile?) |
+| 2 | **The save-drain timer** | Every 750 ms, whatever is on screen, `pollErpRoute` sends two scripts: the bridge check, then the drain. 4,117 drains and as many checks: **39% of all scripts**. Most under 10 ms; 131 drains of 0.5 s or more (a page loading) | The drain runs `ensureErpFormBridge` first. But the bridge is already installed on `did-navigate`, `did-navigate-in-page` and `did-finish-load`; the timer's check is a backstop, and after a full reload it re-sends the 74.5 KB bridge script if those missed | **Fix in R2-5's bridge move:** the timer drains with `{ inject: false }` (a page without the bridge holds no save to take, as the unload path already says), plus a slower backstop check (say every 10 s) for a load whose page events all failed. Halves the timer's scripts. Little a clerk would notice; less churn and quieter charts |
+| 3 | The bridge check before every bridge call ("127 in 80 s" in the T-3 chart) | 2,731 bridge calls: the check's median under 1 ms, p90 8 ms, 13% of bridge-call time | A count, not a cost: asking the page for its bridge version is cheap when the page is free | **Leave.** If the R2-5 bridge move wants it gone, skip the check while the page's document has not changed since the last one (a counter bumped on `did-navigate`) |
+| 4 | Warm pick lists rechecked on every Doc form open | 8 lists loaded once per launch (674 loads in 66 charts, mean 212 ms); **all 8 rechecked on each Doc form open** when older than 10 s (1,039 checks, mean 86 ms; about 55 per long `@nav` run). Typing in a search rechecks after 60 s | `warmLinkLists(why, minAgeMs = 10_000)` checks every list in `WARM_LINK_DOCTYPES`, not the ones the opened form uses | **Later, with the warm-lists block move:** recheck only the lists the opened form uses, with one age rule (60 s). In the background either way |
+| 5 | Reads made once per launch | `calc-site-rounding` 78 calls (mean 428 ms, up to 4.6 s), `fetchOutstandingBills` 86 (281 ms), `relink-reviews` 84 (184 ms), `fetchDraftPayments` 85 (61 ms) | Each test launches the app; a clerk launches it about once a day | **Leave** |
+| 6 | The attachment list re-read on every document hand-over | `listPapers` 627 calls in 15 charts, 29 ms each | On purpose: a file attached in Vanilla keeps the document's name, so only a re-read notices it | **Leave** |
+| 7 | **The probes' own fixed waits** | 1,858 of 3,286 s. `nav-spine-ongoing` 365 of 507 s; `nav-spine-erp-link` 138 of 194 s; `nav-spine-find` 138 of 175 s; `nav-desk-after-discard` 90 of 97 s. The full `nav:check` took 28 min | `sleep(2000)` (266 times, 532 s), `sleep(1500)`, `sleep(6000)` … where the probe could wait for the thing it needs | **Later plan (test side only, no app change):** replace fixed sleeps with waits on a condition (`expect.poll`), the `@nav` matrix first. The biggest saving in agent turnaround. HANDOFF's note that a `sleep` loop counts as the test's own wait applies |
+
+**Not smells:** the long bridge checks (1,572 of 100 ms or more, up to 5.5 s) are scripts sent
+while a new page loads, which wait for it. The probes' `clerkLogin` and `formLoaded` stages are
+0.3–8.7 s and stay out of this table.
+
+`nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
+overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under
+different overlaps agreeing within 3% says the overlap did not change this probe's numbers.
 
 ## Validate
 
