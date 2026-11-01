@@ -12,7 +12,9 @@ had been broken since 2026-10-23: Add payment, and Submit on a Bill marked Alrea
 lint check reported "is not defined" in seconds. The same day, moving printing out of `main.js`
 named an import from the wrong module, and the app would not start. The linter did not catch that,
 because no-undef does not check imports; the printing spec did. A checker that does both would have
-stopped both before any clerk could meet them.
+stopped both before any clerk could meet them. A third turned up in the same day's end-of-session review: the
+Bill page calls a function it never imports (museum OI-196), so typing a payment terms name and
+leaving without picking one does nothing and says nothing.
 
 **Why not just add one.** 5zorro, 2026-10-31: *"I have heard of llm injection attacks by having llms
 suggest dependencies that can get an updated rootkit, so i am wary, and i want to have a specific
