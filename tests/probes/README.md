@@ -263,7 +263,10 @@ Build order: the runner, setup and scenes with the R9 group (the most setup), th
 **Built 2026-10-23 — every row has a probe** (`npm run dogfood:check` runs all 25 rows' probes,
 ~25 min, mostly R6c-2's give-up and R4-2's 205 drafts). Scenes for `dogfood:setup`: R9, R9-1,
 R10c-1, R2-2, R6c-4, R10c-3, R4-2, R6b-4, R6b-1 / R6b-2, R5-1, R6c-2 (`-- --list` says what each
-makes). Notes per row:
+makes). Paper DF-25 (plan 2026-10-03's trace chain) has a scene too, added 2026-11-01: it is not a
+row here and has no probe, because 5zorro types the paper; the scene makes only the customer,
+vendor and items the paper takes as already there, under the paper's own names, and never clears
+before making. Notes per row:
 
 - **Simulated, not ERPNext's own refusal:** R2-7 (no plain-bill path refuses a line rate; the
   ERPNext page's bridge refuses one call). Every other "ERPNext refuses" row uses a real ERPNext

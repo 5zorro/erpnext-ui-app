@@ -1073,7 +1073,7 @@ export const DOGFOOD_SOURCES = [
       "Doc Bill → Select PO / source → both receipts (PS-6601, PS-6602). Add PALLET-WRAP × 1 @ 20.00 as a line with no source (NIC). Charges: Freight 30.00 with Consider Tax or Charge for = Valuation and Total, Add, Actual, and 'Allocate full amount to stock items' ticked; Fuel surcharge 15.00 with Total only. Invoice date 10/13/2026. Then Pay Bills: pay 500.00 of it with Check 10511 and leave that check uncleared (no Bank Reconciliation).",
     expect: "A 900.00 bill. ERPNext spreads the 30.00 freight over the four stock lines by their amounts (Vanilla › each line's Item Tax Amount: 14.37 / 5.39 / 8.62 / 1.62); the pallet wrap and the fuel surcharge are in no line's cost.",
     checks: [
-      "Posting date = invoice date 10/13/2026.",
+      "Posting date = the day you save it; the Invoice date 10/13/2026 only sets the due date (a Bill's posting date is a stamp, 5zorro 2026-10-10).",
       "Pay Bills shows 400.00 still open after Check 10511.",
       "Later, when the trace pages are built: the bill's Landed column reads 414.37 for SKU-10; 'Fuel surcharge 15.00 — in no line's cost' shows beside it; the statement's Payments focus lists Check 10511 as 'not cleared — in the mail?'.",
     ],

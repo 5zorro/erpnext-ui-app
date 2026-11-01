@@ -473,6 +473,84 @@ export const SCENES = {
       ),
     clear: (app) => inPage(app, maker(`return { cleared: await clearVendor("ZZ DF ENRICH") };`), null),
   },
+  // Paper DF-25a…i (plan 2026-10-03, the trace chain) is typed by 5zorro; this scene makes only what
+  // the paper takes as already there. Unlike the others it keeps the paper's own names (they are
+  // printed on it) and never clears before making: running setup again must not undo his typing.
+  "trace-chain": {
+    title: "DF-25's customer, vendor and items, ready for the trace chain to be typed",
+    rows: ["DF-25"],
+    leaves:
+      "Customer LAKESIDE MARINE SUPPLY and vendor CASCADE FITTINGS CO., each with the paper's billing address; stock items SAMPLE-SKU-10 … 13 (default warehouse Stores) and non-stock PALLET-WRAP. Nothing typed is touched; running it again only fills what is missing. --clear cancels or deletes the chain's documents (the vendor's, the customer's, and Material Requests for SAMPLE-SKU-13) so the paper can be typed again; the customer, vendor and items stay.",
+    look:
+      "Type DF-25a…i in order (npm run dogfood:ap-sources prints the papers). Charges on DF-25f: Freight → 5205 Freight and Forwarding Charges; the fuel surcharge has no account of its own here: 5223 Miscellaneous Expenses. Pay and receive with Check (USPS_Check has no account on this sandbox, museum OI-197).",
+    make: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const company = frappe.defaults.get_user_default("Company") || (await list("Company", {}))[0].name;
+          const made = [];
+          async function ensureAddress(title, linkDoctype, linkName, line1, city, pincode) {
+            const links = await x("frappe.client.get_list", { doctype: "Dynamic Link", parent: "Address",
+              filters: { link_doctype: linkDoctype, link_name: linkName, parenttype: "Address" }, fields: ["parent"], limit_page_length: 0 });
+            if (links.length) return links[0].parent;
+            made.push("address " + title);
+            return (await insert({ doctype: "Address", address_title: title, address_type: "Billing", address_line1: line1, city, state: "UT",
+              pincode, country: "United States", is_primary_address: 1, links: [{ link_doctype: linkDoctype, link_name: linkName }] })).name;
+          }
+          const C = "LAKESIDE MARINE SUPPLY", V = "CASCADE FITTINGS CO.";
+          if (!(await one("Customer", { customer_name: C }))) made.push("customer " + C);
+          const customer = await ensureCustomer(C);
+          if (!(await one("Supplier", { supplier_name: V }))) made.push("vendor " + V);
+          const supplier = await ensureSupplier(V);
+          await ensureAddress(C, "Customer", customer, "90 Harbor Dr", "Bear Lake", "84028");
+          await ensureAddress(V, "Supplier", supplier, "410 Mill St", "Logan", "84321");
+          const warehouse = await one("Warehouse", { warehouse_name: "Stores", company });
+          const g = await list("Item Group", { is_group: 0, name: "Products" });
+          const group = g.length ? g[0].name : (await list("Item Group", { is_group: 0 }))[0].name;
+          const items = [
+            ["SAMPLE-SKU-10", "SAMPLE ITEM 10", 1], ["SAMPLE-SKU-11", "SAMPLE ITEM 11", 1],
+            ["SAMPLE-SKU-12", "SAMPLE ITEM 12", 1], ["SAMPLE-SKU-13", "SAMPLE ITEM 13", 1],
+            ["PALLET-WRAP", "PALLET WRAP", 0],
+          ];
+          for (const [code, name, stock] of items) {
+            if (await one("Item", { item_code: code })) continue;
+            made.push("item " + code);
+            await insert({ doctype: "Item", item_code: code, item_name: name, item_group: group, stock_uom: "Nos", is_stock_item: stock,
+              is_purchase_item: 1, is_sales_item: 1, item_defaults: stock && warehouse ? [{ company, default_warehouse: warehouse }] : [] });
+          }
+          return { customer, supplier, made: made.length ? made : "nothing: all there already" };
+        `),
+        null,
+      ),
+    clear: (app) =>
+      inPage(
+        app,
+        maker(String.raw`
+          const done = await clearVendor("CASCADE FITTINGS CO.");
+          const tryDo = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { done.push(label + " FAILED: " + ((e && e.message) || "")); } };
+          const customer = (await list("Customer", { customer_name: "LAKESIDE MARINE SUPPLY" }))[0];
+          if (customer) {
+            for (const [dt, filters] of [["Payment Entry", { party_type: "Customer", party: customer.name }], ["Sales Invoice", { customer: customer.name }],
+              ["Sales Order", { customer: customer.name }], ["Quotation", { party_name: customer.name }]]) {
+              for (const d of await list(dt, { ...filters, docstatus: ["<", 2] }, ["name", "docstatus"], { order_by: "creation desc" })) {
+                if (d.docstatus === 1) await tryDo("cancel " + d.name, () => x("frappe.client.cancel", { doctype: dt, name: d.name }));
+                else await tryDo("delete " + d.name, () => x("frappe.client.delete", { doctype: dt, name: d.name }));
+              }
+            }
+          }
+          const mrLines = await x("frappe.client.get_list", { doctype: "Material Request Item", parent: "Material Request",
+            filters: { item_code: "SAMPLE-SKU-13" }, fields: ["parent"], limit_page_length: 0 });
+          for (const mr of [...new Set(mrLines.map((l) => l.parent))]) {
+            const d = (await list("Material Request", { name: mr, docstatus: ["<", 2] }, ["name", "docstatus"]))[0];
+            if (!d) continue;
+            if (d.docstatus === 1) await tryDo("cancel " + mr, () => x("frappe.client.cancel", { doctype: "Material Request", name: mr }));
+            else await tryDo("delete " + mr, () => x("frappe.client.delete", { doctype: "Material Request", name: mr }));
+          }
+          return { cleared: done };
+        `),
+        null,
+      ),
+  },
 };
 
 /** R10c-3's terms, as the board's own planner names and shapes them. */
