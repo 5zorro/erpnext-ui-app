@@ -172,6 +172,28 @@ is set aside. What is left to choose in Step 3:
 
 The fair test below is then run for ESLint and the chosen plugin only.
 
+**What ERPNext and Frappe use** (5zorro asked 2026-11-01, *"why not use the same as them?"*; read
+from the clones at the tags the sandbox runs, ERPNext v16.32.1 and Frappe v16.31.0):
+- **JavaScript: ESLint too**, pinned at **8.44.0**, run through the Python `pre-commit` tool
+  (`.pre-commit-config.yaml`, `mirrors-eslint`) and its GitHub workflow. The rules
+  (`.eslintrc`) are `eslint:recommended`, which includes `no-undef`, with most style rules
+  and `no-unused-vars` turned off and their page-wide names (`frappe`, `erpnext`, `$`, …) listed as
+  globals. No import plugin. Formatting is Prettier 2.7.1.
+- **Python:** Ruff (lint and format), Semgrep with Frappe's own rules, and in Frappe mypy on a
+  list of files. Commit messages are checked with commitlint. None of it applies to this app's
+  plain JavaScript.
+- **So the same tool, and the same base rules, as decided.** Start from `eslint:recommended` as
+  they do. Two differences are on purpose:
+  - **The version.** ESLint 8 is past its end of support (support ended in October 2024; confirm
+    on eslint.org's version-support page in the dossier), and its old `.eslintrc` format is gone
+    in ESLint 9 and later. Pick a supported version under Step 2's rules, not 8.44.0.
+  - **The import check (R2).** Frappe bundles its JavaScript with esbuild (`frappe/esbuild/`), and
+    the bundler fails the build on a missing named import, so their lint does not need to check
+    imports. This app loads its modules as they are, unbundled, so a wrong import only shows when
+    the app starts (the `print.js` case). That is why we need an import plugin and they don't.
+  - Running ESLint through `pre-commit` would bring in a Python tool and its downloads. Running it
+    from `npm test` keeps one runner (Step 4).
+
 A fair test before choosing is the same one ESLint passed: run each against the commit before
 `5bef496` (the payment bug) and the version of `electron/ipc/print.js` with the wrong import (the
 start-up failure). Count what each finds and how much else it reports. That run needs the
