@@ -1,8 +1,9 @@
 # Implementation plan 2026-10-31 — dependencies first, then a linter
 
-> **Status 2026-11-01: Step 1 done (the report below; nothing changed); Step 2 drafted with his
-> rule of a two-month wait, waiting on his two answers (*Open questions*); the checker is chosen:
-> ESLint** (5zorro, *Decided* under Step 3). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> **Status 2026-11-01: Step 1 done (the report below); Step 2's waiting rule is in force
+> (`.npmrc`: `min-release-age=60`; an advisory fix after 7 days, his yes) and Electron is on 43.8.3
+> under it; the checker is chosen: ESLint, with an import rule of our own instead of a plugin (his
+> two answers under *Open questions*).** ESLint itself still needs his yes by exact version. Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
@@ -121,7 +122,22 @@ A starting draft for him to change:
 6. **An upgrade is its own commit**, with the lockfile's change read and summarised in the message.
 7. **The review repeats** before each release, and when a package is added.
 
-### Open questions for 5zorro (2026-11-01)
+### Open questions for 5zorro (2026-11-01) — answered the same day
+
+**Answers.** (1) *"published advisories should decrease the time, and decreasing it to 1 week
+sounds reasonable. go ahead"*: done. Electron 43.1.1 → **43.8.3** (11 days; 43.8.1 carries the
+eMudhra fix, 43.8.2 has no notes, 43.8.3 is Chromium / V8 / PDFium / Skia security backports) and
+`undici` 7.28.0 → **7.30.1** (17 days, fixes its 24 advisories; it only downloads Electron), each
+named in `--min-release-age-exclude` for that one install. The lockfile changed by those two
+lines; `npm audit` finds 0; `package.json` now pins `electron` exactly. Electron 43 fetches its
+binary on first use and checks it against the `checksums.json` inside its npm package. On 43.8.3:
+`npm test` green, probes `vendor-no-address`, `pay-settings-doors`, `double-press` pass,
+`scaffold-pure-wiring` passes, `scaffold-bill` fails only OI-190's void-and-amend (as on any code).
+(2) *"i don't have the background to really evaluate this import check. perhaps the short rule is
+best?"*: yes, the short rule kept in the repo; it gets the same fair test as a plugin would have.
+Still to do in Step 2: the stale `allowScripts` entry (`npm install-scripts prune`), and the rules
+he has not said yes to (exact versions for new packages, the lockfile, an upgrade per commit).
+
 
 1. **Security fixes against the two-month wait.** Electron 43.5.1 (61 days) is the newest 43.x the
    rule allows today. It fixes 5 of the 12 advisories, including 4 of the 5 high ones. 43.6.0
