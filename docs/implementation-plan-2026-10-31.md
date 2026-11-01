@@ -78,9 +78,11 @@ A starting draft for him to change:
    setting up and for test runs.
 4. **Install scripts off by default** (`ignore-scripts=true` in a project `.npmrc`), with a short
    allow-list for a package that truly needs one.
-5. **A waiting period** before taking a new version, for example 14 days, because a hijacked
-   version is usually found and pulled within days. Check what npm 11 offers for this (its
-   `--before <date>` install option) before writing the rule.
+5. **A waiting period** before taking a new version, because a hijacked version is usually found
+   and pulled within hours or days (both cases under *Step 3* were). npm 11.10 and later has a
+   `min-release-age` setting for a project's `.npmrc`; this machine runs npm 11.18.0. Reports differ
+   on whether its value is in days or minutes, and on how to read it back (`npm config get before`),
+   so try it on a scratch project before writing the rule. A starting value to argue with: 7 days.
 6. **An upgrade is its own commit**, with the lockfile's change read and summarised in the message.
 7. **The review repeats** before each release, and when a package is added.
 
@@ -92,14 +94,67 @@ What it must catch, from the two real cases above:
 - a named import that the module does not export (the printing move);
 - and, a smaller win, imports nobody uses.
 
-Candidates to compare. Fill in the facts during the step, not from memory:
+### Micro RFP (searched 2026-10-31; first pass, to check against each vendor's own pages)
 
-| Candidate | Known going in | To find out |
+The questions any candidate answers, in order of weight:
+
+| # | Requirement | Must / should |
 |---|---|---|
-| **ESLint** | The long-standing standard for JavaScript; its `no-undef` rule found the payment bug. Brought 88 packages in a scratch install | Whether a plugin is needed for the import check, and what that adds |
-| **TypeScript's checker on plain JavaScript** (`checkJs`, no TypeScript code written) | One package, from one publisher. It reads the JSDoc types already in the code, and reports both undefined names and missing exports | How noisy it is on this codebase at first; whether it can start with only those two kinds of error |
-| **Biome** | A single program (written in Rust), shipped as one npm package plus one per operating system | Whether it checks that named imports exist |
-| **oxlint** | Same shape as Biome (one program per operating system) | Same question |
+| R1 | Reports a name used but never defined | must |
+| R2 | Reports a named import its module does not export | must |
+| R3 | Runs on plain JavaScript (ES modules, JSDoc), with no rewrite to TypeScript | must |
+| R4 | Few packages behind it, and none that run code when installed | must |
+| R5 | A clear owner, an active release record, and publishing from a recorded build | should |
+| R6 | Can start with only R1 and R2 turned on, and add rules later | should |
+| R7 | Fast enough to run in every `npm test` | should |
+
+What a first search found (sources at the end; a "?" is still to check):
+
+| | ESLint (keep) | TypeScript's checker (`checkJs`) | Biome | oxlint |
+|---|---|---|---|---|
+| Who | OpenJS Foundation project | Microsoft | Biome project; Vercel sponsored its 2.0 | Oxc project, VoidZero (the Vite company) |
+| R1 undefined name | yes, `no-undef` (found the payment bug) | yes, a compile error | yes? (`noUndeclaredVariables`, to confirm) | yes, `no-undef` |
+| R2 missing export | not in core: needs an import plugin (`eslint-plugin-import` / `-import-x`), more packages | yes, a compile error | yes, `noUnresolvedImports` (off by default; listed as nursery in the next version's docs) | yes, `import/named` (nursery, experimental) |
+| R3 plain JS | yes | yes, but TypeScript 7 (the Go rewrite) changed its JSDoc reading, and older JSDoc patterns may report new errors | yes | yes |
+| R4 packages | 88 in a scratch install, before the import plugin | one package (TypeScript 6); TypeScript 7 ships per operating system | one package plus one per operating system | same as Biome |
+| R6 start small | yes, rule by rule | partly: it checks everything, so the first run may be noisy; switch it on file by file | yes, rule by rule | yes, rule by rule |
+| R7 speed | slowest (seconds) | seconds | fastest (under a second, one benchmark) | fastest (under a second, one benchmark) |
+
+**Two incidents that bear on R4 and on the waiting period:**
+
+- **July 2025:** a maintainer of `eslint-config-prettier`, a popular ESLint add-on, was phished.
+  Four versions were published with an install script that ran malware on Windows (CVE-2025-54313),
+  and the same account's other packages were hit too. ESLint itself was not. It is the add-on
+  packages around a linter that widen what has to be trusted.
+- **September 2025:** another phished maintainer. `debug`, `chalk` and others were published with
+  code that rewrote crypto payment addresses, and were live for hours. **This repo has `debug`.**
+  It is 4.4.3, the clean version that replaced the bad 4.4.2. The scratch ESLint install is also
+  clear (`chalk` 4.1.2, `color-name` 1.1.4, `ansi-styles` 4.3.0, `supports-color` 7.2.0).
+
+**Reading so far, for 5zorro's own look, not a decision.** The two must-catch bugs split the field:
+- ESLint catches R1 out of the box, but needs an extra plugin for R2, which means more packages.
+- TypeScript's checker catches both from one publisher. The cost is a noisy first run and the
+  JSDoc changes in version 7.
+- Biome and oxlint catch both with no package tree behind them. Their R2 rules are still marked
+  experimental.
+
+A fair test before choosing is the same one ESLint passed: run each against the commit before
+`5bef496` (the payment bug) and the version of `electron/ipc/print.js` with the wrong import (the
+start-up failure). Count what each finds and how much else it reports. That run needs the
+candidates installed somewhere, so it waits for Step 2's rules and his yes.
+
+Sources: [Biome vs Oxlint in 2026 (DEV)](https://dev.to/jsmanifest/biome-vs-oxlint-in-2026-which-rust-powered-linter-should-you-replace-eslint-with-48lh) ·
+[Oxlint vs Biome vs ESLint benchmark (DEV)](https://dev.to/fabwaseem/oxlint-vs-biome-vs-eslint-in-2026-benchmarked-on-a-real-nextjs-codebase-3lal) ·
+[Biome: comparison with other tools](https://biomejs.dev/introduction/comparison-with-other-tools) ·
+[Biome `noUnresolvedImports`](https://biomejs.dev/linter/rules/no-unresolved-imports/) ·
+[Oxlint 1.0 stable](https://oxc.rs/blog/2025-06-10-oxlint-stable) ·
+[Oxlint type-aware linting](https://voidzero.dev/posts/announcing-oxlint-type-aware-linting) ·
+[oxlint `import/named`](https://oxc.rs/docs/guide/usage/linter/rules/import/named) ·
+[typescript-go](https://github.com/microsoft/typescript-go) ·
+[TypeScript native port (Visual Studio Magazine)](https://visualstudiomagazine.com/articles/2025/12/02/microsoft-gets-real-on-native-typescript-remake.aspx) ·
+[eslint-config-prettier compromise (BleepingComputer)](https://www.bleepingcomputer.com/news/security/popular-npm-linter-packages-hijacked-via-phishing-to-drop-malware/) ·
+[chalk / debug compromise (Semgrep)](https://semgrep.dev/blog/2025/chalk-debug-and-color-on-npm-compromised-in-new-supply-chain-attack) ·
+[npm `min-release-age` (npm/cli #8825)](https://github.com/npm/cli/pull/8825)
 
 ## Step 4 — run it in `npm test`
 
