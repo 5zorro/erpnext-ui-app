@@ -184,17 +184,7 @@ import {
   remainingHoldMs,
   FIELD_LOADING_SHOW_AFTER_MS,
 } from "../src/field-loading.js";
-import { showSourceModal } from "../src/source-modal-ui.js";
-import {
-  buildCreditSourceGroups,
-  buildCreditSourceLoadingGroups,
-  buildCreditSourceErrorGroups,
-  classifyCreditSourceChoice,
-} from "../src/source-modal-credit-mode.js";
-import {
-  runSourcePickerFlow,
-  mayAutoOpenSourcePicker,
-} from "../src/source-picker-flow.js";
+import { mayAutoOpenSourcePicker } from "../src/source-picker-flow.js";
 import { wireCommitGateChrome } from "../src/doc-commit-gate-ui.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
@@ -247,6 +237,7 @@ import {
 import { uiIconHtml } from "../src/ui-icons.js";
 import { openAssignModal } from "../src/bill-assign-modal-ui.js";
 import { openInformalLinkModal } from "../src/bill-informal-link-modal-ui.js";
+import { runBillSourceModal } from "../src/bill-source-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
@@ -2585,167 +2576,37 @@ export async function bootBillFormPage(api) {
       dd.hidden = true;
     });
 
-    /**
-     * OI-166 — the modal asks one question, "where does this Bill come from?", and the foot
-     * switch changes which corpus answers it: open Purchase Orders / Item Receipts, or the
-     * submitted Bill this credit is against. 5zorro's flow is vendor → source in one breath,
-     * so the decision belongs here rather than behind a second dialog opened later.
-     *
-     * A Bill that is already a credit opens the modal already switched.
-     */
-    let creditOn = isCreditMemoBill(lastDoc);
-    /** Latest PO/IR corpus, kept warm so flipping back is instant and complete. */
-    let sourceGroups = null;
-    /** @type {import("./source-modal-ui.js").SourceModalController|null} */
-    let modalCtl = null;
-    let creditLoadToken = 0;
     const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
-
-    async function switchCreditMode(next) {
-      if (!modalCtl) return;
-      creditOn = !!next;
-      if (!creditOn) {
-        // Slices that landed while the switch was on were accumulated, not painted.
-        modalCtl.setCreditMode(false, sourceGroups || undefined);
-        setStatus("Back to Purchase Orders and Item Receipts — Space to check · Enter to pull.");
-        return;
-      }
-      const token = ++creditLoadToken;
-      modalCtl.setCreditMode(true, buildCreditSourceLoadingGroups(sup));
-      setStatus(`Loading submitted Bills for ${sup}…`);
-      let rows = null;
-      let failure = "";
-      try {
-        rows = await searchSourceBillRows("", sup, currentName);
-      } catch (err) {
-        failure = String(err && err.message ? err.message : err);
-      }
-      // A stale fetch must never repaint a list the clerk has already switched away from.
-      if (token !== creditLoadToken || !creditOn || !sourceModalOpenRef.current) return;
-      if (failure) {
-        modalCtl.setCreditMode(true, buildCreditSourceErrorGroups(failure, sup));
-        setStatus(`Could not load Bills: ${failure}`, "err");
-        return;
-      }
-      modalCtl.setCreditMode(
-        true,
-        buildCreditSourceGroups(rows, { supplier: sup, exclude: currentName }),
-      );
-      setStatus("Pick the Bill this credit is against (or decide later).");
-    }
-
-    setStatus(
-      creditOn ? "Loading submitted Bills…" : "Loading open PO / Item Receipts…",
-    );
-
-    return runSourcePickerFlow({
+    return runBillSourceModal({
+      api,
       supplier: sup,
       trigger,
-      mode: "multi",
-      listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
-      onGroups: (groups) => {
-        sourceGroups = groups;
-      },
-      applySlices: () => !creditOn,
+      creditOn: isCreditMemoBill(lastDoc),
+      isOpenRef: sourceModalOpenRef,
+      setStatus,
       log: (event, detail) => logFocus(event, detail || ""),
-      mayOpen: (vendor, trig) =>
-        mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+      mayOpen: (vendor, trig) => mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
       onUserClose: (kind) => {
         if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
           vendorPickSourceSession.userClosed = true;
         }
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
-      onStreamComplete: ({ errors }) => {
-        // Credit mode owns the status line while it is on — the PO/IR stream is still running
-        // underneath it and must not narrate over the question the clerk is actually answering.
-        if (creditOn || !sourceModalOpenRef.current) return;
-        if (errors.length) {
-          setStatus(`Some sources failed to load (${errors.length}) — NIC still ok.`, "warn");
-        } else {
-          setStatus("Sources loaded — Space to check · Enter to pull (or NIC).");
-        }
+      searchBills: () => searchSourceBillRows("", sup, currentName),
+      currentName,
+      chooseCreditSource: commitCreditSource,
+      beforePull: scheduleFocusInvoiceDateField,
+      onPulled: (merged) => {
+        noteUserEdit();
+        paint(merged.doc, amountDue, {
+          linkedPos: merged.linkedPos,
+          linkedReceipts: merged.linkedReceipts,
+          poLineMeta: merged.poLineMeta,
+          lineAllocations: merged.lineAllocations,
+          forceDueDatePaint: !!(merged.paymentTermsSettle && merged.paymentTermsSettle.ok),
+        });
       },
-      showModal: (flowOpts) =>
-        showSourceModal({
-          ...flowOpts,
-          testId: "bill-source-modal",
-          pickButtonTestId: "bill-source-pull",
-          isOpenRef: sourceModalOpenRef,
-          setStatus,
-          creditToggle: {
-            label: "Credit memo?",
-            checked: creditOn,
-            testId: "bill-source-credit-toggle",
-            onChange: (next) => {
-              void switchCreditMode(next);
-            },
-          },
-          onController: (c) => {
-            modalCtl = c;
-            if (flowOpts.onController) flowOpts.onController(c);
-            // Opened on a Bill that is already a credit: fetch its corpus straight away.
-            if (creditOn) void switchCreditMode(true);
-          },
-          focusSurface: () => {
-            if (api && api.focusBillSurface) api.focusBillSurface();
-          },
-          onChoose: async (choice) => {
-            if (creditOn) {
-              const verdict = classifyCreditSourceChoice(choice);
-              if (verdict.action === "decline") {
-                setStatus(
-                  "Credit memo left with no Bill behind it — the Return Against warning " +
-                    "stays up until you link one.",
-                  "warn",
-                );
-                return;
-              }
-              if (verdict.action !== "link") {
-                setStatus("Pick the Bill this credit is against, or decide later.", "warn");
-                return;
-              }
-              await commitCreditSource(verdict.name);
-              return;
-            }
-            const mode = choice && choice.mode;
-            const items = (choice && choice.items) || [];
-            if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
-              setStatus("No source — enter lines manually.");
-              return;
-            }
-            if (mode !== "merge" || !items.length) {
-              setStatus("Pick at least one source (Space to check), or NIC.", "warn");
-              return;
-            }
-            const labels = items.map((it) => it.name || it.kind).join(", ");
-            setStatus(`Pulling from ${labels}…`);
-            scheduleFocusInvoiceDateField();
-            const payload = items.map((it) => ({ kind: it.kind, name: it.name }));
-            const merged =
-              payload.length === 1
-                ? await api.mergeSource(payload[0].kind, payload[0].name)
-                : await api.mergeSource(payload);
-            if (merged && merged.ok) {
-              noteUserEdit();
-              paint(merged.doc, amountDue, {
-                linkedPos: merged.linkedPos,
-                linkedReceipts: merged.linkedReceipts,
-                poLineMeta: merged.poLineMeta,
-                lineAllocations: merged.lineAllocations,
-                forceDueDatePaint: !!(merged.paymentTermsSettle && merged.paymentTermsSettle.ok),
-              });
-              setStatus(
-                payload.length === 1
-                  ? `Pulled from ${payload[0].name}.`
-                  : `Pulled from ${payload.length} sources.`,
-              );
-            } else {
-              setStatus((merged && merged.reason) || "Could not pull source.", "err");
-              await refresh();
-            }
-          },
-        }),
+      refresh,
     });
   }
   
