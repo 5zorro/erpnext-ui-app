@@ -133,6 +133,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "papers",
     label: "Papers — the compare pane, attachments, ZIP / one PDF",
     modules: ["compare-*", "attachment-*", "sheet-preview", "zip-store"],
+    paths: ["electron/ipc/papers.js"],
     e2e: [],
     noPaper: "attach-and-compare is not on any paper yet — a candidate for the next DF round",
   },
