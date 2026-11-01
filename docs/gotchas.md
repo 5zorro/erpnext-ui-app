@@ -830,6 +830,30 @@ flag, so each switch added another click listener and one click ran the sort twi
 outlives it is wired once; a layout switch resets state (the sort), never listeners.
 **Proof:** `e2e/scaffold-form-switch.spec.js` (failed on the code before: "Description ▼").
 
+## G25 — A header box keeps old text after the shell itself wrote that field (2026-10-31)
+
+**Observed:** on a credit memo, *Clear link* on an informal Bill link said "cleared", but Remarks
+still read "Linked Bill: …"; the next Sales Order link wrote the cleared Bill back (museum OI-193).
+**Why:** `paint()` guards the header boxes (`src/bill-header-paint.js`
+`shouldPreserveHeaderInputDuringPaint`): a box whose text differs from ERPNext's is kept, as if the
+clerk were typing there — unless it is blank or the document changed identity. Right while the
+clerk types, wrong after the shell's own write: the box goes stale, and code that builds the next
+value from the box (`writeInformalLinkToken` reads `el.memo.value`) writes stale text back.
+**Rule:** after the shell writes a header field from the clerk's click (not their typing), paint
+that one box with `{ forcePaint: true }`. Not `forceHeaderPaint` on the whole paint: that would
+overwrite a header write still on its way.
+**Proof:** `tests/probes/informal-link-remarks.probe.js` (failed on the code before at the clear).
+
+## G26 — The status line is text: money in it uses `formatUsdAmount`, not the `…Html` one (2026-10-31)
+
+**Observed:** every Allocate said "Allocated $14.<span class="money-cents">28</span> …" (OI-195).
+**Why:** `formatUsdAmountHtml` underlines the cents with markup for tables and cells written as
+HTML; `setStatus` writes text, so the markup shows as code.
+**Rule:** text (status line, `textContent`, titles) gets `formatUsdAmount`; only HTML written with
+`innerHTML` gets the `…Html` formatters.
+**Proof:** `tests/bill-charge-allocate.test.js` "the Allocate status is plain text"; the e2e
+Allocate test checks the exact status.
+
 ## ERPNext behaviour verified from source (read the bullet you need; don't re-derive)
 
 Facts about the ERPNext / Frappe this shell drives, read from the source at the sandbox's tags
