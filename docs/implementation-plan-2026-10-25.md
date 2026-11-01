@@ -468,6 +468,13 @@ before each bridge call, left as decided). `nav-spine-drafts` and `dogfood-r2-1-
 **Finding 7: his pick 2026-11-01** — replace the probes' fixed sleeps with waits on a condition,
 then *"see what breaks then go from there"* (he expects some things to show before they paint
 properly; a pause of a person's reaction time, ~300 ms, is his fallback for those).
+First pass, the `@nav` matrix's shared `tests/probes/nav-spine.js`: 13 fixed sleeps (1–2.5 s after
+a wait that had already seen the page, the reload cell's 3 s + 6 s) became a 300 ms `settle()`, a
+poll for the gate to close after Stay, and a poll for the Doc page and ERPNext to name the same
+document after a reload; sleeps inside polling loops stay, as does the 8 s after the cruft restart.
+`npm run nav:check -- --ongoing`: **all 8 probes, 142 cells, pass in 13 min 20 s (28 min in the
+sweep)**. Nothing broke, so no settle needed lengthening. Next: the other probes, largest first
+(`r13-1-calc-rounding`, the `leaves-records` set, `df03-item-table`, `nav-reload-gate`).
 
 `nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
 overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under

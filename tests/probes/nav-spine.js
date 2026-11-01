@@ -74,6 +74,13 @@ async function launch(opts = {}) {
   await e2eCall(app, "setLensPref", "purchase-invoice", "doc");
   return app;
 }
+/**
+ * A person's reaction time (5zorro 2026-11-01, plan 10-25 3b finding 7): after a wait that already
+ * saw what the next step needs, a short pause so a thing that is there but not painted yet can paint.
+ * It replaced fixed 1–2.5 s sleeps.
+ */
+const SETTLE_MS = 300;
+const settle = () => sleep(SETTLE_MS);
 const asks = (app) => app.evaluate(() => globalThis.__navAsks);
 const answer = (app, a) => app.evaluate((_e, v) => { globalThis.__navAnswer = v; }, a);
 
@@ -177,12 +184,12 @@ async function arrive(app, start, state, docs) {
   } else if (start === "erp-link") {
     await e2eCall(app, "openErp", PI);
     await expect.poll(() => soft(inErp(app, `(() => { const r = frappe.get_route(); return r[0] === "List" && r[1] === "Purchase Invoice"; })()`)), { timeout: 30_000 }).toBe(true);
-    await sleep(1000);
+    await settle();
     await inErp(app, `(() => { frappe.set_route("Form", "Purchase Invoice", ${JSON.stringify(name)}); return true; })()`);
   } else if (start === "find") {
     await e2eCall(app, "openErp", PI);
     await expect.poll(() => soft(inErp(app, `(() => frappe.get_route()[0] === "List")()`)), { timeout: 30_000 }).toBe(true);
-    await sleep(1000);
+    await settle();
     await inChrome(app, click("lens-doc"));
     await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("find-doc");
     await inFind(app, `(() => { const i = document.querySelector('input[data-field="bill_no"]'); i.value = ${JSON.stringify(docs.refs[name])}; i.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
@@ -201,7 +208,7 @@ async function arrive(app, start, state, docs) {
     const f = await inErp(app, ERP_FORM);
     return { ok: false, surface: await surface(app), name: f ? `${f.doctype} ${f.name}` : "" };
   }
-  await sleep(2000);
+  await settle();
   await closeSourcePickers(app);
   const p = await inDoc(app, DOC_PAGE);
   return { ok: true, surface: "doc", name: p.name, supplier: p.supplier };
@@ -239,7 +246,8 @@ let gateButtons = "";
 /** A gate is up: Stay, check the typing survived, then go again and Discard. */
 async function stayThenDiscard(app, mark, redo) {
   await inDoc(app, click("doc-gate-cancel"));
-  await sleep(1000);
+  await expect.poll(() => soft(inDoc(app, GATE)), { timeout: 10_000 }).not.toBe(true);
+  await settle();
   const p = await inDoc(app, DOC_PAGE);
   const stayKept = (await surface(app)) === "doc" && p.ref === mark;
   await redo();
@@ -262,7 +270,7 @@ async function escBack(app) {
 async function backByRow(app, name, lists) {
   if (!(await clickRow(app, name, lists))) return { surface: await surface(app), name: `no row; rows: ${await railRows(app)}` };
   await waitDoc(app, name).catch(() => {});
-  await sleep(1500);
+  await settle();
   const p = await inDoc(app, DOC_PAGE);
   const saved = await inErp(app, `(async () => (await frappe.xcall("frappe.client.get_value", { doctype: "Purchase Invoice", filters: { name: ${JSON.stringify(name)} }, fieldname: "bill_no" })).bill_no || "")()`, 15_000);
   return { surface: await surface(app), name: p.name, ref: p.ref, savedRef: saved };
@@ -304,7 +312,7 @@ async function move(app, cell, docs, seen) {
       await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("home");
       await inHome(app, click("tile-desk"));
       await expect.poll(() => surface(app), { timeout: 20_000 }).toBe("erp");
-      await sleep(1500);
+      await settle();
       seen.landed = { surface: await surface(app), route: await e2eCall(app, "currentRoute") };
     } else {
       await waitDoc(app, docs.B).catch(() => {});
@@ -326,13 +334,13 @@ async function move(app, cell, docs, seen) {
     if (saveNew) {
       seen.step = "lens: make the new Bill saveable";
       await inDoc(app, `(async () => { const d = window.erpDoc; await d.setHeader("supplier", ${JSON.stringify(VENDOR)}); await d.setItem(0, "item_code", ${JSON.stringify(ITEM)}); await d.setItem(0, "qty", 1); await d.setItem(0, "rate", 10); return true; })()`, 60_000);
-      await sleep(2500);
+      await settle();
       const snap = await repaintDoc(app);
       await closeSourcePickers(app);
       // Save needs the vendor box and the amount due on the page (the API writes do not repaint it).
       const total = billCompareTotal(snap.doc);
       await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(VENDOR)}; const r = document.getElementById("f-billno"); if (r) r.value = ${JSON.stringify(mark)}; const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = ${JSON.stringify(String(total))}; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`);
-      await sleep(500);
+      await settle();
       seen.step = "lens";
     }
     await go();
@@ -341,7 +349,8 @@ async function move(app, cell, docs, seen) {
     if (r.how === "gate" && saveNew) {
       seen.step = "lens: Stay, then Save";
       await inDoc(app, click("doc-gate-cancel"));
-      await sleep(1000);
+      await expect.poll(() => soft(inDoc(app, GATE)), { timeout: 10_000 }).not.toBe(true);
+      await settle();
       seen.stayKept = (await surface(app)) === "doc" && (await inDoc(app, DOC_PAGE)).ref === mark;
       // Stay leaves the lens as it was (review RV-6): Bills still open on the Doc lens.
       try {
@@ -374,14 +383,14 @@ async function move(app, cell, docs, seen) {
     } else if (r.how === "gate") seen.stayKept = await stayThenDiscard(app, mark, go);
     await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("erp");
     await waitErpForm(app, "Purchase Invoice").catch(() => {});
-    await sleep(1500);
+    await settle();
     const f = (await soft(inErp(app, ERP_FORM))) || {};
     seen.landed = { surface: await surface(app), doctype: f.doctype, name: f.name };
     seen.carried = typed ? f.ref === mark : null;
     seen.step = "lens: back to the Doc tab";
     await inChrome(app, click("lens-doc"));
     await expect.poll(() => soft(surface(app)), { timeout: 15_000 }).toBe("doc");
-    await sleep(2000);
+    await settle();
     seen.back = await backHere(app);
     return;
   }
@@ -424,7 +433,7 @@ async function move(app, cell, docs, seen) {
     }
     seen.step = "errand: Esc back";
     await escBack(app);
-    await sleep(2000);
+    await settle();
     seen.back = await backHere(app);
     if (cell.move === "errand-saved") {
       seen.errandWant = ITEM;
@@ -446,7 +455,7 @@ async function move(app, cell, docs, seen) {
     await waitErpForm(app, "Supplier");
     seen.landed = { surface: await surface(app), doctype: "Supplier" };
     await escBack(app);
-    await sleep(2000);
+    await settle();
     seen.back = await backHere(app);
     seen.focusWant = { field: "bill_no" };
     seen.focus = await inDoc(app, ACTIVE);
@@ -454,10 +463,16 @@ async function move(app, cell, docs, seen) {
   }
   if (cell.move === "reload") {
     await e2eCall(app, "reloadErp");
-    await sleep(3000);
-    seen.asked = (await asks(app)) > before;
     await waitErpForm(app, "Purchase Invoice").catch(() => {});
-    await sleep(6000);
+    seen.asked = (await asks(app)) > before;
+    // The Doc page repaints from the reloaded form: wait until it names the same document (the
+    // checks below still judge a mismatch that never resolves).
+    const sameDoc = async () => {
+      const [d, e] = [await soft(inDoc(app, DOC_PAGE)), await soft(inErp(app, ERP_FORM))];
+      return !!(d && e && d.name && d.name === e.name);
+    };
+    await expect.poll(sameDoc, { timeout: 15_000 }).toBe(true).catch(() => {});
+    await settle();
     const p = await inDoc(app, DOC_PAGE);
     const f = (await inErp(app, ERP_FORM)) || {};
     const shown = /^(new-[a-z-]+-[a-z0-9]+|[A-Z][A-Z0-9-]+-\d+(?:-\d+)?)\b/.exec(String(p.status || "").trim());
