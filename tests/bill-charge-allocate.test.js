@@ -257,3 +257,15 @@ describe("the Allocate dialog's lines and status (plan 10-25 R6a-2)", () => {
     assert.match(over.text, /more into them than the charge/);
   });
 });
+
+describe("the Allocate status is plain text (museum OI-195)", () => {
+  it("names the money without HTML: the status line shows text", () => {
+    for (const res of [{ allocatedTotal: 14.28, remainder: 0 }, { allocatedTotal: 14.27, remainder: 0.01 }, { allocatedTotal: 14.29, remainder: -0.01 }]) {
+      const { text } = allocateDoneStatus(res);
+      assert.doesNotMatch(text, /[<>]/, text);
+      assert.match(text, /^Allocated \$14\.2\d into item costs/);
+    }
+    assert.match(allocateDoneStatus({ allocatedTotal: 14.27, remainder: 0.01 }).text, /\$0\.01 could not go/);
+    assert.match(allocateDoneStatus({ allocatedTotal: 1234.5, remainder: 0 }).text, /^Allocated \$1,234\.50 into/);
+  });
+});

@@ -15,7 +15,7 @@
  */
 
 import { splitUnitsByWeights } from "./split-by-weights.js";
-import { formatUsdAmountHtml } from "./money.js";
+import { formatUsdAmount } from "./money.js";
 
 /**
  * A line's amount as ERPNext stores it: qty × rate to cents, Banker's Rounding (this site's
@@ -441,23 +441,23 @@ export function chargeAllocItems(docItems) {
 
 /**
  * The status line after ERPNext took an allocation: exact, a remainder that stays on the charge,
- * or rounding that put a little more in. Money goes through the HTML formatter, as it always has
- * (museum OI-195: the status line shows text, so its cents markup shows).
+ * or rounding that put a little more in. Plain money: the status line shows text, and the HTML
+ * formatter's cents markup showed as code there (museum OI-195).
  * @param {{ allocatedTotal: number, remainder?: number }} res
  * @returns {{ text: string, tone?: "warn" }}
  */
 export function allocateDoneStatus(res) {
-  const total = formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal;
+  const total = formatUsdAmount(res.allocatedTotal) || res.allocatedTotal;
   const left = Number(res.remainder) || 0;
   if (left > 0) {
     return {
-      text: `Allocated ${total} into item costs (offset Deduct added). ${formatUsdAmountHtml(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`,
+      text: `Allocated ${total} into item costs (offset Deduct added). ${formatUsdAmount(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`,
       tone: "warn",
     };
   }
   if (left < 0) {
     return {
-      text: `Allocated ${total} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmountHtml(-left) || -left} more into them than the charge. The bill total is unchanged.`,
+      text: `Allocated ${total} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmount(-left) || -left} more into them than the charge. The bill total is unchanged.`,
       tone: "warn",
     };
   }
