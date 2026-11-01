@@ -14,7 +14,10 @@
 > 5zorro's word: OI-193 (a cleared informal link leaves "Removed linked …" in Remarks, and the box
 > shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
-> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*). **R2-5
+> started 2026-10-31 alongside, from the far end (his pick): printing and Papers moved to
+> `electron/ipc/`; Find and payment settings next; the bridge / doc-form / Bill moves wait for 3b
+> (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
