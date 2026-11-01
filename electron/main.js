@@ -5669,6 +5669,74 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
     ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
+      var r = await frappe.call({
+        method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
+        args: { dt: "Purchase Invoice", dn: billName },
+      });
+      if (r && r.exc) return { ok: false, reason: reasonFrom(r), step: "get_payment_entry" };
+      var pe = r && r.message;
+      if (!pe) return { ok: false, reason: "get_payment_entry returned empty.", step: "get_payment_entry" };
+      try { pe = JSON.parse(JSON.stringify(pe)); } catch (eJson) {}
+      if (!pe.doctype) pe.doctype = "Payment Entry";
+      var billNo = ${billNoLit};
+      var postingDate = ${postingLit};
+      if (!pe.reference_no) pe.reference_no = billNo || billName;
+      if (!pe.reference_date) {
+        pe.reference_date =
+          postingDate ||
+          (frappe.datetime && frappe.datetime.get_today
+            ? frappe.datetime.get_today()
+            : null);
+      }
+      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      if (inserted && inserted.exc) {
+        return { ok: false, reason: reasonFrom(inserted), step: "insert" };
+      }
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved || !saved.name) {
+        return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
+      }
+      return { ok: true, name: saved.name };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, reason: "Payment Entry create failed." };
+  }
+  if (raw.ok) return raw;
+  return {
+    ok: false,
+    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
+    step: raw.step,
+  };
+}
+
+/**
+ * Create + submit Payment Entry for a submitted Purchase Invoice (OI-135 JIT).
+ * @param {string} billName
+ * @param {{ modeOfPayment: string, cashBankAccount: string, paidAmount: number }} intent
+ */
+async function createJitPaymentEntryForBill(billName, intent) {
+  const name = billName == null ? "" : String(billName).trim();
+  if (!name || isNewDocRecord(name)) {
+    return { ok: false, reason: "Bill must be saved/submitted before Payment Entry." };
+  }
+  const mop = JSON.stringify(intent.modeOfPayment || "");
+  const bank = JSON.stringify(intent.cashBankAccount || "");
+  const paid = Number(intent.paidAmount);
+  const paidLit = Number.isFinite(paid) ? String(paid) : "0";
+  const billLit = JSON.stringify(name);
+  const billNoLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || name,
+  );
+  const postingLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.posting_date) || "",
+  );
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var billName = ${billLit};
       var mop = ${mop};
       var bankAccount = ${bank};
       var paidAmount = ${paidLit};
