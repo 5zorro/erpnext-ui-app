@@ -34,6 +34,9 @@
    and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
+   **Not started:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter: review
+   what is installed, agree the rules for adding a package, then 5zorro picks a checker) — waits for
+   his own look at linter vendors; nothing installed for it.
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
    **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
@@ -119,6 +122,7 @@ flowchart LR
 | `pwa/receiving/` · `src/receiving/` · `ops/receiving-proxy/` | **Parked** (plan 2026-09-21): the Receiving Scanner, a second client on the phone — its pages, its pure logic (also served to the pages as `/receiving/lib/`), and the Caddy front door in front of ERPNext's own web server (frappe_docker untouched). Phone setup: `docs/receiving-phone-setup.md`. Invariant 4 holds: the phone uses the proxy's address for both |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
+| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; how a move goes is in that plan's *Order*). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
 | `docs/` | beta-slice, commit conventions, **dated** working plans |
 | Museum `~/agent-harness/erpnext/doc-shell/` | Reference only — layouts, OIs, lessons |
