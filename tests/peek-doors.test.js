@@ -1,18 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { DOC_DOORS, IN_PLACE_ACTIONS, doorFor, isDoorChannel } from "../src/doc-doors.js";
+import { mainProcessSource } from "./main-process-source.js";
 
-const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
+const main = mainProcessSource();
 
 /** Every `ipcMain.on|handle("<name>", …)` handler body. */
 function handlers() {
   const out = [];
-  // One-line handlers end on their own line; multi-line ones at the first `});` / `);` at column 0.
-  const re = /^ipcMain\.(?:on|handle)\("([^"]+)"(?:[^\n]*\);$|[\s\S]*?^\}?\);$)/gm;
+  // One-line handlers end on their own line; multi-line ones at the first `});` / `);` at their own
+  // indent (column 0 in main.js, 2 inside an electron/ipc/<family>.js register function).
+  const re = /^( *)ipcMain\.(?:on|handle)\("([^"]+)"(?:[^\n]*\);$|[\s\S]*?^\1\}?\);$)/gm;
   let m;
-  while ((m = re.exec(main))) out.push({ name: m[1], body: m[0] });
+  while ((m = re.exec(main))) out.push({ name: m[2], body: m[0] });
   return out;
 }
 const all = handlers();

@@ -125,7 +125,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "printing",
     label: "Printing — in place, the queue, printer healing",
     modules: ["print-*"],
-    paths: ["electron/print-raster.html"],
+    paths: ["electron/print-raster.html", "electron/ipc/print.js"],
     e2e: ["scaffold-print.spec.js"],
     noPaper: "printer output, healing and paper size were proven live by hand (plan 2026-09-26 Printing); a paper would print one",
   },
