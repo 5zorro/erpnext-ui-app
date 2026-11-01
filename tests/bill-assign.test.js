@@ -113,16 +113,33 @@ describe("Assign — the Project step", () => {
 
   it("a project search keeps the picked project when it is still listed (OI-192)", () => {
     const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-2" });
-    const found = assignStep(s, { type: "projectsFound", rows: filterAssignProjects(PROJECTS, "  BATH ") });
+    const found = assignStep(s, { type: "projectFilter", text: "  BATH " });
     assert.deepEqual(found.projects.map((p) => p.name), ["PROJ-2"]);
     assert.equal(assignProject(found), "PROJ-2");
   });
 
   it("a project search that hides the pick falls back to No project, so Apply sends what is highlighted (OI-192)", () => {
     const s = assignStep(atProjects(), { type: "pickProject", name: "PROJ-3" });
-    const found = assignStep(s, { type: "projectsFound", rows: filterAssignProjects(PROJECTS, "kitchen") });
+    const found = assignStep(s, { type: "projectFilter", text: "kitchen" });
     assert.equal(found.projectPick, "");
     assert.equal(assignApplyRequest(found, "V").project, "");
+  });
+
+  it("the search filters the list loaded on reaching the step; clearing it shows them all again", () => {
+    let s = run([{ type: "projectFilter", text: "bath" }], atProjects());
+    assert.deepEqual(s.projects.map((p) => p.name), ["PROJ-2"]);
+    s = run([{ type: "projectFilter", text: "proj" }, { type: "projectFilter", text: "" }], s);
+    assert.deepEqual(s.projects.map((p) => p.name), ["PROJ-1", "PROJ-2", "PROJ-3"]);
+    assert.equal(s.allProjects.length, 3);
+  });
+
+  it("a list fetched again (a project made in Vanilla) is filtered by what is typed, the pick kept", () => {
+    const s = run([{ type: "pickProject", name: "PROJ-2" }, { type: "projectFilter", text: "a" }], atProjects());
+    const made = { name: "PROJ-4", project_name: "Garage" };
+    const again = assignStep(s, { type: "projectsReloaded", rows: [...PROJECTS, made], text: "a" });
+    assert.deepEqual(again.projects.map((p) => p.name), ["PROJ-1", "PROJ-2", "PROJ-4"]);
+    assert.equal(again.allProjects.length, 4);
+    assert.equal(assignProject(again), "PROJ-2");
   });
 
   it("the search matches name, title or customer name, any case; blank matches all", () => {

@@ -17,7 +17,6 @@ import {
   assignPlanRequest,
   assignApplyRequest,
   assignMarginLines,
-  filterAssignProjects,
   assignProjectLabel,
 } from "./bill-assign.js";
 import { formatSalesOrderPickerLabel } from "./so-picker.js";
@@ -107,6 +106,7 @@ export async function openAssignModal(deps) {
   function close() {
     closed = true;
     clearTimeout(searchTimer);
+    window.removeEventListener("focus", onFocus);
     if (loading) setStatus("Assign closed.");
     deps.onClose();
     document.removeEventListener("keydown", onKey, true);
@@ -182,7 +182,10 @@ export async function openAssignModal(deps) {
       empty.className = "src-item link-action";
       empty.textContent = "No projects found — create Project in Vanilla…";
       empty.onclick = () => {
-        if (api.openProjectAdd) api.openProjectAdd();
+        if (!api.openProjectAdd) return;
+        // The project is made in Vanilla: fetch the list again on the way back (see onFocus).
+        projectsStale = true;
+        api.openProjectAdd();
       };
       body.appendChild(empty);
     }
@@ -304,22 +307,42 @@ export async function openAssignModal(deps) {
   let searchTimer = null;
   // Only the newest search may paint: a slow answer for older text must not replace it (R5b-1).
   let searchSeq = 0;
+  /**
+   * The projects were loaded once, on reaching the step, and the search filters that list as the
+   * clerk types (5zorro 2026-11-01: no fresh copy per keystroke; the typed text never went to
+   * ERPNext anyway). Fetched again only after the clerk went to create one in Vanilla.
+   */
+  let projectsStale = false;
+  let reloadSeq = 0;
+  async function reloadProjects() {
+    projectsStale = false;
+    const seq = ++reloadSeq;
+    const rows = await loadProjects(state.customer);
+    if (closed || seq !== reloadSeq || state.step !== "project") return;
+    dispatch({ type: "projectsReloaded", rows, text: searchEl.value });
+    draw();
+  }
+  function onFocus() {
+    if (projectsStale && state.step === "project") void reloadProjects();
+  }
+  window.addEventListener("focus", onFocus);
+
   searchEl.oninput = () => {
+    if (state.step === "project") {
+      dispatch({ type: "projectFilter", text: searchEl.value });
+      draw();
+      if (projectsStale) void reloadProjects();
+      return;
+    }
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
       const seq = ++searchSeq;
       const text = searchEl.value;
-      if (state.step === "customer") {
-        const rows = await loadCustomers(text);
-        if (seq !== searchSeq || state.step !== "customer") return;
-        dispatch({ type: "customers", rows });
-        draw();
-      } else if (state.step === "project") {
-        const rows = await loadProjects(state.customer);
-        if (seq !== searchSeq || state.step !== "project") return;
-        dispatch({ type: "projectsFound", rows: filterAssignProjects(rows, text) });
-        draw();
-      }
+      if (state.step !== "customer") return;
+      const rows = await loadCustomers(text);
+      if (seq !== searchSeq || state.step !== "customer") return;
+      dispatch({ type: "customers", rows });
+      draw();
     }, 180);
   };
 

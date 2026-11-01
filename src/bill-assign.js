@@ -22,6 +22,7 @@ import { soPickerBillLines } from "./so-picker.js";
  *   customerName: string,
  *   salesOrders: Array<{ name: string, draft?: boolean, negativeMargin?: boolean }>,
  *   selected: string[],
+ *   allProjects: Array<{ name: string, project_name?: string, customer?: string, customer_name?: string }>,
  *   projects: Array<{ name: string, project_name?: string, customer?: string, customer_name?: string }>,
  *   projectPick: string,
  *   fromStock: string[],
@@ -39,6 +40,7 @@ export function assignStart() {
     customerName: "",
     salesOrders: [],
     selected: [],
+    allProjects: [],
     projects: [],
     projectPick: "",
     fromStock: [],
@@ -72,8 +74,12 @@ const toggled = (list, name) => (list.includes(name) ? list.filter((x) => x !== 
  *   - `salesOrders` { customer, customerName, rows } — on to the Sales Order step; ticks not on
  *     the new list are dropped
  *   - `toggleSalesOrder` { name }
- *   - `projects` { rows } — on to the Project step, "— No project —" chosen
- *   - `projectsFound` { rows } — a project search answered; the pick stays if it is listed
+ *   - `projects` { rows } — on to the Project step with the customer's projects, loaded once;
+ *     "— No project —" chosen
+ *   - `projectFilter` { text } — the project search: the loaded list, filtered here as the clerk
+ *     types (no call to ERPNext; the search is not sent there); the pick stays if it is listed
+ *   - `projectsReloaded` { rows, text } — the list fetched again (after the clerk went to create
+ *     a project in Vanilla), filtered by what is typed
  *   - `costing` { plan } — on to (or redraw) the costing step
  *   - `toggleStock` { salesOrder, on }
  *   - `back`
@@ -99,9 +105,13 @@ export function assignStep(state, action) {
     case "toggleSalesOrder":
       return { ...state, selected: toggled(state.selected, action.name) };
     case "projects":
-      return { ...state, step: "project", projects: action.rows, projectPick: "" };
-    case "projectsFound":
-      return { ...state, projects: action.rows, projectPick: kept(state.projectPick, action.rows, "name") };
+      return { ...state, step: "project", allProjects: action.rows, projects: action.rows, projectPick: "" };
+    case "projectFilter":
+    case "projectsReloaded": {
+      const all = action.type === "projectsReloaded" ? action.rows : state.allProjects;
+      const shown = filterAssignProjects(all, action.text);
+      return { ...state, allProjects: all, projects: shown, projectPick: kept(state.projectPick, shown, "name") };
+    }
     case "pickProject":
       return { ...state, projectPick: action.name };
     case "costing":
