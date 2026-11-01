@@ -24,12 +24,19 @@ const scrub = (o) => JSON.parse(JSON.stringify(o).replace(/"path":"[^"]*"/g, '"p
 /** Launch, log in as the AP clerk, open the board. */
 async function boardAsClerk() {
   const app = await launchShell();
-  await waitForE2eApi(app);
-  await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
-  const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
-  await openBoard(app, { cards: false });
-  await sleep(1500);
-  return { app, clerk };
+  try {
+    await waitForE2eApi(app);
+    await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
+    const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
+    await openBoard(app, { cards: false });
+    await sleep(1500);
+    return { app, clerk };
+  } catch (e) {
+    // The caller's finally holds the app from before; close this one (a clerk enabled here is
+    // retired by run-probe from the lock).
+    await app.close().catch(() => {});
+    throw e;
+  }
 }
 
 test("payment settings: batch prefs and delay calendar, every door, and after a restart", async () => {

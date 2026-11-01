@@ -401,9 +401,14 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
      linter in the repo, so the check is ESLint's `no-undef` run from outside it. Also, every named
      import must exist in its module. Lint does not catch that, and a wrong one stops the app at
      start-up (it happened once on this step: `normalizeEditableText` comes from
-     `src/dirty-gate.js`). Then `npm test`, start the app once headless (`E2E=1
-     ERP_USER_DATA_DIR=<tmp>`) and read the errors, then the family's specs from
-     `npm run dogfood:for-change`.
+     `src/dirty-gate.js`). The import check loads each module in plain Node, which cannot load
+     `electron/ipc/*.js` (they import `electron`), so check main.js's imports from them by reading
+     their `export`s. Then `npm test`, start the app once headless (`E2E=1
+     ERP_USER_DATA_DIR=<tmp>`, wrapped in `timeout -k 5 25`, never a `pkill electron`: 5zorro's
+     own app is usually open) and read the errors, then the family's specs from
+     `npm run dogfood:for-change`; compare failure names with a run on the code before. Where no
+     spec or probe drives a door, write a probe that does, run it before and after, `diff` the
+     outputs, and keep it (payment settings: `pay-settings-doors`).
    - The first lint pass found two Bill payment paths broken since 2026-10-23 (fixed `5bef496`,
      probe `leaves-records/bill-payment-paths`). Running that lint in `npm test` is open for
      5zorro to decide: it is one dev dependency.
