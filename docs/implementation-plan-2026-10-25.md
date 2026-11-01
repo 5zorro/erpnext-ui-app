@@ -9,7 +9,8 @@
 > customer and project picks kept by name); the informal link dialog moved 2026-10-27
 > (`src/bill-informal-link.js`, `src/bill-informal-link-modal-ui.js`; museum OI-193 found, his call);
 > the source picker's Bill side moved 2026-10-31 (`src/bill-source-modal-ui.js`; a pick's meaning in
-> `src/bill-source-flow.js`); next allocate charge; also owed, decided 2026-10-26: the Item Receipt's
+> `src/bill-source-flow.js`), and Allocate into items moved 2026-10-31
+> (`src/bill-allocate-charge-modal-ui.js`; museum OI-195 found, his call): **R6a-2's four dialogs are done**; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,

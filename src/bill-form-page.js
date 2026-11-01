@@ -81,7 +81,6 @@ import {
 } from "../src/bill-paid.js";
 import {
   isAllocatableChargeRow,
-  planChargeToStockAllocation,
   taxRowDeleteAllowed,
 } from "../src/bill-charge-allocate.js";
 import {
@@ -238,6 +237,7 @@ import { uiIconHtml } from "../src/ui-icons.js";
 import { openAssignModal } from "../src/bill-assign-modal-ui.js";
 import { openInformalLinkModal } from "../src/bill-informal-link-modal-ui.js";
 import { runBillSourceModal } from "../src/bill-source-modal-ui.js";
+import { openAllocateChargeModal as openAllocateChargeDialog, closeAllocateChargeModal } from "../src/bill-allocate-charge-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
@@ -2176,43 +2176,13 @@ export async function bootBillFormPage(api) {
     });
   }
   
-  function closeAllocateChargeModal() {
-    const node = document.getElementById("alloc-charge-modal");
-    if (node) node.remove();
-    freezeTaxDeletesForAllocModal(false);
-    document.removeEventListener("keydown", onAllocateChargeModalKeydown, true);
-  }
-  
-  function onAllocateChargeModalKeydown(ev) {
-    if (!allocateChargeModalOpen) return;
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeAllocateChargeModal();
-      setStatus("Allocate cancelled.");
-      return;
-    }
-    // While open, ignore Enter/Space on tax × / → Stock behind the dialog.
-    const t = /** @type {HTMLElement|null} */ (ev.target);
-    if (
-      t &&
-      t.closest &&
-      t.closest("#alloc-charge-modal")
-    ) {
-      return;
-    }
-    if (ev.key === "Enter" || ev.key === " ") {
-      ev.preventDefault();
-      ev.stopPropagation();
-    }
-  }
-  
   /**
-   * Allocate freight/charge into item costs (OI-140).
+   * Allocate freight/charge into item costs (OI-140): src/bill-allocate-charge-modal-ui.js.
    * @param {number} taxRowIndex
    */
   function openAllocateChargeModal(taxRowIndex) {
     closeAllocateChargeModal();
+    freezeTaxDeletesForAllocModal(false);
     const doc = lastDoc;
     if (!doc || !editable()) return;
     const tax = Array.isArray(doc.taxes) ? doc.taxes[taxRowIndex] : null;
@@ -2220,161 +2190,18 @@ export async function bootBillFormPage(api) {
       setStatus("Pick an Add charge with amount > 0.", "warn");
       return;
     }
-    const items = (Array.isArray(doc.items) ? doc.items : []).map((it, i) => ({
-      rowIndex: i,
-      qty: it.qty,
-      rate: it.rate,
-      amount: it.amount,
-      item_code: it.item_code,
-    }));
-    const chargeAmt = Number(tax.tax_amount);
-    const backdrop = document.createElement("div");
-    backdrop.className = "alloc-modal-backdrop";
-    backdrop.id = "alloc-charge-modal";
-    backdrop.dataset.testid = "bill-alloc-modal";
-    backdrop.innerHTML = `
-      <div class="alloc-modal" role="dialog" aria-modal="true" aria-labelledby="alloc-title">
-        <h2 id="alloc-title">Allocate charge to stock cost</h2>
-        <p style="margin:0;font-size:13px;color:#475569;line-height:1.4">
-          ${escapeHtml(tax.description || tax.account_head || "Charge")} ·
-          ${formatUsdAmountHtml(chargeAmt) || escapeHtml(String(chargeAmt))}.
-          Item costs rise; a Deduct offset keeps grand total unchanged.
-        </p>
-        <div class="alloc-modes" role="radiogroup" aria-label="Allocation mode">
-          <label><input type="radio" name="alloc-mode" value="amount" checked /> By price (amount)</label>
-          <label><input type="radio" name="alloc-mode" value="qty" /> By qty</label>
-          <label><input type="radio" name="alloc-mode" value="custom" /> Custom $ / %</label>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Item Code</th>
-              <th class="num">Qty</th>
-              <th class="num">Cost</th>
-              <th class="num">Amount</th>
-              <th class="num">Alloc $</th>
-              <th class="num">Alloc %</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items
-              .map(
-                (it) => `<tr data-alloc-row="${it.rowIndex}">
-                  <td>${escapeHtml(it.item_code || `#${it.rowIndex + 1}`)}</td>
-                  <td class="num">${escapeHtml(String(it.qty ?? ""))}</td>
-                  <td class="num">${formatUsdAmountHtml(it.rate) || ""}</td>
-                  <td class="num">${formatUsdAmountHtml(it.amount) || ""}</td>
-                  <td class="num"><input type="text" inputmode="decimal" data-alloc-dollars="${it.rowIndex}" class="money-cost" disabled /></td>
-                  <td class="num"><input type="text" inputmode="decimal" data-alloc-percent="${it.rowIndex}" class="money-cost" disabled /></td>
-                </tr>`,
-              )
-              .join("")}
-          </tbody>
-        </table>
-        <div class="alloc-modal-actions">
-          <button type="button" data-alloc-cancel>Cancel</button>
-          <button type="button" class="primary" data-alloc-apply data-testid="bill-alloc-apply">Apply to items</button>
-        </div>
-      </div>`;
-    document.body.appendChild(backdrop);
-    freezeTaxDeletesForAllocModal(true);
-    document.addEventListener("keydown", onAllocateChargeModalKeydown, true);
-    const applyBtn = backdrop.querySelector("[data-alloc-apply]");
-    const syncCustomEnabled = () => {
-      const mode =
-        (backdrop.querySelector('input[name="alloc-mode"]:checked') || {}).value || "amount";
-      const custom = mode === "custom";
-      backdrop.querySelectorAll("[data-alloc-dollars], [data-alloc-percent]").forEach((inp) => {
-        inp.disabled = !custom;
-      });
-    };
-    backdrop.querySelectorAll('input[name="alloc-mode"]').forEach((r) => {
-      r.addEventListener("change", syncCustomEnabled);
-    });
-    syncCustomEnabled();
-    backdrop.querySelector("[data-alloc-cancel]").onclick = () => {
-      closeAllocateChargeModal();
-      setStatus("Allocate cancelled.");
-    };
-    backdrop.addEventListener("click", (ev) => {
-      if (ev.target === backdrop) {
-        closeAllocateChargeModal();
-        setStatus("Allocate cancelled.");
-      }
-    });
-    const runApply = async () => {
-      if (!api || !api.allocateCharge) {
-        setStatus("Allocate API missing — restart the shell.", "err");
-        return;
-      }
-      const mode =
-        (backdrop.querySelector('input[name="alloc-mode"]:checked') || {}).value || "amount";
-      /** @type {Array<{ rowIndex: number, dollars?: number, percent?: number }>} */
-      const custom = [];
-      if (mode === "custom") {
-        items.forEach((it) => {
-          const dInp = backdrop.querySelector(`[data-alloc-dollars="${it.rowIndex}"]`);
-          const pInp = backdrop.querySelector(`[data-alloc-percent="${it.rowIndex}"]`);
-          const dollars = dInp ? parseMoney(dInp.value) : null;
-          const percent = pInp ? parseMoney(pInp.value) : null;
-          if (dollars != null || percent != null) {
-            custom.push({
-              rowIndex: it.rowIndex,
-              dollars: dollars != null ? dollars : undefined,
-              percent: percent != null ? percent : undefined,
-            });
-          }
-        });
-        const preview = planChargeToStockAllocation({
-          items,
-          chargeAmount: chargeAmt,
-          mode: "custom",
-          custom,
-          chargeAccount: tax.account_head,
-          chargeDescription: tax.description,
-        });
-        if (!preview.ok) {
-          setStatus(preview.reason || "Custom allocation invalid.", "err");
-          return;
-        }
-      }
-      setStatus("Allocating charge into item costs…");
-      const res = await api.allocateCharge(taxRowIndex, mode, custom);
-      closeAllocateChargeModal();
-      if (res && res.ok) {
+    openAllocateChargeDialog({
+      api,
+      doc,
+      taxRowIndex,
+      setStatus,
+      onFrozen: freezeTaxDeletesForAllocModal,
+      onApplied: (res) => {
         noteUserEdit();
         paint(res.doc, amountDue);
-        const left = Number(res.remainder) || 0;
-        setStatus(
-          left > 0
-            ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added). ${formatUsdAmountHtml(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`
-            : left < 0
-              ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmountHtml(-left) || -left} more into them than the charge. The bill total is unchanged.`
-              : `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs, exactly (offset Deduct added).`,
-          left === 0 ? undefined : "warn",
-        );
-      } else {
-        setStatus((res && res.reason) || "Allocate failed.", "err");
-        if (res && res.doc) paint(res.doc, amountDue);
-      }
-    };
-    if (applyBtn) applyBtn.onclick = () => void runApply();
-    // Delay focus past the Enter/Space that opened the dialog (same class as source modal).
-    const focusApply = () => {
-      try {
-        if (api && api.focusBillSurface) api.focusBillSurface();
-      } catch {
-        /* ignore */
-      }
-      try {
-        if (applyBtn) applyBtn.focus();
-      } catch {
-        /* ignore */
-      }
-    };
-    requestAnimationFrame(focusApply);
-    setTimeout(focusApply, 30);
-    setStatus("Enter = Apply to items · Esc = cancel. Tax row delete is frozen while this is open.");
+      },
+      repaint: (next) => paint(next, amountDue),
+    });
   }
   
   /**

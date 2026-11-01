@@ -8,6 +8,8 @@ import {
   isAllocatableChargeRow,
   allocationBasisWeights,
   taxRowDeleteAllowed,
+  chargeAllocItems,
+  allocateDoneStatus,
 } from "../src/bill-charge-allocate.js";
 
 describe("bill-charge-allocate (OI-140)", () => {
@@ -233,5 +235,25 @@ describe("allocatedFromDoc (review 10-19 R6b-3)", () => {
   it("a line ERPNext did not report keeps the plan's figure", () => {
     const r = allocatedFromDoc(before, [{ amount: 66 }], updates, 8.53);
     assert.deepEqual(r, { allocatedTotal: 8.53, driftCents: 0 });
+  });
+});
+
+describe("the Allocate dialog's lines and status (plan 10-25 R6a-2)", () => {
+  it("lists every Bill line with its row index", () => {
+    assert.deepEqual(chargeAllocItems([{ item_code: "A", qty: 3, rate: 21, amount: 63, idx: 1 }, { qty: 0 }]), [
+      { rowIndex: 0, qty: 3, rate: 21, amount: 63, item_code: "A" },
+      { rowIndex: 1, qty: 0, rate: undefined, amount: undefined, item_code: undefined },
+    ]);
+    assert.deepEqual(chargeAllocItems(null), []);
+  });
+  it("says exact, a remainder kept on the charge, or rounding that put more in", () => {
+    assert.match(allocateDoneStatus({ allocatedTotal: 14.28, remainder: 0 }).text, /^Allocated \$14\..* into item costs, exactly/);
+    assert.equal(allocateDoneStatus({ allocatedTotal: 14.28 }).tone, undefined);
+    const left = allocateDoneStatus({ allocatedTotal: 14.27, remainder: 0.01 });
+    assert.equal(left.tone, "warn");
+    assert.match(left.text, /stays on the charge line/);
+    const over = allocateDoneStatus({ allocatedTotal: 14.29, remainder: -0.01 });
+    assert.equal(over.tone, "warn");
+    assert.match(over.text, /more into them than the charge/);
   });
 });
