@@ -15,8 +15,8 @@
 > shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*). **R2-5
-> started 2026-10-31 alongside, from the far end (his pick): printing, Papers and Find moved to
-> `electron/ipc/`; payment settings next; the bridge / doc-form / Bill moves wait for 3b
+> started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and payment
+> settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves wait for 3b
 > (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
@@ -342,10 +342,12 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    (`src/bill-source-modal-ui.js`; the shared modal was already `src/source-modal-ui.js`), Allocate
    (`src/bill-allocate-charge-modal-ui.js`). Bill page 5,197 → about 4,350 lines. **How each move
    was proven** (the way to prove any move that should change nothing a clerk sees, when no probe
-   drives every path): a throwaway probe that drives every door of the dialog and `report`s what
-   the clerk sees at each step, run on the code before the move and saved; the same probe on the
-   moved code, and the two outputs `diff`ed (identical, with run-specific names normalised); then
-   the probe deleted. Where a probe would leave records, it makes its own (a PO for the run) and
+   drives every path): a probe that drives every door of the dialog and `report`s what the clerk
+   sees at each step, run on the code before the move and saved; the same probe on the moved
+   code, and the two outputs `diff`ed (identical, with run-specific names normalised). These four
+   were deleted after; that was a mistake. Probes are kept (HANDOFF § *Test strategy*, 5zorro
+   2026-10-22), so from R2-5's payment settings on, the probe stays in `tests/probes/` for the
+   next change to the same code. Where a probe would leave records, it makes its own (a PO for the run) and
    cancels and deletes it. The same probes found three bugs the moves kept as they were — the
    old code did the same — museum OI-192, OI-193, OI-195, fixed or left at 5zorro's word (status
    box). Each module was then imported in Node (a missing named import fails there) and checked
@@ -366,9 +368,12 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    **Started 2026-10-31, before 3b, at 5zorro's word, from the far end:** families away from the
    two smells first (print IPC → Papers → Find → payment settings); the bridge, doc-form and Bill
    moves wait for 3b's report, as above. Built: print (`e448c2e`, `electron/ipc/print.js`) and
-   Papers (`b655e78`, `electron/ipc/papers.js`), Find (`electron/ipc/find.js`: the list, the peek and
-   the remembered search; opening the page and its "Open in Vanilla" door write the lens prefs and
-   stay in main.js with the other navigation); main.js 13,534 → 12,504 lines. **How each move
+   Papers (`b655e78`, `electron/ipc/papers.js`), Find (`18e1331`, `electron/ipc/find.js`: the list,
+   the peek and the remembered search; opening the page and its "Open in Vanilla" door write the
+   lens prefs and stay in main.js with the other navigation), payment settings
+   (`electron/ipc/payment-settings.js`: the payment batch prefs and the delay calendar; the
+   payment-direction prefs stay, navigation writes them; proven by the probe
+   `pay-settings-doors`, the same output before and after); main.js 13,534 → 12,419 lines. **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js

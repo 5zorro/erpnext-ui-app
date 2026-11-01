@@ -18,7 +18,7 @@
    the commit gate); step 3 built (the item rows, `src/doc-form-item-rows-ui.js`;
    one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); R6a-2's four
    dialogs built (2026-10-27 … 31, `src/bill-*-modal-ui.js`); R2-5 started 2026-10-31 from the far
-   end (printing and Papers moved to `electron/ipc/`; Find and payment settings next). Then 3b, a
+   end (printing, Papers, Find and payment settings moved to `electron/ipc/`). Then 3b, a
    performance deep dive over every probe's times and charts, before R2-5's bridge / doc-form /
    Bill moves.
    Decided: share, not merge, with every data-entry form in view

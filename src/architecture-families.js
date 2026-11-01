@@ -118,7 +118,7 @@ export const ARCHITECTURE_FAMILIES = [
       "check-doc-*", "check-drawer-height"],
     paths: ["electron/pay-outstanding.html", "electron/pay-outstanding.src.html", "electron/pay-outstanding-preload.cjs", "electron/payment-doc.html",
       "electron/payment-doc.src.html", "electron/payment-doc-preload.cjs", "electron/check-doc.fragment.html", "electron/check-doc.css",
-      "scripts/assemble-pay-outstanding-html.js", "scripts/assemble-payment-doc-html.js"],
+      "scripts/assemble-pay-outstanding-html.js", "scripts/assemble-payment-doc-html.js", "electron/ipc/payment-settings.js"],
     e2e: ["scaffold-pay-outstanding.spec.js", "scaffold-detour.spec.js"],
   },
   {

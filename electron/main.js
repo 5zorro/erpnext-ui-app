@@ -100,11 +100,6 @@ import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src
 import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
 import { PE_REASON_FROM_JS, ERP_LIST_JS, endSentence } from "../src/erp-refusal-reason.js";
 import {
-  DEFAULT_PAYMENT_BATCH_PREFS,
-  mergePaymentBatchPrefs,
-  validatePaymentBatchPrefs,
-} from "../src/payment-batch-prefs.js";
-import {
   allocationRowFor,
   proposeRelinks,
   splitAutoRelinks,
@@ -117,9 +112,10 @@ import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
 import { isStaleTempCopy } from "../src/compare-papers.js";
 import { classifyErpPrintUrl } from "../src/print-service.js";
-import { initPrinting, loadPrintPrefs, printE2eApi, askSavePath, handleErpPrintRequest } from "./ipc/print.js";
+import { initPrinting, loadPrintPrefs, printE2eApi, handleErpPrintRequest } from "./ipc/print.js";
 import { initPapers } from "./ipc/papers.js";
 import { initFind } from "./ipc/find.js";
+import { initPaymentSettings, loadPaymentBatchPrefs } from "./ipc/payment-settings.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -417,8 +413,6 @@ let lastLogin = { state: "unknown", user: null };
 let history = [];
 /** @type {Record<string, string>} */
 let lensPrefs = {};
-/** @type {import("../src/payment-batch-prefs.js").PaymentBatchPrefs} */
-let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
 /** OI-170: which number leads — theirs or ours. One app-wide setting (DF-01 E). */
@@ -725,9 +719,6 @@ function reloadDocFormShell() {
 function prefsPath() {
   return path.join(app.getPath("userData"), "lens-prefs.json");
 }
-function paymentBatchPrefsPath() {
-  return path.join(app.getPath("userData"), "payment-batch-prefs.json");
-}
 function docWashPrefsPath() {
   return path.join(app.getPath("userData"), DOC_WASH_PREFS_FILENAME);
 }
@@ -739,15 +730,6 @@ function docNumberPrefsPath() {
 }
 function billReceivePrefsPath() {
   return path.join(app.getPath("userData"), "bill-receive-prefs.json");
-}
-/**
- * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
- * spreadsheets but only store as a csv?"*). The stored file is therefore the same artefact the
- * user edits in Excel — they can open this path directly, and an export is a copy rather than a
- * conversion. Parsing and serialising stay in `src/delay-calendar.js`; this layer moves strings.
- */
-function delayCalendarPath() {
-  return path.join(app.getPath("userData"), "delay-calendar.csv");
 }
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
@@ -785,13 +767,7 @@ function loadPrefs() {
   } catch {
     healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
   }
-  try {
-    paymentBatchPrefs = mergePaymentBatchPrefs(
-      JSON.parse(fs.readFileSync(paymentBatchPrefsPath(), "utf8")),
-    );
-  } catch {
-    paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
-  }
+  loadPaymentBatchPrefs();
   try {
     paymentDirectionPrefs = mergePaymentDirectionPrefs(
       JSON.parse(fs.readFileSync(paymentDirectionPrefsPath(), "utf8")),
@@ -831,13 +807,6 @@ function syncWashPattern(view) {
 
 function syncWashPatternEverywhere() {
   for (const v of [home, docForm, findDoc, payOutstanding, paymentDoc]) syncWashPattern(v);
-}
-function savePaymentBatchPrefs() {
-  try {
-    fs.writeFileSync(paymentBatchPrefsPath(), JSON.stringify(paymentBatchPrefs));
-  } catch {
-    /* ignore */
-  }
 }
 function savePaymentDirectionPrefs() {
   try {
@@ -11717,14 +11686,8 @@ ipcMain.handle("set-doc-number-lead", async (_e, lead) => {
 });
 ipcMain.handle("submit-draft-payment", async (_e, name) => actOnDraftPayment("submit", name));
 ipcMain.handle("delete-draft-payment", async (_e, name) => actOnDraftPayment("delete", name));
-ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
-ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
-  const check = validatePaymentBatchPrefs(prefs);
-  if (!check.ok) return { ok: false, errors: check.errors, prefs: { ...paymentBatchPrefs } };
-  paymentBatchPrefs = mergePaymentBatchPrefs(prefs);
-  savePaymentBatchPrefs();
-  return { ok: true, prefs: { ...paymentBatchPrefs } };
-});
+/* Payment settings (batch prefs, delay calendar): electron/ipc/payment-settings.js */
+initPaymentSettings({ mainWindow: () => win });
 ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
   paymentDocDirty = !!dirty;
 });
@@ -11737,54 +11700,6 @@ ipcMain.handle("create-blank-payment-entry", async (_e, intent) => {
   const out = await createBlankPaymentEntryDoc(intent);
   navDebug("payment-create-blank", paymentWriteOutcomeLog(out));
   return out;
-});
-/**
- * Delay calendar (P3b/P3c). `exists` is load-bearing, not informational: the renderer only passes
- * the ratified-calendar probe into the date walk when a calendar file exists, because with no file
- * every bridge day would stop applying at once and there would be no UI to turn them back on.
- */
-ipcMain.handle("get-delay-calendar", () => {
-  try {
-    return { csv: fs.readFileSync(delayCalendarPath(), "utf8"), exists: true };
-  } catch {
-    return { csv: "", exists: false };
-  }
-});
-ipcMain.handle("set-delay-calendar", (_e, csv) => {
-  try {
-    fs.writeFileSync(delayCalendarPath(), String(csv == null ? "" : csv));
-    return { ok: true, exists: true, path: delayCalendarPath() };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-});
-/** Save-as, for the copy that goes into Excel. The renderer sends the Excel-flavoured text. */
-ipcMain.handle("export-delay-calendar", async (_e, csv) => {
-  const r = await askSavePath({
-    title: "Export delay calendar",
-    defaultPath: path.join(app.getPath("documents"), "delay-calendar.csv"),
-    filters: [{ name: "CSV (Excel)", extensions: ["csv"] }],
-  });
-  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
-  try {
-    fs.writeFileSync(r.filePath, String(csv == null ? "" : csv));
-    return { ok: true, path: r.filePath };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-});
-ipcMain.handle("import-delay-calendar", async () => {
-  const r = await dialog.showOpenDialog(win, {
-    title: "Import delay calendar",
-    properties: ["openFile"],
-    filters: [{ name: "CSV (Excel)", extensions: ["csv", "txt"] }],
-  });
-  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
-  try {
-    return { ok: true, text: fs.readFileSync(r.filePaths[0], "utf8"), path: r.filePaths[0] };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
 });
 ipcMain.handle("create-payment-term", async (_e, input) => {
   const i = input || {};
