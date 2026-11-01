@@ -7,6 +7,7 @@
  */
 import { chargeAllocItems, planChargeToStockAllocation, allocateDoneStatus } from "./bill-charge-allocate.js";
 import { formatUsdAmountHtml, parseMoney } from "./money.js";
+import { createRepeatPressGuard, repeatPressToast } from "./bill-repeat-press.js";
 
 const MODAL_ID = "alloc-charge-modal";
 
@@ -59,10 +60,13 @@ function onKeydown(ev) {
  *   onFrozen: (frozen: boolean) => void,
  *   onApplied: (res: any) => void,
  *   repaint: (doc: any) => void,
+ *   toast: (text: string, onClick: () => void) => void,
+ *   clearToast: () => void,
  * }} deps
  *   `doc` — the Bill, with an allocatable charge at `taxRowIndex` (the page checks); `onFrozen` —
  *   freeze or unfreeze the tax deletes; `onApplied` — ERPNext took it, repaint; `repaint` — it
- *   refused but sent the document back
+ *   refused but sent the document back; `toast` / `clearToast` — a clickable notice over the
+ *   dialog, for a second Apply held back (src/bill-repeat-press.js)
  */
 export function openAllocateChargeModal(deps) {
   closeAllocateChargeModal();
@@ -190,7 +194,13 @@ export function openAllocateChargeModal(deps) {
       if (res && res.doc) deps.repaint(res.doc);
     }
   };
-  if (applyBtn) applyBtn.onclick = () => void runApply();
+  // A second Apply while the first works put the charge in twice (a second Deduct; the bill total
+  // fell by the charge): held back and said, with the toast to run it anyway (review S1).
+  const applyGuard = createRepeatPressGuard({
+    onRepeat: (runAgain) => deps.toast(repeatPressToast("Apply to items"), () => void runAgain()),
+    onIdle: deps.clearToast,
+  });
+  if (applyBtn) applyBtn.onclick = () => void applyGuard.press(runApply);
   // Delay focus past the Enter/Space that opened the dialog (same class as source modal).
   const focusApply = () => {
     try {

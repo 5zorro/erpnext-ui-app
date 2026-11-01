@@ -21,6 +21,7 @@ import {
   assignProjectLabel,
 } from "./bill-assign.js";
 import { formatSalesOrderPickerLabel } from "./so-picker.js";
+import { createRepeatPressGuard, repeatPressToast } from "./bill-repeat-press.js";
 import { uiIconHtml } from "./ui-icons.js";
 import { renderCostingBox } from "./costing-box-ui.js";
 
@@ -34,16 +35,23 @@ import { renderCostingBox } from "./costing-box-ui.js";
  *   onClose: () => void,
  *   onApplied: (res: any) => void,
  *   refresh: () => Promise<unknown>,
+ *   toast: (text: string, onClick: () => void) => void,
+ *   clearToast: () => void,
  * }} AssignModalDeps
  *   `items` — the Bill's lines when the Sales Orders load (for their margins); `onClose` — the
  *   dialog is gone; `onApplied` — ERPNext took the allocation (`res` from `applyLineAllocation`),
- *   repaint; `refresh` — it refused, reload the Bill
+ *   repaint; `refresh` — it refused, reload the Bill; `toast` / `clearToast` — a
+ *   clickable notice over the dialog, for a second Apply held back (src/bill-repeat-press.js)
  */
 
 /** @param {AssignModalDeps} deps */
 export async function openAssignModal(deps) {
   const { api, rowIndex, supplier: sup, setStatus } = deps;
   let state = assignStart();
+  /** Closed: a load that answers late draws nothing (review M1). */
+  let closed = false;
+  /** A load is out, so the status line says "Loading…". */
+  let loading = false;
   const dispatch = (action) => {
     state = assignStep(state, action);
   };
@@ -97,6 +105,9 @@ export async function openAssignModal(deps) {
   }
 
   function close() {
+    closed = true;
+    clearTimeout(searchTimer);
+    if (loading) setStatus("Assign closed.");
     deps.onClose();
     document.removeEventListener("keydown", onKey, true);
     if (back.parentNode) back.parentNode.removeChild(back);
@@ -214,14 +225,21 @@ export async function openAssignModal(deps) {
   async function goToSalesOrders() {
     const choice = assignCustomerChoice(state);
     setStatus("Loading Sales Orders…");
+    loading = true;
     const rows = await loadSalesOrders(choice.customer);
+    loading = false;
+    if (closed) return;
     dispatch({ type: "salesOrders", ...choice, rows });
     draw();
   }
 
   async function goToProjects() {
     setStatus("Loading projects…");
-    dispatch({ type: "projects", rows: await loadProjects(state.customer) });
+    loading = true;
+    const rows = await loadProjects(state.customer);
+    loading = false;
+    if (closed) return;
+    dispatch({ type: "projects", rows });
     draw();
   }
 
@@ -259,11 +277,18 @@ export async function openAssignModal(deps) {
     }
   }
 
+  // Apply writes to the Bill (and may make a bridge PO): a second press while it works is held
+  // back and said, never run silently (review S1).
+  const applyGuard = createRepeatPressGuard({
+    onRepeat: (runAgain) => deps.toast(repeatPressToast(assignView(state, rowIndex).primary), () => void runAgain()),
+    onIdle: deps.clearToast,
+  });
+
   async function onPrimary() {
     const next = assignPrimaryAction(state);
     if (next === "load-sales-orders") await goToSalesOrders();
     else if (next === "load-projects") await goToProjects();
-    else await applyAllocation();
+    else await applyGuard.press(applyAllocation);
   }
 
   function onKey(ev) {

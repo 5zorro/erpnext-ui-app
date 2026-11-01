@@ -6,7 +6,6 @@ import {
   readBillHeader,
   amountDueChecksumChip,
   amountDueGrandPointer,
-  amountDueMatchesGrandTotal,
   billCompareTotal,
   billMoneyStack,
   sumBillLineQty,
@@ -97,7 +96,6 @@ import {
   listOverbillCapCacheBlockers,
   OVERBILL_CAP_CACHE_BLOCKER,
   planBillLineQtySplit,
-  saveFailureIsOverBilling,
 } from "../src/bill-po-qty-split.js";
 import { billDueDateFieldMode } from "../src/bill-due-date.js";
 import {
@@ -527,30 +525,6 @@ export async function bootBillFormPage(api) {
   }
 
   /**
-   * Save-time repair when enrich missed caps — split every sourced row over PO limit.
-   * @returns {Promise<{ repaired: number }>}
-   */
-  async function repairAllOverbillRows() {
-    if (!api || !lastDoc || !Array.isArray(lastDoc.items)) return { repaired: 0 };
-    let repaired = 0;
-    let doc = lastDoc;
-    for (let ri = doc.items.length - 1; ri >= 0; ri -= 1) {
-      const row = doc.items[ri];
-      if (!row || !billRowHasSource(row)) continue;
-      const cap = await fetchMaxBillableForRow(ri);
-      const plan = planBillLineQtySplit(row, cap, row.qty);
-      if (plan.action !== "split" || !plan.itemCode) continue;
-      const res = await executeSplitPlan(ri, plan);
-      if (res.ok) {
-        repaired += 1;
-        if (res.doc) doc = res.doc;
-      }
-    }
-    if (repaired > 0) lastDoc = doc;
-    return { repaired };
-  }
-
-  /**
    * @param {HTMLInputElement} inp
    * @param {{ kind: string, onCommit: (value: string) => void | Promise<void> }} opts
    */
@@ -892,6 +866,30 @@ export async function bootBillFormPage(api) {
         target.scrollIntoView();
       }
     }
+  }
+
+  /**
+   * A clickable toast shown over an open dialog (the dialogs' backdrops sit above the toast's own
+   * layer), cleared by `hideDialogToast` (review S1: a second Apply held back).
+   * @param {string} text
+   * @param {() => void} onClick
+   */
+  function showDialogToast(text, onClick) {
+    if (el.toast) el.toast.classList.add("over-dialog");
+    showBlockingToast(text, () => {
+      hideDialogToast();
+      onClick();
+    });
+  }
+
+  function hideDialogToast() {
+    if (!el.toast || !el.toast.classList.contains("over-dialog")) return;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = null;
+    el.toast.classList.remove("show", "fade-out", "is-action", "over-dialog");
+    el.toast.onclick = null;
+    el.toast.hidden = true;
+    el.toast.textContent = "";
   }
 
   /**
@@ -2200,6 +2198,8 @@ export async function bootBillFormPage(api) {
         paint(res.doc, amountDue);
       },
       repaint: (next) => paint(next, amountDue),
+      toast: showDialogToast,
+      clearToast: hideDialogToast,
     });
   }
   
@@ -2472,10 +2472,6 @@ export async function bootBillFormPage(api) {
     setTimeout(tryFocus, 50);
     setTimeout(tryFocus, 200);
   }
-
-  function focusInvoiceDateField() {
-    scheduleFocusInvoiceDateField();
-  }
   
   /**
    * OI-134: per-line Assign — customer → multi SO → Project (src/bill-assign-modal-ui.js).
@@ -2521,6 +2517,8 @@ export async function bootBillFormPage(api) {
         });
       },
       refresh,
+      toast: showDialogToast,
+      clearToast: hideDialogToast,
     });
   }
 
