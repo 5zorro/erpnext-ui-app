@@ -138,6 +138,27 @@ What a first search found (sources at the end; a "?" is still to check):
 - Biome and oxlint catch both with no package tree behind them. Their R2 rules are still marked
   experimental.
 
+**Narrowed (5zorro, 2026-11-01):** *"right now i think either eslint and a plugin or typescript is
+the best"*. Biome and oxlint are on hold; he is hesitant about them. ESLint stays a good long-term
+choice if the plugin is a known-good version and new versions wait out the waiting period.
+
+**Recommended: TypeScript's checker, version 6.0.3, pinned exactly; ESLint with an import plugin
+is the fallback.** From the npm registry's records on 2026-11-01 (read only; nothing installed):
+
+| | TypeScript 6.0.3 | ESLint 10.14.0 + `eslint-plugin-import-x` 4.17.1 |
+|---|---|---|
+| Packages behind it | none (no dependencies) | ESLint: 30 direct dependencies (88 packages in all at version 9). The plugin: 9 more, including `unrs-resolver`, a native resolver that depends on `napi-postinstall`, one of the packages hijacked in July 2025 |
+| Install scripts | none listed | via `napi-postinstall`, to confirm |
+| Publisher | Microsoft (`microsoft1es`, `typescript-bot`, `typescript-deploys`, and named team members); repository `github.com/microsoft/TypeScript` | ESLint: OpenJS Foundation; the plugin: separate volunteer maintainers |
+| Released | 2026-04-16 | 2026-10-30 / 2026-06-28 |
+
+Why TypeScript 6 and not 7: 7.0.2 (the Go rewrite) was published 2026-10-31, so it is inside any
+waiting period. It also changed how type comments in JavaScript are read. 6.0.3 is the last of the
+original line. A later move to 7 is its own step. The risk with 6.0.3 is that it is noisy at first:
+run it in full on this code and it will likely report many type complaints. So it starts by showing
+only the two must-catch kinds ("cannot find name"; "module has no exported member"), and widens one
+file at a time. If that cannot be made quiet enough, use the fallback.
+
 A fair test before choosing is the same one ESLint passed: run each against the commit before
 `5bef496` (the payment bug) and the version of `electron/ipc/print.js` with the wrong import (the
 start-up failure). Count what each finds and how much else it reports. That run needs the
