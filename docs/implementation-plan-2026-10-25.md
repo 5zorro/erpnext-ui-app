@@ -457,6 +457,18 @@ was 14.7 s). The source picker never waited (~0.1 s); the clerk saw "Setting ven
 late. Fails on the old script, passes on the new; `npm test` green; `r5b3-item-after-vendor` (also
 under chaos 1200/100), `dogfood-d3-vendor-chaos`, `r5b1-vendor-held-tab`, `df03-po-source-focus` pass.
 
+**Finding 2 built 2026-11-01** (his words: *"i think it was originally made when erpnext's source
+code was more difficult to examine. drop the check and keep a slower one as a fallback"*), ahead of
+the bridge move, as its own change: the route poll drains with `{ inject: false }` and checks the
+bridge every 10 s (`BRIDGE_BACKSTOP_MS`). `nav-spine-drafts` on the code before and after (2.1 min
+each): bridge checks 500 → 360, all chart spans 1,145 → 1,036 (the 360 left are finding 3's check
+before each bridge call, left as decided). `nav-spine-drafts` and `dogfood-r2-1-reload-mid-save`
+(a reload in the middle of a save, so the bridge comes back from page events alone) pass.
+
+**Finding 7: his pick 2026-11-01** — replace the probes' fixed sleeps with waits on a condition,
+then *"see what breaks then go from there"* (he expects some things to show before they paint
+properly; a pause of a person's reaction time, ~300 ms, is his fallback for those).
+
 `nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
 overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under
 different overlaps agreeing within 3% says the overlap did not change this probe's numbers.

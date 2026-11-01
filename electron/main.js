@@ -2757,6 +2757,10 @@ function trackNav(url, opts = {}) {
   syncE2eApi();
 }
 
+/** How often the route poll still checks the bridge is installed (plan 2026-10-25 3b finding 2). */
+const BRIDGE_BACKSTOP_MS = 10_000;
+let lastBridgeBackstopAt = 0;
+
 function pollErpRoute() {
   if (!erp || erp.webContents.isDestroyed()) return;
   // URL sync for chrome/history when on Vanilla — not a DB poll.
@@ -2771,8 +2775,15 @@ function pollErpRoute() {
       }
     }
   }
-  // Submit often keeps the same form URL — still drain shelf updates.
-  drainErpSaveIntoShelved().catch(() => {});
+  // Submit often keeps the same form URL — still drain shelf updates. The bridge is installed on
+  // did-navigate, did-navigate-in-page and did-finish-load, so the drain does not check it each
+  // tick (that check was half of every script sent into the page, plan 2026-10-25 3b finding 2);
+  // a page without the bridge holds no save to take. A slower check stays as the fallback for a
+  // load whose page events all missed.
+  const now = Date.now();
+  const backstop = now - lastBridgeBackstopAt >= BRIDGE_BACKSTOP_MS;
+  if (backstop) lastBridgeBackstopAt = now;
+  drainErpSaveIntoShelved({ inject: backstop }).catch(() => {});
 }
 
 /** Electron session.fetch — attaches ERP login cookies without manual Cookie headers. */
