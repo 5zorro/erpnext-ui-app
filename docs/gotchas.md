@@ -862,6 +862,13 @@ establish. Moved here from the local agent notes 2026-10-25 (review 10-19 R15-1)
 off this machine has them too. `HANDOFF.md` § *ERP site settings this shell reads* is the table of
 the settings among them.
 
+ - **Picking a vendor fills its address in one reply** (2026-11-01, v16 `purchase_invoice.js` `supplier()`,
+   `public/js/utils/party.js` `get_party_details`, `accounts/party.py` `set_address_details`; frappe
+   `request.js`, `model.js`). The trigger sends one `get_party_details` call before `set_value`
+   resolves; the reply carries `address_display` (rendered from the vendor's default address, empty
+   when there is none) with the rest; `frm.updating_party_details` is true while the reply is written.
+   `frappe.request.ajax_count` drops at `ajaxComplete`, before that write ends, so "quiet" needs both.
+   The bridge's vendor wait ends on that (plan 10-25 3b finding 1; probe `vendor-no-address`).
 - **List filters ride in the address** (2026-09-26, frappe `router.js` `set_route_options_from_url`
   → `list_view.js` `parse_filters_from_route_options`): `/app/purchase-invoice?supplier=X&bill_no=Y`
   opens the list already filtered and replaces its saved filters. A bare list address instead

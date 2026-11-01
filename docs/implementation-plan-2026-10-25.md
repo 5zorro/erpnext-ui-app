@@ -449,6 +449,14 @@ the app and ERPNext working. 21,295 scripts were sent into the ERPNext page.
 while a new page loads, which wait for it. The probes' `clerkLogin` and `formLoaded` stages are
 0.3–8.7 s and stay out of this table.
 
+**Finding 1 built 2026-11-01** (his pick): the bridge's vendor wait ends once ERPNext has been quiet
+50 ms with no address (`partyDetailsQuiet`, bridge version 30); the 12 s deadline stays as the
+backstop. New kept probe `vendor-no-address` (AP clerk): a vendor with no address 9.2–9.4 s → 0.31 s;
+with ERPNext's reply held 4 s the write still waits for it (address arrives; no-address ends at 4.3 s,
+was 14.7 s). The source picker never waited (~0.1 s); the clerk saw "Setting vendor…" and the terms
+late. Fails on the old script, passes on the new; `npm test` green; `r5b3-item-after-vendor` (also
+under chaos 1200/100), `dogfood-d3-vendor-chaos`, `r5b1-vendor-held-tab`, `df03-po-source-focus` pass.
+
 `nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
 overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under
 different overlaps agreeing within 3% says the overlap did not change this probe's numbers.

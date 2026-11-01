@@ -24,6 +24,7 @@ import {
   SUPPLIER_PARTY_SETTLE_MAX_MS,
   supplierSnapshotWaitSliceMs,
   supplierSnapshotAllowMetaOnly,
+  partyDetailsQuiet,
   supplierAddressSnapshotReady,
   supplierSnapshotReadyReason,
   hasSupplierBillingDisplay,
@@ -76,7 +77,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 29);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 30);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -271,6 +272,33 @@ describe("supplier party settle (parallel-safe setHeader)", () => {
     );
   });
 
+  it("a vendor with no address is ready once ERPNext has gone quiet, not at the deadline (plan 10-25 3b)", () => {
+    const baseline = supplierPartyBaseline({});
+    const none = { supplier: "Summit Traders", supplier_name: "Summit Traders", address_display: "" };
+    const ctx = { targetSupplier: "Summit Traders", baseline, allowMetaOnlyAtDeadline: false };
+    assert.deepEqual(supplierSnapshotReadyReason(none, { ...ctx, partyDetailsQuiet: true }), {
+      ready: true,
+      reason: "party_quiet_no_address",
+      field: "",
+    });
+    assert.equal(supplierSnapshotReadyReason(none, { ...ctx, partyDetailsQuiet: false }).reason, "waiting");
+    // An address still wins, and quiet never answers for another vendor.
+    const withAddr = { ...none, address_display: "<p>1 Mountain Rd</p>" };
+    assert.equal(supplierSnapshotReadyReason(withAddr, { ...ctx, partyDetailsQuiet: true }).reason, "address_display");
+    assert.equal(
+      supplierSnapshotReadyReason({ ...none, supplier: "Alpine Supply" }, { ...ctx, partyDetailsQuiet: true }).reason,
+      "supplier_mismatch",
+    );
+  });
+
+  it("partyDetailsQuiet: no request out and the party reply written; an unreadable counter is busy", () => {
+    assert.equal(partyDetailsQuiet({ ajax_count: 0 }, {}), true);
+    assert.equal(partyDetailsQuiet({ ajax_count: 1 }, {}), false);
+    assert.equal(partyDetailsQuiet({ ajax_count: 0 }, { updating_party_details: true }), false);
+    assert.equal(partyDetailsQuiet({}, {}), false);
+    assert.equal(partyDetailsQuiet(null, {}), false);
+  });
+
   it("meta-only grace opens only near deadline", () => {
     const deadline = Date.now() + 5000;
     assert.equal(supplierSnapshotAllowMetaOnly(deadline), false);
@@ -292,7 +320,8 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 29/);
+    assert.match(page, /var VERSION = 30/);
+    assert.match(page, /partyDetailsQuiet: !!quietSince && now - quietSince >= SUPPLIER_PARTY_QUIET_HOLD_MS/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     // A mapped doc's party fields must be applied through set_value, and before the item
     // merge — see src/mapped-header-fields.js and the 2026-09-09 vendor-dropped dogfood.

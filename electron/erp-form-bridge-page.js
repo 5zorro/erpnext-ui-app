@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 29;
+  var VERSION = 30;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -806,6 +806,9 @@
     if (hasSupplierBillingDisplay(d)) {
       return { ready: true, reason: "address_display", field: SUPPLIER_BILLING_DISPLAY_FIELD };
     }
+    if (ctx.partyDetailsQuiet) {
+      return { ready: true, reason: "party_quiet_no_address", field: "" };
+    }
     if (ctx.allowMetaOnlyAtDeadline) {
       if (
         isSupplierPartySettled(d, {
@@ -858,6 +861,7 @@
     "dispatch_address",
   ];
   var SUPPLIER_PARTY_META_ONLY_GRACE_MS = 3000;
+  var SUPPLIER_PARTY_QUIET_HOLD_MS = 50;
 
   function hasSupplierAddressDisplaySignals(doc) {
     var d = doc && typeof doc === "object" ? doc : {};
@@ -895,22 +899,42 @@
     return false;
   }
 
+  /**
+   * Has ERPNext finished filling in the picked vendor? Twin of src/erp-form-bridge.js
+   * `partyDetailsQuiet` (why it is safe is there and in gotchas § ERPNext behaviour verified from
+   * source). A counter that cannot be read is "not quiet": the deadline rule stays in charge.
+   */
+  function partyDetailsQuiet(f) {
+    try {
+      var req = window.frappe && frappe.request;
+      if (!req || typeof req.ajax_count !== "number") return false;
+      return req.ajax_count === 0 && !f.updating_party_details;
+    } catch (eQ) {
+      return false;
+    }
+  }
+
   async function waitForSupplierBillingSnapshot(f, targetSupplier, baseline, maxWaitMs) {
     maxWaitMs = maxWaitMs || SUPPLIER_PARTY_SETTLE_MAX_MS;
     var deadline = Date.now() + maxWaitMs;
     /** @type {Array<{ event: string, remaining?: number, ms?: number, field?: string }>} */
     var timing = [];
     var done = false;
+    // Quiet must hold for SUPPLIER_PARTY_QUIET_HOLD_MS, not be one instant between two calls.
+    var quietSince = 0;
 
     function tryReady() {
       if (done || !f || !f.doc) return null;
       var now = Date.now();
       var remaining = deadline - now;
       if (remaining <= 0) return null;
+      if (!partyDetailsQuiet(f)) quietSince = 0;
+      else if (!quietSince) quietSince = now;
       var hit = supplierSnapshotReadyReason(f.doc, {
         targetSupplier: targetSupplier,
         baseline: baseline,
         allowMetaOnlyAtDeadline: supplierSnapshotAllowMetaOnly(deadline, now),
+        partyDetailsQuiet: !!quietSince && now - quietSince >= SUPPLIER_PARTY_QUIET_HOLD_MS,
       });
       if (hit.ready) {
         return {

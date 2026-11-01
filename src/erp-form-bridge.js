@@ -6,9 +6,14 @@
  * not fixed sleeps or main-process poll loops.
  */
 
-export const DOC_FORM_BRIDGE_VERSION = 29;
+export const DOC_FORM_BRIDGE_VERSION = 30;
 
-/** Max wait for address_display on supplier setHeader before snapshot (bridge deadline). */
+/**
+ * Max wait for address_display on supplier setHeader before snapshot (bridge deadline). A vendor
+ * with no address no longer waits for it: once ERPNext's vendor-details call has landed and gone
+ * quiet, the wait ends (`partyDetailsQuiet`); the deadline is the backstop for a page whose
+ * request counter cannot be read.
+ */
 export const SUPPLIER_PARTY_SETTLE_MAX_MS = 12000;
 
 /** Bill header paints billing from this HTML field (not supplier_address link). */
@@ -146,8 +151,28 @@ export function isSupplierPartySettled(doc, ctx = {}) {
   return false;
 }
 
-/** Ms before deadline when meta-only settle is allowed (vendor with no address on file). */
+/** Ms before deadline when meta-only settle is allowed (backstop for a vendor with no address on file). */
 export const SUPPLIER_PARTY_META_ONLY_GRACE_MS = 3000;
+
+/**
+ * How long ERPNext must stay quiet (no request out, `frm.updating_party_details` clear) before a
+ * still-empty address is taken as "this vendor has none" (plan 2026-10-25 step 3b, finding 1: the
+ * deadline rule alone held every such vendor pick ~9 s). Verified in v16 source: the vendor
+ * trigger sends `get_party_details` before `set_value` resolves, and its reply carries
+ * `address_display` with the rest.
+ */
+export const SUPPLIER_PARTY_QUIET_HOLD_MS = 50;
+
+/**
+ * Is ERPNext done filling in the picked vendor? `request` is `frappe.request` (its `ajax_count`),
+ * `frm` the form. A counter that cannot be read is "not quiet", leaving the deadline rule in charge.
+ * @param {{ ajax_count?: unknown }|null|undefined} request
+ * @param {{ updating_party_details?: unknown }|null|undefined} frm
+ */
+export function partyDetailsQuiet(request, frm) {
+  if (!request || typeof request.ajax_count !== "number") return false;
+  return request.ajax_count === 0 && !(frm && frm.updating_party_details);
+}
 
 /**
  * One after_ajax slice while waiting for supplier party settle.
@@ -183,7 +208,8 @@ export function supplierSnapshotAllowMetaOnly(deadlineMs, nowMs = Date.now()) {
  * Snapshot gate for setHeader IPC — matches readBillHeader billing projection.
  *
  * @param {object|null|undefined} doc
- * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean }} [ctx]
+ * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean, partyDetailsQuiet?: boolean }} [ctx]
+ *   partyDetailsQuiet: ERPNext has been quiet for SUPPLIER_PARTY_QUIET_HOLD_MS (the caller times it)
  * @returns {{ ready: boolean, reason: string, field?: string }}
  */
 export function supplierSnapshotReadyReason(doc, ctx = {}) {
@@ -194,6 +220,9 @@ export function supplierSnapshotReadyReason(doc, ctx = {}) {
   }
   if (hasSupplierBillingDisplay(d)) {
     return { ready: true, reason: "address_display", field: SUPPLIER_BILLING_DISPLAY_FIELD };
+  }
+  if (ctx.partyDetailsQuiet) {
+    return { ready: true, reason: "party_quiet_no_address", field: "" };
   }
   if (ctx.allowMetaOnlyAtDeadline) {
     const metaOk = isSupplierPartySettled(doc, {
@@ -207,11 +236,11 @@ export function supplierSnapshotReadyReason(doc, ctx = {}) {
 }
 
 /**
- * Stricter than modal-open settle: snapshot only when address_display HTML exists,
- * or meta-only grace at deadline (vendor with no address on file).
+ * Stricter than modal-open settle: snapshot only when address_display HTML exists, when ERPNext
+ * has gone quiet with none, or meta-only grace at deadline (vendor with no address on file).
  *
  * @param {object|null|undefined} doc
- * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean }} [ctx]
+ * @param {{ targetSupplier?: unknown, baseline?: object|null, allowMetaOnlyAtDeadline?: boolean, partyDetailsQuiet?: boolean }} [ctx]
  */
 export function supplierAddressSnapshotReady(doc, ctx = {}) {
   return supplierSnapshotReadyReason(doc, ctx).ready;
