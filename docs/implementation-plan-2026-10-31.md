@@ -1,8 +1,8 @@
 # Implementation plan 2026-10-31 — dependencies first, then a linter
 
-> **Status 2026-10-31: not started.** Nothing is installed in the repo for it. 5zorro wants to look
-> at linter vendors himself, and to have a dependency policy in place, before he says yes to any new
-> package. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
+> **Status 2026-11-01: not started; the checker is chosen: ESLint, with an import plugin** (5zorro,
+> *Decided* under Step 3). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
 
@@ -158,6 +158,19 @@ original line. A later move to 7 is its own step. The risk with 6.0.3 is that it
 run it in full on this code and it will likely report many type complaints. So it starts by showing
 only the two must-catch kinds ("cannot find name"; "module has no exported member"), and widens one
 file at a time. If that cannot be made quiet enough, use the fallback.
+
+**Decided (5zorro, 2026-11-01): ESLint.** *"i don't want to be dependent on microsoft. Microsoft has a
+competing product against erpnext (microsoft dynamics), so im going to lean open source. lets do
+eslint."* TypeScript's own licence is open source; the reason is independence from a competitor's
+control of the tool, which ESLint, an OpenJS Foundation project, gives. So the recommendation above
+is set aside. What is left to choose in Step 3:
+- **the import plugin:** `eslint-plugin-import-x` (newer; 9 dependencies, including the native
+  resolver and `napi-postinstall`) or the original `eslint-plugin-import` (19 dependencies, all
+  plain JavaScript; last release 2025-06-20). Each gets a dossier under Step 2's rules;
+- **the exact versions,** each older than the waiting period, checked against the known-bad
+  version lists.
+
+The fair test below is then run for ESLint and the chosen plugin only.
 
 A fair test before choosing is the same one ESLint passed: run each against the commit before
 `5bef496` (the payment bug) and the version of `electron/ipc/print.js` with the wrong import (the
