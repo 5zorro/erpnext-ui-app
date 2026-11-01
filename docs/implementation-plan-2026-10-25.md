@@ -15,8 +15,8 @@
 > shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays; also owed, decided 2026-10-26: the Item Receipt's
 > lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*). **R2-5
-> started 2026-10-31 alongside, from the far end (his pick): printing and Papers moved to
-> `electron/ipc/`; Find and payment settings next; the bridge / doc-form / Bill moves wait for 3b
+> started 2026-10-31 alongside, from the far end (his pick): printing, Papers and Find moved to
+> `electron/ipc/`; payment settings next; the bridge / doc-form / Bill moves wait for 3b
 > (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
@@ -366,7 +366,9 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    **Started 2026-10-31, before 3b, at 5zorro's word, from the far end:** families away from the
    two smells first (print IPC → Papers → Find → payment settings); the bridge, doc-form and Bill
    moves wait for 3b's report, as above. Built: print (`e448c2e`, `electron/ipc/print.js`) and
-   Papers (`b655e78`, `electron/ipc/papers.js`); main.js 13,534 → 12,571 lines. **How each move
+   Papers (`b655e78`, `electron/ipc/papers.js`), Find (`electron/ipc/find.js`: the list, the peek and
+   the remembered search; opening the page and its "Open in Vanilla" door write the lens prefs and
+   stay in main.js with the other navigation); main.js 13,534 → 12,504 lines. **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js

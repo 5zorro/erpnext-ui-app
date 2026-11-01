@@ -21,8 +21,7 @@ import {
   vanishedKey,
   shouldPruneOnHome,
 } from "../src/nav-prune.js";
-import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
-import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
+import { frappeResourceGetList, frappeResourceGetDocs } from "../src/erp-http-list.js";
 import { isAllowedErpUrl, erpUrl, isShellNavAllowed, offBaseNavigation, offBaseWarning } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
@@ -120,6 +119,7 @@ import { isStaleTempCopy } from "../src/compare-papers.js";
 import { classifyErpPrintUrl } from "../src/print-service.js";
 import { initPrinting, loadPrintPrefs, printE2eApi, askSavePath, handleErpPrintRequest } from "./ipc/print.js";
 import { initPapers } from "./ipc/papers.js";
+import { initFind } from "./ipc/find.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -11226,82 +11226,15 @@ ipcMain.on("open-preferred", (_e, route) => {
   navDebug("ipc-open-preferred", r);
   openRoutePreferred(r, { forceLoad: true });
 });
+/* ---------------- Find pages (list, peek, last search): electron/ipc/find.js ---------------- */
+
+initFind({ erpBase: ERP_BASE, navDebug, erpSessionFetchImpl });
+
 /**
  * Find page → Vanilla list with the page's searches as `?field=value` filters, which Frappe
  * applies itself (router.js set_route_options_from_url) — nothing typed into its page. The
  * path is rebuilt from the registry; only the query is taken from the page.
  */
-// Find pages, live (plan 2026-09-26 F3): the list and the peek are read over HTTP with the ERP
-// session's cookies — the same data the Vanilla list shows, without touching the ERP page.
-ipcMain.handle("find-doc-list", async (_e, doctypeKey, opts) => {
-  const q = findListQuery(String(doctypeKey || ""), opts && typeof opts === "object" ? opts : {});
-  if (!q) return { ok: false, reason: "No Find page for this document type.", rows: [], more: false };
-  const fetchImpl = erpSessionFetchImpl();
-  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", rows: [], more: false };
-  const res = await frappeResourceGetList({
-    erpBase: ERP_BASE,
-    doctype: q.doctype,
-    fields: q.fields,
-    filters: q.filters,
-    orFilters: q.orFilters,
-    orderBy: q.orderBy,
-    limit: q.limit,
-    start: q.start,
-    fetchImpl,
-  });
-  if (!res.ok) {
-    navDebug("find-doc-list-failed", `${q.doctype}: ${res.status || ""} ${res.reason || ""}`);
-    return { ok: false, reason: res.reason || "Could not read the list.", status: res.status, rows: [], more: false };
-  }
-  return { ok: true, ...findRowsFromList(String(doctypeKey), res.rows) };
-});
-
-/**
- * Each Find page's last search (5zorro 2026-09-26), keyed by doctype, in userData like the other
- * prefs. Not the page's own localStorage: that was not reliably on disk when the app closed, so
- * the search could be lost across a restart. Always re-checked against the registry.
- */
-function findSearchesPath() {
-  return path.join(app.getPath("userData"), "find-doc-searches.json");
-}
-/** @type {Record<string, unknown>|null} */
-let findSearches = null;
-function readFindSearches() {
-  if (findSearches) return findSearches;
-  try {
-    const raw = JSON.parse(fs.readFileSync(findSearchesPath(), "utf8"));
-    findSearches = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  } catch {
-    findSearches = {};
-  }
-  return findSearches;
-}
-ipcMain.handle("find-doc-load-search", (_e, doctypeKey) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  if (!skin) return null;
-  return findSavedSearch(skin.doctypeKey, readFindSearches()[skin.doctypeKey]);
-});
-ipcMain.on("find-doc-save-search", (_e, doctypeKey, search) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  if (!skin) return;
-  const all = readFindSearches();
-  all[skin.doctypeKey] = findSavedSearch(skin.doctypeKey, search);
-  try {
-    fs.writeFileSync(findSearchesPath(), JSON.stringify(all));
-  } catch {
-    /* ignore — the search is simply not remembered */
-  }
-});
-
-ipcMain.handle("find-doc-peek", async (_e, doctypeKey, name) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  const rec = typeof name === "string" ? name.trim() : "";
-  if (!skin || !rec) return { ok: false, reason: "Nothing to peek at.", doc: null };
-  const fetchImpl = erpSessionFetchImpl();
-  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", doc: null };
-  return frappeResourceGetDoc({ erpBase: ERP_BASE, doctype: skin.doctype, name: rec, fetchImpl });
-});
-
 ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
   const skin = findSkinFor(doctypeKey);
   if (!skin) return;

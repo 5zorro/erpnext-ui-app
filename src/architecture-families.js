@@ -66,7 +66,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "find",
     label: "Find pages (Find Bills, POs, receipts, Sales Orders, …) and the prefill into them",
     modules: ["find-*", "bill-find-prefill", "po-find-prefill"],
-    paths: ["electron/find-doc.html", "electron/find-doc-preload.cjs"],
+    paths: ["electron/find-doc.html", "electron/find-doc-preload.cjs", "electron/ipc/find.js"],
     e2e: ["scaffold-find-doc.spec.js"],
   },
   {

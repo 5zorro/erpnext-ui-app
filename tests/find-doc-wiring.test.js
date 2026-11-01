@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mainProcessSource } from "./main-process-source.js";
 import { fileURLToPath } from "node:url";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -89,7 +90,7 @@ describe("Find page wiring", () => {
 describe("Find page is live (plan 2026-09-26 F3)", () => {
   const page = read("../electron/find-doc.html");
   const preload = read("../electron/find-doc-preload.cjs");
-  const main = read("../electron/main.js");
+  const main = mainProcessSource();
 
   it("reads rows and peeks through main over HTTP — no sample rows left", () => {
     assert.doesNotMatch(page, /find-skin-mock/);
