@@ -2,10 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   formatDocLineNumber,
+  lineTotalsColumns,
   sortableHeadersFromCols,
   sortDocItemRowModels,
 } from "../src/doc-item-sort.js";
 import { PO_ITEM_COLS, readPoItemRows } from "../src/po-map.js";
+import { RECEIPT_ITEM_COLS } from "../src/receipt-map.js";
+import { ESTIMATE_ITEM_COLS } from "../src/estimate-map.js";
+import { SALES_ORDER_ITEM_COLS } from "../src/sales-order-map.js";
+import { SALES_INVOICE_ITEM_COLS } from "../src/sales-invoice-map.js";
 
 describe("formatDocLineNumber", () => {
   it("prefers ERP idx", () => {
@@ -51,5 +56,26 @@ describe("sortableHeadersFromCols / sortDocItemRowModels", () => {
       models.map((m) => m.cells[1]),
       ["A", "B", "C"],
     );
+  });
+});
+
+describe("lineTotalsColumns", () => {
+  it("puts the Item subtotal under Amount, not under the Line column before it", () => {
+    assert.deepEqual(lineTotalsColumns(PO_ITEM_COLS), { qtyIdx: 3, amtIdx: 7 });
+    assert.deepEqual(lineTotalsColumns(RECEIPT_ITEM_COLS), { qtyIdx: 3, amtIdx: 5 });
+    for (const cols of [ESTIMATE_ITEM_COLS, SALES_ORDER_ITEM_COLS, SALES_INVOICE_ITEM_COLS]) {
+      const { amtIdx } = lineTotalsColumns(cols);
+      assert.equal(cols[amtIdx].label, "Amount");
+    }
+  });
+
+  it("with no column called Amount, takes the first display-only one past Line", () => {
+    const cols = [
+      { label: "Line", field: "__line_no", displayOnly: true, sortKey: "lineNo" },
+      { label: "Item Code", field: "item_code" },
+      { label: "Qty", field: "qty" },
+      { label: "Total", field: null, displayOnly: true },
+    ];
+    assert.deepEqual(lineTotalsColumns(cols), { qtyIdx: 2, amtIdx: 3 });
   });
 });

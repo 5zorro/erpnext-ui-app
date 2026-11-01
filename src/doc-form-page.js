@@ -43,7 +43,7 @@ import {
   emptyItemRowCleanupAction,
   lastItemRowToast,
 } from "./bill-item-guard.js";
-import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./doc-item-sort.js";
+import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState, lineTotalsColumns } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
 import {
   collectSourceRefsForProfile,
@@ -1164,14 +1164,7 @@ function paintItemsHead() {
 
 function buildLineTotalsFoot(cols) {
   if (!el.lineTotals) return;
-  const qtyIdx = cols.findIndex((c) => c.field === "qty");
-  const amtIdx = cols.findIndex(
-    (c) => c.displayOnly || (c.label && /amount/i.test(c.label)),
-  );
-  totalsLayout = {
-    qtyIdx: qtyIdx >= 0 ? qtyIdx : 2,
-    amtIdx: amtIdx >= 0 ? amtIdx : Math.max(0, cols.length - 2),
-  };
+  totalsLayout = lineTotalsColumns(cols);
   const cells = [];
   for (let i = 0; i < cols.length + 1; i++) {
     if (i === totalsLayout.qtyIdx) {

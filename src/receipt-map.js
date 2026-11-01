@@ -18,6 +18,7 @@ import {
   BILL_EXPENSE_NOTE,
   BILL_MEMO_LABEL,
 } from "./bill-map.js";
+import { formatDocLineNumber } from "./doc-item-sort.js";
 
 export const RECEIPT_DOCTYPE = "Purchase Receipt";
 export const RECEIPT_LAYOUT_KEY = "item-receipt";
@@ -47,17 +48,23 @@ export const RECEIPT_TERMS_FIELD = ERP_FREEFORM_TERMS_FIELD;
 /** Same museum wording as Bill memo block. */
 export const RECEIPT_MEMO_LABEL = BILL_MEMO_LABEL;
 
-/** Same ITEM_COLS pattern as Bill (museum itemColFields). */
+/**
+ * Same ITEM_COLS pattern as Bill (museum itemColFields). Leading Line = Item Receipt line number
+ * (ERP idx); headers are sortable (display-only), as on the Bill and the PO (5zorro, 2026-10-26).
+ */
 export const RECEIPT_ITEM_COLS = [
-  { label: "Item Code", field: "item_code", linkDoctype: "Item" },
-  { label: "Description", field: "description" },
-  { label: "Qty", field: "qty" },
-  { label: "Cost", field: "rate" },
-  { label: "Amount", field: null, displayOnly: true },
-  { label: "Customer:Job", field: "project", linkDoctype: "Project" },
+  { label: "Line", field: "__line_no", displayOnly: true, readOnly: true, sortKey: "lineNo" },
+  { label: "Item Code", field: "item_code", linkDoctype: "Item", sortKey: "item_code" },
+  { label: "Description", field: "description", sortKey: "description" },
+  { label: "Qty", field: "qty", sortKey: "qty" },
+  { label: "Cost", field: "rate", sortKey: "rate" },
+  { label: "Amount", field: null, displayOnly: true, sortKey: "amount" },
+  { label: "Customer:Job", field: "project", linkDoctype: "Project", sortKey: "project" },
 ];
 
-export const RECEIPT_ITEM_EDIT_FIELDS = RECEIPT_ITEM_COLS.map((c) => c.field).filter(Boolean);
+export const RECEIPT_ITEM_EDIT_FIELDS = RECEIPT_ITEM_COLS.map((c) => c.field).filter(
+  (f) => typeof f === "string" && f && !f.startsWith("__"),
+);
 
 /**
  * @param {string} field
@@ -127,9 +134,10 @@ export function readReceiptHeader(doc) {
  */
 export function readReceiptItemRows(doc) {
   const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  return items.map((it) => {
+  return items.map((it, ri) => {
     const row = it || {};
     return [
+      formatDocLineNumber(ri, row),
       row.item_code || "",
       stripHtml(row.description),
       row.qty != null ? row.qty : "",

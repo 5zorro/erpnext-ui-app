@@ -12,8 +12,8 @@
 > `src/bill-source-flow.js`), and Allocate into items moved 2026-10-31
 > (`src/bill-allocate-charge-modal-ui.js`; museum OI-195 found): **R6a-2's four dialogs are done**. Fixed from what the moves found, at
 > 5zorro's word: OI-193 (a cleared informal link leaves "Removed linked …" in Remarks, and the box
-> shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays; also owed, decided 2026-10-26: the Item Receipt's
-> lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
+> shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays. The Item Receipt's
+> lines got the Line column and sortable headers 2026-11-01 (decided 2026-10-26; end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*). **R2-5
 > started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and payment
 > settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves wait for 3b
@@ -317,7 +317,17 @@ not changed: the Item Receipt's lines have no Line column and no sortable header
 match them — "yes".** To build (not started): give `RECEIPT_ITEM_COLS` (`src/receipt-map.js`) the
 Line column and a `sortKey` on each column, as `PO_ITEM_COLS` has; then the hold-the-order rules
 (T-1) and the walk follow on screen order there too. Proof: a probe or spec that sorts an Item
-Receipt's lines and fails on the code before.
+Receipt's lines and fails on the code before. **Built 2026-11-01:** `RECEIPT_ITEM_COLS` has the
+Line column and a sort key on each column, and `readReceiptItemRows` the line number. Found while
+proving it: on every doc-form page with a Line column (the PO since 2026-08-23, the Estimate, Sales
+Order and Invoice) the Item subtotal sat under Line, because the totals row took the first
+display-only column; `lineTotalsColumns` (`src/doc-item-sort.js`) now takes the column labelled
+Amount. Proof: probe `df03-item-table` runs T-2 and T-1 on the receipt too, and a new test checks
+the Line numbers and where the subtotal sits on the PO and the receipt; the four failed on the
+code before (no sortable receipt header; the PO's subtotal under column 0, not Amount's 7), and
+the whole probe passes, 10 of 10. `scaffold-form-switch` passes; `-peek-return-focus` and
+`-ar-doc-skins` fail only their baseline Sales Order / A/R tests, so the A/R footers are covered by
+the unit test, not a spec.
 `.taxes-table` / `.taxes-add` in `doc-fields.css` no longer style a doc-form page but stay: a test
 keeps them as the vocabulary the check/ACH document will reuse. The item rows' `deps` is long
 (about 35 hooks); the next steps (R6a-2) shrink the Bill's closure, which most of them reach into.
