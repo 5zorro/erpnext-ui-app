@@ -1,7 +1,8 @@
 # Implementation plan 2026-10-31 — dependencies first, then a linter
 
-> **Status 2026-11-01: not started; the checker is chosen: ESLint, with an import plugin** (5zorro,
-> *Decided* under Step 3). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> **Status 2026-11-01: Step 1 done (the report below; nothing changed); Step 2 drafted with his
+> rule of a two-month wait, waiting on his two answers (*Open questions*); the checker is chosen:
+> ESLint** (5zorro, *Decided* under Step 3). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
@@ -62,6 +63,37 @@ Then run `npm audit` (known vulnerabilities) and `npm audit signatures` (checks 
 came from the registry unchanged, and which ones say where they were built). Report the results;
 change nothing.
 
+### Step 1 report (2026-11-01; read-only: registry lookups and `npm audit`, nothing installed or changed)
+
+| Package | What for | Publisher (repo checked against the npm page) | Installed | Newest |
+|---|---|---|---|---|
+| `mammoth` | reads Word files (Papers) | one maintainer, `mwilliamson/mammoth.js` | 1.13.0, released 2026-09-26 (35 days) | the same |
+| `pdfjs-dist` | reads PDFs | Mozilla, `mozilla/pdf.js` | 6.3.289, 2026-08-29 (64 days) | 6.4.299, 2026-10-03 |
+| `@playwright/test` | drives the app in tests (dev only) | Microsoft, `microsoft/playwright` (Apache-2.0) | 1.61.1, 2026-06-23 | 1.64.1, 2026-10-14 |
+| `electron` | the app's runtime (dev dependency; shipped inside the build) | the Electron project (OpenJS Foundation), `electron/electron` | 43.1.1, 2026-07-14 | 45.2.1, 2026-10-31 |
+
+- **54 packages in the lockfile** (43 that install on Linux). The oldest are from 2015; 18 are
+  newer than two months, every one of them pulled in by `mammoth` (1.13.0 and its `jszip`
+  3.10.2, `dingbat-to-unicode` 1.0.2), `pdfjs-dist` (its optional `@napi-rs/canvas` 1.0.10 builds)
+  or the dev tools. `mammoth` 1.13.0 went in on 2026-10-03 (`6b58437`), before the rule; it stays
+  until its next upgrade, which follows the rule.
+- **`npm audit signatures`:** all 43 have verified registry signatures; 11 also say where they
+  were built (attestations).
+- **`npm audit`: Electron 43.1.1 has 12 published advisories** (5 high, 4 moderate, 3 low), all fixed
+  in later 43.x releases. The ones that matter most for an app that shows ERPNext's pages: a window
+  opened from a sandboxed page does not keep the sandbox (fixed 43.4.1), file and http handlers
+  allow cross-origin reads (43.4.1), `<webview>` can switch on Node.js in web workers (43.4.1), the
+  preload code cache can be poisoned (43.5.0), and an eMudhra certificate mitigation (43.8.1).
+  The other is `undici` 7.28.0 (24 advisories), which `@electron/get` uses only to download
+  Electron at install; it is never in the app.
+- **Install scripts:** `npm install-scripts ls` says none are unreviewed. npm 11.18 already blocks
+  a dependency's install script unless `package.json`'s `allowScripts` names it (`npm help
+  install-scripts`; its `deny-scripts` page still says scripts run by default; the two pages
+  disagree, so the fair test checks it). The `allowScripts` entry `electron@33.4.11` matches
+  nothing installed: Electron 43 has no install script. `npm install-scripts prune` removes it.
+- **Who controls what:** Playwright is Microsoft's (he avoids tools a competitor of ERPNext
+  controls). It is a test driver under Apache-2.0 and is not shipped; noted, not a change.
+
 ## Step 2 — the rules for adding a package (5zorro accepts them before any new package)
 
 A starting draft for him to change:
@@ -78,13 +110,39 @@ A starting draft for him to change:
    setting up and for test runs.
 4. **Install scripts off by default** (`ignore-scripts=true` in a project `.npmrc`), with a short
    allow-list for a package that truly needs one.
-5. **A waiting period** before taking a new version, because a hijacked version is usually found
-   and pulled within hours or days (both cases under *Step 3* were). npm 11.10 and later has a
-   `min-release-age` setting for a project's `.npmrc`; this machine runs npm 11.18.0. Reports differ
-   on whether its value is in days or minutes, and on how to read it back (`npm config get before`),
-   so try it on a scratch project before writing the rule. A starting value to argue with: 7 days.
+5. **A waiting period of two months** before taking any version (5zorro, 2026-11-01: *"don't
+   install anything that hasn't been deployed for at least two months"*), because a hijacked
+   version is usually found and pulled within hours or days (both cases under *Step 3* were).
+   Set as `min-release-age=60` in a project `.npmrc`. **Checked 2026-11-01 on npm 11.18.0:** the
+   value is in days (`npm help config`), `npm config get min-release-age` reads it back (`before`
+   stays null), and a dry run of `electron@43` picked 43.5.1 (61 days old) with it and 43.8.6
+   (1 day) without. A version too new for the window is skipped silently for a range; `npm audit
+   fix` stops with an error naming it. `min-release-age-exclude` names packages exempt from it.
 6. **An upgrade is its own commit**, with the lockfile's change read and summarised in the message.
 7. **The review repeats** before each release, and when a package is added.
+
+### Open questions for 5zorro (2026-11-01)
+
+1. **Security fixes against the two-month wait.** Electron 43.5.1 (61 days) is the newest 43.x the
+   rule allows today. It fixes 5 of the 12 advisories, including 4 of the 5 high ones. 43.6.0
+   passes on 2026-11-03 (still 7 open), and the last high one (the eMudhra certificates) needs
+   43.8.1, which passes on 2026-12-19. Proposal: a published security advisory may shorten the
+   wait to **7 days** for the patch release that fixes it (43.8.1 today, 12 days old), named in
+   `min-release-age-exclude` only for that one install, with the dossier saying why. Or keep two
+   months, and take 43.5.1 now, then 43.8.x when it ages.
+2. **The import check: a plugin or a rule of our own.** Sizes, resolved under the 60-day window
+   with `--package-lock-only` (lockfile only, nothing installed):
+   - ESLint 10.9.1 + `@eslint/js` 10.0.1 + `globals` 17.12.0: **71 packages, no install scripts.**
+   - The same + `eslint-plugin-import-x` 4.17.1: **109 packages**, one with an install script
+     (`unrs-resolver` 1.12.2, a native resolver whose postinstall can fetch a binary). The plugin
+     and the resolver have the same single maintainer. (`eslint-plugin-import` 2.32.0 supports only
+     ESLint 9 and earlier, and ESLint 9's support has ended.)
+   - Or a short import rule kept in the repo's own lint config: for each `import { a } from
+     "./x.js"`, read `x.js` with the parser ESLint already ships and check it exports `a`. No new
+     package; a few dozen lines to own. Both go through the fair test.
+   Both sets report two `npm audit` findings in ESLint's own tree (`brace-expansion`, high, and
+   `minimatch`, moderate: slow on a crafted file pattern). The linter only reads this repo's
+   files, so these are noted rather than blocking; the fixed versions are newer than the window.
 
 ## Step 3 — which checker (after 5zorro's own look at the vendors)
 
