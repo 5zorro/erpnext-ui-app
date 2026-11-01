@@ -62,9 +62,8 @@ import {
   creditMemoReturnAgainst,
   creditMemoOrphaned,
   parseBillLinkToken,
-  withBillLinkToken,
+  withLinkTokenTraced,
   parseSoLinkToken,
-  withSoLinkToken,
   planCreditMemoSource,
 } from "../src/credit-memo.js";
 import {
@@ -2597,6 +2596,12 @@ export async function bootBillFormPage(api) {
   /**
    * Write one informal link token into Remarks and repaint. Returns the outcome instead of
    * speaking: callers own their own dialog lifecycle and status voice.
+   *
+   * Museum OI-193: a cleared or replaced link leaves "Removed linked …" behind, and the Remarks box
+   * takes what was written. The repaint alone keeps a box whose text differs from ERPNext's, as if
+   * the clerk were typing there, so after a clear the box still read "Linked Bill: …" and the next
+   * link — built from the box — wrote the cleared Bill back. This write came from the clerk's own
+   * click, so there is no typing to keep.
    * @param {"bill"|"so"} kind
    * @param {string} name
    * @returns {Promise<{ ok: boolean, label: string, reason?: string }>}
@@ -2604,14 +2609,12 @@ export async function bootBillFormPage(api) {
   async function writeInformalLinkToken(kind, name) {
     const label = kind === "bill" ? "Bill" : "Sales Order";
     const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
-    const next =
-      kind === "bill"
-        ? withBillLinkToken(currentRemarks, name)
-        : withSoLinkToken(currentRemarks, name);
+    const next = withLinkTokenTraced(currentRemarks, kind, name);
     try {
       const res = await api.setHeader("remarks", remarksKeepingReceived(next));
       if (res && res.ok) {
         paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        paintHeaderInputIfAllowed(el.memo, "remarks", stripReceivedBlock(readBillHeader(res.doc).Memo ?? ""), { forcePaint: true });
         return { ok: true, label };
       }
       return {

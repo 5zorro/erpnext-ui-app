@@ -180,6 +180,34 @@ export function withLinkToken(remarksText, kind, name) {
   return clean ? `${clean}\n${token}` : token;
 }
 
+/**
+ * The line a cleared or replaced informal link leaves behind: "Removed linked Bill: ACC-PINV-…".
+ * Never parsed as a link (a link line starts with its label).
+ * @param {InformalLinkKind} kind
+ * @param {string} name
+ */
+export function removedLinkLine(kind, name) {
+  const label = LINK_LABELS[kind];
+  return label && name ? `Removed ${label.charAt(0).toLowerCase()}${label.slice(1)}: ${name}` : "";
+}
+
+/**
+ * `withLinkToken` for the clerk's informal links, leaving a trace when a link is cleared or
+ * replaced (museum OI-193; 5zorro 2026-10-31: "when something is wonky, i want to be able to see
+ * the fingerprints that left it in the state that i am researching out"). The trace stays until
+ * someone deletes it by hand; it goes before the new link, so the link stays the last line.
+ * @param {string|null|undefined} remarksText
+ * @param {InformalLinkKind} kind
+ * @param {string|null|undefined} name "" clears
+ * @returns {string}
+ */
+export function withLinkTokenTraced(remarksText, kind, name) {
+  const was = parseLinkToken(remarksText, kind);
+  const now = name != null ? String(name).trim() : "";
+  if (!was || was === now) return withLinkToken(remarksText, kind, now);
+  return [stripLinkToken(remarksText, kind), removedLinkLine(kind, was), buildLinkToken(kind, now)].filter(Boolean).join("\n");
+}
+
 // --- Sales Order (OI-165) — original names kept for callers/tests already using them ---
 
 /** @param {string|null|undefined} soName @returns {string} */
