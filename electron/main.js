@@ -1035,6 +1035,8 @@ function syncE2eApi() {
     docSkinAvailable: () => true,
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
+    /** Which warm pick-list copies are loaded (they load 2 s after a Doc page opens; probe-helpers `warmCopies`). */
+    linkListsLoaded: () => [...linkListCopies.keys()],
     execInView: (name, js) => {
       const map = { chrome, home, hist, erp, docForm, payOutstanding, paymentDoc, findDoc };
       const view = map[name];
@@ -7293,7 +7295,7 @@ function loadLinkList(doctype, why) {
     linkListUser = lastLogin.user || "";
     navDebug("link-list", `loaded dt=${doctype} rows=${copy.rows.length} ms=${Date.now() - started} via=${why}`);
   })()
-    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${e && e.message}`))
+    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(e && e.message) || String(e)}`))
     .finally(() => {
       linkListBusy.delete(doctype);
       if (retryLater) {

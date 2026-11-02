@@ -60,6 +60,19 @@ export const searchDone = (app, timeout = 15_000) =>
     .poll(() => inDoc(app, `document.querySelectorAll("[data-search-pending]").length`), { timeout, intervals: [50] })
     .toBe(0);
 
+/**
+ * Wait until the warm pick-list copies for `doctypes` are loaded. Main loads them on its own 2 s
+ * after a Doc page opens, so `docQuiet` (the page and ERPNext) cannot see them; a probe that types
+ * with ERPNext's live search refused needs them first.
+ */
+export const warmCopies = (app, doctypes = ["Supplier", "Item"], timeout = 30_000) =>
+  expect
+    .poll(async () => {
+      const have = await e2eCall(app, "linkListsLoaded");
+      return doctypes.every((d) => have.includes(d));
+    }, { timeout, intervals: [100] })
+    .toBe(true);
+
 /** Run `js` in a view, giving up after `ms` (a stalled ERPNext page must not hang the probe). */
 function inView(app, view, js, ms = 8000) {
   return Promise.race([
