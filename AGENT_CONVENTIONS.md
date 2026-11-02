@@ -65,6 +65,18 @@ built at all → does the standard library already do it → does a native platf
 cover it → does an already-installed dependency solve it → can this be one line → only then
 write the minimum custom code.
 
+## Packages
+
+An agent proposes a package, never adds one: 5zorro says yes to each new package, and each version
+change, by exact name and version, after a short dossier (what it does, who publishes it, its
+repository checked against the npm page, its age, how many packages it brings, whether any run an
+install script, and the cheaper rung of the ladder above). That covers dev tools, and a scratch
+install whose output feeds a commit. The project `.npmrc` takes no version younger than two months
+(`min-release-age=60`). A release that fixes a published security advisory may go in after a week,
+named with `--min-release-age-exclude=<package>` on that one install, never in `.npmrc`. New
+packages are pinned exactly, and an install or upgrade is its own commit. The policy and its
+reasons: `docs/implementation-plan-2026-10-31.md`.
+
 ## Pointers
 
 - Architecture, layers, extension points: `HANDOFF.md` (public, tracked — the real map).

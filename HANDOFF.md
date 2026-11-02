@@ -37,9 +37,9 @@
    and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
-   **Not started:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter: review
-   what is installed, agree the rules for adding a package, then 5zorro picks a checker) — waits for
-   his own look at linter vendors; nothing installed for it.
+   **In flight:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter) — the
+   review of what is installed is done, the two-month wait is in force (`.npmrc`), and ESLint
+   10.9.1 is installed (2026-11-01); next its config, an import rule of our own, and `npm test`.
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
    **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and

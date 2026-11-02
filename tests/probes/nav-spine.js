@@ -462,7 +462,11 @@ async function move(app, cell, docs, seen) {
     return;
   }
   if (cell.move === "reload") {
+    // reloadErp only starts the reload: mark the page first, so the waits below see the new page,
+    // never the old one still answering before the reload begins.
+    await inErp(app, `(() => { window.__navBeforeReload = 1; return true; })()`);
     await e2eCall(app, "reloadErp");
+    await expect.poll(() => soft(inErp(app, `!window.__navBeforeReload`)), { timeout: 30_000 }).toBe(true).catch(() => {});
     await waitErpForm(app, "Purchase Invoice").catch(() => {});
     seen.asked = (await asks(app)) > before;
     // The Doc page repaints from the reloaded form: wait until it names the same document (the

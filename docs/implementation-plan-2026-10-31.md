@@ -298,6 +298,12 @@ test does (`AGENT_CONVENTIONS.md`). First, settle what it reports on today's cod
 names: `classifyPrintNavResult` (an import) and a variable `co`. Fix those, or record why they
 stay. Start with `electron/` and `src/`, then the tests and scripts.
 
+Two things the CI side needs (found 2026-11-01): `.github/workflows/ci.yml` runs `npm test` with no
+install step, which works only while the unit tests need no package, so add `npm ci` before it
+(checked: `npm ci` installs the lockfile's versions even under the `.npmrc` window, so Electron
+43.8.3 installs although it is younger than two months); and ESLint 10 needs Node 20.19+ / 22.13+
+/ 24+, while `package.json`'s `engines` says `>=20` (CI uses Node 22, which is fine).
+
 ## Dogfood residuals
 
 | Family | Residual | Status |

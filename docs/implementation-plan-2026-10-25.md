@@ -15,9 +15,11 @@
 > shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays. The Item Receipt's
 > lines got the Line column and sortable headers 2026-11-01 (decided 2026-10-26; end of the step 3 section). Then 3b, a
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*): **run
-> 2026-11-01, report in § *3b — the performance report*; the picks are 5zorro's.** **R2-5
-> started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and payment
-> settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves wait for 3b
+> 2026-11-01, report in § *3b — the performance report*; his picks the same day: finding 1 (a
+> vendor with no address waited ~9 s) and finding 2 (the save-drain timer) built, finding 7 (the
+> probes' fixed sleeps) under way, the `@nav` matrix done (28 → 13 min); 3–6 left as reported.**
+> **R2-5 started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and
+> payment settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves are next
 > (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
@@ -373,7 +375,8 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    smell found gets one line: fix it in R2-5 (which moves that code anyway), a later plan, or
    leave it with the reason. Before R2-5 on purpose: most smells live in `main.js`, and the split
    should carry the fix, not move the smell. Report, not code: what to fix is 5zorro's call.
-   **Run 2026-11-01; the report is § *3b — the performance report*, waiting for his picks.**
+   **Run 2026-11-01; the report is § *3b — the performance report*, with his picks and what was
+   built under the table.**
 4. **R2-5** in its order (print IPC → Papers → Find → payment settings → re-link / method change →
    health / incidents → the warm pick lists block → doc-form → Bill), each family to
    `electron/ipc/<family>.js` taking a `deps` object.
