@@ -869,6 +869,14 @@ the settings among them.
    when there is none) with the rest; `frm.updating_party_details` is true while the reply is written.
    `frappe.request.ajax_count` drops at `ajaxComplete`, before that write ends, so "quiet" needs both.
    The bridge's vendor wait ends on that (plan 10-25 3b finding 1; probe `vendor-no-address`).
+- **A field script's server calls hold `set_value`** (2026-11-01, frappe `form/script_manager.js`
+  `trigger`): when a field's script returns no promise (ERPNext's `supplier()` does not), Frappe
+  chains `frappe.after_server_call()`, which waits for **every** outstanding server call, with no
+  time limit. So `await frm.set_value("supplier", …)` ends only after the vendor-details reply has
+  landed, however slow: held 14, 26 and 32 s, the Bill's write took 15, 27 and 33 s and never showed
+  the old vendor's address (probe `vendor-switch`, run on the code before museum OI-200). The
+  bridge's 12 s `afterAjaxQuiet` after it is not what bounds the wait; a reply that never comes holds
+  the write open.
 - **List filters ride in the address** (2026-09-26, frappe `router.js` `set_route_options_from_url`
   → `list_view.js` `parse_filters_from_route_options`): `/app/purchase-invoice?supplier=X&bill_no=Y`
   opens the list already filtered and replaces its saved filters. A bare list address instead

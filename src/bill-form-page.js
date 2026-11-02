@@ -2221,6 +2221,41 @@ export async function bootBillFormPage(api) {
     });
   }
 
+  /**
+   * Museum OI-200 (5zorro's option A): a switch from one vendor to another clears the whole Bill
+   * before the new vendor is set — main warns first when the clerk has typed anything, with Keep
+   * as the default. The first pick on a Bill with no vendor clears nothing.
+   * @param {string} v the vendor picked
+   * @returns {Promise<boolean>} false when the clerk kept the old vendor or the clear failed
+   */
+  async function clearBeforeVendorSwitch(v) {
+    if (!api.clearForVendorChange) return true;
+    const kept = String(paintedHeaderValue("supplier") ?? "");
+    const res = await api.clearForVendorChange(v);
+    if (res && res.ok && !res.cleared) return true;
+    if (!res || !res.ok) {
+      if (el.vendor) el.vendor.value = (res && res.supplier) || kept;
+      if (res && res.kept) setStatus(`Kept ${res.supplier || kept}; nothing cleared.`);
+      else setStatus((res && res.reason) || "Could not clear the bill for the new vendor.", "err");
+      logFocus("vendor-switch", res && res.kept ? "kept" : `failed: ${(res && res.reason) || ""}`);
+      return false;
+    }
+    logFocus("vendor-switch", "cleared");
+    noteUserEdit();
+    paint(res.doc, res.amountDue ?? "", {
+      caller: "vendor-switch",
+      // Every box takes the cleared value, even one whose text differs from ERPNext's.
+      forceHeaderPaint: true,
+      linkedPos: [],
+      linkedReceipts: [],
+      lineAllocations: {},
+      poLineMeta: {},
+      enrichPending: null,
+    });
+    if (el.vendor) el.vendor.value = v;
+    return true;
+  }
+
   function ensureHeaderLinkPickers() {
     mountBillLinkPicker(
       el.vendor,
@@ -2232,6 +2267,7 @@ export async function bootBillFormPage(api) {
         return;
       }
       if (await vendorIsMissing(v, "vendor")) return;
+      if (!(await clearBeforeVendorSwitch(v))) return;
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "link_pick",
         hasSupplier: !!normalizeEditableText(v),

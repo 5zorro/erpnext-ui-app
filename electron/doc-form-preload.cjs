@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("erpDoc", {
   getUi: () => ipcRenderer.invoke("doc-get-ui"),
   getSnapshot: () => ipcRenderer.invoke("doc-get-snapshot"),
   setHeader: (field, value) => invokeSkin("bill-set-header", "doc-set-header", field, value),
+  // Museum OI-200: before a vendor switch — warn (Keep is the default), then clear the document.
+  clearForVendorChange: (value) => ipcRenderer.invoke("doc-clear-for-vendor-change", value),
   setDateExpected: (value) => ipcRenderer.invoke("doc-set-date-expected", value),
   setItem: (rowIndex, field, value) =>
     invokeSkin("bill-set-item", "doc-set-item", rowIndex, field, value),

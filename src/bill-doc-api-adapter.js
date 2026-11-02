@@ -7,6 +7,7 @@ export function billApiFromErpDoc(api) {
   return {
     getSnapshot: () => api.getSnapshot(),
     setHeader: (field, value) => api.setHeader(field, value),
+    clearForVendorChange: (value) => api.clearForVendorChange(value),
     checkRef: (billNo, opts) => api.checkRef(billNo, opts || {}),
     prefetchVendorRefs: (supplier) =>
       api.prefetchVendorRefs ? api.prefetchVendorRefs(supplier || "") : Promise.resolve({ ok: false }),

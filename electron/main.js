@@ -57,6 +57,7 @@ import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.
 import { appendNavDebug, formatNavDebugLines, debugLogNeedsRotation } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
+import { isVendorSwitch, vendorChangeLosses, vendorChangeDialogSpec } from "../src/vendor-change.js";
 import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent, resolveErpNavIntent } from "../src/erp-nav-intent.js";
 import {
   NAV_INCIDENT_NOTE_MAX,
@@ -8276,6 +8277,71 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
     }
   }
   return raw;
+});
+
+/**
+ * Museum OI-200 (5zorro's option A, 2026-11-01): the page asks this before it sets a vendor. A
+ * switch from one vendor to another clears the whole document first (Bill, PO, Item Receipt):
+ * nothing the old vendor brought outlives the switch. When the clerk has typed anything, a
+ * warning says what will clear and Keep is the default. Logged both sides (nav-debug).
+ * @returns {Promise<{ ok: boolean, cleared?: boolean, kept?: boolean, supplier?: string, doc?: object, reason?: string, amountDue?: string, scratch?: object }>}
+ */
+ipcMain.handle("doc-clear-for-vendor-change", async (_e, value) => {
+  const next = normalizeEditableText(value);
+  const doc = dirtyState.doc;
+  const prev = normalizeEditableText(doc && doc.supplier);
+  if (!isVendorSwitch(prev, next) || headerValueUnchanged("supplier", next)) {
+    return { ok: true, cleared: false };
+  }
+  const profile = activeDocProfile();
+  const docLabel = String((profile && profile.title) || "document").toLowerCase();
+  const losses = vendorChangeLosses(doc, {
+    dateExpected: activeDocSkin === "po" ? dateExpectedScratch : "",
+    amountDue: activeDocSkin === "bill" ? amountDueScratch : "",
+  });
+  const shown = normalizeEditableText(doc && doc.supplier_name) || prev;
+  if (losses.length && win && !win.isDestroyed()) {
+    const w = vendorChangeDialogSpec({ from: shown, to: next, docLabel, losses });
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      title: w.title,
+      message: w.message,
+      detail: w.detail,
+      buttons: w.buttons,
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (w.actions[response] !== "clear") {
+      navDebug("vendor-change", `kept ${prev} (asked: ${next}; would clear: ${losses.join("; ")})`);
+      return { ok: false, kept: true, supplier: shown };
+    }
+  }
+  navDebug("vendor-change", `clear ${prev} -> ${next}: ${losses.join("; ") || "nothing typed"}`);
+  const raw = await bridgeCall("clearForPartyChange", "supplier");
+  if (!raw || !raw.ok) {
+    const reason = (raw && raw.reason) || "Could not clear the document.";
+    navDebug("vendor-change", `clear failed: ${reason}`);
+    return { ok: false, reason };
+  }
+  navDebug(
+    "vendor-change",
+    `cleared ${raw.cleared ? `${raw.cleared.fields.length} fields, tables ${raw.cleared.tables.join(",") || "none"}` : ""}`,
+  );
+  if (activeDocSkin === "po") dateExpectedScratch = "";
+  if (activeDocSkin === "bill") {
+    amountDueScratch = "";
+    const key = raw.doc && raw.doc.name ? String(raw.doc.name) : currentBillDocKey();
+    delete billLineAllocationsByDoc[key];
+  }
+  dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+  return {
+    ok: true,
+    cleared: true,
+    doc: raw.doc,
+    amountDue: amountDueScratch,
+    scratch: { dateExpected: dateExpectedScratch },
+  };
 });
 
 ipcMain.handle("bill-check-ref", async (_e, billNo, opts) => checkBillRef(billNo, opts));
