@@ -3,7 +3,11 @@
 > **Status 2026-11-01: Step 1 done (the report below); Step 2's waiting rule is in force
 > (`.npmrc`: `min-release-age=60`; an advisory fix after 7 days, his yes) and Electron is on 43.8.3
 > under it; the checker is chosen: ESLint, with an import rule of our own instead of a plugin (his
-> two answers under *Open questions*).** ESLint itself still needs his yes by exact version. Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> two answers under *Open questions*). Installed at his yes (2026-11-01): `eslint` 10.9.1,
+> `@eslint/js` 10.0.1, `globals` 17.12.0, exact, as dev dependencies** — 69 packages added (the
+> youngest 62 days old), all with verified registry signatures, none with an install script;
+> `npm audit` reports only the `brace-expansion` / `minimatch` findings noted below. Next: the
+> config, the import rule, the fair test (Step 3), then `npm test` (Step 4). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
