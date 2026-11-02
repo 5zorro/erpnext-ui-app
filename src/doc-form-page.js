@@ -1581,6 +1581,7 @@ function ensureHeaderLinkPickers() {
             if (decision && decision.open) setStatus("Choose a source (or NIC).");
           },
           onHeaderFailure: (res) => {
+            if (res && res.superseded) return; // a newer pick owns the document (museum OI-200)
             setStatus((res && res.reason) || "Vendor update failed.", "err");
           },
         });

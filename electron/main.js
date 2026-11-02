@@ -8225,7 +8225,7 @@ function headerValueUnchanged(field, next) {
   return false;
 }
 
-ipcMain.handle("bill-set-header", async (_e, field, value) => {
+async function billSetHeader(field, value) {
   if (typeof field !== "string" || !field || field.startsWith("__")) {
     return { ok: false, reason: "Invalid field" };
   }
@@ -8277,16 +8277,60 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
     }
   }
   return raw;
-});
+}
+ipcMain.handle("bill-set-header", (_e, field, value) =>
+  field === "supplier" ? queuedVendorWrite("write", () => billSetHeader(field, value)) : billSetHeader(field, value),
+);
+
+/**
+ * Museum OI-200, follow-up (5zorro 2026-11-01: a re-pick while the server lags is the common
+ * "oops"): one vendor step at a time, and the newest pick wins — the picker's "a newer search owns
+ * the box", for the document. Both pages' vendor writes run side by side in ERPNext's page
+ * otherwise, and ERPNext writes a vendor-details reply onto the form whole, its `supplier` field
+ * included, without checking it is still the vendor asked about (`party.js` `get_party_details`):
+ * a reply for A landing after B's put A back. Now a pick made while a vendor step is still out
+ * waits for it, then is a real switch (A → B: warning, clear); a step a newer pick overtook, or
+ * one whose document is no longer open, is dropped (`superseded`), and the page stays quiet.
+ * Each pick bumps `vendorPickSeq` (the page's clear call comes first in every pick).
+ */
+let vendorPickSeq = 0;
+/** @type {Promise<unknown>} */
+let vendorStepTail = Promise.resolve();
+
+/** The open document, for "is it still the one this step was asked on". */
+const openDocKey = () => `${activeDocSkin || ""}|${(dirtyState.doc && dirtyState.doc.name) || ""}`;
+
+/**
+ * @template T
+ * @param {"clear"|"write"} kind
+ * @param {() => Promise<T>} step
+ * @returns {Promise<T | { ok: false, superseded: true, reason: string }>}
+ */
+function queuedVendorWrite(kind, step) {
+  const asked = vendorPickSeq;
+  const docAsked = openDocKey();
+  const run = async () => {
+    if (asked !== vendorPickSeq || docAsked !== openDocKey()) {
+      navDebug("vendor-change", `superseded ${kind} (pick ${asked}, now ${vendorPickSeq}; doc ${docAsked} -> ${openDocKey()})`);
+      return { ok: false, superseded: true, reason: "A newer vendor pick replaced this one." };
+    }
+    return step();
+  };
+  const p = vendorStepTail.then(run, run);
+  vendorStepTail = p.catch(() => {});
+  return p;
+}
 
 /**
  * Museum OI-200 (5zorro's option A, 2026-11-01): the page asks this before it sets a vendor. A
  * switch from one vendor to another clears the whole document first (Bill, PO, Item Receipt):
  * nothing the old vendor brought outlives the switch. When the clerk has typed anything, a
  * warning says what will clear and Keep is the default. Logged both sides (nav-debug).
+ * Runs queued behind any vendor step still out (`queuedVendorWrite`), so "the vendor now" is the
+ * one that step set.
  * @returns {Promise<{ ok: boolean, cleared?: boolean, kept?: boolean, supplier?: string, doc?: object, reason?: string, amountDue?: string, scratch?: object }>}
  */
-ipcMain.handle("doc-clear-for-vendor-change", async (_e, value) => {
+async function clearForVendorChange(value) {
   const next = normalizeEditableText(value);
   const doc = dirtyState.doc;
   const prev = normalizeEditableText(doc && doc.supplier);
@@ -8342,6 +8386,10 @@ ipcMain.handle("doc-clear-for-vendor-change", async (_e, value) => {
     amountDue: amountDueScratch,
     scratch: { dateExpected: dateExpectedScratch },
   };
+}
+ipcMain.handle("doc-clear-for-vendor-change", (_e, value) => {
+  vendorPickSeq += 1;
+  return queuedVendorWrite("clear", () => clearForVendorChange(value));
 });
 
 ipcMain.handle("bill-check-ref", async (_e, billNo, opts) => checkBillRef(billNo, opts));
@@ -10363,7 +10411,7 @@ ipcMain.handle("doc-retry-load", async () => {
   return { ok: true };
 });
 
-ipcMain.handle("doc-set-header", async (_e, field, value) => {
+async function docSetHeader(field, value) {
   if (typeof field !== "string" || !field || field.startsWith("__")) {
     return { ok: false, reason: "Invalid field" };
   }
@@ -10414,7 +10462,10 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
     : { ok: false, reason: "Set header failed." };
-});
+}
+ipcMain.handle("doc-set-header", (_e, field, value) =>
+  field === "supplier" ? queuedVendorWrite("write", () => docSetHeader(field, value)) : docSetHeader(field, value),
+);
 
 ipcMain.handle("doc-set-date-expected", async (_e, value) => {
   if (activeDocSkin !== "po") {

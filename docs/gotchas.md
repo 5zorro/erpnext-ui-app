@@ -869,6 +869,13 @@ the settings among them.
    when there is none) with the rest; `frm.updating_party_details` is true while the reply is written.
    `frappe.request.ajax_count` drops at `ajaxComplete`, before that write ends, so "quiet" needs both.
    The bridge's vendor wait ends on that (plan 10-25 3b finding 1; probe `vendor-no-address`).
+- **A late vendor-details reply puts its vendor back** (2026-11-01, v16 `public/js/utils/party.js`
+  `get_party_details` callback; `accounts/party.py` returns the party in its reply): the reply is
+  written onto the form whole with `frm.set_value(r.message)`, its `supplier` included, with no
+  check that the form still has the vendor it asked about. Two vendor picks whose replies land out of
+  order end on the **first** vendor, with its address (probe `vendor-switch`, "re-pick": ALPINE held
+  8 s, SUMMIT 2 s → ERPNext on ALPINE while the page's box said SUMMIT). The app runs one vendor step
+  at a time, newest pick winning (`electron/main.js` `queuedVendorWrite`, museum OI-200).
 - **A field script's server calls hold `set_value`** (2026-11-01, frappe `form/script_manager.js`
   `trigger`): when a field's script returns no promise (ERPNext's `supplier()` does not), Frappe
   chains `frappe.after_server_call()`, which waits for **every** outstanding server call, with no

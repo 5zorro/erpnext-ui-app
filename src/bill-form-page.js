@@ -2298,6 +2298,7 @@ export async function bootBillFormPage(api) {
           if (decision.open) setStatus("Choose a source (or NIC).");
         },
         onHeaderFailure: (res) => {
+          if (res && res.superseded) return; // a newer pick owns the Bill (museum OI-200)
           setStatus((res && res.reason) || "Vendor update failed.", "err");
         },
         onModalSkipped: (reason) => {

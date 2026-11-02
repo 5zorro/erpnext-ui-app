@@ -53,6 +53,28 @@ const answerVendorWarning = (app, response) =>
   }, response);
 const warnings = (app) => app.evaluate(() => globalThis.__vendorWarnings || []);
 
+/**
+ * Hold ERPNext's vendor-details request per vendor: `[[name, ms], …]` (the vendor is in the
+ * request's form body). A first vendor held longer than the second makes the replies land out of
+ * order, as on a lagging server where the first request was the slow one.
+ */
+const holdPartyDetailsFor = (app, rules) =>
+  app.evaluate(({ session }, [part, list]) => {
+    globalThis.__heldParties = [];
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => {
+      if (!d.url.includes(part)) return cb({});
+      const body = (d.uploadData || []).map((u) => (u.bytes ? Buffer.from(u.bytes).toString("utf8") : "")).join("");
+      const text = decodeURIComponent(body.replace(/\+/g, " "));
+      const hit = list.find(([name]) => text.includes(name));
+      globalThis.__heldParties.push(hit ? `${hit[0]} ${hit[1]}ms` : `unmatched: ${text.slice(0, 80)}`);
+      if (hit) setTimeout(() => cb({}), hit[1]);
+      else cb({});
+    });
+  }, [PARTY_DETAILS, rules]);
+const heldParties = (app) => app.evaluate(() => globalThis.__heldParties || []);
+const OTHER_NO_ADDRESS = "ZZ DF BRIDGE";
+const PICKER_OPEN = `!!document.querySelector(".src-back:not([hidden])")`;
+
 function lastSupplierWait(logFile) {
   let lines = [];
   try {
@@ -219,3 +241,66 @@ test("the PO the same way: 13 s into a slow switch, ERPNext's form already holds
     await app.close().catch(() => {});
   }
 });
+
+/**
+ * Museum OI-200 follow-up (5zorro: a re-pick while the server lags is the common "oops"). ERPNext
+ * writes a vendor-details reply onto the form whole, `supplier` included, without checking it is
+ * still the vendor asked about. Before: picking SUMMIT while ALPINE's reply was still out (ALPINE
+ * held 8 s, SUMMIT 2 s) left the Bill on ALPINE when ALPINE's reply landed last, and no warning
+ * came (the app did not yet know ALPINE). Now the second pick waits for the first, then is a real
+ * switch: warned (the invoice number typed in between), cleared, SUMMIT.
+ */
+async function newBillAsClerk() {
+  const app = await launchShell();
+  await waitForE2eApi(app);
+  await expect.poll(() => inErp(app, `!!(window.frappe && frappe.xcall)`), { timeout: 30_000 }).toBe(true);
+  await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }); // leaving: Discard
+  const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
+  await openNewDoc(app, "bill", "/app/purchase-invoice/new");
+  await docQuiet(app);
+  return { app, clerk };
+}
+
+for (const { title, picks, want } of [
+  { title: "a re-pick while the first vendor's reply is still out ends on the re-pick, warned and cleared", picks: [NO_ADDRESS], want: NO_ADDRESS },
+  { title: "two quick re-picks: the newest wins, the one in between is dropped", picks: [NO_ADDRESS, OTHER_NO_ADDRESS], want: OTHER_NO_ADDRESS },
+]) {
+  test(title, async () => {
+    test.setTimeout(180_000);
+    let app = null;
+    let clerk = null;
+    try {
+      ({ app, clerk } = await newBillAsClerk());
+      await answerVendorWarning(app, 1);
+      await holdPartyDetailsFor(app, [[WITH_ADDRESS, 8000], [NO_ADDRESS, 2000], [OTHER_NO_ADDRESS, 2000]]);
+      await pickVendor(app, "bill-vendor", WITH_ADDRESS);
+      // As the clerk sees it: the source picker opens on the pick (ALPINE's reply still out); close it.
+      await expect.poll(() => inDoc(app, PICKER_OPEN), { timeout: 10_000 }).toBe(true);
+      await closeSourcePickers(app);
+      await settle();
+      await focusTestId(app, "bill-ref");
+      await keys(app, BILL_NO);
+      await keys(app, "\t");
+      await settle();
+      for (const v of picks) await pickVendor(app, "bill-vendor", v);
+      await docQuiet(app, { timeout: 60_000 });
+      await closeSourcePickers(app);
+      await docQuiet(app);
+      const seen = { erp: await inErp(app, ERP_STATE), box: await billBox(app), warnings: await warnings(app), held: await heldParties(app) };
+      report("re-pick", seen);
+      expect(seen.held.filter((h) => h.startsWith("unmatched")).length).toBe(0);
+      expect(seen.erp.supplier).toBe(want);
+      expect(seen.erp.address).toBe("");
+      expect(seen.erp.bill_no).toBe("");
+      expect(seen.box.vendor).toBe(want);
+      expect(seen.box.address).toBe("");
+      expect(seen.warnings.length).toBe(1);
+      expect(seen.warnings[0]).toContain(`from ${WITH_ADDRESS} to ${want}`);
+      expect(seen.warnings[0]).toContain(BILL_NO);
+    } finally {
+      if (app) await erpUp(app).catch(() => {});
+      if (clerk) await clerk.retire().catch((e) => report("retire-failed", String(e)));
+      if (app) await app.close().catch(() => {});
+    }
+  });
+}

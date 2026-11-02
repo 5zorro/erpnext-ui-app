@@ -17,8 +17,9 @@
  *   log: (event: string, detail: string) => void,
  *   onCleared: (res: { doc: object, amountDue?: string, scratch?: object }) => void,
  * }} o `kept`: the vendor the box showed before the pick; `onCleared` repaints the cleared document
- * @returns {Promise<boolean>} false when the clerk kept the old vendor or the clear failed: the
- *   caller then sets no vendor
+ * @returns {Promise<boolean>} false when the clerk kept the old vendor, the clear failed, or a
+ *   newer pick overtook this one (`superseded`, main's `queuedVendorWrite`): the caller then sets no
+ *   vendor
  */
 export async function clearBeforeVendorSwitch(o) {
   if (!o.api || !o.api.clearForVendorChange) return true;
@@ -29,6 +30,11 @@ export async function clearBeforeVendorSwitch(o) {
     res = { ok: false, reason: `Could not clear the ${o.docLabel} for the new vendor: ${String((e && e.message) || e)}` };
   }
   if (res && res.ok && !res.cleared) return true;
+  if (res && res.superseded) {
+    // A newer pick owns the box and the document: say nothing, touch nothing.
+    o.log("vendor-switch", "superseded");
+    return false;
+  }
   if (!res || !res.ok) {
     if (o.box) o.box.value = (res && res.supplier) || o.kept;
     if (res && res.kept) o.setStatus(`Kept ${res.supplier || o.kept}; nothing cleared.`);

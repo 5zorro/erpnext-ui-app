@@ -122,3 +122,23 @@ describe("clearBeforeVendorSwitch (the page half)", () => {
     assert.equal(r.said[0][1], "err");
   });
 });
+
+describe("clearBeforeVendorSwitch: a newer pick overtook this one", () => {
+  it("says nothing and leaves the box to the newer pick", async () => {
+    const said = [];
+    const box = { value: "ZZ NEWEST" };
+    const go = await clearBeforeVendorSwitch({
+      api: { clearForVendorChange: async () => ({ ok: false, superseded: true, reason: "A newer vendor pick replaced this one." }) },
+      value: "SUMMIT TRADERS",
+      box,
+      kept: "ALPINE SUPPLY CO",
+      docLabel: "bill",
+      setStatus: (t) => said.push(t),
+      log: () => {},
+      onCleared: () => assert.fail("nothing is cleared"),
+    });
+    assert.equal(go, false);
+    assert.deepEqual(said, []);
+    assert.equal(box.value, "ZZ NEWEST");
+  });
+});
