@@ -476,8 +476,27 @@ a wait that had already seen the page, the reload cell's 3 s + 6 s) became a 300
 poll for the gate to close after Stay, and a poll for the Doc page and ERPNext to name the same
 document after a reload; sleeps inside polling loops stay, as does the 8 s after the cruft restart.
 `npm run nav:check -- --ongoing`: **all 8 probes, 142 cells, pass in 13 min 20 s (28 min in the
-sweep)**. Nothing broke, so no settle needed lengthening. Next: the other probes, largest first
-(`r13-1-calc-rounding`, the `leaves-records` set, `df03-item-table`, `nav-reload-gate`).
+sweep)**. Nothing broke, so no settle needed lengthening.
+
+**Second pass, every other probe (2026-11-01, his "lets do all of these"; his question: "is there a
+more elegant way to wait for [the repaints]?").** Yes: the page now says when it is quiet, and the
+probes wait for that. Three small app-side marks, no behaviour change: the Doc page's preload counts
+its calls to the main process still out (`erpDoc.inFlight()`), each page stamps the end of a repaint
+(`window.__docPaintedAt`), and a pick list marks its box while a search waits out its pause or is in
+flight (`data-search-pending`). `probe-helpers.js` `docQuiet(app)` waits until those and ERPNext's
+`frappe.request.ajax_count` have been calm 300 ms; `searchDone(app)` waits for the pick list only;
+`settle()` (now shared; nav-spine uses it) and `leftHome(app)` cover the rest. A `sleep` stays only
+where time is the question (a "nothing happens in 15 s" window, the calculator tape's timed fade, a
+race the probe sets up, a clerk's pause it imitates), with a comment saying which; the rules are in
+`tests/probes/README.md` § *Writing one*. **47 probes, run before and after: 1,657 s → 1,193 s (−28%),
+all pass.** Largest: `df03-item-table` 340 → 246 s, `nav-desk-after-discard` 97 → 49, `r5b3` 63 → 13,
+`item-table-keys` 79 → 51, `nav-reload-gate` 80 → 55. Slower: `bill-payment-paths` 24 → 34 and
+`pay-settings-doors` 17 → 22 — they now wait for ERPNext's background reads the old sleeps cut
+across. In `pay-settings-doors` that race was real: `probe-user.js` `back()` swapped the login cookies
+while a reply was still out, and the clerk's cookie came back (fixed: it waits for ERPNext to be
+quiet first). `r4-2-find-show-more` swings 27–62 s on either code: its scene's delete of 205 POs alone
+took 18–27 s across runs (an A/B with the app marks set aside: 35 and 41 s without, 30 and 53 s
+with); it now reports both scene timings.
 
 `nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
 overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under

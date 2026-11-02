@@ -7,7 +7,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, focusTestId, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, keys, inDoc, focusTestId, openNewDoc, report, docQuiet, settle, searchDone } from "./probe-helpers.js";
 
 const ITEM = "SAMPLE-SKU-02";
 const VENDOR = "SUMMIT TRADERS";
@@ -21,7 +21,7 @@ const line = (app) =>
 const typeItem = async (app) => {
   await inDoc(app, `(() => { const i = ${cell}; i.focus(); i.select(); return true; })()`);
   await keys(app, ITEM);
-  await sleep(1200);
+  await searchDone(app);
   await keys(app, "\t");
 };
 
@@ -31,19 +31,19 @@ for (const way of ["written", "clerk"]) {
     try {
       await waitForE2eApi(app);
       await openNewDoc(app, "po", "/app/purchase-order/new");
-      await sleep(3000);
+      await docQuiet(app);
       if (way === "written") {
         await inDoc(app, `(() => { window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return true; })()`);
         await sleep(300);
       } else {
         await focusTestId(app, "doc-supplier");
         await keys(app, `${VENDOR}\t`);
-        await sleep(2500);
+        await expect.poll(() => inDoc(app, `!!document.querySelector(".src-back:not([hidden])")`), { timeout: 20_000 }).toBe(true);
         await keys(app, "\x1b"); // the source picker opens on a vendor pick; close it
-        await sleep(200);
+        await settle();
       }
       await typeItem(app);
-      await sleep(15_000); // the vendor settle and its repaint
+      await docQuiet(app, { timeout: 60_000 }); // the vendor settle and its repaint
       const seen = await line(app);
       report(`r5b3-${way}`, seen);
       expect(seen.erp).toBe(ITEM);

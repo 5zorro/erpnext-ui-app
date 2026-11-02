@@ -15,7 +15,7 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report, closeSourcePickers, erpUp } from "./probe-helpers.js";
+import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report, closeSourcePickers, erpUp, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const NO_ADDRESS = "SUMMIT TRADERS";
@@ -63,7 +63,7 @@ test("a vendor with no address: the header write ends without a long wait, and t
     await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }); // leaving: Discard
     clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2000);
+    await docQuiet(app);
     const logFile = path.join(await app.evaluate(({ app: a }) => a.getPath("userData")), "focus-debug.log");
 
     const results = [];
@@ -90,7 +90,7 @@ test("a vendor with no address: the header write ends without a long wait, and t
       if (slow) await erpUp(app);
       const erp = await inErp(app, `(() => { const d = cur_frm.doc; return { supplier: d.supplier, supplier_address: d.supplier_address || "", address: (d.address_display || "").replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim() }; })()`);
       await closeSourcePickers(app);
-      await sleep(500);
+      await settle();
       const box = await inDoc(app, `document.querySelector('[data-testid="bill-billing-address"]').value.replace(/\\s+/g, " ").trim()`);
       const row = { vendor, slow: !!slow, pickerMs, bridgeMs, bridgeWait: lastSupplierWait(logFile), erp, box };
       report("pick", row);

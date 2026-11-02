@@ -6,19 +6,19 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, focusTestId, openNewDoc, docState, report } from "./probe-helpers.js";
+import { sleep, keys, focusTestId, openNewDoc, docState, report, docQuiet, settle } from "./probe-helpers.js";
 
 test("Bill: a made-up vendor gets the banner, never its sources", async () => {
   const app = await launchShell();
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(3000);
+    await docQuiet(app);
     await focusTestId(app, "bill-vendor");
     await keys(app, "ZZ NEVER EXISTED");
-    await sleep(1500);
+    await docQuiet(app);
     await focusTestId(app, "bill-ref");
-    await sleep(300);
+    await settle();
     await keys(app, "123");
     await sleep(15_000);
     const seen = await docState(app);

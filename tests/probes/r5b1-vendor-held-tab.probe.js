@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, escPeek, focusTestId, openNewDoc, docState, report } from "./probe-helpers.js";
+import { keys, escPeek, focusTestId, openNewDoc, docState, report, docQuiet, settle } from "./probe-helpers.js";
 
 /** Every Supplier search answers 1.5 s late (copy or live — the wrap is around the IPC handler). */
 const slowVendorSearch = (app) =>
@@ -28,17 +28,17 @@ test("held Tab on a vendor match picks the vendor, not Create Vendor…", async 
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(3000);
+    await docQuiet(app);
     await slowVendorSearch(app);
     await focusTestId(app, "doc-supplier");
     await keys(app, "SUMM\t");
-    await sleep(6000);
+    await docQuiet(app);
     const match = { ...(await docState(app)), createPeek: await views(app) };
     await keys(app, "\x1b"); // the PO opens its source picker on a vendor pick
-    await sleep(500);
+    await settle();
     await focusTestId(app, "doc-supplier");
     await keys(app, "ZZQX\t");
-    await sleep(6000);
+    await docQuiet(app);
     const none = { ...(await docState(app)), createPeek: await views(app) };
     await escPeek(app);
     report("r5b1-vendor", { match, none });

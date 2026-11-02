@@ -7,7 +7,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, focusTestId, inDoc, inErp, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, keys, focusTestId, inDoc, inErp, openNewDoc, report, docQuiet } from "./probe-helpers.js";
 
 test("D3: setting a vendor under chaos leaves the page responsive and opens its sources", async () => {
   process.env.ERP_CHAOS_LAG_MS = process.env.ERP_CHAOS_LAG_MS || "250";
@@ -16,7 +16,7 @@ test("D3: setting a vendor under chaos leaves the page responsive and opens its 
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(4000);
+    await docQuiet(app);
     await focusTestId(app, "bill-vendor");
     await keys(app, "ALPINE SUPPLY CO");
     await sleep(600);

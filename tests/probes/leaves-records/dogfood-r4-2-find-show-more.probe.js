@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inFind, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report } from "../probe-helpers.js";
+import { inDoc, inFind, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report, settle } from "../probe-helpers.js";
 import { SCENES } from "../dogfood-scenes.js";
 
 const scene = SCENES["find-many"];
@@ -31,10 +31,11 @@ test("R4-2: a failed Show more keeps the rows and offers Try again", async () =>
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(1500);
+    await settle();
     report("site", { companies: await assertSandboxSite(app) });
+    const tMake = Date.now();
     const made = await scene.make(app);
-    report("scene", made);
+    report("scene", { ...made, ms: Date.now() - tMake });
     expect(made && made.error).toBeFalsy();
 
     await inDoc(app, `document.getElementById("btn-find").click(); true`);
@@ -66,7 +67,8 @@ test("R4-2: a failed Show more keeps the rows and offers Try again", async () =>
     expect((await state(app)).moreError).toBeNull();
   } finally {
     await erpUp(app).catch(() => {});
-    if (!keepScene()) report("clear", await scene.clear(app));
+    const tClear = Date.now();
+    if (!keepScene()) report("clear", { cleared: await scene.clear(app), ms: Date.now() - tClear });
     await app.close().catch(() => {});
   }
 });

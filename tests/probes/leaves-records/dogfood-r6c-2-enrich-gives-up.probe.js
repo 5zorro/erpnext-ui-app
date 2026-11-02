@@ -17,7 +17,7 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
 import { runProfileDir } from "../../../scripts/test-profile.js";
-import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report } from "../probe-helpers.js";
+import { inDoc, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report, docQuiet } from "../probe-helpers.js";
 import { SCENES } from "../dogfood-scenes.js";
 import { LINKED_SOURCE_LOADING_PLACEHOLDER } from "../../../src/bill-enrich-pending.js";
 
@@ -37,7 +37,7 @@ test("R6c-2: when the background loading gives up, the page says Refresh", async
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await scene.make(app);
     report("scene", made);
@@ -51,7 +51,7 @@ test("R6c-2: when the background loading gives up, the page says Refresh", async
     const t0 = Date.now();
     await expect.poll(() => gaveUpLine(made.bill, t0), { timeout: 840_000, intervals: [5_000] }).not.toBeNull();
     report("gave-up", { afterMs: Date.now() - t0, line: /"detail":"([^"]+)"/.exec(gaveUpLine(made.bill, t0))[1] });
-    await sleep(1500);
+    await docQuiet(app);
     // No field is left saying it is still loading (a field still pending says "Couldn't load — press
     // Refresh"; the PO numbers come from the bill's own lines, so those fields are filled).
     const loading = await inDoc(app, `[...document.querySelectorAll("input")].filter((i) => i.placeholder === ${JSON.stringify(LINKED_SOURCE_LOADING_PLACEHOLDER)}).length`);
@@ -59,7 +59,7 @@ test("R6c-2: when the background loading gives up, the page says Refresh", async
     expect(loading).toBe(0);
 
     await inDoc(app, `(() => { window.confirm = () => true; document.getElementById("btn-save").click(); return true; })()`);
-    await sleep(1500);
+    await docQuiet(app);
     await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-receive-bill-only"]'); if (b) b.click(); return true; })()`);
     await expect.poll(() => inDoc(app, `document.getElementById("status").textContent`), { timeout: 30_000 }).toMatch(/Refresh/);
     const status = await inDoc(app, `document.getElementById("status").textContent`);

@@ -12,7 +12,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -51,7 +51,7 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"], ["po", "/app
     let clerk = null;
     const path = [];
     const step = async (label) => {
-      await sleep(700);
+      await docQuiet(app);
       const w = await where(app);
       path.push({ label, ...w });
       return w;
@@ -62,9 +62,9 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"], ["po", "/app
       await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; });
       clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
       await openNewDoc(app, skin, route);
-      await sleep(2500);
+      await docQuiet(app);
       await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return r && r.ok; })()`, 30_000);
-      await sleep(3000);
+      await docQuiet(app);
       await closeSourcePickers(app);
       const made = await inDoc(
         app,
@@ -82,9 +82,9 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"], ["po", "/app
       );
       expect(made).toBe("ok");
       await repaintDoc(app);
-      await sleep(1500);
+      await docQuiet(app);
       await closeSourcePickers(app);
-      await sleep(500);
+      await settle();
 
       await inDoc(app, `(() => { const i = document.querySelector('input[data-row="0"][data-field="qty"]'); i.focus(); return true; })()`);
       expect((await step("focus 0:qty")).mode).toBe("edit");
@@ -113,7 +113,7 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"], ["po", "/app
         w = await step(`Tab ${n + 1}`);
         if (w.lines >= 3) break;
       }
-      await sleep(2500);
+      await settle();
       w = await step("after the add");
       report(`keys-${skin}`, path);
       expect(w.lines).toBe(3);

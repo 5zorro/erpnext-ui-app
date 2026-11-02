@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, openNewDoc, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
+import { sleep, keys, inDoc, openNewDoc, report, closeSourcePickers, repaintDoc, docQuiet } from "./probe-helpers.js";
 
 const LINES = 25;
 const SNAP = `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc }; })()`;
@@ -35,7 +35,7 @@ test("R5-1: a long Bill's repaints add no page-wide listeners, and an open dropd
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2000);
+    await docQuiet(app);
     await inDoc(
       app,
       `(async () => { const d = window.erpDoc; await d.setHeader("supplier", "ALPINE SUPPLY CO");

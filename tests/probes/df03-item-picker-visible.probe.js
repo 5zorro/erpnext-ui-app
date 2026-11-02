@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -29,9 +29,9 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"]]) {
       await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; });
       clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
       await openNewDoc(app, skin, route);
-      await sleep(2500);
+      await docQuiet(app);
       await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return r && r.ok; })()`, 30_000);
-      await sleep(3000);
+      await docQuiet(app);
       await closeSourcePickers(app);
       const made = await inDoc(
         app,
@@ -52,7 +52,7 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"]]) {
       );
       expect(made).toBe("ok");
       await repaintDoc(app);
-      await sleep(1500);
+      await docQuiet(app);
       await closeSourcePickers(app);
       await inDoc(app, `(() => { const i = document.querySelector('input[data-row="1"][data-field="item_code"]'); i.scrollIntoView({ block: "center" }); i.focus(); i.select(); return true; })()`);
       // ↓ in the empty box lists every Item: a full-height list, long enough to reach the taxes.
@@ -64,7 +64,7 @@ for (const [skin, route] of [["bill", "/app/purchase-invoice/new"]]) {
       await expect
         .poll(() => inDoc(app, `(() => { const d = [...document.querySelectorAll(".link-dd")].find((x) => !x.hidden); return !!d && d.querySelectorAll(".link-opt").length > 0; })()`), { timeout: 30_000 })
         .toBe(true);
-      await sleep(800);
+      await docQuiet(app);
       const seen = await inDoc(
         app,
         `(() => {

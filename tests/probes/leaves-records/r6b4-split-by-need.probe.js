@@ -20,7 +20,7 @@
 import { writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, keys, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
+import { sleep, inDoc, inErp, keys, openNewDoc, assertSandboxSite, report, docQuiet } from "../probe-helpers.js";
 import { parseCostingNote } from "../../../src/costing-assumptions.js";
 import { inDialog, clickPrimary, nextStep as next, assignToOrders } from "../assign-helpers.js";
 
@@ -100,7 +100,7 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await makeOrders(app);
     report("orders", made);
@@ -108,13 +108,13 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     const [A, B, C] = made.orders;
 
     await call(app, `window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO")`);
-    await sleep(2500);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setHeader("bill_no", ${JSON.stringify(TAG)})`);
     await call(app, `window.erpDoc.setItem(0, "item_code", "SAMPLE-SKU-01")`);
-    await sleep(1500);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setItem(0, "qty", 5)`);
     await call(app, `window.erpDoc.setItem(0, "rate", 10)`);
-    await sleep(1500);
+    await docQuiet(app);
 
     // The page's own planner, straight: 4 / 1 and an Okay needed.
     const plan = await call(app, `window.erpDoc.planLineAllocation(0, { salesOrders: [${JSON.stringify(A.name)}, ${JSON.stringify(B.name)}] })`);
@@ -137,7 +137,7 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
 
     // Fill SO-B from stock: the box redraws 5 / 0.
     await inDialog(app, `const tr = [...d.querySelectorAll(".costing-table tbody tr")].find((r) => r.dataset.so === ${JSON.stringify(B.name)}); tr.querySelector('[data-testid="costing-from-stock"]').click(); return true;`);
-    await sleep(2500);
+    await docQuiet(app);
     const rows = await inDialog(app, `return [...d.querySelectorAll(".costing-table tbody tr")].map((r) => [...r.cells].slice(0, 4).map((c) => c.textContent));`);
     report("after-tick", rows);
     const getsBySo = Object.fromEntries(rows.map((r) => [r[0], r[2]]));
@@ -146,7 +146,7 @@ test("a Bill line split by need, with the costing box and a fill from stock", as
     expect(await inDialog(app, `return !!d.querySelector('.costing-table tbody tr[data-so=${JSON.stringify(C.name)}] [data-testid="costing-from-stock"]');`)).toBe(false);
 
     await clickPrimary(app); // Okay
-    await sleep(8000);
+    await docQuiet(app, { timeout: 60_000 });
     const status = await inDoc(app, `document.getElementById("status").textContent`);
     report("status", { status });
     const snap = await call(app, `window.erpDoc.getSnapshot()`);

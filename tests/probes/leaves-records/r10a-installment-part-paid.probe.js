@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inErp, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
+import { inErp, openNewDoc, assertSandboxSite, report, docQuiet } from "../probe-helpers.js";
 
 const VENDOR = "ZZ R10A PART PAID";
 const TAG = `ZZR10A-${Date.now() % 100000}`;
@@ -77,7 +77,7 @@ test("a part-paid installment bill shows what ERPNext says is owed", async () =>
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await setup(app);
     report("setup", made);

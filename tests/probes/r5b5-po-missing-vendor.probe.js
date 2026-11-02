@@ -7,19 +7,19 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, escPeek, focusTestId, openNewDoc, docState, deleteZzSuppliers, report } from "./probe-helpers.js";
+import { sleep, keys, escPeek, focusTestId, openNewDoc, docState, deleteZzSuppliers, report, docQuiet, settle } from "./probe-helpers.js";
 
 test("a vendor that does not exist gets the banner, never its sources", async () => {
   const app = await launchShell();
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(3000);
+    await docQuiet(app);
     await focusTestId(app, "doc-supplier");
     await keys(app, "ZZ NO SUCH VENDOR");
-    await sleep(1500);
+    await docQuiet(app);
     await keys(app, "\t"); // takes Create Vendor… (the only option)
-    await sleep(4000);
+    await docQuiet(app);
     await escPeek(app); // back from the peek without saving; the box is back to no vendor
     await expect.poll(async () => (await docState(app)).snapOk, { timeout: 30_000 }).toBe(true);
     const back = await docState(app);
@@ -27,9 +27,9 @@ test("a vendor that does not exist gets the banner, never its sources", async ()
     // Create Vendor… again) and typing there. Leaving the box writes the made-up name.
     await focusTestId(app, "doc-supplier");
     await keys(app, "ZZ NO SUCH VENDOR");
-    await sleep(1500);
+    await docQuiet(app);
     await focusTestId(app, "doc-transaction_date");
-    await sleep(500);
+    await settle();
     await keys(app, "10222026");
     await sleep(15_000); // longer than a vendor settle (~12 s)
     const seen = { back, after: await docState(app) };

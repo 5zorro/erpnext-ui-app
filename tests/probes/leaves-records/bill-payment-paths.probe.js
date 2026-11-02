@@ -15,7 +15,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, escPeek, assertSandboxSite, report, repaintDoc, closeSourcePickers } from "../probe-helpers.js";
+import { inDoc, inErp, escPeek, assertSandboxSite, report, repaintDoc, closeSourcePickers, docQuiet } from "../probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "../probe-user.js";
 import { billCompareTotal } from "../../../src/bill-map.js";
 
@@ -73,7 +73,7 @@ async function openBillInDoc(app, name) {
   await expect
     .poll(async () => ((await e2eGet(app, "surfaceMode")) === "doc" ? inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return s && s.doc ? s.doc.name : ""; })()`, 10_000) : ""), { timeout: 40_000 })
     .toBe(name);
-  await sleep(2500);
+  await docQuiet(app);
 }
 
 test("the Bill's Add payment and Already-paid Submit each make their Payment Entry", async () => {
@@ -102,7 +102,7 @@ test("the Bill's Add payment and Already-paid Submit each make their Payment Ent
     report("add-payment", added);
     expect(added[0].docstatus).toBe(0);
     await escPeek(app);
-    await sleep(2000);
+    await docQuiet(app);
 
     // 2. Submit the Already-paid draft.
     await openBillInDoc(app, made.jit);

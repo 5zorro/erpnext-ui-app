@@ -147,6 +147,16 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
 - Steps shared by probes are in `probe-helpers.js`: `openNewDoc`, `keys` (real keystrokes —
   `e2e/GOTCHAS.md` #15), `focusTestId`, `escPeek`, `docState`, `erpAnswers`, `inDoc` / `inErp`
   (each gives up after a few seconds, so a stalled page shows as `"TIMEOUT"`, not a hung run).
+- **Wait for the page, not the clock** (plan 10-25 3b finding 7). After an action on the Doc page
+  (open, vendor, line, save, repaint), `await docQuiet(app)`: no call from the page to the main
+  process still out (`erpDoc.inFlight()`), no pick list search pending (`data-search-pending` on
+  its box, set while the search waits out its pause or is in flight), ERPNext with no request out
+  (`frappe.request.ajax_count`), and no repaint (`window.__docPaintedAt`) — held 300 ms. After
+  typing while something else is meant to stay in flight, `searchDone(app)` waits for the list
+  only. Elsewhere, poll for the thing the next step reads (`expect.poll`); `settle()` (300 ms, a
+  person's reaction time, 5zorro's figure) after a wait that already saw it; `leftHome(app)` after a Home tile.
+  A `sleep` stays only where time *is* the question: "nothing happens in the next 15 s", a fade
+  timed on purpose, a race the probe sets up, a clerk's pause it imitates — say which in a comment.
 - Right after a peek returns (Esc), the ERPNext form reloads for a few seconds and the Doc page's
   snapshot is not `ok` — poll `docState(app).snapOk` before reading or typing. Esc keys sent to the
   Doc page do not reach a peek (it is the ERPNext view): use `escPeek`.

@@ -5,21 +5,21 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, escPeek, focusTestId, openNewDoc, erpAnswers, docState, report } from "./probe-helpers.js";
+import { keys, escPeek, focusTestId, openNewDoc, erpAnswers, docState, report, docQuiet } from "./probe-helpers.js";
 
 test("unknown vendor + fast Tab leaves the ERPNext page answering", async () => {
   const app = await launchShell();
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(3000); // warm lists in
+    await docQuiet(app);
     await focusTestId(app, "doc-supplier");
     await keys(app, "ZZNOPE\t");
-    await sleep(6000);
+    await docQuiet(app);
     const afterTab = await docState(app);
     await escPeek(app); // close the Create Vendor… peek the Tab opens
     await keys(app, "\x1b"); // and any dropdown
-    await sleep(3000);
+    await docQuiet(app);
     const seen = { afterTab, erpAnswers: await erpAnswers(app), after: await docState(app) };
     report("r5b4", seen);
     expect(seen.erpAnswers).toBe(true);

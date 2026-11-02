@@ -17,7 +17,7 @@ import path from "node:path";
 import { expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
 import { runProfileDir } from "../../scripts/test-profile.js";
-import { sleep, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "./probe-helpers.js";
+import { sleep, settle, inDoc, inErp, inBoard, inFind, keys, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 import { spineCells, judgeCell, cellLine, cellPassed, isTyped, isNew } from "../../src/nav-spine.js";
 import { cruftFindings, cruftLine } from "../../src/nav-cruft.js";
@@ -74,13 +74,8 @@ async function launch(opts = {}) {
   await e2eCall(app, "setLensPref", "purchase-invoice", "doc");
   return app;
 }
-/**
- * A person's reaction time (5zorro 2026-11-01, plan 10-25 3b finding 7): after a wait that already
- * saw what the next step needs, a short pause so a thing that is there but not painted yet can paint.
- * It replaced fixed 1–2.5 s sleeps.
- */
-const SETTLE_MS = 300;
-const settle = () => sleep(SETTLE_MS);
+// `settle()`: a person's reaction time (probe-helpers SETTLE_MS), after a wait that already saw
+// what the next step needs.
 const asks = (app) => app.evaluate(() => globalThis.__navAsks);
 const answer = (app, a) => app.evaluate((_e, v) => { globalThis.__navAnswer = v; }, a);
 

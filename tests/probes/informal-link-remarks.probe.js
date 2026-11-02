@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, openNewDoc, assertSandboxSite, report, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, openNewDoc, assertSandboxSite, report, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 
 const VENDOR = "ZZ DF BRIDGE";
 const call = (app, js) => inDoc(app, `(async () => { try { const r = await ${js}; return r && typeof r === "object" ? JSON.parse(JSON.stringify(r)) : r; } catch (e) { return "ERR " + (e && e.message); } })()`, 90_000);
@@ -33,13 +33,13 @@ test("informal links: the Remarks box shows what was written, and a cleared link
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     await assertSandboxSite(app);
     await call(app, `window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)})`);
-    await sleep(2500);
+    await docQuiet(app);
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(VENDOR)}; return true; })()`);
     await closeSourcePickers(app);
-    await sleep(1000);
+    await settle();
     // A credit memo, as a clerk makes one: Credit memo → Yes opens "which Bill?"; Decide later.
     await click(app, "#f-is-return");
     await expect.poll(async () => inDoc(app, `!!document.querySelector('[data-testid="bill-credit-source-picker"]')`), { timeout: 20_000 }).toBe(true);

@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, closeSourcePickers, repaintDoc } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, openNewDoc, report, closeSourcePickers, repaintDoc, docQuiet, settle } from "./probe-helpers.js";
 import { billCompareTotal } from "../../src/bill-map.js";
 
 const TAG = `ZZ-DF-RELOAD-${Date.now() % 100000}`;
@@ -19,20 +19,20 @@ test("R2-1: a reload mid-save ends the wait and New still works", async () => {
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2000);
+    await docQuiet(app);
     await inDoc(
       app,
       `(async () => { const d = window.erpDoc; await d.setHeader("supplier", "ALPINE SUPPLY CO"); await d.setHeader("bill_no", ${JSON.stringify(TAG)});
         await d.setItem(0, "item_code", "SAMPLE-SKU-01"); await d.setItem(0, "qty", 1); await d.setItem(0, "rate", 10); return true; })()`,
       90_000,
     );
-    await sleep(3000);
+    await docQuiet(app);
     const snap = await repaintDoc(app);
     report("before-save", { supplier: snap.doc.supplier, items: (snap.doc.items || []).map((i) => i.item_code) });
     // The page reads the vendor from its box; the API write does not repaint it.
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = "ALPINE SUPPLY CO"; return true; })()`);
     await closeSourcePickers(app);
-    await sleep(500);
+    await settle();
 
     const total = billCompareTotal(snap.doc);
     await inDoc(app, `(() => { const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = ${JSON.stringify(String(total))}; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`);

@@ -147,6 +147,16 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   /** The text a search is waiting for (typing pause or in flight); null when none is. */
   /** @type {string|null} */
   let pendingFor = null;
+  /**
+   * A search waiting out its pause or in flight, mirrored on the box as `data-search-pending` so a
+   * test can wait for the list instead of sleeping (probe-helpers `docQuiet`).
+   * @param {string|null} v
+   */
+  const setPendingFor = (v) => {
+    pendingFor = v;
+    if (v == null) delete input.dataset.searchPending;
+    else input.dataset.searchPending = "1";
+  };
   /** A Tab / Enter waiting for the list of the text it was pressed on. */
   /** @type {{ key: string, shiftKey: boolean, text: string }|null} */
   let held = null;
@@ -247,7 +257,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     // A search still waiting (typing pause or in flight) is for text this pick replaces.
     clearTimeout(timer);
     searchSeq++;
-    pendingFor = null;
+    setPendingFor(null);
     held = null;
     input.value = v;
     input.dataset.linkCommitted = v;
@@ -287,13 +297,13 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     }
     const seq = ++searchSeq;
     const forText = input.value;
-    pendingFor = forText;
+    setPendingFor(forText);
     showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
     const res = await api.searchLink(doctype, q || "");
     // A newer search owns the box; this answer is for text no longer there.
     if (seq !== searchSeq) return;
-    pendingFor = null;
+    setPendingFor(null);
     listFor = forText;
     listSource = res && res.source === "copy" ? "copy" : "live";
     opts = [];
@@ -380,7 +390,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     if (held) logFocus("link-held-cancel", trail("typed-on"));
     held = null;
     clearTimeout(timer);
-    pendingFor = input.value;
+    setPendingFor(input.value);
     timer = setTimeout(() => runSearch(input.value), listSource === "copy" ? SEARCH_PAUSE_COPY_MS : SEARCH_PAUSE_MS);
   });
   if (input.dataset.linkCommitted == null) {
@@ -398,7 +408,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
       // Tab wait for it.
       clearTimeout(timer);
       searchSeq++;
-      pendingFor = null;
+      setPendingFor(null);
       dd.hidden = true;
       hi = -1;
       return;

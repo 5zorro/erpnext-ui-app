@@ -17,7 +17,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, closeSourcePickers } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, openNewDoc, report, closeSourcePickers, docQuiet } from "./probe-helpers.js";
 
 const ERP_STATE = `(() => { const f = window.cur_frm; const ev = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(ev);
   return { name: f && f.doc && f.doc.name, unsaved: !!(f && f.doc && f.doc.__unsaved), supplier: (f && f.doc && f.doc.supplier) || "", listener: ev.defaultPrevented, everActive: !!(navigator.userActivation && navigator.userActivation.hasBeenActive) }; })()`;
@@ -35,12 +35,17 @@ const stubDialog = (app) =>
   });
 const asks = (app) => app.evaluate(() => globalThis.__probeAsks.slice());
 
+/** After Home: the Doc page's unsaved gate is up, or the shell is already Home. */
+const gateOrHome = (app) => async () =>
+  (await e2eGet(app, "surfaceMode")) === "home" ||
+  (await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-discard"]'); return !!(b && b.offsetParent); })()`)) === true;
+
 async function typedNewBill(app) {
   await openNewDoc(app, "bill", "/app/purchase-invoice/new");
   const openedAt = Date.now();
-  await sleep(1500);
+  await docQuiet(app);
   await inDoc(app, `(async () => { const d = window.erpDoc; await d.setHeader("supplier", "ALPINE SUPPLY CO"); await d.setItem(0, "item_code", "SAMPLE-SKU-01"); await d.setItem(0, "qty", 2); return true; })()`, 60_000);
-  await sleep(2000);
+  await docQuiet(app);
   await closeSourcePickers(app);
   return openedAt;
 }
@@ -49,8 +54,13 @@ async function typedNewBill(app) {
 async function reloadAndLook(app, label, openedAt) {
   const before = await asks(app);
   const reloadAt = Date.now();
+  // A mark only the page before the reload carries: gone means ERPNext's page is a new one.
+  await inErp(app, `(() => { window.__probeBeforeReload = 1; return true; })()`);
   await e2eCall(app, "reloadErp");
-  await sleep(8000);
+  await expect
+    .poll(async () => (await asks(app)).length > before.length || (await inErp(app, `!window.__probeBeforeReload && !!(window.frappe && frappe.xcall && window.cur_frm)`)) === true, { timeout: 30_000, intervals: [200] })
+    .toBe(true);
+  await docQuiet(app);
   const after = await asks(app);
   const look = {
     sinceOpenMs: reloadAt - openedAt,
@@ -82,7 +92,7 @@ test("nav step 1: a reload under unsaved Bill typing — asked or not, and why",
 
     // Case B: the same, reloaded past the 20 s window.
     e2eCall(app, "goHome").catch(() => {});
-    await sleep(1500);
+    await expect.poll(gateOrHome(app), { timeout: 15_000 }).toBe(true);
     await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-discard"]'); if (b && b.offsetParent) { b.click(); return true; } return false; })()`);
     await expect.poll(() => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("home");
     const openedB = await typedNewBill(app);
@@ -94,7 +104,7 @@ test("nav step 1: a reload under unsaved Bill typing — asked or not, and why",
 
     // Case C: as B, after a user gesture in the ERPNext page itself.
     e2eCall(app, "goHome").catch(() => {});
-    await sleep(1500);
+    await expect.poll(gateOrHome(app), { timeout: 15_000 }).toBe(true);
     await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-discard"]'); if (b && b.offsetParent) { b.click(); return true; } return false; })()`);
     await expect.poll(() => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("home");
     const openedC = await typedNewBill(app);

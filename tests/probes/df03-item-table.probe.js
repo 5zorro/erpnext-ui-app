@@ -21,7 +21,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -73,9 +73,9 @@ async function openWithLines(skin, route, qtys, item = ITEM) {
   await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; });
   const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
   await openNewDoc(app, skin, route);
-  await sleep(2500);
+  await docQuiet(app);
   await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return r && r.ok; })()`, 60_000);
-  await sleep(3000);
+  await docQuiet(app);
   await closeSourcePickers(app);
   const made = await inDoc(
     app,
@@ -94,9 +94,9 @@ async function openWithLines(skin, route, qtys, item = ITEM) {
   );
   expect(made).toBe("ok");
   await repaintDoc(app);
-  await sleep(1500);
+  await docQuiet(app);
   await closeSourcePickers(app);
-  await sleep(500);
+  await settle();
   return { app, clerk };
 }
 
@@ -112,7 +112,7 @@ for (const { skin, route, lastBox } of SKINS) {
       expect(await focusNav(app, 1, lastBox)).toBe(true);
       await press(app, "Tab");
       await press(app, "Tab");
-      await sleep(15_000);
+      await docQuiet(app, { timeout: 60_000 }); // both Tabs answered, under a 1.2 s lag on every call
       const w = await where(app);
       report(`t3-${skin}`, w);
       expect(w.lines).toBe(3);
@@ -137,7 +137,7 @@ for (const { skin, route, lastBox, item } of SORT_SKINS) {
     let clerk = null;
     const path = [];
     const step = async (label) => {
-      await sleep(900);
+      await docQuiet(app);
       const w = await where(app);
       path.push(`${label} → ${w.at} (${w.lines} lines)`);
       return w;
@@ -145,7 +145,7 @@ for (const { skin, route, lastBox, item } of SORT_SKINS) {
     try {
       ({ app, clerk } = await openWithLines(skin, route, [5, 1, 3], item));
       await inDoc(app, `(() => { document.querySelector('th[data-sort="qty"]').click(); return true; })()`);
-      await sleep(1500);
+      await docQuiet(app);
       const rows = await screenRows(app);
       report(`t2-${skin}-screen`, rows);
       expect(rows).toEqual([1, 2, 0]);
@@ -180,7 +180,7 @@ for (const { skin, route, item } of SORT_SKINS) {
     let clerk = null;
     const path = [];
     const step = async (label) => {
-      await sleep(1500);
+      await docQuiet(app);
       const w = await where(app);
       const rows = await screenRows(app);
       const stale = await staleShown(app);

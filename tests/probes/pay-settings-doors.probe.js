@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { sleep, inBoard, openBoard, openNewDoc, report } from "./probe-helpers.js";
+import { inBoard, openBoard, openNewDoc, report, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const api = (app, call) =>
@@ -29,7 +29,7 @@ async function boardAsClerk() {
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
     const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
     await openBoard(app, { cards: false });
-    await sleep(1500);
+    await settle();
     return { app, clerk };
   } catch (e) {
     // The caller's finally holds the app from before; close this one (a clerk enabled here is

@@ -9,7 +9,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { sleep, inErp, report } from "./probe-helpers.js";
+import { inErp, report, settle } from "./probe-helpers.js";
 
 /** What the page shows of the skin, on the Bill form Frappe keeps for this page. */
 const STATE = `(() => {
@@ -43,18 +43,18 @@ test("R12-1: Simplified leaves cleanly in-page and applies again on the way back
 
     await inErp(app, `(() => { frappe.set_route("app", "supplier"); return true; })()`);
     await expect.poll(async () => (await inErp(app, STATE)).installed, { timeout: 20_000 }).toBe(false);
-    await sleep(1500);
+    await settle();
     const away = await inErp(app, STATE);
     report("away", away);
 
     await inErp(app, `(() => { frappe.new_doc("Purchase Invoice"); return true; })()`);
-    await sleep(6000);
+    await expect.poll(async () => (await inErp(app, STATE).catch(() => null)) || {}, { timeout: 15_000 }).toMatchObject({ installed: true, note: true }).catch(() => {});
     const back = await inErp(app, STATE);
     report("back", back);
     // Another new Bill straight from this one: the skin is installed, so a re-inject returns at
     // once — only ERPNext's refresh (the patched hook) can apply it to the new document.
     await inErp(app, `(() => { frappe.new_doc("Purchase Invoice"); return true; })()`);
-    await sleep(6000);
+    await expect.poll(async () => (await inErp(app, STATE).catch(() => null)) || {}, { timeout: 15_000 }).toMatchObject({ installed: true, note: true }).catch(() => {});
     const again = await inErp(app, STATE);
     report("again", again);
 

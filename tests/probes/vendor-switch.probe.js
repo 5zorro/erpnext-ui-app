@@ -24,7 +24,7 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report, closeSourcePickers, erpUp } from "./probe-helpers.js";
+import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report, closeSourcePickers, erpUp, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const WITH_ADDRESS = "ALPINE SUPPLY CO";
@@ -93,7 +93,7 @@ test("a vendor switch clears the document first: a slow reply leaves a blank, ne
     await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }); // leaving: Discard
     clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2000);
+    await docQuiet(app);
     const logFile = path.join(await app.evaluate(({ app: a }) => a.getPath("userData")), "focus-debug.log");
 
     // 1. The first pick: no warning, ALPINE's address.
@@ -102,7 +102,7 @@ test("a vendor switch clears the document first: a slow reply leaves a blank, ne
     await pickVendor(app, "bill-vendor", WITH_ADDRESS);
     await expect.poll(() => lastSupplierWait(logFile), { timeout: 30_000, intervals: [100] }).not.toBe(before);
     await closeSourcePickers(app);
-    await sleep(500);
+    await settle();
     const alpine = await inErp(app, ERP_STATE);
     await focusTestId(app, "bill-ref");
     await keys(app, BILL_NO);
@@ -114,7 +114,7 @@ test("a vendor switch clears the document first: a slow reply leaves a blank, ne
     // 2. Switch, answered Keep.
     await pickVendor(app, "bill-vendor", NO_ADDRESS);
     await expect.poll(async () => (await warnings(app)).length, { timeout: 15_000 }).toBe(1);
-    await sleep(1500);
+    await docQuiet(app);
     const kept = { erp: await inErp(app, ERP_STATE), box: await billBox(app), warning: (await warnings(app))[0] };
     report("2-kept", kept);
 
@@ -128,9 +128,9 @@ test("a vendor switch clears the document first: a slow reply leaves a blank, ne
     const writeMs = Date.now() - t0;
     const boxAtWriteEnd = await billBox(app);
     await erpUp(app);
-    await sleep(Math.max(0, HELD_MS + 2000 - (Date.now() - t0))); // the held reply lands
+    await docQuiet(app); // the held reply lands (ERPNext has a request out until then)
     await closeSourcePickers(app);
-    await sleep(500);
+    await settle();
     const changed = { writeMs, boxAtWriteEnd, erp: await inErp(app, ERP_STATE), box: await billBox(app), warnings: await warnings(app) };
     report("3-changed-slow", changed);
 
@@ -143,7 +143,7 @@ test("a vendor switch clears the document first: a slow reply leaves a blank, ne
     await erpUp(app);
     await holdPartyDetails(app, 0);
     await closeSourcePickers(app);
-    await sleep(500);
+    await settle();
     const back = { boxAtWriteEnd: boxBack, erp: await inErp(app, ERP_STATE), box: await billBox(app), warnings: await warnings(app) };
     report("4-back-no-warning", back);
 
@@ -191,18 +191,18 @@ test("the PO the same way: 13 s into a slow switch, ERPNext's form already holds
     await answerVendorWarning(app, 1); // nothing is typed, so no warning is expected at all
     await openNewDoc(app, "po", "/app/purchase-order/new");
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="doc-supplier"]')`), { timeout: 30_000 }).toBe(true);
-    await sleep(2000);
+    await docQuiet(app);
     await pickVendor(app, "doc-supplier", WITH_ADDRESS);
     await expect.poll(async () => (await inErp(app, ERP_STATE)).address, { timeout: 30_000 }).not.toBe("");
     await closeSourcePickers(app);
-    await sleep(1000);
+    await settle();
     const poAlpine = await inErp(app, ERP_STATE);
     await holdPartyDetails(app, HELD_MS);
     await pickVendor(app, "doc-supplier", NO_ADDRESS);
     await sleep(13_000);
     const poMid = await inErp(app, ERP_STATE);
     await erpUp(app);
-    await sleep(HELD_MS + 2000 - 13_000); // the held reply lands
+    await docQuiet(app); // the held reply lands
     await expect.poll(async () => (await inErp(app, ERP_STATE)).supplier, { timeout: 30_000 }).toBe(NO_ADDRESS);
     const poEnd = await inErp(app, ERP_STATE);
     const poWarnings = await warnings(app);

@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { sleep, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, openNewDoc, report, docQuiet } from "./probe-helpers.js";
 
 const chrome = (app, js) => e2eCall(app, "execInView", "chrome", js);
 const toolbar = (app) => chrome(app, `({ login: !document.getElementById("btn-login").hidden, health: document.getElementById("health").textContent.replace(/\\s+/g, " ").trim(), cls: document.getElementById("health").className })`);
@@ -20,7 +20,7 @@ test("R4-1: a lapsed login shows Log in on focus, with the health dot still ok",
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(3000);
+    await docQuiet(app);
     const before = await toolbar(app);
     report("before", before);
     expect(before.login).toBe(false);

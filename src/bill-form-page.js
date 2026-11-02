@@ -3264,6 +3264,8 @@ export async function bootBillFormPage(api) {
     paintedBillDocName = nextDocName;
     } finally {
       painting = false;
+      // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
+      window.__docPaintedAt = Date.now();
       logFocus("paint-end", lastDoc && lastDoc.name ? String(lastDoc.name) : "");
       restoreBillFocus(savedFocus, { allowFocusVendor: vendorFocused });
     }

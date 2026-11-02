@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, deleteZzSuppliers, report } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, deleteZzSuppliers, report, docQuiet } from "./probe-helpers.js";
 
 const VENDOR = "ZZ R6B NO TERMS";
 const BILL_NO = `ZZR6B-${Date.now() % 100000}`;
@@ -29,14 +29,14 @@ test("Bill without terms: typed due date, save, change a line, save again", asyn
       "make-vendor",
       await inErp(app, `(async () => { try { const g = await frappe.xcall("frappe.client.get_list", { doctype: "Supplier Group", fields: ["name"], limit_page_length: 1 }); const d = await frappe.xcall("frappe.client.insert", { doc: { doctype: "Supplier", supplier_name: ${JSON.stringify(VENDOR)}, supplier_group: g[0] && g[0].name } }); return d.name; } catch (e) { return "ERR " + (e && e.message); } })()`, 20_000),
     );
-    await sleep(2000);
+    await docQuiet(app);
     report("set-vendor", brief(await call(app, `window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)})`)));
-    await sleep(2000);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setHeader("bill_no", ${JSON.stringify(BILL_NO)})`);
     report("due", brief(await call(app, `window.erpDoc.setHeader("due_date", "2026-12-15")`)));
     report("after-due", await schedule(app));
     await call(app, `window.erpDoc.setItem(0, "item_code", "SAMPLE-SKU-01")`);
-    await sleep(1500);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setItem(0, "qty", 1)`);
     await call(app, `window.erpDoc.setItem(0, "rate", 10)`);
     save1 = await call(app, `window.erpDoc.save({})`);

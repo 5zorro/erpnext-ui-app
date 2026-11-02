@@ -1932,6 +1932,8 @@ function paint(doc, snapScratch, opts = {}) {
   void ensureAtLeastOneItemRow(doc);
   } finally {
     painting = false;
+    // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
+    window.__docPaintedAt = Date.now();
     // Only when the repaint dropped focus: a box that survived keeps the clerk's typing untouched.
     const now = document.activeElement;
     if (focusAnchor && (!now || now === document.body)) restoreFocusAnchor(focusAnchor);

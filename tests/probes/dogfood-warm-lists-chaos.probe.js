@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, focusTestId, inDoc, inErp, openNewDoc, erpDown, erpUp, report } from "./probe-helpers.js";
+import { keys, focusTestId, inDoc, inErp, openNewDoc, erpDown, erpUp, report, docQuiet, searchDone } from "./probe-helpers.js";
 
 const dropdown = (app) =>
   inDoc(app, `(() => { const d = [...document.querySelectorAll(".link-dd")].find((x) => !x.hidden); return d ? { opts: [...d.querySelectorAll(".link-opt")].map((o) => o.textContent.trim()), searching: /Searching/.test(d.textContent) } : null; })()`);
@@ -30,7 +30,7 @@ test("Warm lists 1: under chaos, vendor and item lists come from the copy, in ER
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(5000); // the copies load at start
+    await docQuiet(app, { timeout: 60_000 }); // the copies load at start
     const liveVendors = await live(app, "Supplier", "S");
     const liveItems = await live(app, "Item", "SAMPLE");
     report("live", { vendors: liveVendors, items: liveItems });
@@ -38,7 +38,7 @@ test("Warm lists 1: under chaos, vendor and item lists come from the copy, in ER
     await erpDown(app, "search_link");
     await focusTestId(app, "bill-vendor");
     await keys(app, "S");
-    await sleep(800);
+    await searchDone(app);
     const vendors = await dropdown(app);
     report("vendor-list", vendors);
     await keys(app, "\x1b");
@@ -47,7 +47,7 @@ test("Warm lists 1: under chaos, vendor and item lists come from the copy, in ER
 
     await inDoc(app, `(() => { const c = document.querySelector('input[data-row="0"][data-field="item_code"]'); c.focus(); return true; })()`);
     await keys(app, "SAMPLE");
-    await sleep(800);
+    await searchDone(app);
     const items = await dropdown(app);
     report("item-list", items);
     expect(items && items.searching).toBe(false);

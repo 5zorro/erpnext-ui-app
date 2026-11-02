@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
+import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report, docQuiet } from "../probe-helpers.js";
 import { SCENES } from "../dogfood-scenes.js";
 import { cardOf } from "../method-panel-helpers.js";
 
@@ -23,7 +23,7 @@ test("R10c-1: a refused payment submit names the draft and lists it under Draft 
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await scene.make(app);
     report("scene", made);

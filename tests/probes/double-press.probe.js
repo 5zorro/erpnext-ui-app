@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, assertSandboxSite, report, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, assertSandboxSite, report, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 
 const VENDOR = "ZZ DF BRIDGE";
 const status = (app) => inDoc(app, `document.getElementById("status").textContent`);
@@ -17,7 +17,7 @@ const LINES = `(async () => { const s = await window.erpDoc.getSnapshot(); retur
 
 async function newBill(app) {
   await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-  await sleep(1500);
+  await docQuiet(app);
 }
 
 test("Allocate: a second Apply is held back and said; the toast runs it again", async () => {
@@ -84,12 +84,12 @@ test("Assign: a second Apply is held back and said", async () => {
     await newBill(app);
     await assertSandboxSite(app);
     await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return true; })()`, 60_000);
-    await sleep(2500);
+    await docQuiet(app);
     await inDoc(app, `(async () => { await window.erpDoc.setItem(0, "item_code", "ZZ-DF-SERVICE"); return true; })()`, 60_000);
-    await sleep(1500);
+    await docQuiet(app);
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(VENDOR)}; return true; })()`);
     await closeSourcePickers(app);
-    await sleep(1000);
+    await settle();
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-assign-0"]').click(); return true; })()`);
     const title = () => inDoc(app, `(() => { const t = document.querySelector('[data-testid="bill-allocation-picker"] [data-alloc-title]'); return t ? t.textContent : null; })()`);
     const pick = `document.querySelector('[data-testid="bill-allocation-picker"] [data-act="pick"]')`;
