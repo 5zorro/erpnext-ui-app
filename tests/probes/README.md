@@ -155,7 +155,9 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
   typing while something else is meant to stay in flight, `searchDone(app)` waits for the list
   only. Elsewhere, poll for the thing the next step reads (`expect.poll`); `settle()` (300 ms, a
   person's reaction time, 5zorro's figure) after a wait that already saw it; `leftHome(app)` after a Home tile.
-  A `sleep` stays only where time *is* the question: "nothing happens in the next 15 s", a fade
+  `docQuiet` also waits for the app's background reads in ERPNext (warm lists, a Bill's line
+  details): when the next step only needs the login (`openNewDoc` already waited for that), use
+  `settle()` — `docQuiet` there cost `r10b-board-bills` 4 s more. A `sleep` stays only where time *is* the question: "nothing happens in the next 15 s", a fade
   timed on purpose, a race the probe sets up, a clerk's pause it imitates — say which in a comment.
 - Right after a peek returns (Esc), the ERPNext form reloads for a few seconds and the Doc page's
   snapshot is not `ok` — poll `docState(app).snapOk` before reading or typing. Esc keys sent to the

@@ -45,6 +45,7 @@ import {
 } from "./bill-item-guard.js";
 import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState, lineTotalsColumns } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
+import { clearBeforeVendorSwitch as clearPageBeforeVendorSwitch } from "./vendor-change-ui.js";
 import {
   collectSourceRefsForProfile,
   sourceTermsDisplayBlocks,
@@ -1524,31 +1525,21 @@ function vendorIsMissing(name, attempt) {
   });
 }
 
-/**
- * Museum OI-200 (5zorro's option A): a switch from one vendor to another clears the whole
- * document before the new vendor is set — the Bill's way (`bill-form-page.js`
- * `clearBeforeVendorSwitch`): main warns first when the clerk has typed anything, Keep the default.
- * @param {string} v the vendor picked
- * @returns {Promise<boolean>} false when the clerk kept the old vendor or the clear failed
- */
-async function clearBeforeVendorSwitch(v) {
-  if (!api.clearForVendorChange) return true;
-  const box = supplierInput();
-  const kept = String(paintedHeaderValue("supplier") ?? "");
-  const res = await api.clearForVendorChange(v);
-  if (res && res.ok && !res.cleared) return true;
-  if (!res || !res.ok) {
-    if (box) box.value = (res && res.supplier) || kept;
-    if (res && res.kept) setStatus(`Kept ${res.supplier || kept}; nothing cleared.`);
-    else setStatus((res && res.reason) || `Could not clear the ${docTitle()} for the new vendor.`, "err");
-    logFocus("vendor-switch", res && res.kept ? "kept" : `failed: ${(res && res.reason) || ""}`);
-    return false;
-  }
-  logFocus("vendor-switch", "cleared");
-  noteUserEdit();
-  paint(res.doc, res.scratch || scratch);
-  if (box) box.value = v;
-  return true;
+/** Museum OI-200: before a vendor pick, a switch clears the whole document (`vendor-change-ui.js`). */
+function clearBeforeVendorSwitch(v) {
+  return clearPageBeforeVendorSwitch({
+    api,
+    value: v,
+    box: supplierInput(),
+    kept: String(paintedHeaderValue("supplier") ?? ""),
+    docLabel: docTitle(),
+    setStatus,
+    log: logFocus,
+    onCleared: (res) => {
+      noteUserEdit();
+      paint(res.doc, res.scratch || scratch);
+    },
+  });
 }
 
 function ensureHeaderLinkPickers() {

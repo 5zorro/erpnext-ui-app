@@ -33,8 +33,9 @@ export async function docQuiet(app, { quietMs = SETTLE_MS, timeout = 30_000 } = 
     const page = await inDoc(
       app,
       `(() => ({ busy: (window.erpDoc && window.erpDoc.inFlight ? window.erpDoc.inFlight() : 0) + document.querySelectorAll("[data-search-pending]").length, painted: window.__docPaintedAt || 0, now: Date.now() }))()`,
-    );
-    const ajax = await inErp(app, `(window.frappe && frappe.request && frappe.request.ajax_count) || 0`);
+    ).catch(() => "TIMEOUT");
+    // A read that throws (a page mid-reload) counts as "not calm yet", not a failed probe.
+    const ajax = await inErp(app, `(window.frappe && frappe.request && frappe.request.ajax_count) || 0`).catch(() => "TIMEOUT");
     const now = Date.now();
     const calm =
       page && page !== "TIMEOUT" && page.busy === 0 && ajax === 0 && page.now - page.painted >= quietMs;

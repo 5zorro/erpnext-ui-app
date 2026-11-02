@@ -300,7 +300,11 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
     setPendingFor(forText);
     showDropdown();
     dd.innerHTML = `<div class="link-muted">Searching ${escapeHtml(doctype)}…</div>`;
-    const res = await api.searchLink(doctype, q || "");
+    // A search that throws (the main process's handler failed) answers like a refused one: the
+    // list says so and a held Tab / Enter is replayed, instead of "Searching…" forever.
+    const res = await Promise.resolve()
+      .then(() => api.searchLink(doctype, q || ""))
+      .catch((e) => ({ ok: false, reason: `Search failed: ${String((e && e.message) || e)}` }));
     // A newer search owns the box; this answer is for text no longer there.
     if (seq !== searchSeq) return;
     setPendingFor(null);

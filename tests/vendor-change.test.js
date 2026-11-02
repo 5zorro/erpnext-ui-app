@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { isVendorSwitch, vendorChangeLosses, vendorChangeDialogSpec } from "../src/vendor-change.js";
+import { clearBeforeVendorSwitch } from "../src/vendor-change-ui.js";
 
 /** Museum OI-200 (5zorro's option A, 2026-11-01). */
 
@@ -76,5 +77,48 @@ describe("vendorChangeDialogSpec", () => {
     assert.match(s.detail, /screenshot/);
     assert.deepEqual(s.buttons, ["Keep ALPINE SUPPLY CO", "Change vendor and clear"]);
     assert.deepEqual(s.actions, ["keep", "clear"]);
+  });
+});
+
+describe("clearBeforeVendorSwitch (the page half)", () => {
+  const run = async (answer) => {
+    const said = [];
+    const logged = [];
+    const cleared = [];
+    const box = { value: "SUMMIT TRADERS" };
+    const go = await clearBeforeVendorSwitch({
+      api: { clearForVendorChange: async () => (answer instanceof Error ? Promise.reject(answer) : answer) },
+      value: "SUMMIT TRADERS",
+      box,
+      kept: "ALPINE SUPPLY CO",
+      docLabel: "bill",
+      setStatus: (t, k) => said.push([t, k]),
+      log: (e, d) => logged.push(`${e} ${d}`),
+      onCleared: (res) => cleared.push(res.doc),
+    });
+    return { go, said, logged, cleared, box: box.value };
+  };
+
+  it("a first pick (nothing to clear) goes on and touches nothing", async () => {
+    assert.deepEqual(await run({ ok: true, cleared: false }), { go: true, said: [], logged: [], cleared: [], box: "SUMMIT TRADERS" });
+  });
+  it("Keep: stops, puts the old vendor back in the box, says nothing was cleared", async () => {
+    const r = await run({ ok: false, kept: true, supplier: "ALPINE SUPPLY CO" });
+    assert.equal(r.go, false);
+    assert.equal(r.box, "ALPINE SUPPLY CO");
+    assert.deepEqual(r.said, [["Kept ALPINE SUPPLY CO; nothing cleared.", undefined]]);
+  });
+  it("cleared: repaints, keeps the new vendor in the box, goes on", async () => {
+    const r = await run({ ok: true, cleared: true, doc: { name: "new-1" } });
+    assert.equal(r.go, true);
+    assert.deepEqual(r.cleared, [{ name: "new-1" }]);
+    assert.equal(r.box, "SUMMIT TRADERS");
+  });
+  it("a call that throws stops the switch: no vendor is set on a half-cleared document", async () => {
+    const r = await run(new Error("handler gone"));
+    assert.equal(r.go, false);
+    assert.equal(r.box, "ALPINE SUPPLY CO");
+    assert.match(r.said[0][0], /Could not clear the bill for the new vendor: handler gone/);
+    assert.equal(r.said[0][1], "err");
   });
 });

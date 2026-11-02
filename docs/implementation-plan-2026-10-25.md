@@ -17,7 +17,9 @@
 > performance deep dive over every probe's times and charts (added 2026-10-26, *Order*): **run
 > 2026-11-01, report in § *3b — the performance report*; his picks the same day: finding 1 (a
 > vendor with no address waited ~9 s) and finding 2 (the save-drain timer) built, finding 7 (the
-> probes' fixed sleeps) under way, the `@nav` matrix done (28 → 13 min); 3–6 left as reported.**
+> probes' fixed sleeps) done: the `@nav` matrix (28 → 13 min), then every other probe waits for the
+> page to be quiet (`docQuiet`, 47 probes −28%); OI-200 (a vendor switch clears the document) built
+> alongside; 3–6 left as reported. `nav:check` / `dogfood:check` not re-run whole since.**
 > **R2-5 started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and
 > payment settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves are next
 > (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
