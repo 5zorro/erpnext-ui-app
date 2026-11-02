@@ -21,8 +21,10 @@
 > page to be quiet (`docQuiet`, 47 probes −28%); OI-200 (a vendor switch clears the document) built
 > alongside; 3–6 left as reported. `nav:check` / `dogfood:check` not re-run whole since.**
 > **R2-5 started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and
-> payment settings moved to `electron/ipc/`; the bridge / doc-form / Bill moves are next
-> (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> payment settings moved to `electron/ipc/`; after 3b, `nav:check` (109/109) and `dogfood:check`
+> (one probe's wait fixed) ran whole on 2026-11-01, then re-link and method change moved
+> (`electron/ipc/relink-method-change.js`). Next in the order: health / incidents, the warm pick
+> lists, then doc-form and Bill with the bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -390,7 +392,17 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    lens prefs and stay in main.js with the other navigation), payment settings
    (`electron/ipc/payment-settings.js`: the payment batch prefs and the delay calendar; the
    payment-direction prefs stay, navigation writes them; proven by the probe
-   `pay-settings-doors`, the same output before and after); main.js 13,534 → 12,419 lines. **How each move
+   `pay-settings-doors`, the same output before and after); main.js 13,534 → 12,419 lines.
+   Re-link and method change (`electron/ipc/relink-method-change.js`, 2026-11-01): the vendor's
+   re-link facts, one re-link, the auto re-links and their reviews, the method-change facts and
+   run; it borrows `navDebug`, `erpEval` and `voidAndAmendDoc` (void and amend stays in main.js,
+   the Doc page uses it too). No spec or probe drove these doors, so the new probe
+   `relink-method-doors` drives every one that writes nothing (a re-link that posts needs a loose
+   payment the sandbox does not have; its reconcile, flag and comment calls are reached only to
+   their refusals): 16 lines, the same before and after. `dogfood-r9-batch` (a real batch method
+   change through the panel) passes on the moved code. main.js 12,549 → 11,926 lines. ESLint is
+   in the repo now (plan 10-31) but has no config yet; the import check was done by reading the
+   modules' `export`s, and the module's free names by hand. **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js

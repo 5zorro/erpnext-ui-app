@@ -109,6 +109,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "edit-submitted",
     label: "Editing a submitted document — void and amend, method change, payment re-link",
     modules: ["doc-actions", "doc-action-flow", "void-amend-flow", "mode-change-plan", "payment-relink", "erp-refusal-reason"],
+    paths: ["electron/ipc/relink-method-change.js"],
     e2e: [],
   },
   {
