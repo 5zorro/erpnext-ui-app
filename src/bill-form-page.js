@@ -125,6 +125,7 @@ import {
   moneyOrSum,
 } from "../src/money.js";
 import {
+  isCreatePaymentTermsLinkAction,
   linkDoctypeForBillField,
 } from "../src/link-search.js";
 import {
