@@ -4,7 +4,7 @@
  * Written for plan 2026-10-25 R2-5's health / incidents move: run before and after, the DOOR lines
  * must match. Nothing here writes to ERPNext. The two incident notes go to this run's own profile
  * folder; the clipboard and the message boxes are stood in for in the main process (the clerk's
- * clipboard is never touched, no box waits for a click). The run's profile copies the clerk's
+ * clipboard and browser are never touched, no box waits for a click). The run's profile copies the clerk's
  * prefs, IT recovery settings included: where Autofix is set up, the Autofix door reaches its
  * "Start ERPNext?" box, which the stand-in always cancels — a probe never runs IT's script. (So the
  * Autofix line differs between a machine with Autofix set up and one without; compare runs on one
@@ -42,7 +42,7 @@ async function gone(app, file) {
 
 /** Message boxes answer `response`; the clipboard records instead of writing. */
 const standIns = (app, response) =>
-  app.evaluate(({ dialog, clipboard }, r) => {
+  app.evaluate(({ dialog, clipboard, shell }, r) => {
     globalThis.__boxes = globalThis.__boxes || [];
     dialog.showMessageBox = async (...args) => {
       const o = args.find((a) => a && typeof a === "object" && "buttons" in a) || {};
@@ -53,6 +53,8 @@ const standIns = (app, response) =>
     };
     if (!globalThis.__clipWrapped) {
       clipboard.writeText = (t) => { globalThis.__clip = String(t); };
+      // Notify IT (where set up) and Feedback's "Open in browser" would open the clerk's browser.
+      shell.openExternal = async (u) => { globalThis.__opened = String(u); };
       globalThis.__clipWrapped = true;
     }
   }, response);

@@ -745,11 +745,11 @@ the 'i can't work while the probes are running'"*).**
   so a run from a `git worktree` queues with runs from the main folder.
 - **Checks from a snapshot, while the code is edited.** A probe launches the app from the folder's
   live files, so editing during a long check (`dogfood:check`, `nav:check`) changes what the later
-  probes test. Run it from a frozen copy instead:
-  `git worktree add --detach <dir> $(git stash create || git rev-parse HEAD)` (the working tree,
-  uncommitted changes included, without touching it or the stash list), then
-  `ln -s "$PWD/node_modules" <dir>/node_modules`, and run the check in `<dir>`. Afterwards
-  `rm <dir>/node_modules && git worktree remove <dir>`. Tried 2026-11-02: a probe from the copy and
+  probes test. Run it from a frozen copy instead: `npm run snapshot -- <dir>` (a `git worktree` of
+  everything not ignored, new files included, made through a temporary index — `git stash create`
+  would leave new files out; the real index and stash are untouched; `node_modules` and
+  `test-logs` are links to the main folder's, so the run's logs stay here), run the check in
+  `<dir>`, then `npm run snapshot -- --remove <dir>`. Tried 2026-11-02: a probe from a copy and
   one from the main folder queued on the shared lock, both passed.
 - **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
   A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
@@ -957,6 +957,7 @@ cd ~/erpnext-ui-app && npm test && npm start
 | Command | What |
 |---|---|
 | `npm test` | Required before every push; pure unit tests (`node --test`), then the lint check. Every run is logged to `test-logs/` (untracked) |
+| `npm run snapshot -- <dir>` · `-- --remove <dir>` | A frozen copy of the working tree to run a long check from while the code is edited (§ Test strategy) |
 | `npm run lint` | The lint check alone: ESLint's recommended rules plus our import rule over the whole repo (`eslint.config.js` gives each setting's reason; plan 2026-10-31). A failure fails `npm test`, here and in CI |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
 | `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`; a probe waits for the page with `docQuiet` instead wherever time is not the question — `tests/probes/README.md` § *Writing one*) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |

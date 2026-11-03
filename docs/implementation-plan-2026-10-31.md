@@ -19,7 +19,11 @@
 > probes, scripts, specs, `ops/` and `pwa/` (`npm run lint` = `eslint .`; the import rule maps the
 > scanner's `./lib/` to `src/receiving/`, as its proxy does), and the stale `allowScripts` entry is
 > removed (no installed package has an install script; `npm install-scripts ls` is clean). Plan
-> 10-31's steps are all done. The dependency policy (Steps 1–2)
+> 10-31's steps are all done. Lint costs ~7 s on top of the ~23 s unit run (2026-11-02); ESLint's
+> `--cache` is left off on purpose: it re-checks a file only when that file changes, so a module
+> that stops exporting a name would leave its importers' cached "clean" standing — the very slip
+> the import rule is for. A lint failure counts in the run's row of `runs.tsv` and its report is
+> kept in the run's log. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
