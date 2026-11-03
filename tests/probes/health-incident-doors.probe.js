@@ -4,7 +4,11 @@
  * Written for plan 2026-10-25 R2-5's health / incidents move: run before and after, the DOOR lines
  * must match. Nothing here writes to ERPNext. The two incident notes go to this run's own profile
  * folder; the clipboard and the message boxes are stood in for in the main process (the clerk's
- * clipboard is never touched, no box waits for a click).
+ * clipboard is never touched, no box waits for a click). The run's profile copies the clerk's
+ * prefs, IT recovery settings included: where Autofix is set up, the Autofix door reaches its
+ * "Start ERPNext?" box, which the stand-in always cancels — a probe never runs IT's script. (So the
+ * Autofix line differs between a machine with Autofix set up and one without; compare runs on one
+ * machine.)
  *
  * Acts as the AP clerk.
  */
@@ -43,6 +47,8 @@ const standIns = (app, response) =>
     dialog.showMessageBox = async (...args) => {
       const o = args.find((a) => a && typeof a === "object" && "buttons" in a) || {};
       globalThis.__boxes.push({ title: o.title || "", buttons: o.buttons || [] });
+      // Never "Run script": the profile may hold the clerk's real Autofix setup.
+      if (/Start ERPNext/i.test(o.title || "") || (o.buttons || []).includes("Run script")) return { response: o.cancelId ?? 1 };
       return { response: r };
     };
     if (!globalThis.__clipWrapped) {

@@ -7,7 +7,8 @@
  *
  * Prints one submitted Bill to this machine's CUPS printer "PDF" (it writes to ~/PDF/), as image,
  * through the Doc page's own call; then the run's trail must show no `print-raster-fail`. The
- * file it writes is deleted after. Skips when no printer "PDF" exists (`lpstat -p PDF`).
+ * file its own job writes is deleted after (only that one: CUPS names it `…-job_<n>.pdf`). Skips
+ * when no printer "PDF" exists (`lpstat -p PDF`).
  *
  * Acts as the AP clerk. Makes no records.
  */
@@ -44,6 +45,8 @@ test("Print as image flattens the paper instead of printing the PDF as it is", a
   test.setTimeout(180_000);
   let app = null;
   let clerk = null;
+  /** This run's CUPS job numbers ("PDF-7" → 7): only their files are deleted. */
+  let jobs = [];
   const before = pdfsNow();
   try {
     app = await launchShell();
@@ -69,6 +72,7 @@ test("Print as image flattens the paper instead of printing the PDF as it is", a
         const e = JSON.parse(l);
         return `${e.event}: ${e.detail}`;
       });
+    jobs = ((res && res.jobs) || []).map((j) => String(j.id || "").split("-").pop()).filter(Boolean);
     report("printed", { bill, res, trail });
     expect(trail.filter((l) => l.startsWith("print-raster-fail"))).toEqual([]);
     expect(res && res.ok).toBe(true);
@@ -77,8 +81,8 @@ test("Print as image flattens the paper instead of printing the PDF as it is", a
     if (app) await app.close().catch(() => {});
     // CUPS writes the file a moment after the job is queued.
     for (let i = 0; i < 20; i += 1) {
-      const made = [...pdfsNow()].filter((f) => !before.has(f));
-      if (made.length) {
+      const made = [...pdfsNow()].filter((f) => !before.has(f) && jobs.some((n) => f.endsWith(`-job_${n}.pdf`)));
+      if (!jobs.length || made.length) {
         for (const f of made) fs.rmSync(path.join(OUT_DIR, f), { force: true });
         report("cleanup", made);
         break;
