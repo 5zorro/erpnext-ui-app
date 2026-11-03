@@ -58,6 +58,9 @@ export function restoreBillFocus(saved, opts = {}) {
     // The repaint rebuilt that line: the same row and field, as a new element (5zorro 2026-10-11 —
     // a click into a line while a new bill loaded was dropped by the next repaint).
     if (!cap.field || cap.row == null) return;
+    // The line rows already put the clerk back, by line rather than index, with their typing
+    // (src/doc-form-item-rows-ui.js, museum OI-202): leave it there.
+    if (isBillFormFocusTarget(document.activeElement) && document.activeElement !== document.body) return;
     const again = document.querySelector(`[data-row="${cap.row}"][data-field="${cap.field}"]`);
     if (!again) return;
     el = again;

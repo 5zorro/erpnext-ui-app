@@ -321,7 +321,7 @@ test.describe("scaffold: Bill taxes and charges (DF-02)", () => {
     const after = await inDoc(app, LINES);
     expect(after.taxes).toContainEqual(["Deduct", 14.28]);
     expect(after.gt).toBe(183.28); // charge in, offset out: the vendor total stays 169 + the 14.28 charge row
-    expect(await inDoc(app, `document.getElementById("status").textContent`)).toMatch(/exactly/);
+    expect(await inDoc(app, `document.getElementById("status").textContent`)).toMatch(/^Allocated \$14\.28 into item costs, exactly/);
   });
 
   // 5zorro 2026-10-11: the ribbon was exactly the field's width; a long tape in a narrow cell spilled.

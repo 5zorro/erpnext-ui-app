@@ -9,7 +9,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser } from "./probe-user.js";
 
 test("DF-03: after Select PO → NIC, focus is on the PO's Date", async () => {
@@ -22,20 +22,20 @@ test("DF-03: after Select PO → NIC, focus is on the PO's Date", async () => {
     await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; });
     clerk = await loginAsProbeUser(app, ["Purchase User"]);
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(2500);
+    await docQuiet(app);
     await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO"); return r && r.ok; })()`, 30_000);
-    await sleep(3000);
+    await docQuiet(app);
     await repaintDoc(app);
-    await sleep(1000);
+    await docQuiet(app);
     await closeSourcePickers(app);
-    await sleep(800);
+    await settle();
     await inDoc(app, `(() => { document.querySelector('[data-testid="doc-select-source"]').click(); return true; })()`);
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="doc-source-modal"]')`), { timeout: 20_000 }).toBe(true);
-    await sleep(1500);
+    await docQuiet(app);
     const clicked = await inDoc(app, `(() => { const m = document.querySelector('[data-testid="doc-source-modal"]'); const nic = [...m.querySelectorAll(".src-item")].find((b) => /^NIC/.test(b.textContent.trim())); if (!nic) return "no nic"; nic.click(); m.querySelector('[data-act="pick"]').click(); return "ok"; })()`);
     report("clicked", clicked);
     expect(clicked).toBe("ok");
-    await sleep(1500);
+    await docQuiet(app);
     const active = await inDoc(app, `(() => { const a = document.activeElement; return a ? (a.getAttribute("data-field") || a.tagName) : null; })()`);
     report("active", active);
     expect(active).toBe("transaction_date");

@@ -17,6 +17,20 @@ OI-108 (schema research, superseded by `src/trace-links.js`).
 > pages (stages 3–6) are not built: they need 5zorro's data to be checked, and stage 4 edits the
 > Find page the 09-26 plan built, which is still being dogfooded. Paper DF-25a…i is in the pack, so
 > the data can be typed before the pages exist.
+>
+> **Checked again 2026-10-31**, after plan 10-25's refactors: the trace's 95 unit tests pass and the
+> live probe still answers 144/144, so stages 1–2 need nothing. Still blocking the pages: (a) the
+> DF-25 chain is **not on the sandbox** (no LAKESIDE MARINE SUPPLY customer; it was reinstalled
+> blank 09-28), and DF-25 has no dogfood scene, which every new paper has had since the rule that
+> dogfood setup is automated; (b) stage 4 waits on the 09-26 Find-page dogfood. Order to keep:
+> stage 3 adds the `trace-fetch` IPC to `electron/main.js`, which plan 10-25 R2-5 is about to split
+> by concern, so build stage 3 after R2-5 (or straight into its new layout), not before.
+>
+> **2026-11-01: (a) is half done.** 5zorro types DF-25 himself; its scene is built
+> (`npm run dogfood:setup -- DF-25`: customer LAKESIDE MARINE SUPPLY, vendor CASCADE FITTINGS CO.,
+> each with the paper's address, stock items SAMPLE-SKU-10 … 13 and non-stock PALLET-WRAP; made
+> on the sandbox the same day). DF-25f's check now says the posting date is the day the Bill is
+> saved (his 2026-10-10 rule; the paper predates it). Left: his typing.
 
 ---
 

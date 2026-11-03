@@ -8,14 +8,14 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inErp, openNewDoc, report } from "./probe-helpers.js";
+import { inErp, openNewDoc, report, settle } from "./probe-helpers.js";
 
 test("the board's bills add up to what ERPNext says each invoice owes", async () => {
   const app = await launchShell();
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
-    await sleep(1500);
+    await settle();
     const t0 = Date.now();
     const res = await app.evaluate(async ({ ipcMain }) => ipcMain._invokeHandlers.get("get-outstanding-bills")({}));
     const ms = Date.now() - t0;

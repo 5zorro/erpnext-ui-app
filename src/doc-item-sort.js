@@ -30,6 +30,28 @@ export function formatDocLineNumber(rowIndex, item) {
 }
 
 /**
+ * Which columns the totals row's Σ Qty and Item subtotal sit under. The Amount column by its label
+ * first: a display-only column is only the fallback, since the Line column is display-only too and
+ * comes first (the subtotal sat under Line on every form with one).
+ * @param {Array<{ label?: string, field?: string|null, displayOnly?: boolean }>|null|undefined} cols
+ * @returns {{ qtyIdx: number, amtIdx: number }}
+ */
+export function lineTotalsColumns(cols) {
+  const list = Array.isArray(cols) ? cols : [];
+  const qtyIdx = list.findIndex((c) => c && c.field === "qty");
+  let amtIdx = list.findIndex((c) => c && /^amount$/i.test(c.label || ""));
+  if (amtIdx < 0) {
+    amtIdx = list.findIndex(
+      (c) => c && c.sortKey !== "lineNo" && (c.displayOnly || (c.label && /amount/i.test(c.label))),
+    );
+  }
+  return {
+    qtyIdx: qtyIdx >= 0 ? qtyIdx : 2,
+    amtIdx: amtIdx >= 0 ? amtIdx : Math.max(0, list.length - 2),
+  };
+}
+
+/**
  * @param {Array<{ label?: string, sortKey?: string }>|null|undefined} cols
  * @returns {Array<{ label: string, sortKey: string }>}
  */

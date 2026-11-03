@@ -100,3 +100,25 @@ export function supplierHeaderUnchanged(doc, next, valuesEqual) {
   if (valuesEqual(doc.supplier_name, next, { kind: "text" })) return true;
   return false;
 }
+
+/**
+ * What a pick in the Bill's source picker means, with Credit memo off (plan 2026-10-25 R6a-2):
+ * NIC (no source, lines by hand), pull the checked sources, or nothing checked yet.
+ * @param {{ mode?: string, items?: Array<{ kind: string, name?: string }> }|null|undefined} choice
+ * @returns {{ action: "nic" } | { action: "warn" } | { action: "merge", payload: Array<{ kind: string, name?: string }>, labels: string }}
+ */
+export function billSourceChoiceAction(choice) {
+  const mode = choice && choice.mode;
+  const items = (choice && choice.items) || [];
+  if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) return { action: "nic" };
+  if (mode !== "merge" || !items.length) return { action: "warn" };
+  return {
+    action: "merge",
+    payload: items.map((it) => ({ kind: it.kind, name: it.name })),
+    labels: items.map((it) => it.name || it.kind).join(", "),
+  };
+}
+
+/** The status line after a pull: one source by name, several by count. */
+export const billSourcePulledStatus = (payload) =>
+  payload.length === 1 ? `Pulled from ${payload[0].name}.` : `Pulled from ${payload.length} sources.`;

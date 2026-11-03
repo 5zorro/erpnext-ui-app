@@ -2,7 +2,7 @@
  * Steps every probe needs (README.md here). Launch and `__erpE2e` come from `e2e/helpers.js`.
  */
 import { expect } from "@playwright/test";
-import { e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { e2eCall, e2eGet, launchShell } from "../../e2e/helpers.js";
 import { noteWait, timed } from "../../e2e/test-timing.js";
 
 /** A deliberate pause: counted on the test's timing as its own wait, not the app's work. */
@@ -10,6 +10,88 @@ export const sleep = (ms) => {
   noteWait(ms);
   return new Promise((r) => setTimeout(r, ms));
 };
+
+/**
+ * A person's reaction time (5zorro, plan 10-25 3b finding 7): how long the Doc page must stay
+ * quiet before a probe acts again, and the pause after a wait that already saw what it needs.
+ */
+export const SETTLE_MS = 300;
+export const settle = () => sleep(SETTLE_MS);
+
+/**
+ * Wait until the Doc page is quiet: no call to the main process waiting for its answer
+ * (`erpDoc.inFlight()`), no pick list search pending (`data-search-pending`), ERPNext with no request out (`frappe.request.ajax_count`), and no repaint
+ * for `quietMs` — all three held for `quietMs`. What a fixed `sleep` after an action was guessing
+ * at. Not for proving that nothing happens later (a timer the app sets is not "in flight"): those
+ * windows stay sleeps. Returns how long it waited.
+ * @param {{ quietMs?: number, timeout?: number }} [o]
+ */
+export async function docQuiet(app, { quietMs = SETTLE_MS, timeout = 30_000 } = {}) {
+  const t0 = Date.now();
+  let calmSince = 0;
+  for (;;) {
+    const page = await inDoc(
+      app,
+      `(() => ({ busy: (window.erpDoc && window.erpDoc.inFlight ? window.erpDoc.inFlight() : 0) + document.querySelectorAll("[data-search-pending]").length, painted: window.__docPaintedAt || 0, now: Date.now() }))()`,
+    ).catch(() => "TIMEOUT");
+    // A read that throws (a page mid-reload) counts as "not calm yet", not a failed probe.
+    const ajax = await inErp(app, `(window.frappe && frappe.request && frappe.request.ajax_count) || 0`).catch(() => "TIMEOUT");
+    const now = Date.now();
+    const calm =
+      page && page !== "TIMEOUT" && page.busy === 0 && ajax === 0 && page.now - page.painted >= quietMs;
+    if (calm) {
+      if (!calmSince) calmSince = now;
+      if (now - calmSince >= quietMs) return now - t0;
+    } else {
+      calmSince = 0;
+    }
+    if (now - t0 > timeout) throw new Error(`docQuiet: the Doc page stayed busy ${timeout} ms (${JSON.stringify({ page, ajax })})`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/**
+ * Wait until no pick list search is pending on the Doc page (`data-search-pending`): the list for
+ * what was typed is showing. For a probe that types while something else is meant to be still in
+ * flight, where `docQuiet` would wait for that too.
+ */
+export const searchDone = (app, timeout = 15_000) =>
+  expect
+    .poll(() => inDoc(app, `document.querySelectorAll("[data-search-pending]").length`), { timeout, intervals: [50] })
+    .toBe(0);
+
+/**
+ * Launch the app under chaos lag (each ERPNext call `ms` late, `pct` % of the time), unless the run
+ * already set its own. The setting is for this launch only: the next probe in the same run does not
+ * inherit it (two probes once set it and never put it back).
+ * @param {{ ms?: string, pct?: string }} [chaos]
+ */
+export async function launchWithChaos({ ms = "250", pct = "45" } = {}) {
+  const before = { ERP_CHAOS_LAG_MS: process.env.ERP_CHAOS_LAG_MS, ERP_CHAOS_LAG_PCT: process.env.ERP_CHAOS_LAG_PCT };
+  process.env.ERP_CHAOS_LAG_MS = before.ERP_CHAOS_LAG_MS || ms;
+  process.env.ERP_CHAOS_LAG_PCT = before.ERP_CHAOS_LAG_PCT || pct;
+  try {
+    return await launchShell();
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+/**
+ * Wait until the warm pick-list copies for `doctypes` are loaded. Main loads them on its own 2 s
+ * after a Doc page opens, so `docQuiet` (the page and ERPNext) cannot see them; a probe that types
+ * with ERPNext's live search refused needs them first.
+ */
+export const warmCopies = (app, doctypes = ["Supplier", "Item"], timeout = 30_000) =>
+  expect
+    .poll(async () => {
+      const have = await e2eCall(app, "linkListsLoaded");
+      return doctypes.every((d) => have.includes(d));
+    }, { timeout, intervals: [100] })
+    .toBe(true);
 
 /** Run `js` in a view, giving up after `ms` (a stalled ERPNext page must not hang the probe). */
 function inView(app, view, js, ms = 8000) {
@@ -98,9 +180,15 @@ export async function assertSandboxSite(app) {
 export const inBoard = (app, js, ms) => inView(app, "payOutstanding", js, ms);
 
 /** Open Pay Outstanding from Home (its Doc lens) and wait for vendor cards (`{ cards: false }`: for the page only). */
+/** A Home tile was clicked: wait until the shell has left Home (the board, or Vanilla's page). */
+export const leftHome = async (app) => {
+  await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 15_000 }).not.toBe("home");
+  await settle();
+};
+
 export async function openBoard(app, { cards = true } = {}) {
   await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
-  await sleep(3000);
+  await leftHome(app);
   if ((await e2eGet(app, "surfaceMode")) !== "pay-outstanding") {
     await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
   }

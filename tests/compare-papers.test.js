@@ -19,6 +19,7 @@ import {
 } from "../src/compare-papers.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mainProcessSource } from "./main-process-source.js";
 
 // 5zorro 2026-10-03: compare a bill against scanned / photographed / written .png .pdf .docx, all as
 // if one PDF, to the right of the bill.
@@ -169,8 +170,8 @@ describe("frappeDownloadPath", () => {
     assert.match(paperCantShow("other", "setup.exe"), /download it/);
   });
 
-  it("main.js gates Open on openablePaper and marks Windows copies as from the internet", () => {
-    const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
+  it("the main process gates Open on openablePaper and marks Windows copies as from the internet", () => {
+    const main = mainProcessSource();
     const start = main.indexOf("async function openPaper(");
     const body = main.slice(start, main.indexOf("\n}\n", start));
     assert.ok(body.indexOf("openablePaper(r.fileName)") > 0 && body.indexOf("openablePaper(") < body.indexOf("shell.openPath"));
@@ -203,7 +204,7 @@ describe("frappeDownloadPath", () => {
   });
 
   it("Open, Download and Save as ZIP use the larger cap; only the preview keeps 25 MB", () => {
-    const main = readFileSync(fileURLToPath(new URL("../electron/main.js", import.meta.url)), "utf8");
+    const main = mainProcessSource();
     const calls = main.match(/paperBytes\([^)]*\)/g) || [];
     const withCap = calls.filter((c) => /MAX_OPEN_BYTES/.test(c));
     assert.equal(withCap.length, 3, calls.join(" | "));

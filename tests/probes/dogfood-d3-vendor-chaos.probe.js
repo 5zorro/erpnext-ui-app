@@ -6,17 +6,15 @@
  * and does the vendor's source picker open within ~10 s? The *feel* is 5zorro's. Makes no records.
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, focusTestId, inDoc, inErp, openNewDoc, report } from "./probe-helpers.js";
+import { waitForE2eApi } from "../../e2e/helpers.js";
+import { sleep, keys, focusTestId, inDoc, inErp, openNewDoc, report, docQuiet, launchWithChaos } from "./probe-helpers.js";
 
 test("D3: setting a vendor under chaos leaves the page responsive and opens its sources", async () => {
-  process.env.ERP_CHAOS_LAG_MS = process.env.ERP_CHAOS_LAG_MS || "250";
-  process.env.ERP_CHAOS_LAG_PCT = process.env.ERP_CHAOS_LAG_PCT || "45";
-  const app = await launchShell();
+  const app = await launchWithChaos();
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(4000);
+    await docQuiet(app);
     await focusTestId(app, "bill-vendor");
     await keys(app, "ALPINE SUPPLY CO");
     await sleep(600);

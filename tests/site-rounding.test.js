@@ -184,7 +184,7 @@ describe("wiring", () => {
   it("main reads the site's rounding from the ERPNext page's boot, the pages can ask for it", () => {
     assert.match(main, /ipcMain\.handle\("calc-site-rounding"/);
     assert.match(main, /frappe\.boot && frappe\.boot\.sysdefaults/);
-    assert.match(preload, /getSiteRounding: \(\) => ipcRenderer\.invoke\("calc-site-rounding"\)/);
+    assert.match(preload, /getSiteRounding: \(\) => invoke\("calc-site-rounding"\)/);
     assert.match(adapter, /getSiteRounding:/);
   });
   for (const page of ["doc-form-page.js", "bill-form-page.js"]) {

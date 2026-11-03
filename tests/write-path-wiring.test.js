@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mainProcessSource } from "./main-process-source.js";
 
 /**
  * Review 10-19 session 2 (R9, R10c, R6c): the fixes that live in main.js wiring, where a pure test
@@ -11,7 +12,8 @@ import { fileURLToPath } from "node:url";
  */
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const main = read("../electron/main.js");
+// main.js and the families split out of it (electron/ipc/*.js, plan 2026-10-25 R2-5).
+const main = mainProcessSource();
 const preload = read("../electron/pay-outstanding-preload.cjs");
 const board = read("../electron/pay-outstanding.src.html");
 
@@ -33,8 +35,10 @@ function fnBody(src, name) {
 function handlerBody(src, channel) {
   const at = src.indexOf(`ipcMain.handle("${channel}"`);
   assert.ok(at >= 0, `${channel} not found`);
-  const next = src.indexOf("\nipcMain.", at + 10);
-  return src.slice(at, next < 0 ? undefined : next);
+  // The next handler, at any indent (a moved family registers its handlers inside a function).
+  const rest = src.slice(at + 10);
+  const next = rest.search(/\n\s*ipcMain\./);
+  return src.slice(at, next < 0 ? undefined : at + 10 + next);
 }
 
 describe("R9-2: a failure before anything was sent is labelled, so nothing else reads as 'nothing changed'", () => {

@@ -830,6 +830,30 @@ flag, so each switch added another click listener and one click ran the sort twi
 outlives it is wired once; a layout switch resets state (the sort), never listeners.
 **Proof:** `e2e/scaffold-form-switch.spec.js` (failed on the code before: "Description ▼").
 
+## G25 — A header box keeps old text after the shell itself wrote that field (2026-10-31)
+
+**Observed:** on a credit memo, *Clear link* on an informal Bill link said "cleared", but Remarks
+still read "Linked Bill: …"; the next Sales Order link wrote the cleared Bill back (museum OI-193).
+**Why:** `paint()` guards the header boxes (`src/bill-header-paint.js`
+`shouldPreserveHeaderInputDuringPaint`): a box whose text differs from ERPNext's is kept, as if the
+clerk were typing there — unless it is blank or the document changed identity. Right while the
+clerk types, wrong after the shell's own write: the box goes stale, and code that builds the next
+value from the box (`writeInformalLinkToken` reads `el.memo.value`) writes stale text back.
+**Rule:** after the shell writes a header field from the clerk's click (not their typing), paint
+that one box with `{ forcePaint: true }`. Not `forceHeaderPaint` on the whole paint: that would
+overwrite a header write still on its way.
+**Proof:** `tests/probes/informal-link-remarks.probe.js` (failed on the code before at the clear).
+
+## G26 — The status line is text: money in it uses `formatUsdAmount`, not the `…Html` one (2026-10-31)
+
+**Observed:** every Allocate said "Allocated $14.<span class="money-cents">28</span> …" (OI-195).
+**Why:** `formatUsdAmountHtml` underlines the cents with markup for tables and cells written as
+HTML; `setStatus` writes text, so the markup shows as code.
+**Rule:** text (status line, `textContent`, titles) gets `formatUsdAmount`; only HTML written with
+`innerHTML` gets the `…Html` formatters.
+**Proof:** `tests/bill-charge-allocate.test.js` "the Allocate status is plain text"; the e2e
+Allocate test checks the exact status.
+
 ## ERPNext behaviour verified from source (read the bullet you need; don't re-derive)
 
 Facts about the ERPNext / Frappe this shell drives, read from the source at the sandbox's tags
@@ -838,6 +862,28 @@ establish. Moved here from the local agent notes 2026-10-25 (review 10-19 R15-1)
 off this machine has them too. `HANDOFF.md` § *ERP site settings this shell reads* is the table of
 the settings among them.
 
+ - **Picking a vendor fills its address in one reply** (2026-11-01, v16 `purchase_invoice.js` `supplier()`,
+   `public/js/utils/party.js` `get_party_details`, `accounts/party.py` `set_address_details`; frappe
+   `request.js`, `model.js`). The trigger sends one `get_party_details` call before `set_value`
+   resolves; the reply carries `address_display` (rendered from the vendor's default address, empty
+   when there is none) with the rest; `frm.updating_party_details` is true while the reply is written.
+   `frappe.request.ajax_count` drops at `ajaxComplete`, before that write ends, so "quiet" needs both.
+   The bridge's vendor wait ends on that (plan 10-25 3b finding 1; probe `vendor-no-address`).
+- **A late vendor-details reply puts its vendor back** (2026-11-01, v16 `public/js/utils/party.js`
+  `get_party_details` callback; `accounts/party.py` returns the party in its reply): the reply is
+  written onto the form whole with `frm.set_value(r.message)`, its `supplier` included, with no
+  check that the form still has the vendor it asked about. Two vendor picks whose replies land out of
+  order end on the **first** vendor, with its address (probe `vendor-switch`, "re-pick": ALPINE held
+  8 s, SUMMIT 2 s → ERPNext on ALPINE while the page's box said SUMMIT). The app runs one vendor step
+  at a time, newest pick winning (`electron/main.js` `queuedVendorWrite`, museum OI-200).
+- **A field script's server calls hold `set_value`** (2026-11-01, frappe `form/script_manager.js`
+  `trigger`): when a field's script returns no promise (ERPNext's `supplier()` does not), Frappe
+  chains `frappe.after_server_call()`, which waits for **every** outstanding server call, with no
+  time limit. So `await frm.set_value("supplier", …)` ends only after the vendor-details reply has
+  landed, however slow: held 14, 26 and 32 s, the Bill's write took 15, 27 and 33 s and never showed
+  the old vendor's address (probe `vendor-switch`, run on the code before museum OI-200). The
+  bridge's 12 s `afterAjaxQuiet` after it is not what bounds the wait; a reply that never comes holds
+  the write open.
 - **List filters ride in the address** (2026-09-26, frappe `router.js` `set_route_options_from_url`
   → `list_view.js` `parse_filters_from_route_options`): `/app/purchase-invoice?supplier=X&bill_no=Y`
   opens the list already filtered and replaces its saved filters. A bare list address instead

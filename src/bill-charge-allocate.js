@@ -15,6 +15,7 @@
  */
 
 import { splitUnitsByWeights } from "./split-by-weights.js";
+import { formatUsdAmount } from "./money.js";
 
 /**
  * A line's amount as ERPNext stores it: qty × rate to cents, Banker's Rounding (this site's
@@ -421,4 +422,44 @@ export function isAllocatableChargeRow(taxRow) {
  */
 export function taxRowDeleteAllowed(allocateModalOpen) {
   return !allocateModalOpen;
+}
+
+/**
+ * The Bill's lines as the Allocate dialog lists and plans them (plan 2026-10-25 R6a-2).
+ * @param {Array<any>|null|undefined} docItems
+ * @returns {ChargeAllocItem[]}
+ */
+export function chargeAllocItems(docItems) {
+  return (Array.isArray(docItems) ? docItems : []).map((it, i) => ({
+    rowIndex: i,
+    qty: it.qty,
+    rate: it.rate,
+    amount: it.amount,
+    item_code: it.item_code,
+  }));
+}
+
+/**
+ * The status line after ERPNext took an allocation: exact, a remainder that stays on the charge,
+ * or rounding that put a little more in. Plain money: the status line shows text, and the HTML
+ * formatter's cents markup showed as code there (museum OI-195).
+ * @param {{ allocatedTotal: number, remainder?: number }} res
+ * @returns {{ text: string, tone?: "warn" }}
+ */
+export function allocateDoneStatus(res) {
+  const total = formatUsdAmount(res.allocatedTotal) || res.allocatedTotal;
+  const left = Number(res.remainder) || 0;
+  if (left > 0) {
+    return {
+      text: `Allocated ${total} into item costs (offset Deduct added). ${formatUsdAmount(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`,
+      tone: "warn",
+    };
+  }
+  if (left < 0) {
+    return {
+      text: `Allocated ${total} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmount(-left) || -left} more into them than the charge. The bill total is unchanged.`,
+      tone: "warn",
+    };
+  }
+  return { text: `Allocated ${total} into item costs, exactly (offset Deduct added).` };
 }

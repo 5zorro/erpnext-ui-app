@@ -13,7 +13,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
+import { inDoc, openNewDoc, assertSandboxSite, keepScene, report, docQuiet } from "../probe-helpers.js";
 import { SCENES, inPage } from "../dogfood-scenes.js";
 import { clickPrimary, assignToOrders } from "../assign-helpers.js";
 
@@ -25,20 +25,20 @@ test("R2-2: a refused bridge PO says so, and leaves no draft", async () => {
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await scene.make(app);
     report("scene", made);
     expect(made && made.error).toBeFalsy();
 
     await call(app, `window.erpDoc.setHeader("supplier", ${JSON.stringify(made.vendor)})`);
-    await sleep(2500);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setHeader("bill_no", "ZZ-DF-BRIDGE-BILL")`);
     await call(app, `window.erpDoc.setItem(0, "item_code", "ZZ-DF-SERVICE")`);
-    await sleep(1500);
+    await docQuiet(app);
     await call(app, `window.erpDoc.setItem(0, "qty", 1)`);
     await call(app, `window.erpDoc.setItem(0, "rate", 100000)`);
-    await sleep(1500);
+    await docQuiet(app);
 
     await assignToOrders(app, { vendor: made.vendor, salesOrders: [made.salesOrder] });
     await clickPrimary(app); // Apply — an exact fill, so no costing box

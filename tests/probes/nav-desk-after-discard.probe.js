@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { sleep, inDoc, keys, report } from "./probe-helpers.js";
+import { sleep, inDoc, keys, report, docQuiet } from "./probe-helpers.js";
 
 const surface = (app) => e2eGet(app, "surfaceMode");
 const click = (view, id) => e2eCall(app_, "execInView", view, `(() => { const b = document.querySelector('[data-testid="${id}"]'); if (b) b.click(); return !!b; })()`);
@@ -26,22 +26,27 @@ test("N-3: Desk right after Discard on a new Bill stays on Desk", async () => {
     for (let i = 0; i < tries; i += 1) {
       await click("home", "tile-bill-new");
       await expect.poll(() => surface(app), { timeout: 30_000 }).toBe("doc");
-      await sleep(2500);
+      await docQuiet(app);
       await inDoc(app, `(() => { const i = document.getElementById("f-billno"); i.focus(); return true; })()`);
       await keys(app, `ZZNAV-R${i}\t`);
-      await sleep(1000);
+      await docQuiet(app);
       await click("chrome", "btn-home");
       await expect.poll(() => inDoc(app, `(() => { const g = document.querySelector('[data-testid="doc-commit-gate"]'); return !!(g && !g.hidden); })()`), { timeout: 10_000 }).toBe(true);
       await inDoc(app, `(() => { document.querySelector('[data-testid="doc-gate-discard"]').click(); return true; })()`);
       for (let k = 0; k < 200 && (await surface(app)) !== "home"; k += 1) await sleep(20);
       await click("home", "tile-desk");
-      await sleep(6000);
+      // Leaves Home, then a window for the race: the Doc lens pulled the clerk back within a
+      // couple of the route poll's 750 ms ticks.
+      await expect.poll(() => surface(app), { timeout: 15_000 }).not.toBe("home");
+      await sleep(3000);
       const end = await surface(app);
       ends.push(end);
       report("try", { i, end, route: await e2eCall(app, "currentRoute") });
       if (end !== "home") {
         await click("chrome", "btn-home");
-        await sleep(1500);
+        await expect
+          .poll(async () => (await surface(app)) === "home" || (await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-discard"]'); return !!(b && b.offsetParent); })()`)) === true, { timeout: 15_000 })
+          .toBe(true);
         await inDoc(app, `(() => { const b = document.querySelector('[data-testid="doc-gate-discard"]'); if (b && b.offsetParent) b.click(); return true; })()`);
         await expect.poll(() => surface(app), { timeout: 15_000 }).toBe("home");
       }

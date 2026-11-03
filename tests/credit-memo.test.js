@@ -20,6 +20,8 @@ import {
   parseBillRefToken,
   stripBillRefToken,
   withBillRefToken,
+  withLinkTokenTraced,
+  removedLinkLine,
 } from "../src/credit-memo.js";
 
 describe("isCreditMemoBill", () => {
@@ -267,5 +269,31 @@ describe("creditMemoTermsHint", () => {
     // Doc skins stay typeable; read-only may only reflect docstatus (HANDOFF invariant 7).
     const hint = creditMemoTermsHint({ is_return: 1 });
     assert.doesNotMatch(hint, /read-?only|locked|cannot|can't/i);
+  });
+});
+
+describe("informal links leave a trace when cleared or replaced (museum OI-193)", () => {
+  it("clearing a link leaves 'Removed linked …', which is not read as a link", () => {
+    const r = withLinkTokenTraced("Linked Bill: ACC-PINV-1", "bill", "");
+    assert.equal(r, "Removed linked Bill: ACC-PINV-1");
+    assert.equal(parseBillLinkToken(r), "");
+  });
+  it("replacing a link leaves the old one's trace before the new link", () => {
+    assert.equal(withLinkTokenTraced("note\nLinked Bill: A", "bill", "B"), "note\nRemoved linked Bill: A\nLinked Bill: B");
+    assert.equal(withLinkTokenTraced("Linked Sales Order: SO-1", "so", "SO-2"), "Removed linked Sales Order: SO-1\nLinked Sales Order: SO-2");
+  });
+  it("a new link, or the same link again, leaves no trace", () => {
+    assert.equal(withLinkTokenTraced("note", "bill", "A"), "note\nLinked Bill: A");
+    assert.equal(withLinkTokenTraced("Linked Bill: A", "bill", " A "), "Linked Bill: A");
+    assert.equal(withLinkTokenTraced("", "so", ""), "");
+  });
+  it("the other kind's link and earlier traces stay", () => {
+    const r = withLinkTokenTraced("Removed linked Bill: A\nLinked Sales Order: SO-1", "so", "");
+    assert.equal(r, "Removed linked Bill: A\nRemoved linked Sales Order: SO-1");
+    assert.equal(withLinkTokenTraced("Linked Sales Order: SO-1\nLinked Bill: A", "bill", ""), "Linked Sales Order: SO-1\nRemoved linked Bill: A");
+  });
+  it("names the removed line from the link's label", () => {
+    assert.equal(removedLinkLine("so", "SO-9"), "Removed linked Sales Order: SO-9");
+    assert.equal(removedLinkLine("bill", ""), "");
   });
 });

@@ -16,7 +16,7 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
 import { runProfileDir } from "../../../scripts/test-profile.js";
-import { sleep, inDoc, inErp, report, closeSourcePickers, repaintDoc, assertSandboxSite } from "../probe-helpers.js";
+import { sleep, inDoc, inErp, report, closeSourcePickers, repaintDoc, assertSandboxSite, docQuiet } from "../probe-helpers.js";
 import { billCompareTotal } from "../../../src/bill-map.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -50,7 +50,7 @@ const clickSubmitted = (app, name) =>
 async function submitInDoc(app, name) {
   await e2eCall(app, "openBill", `/app/purchase-invoice/${encodeURIComponent(name)}`);
   await expect.poll(async () => ((await surface(app)) === "doc" ? docName(app) : ""), { timeout: 40_000 }).toBe(name);
-  await sleep(2500);
+  await docQuiet(app);
   const snap = await repaintDoc(app);
   await closeSourcePickers(app);
   const total = billCompareTotal(snap.doc);
@@ -62,7 +62,7 @@ async function submitInDoc(app, name) {
       return inErp(app, `(async () => (await frappe.xcall("frappe.client.get_value", { doctype: "Purchase Invoice", filters: { name: ${JSON.stringify(name)} }, fieldname: "docstatus" })).docstatus)()`, 10_000);
     }, { timeout: 90_000 })
     .toBe(1);
-  await sleep(2000);
+  await docQuiet(app);
 }
 
 test("answer 4: a submitted Bill is found again under Submitted, newest first, once", async () => {
@@ -87,7 +87,7 @@ test("answer 4: a submitted Bill is found again under Submitted, newest first, o
     await e2eCall(app, "goHome");
     await e2eCall(app, "execInView", "home", `(() => { document.querySelector('[data-testid="tile-bill-new"]').click(); return true; })()`);
     await expect.poll(async () => ((await surface(app)) === "doc" ? docName(app) : ""), { timeout: 40_000 }).toMatch(/^new-purchase-invoice/);
-    await sleep(2000);
+    await docQuiet(app);
     const recent = await e2eCall(app, "getHistory");
     report("recent", recent.map((h) => h.route));
 
@@ -128,7 +128,7 @@ test("answer 4: a submitted Bill is found again under Submitted, newest first, o
     // Look at the other one: it moves to the top.
     expect(await clickSubmitted(app, made[1])).toBe(true);
     await expect.poll(async () => ((await surface(app)) === "doc" ? docName(app) : ""), { timeout: 40_000 }).toBe(made[1]);
-    await sleep(1500);
+    await docQuiet(app);
     const flipped = namesOf(await submittedRows(app));
     report("viewed-other", flipped);
     expect(flipped.slice(0, 2)).toEqual([made[1], made[0]]);

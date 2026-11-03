@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, keys, inDoc, inErp, focusTestId, openNewDoc, report, docQuiet } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const tape = (app) =>
@@ -39,7 +39,7 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }); // leaving: Discard
     clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2500);
+    await docQuiet(app);
     priorConvention = await inDoc(app, `(() => { try { return localStorage.getItem("calc-rounding-convention"); } catch { return null; } })()`);
     await inDoc(app, `(() => { try { localStorage.removeItem("calc-rounding-convention"); } catch {} return true; })()`);
     // The page read the convention at load: open the tape once and pick Round to be sure.
@@ -50,11 +50,12 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await sleep(300);
     await click(app, "doc-calc-convention-round");
     await keys(app, "0.5\n");
-    await sleep(400);
+    await docQuiet(app);
     const at0 = await tape(app);
     await sleep(2500);
     const at3 = await tape(app);
-    await sleep(4000);
+    // Gone by ~7 s: hidden within 4.5 s of the 3 s look (the tape lingers ~5 s, then fades).
+    await expect.poll(async () => (await tape(app)).shown, { timeout: 4500, intervals: [100] }).toBe(false).catch(() => {});
     const at7 = await tape(app);
     report("round", { at0, at3, at7 });
     expect(at0.value).toMatch(/^\$?5\.03$/);
@@ -70,7 +71,7 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await click(app, "doc-calc-convention-info");
     const note = await inDoc(app, `document.querySelector('[data-testid="doc-calc-convention-note"]').textContent`);
     await keys(app, "3\n");
-    await sleep(400);
+    await docQuiet(app);
     const up = await tape(app);
     report("up", { up, note });
     expect(note).toMatch(/^Round up: anything past the cent goes up/);
@@ -79,7 +80,7 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await click(app, "doc-calc-convention-info"); // close the ⓘ again
 
     // 3. ↩ resume from 3.3333333333, not the 3.34 in the box (Round up is still on).
-    await sleep(6500);
+    await expect.poll(async () => (await tape(app)).shown, { timeout: 10_000 }).toBe(false); // the last tape has faded
     await focusTestId(app, "bill-amount-due");
     await keys(app, "+");
     await sleep(300);
@@ -87,7 +88,7 @@ test("R13-1: never quietly rounded — remainder row, convention, resume", async
     await expect.poll(() => inDoc(app, `document.querySelectorAll('[data-testid="doc-calc-resume"]').length`), { timeout: 10_000 }).toBeGreaterThan(0);
     const resumed = await inDoc(app, `(() => { const all = [...document.querySelectorAll('[data-testid="doc-calc-resume"]')]; const b = all[all.length - 1]; const t = b.title; b.click(); return t; })()`);
     await keys(app, "6.6666666667\n");
-    await sleep(400);
+    await docQuiet(app);
     const res = await tape(app);
     report("resume", { resumed, res });
     expect(resumed).toMatch(/from 3\.3333333333 /);

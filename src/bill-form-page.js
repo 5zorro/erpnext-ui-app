@@ -6,7 +6,6 @@ import {
   readBillHeader,
   amountDueChecksumChip,
   amountDueGrandPointer,
-  amountDueMatchesGrandTotal,
   billCompareTotal,
   billMoneyStack,
   sumBillLineQty,
@@ -62,9 +61,8 @@ import {
   creditMemoReturnAgainst,
   creditMemoOrphaned,
   parseBillLinkToken,
-  withBillLinkToken,
+  withLinkTokenTraced,
   parseSoLinkToken,
-  withSoLinkToken,
   planCreditMemoSource,
 } from "../src/credit-memo.js";
 import {
@@ -81,7 +79,6 @@ import {
 } from "../src/bill-paid.js";
 import {
   isAllocatableChargeRow,
-  planChargeToStockAllocation,
   taxRowDeleteAllowed,
 } from "../src/bill-charge-allocate.js";
 import {
@@ -99,7 +96,6 @@ import {
   listOverbillCapCacheBlockers,
   OVERBILL_CAP_CACHE_BLOCKER,
   planBillLineQtySplit,
-  saveFailureIsOverBilling,
 } from "../src/bill-po-qty-split.js";
 import { billDueDateFieldMode } from "../src/bill-due-date.js";
 import {
@@ -129,6 +125,7 @@ import {
   moneyOrSum,
 } from "../src/money.js";
 import {
+  isCreatePaymentTermsLinkAction,
   linkDoctypeForBillField,
 } from "../src/link-search.js";
 import {
@@ -184,19 +181,10 @@ import {
   remainingHoldMs,
   FIELD_LOADING_SHOW_AFTER_MS,
 } from "../src/field-loading.js";
-import { showSourceModal } from "../src/source-modal-ui.js";
-import {
-  buildCreditSourceGroups,
-  buildCreditSourceLoadingGroups,
-  buildCreditSourceErrorGroups,
-  classifyCreditSourceChoice,
-} from "../src/source-modal-credit-mode.js";
-import {
-  runSourcePickerFlow,
-  mayAutoOpenSourcePicker,
-} from "../src/source-picker-flow.js";
+import { mayAutoOpenSourcePicker } from "../src/source-picker-flow.js";
 import { wireCommitGateChrome } from "../src/doc-commit-gate-ui.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
+import { clearBeforeVendorSwitch as clearPageBeforeVendorSwitch } from "../src/vendor-change-ui.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
 import { collectBillSourceRefs, sourceTermsDisplayBlocks } from "../src/doc-source-terms.js";
 import { paintSourceTermsFields } from "../src/doc-source-terms-dom.js";
@@ -247,6 +235,8 @@ import {
 import { uiIconHtml } from "../src/ui-icons.js";
 import { openAssignModal } from "../src/bill-assign-modal-ui.js";
 import { openInformalLinkModal } from "../src/bill-informal-link-modal-ui.js";
+import { runBillSourceModal } from "../src/bill-source-modal-ui.js";
+import { openAllocateChargeModal as openAllocateChargeDialog, closeAllocateChargeModal } from "../src/bill-allocate-charge-modal-ui.js";
 import { offeredDocActions } from "../src/doc-actions.js";
 import { runVoidAndAmend } from "../src/void-amend-flow.js";
 import { nextTaxAddRowTabTarget } from "../src/bill-tax-table-nav.js";
@@ -287,6 +277,7 @@ export async function bootBillFormPage(api) {
   /** The taxes table (src/doc-form-tax-table-ui.js, shared with the doc-form page). */
   const taxTable = createTaxTable({
     el: () => el,
+    logFocus,
     head: () => document.getElementById("taxes-head-row"),
     api: () => api,
     lastDoc: () => lastDoc,
@@ -534,30 +525,6 @@ export async function bootBillFormPage(api) {
     }
     const res = await executeSplitPlan(ri, plan);
     return res.handled;
-  }
-
-  /**
-   * Save-time repair when enrich missed caps — split every sourced row over PO limit.
-   * @returns {Promise<{ repaired: number }>}
-   */
-  async function repairAllOverbillRows() {
-    if (!api || !lastDoc || !Array.isArray(lastDoc.items)) return { repaired: 0 };
-    let repaired = 0;
-    let doc = lastDoc;
-    for (let ri = doc.items.length - 1; ri >= 0; ri -= 1) {
-      const row = doc.items[ri];
-      if (!row || !billRowHasSource(row)) continue;
-      const cap = await fetchMaxBillableForRow(ri);
-      const plan = planBillLineQtySplit(row, cap, row.qty);
-      if (plan.action !== "split" || !plan.itemCode) continue;
-      const res = await executeSplitPlan(ri, plan);
-      if (res.ok) {
-        repaired += 1;
-        if (res.doc) doc = res.doc;
-      }
-    }
-    if (repaired > 0) lastDoc = doc;
-    return { repaired };
   }
 
   /**
@@ -902,6 +869,30 @@ export async function bootBillFormPage(api) {
         target.scrollIntoView();
       }
     }
+  }
+
+  /**
+   * A clickable toast shown over an open dialog (the dialogs' backdrops sit above the toast's own
+   * layer), cleared by `hideDialogToast` (review S1: a second Apply held back).
+   * @param {string} text
+   * @param {() => void} onClick
+   */
+  function showDialogToast(text, onClick) {
+    if (el.toast) el.toast.classList.add("over-dialog");
+    showBlockingToast(text, () => {
+      hideDialogToast();
+      onClick();
+    });
+  }
+
+  function hideDialogToast() {
+    if (!el.toast || !el.toast.classList.contains("over-dialog")) return;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = null;
+    el.toast.classList.remove("show", "fade-out", "is-action", "over-dialog");
+    el.toast.onclick = null;
+    el.toast.hidden = true;
+    el.toast.textContent = "";
   }
 
   /**
@@ -2185,43 +2176,13 @@ export async function bootBillFormPage(api) {
     });
   }
   
-  function closeAllocateChargeModal() {
-    const node = document.getElementById("alloc-charge-modal");
-    if (node) node.remove();
-    freezeTaxDeletesForAllocModal(false);
-    document.removeEventListener("keydown", onAllocateChargeModalKeydown, true);
-  }
-  
-  function onAllocateChargeModalKeydown(ev) {
-    if (!allocateChargeModalOpen) return;
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeAllocateChargeModal();
-      setStatus("Allocate cancelled.");
-      return;
-    }
-    // While open, ignore Enter/Space on tax × / → Stock behind the dialog.
-    const t = /** @type {HTMLElement|null} */ (ev.target);
-    if (
-      t &&
-      t.closest &&
-      t.closest("#alloc-charge-modal")
-    ) {
-      return;
-    }
-    if (ev.key === "Enter" || ev.key === " ") {
-      ev.preventDefault();
-      ev.stopPropagation();
-    }
-  }
-  
   /**
-   * Allocate freight/charge into item costs (OI-140).
+   * Allocate freight/charge into item costs (OI-140): src/bill-allocate-charge-modal-ui.js.
    * @param {number} taxRowIndex
    */
   function openAllocateChargeModal(taxRowIndex) {
     closeAllocateChargeModal();
+    freezeTaxDeletesForAllocModal(false);
     const doc = lastDoc;
     if (!doc || !editable()) return;
     const tax = Array.isArray(doc.taxes) ? doc.taxes[taxRowIndex] : null;
@@ -2229,161 +2190,20 @@ export async function bootBillFormPage(api) {
       setStatus("Pick an Add charge with amount > 0.", "warn");
       return;
     }
-    const items = (Array.isArray(doc.items) ? doc.items : []).map((it, i) => ({
-      rowIndex: i,
-      qty: it.qty,
-      rate: it.rate,
-      amount: it.amount,
-      item_code: it.item_code,
-    }));
-    const chargeAmt = Number(tax.tax_amount);
-    const backdrop = document.createElement("div");
-    backdrop.className = "alloc-modal-backdrop";
-    backdrop.id = "alloc-charge-modal";
-    backdrop.dataset.testid = "bill-alloc-modal";
-    backdrop.innerHTML = `
-      <div class="alloc-modal" role="dialog" aria-modal="true" aria-labelledby="alloc-title">
-        <h2 id="alloc-title">Allocate charge to stock cost</h2>
-        <p style="margin:0;font-size:13px;color:#475569;line-height:1.4">
-          ${escapeHtml(tax.description || tax.account_head || "Charge")} ·
-          ${formatUsdAmountHtml(chargeAmt) || escapeHtml(String(chargeAmt))}.
-          Item costs rise; a Deduct offset keeps grand total unchanged.
-        </p>
-        <div class="alloc-modes" role="radiogroup" aria-label="Allocation mode">
-          <label><input type="radio" name="alloc-mode" value="amount" checked /> By price (amount)</label>
-          <label><input type="radio" name="alloc-mode" value="qty" /> By qty</label>
-          <label><input type="radio" name="alloc-mode" value="custom" /> Custom $ / %</label>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Item Code</th>
-              <th class="num">Qty</th>
-              <th class="num">Cost</th>
-              <th class="num">Amount</th>
-              <th class="num">Alloc $</th>
-              <th class="num">Alloc %</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items
-              .map(
-                (it) => `<tr data-alloc-row="${it.rowIndex}">
-                  <td>${escapeHtml(it.item_code || `#${it.rowIndex + 1}`)}</td>
-                  <td class="num">${escapeHtml(String(it.qty ?? ""))}</td>
-                  <td class="num">${formatUsdAmountHtml(it.rate) || ""}</td>
-                  <td class="num">${formatUsdAmountHtml(it.amount) || ""}</td>
-                  <td class="num"><input type="text" inputmode="decimal" data-alloc-dollars="${it.rowIndex}" class="money-cost" disabled /></td>
-                  <td class="num"><input type="text" inputmode="decimal" data-alloc-percent="${it.rowIndex}" class="money-cost" disabled /></td>
-                </tr>`,
-              )
-              .join("")}
-          </tbody>
-        </table>
-        <div class="alloc-modal-actions">
-          <button type="button" data-alloc-cancel>Cancel</button>
-          <button type="button" class="primary" data-alloc-apply data-testid="bill-alloc-apply">Apply to items</button>
-        </div>
-      </div>`;
-    document.body.appendChild(backdrop);
-    freezeTaxDeletesForAllocModal(true);
-    document.addEventListener("keydown", onAllocateChargeModalKeydown, true);
-    const applyBtn = backdrop.querySelector("[data-alloc-apply]");
-    const syncCustomEnabled = () => {
-      const mode =
-        (backdrop.querySelector('input[name="alloc-mode"]:checked') || {}).value || "amount";
-      const custom = mode === "custom";
-      backdrop.querySelectorAll("[data-alloc-dollars], [data-alloc-percent]").forEach((inp) => {
-        inp.disabled = !custom;
-      });
-    };
-    backdrop.querySelectorAll('input[name="alloc-mode"]').forEach((r) => {
-      r.addEventListener("change", syncCustomEnabled);
-    });
-    syncCustomEnabled();
-    backdrop.querySelector("[data-alloc-cancel]").onclick = () => {
-      closeAllocateChargeModal();
-      setStatus("Allocate cancelled.");
-    };
-    backdrop.addEventListener("click", (ev) => {
-      if (ev.target === backdrop) {
-        closeAllocateChargeModal();
-        setStatus("Allocate cancelled.");
-      }
-    });
-    const runApply = async () => {
-      if (!api || !api.allocateCharge) {
-        setStatus("Allocate API missing — restart the shell.", "err");
-        return;
-      }
-      const mode =
-        (backdrop.querySelector('input[name="alloc-mode"]:checked') || {}).value || "amount";
-      /** @type {Array<{ rowIndex: number, dollars?: number, percent?: number }>} */
-      const custom = [];
-      if (mode === "custom") {
-        items.forEach((it) => {
-          const dInp = backdrop.querySelector(`[data-alloc-dollars="${it.rowIndex}"]`);
-          const pInp = backdrop.querySelector(`[data-alloc-percent="${it.rowIndex}"]`);
-          const dollars = dInp ? parseMoney(dInp.value) : null;
-          const percent = pInp ? parseMoney(pInp.value) : null;
-          if (dollars != null || percent != null) {
-            custom.push({
-              rowIndex: it.rowIndex,
-              dollars: dollars != null ? dollars : undefined,
-              percent: percent != null ? percent : undefined,
-            });
-          }
-        });
-        const preview = planChargeToStockAllocation({
-          items,
-          chargeAmount: chargeAmt,
-          mode: "custom",
-          custom,
-          chargeAccount: tax.account_head,
-          chargeDescription: tax.description,
-        });
-        if (!preview.ok) {
-          setStatus(preview.reason || "Custom allocation invalid.", "err");
-          return;
-        }
-      }
-      setStatus("Allocating charge into item costs…");
-      const res = await api.allocateCharge(taxRowIndex, mode, custom);
-      closeAllocateChargeModal();
-      if (res && res.ok) {
+    openAllocateChargeDialog({
+      api,
+      doc,
+      taxRowIndex,
+      setStatus,
+      onFrozen: freezeTaxDeletesForAllocModal,
+      onApplied: (res) => {
         noteUserEdit();
         paint(res.doc, amountDue);
-        const left = Number(res.remainder) || 0;
-        setStatus(
-          left > 0
-            ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added). ${formatUsdAmountHtml(left) || left} could not go into whole-cent unit costs on these quantities — it stays on the charge line.`
-            : left < 0
-              ? `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs (offset Deduct added) — ERPNext's rounding put ${formatUsdAmountHtml(-left) || -left} more into them than the charge. The bill total is unchanged.`
-              : `Allocated ${formatUsdAmountHtml(res.allocatedTotal) || res.allocatedTotal} into item costs, exactly (offset Deduct added).`,
-          left === 0 ? undefined : "warn",
-        );
-      } else {
-        setStatus((res && res.reason) || "Allocate failed.", "err");
-        if (res && res.doc) paint(res.doc, amountDue);
-      }
-    };
-    if (applyBtn) applyBtn.onclick = () => void runApply();
-    // Delay focus past the Enter/Space that opened the dialog (same class as source modal).
-    const focusApply = () => {
-      try {
-        if (api && api.focusBillSurface) api.focusBillSurface();
-      } catch {
-        /* ignore */
-      }
-      try {
-        if (applyBtn) applyBtn.focus();
-      } catch {
-        /* ignore */
-      }
-    };
-    requestAnimationFrame(focusApply);
-    setTimeout(focusApply, 30);
-    setStatus("Enter = Apply to items · Esc = cancel. Tax row delete is frozen while this is open.");
+      },
+      repaint: (next) => paint(next, amountDue),
+      toast: showDialogToast,
+      clearToast: hideDialogToast,
+    });
   }
   
   /**
@@ -2404,6 +2224,32 @@ export async function bootBillFormPage(api) {
     });
   }
 
+  /** Museum OI-200: before a vendor pick, a switch clears the whole Bill (`vendor-change-ui.js`). */
+  function clearBeforeVendorSwitch(v) {
+    return clearPageBeforeVendorSwitch({
+      api,
+      value: v,
+      box: el.vendor,
+      kept: String(paintedHeaderValue("supplier") ?? ""),
+      docLabel: "bill",
+      setStatus,
+      log: logFocus,
+      onCleared: (res) => {
+        noteUserEdit();
+        paint(res.doc, res.amountDue ?? "", {
+          caller: "vendor-switch",
+          // Every box takes the cleared value, even one whose text differs from ERPNext's.
+          forceHeaderPaint: true,
+          linkedPos: [],
+          linkedReceipts: [],
+          lineAllocations: {},
+          poLineMeta: {},
+          enrichPending: null,
+        });
+      },
+    });
+  }
+
   function ensureHeaderLinkPickers() {
     mountBillLinkPicker(
       el.vendor,
@@ -2415,6 +2261,7 @@ export async function bootBillFormPage(api) {
         return;
       }
       if (await vendorIsMissing(v, "vendor")) return;
+      if (!(await clearBeforeVendorSwitch(v))) return;
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "link_pick",
         hasSupplier: !!normalizeEditableText(v),
@@ -2453,6 +2300,7 @@ export async function bootBillFormPage(api) {
           if (decision.open) setStatus("Choose a source (or NIC).");
         },
         onHeaderFailure: (res) => {
+          if (res && res.superseded) return; // a newer pick owns the Bill (museum OI-200)
           setStatus((res && res.reason) || "Vendor update failed.", "err");
         },
         onModalSkipped: (reason) => {
@@ -2585,167 +2433,37 @@ export async function bootBillFormPage(api) {
       dd.hidden = true;
     });
 
-    /**
-     * OI-166 — the modal asks one question, "where does this Bill come from?", and the foot
-     * switch changes which corpus answers it: open Purchase Orders / Item Receipts, or the
-     * submitted Bill this credit is against. 5zorro's flow is vendor → source in one breath,
-     * so the decision belongs here rather than behind a second dialog opened later.
-     *
-     * A Bill that is already a credit opens the modal already switched.
-     */
-    let creditOn = isCreditMemoBill(lastDoc);
-    /** Latest PO/IR corpus, kept warm so flipping back is instant and complete. */
-    let sourceGroups = null;
-    /** @type {import("./source-modal-ui.js").SourceModalController|null} */
-    let modalCtl = null;
-    let creditLoadToken = 0;
     const currentName = lastDoc && lastDoc.name ? String(lastDoc.name) : "";
-
-    async function switchCreditMode(next) {
-      if (!modalCtl) return;
-      creditOn = !!next;
-      if (!creditOn) {
-        // Slices that landed while the switch was on were accumulated, not painted.
-        modalCtl.setCreditMode(false, sourceGroups || undefined);
-        setStatus("Back to Purchase Orders and Item Receipts — Space to check · Enter to pull.");
-        return;
-      }
-      const token = ++creditLoadToken;
-      modalCtl.setCreditMode(true, buildCreditSourceLoadingGroups(sup));
-      setStatus(`Loading submitted Bills for ${sup}…`);
-      let rows = null;
-      let failure = "";
-      try {
-        rows = await searchSourceBillRows("", sup, currentName);
-      } catch (err) {
-        failure = String(err && err.message ? err.message : err);
-      }
-      // A stale fetch must never repaint a list the clerk has already switched away from.
-      if (token !== creditLoadToken || !creditOn || !sourceModalOpenRef.current) return;
-      if (failure) {
-        modalCtl.setCreditMode(true, buildCreditSourceErrorGroups(failure, sup));
-        setStatus(`Could not load Bills: ${failure}`, "err");
-        return;
-      }
-      modalCtl.setCreditMode(
-        true,
-        buildCreditSourceGroups(rows, { supplier: sup, exclude: currentName }),
-      );
-      setStatus("Pick the Bill this credit is against (or decide later).");
-    }
-
-    setStatus(
-      creditOn ? "Loading submitted Bills…" : "Loading open PO / Item Receipts…",
-    );
-
-    return runSourcePickerFlow({
+    return runBillSourceModal({
+      api,
       supplier: sup,
       trigger,
-      mode: "multi",
-      listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
-      onGroups: (groups) => {
-        sourceGroups = groups;
-      },
-      applySlices: () => !creditOn,
+      creditOn: isCreditMemoBill(lastDoc),
+      isOpenRef: sourceModalOpenRef,
+      setStatus,
       log: (event, detail) => logFocus(event, detail || ""),
-      mayOpen: (vendor, trig) =>
-        mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+      mayOpen: (vendor, trig) => mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
       onUserClose: (kind) => {
         if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
           vendorPickSourceSession.userClosed = true;
         }
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
-      onStreamComplete: ({ errors }) => {
-        // Credit mode owns the status line while it is on — the PO/IR stream is still running
-        // underneath it and must not narrate over the question the clerk is actually answering.
-        if (creditOn || !sourceModalOpenRef.current) return;
-        if (errors.length) {
-          setStatus(`Some sources failed to load (${errors.length}) — NIC still ok.`, "warn");
-        } else {
-          setStatus("Sources loaded — Space to check · Enter to pull (or NIC).");
-        }
+      searchBills: () => searchSourceBillRows("", sup, currentName),
+      currentName,
+      chooseCreditSource: commitCreditSource,
+      beforePull: scheduleFocusInvoiceDateField,
+      onPulled: (merged) => {
+        noteUserEdit();
+        paint(merged.doc, amountDue, {
+          linkedPos: merged.linkedPos,
+          linkedReceipts: merged.linkedReceipts,
+          poLineMeta: merged.poLineMeta,
+          lineAllocations: merged.lineAllocations,
+          forceDueDatePaint: !!(merged.paymentTermsSettle && merged.paymentTermsSettle.ok),
+        });
       },
-      showModal: (flowOpts) =>
-        showSourceModal({
-          ...flowOpts,
-          testId: "bill-source-modal",
-          pickButtonTestId: "bill-source-pull",
-          isOpenRef: sourceModalOpenRef,
-          setStatus,
-          creditToggle: {
-            label: "Credit memo?",
-            checked: creditOn,
-            testId: "bill-source-credit-toggle",
-            onChange: (next) => {
-              void switchCreditMode(next);
-            },
-          },
-          onController: (c) => {
-            modalCtl = c;
-            if (flowOpts.onController) flowOpts.onController(c);
-            // Opened on a Bill that is already a credit: fetch its corpus straight away.
-            if (creditOn) void switchCreditMode(true);
-          },
-          focusSurface: () => {
-            if (api && api.focusBillSurface) api.focusBillSurface();
-          },
-          onChoose: async (choice) => {
-            if (creditOn) {
-              const verdict = classifyCreditSourceChoice(choice);
-              if (verdict.action === "decline") {
-                setStatus(
-                  "Credit memo left with no Bill behind it — the Return Against warning " +
-                    "stays up until you link one.",
-                  "warn",
-                );
-                return;
-              }
-              if (verdict.action !== "link") {
-                setStatus("Pick the Bill this credit is against, or decide later.", "warn");
-                return;
-              }
-              await commitCreditSource(verdict.name);
-              return;
-            }
-            const mode = choice && choice.mode;
-            const items = (choice && choice.items) || [];
-            if (mode === "nic" || (items.length === 1 && items[0] && items[0].kind === "nic")) {
-              setStatus("No source — enter lines manually.");
-              return;
-            }
-            if (mode !== "merge" || !items.length) {
-              setStatus("Pick at least one source (Space to check), or NIC.", "warn");
-              return;
-            }
-            const labels = items.map((it) => it.name || it.kind).join(", ");
-            setStatus(`Pulling from ${labels}…`);
-            scheduleFocusInvoiceDateField();
-            const payload = items.map((it) => ({ kind: it.kind, name: it.name }));
-            const merged =
-              payload.length === 1
-                ? await api.mergeSource(payload[0].kind, payload[0].name)
-                : await api.mergeSource(payload);
-            if (merged && merged.ok) {
-              noteUserEdit();
-              paint(merged.doc, amountDue, {
-                linkedPos: merged.linkedPos,
-                linkedReceipts: merged.linkedReceipts,
-                poLineMeta: merged.poLineMeta,
-                lineAllocations: merged.lineAllocations,
-                forceDueDatePaint: !!(merged.paymentTermsSettle && merged.paymentTermsSettle.ok),
-              });
-              setStatus(
-                payload.length === 1
-                  ? `Pulled from ${payload[0].name}.`
-                  : `Pulled from ${payload.length} sources.`,
-              );
-            } else {
-              setStatus((merged && merged.reason) || "Could not pull source.", "err");
-              await refresh();
-            }
-          },
-        }),
+      refresh,
     });
   }
   
@@ -2784,10 +2502,6 @@ export async function bootBillFormPage(api) {
     requestAnimationFrame(tryFocus);
     setTimeout(tryFocus, 50);
     setTimeout(tryFocus, 200);
-  }
-
-  function focusInvoiceDateField() {
-    scheduleFocusInvoiceDateField();
   }
   
   /**
@@ -2834,6 +2548,8 @@ export async function bootBillFormPage(api) {
         });
       },
       refresh,
+      toast: showDialogToast,
+      clearToast: hideDialogToast,
     });
   }
 
@@ -2909,6 +2625,12 @@ export async function bootBillFormPage(api) {
   /**
    * Write one informal link token into Remarks and repaint. Returns the outcome instead of
    * speaking: callers own their own dialog lifecycle and status voice.
+   *
+   * Museum OI-193: a cleared or replaced link leaves "Removed linked …" behind, and the Remarks box
+   * takes what was written. The repaint alone keeps a box whose text differs from ERPNext's, as if
+   * the clerk were typing there, so after a clear the box still read "Linked Bill: …" and the next
+   * link — built from the box — wrote the cleared Bill back. This write came from the clerk's own
+   * click, so there is no typing to keep.
    * @param {"bill"|"so"} kind
    * @param {string} name
    * @returns {Promise<{ ok: boolean, label: string, reason?: string }>}
@@ -2916,14 +2638,12 @@ export async function bootBillFormPage(api) {
   async function writeInformalLinkToken(kind, name) {
     const label = kind === "bill" ? "Bill" : "Sales Order";
     const currentRemarks = el.memo ? el.memo.value : (lastDoc && lastDoc.remarks) || "";
-    const next =
-      kind === "bill"
-        ? withBillLinkToken(currentRemarks, name)
-        : withSoLinkToken(currentRemarks, name);
+    const next = withLinkTokenTraced(currentRemarks, kind, name);
     try {
       const res = await api.setHeader("remarks", remarksKeepingReceived(next));
       if (res && res.ok) {
         paint(res.doc, res.amountDue != null ? res.amountDue : amountDue);
+        paintHeaderInputIfAllowed(el.memo, "remarks", stripReceivedBlock(readBillHeader(res.doc).Memo ?? ""), { forcePaint: true });
         return { ok: true, label };
       }
       return {
@@ -3539,6 +3259,8 @@ export async function bootBillFormPage(api) {
     paintedBillDocName = nextDocName;
     } finally {
       painting = false;
+      // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
+      window.__docPaintedAt = Date.now();
       logFocus("paint-end", lastDoc && lastDoc.name ? String(lastDoc.name) : "");
       restoreBillFocus(savedFocus, { allowFocusVendor: vendorFocused });
     }

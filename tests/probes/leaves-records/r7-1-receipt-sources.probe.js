@@ -10,7 +10,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, assertSandboxSite, repaintDoc } from "../probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, assertSandboxSite, repaintDoc, docQuiet, settle } from "../probe-helpers.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
 const ITEM = "SAMPLE-SKU-01";
@@ -47,15 +47,15 @@ test("R7-1: the Item Receipt offers the PO still to receive, and refuses one wit
     expect(made && made.a && made.b).toBeTruthy();
 
     await openNewDoc(app, "receipt", "/app/purchase-receipt/new");
-    await sleep(2500);
+    await docQuiet(app);
     const set = await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return !!(r && r.ok); })()`, 30_000);
     expect(set).toBe(true);
-    await sleep(3000);
+    await docQuiet(app);
     await repaintDoc(app); // the page's own API writes do not repaint it
-    await sleep(1000);
+    await docQuiet(app);
     // Any picker the vendor write opened: close it, then ask for it from the toolbar, as a clerk would.
     await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
-    await sleep(800);
+    await settle();
     await inDoc(app, `(() => { document.querySelector('[data-testid="doc-select-source"]').click(); return true; })()`);
     const listed = async () =>
       inDoc(app, `(() => { const m = document.querySelector('[data-testid="doc-source-modal"]'); if (!m) return null; const items = [...m.querySelectorAll(".src-item")].map((b) => b.textContent); return { loading: items.some((t) => /Still loading/.test(t)), items }; })()`);
@@ -79,13 +79,13 @@ test("R7-1: the Item Receipt offers the PO still to receive, and refuses one wit
 
     // R7-3: the Bill's picker, where the receipt from A is still to bill.
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2500);
+    await docQuiet(app);
     await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return true; })()`, 30_000);
-    await sleep(3000);
+    await docQuiet(app);
     await repaintDoc(app);
-    await sleep(1000);
+    await docQuiet(app);
     await inDoc(app, `(() => { for (const b of document.querySelectorAll(".src-back")) { const c = b.querySelector('[data-act="cancel"], [data-act="close"], .src-close'); if (c) c.click(); } return true; })()`);
-    await sleep(800);
+    await settle();
     await inDoc(app, `(() => { document.querySelector('[data-testid="bill-select-po"]').click(); return true; })()`);
     const billListed = async () =>
       inDoc(app, `(() => { const m = document.querySelector('[data-testid="bill-source-modal"]'); if (!m) return null; const items = [...m.querySelectorAll(".src-item")].map((b) => b.textContent); return { loading: items.some((t) => /Still loading/.test(t)), items }; })()`);

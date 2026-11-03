@@ -12,7 +12,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
+import { inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report, docQuiet } from "../probe-helpers.js";
 import { SCENES, TERM_INPUT, inPage } from "../dogfood-scenes.js";
 
 const scene = SCENES["term-half-made"];
@@ -41,7 +41,7 @@ test("R10c-3: a term ERPNext already has is reused; one with other numbers is re
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await scene.make(app);
     report("scene", made);

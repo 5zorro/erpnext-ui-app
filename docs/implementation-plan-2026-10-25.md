@@ -8,9 +8,23 @@
 > dialog), then museum OI-192 fixed at 5zorro's word (a tick on an order no longer listed is dropped;
 > customer and project picks kept by name); the informal link dialog moved 2026-10-27
 > (`src/bill-informal-link.js`, `src/bill-informal-link-modal-ui.js`; museum OI-193 found, his call);
-> next the source picker, allocate charge; also owed, decided 2026-10-26: the Item Receipt's
-> lines get the Line column and sortable headers (end of the step 3 section). Then 3b, a
-> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> the source picker's Bill side moved 2026-10-31 (`src/bill-source-modal-ui.js`; a pick's meaning in
+> `src/bill-source-flow.js`), and Allocate into items moved 2026-10-31
+> (`src/bill-allocate-charge-modal-ui.js`; museum OI-195 found): **R6a-2's four dialogs are done**. Fixed from what the moves found, at
+> 5zorro's word: OI-193 (a cleared informal link leaves "Removed linked …" in Remarks, and the box
+> shows what was written) and OI-195's status line (plain money); OI-195's over-allocation stays. The Item Receipt's
+> lines got the Line column and sortable headers 2026-11-01 (decided 2026-10-26; end of the step 3 section). Then 3b, a
+> performance deep dive over every probe's times and charts (added 2026-10-26, *Order*): **run
+> 2026-11-01, report in § *3b — the performance report*; his picks the same day: finding 1 (a
+> vendor with no address waited ~9 s) and finding 2 (the save-drain timer) built, finding 7 (the
+> probes' fixed sleeps) done: the `@nav` matrix (28 → 13 min), then every other probe waits for the
+> page to be quiet (`docQuiet`, 47 probes −28%); OI-200 (a vendor switch clears the document) built
+> alongside; 3–6 left as reported. `nav:check` / `dogfood:check` not re-run whole since.**
+> **R2-5 started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and
+> payment settings moved to `electron/ipc/`; after 3b, `nav:check` (109/109) and `dogfood:check`
+> (one probe's wait fixed) ran whole on 2026-11-01, then re-link and method change moved
+> (`electron/ipc/relink-method-change.js`). Next in the order: health / incidents, the warm pick
+> lists, then doc-form and Bill with the bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -310,7 +324,17 @@ not changed: the Item Receipt's lines have no Line column and no sortable header
 match them — "yes".** To build (not started): give `RECEIPT_ITEM_COLS` (`src/receipt-map.js`) the
 Line column and a `sortKey` on each column, as `PO_ITEM_COLS` has; then the hold-the-order rules
 (T-1) and the walk follow on screen order there too. Proof: a probe or spec that sorts an Item
-Receipt's lines and fails on the code before.
+Receipt's lines and fails on the code before. **Built 2026-11-01:** `RECEIPT_ITEM_COLS` has the
+Line column and a sort key on each column, and `readReceiptItemRows` the line number. Found while
+proving it: on every doc-form page with a Line column (the PO since 2026-08-23, the Estimate, Sales
+Order and Invoice) the Item subtotal sat under Line, because the totals row took the first
+display-only column; `lineTotalsColumns` (`src/doc-item-sort.js`) now takes the column labelled
+Amount. Proof: probe `df03-item-table` runs T-2 and T-1 on the receipt too, and a new test checks
+the Line numbers and where the subtotal sits on the PO and the receipt; the four failed on the
+code before (no sortable receipt header; the PO's subtotal under column 0, not Amount's 7), and
+the whole probe passes, 10 of 10. `scaffold-form-switch` passes; `-peek-return-focus` and
+`-ar-doc-skins` fail only their baseline Sales Order / A/R tests, so the A/R footers are covered by
+the unit test, not a spec.
 `.taxes-table` / `.taxes-add` in `doc-fields.css` no longer style a doc-form page but stay: a test
 keeps them as the vocabulary the check/ACH document will reuse. The item rows' `deps` is long
 (about 35 hooks); the next steps (R6a-2) shrink the Bill's closure, which most of them reach into.
@@ -321,7 +345,7 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
 |----|------|-----|-------|------|--------------|--------|
 | R2-5 | M | low | `main.js` as a whole | 12,744 lines, 187 handlers, 264 functions, **82 module-level `let`s** — the shared state, not the handler count, is what stops a split. Blocks by state touched: print IPC 2 vars, Papers 3, Find 2, payment settings 7, re-link/method change 9, health/incidents 15, doc-form 9, Bill 16 | Move in that order, each to `electron/ipc/<family>.js` taking a `deps` object; Bill and doc-form last, after R2-4 gives `dirtyState` and the scratch fields one owner. No behavior change per step; `tests/write-path-wiring.test.js` must follow the moved code | open — R2-4, its prerequisite, is done; the moves are a session of their own **2026-10-21:** the warm pick lists added a self-contained block (`linkListCopies` … `dropLinkLists`, `doc-link-exists`, `link-list-refresh`, ~300 lines) and `setSurfaceMode` — the first is a natural module to lift out in the split. |
 | R6a-1 | M | med | `src/bill-form-page.js` ↔ `src/doc-form-page.js` | 55 functions have the same name in both pages. Measured by trimmed non-blank lines, those functions are 2,193 lines in the Bill and 1,831 in doc-form, and **1,295 lines are identical**. The largest: `paintItems` (464 / 454, 76% the same), `resolveCommitGate` (80%), `beginAmountBackIn` (80%), `focusItemCell` (90%), `paintMoneyStack` (89%), `removeAllTaxes` (79%). The tax-default note, `wireDateField`, `setLineTab`, `setItemCellMode`, `keepTaxesRemoved` and the tax "fixed amount" note are 100%. The differences are mostly words ("Bill" vs `docTitle()`), the paint signature (`paint(doc, amountDue)` vs `paint(doc, scratch)`) and features one side has (Bill: account-company blockers, `announceSaveBlocker`, Find continuing after a gated save; doc-form: direct save). The drift already costs: R3-1 needed two different fixes, and R5-1 / R5b-1 sit under both pages | Don't merge the pages. Move shared code into modules that take a small deps object, as `item-import-ui.js` / `address-picker-ui.js` already do, in this order: **(1)** the identical leaves (~120 lines); **(2)** the commit gate (`openGate` … `resolveCommitGate`, ~150 lines at 80–100%), with hooks for title, blockers and paint; **(3)** `paintItems`' cell builder (~350 identical lines), with the Bill-only cells (Rec'd editor, Assign, ref chip) as hooks. Steps 1–2 are one session. Step 3 is its own session, with both skins' smoke specs. It is independent of R2-5 | open — 5zorro agreed 2026-10-20; schedule as its own sessions |
-| R6a-2 | M | low | `src/bill-form-page.js:275–6087` | The whole Bill page is one 5,800-line closure, `bootBillFormPage(api)`, with all state held inside it, so no inner function can be imported or tested, and every extraction must thread state through. The doc-form page is module-level functions. The biggest functions: `paintItems` 472, `openLineAllocationPicker` 318, `paintTaxes` 315, `openInformalLinkPicker` 209, `paint` 201, `runBillSourcePicker` 173, `openAllocateChargeModal` 163, `paintLinkedSources` 139, `doSave` 126 | Four of them are self-contained dialogs (Assign, informal link, source picker, allocate charge: ~860 lines) that read only `lastDoc`, `api`, `setStatus` and `paint`. Move each to its own `src/bill-*-modal-ui.js` taking deps. Assign's steps (customer → Sales Orders → project) become a pure reducer with tests. `paintItems` / `paintTaxes` go with R6a-1 step 3 | open — 5zorro agreed 2026-10-20; with R6a-1 |
+| R6a-2 | M | low | `src/bill-form-page.js:275–6087` | The whole Bill page is one 5,800-line closure, `bootBillFormPage(api)`, with all state held inside it, so no inner function can be imported or tested, and every extraction must thread state through. The doc-form page is module-level functions. The biggest functions: `paintItems` 472, `openLineAllocationPicker` 318, `paintTaxes` 315, `openInformalLinkPicker` 209, `paint` 201, `runBillSourcePicker` 173, `openAllocateChargeModal` 163, `paintLinkedSources` 139, `doSave` 126 | Four of them are self-contained dialogs (Assign, informal link, source picker, allocate charge: ~860 lines) that read only `lastDoc`, `api`, `setStatus` and `paint`. Move each to its own `src/bill-*-modal-ui.js` taking deps. Assign's steps (customer → Sales Orders → project) become a pure reducer with tests. `paintItems` / `paintTaxes` go with R6a-1 step 3 | **built 2026-10-27 … 31** (`f241b28`, `0f9d3d1`, `33d2127`, `3c3dd2f`); `paintItems` / `paintTaxes` went with R6a-1 step 3 |
 
 ## Order
 
@@ -329,7 +353,22 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
 1. **R6a-1 steps 1–2** (one session): the identical leaves, then the commit gate.
 2. **R6a-1 step 3 with R6a-2's `paintItems` / `paintTaxes`** (its own session, both skins' smoke
    specs). Builds on step 0's module.
-3. **R6a-2's four dialogs** to `src/bill-*-modal-ui.js` (Assign's steps as a pure reducer).
+3. **R6a-2's four dialogs** to `src/bill-*-modal-ui.js` (Assign's steps as a pure reducer). **Built
+   2026-10-27 … 31:** Assign (`src/bill-assign.js` + `-modal-ui.js`), the informal link
+   (`src/bill-informal-link.js` + `-modal-ui.js`), the source picker's Bill side
+   (`src/bill-source-modal-ui.js`; the shared modal was already `src/source-modal-ui.js`), Allocate
+   (`src/bill-allocate-charge-modal-ui.js`). Bill page 5,197 → about 4,350 lines. **How each move
+   was proven** (the way to prove any move that should change nothing a clerk sees, when no probe
+   drives every path): a probe that drives every door of the dialog and `report`s what the clerk
+   sees at each step, run on the code before the move and saved; the same probe on the moved
+   code, and the two outputs `diff`ed (identical, with run-specific names normalised). These four
+   were deleted after; that was a mistake. Probes are kept (HANDOFF § *Test strategy*, 5zorro
+   2026-10-22), so from R2-5's payment settings on, the probe stays in `tests/probes/` for the
+   next change to the same code. Where a probe would leave records, it makes its own (a PO for the run) and
+   cancels and deletes it. The same probes found three bugs the moves kept as they were — the
+   old code did the same — museum OI-192, OI-193, OI-195, fixed or left at 5zorro's word (status
+   box). Each module was then imported in Node (a missing named import fails there) and checked
+   with ESLint's `no-undef` from outside the repo.
 3b. **A performance deep dive** (added 2026-10-26, 5zorro: *"perhaps we should add to the refactor, a
    deep dive into the results of the entire probe tests getting ran for performance smells"*):
    run every probe (`npm run nav:check -- --ongoing`, `npm run dogfood:check`, then the rest),
@@ -340,11 +379,142 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    smell found gets one line: fix it in R2-5 (which moves that code anyway), a later plan, or
    leave it with the reason. Before R2-5 on purpose: most smells live in `main.js`, and the split
    should carry the fix, not move the smell. Report, not code: what to fix is 5zorro's call.
+   **Run 2026-11-01; the report is § *3b — the performance report*, with his picks and what was
+   built under the table.**
 4. **R2-5** in its order (print IPC → Papers → Find → payment settings → re-link / method change →
    health / incidents → the warm pick lists block → doc-form → Bill), each family to
    `electron/ipc/<family>.js` taking a `deps` object.
+   **Started 2026-10-31, before 3b, at 5zorro's word, from the far end:** families away from the
+   two smells first (print IPC → Papers → Find → payment settings); the bridge, doc-form and Bill
+   moves wait for 3b's report, as above. Built: print (`e448c2e`, `electron/ipc/print.js`) and
+   Papers (`b655e78`, `electron/ipc/papers.js`), Find (`18e1331`, `electron/ipc/find.js`: the list,
+   the peek and the remembered search; opening the page and its "Open in Vanilla" door write the
+   lens prefs and stay in main.js with the other navigation), payment settings
+   (`electron/ipc/payment-settings.js`: the payment batch prefs and the delay calendar; the
+   payment-direction prefs stay, navigation writes them; proven by the probe
+   `pay-settings-doors`, the same output before and after); main.js 13,534 → 12,419 lines.
+   Re-link and method change (`electron/ipc/relink-method-change.js`, 2026-11-01): the vendor's
+   re-link facts, one re-link, the auto re-links and their reviews, the method-change facts and
+   run; it borrows `navDebug`, `erpEval` and `voidAndAmendDoc` (void and amend stays in main.js,
+   the Doc page uses it too). No spec or probe drove these doors, so the new probe
+   `relink-method-doors` drives every one that writes nothing (a re-link that posts needs a loose
+   payment the sandbox does not have; its reconcile, flag and comment calls are reached only to
+   their refusals): 16 lines, the same before and after. `dogfood-r9-batch` (a real batch method
+   change through the panel) passes on the moved code. main.js 12,549 → 11,926 lines. ESLint is
+   in the repo now (plan 10-31) but has no config yet; the import check was done by reading the
+   modules' `export`s, and the module's free names by hand. **How each move
+   goes** (keep it the same for the rest):
+   - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
+     from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js
+     variable that is replaced over time (`win`, `erp`) is lent as a getter (`mainWindow()`,
+     `erpView()`), the only edit inside moved code. The rest of main.js reads the module through
+     named exports, never its state directly (`printFormatFor(doctype)`, not `printPrefs.formats`).
+   - Handlers register inside `register<Family>Handlers()`, so importing a module has no effect
+     until main.js calls its init.
+   - Tests that find a handler or a pinned line in the source read `tests/main-process-source.js`
+     (main.js, then each `electron/ipc/*.js`), never main.js alone.
+   - The coverage map (`src/architecture-families.js`) lists the new file under its family.
+   - **Checks before the commit:** no name in main.js or the module is undefined. There is no
+     linter in the repo, so the check is ESLint's `no-undef` run from outside it. Also, every named
+     import must exist in its module. Lint does not catch that, and a wrong one stops the app at
+     start-up (it happened once on this step: `normalizeEditableText` comes from
+     `src/dirty-gate.js`). The import check loads each module in plain Node, which cannot load
+     `electron/ipc/*.js` (they import `electron`), so check main.js's imports from them by reading
+     their `export`s. Then `npm test`, start the app once headless (`E2E=1
+     ERP_USER_DATA_DIR=<tmp>`, wrapped in `timeout -k 5 25`, never a `pkill electron`: 5zorro's
+     own app is usually open) and read the errors, then the family's specs from
+     `npm run dogfood:for-change`; compare failure names with a run on the code before. Where no
+     spec or probe drives a door, write a probe that does, run it before and after, `diff` the
+     outputs, and keep it (payment settings: `pay-settings-doors`).
+   - The first lint pass found two Bill payment paths broken since 2026-10-23 (fixed `5bef496`,
+     probe `leaves-records/bill-payment-paths`). Running that lint in `npm test` is open for
+     5zorro to decide: it is one dev dependency.
 
 Each step is its own commit, behaviour unchanged, `npm test` green, the named probes re-run.
+
+## 3b — the performance report (2026-11-01)
+
+**What was run.** Every probe, on `5ab658a` (main.js did not change during the run; the other
+session's uncommitted edits were in the Item Receipt / doc-form lines), 06:51–07:49 UTC: `npm run
+nav:check -- --ongoing` (109 pass; after a long session 33 pass, cruft clean), `npm run
+dogfood:check` (25 pass), then the 20 other probes (all pass; `dogfood-setup` left out, it builds
+scenes). The numbers come from the 69 timeline charts written by that run (`test-logs/traces/`,
+one per test), because `test:times` keeps only the last 50 probe logs and the run's own volume
+pushed the first `@nav` runs out. Specs and `npm test` do not take the probe lock: one probe
+(`nav-spine-home`) overlapped a spec run and a unit run and was run again alone (below).
+
+**How to read the numbers.** A chart's "ERPNext calls" lane is every script the shell sends into the
+ERPNext page (`erpEval`, named by method or caller), timed in whole milliseconds. A script's time
+is mostly waiting for the page to be free (or for a page that is loading to finish), so the spans
+overlap and their sum is not time a clerk could get back. What a clerk feels is a script that
+something waits on.
+
+**Headline.** 3,286 s of probe time: **1,858 s (57%) are the probes' own fixed `sleep`s**, 1,428 s
+the app and ERPNext working. 21,295 scripts were sent into the ERPNext page.
+
+| # | Smell | Numbers | Cause | Proposal (5zorro's call) |
+|---|-------|---------|-------|--------------------------|
+| 1 | **Picking a vendor with no address takes about 9 s** (the Bill's header write) | `setHeader`: 131 calls, median 31 ms, p90 220 ms; **9 calls at 9.06–9.17 s**, one per test, none under chaos. 13 of the sandbox's 14 vendors have no address | `waitForSupplierBillingSnapshot` (`electron/erp-form-bridge-page.js`) waits up to `SUPPLIER_PARTY_SETTLE_MAX_MS` (12 s) for the vendor's billing address and accepts "no address" only in the last `SUPPLIER_PARTY_META_ONLY_GRACE_MS` (3 s): 12 − 3 = 9 s. During the wait the page answers other scripts in 0–2 ms, so nothing is busy; it is a timer | **Fix soon, its own small change** (bridge script, not main.js): once ERPNext's own calls for the vendor have gone quiet and the address is still empty, the vendor has none, so stop waiting. Check in ERPNext's source first that the party fetch sets `address_display` only from an existing address. A probe with an address-less vendor times the write before and after. Worth asking whether the clerk sees the 9 s (does the page hold typing meanwhile?) |
+| 2 | **The save-drain timer** | Every 750 ms, whatever is on screen, `pollErpRoute` sends two scripts: the bridge check, then the drain. 4,117 drains and as many checks: **39% of all scripts**. Most under 10 ms; 131 drains of 0.5 s or more (a page loading) | The drain runs `ensureErpFormBridge` first. But the bridge is already installed on `did-navigate`, `did-navigate-in-page` and `did-finish-load`; the timer's check is a backstop, and after a full reload it re-sends the 74.5 KB bridge script if those missed | **Fix in R2-5's bridge move:** the timer drains with `{ inject: false }` (a page without the bridge holds no save to take, as the unload path already says), plus a slower backstop check (say every 10 s) for a load whose page events all failed. Halves the timer's scripts. Little a clerk would notice; less churn and quieter charts |
+| 3 | The bridge check before every bridge call ("127 in 80 s" in the T-3 chart) | 2,731 bridge calls: the check's median under 1 ms, p90 8 ms, 13% of bridge-call time | A count, not a cost: asking the page for its bridge version is cheap when the page is free | **Leave.** If the R2-5 bridge move wants it gone, skip the check while the page's document has not changed since the last one (a counter bumped on `did-navigate`) |
+| 4 | Warm pick lists rechecked on every Doc form open | 8 lists loaded once per launch (674 loads in 66 charts, mean 212 ms); **all 8 rechecked on each Doc form open** when older than 10 s (1,039 checks, mean 86 ms; about 55 per long `@nav` run). Typing in a search rechecks after 60 s | `warmLinkLists(why, minAgeMs = 10_000)` checks every list in `WARM_LINK_DOCTYPES`, not the ones the opened form uses | **Later, with the warm-lists block move:** recheck only the lists the opened form uses, with one age rule (60 s). In the background either way |
+| 5 | Reads made once per launch | `calc-site-rounding` 78 calls (mean 428 ms, up to 4.6 s), `fetchOutstandingBills` 86 (281 ms), `relink-reviews` 84 (184 ms), `fetchDraftPayments` 85 (61 ms) | Each test launches the app; a clerk launches it about once a day | **Leave** |
+| 6 | The attachment list re-read on every document hand-over | `listPapers` 627 calls in 15 charts, 29 ms each | On purpose: a file attached in Vanilla keeps the document's name, so only a re-read notices it | **Leave** |
+| 7 | **The probes' own fixed waits** | 1,858 of 3,286 s. `nav-spine-ongoing` 365 of 507 s; `nav-spine-erp-link` 138 of 194 s; `nav-spine-find` 138 of 175 s; `nav-desk-after-discard` 90 of 97 s. The full `nav:check` took 28 min | `sleep(2000)` (266 times, 532 s), `sleep(1500)`, `sleep(6000)` … where the probe could wait for the thing it needs | **Later plan (test side only, no app change):** replace fixed sleeps with waits on a condition (`expect.poll`), the `@nav` matrix first. The biggest saving in agent turnaround. HANDOFF's note that a `sleep` loop counts as the test's own wait applies |
+
+**Not smells:** the long bridge checks (1,572 of 100 ms or more, up to 5.5 s) are scripts sent
+while a new page loads, which wait for it. The probes' `clerkLogin` and `formLoaded` stages are
+0.3–8.7 s and stay out of this table.
+
+**Finding 1 built 2026-11-01** (his pick): the bridge's vendor wait ends once ERPNext has been quiet
+50 ms with no address (`partyDetailsQuiet`, bridge version 30); the 12 s deadline stays as the
+backstop. New kept probe `vendor-no-address` (AP clerk): a vendor with no address 9.2–9.4 s → 0.31 s;
+with ERPNext's reply held 4 s the write still waits for it (address arrives; no-address ends at 4.3 s,
+was 14.7 s). The source picker never waited (~0.1 s); the clerk saw "Setting vendor…" and the terms
+late. Fails on the old script, passes on the new; `npm test` green; `r5b3-item-after-vendor` (also
+under chaos 1200/100), `dogfood-d3-vendor-chaos`, `r5b1-vendor-held-tab`, `df03-po-source-focus` pass.
+
+**Finding 2 built 2026-11-01** (his words: *"i think it was originally made when erpnext's source
+code was more difficult to examine. drop the check and keep a slower one as a fallback"*), ahead of
+the bridge move, as its own change: the route poll drains with `{ inject: false }` and checks the
+bridge every 10 s (`BRIDGE_BACKSTOP_MS`). `nav-spine-drafts` on the code before and after (2.1 min
+each): bridge checks 500 → 360, all chart spans 1,145 → 1,036 (the 360 left are finding 3's check
+before each bridge call, left as decided). `nav-spine-drafts` and `dogfood-r2-1-reload-mid-save`
+(a reload in the middle of a save, so the bridge comes back from page events alone) pass.
+
+**Finding 7: his pick 2026-11-01** — replace the probes' fixed sleeps with waits on a condition,
+then *"see what breaks then go from there"* (he expects some things to show before they paint
+properly; a pause of a person's reaction time, ~300 ms, is his fallback for those).
+First pass, the `@nav` matrix's shared `tests/probes/nav-spine.js`: 13 fixed sleeps (1–2.5 s after
+a wait that had already seen the page, the reload cell's 3 s + 6 s) became a 300 ms `settle()`, a
+poll for the gate to close after Stay, and a poll for the Doc page and ERPNext to name the same
+document after a reload; sleeps inside polling loops stay, as does the 8 s after the cruft restart.
+`npm run nav:check -- --ongoing`: **all 8 probes, 142 cells, pass in 13 min 20 s (28 min in the
+sweep)**. Nothing broke, so no settle needed lengthening.
+
+**Second pass, every other probe (2026-11-01, his "lets do all of these"; his question: "is there a
+more elegant way to wait for [the repaints]?").** Yes: the page now says when it is quiet, and the
+probes wait for that. Three small app-side marks, no behaviour change: the Doc page's preload counts
+its calls to the main process still out (`erpDoc.inFlight()`), each page stamps the end of a repaint
+(`window.__docPaintedAt`), and a pick list marks its box while a search waits out its pause or is in
+flight (`data-search-pending`). `probe-helpers.js` `docQuiet(app)` waits until those and ERPNext's
+`frappe.request.ajax_count` have been calm 300 ms; `searchDone(app)` waits for the pick list only;
+`settle()` (now shared; nav-spine uses it) and `leftHome(app)` cover the rest. A `sleep` stays only
+where time is the question (a "nothing happens in 15 s" window, the calculator tape's timed fade, a
+race the probe sets up, a clerk's pause it imitates), with a comment saying which; the rules are in
+`tests/probes/README.md` § *Writing one*. **47 probes, run before and after: 1,657 s → 1,193 s (−28%),
+all pass.** Largest: `df03-item-table` 340 → 246 s, `nav-desk-after-discard` 97 → 49, `r5b3` 63 → 13,
+`item-table-keys` 79 → 51, `nav-reload-gate` 80 → 55. Slower: `bill-payment-paths` 24 → 34 and
+`pay-settings-doors` 17 → 22 — they now wait for ERPNext's background reads the old sleeps cut
+across. In `pay-settings-doors` that race was real: `probe-user.js` `back()` swapped the login cookies
+while a reply was still out, and the clerk's cookie came back (fixed: it waits for ERPNext to be
+quiet first). `r4-2-find-show-more` swings 27–62 s on either code: its scene's delete of 205 POs alone
+took 18–27 s across runs (an A/B with the app marks set aside: 35 and 41 s without, 30 and 53 s
+with); it now reports both scene timings.
+
+`nav-spine-home` run again: 67.2 s (47.0 s of it its own waits), against 65.5 s for the
+overlapped run. A unit run (`npm test`, 27 s) overlapped the second run too; two runs under
+different overlaps agreeing within 3% says the overlap did not change this probe's numbers.
 
 ## Validate
 

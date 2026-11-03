@@ -13,7 +13,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, report, assertSandboxSite } from "../probe-helpers.js";
+import { sleep, inDoc, inErp, report, assertSandboxSite, docQuiet } from "../probe-helpers.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
 const ITEM = "SAMPLE-SKU-01";
@@ -84,7 +84,7 @@ test("R8: Create ▾ › Purchase Order orders only the ticked twin, and only on
     report("dialog-1", await openDialog(app, [0]));
     await inDoc(app, `document.querySelector('[data-testid="so-create-save"]').click(); true`);
     await expect.poll(async () => !(await dialogOpen(app)), { timeout: 60_000 }).toBe(true);
-    await sleep(1500);
+    await docQuiet(app);
     const afterOne = await poLines(app, made.so);
     report("after-line-1", { lines: afterOne, status: await status(app) });
     // R8-3: the Sources column (its reads now run at once) still shows the new PO on line 1.
@@ -106,7 +106,7 @@ test("R8: Create ▾ › Purchase Order orders only the ticked twin, and only on
     await sleep(2500);
     const second = { open: await dialogOpen(app), msg: await dialogMsg(app) };
     report("second-save", second);
-    await sleep(10_000); // both runs (if two) are done
+    await docQuiet(app, { timeout: 60_000 }); // both runs (if two) are done
     if (await dialogOpen(app)) await inDoc(app, `document.querySelector('[data-testid="so-create-po"] [data-sc="cancel"]').click(); true`);
     const afterTwo = await poLines(app, made.so);
     report("after-line-2", { lines: afterTwo, status: await status(app) });
@@ -116,7 +116,7 @@ test("R8: Create ▾ › Purchase Order orders only the ticked twin, and only on
       frappe.call = function (opts) { if (opts && /make_purchase_order/.test(String(opts.method || ""))) return new Promise((r) => setTimeout(r, 6000)).then(() => orig.call(frappe, opts)); return orig.apply(frappe, arguments); }; return true; })()`);
     report("dialog-4", await openDialog(app, [1]));
     await inDoc(app, `document.querySelector('[data-testid="so-create-save"]').click(); true`);
-    await sleep(1500);
+    await sleep(1500); // into the held save's 6 s: the race is the question, so not docQuiet
     await app.evaluate(({ webContents }) => { const w = webContents.getAllWebContents().find((x) => /\/(app|desk)\b/.test(x.getURL())); if (w) w.reload(); });
     await sleep(8000);
     const reloaded = { open: await dialogOpen(app), msg: await dialogMsg(app), status: await status(app) };

@@ -7,7 +7,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, openNewDoc, assertSandboxSite } from "../probe-helpers.js";
+import { openNewDoc, assertSandboxSite, docQuiet } from "../probe-helpers.js";
 import { SCENES, scenesForRow } from "../dogfood-scenes.js";
 
 test("dogfood setup", async () => {
@@ -21,7 +21,7 @@ test("dogfood setup", async () => {
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
-    await sleep(1500);
+    await docQuiet(app);
     await assertSandboxSite(app);
     for (const name of names) {
       const s = SCENES[name];

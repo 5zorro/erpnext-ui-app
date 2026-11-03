@@ -11,7 +11,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, openNewDoc, assertSandboxSite, keepScene, report, repaintDoc } from "../probe-helpers.js";
+import { inDoc, openNewDoc, assertSandboxSite, keepScene, report, repaintDoc, docQuiet } from "../probe-helpers.js";
 import { SCENES, inPage } from "../dogfood-scenes.js";
 import { billCompareTotal } from "../../../src/bill-map.js";
 
@@ -23,7 +23,7 @@ test("R6c-4: a refused just-in-time receipt leaves no draft and says why", async
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     const made = await scene.make(app);
     report("scene", made);
@@ -40,7 +40,7 @@ test("R6c-4: a refused just-in-time receipt leaves no draft and says why", async
         return true; })()`,
       30_000,
     );
-    await sleep(2000);
+    await docQuiet(app);
     const line = (await inDoc(app, SNAP)).doc.items[0];
     report("line", { item: line.item_code, warehouse: line.warehouse });
     expect(line.warehouse).toBe(made.warehouse);

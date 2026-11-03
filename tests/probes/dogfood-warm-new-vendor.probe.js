@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, escPeek, focusTestId, inDoc, inErp, openNewDoc, docState, erpDown, erpUp, report } from "./probe-helpers.js";
+import { sleep, keys, escPeek, focusTestId, inDoc, inErp, openNewDoc, docState, erpDown, erpUp, report, docQuiet, searchDone } from "./probe-helpers.js";
 
 const NAME = `ZZ DF WARM ${Date.now() % 100000}`;
 const dropdown = (app) =>
@@ -19,10 +19,10 @@ test("Warm lists 2: a vendor made through Create Vendor… is listed at once", a
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(3000);
+    await docQuiet(app);
     await focusTestId(app, "bill-vendor");
     await keys(app, NAME);
-    await sleep(1500);
+    await searchDone(app);
     await keys(app, "\t"); // Create Vendor… (the only option)
     await expect.poll(() => inErp(app, `!!(window.cur_frm && cur_frm.doctype === "Supplier")`), { timeout: 20_000 }).toBe(true);
     const saved = await inErp(app, `(async () => { cur_frm.set_value("supplier_name", ${JSON.stringify(NAME)}); if (!cur_frm.doc.supplier_group) { const g = await frappe.xcall("frappe.client.get_list", { doctype: "Supplier Group", fields: ["name"], limit_page_length: 1 }); await cur_frm.set_value("supplier_group", g[0].name); } await cur_frm.save(); return cur_frm.doc.name; })()`, 30_000);
@@ -33,11 +33,11 @@ test("Warm lists 2: a vendor made through Create Vendor… is listed at once", a
     await expect.poll(async () => (await docState(app)).snapOk, { timeout: 30_000 }).toBe(true);
 
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(2000);
+    await docQuiet(app);
     await erpDown(app, "search_link"); // a live search cannot answer now
     await focusTestId(app, "bill-vendor");
     await keys(app, "ZZ DF WA");
-    await sleep(1500);
+    await searchDone(app);
     const seen = await dropdown(app);
     await erpUp(app);
     report("typed", seen);

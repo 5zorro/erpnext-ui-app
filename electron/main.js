@@ -21,8 +21,7 @@ import {
   vanishedKey,
   shouldPruneOnHome,
 } from "../src/nav-prune.js";
-import { frappeResourceGetList, frappeResourceGetDocs, frappeResourceGetDoc } from "../src/erp-http-list.js";
-import { findListQuery, findRowsFromList, findSavedSearch } from "../src/find-skin-query.js";
+import { frappeResourceGetList, frappeResourceGetDocs } from "../src/erp-http-list.js";
 import { isAllowedErpUrl, erpUrl, isShellNavAllowed, offBaseNavigation, offBaseWarning } from "../src/nav-guard.js";
 import { pushHistory } from "../src/history.js";
 import {
@@ -58,6 +57,7 @@ import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.
 import { appendNavDebug, formatNavDebugLines, debugLogNeedsRotation } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
 import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
+import { isVendorSwitch, vendorChangeLosses, vendorChangeDialogSpec } from "../src/vendor-change.js";
 import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent, resolveErpNavIntent } from "../src/erp-nav-intent.js";
 import {
   NAV_INCIDENT_NOTE_MAX,
@@ -73,7 +73,6 @@ import {
   voidAmendProbes,
 } from "../src/doc-actions.js";
 import { voidAmendOutcome } from "../src/void-amend-flow.js";
-import { modeChangeShouldStop } from "../src/mode-change-plan.js";
 import {
   FOCUS_INCIDENT_NOTE_MAX,
   buildFocusIncident,
@@ -100,50 +99,17 @@ import {
 import { buildBillRowsFromTermReport, OUTSTANDING_SCHEDULE_FIELDS } from "../src/outstanding-bills.js";
 import { costingNote, COSTING_TOKEN } from "../src/costing-assumptions.js";
 import { PE_REASON_FROM_JS, ERP_LIST_JS, endSentence } from "../src/erp-refusal-reason.js";
-import {
-  DEFAULT_PAYMENT_BATCH_PREFS,
-  mergePaymentBatchPrefs,
-  validatePaymentBatchPrefs,
-} from "../src/payment-batch-prefs.js";
-import {
-  allocationRowFor,
-  proposeRelinks,
-  splitAutoRelinks,
-  relinkReviewNote,
-  relinkProvenanceNote,
-} from "../src/payment-relink.js";
 import { normalizeDraftPayments, paymentCreateFailureText } from "../src/payment-drafts.js";
 import { mergeNumberPrefs, normalizeNumberLead } from "../src/doc-number-pref.js";
 import { mergeReceiveAskPrefs } from "../src/bill-receive-ask.js";
 import { beginShellDetour, detourBackLabel, isDocErrandTarget, beginDocDetour } from "../src/shell-detour.js";
-import { MAX_PAPER_BYTES, MAX_OPEN_BYTES, frappeDownloadPath, openablePaper, INTERNET_ZONE_MARK, isErpFilePath, isStaleTempCopy } from "../src/compare-papers.js";
-import { buildZip, plainFileName, freeFileName } from "../src/zip-store.js";
-import {
-  MULTI_PDF_SYNC_MAX,
-  addToPrintQueue,
-  classifyErpPrintUrl,
-  diagnosePrintFailure,
-  isChromiumPrintRefusal,
-  osPrintCommand,
-  interpretJobStatus,
-  paperMismatch,
-  parseCupsPaper,
-  parseLpJobId,
-  printPlan,
-  groupPrintQueue,
-  mergePrintPrefs,
-  multiPdfUrl,
-  pdfFileName,
-  pdfUrl,
-  printBlockReason,
-  printerPurposeFor,
-  printviewUrl,
-  rememberPrintChoice,
-  removeFromPrintQueue,
-  printerLabel,
-  sortPrintersByRecent,
-  summarizePrintResults,
-} from "../src/print-service.js";
+import { isStaleTempCopy } from "../src/compare-papers.js";
+import { classifyErpPrintUrl } from "../src/print-service.js";
+import { initPrinting, loadPrintPrefs, printE2eApi, handleErpPrintRequest } from "./ipc/print.js";
+import { initPapers } from "./ipc/papers.js";
+import { initFind } from "./ipc/find.js";
+import { initPaymentSettings, loadPaymentBatchPrefs } from "./ipc/payment-settings.js";
+import { initRelinkMethodChange } from "./ipc/relink-method-change.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -198,7 +164,7 @@ import {
   isAllowedAutofixScriptPath,
   autofixReady,
 } from "../src/health-remediation.js";
-import { spawn, execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { findListFocusField, findListFocusLabel } from "../src/doc-chrome.js";
 import {
   resolveFeedbackFormUrl,
@@ -441,8 +407,6 @@ let lastLogin = { state: "unknown", user: null };
 let history = [];
 /** @type {Record<string, string>} */
 let lensPrefs = {};
-/** @type {import("../src/payment-batch-prefs.js").PaymentBatchPrefs} */
-let paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
 /** AP vs AR at /app/payment-entry/new (Packet 4b step 5). @type {{ direction: "Pay"|"Receive" }} */
 let paymentDirectionPrefs = mergePaymentDirectionPrefs(null);
 /** OI-170: which number leads — theirs or ours. One app-wide setting (DF-01 E). */
@@ -455,19 +419,6 @@ let billReceivePrefs = mergeReceiveAskPrefs(null);
  * @type {import("../src/shell-detour.js").ShellDetour|null}
  */
 let shellDetour = null;
-/** Printing (src/print-service.js): remembered formats / letter head / printers, and the queue. */
-let printPrefs = mergePrintPrefs(null);
-/** @type {import("../src/print-service.js").PrintItem[]} */
-let printQueue = [];
-/**
- * Self-healing printing: the last engine / session fault this session, said in the dialog with its
- * fix until a PDF from ERPNext works again. @type {{ kind: string, cause: string, fix: string, at: string }|null}
- */
-let printTrouble = null;
-/** Print Settings as last read (the fallback PDF uses ERPNext's page size). */
-let lastPrintSettings = {};
-/** Once Chromium has refused a silent print this session, go straight to the OS print command. */
-let preferOsPrint = false;
 /** Desk hatch — which desk's Doc skins are hatched (doc-wash.js). @type {{ pattern: string }} */
 let docWashPrefs = mergeDocWashPrefs(null);
 /** @type {import("../src/shelved-drafts.js").ShelvedDraft[]} */
@@ -762,9 +713,6 @@ function reloadDocFormShell() {
 function prefsPath() {
   return path.join(app.getPath("userData"), "lens-prefs.json");
 }
-function paymentBatchPrefsPath() {
-  return path.join(app.getPath("userData"), "payment-batch-prefs.json");
-}
 function docWashPrefsPath() {
   return path.join(app.getPath("userData"), DOC_WASH_PREFS_FILENAME);
 }
@@ -774,20 +722,8 @@ function paymentDirectionPrefsPath() {
 function docNumberPrefsPath() {
   return path.join(app.getPath("userData"), "doc-number-prefs.json");
 }
-function printPrefsPath() {
-  return path.join(app.getPath("userData"), "print-prefs.json");
-}
 function billReceivePrefsPath() {
   return path.join(app.getPath("userData"), "bill-receive-prefs.json");
-}
-/**
- * The delay calendar is stored as **CSV, not JSON** (5zorro 2026-09-16: *"perhaps accept
- * spreadsheets but only store as a csv?"*). The stored file is therefore the same artefact the
- * user edits in Excel — they can open this path directly, and an export is a copy rather than a
- * conversion. Parsing and serialising stay in `src/delay-calendar.js`; this layer moves strings.
- */
-function delayCalendarPath() {
-  return path.join(app.getPath("userData"), "delay-calendar.csv");
 }
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
@@ -825,13 +761,7 @@ function loadPrefs() {
   } catch {
     healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
   }
-  try {
-    paymentBatchPrefs = mergePaymentBatchPrefs(
-      JSON.parse(fs.readFileSync(paymentBatchPrefsPath(), "utf8")),
-    );
-  } catch {
-    paymentBatchPrefs = { ...DEFAULT_PAYMENT_BATCH_PREFS };
-  }
+  loadPaymentBatchPrefs();
   try {
     paymentDirectionPrefs = mergePaymentDirectionPrefs(
       JSON.parse(fs.readFileSync(paymentDirectionPrefsPath(), "utf8")),
@@ -849,11 +779,7 @@ function loadPrefs() {
   } catch {
     docNumberPrefs = mergeNumberPrefs(null);
   }
-  try {
-    printPrefs = mergePrintPrefs(JSON.parse(fs.readFileSync(printPrefsPath(), "utf8")));
-  } catch {
-    printPrefs = mergePrintPrefs(null);
-  }
+  loadPrintPrefs();
   try {
     billReceivePrefs = mergeReceiveAskPrefs(JSON.parse(fs.readFileSync(billReceivePrefsPath(), "utf8")));
   } catch {
@@ -875,13 +801,6 @@ function syncWashPattern(view) {
 
 function syncWashPatternEverywhere() {
   for (const v of [home, docForm, findDoc, payOutstanding, paymentDoc]) syncWashPattern(v);
-}
-function savePaymentBatchPrefs() {
-  try {
-    fs.writeFileSync(paymentBatchPrefsPath(), JSON.stringify(paymentBatchPrefs));
-  } catch {
-    /* ignore */
-  }
 }
 function savePaymentDirectionPrefs() {
   try {
@@ -1047,24 +966,7 @@ function syncE2eApi() {
       erp && !erp.webContents.isDestroyed() ? erp.webContents.getURL() : "",
     getHistory: () => history.map((h) => ({ ...h })),
     getPeekStack: () => (peekStack ? JSON.parse(JSON.stringify(peekStack)) : null),
-    // Printing: ERPNext's PDF through the ERP view's session, without a save dialog (tests only).
-    fetchPrintPdf: async (item) => {
-      const r = await fetchErpPdf(pdfUrl(ERP_BASE, item || {}));
-      return r.ok ? { ok: true, size: r.bytes.length, head: r.bytes.subarray(0, 5).toString("latin1") } : r;
-    },
-    // Self-healing PDF for one document, without a save dialog (tests only).
-    healedPdf: async (item) => {
-      const r = await pdfForItem(null, item || {});
-      if (r.worker && !r.worker.isDestroyed()) r.worker.destroy();
-      return r.ok
-        ? { ok: true, healed: !!r.healed, head: Buffer.from(r.bytes).subarray(0, 5).toString("latin1"), trouble: printTrouble }
-        : { ok: false, reason: r.reason, trouble: printTrouble };
-    },
-    getPrintQueue: () => printQueue.map((q) => ({ ...q })),
-    setNextSavePath: (p) => {
-      e2eNextSavePath = String(p || "");
-      return true;
-    },
+    ...printE2eApi(),
     windowCount: () => BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed()).length,
     getRecentRows: () =>
       JSON.parse(JSON.stringify(applyPeekTreeToHistory(history, peekStack, ERP_BASE, peekLinks))),
@@ -1126,6 +1028,8 @@ function syncE2eApi() {
     docSkinAvailable: () => true,
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
+    /** Which warm pick-list copies are loaded (they load 2 s after a Doc page opens; probe-helpers `warmCopies`). */
+    linkListsLoaded: () => [...linkListCopies.keys()],
     execInView: (name, js) => {
       const map = { chrome, home, hist, erp, docForm, payOutstanding, paymentDoc, findDoc };
       const view = map[name];
@@ -2849,6 +2753,10 @@ function trackNav(url, opts = {}) {
   syncE2eApi();
 }
 
+/** How often the route poll still checks the bridge is installed (plan 2026-10-25 3b finding 2). */
+const BRIDGE_BACKSTOP_MS = 10_000;
+let lastBridgeBackstopAt = 0;
+
 function pollErpRoute() {
   if (!erp || erp.webContents.isDestroyed()) return;
   // URL sync for chrome/history when on Vanilla — not a DB poll.
@@ -2863,8 +2771,15 @@ function pollErpRoute() {
       }
     }
   }
-  // Submit often keeps the same form URL — still drain shelf updates.
-  drainErpSaveIntoShelved().catch(() => {});
+  // Submit often keeps the same form URL — still drain shelf updates. The bridge is installed on
+  // did-navigate, did-navigate-in-page and did-finish-load, so the drain does not check it each
+  // tick (that check was half of every script sent into the page, plan 2026-10-25 3b finding 2);
+  // a page without the bridge holds no save to take. A slower check stays as the fallback for a
+  // load whose page events all missed.
+  const now = Date.now();
+  const backstop = now - lastBridgeBackstopAt >= BRIDGE_BACKSTOP_MS;
+  if (backstop) lastBridgeBackstopAt = now;
+  drainErpSaveIntoShelved({ inject: backstop }).catch(() => {});
 }
 
 /** Electron session.fetch — attaches ERP login cookies without manual Cookie headers. */
@@ -5669,6 +5584,74 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
     ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
+      var r = await frappe.call({
+        method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
+        args: { dt: "Purchase Invoice", dn: billName },
+      });
+      if (r && r.exc) return { ok: false, reason: reasonFrom(r), step: "get_payment_entry" };
+      var pe = r && r.message;
+      if (!pe) return { ok: false, reason: "get_payment_entry returned empty.", step: "get_payment_entry" };
+      try { pe = JSON.parse(JSON.stringify(pe)); } catch (eJson) {}
+      if (!pe.doctype) pe.doctype = "Payment Entry";
+      var billNo = ${billNoLit};
+      var postingDate = ${postingLit};
+      if (!pe.reference_no) pe.reference_no = billNo || billName;
+      if (!pe.reference_date) {
+        pe.reference_date =
+          postingDate ||
+          (frappe.datetime && frappe.datetime.get_today
+            ? frappe.datetime.get_today()
+            : null);
+      }
+      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      if (inserted && inserted.exc) {
+        return { ok: false, reason: reasonFrom(inserted), step: "insert" };
+      }
+      var saved = inserted && inserted.message ? inserted.message : null;
+      if (!saved || !saved.name) {
+        return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
+      }
+      return { ok: true, name: saved.name };
+    } catch (e) {
+      return { ok: false, reason: reasonFrom(e), step: "unknown" };
+    }
+  })()`);
+  if (!(raw && typeof raw === "object")) {
+    return { ok: false, reason: "Payment Entry create failed." };
+  }
+  if (raw.ok) return raw;
+  return {
+    ok: false,
+    reason: formatClientErrorReason(raw.reason || raw, "Payment Entry create failed."),
+    step: raw.step,
+  };
+}
+
+/**
+ * Create + submit Payment Entry for a submitted Purchase Invoice (OI-135 JIT).
+ * @param {string} billName
+ * @param {{ modeOfPayment: string, cashBankAccount: string, paidAmount: number }} intent
+ */
+async function createJitPaymentEntryForBill(billName, intent) {
+  const name = billName == null ? "" : String(billName).trim();
+  if (!name || isNewDocRecord(name)) {
+    return { ok: false, reason: "Bill must be saved/submitted before Payment Entry." };
+  }
+  const mop = JSON.stringify(intent.modeOfPayment || "");
+  const bank = JSON.stringify(intent.cashBankAccount || "");
+  const paid = Number(intent.paidAmount);
+  const paidLit = Number.isFinite(paid) ? String(paid) : "0";
+  const billLit = JSON.stringify(name);
+  const billNoLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.bill_no) || name,
+  );
+  const postingLit = JSON.stringify(
+    normalizeEditableText(dirtyState.doc && dirtyState.doc.posting_date) || "",
+  );
+  const raw = await erpEval(`(async () => {
+    ${PE_REASON_FROM_JS}
+    try {
+      var billName = ${billLit};
       var mop = ${mop};
       var bankAccount = ${bank};
       var paidAmount = ${paidLit};
@@ -7305,7 +7288,7 @@ function loadLinkList(doctype, why) {
     linkListUser = lastLogin.user || "";
     navDebug("link-list", `loaded dt=${doctype} rows=${copy.rows.length} ms=${Date.now() - started} via=${why}`);
   })()
-    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${e && e.message}`))
+    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(e && e.message) || String(e)}`))
     .finally(() => {
       linkListBusy.delete(doctype);
       if (retryLater) {
@@ -8237,7 +8220,7 @@ function headerValueUnchanged(field, next) {
   return false;
 }
 
-ipcMain.handle("bill-set-header", async (_e, field, value) => {
+async function billSetHeader(field, value) {
   if (typeof field !== "string" || !field || field.startsWith("__")) {
     return { ok: false, reason: "Invalid field" };
   }
@@ -8289,6 +8272,119 @@ ipcMain.handle("bill-set-header", async (_e, field, value) => {
     }
   }
   return raw;
+}
+ipcMain.handle("bill-set-header", (_e, field, value) =>
+  field === "supplier" ? queuedVendorWrite("write", () => billSetHeader(field, value)) : billSetHeader(field, value),
+);
+
+/**
+ * Museum OI-200, follow-up (5zorro 2026-11-01: a re-pick while the server lags is the common
+ * "oops"): one vendor step at a time, and the newest pick wins — the picker's "a newer search owns
+ * the box", for the document. Both pages' vendor writes run side by side in ERPNext's page
+ * otherwise, and ERPNext writes a vendor-details reply onto the form whole, its `supplier` field
+ * included, without checking it is still the vendor asked about (`party.js` `get_party_details`):
+ * a reply for A landing after B's put A back. Now a pick made while a vendor step is still out
+ * waits for it, then is a real switch (A → B: warning, clear); a step a newer pick overtook, or
+ * one whose document is no longer open, is dropped (`superseded`), and the page stays quiet.
+ * Each pick bumps `vendorPickSeq` (the page's clear call comes first in every pick).
+ */
+let vendorPickSeq = 0;
+/** @type {Promise<unknown>} */
+let vendorStepTail = Promise.resolve();
+
+/** The open document, for "is it still the one this step was asked on". */
+const openDocKey = () => `${activeDocSkin || ""}|${(dirtyState.doc && dirtyState.doc.name) || ""}`;
+
+/**
+ * @template T
+ * @param {"clear"|"write"} kind
+ * @param {() => Promise<T>} step
+ * @returns {Promise<T | { ok: false, superseded: true, reason: string }>}
+ */
+function queuedVendorWrite(kind, step) {
+  const asked = vendorPickSeq;
+  const docAsked = openDocKey();
+  const run = async () => {
+    if (asked !== vendorPickSeq || docAsked !== openDocKey()) {
+      navDebug("vendor-change", `superseded ${kind} (pick ${asked}, now ${vendorPickSeq}; doc ${docAsked} -> ${openDocKey()})`);
+      return { ok: false, superseded: true, reason: "A newer vendor pick replaced this one." };
+    }
+    return step();
+  };
+  const p = vendorStepTail.then(run, run);
+  vendorStepTail = p.catch(() => {});
+  return p;
+}
+
+/**
+ * Museum OI-200 (5zorro's option A, 2026-11-01): the page asks this before it sets a vendor. A
+ * switch from one vendor to another clears the whole document first (Bill, PO, Item Receipt):
+ * nothing the old vendor brought outlives the switch. When the clerk has typed anything, a
+ * warning says what will clear and Keep is the default. Logged both sides (nav-debug).
+ * Runs queued behind any vendor step still out (`queuedVendorWrite`), so "the vendor now" is the
+ * one that step set.
+ * @returns {Promise<{ ok: boolean, cleared?: boolean, kept?: boolean, supplier?: string, doc?: object, reason?: string, amountDue?: string, scratch?: object }>}
+ */
+async function clearForVendorChange(value) {
+  const next = normalizeEditableText(value);
+  const doc = dirtyState.doc;
+  const prev = normalizeEditableText(doc && doc.supplier);
+  if (!isVendorSwitch(prev, next) || headerValueUnchanged("supplier", next)) {
+    return { ok: true, cleared: false };
+  }
+  const profile = activeDocProfile();
+  const docLabel = String((profile && profile.title) || "document").toLowerCase();
+  const losses = vendorChangeLosses(doc, {
+    dateExpected: activeDocSkin === "po" ? dateExpectedScratch : "",
+    amountDue: activeDocSkin === "bill" ? amountDueScratch : "",
+  });
+  const shown = normalizeEditableText(doc && doc.supplier_name) || prev;
+  if (losses.length && win && !win.isDestroyed()) {
+    const w = vendorChangeDialogSpec({ from: shown, to: next, docLabel, losses });
+    const { response } = await dialog.showMessageBox(win, {
+      type: "warning",
+      title: w.title,
+      message: w.message,
+      detail: w.detail,
+      buttons: w.buttons,
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (w.actions[response] !== "clear") {
+      navDebug("vendor-change", `kept ${prev} (asked: ${next}; would clear: ${losses.join("; ")})`);
+      return { ok: false, kept: true, supplier: shown };
+    }
+  }
+  navDebug("vendor-change", `clear ${prev} -> ${next}: ${losses.join("; ") || "nothing typed"}`);
+  const raw = await bridgeCall("clearForPartyChange", "supplier");
+  if (!raw || !raw.ok) {
+    const reason = (raw && raw.reason) || "Could not clear the document.";
+    navDebug("vendor-change", `clear failed: ${reason}`);
+    return { ok: false, reason };
+  }
+  navDebug(
+    "vendor-change",
+    `cleared ${raw.cleared ? `${raw.cleared.fields.length} fields, tables ${raw.cleared.tables.join(",") || "none"}` : ""}`,
+  );
+  if (activeDocSkin === "po") dateExpectedScratch = "";
+  if (activeDocSkin === "bill") {
+    amountDueScratch = "";
+    const key = raw.doc && raw.doc.name ? String(raw.doc.name) : currentBillDocKey();
+    delete billLineAllocationsByDoc[key];
+  }
+  dirtyState = markUserEdited({ ...dirtyState, doc: raw.doc, isDirty: true });
+  return {
+    ok: true,
+    cleared: true,
+    doc: raw.doc,
+    amountDue: amountDueScratch,
+    scratch: { dateExpected: dateExpectedScratch },
+  };
+}
+ipcMain.handle("doc-clear-for-vendor-change", (_e, value) => {
+  vendorPickSeq += 1;
+  return queuedVendorWrite("clear", () => clearForVendorChange(value));
 });
 
 ipcMain.handle("bill-check-ref", async (_e, billNo, opts) => checkBillRef(billNo, opts));
@@ -10310,7 +10406,7 @@ ipcMain.handle("doc-retry-load", async () => {
   return { ok: true };
 });
 
-ipcMain.handle("doc-set-header", async (_e, field, value) => {
+async function docSetHeader(field, value) {
   if (typeof field !== "string" || !field || field.startsWith("__")) {
     return { ok: false, reason: "Invalid field" };
   }
@@ -10361,7 +10457,10 @@ ipcMain.handle("doc-set-header", async (_e, field, value) => {
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
     : { ok: false, reason: "Set header failed." };
-});
+}
+ipcMain.handle("doc-set-header", (_e, field, value) =>
+  field === "supplier" ? queuedVendorWrite("write", () => docSetHeader(field, value)) : docSetHeader(field, value),
+);
 
 ipcMain.handle("doc-set-date-expected", async (_e, value) => {
   if (activeDocSkin !== "po") {
@@ -11219,82 +11318,15 @@ ipcMain.on("open-preferred", (_e, route) => {
   navDebug("ipc-open-preferred", r);
   openRoutePreferred(r, { forceLoad: true });
 });
+/* ---------------- Find pages (list, peek, last search): electron/ipc/find.js ---------------- */
+
+initFind({ erpBase: ERP_BASE, navDebug, erpSessionFetchImpl });
+
 /**
  * Find page → Vanilla list with the page's searches as `?field=value` filters, which Frappe
  * applies itself (router.js set_route_options_from_url) — nothing typed into its page. The
  * path is rebuilt from the registry; only the query is taken from the page.
  */
-// Find pages, live (plan 2026-09-26 F3): the list and the peek are read over HTTP with the ERP
-// session's cookies — the same data the Vanilla list shows, without touching the ERP page.
-ipcMain.handle("find-doc-list", async (_e, doctypeKey, opts) => {
-  const q = findListQuery(String(doctypeKey || ""), opts && typeof opts === "object" ? opts : {});
-  if (!q) return { ok: false, reason: "No Find page for this document type.", rows: [], more: false };
-  const fetchImpl = erpSessionFetchImpl();
-  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", rows: [], more: false };
-  const res = await frappeResourceGetList({
-    erpBase: ERP_BASE,
-    doctype: q.doctype,
-    fields: q.fields,
-    filters: q.filters,
-    orFilters: q.orFilters,
-    orderBy: q.orderBy,
-    limit: q.limit,
-    start: q.start,
-    fetchImpl,
-  });
-  if (!res.ok) {
-    navDebug("find-doc-list-failed", `${q.doctype}: ${res.status || ""} ${res.reason || ""}`);
-    return { ok: false, reason: res.reason || "Could not read the list.", status: res.status, rows: [], more: false };
-  }
-  return { ok: true, ...findRowsFromList(String(doctypeKey), res.rows) };
-});
-
-/**
- * Each Find page's last search (5zorro 2026-09-26), keyed by doctype, in userData like the other
- * prefs. Not the page's own localStorage: that was not reliably on disk when the app closed, so
- * the search could be lost across a restart. Always re-checked against the registry.
- */
-function findSearchesPath() {
-  return path.join(app.getPath("userData"), "find-doc-searches.json");
-}
-/** @type {Record<string, unknown>|null} */
-let findSearches = null;
-function readFindSearches() {
-  if (findSearches) return findSearches;
-  try {
-    const raw = JSON.parse(fs.readFileSync(findSearchesPath(), "utf8"));
-    findSearches = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  } catch {
-    findSearches = {};
-  }
-  return findSearches;
-}
-ipcMain.handle("find-doc-load-search", (_e, doctypeKey) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  if (!skin) return null;
-  return findSavedSearch(skin.doctypeKey, readFindSearches()[skin.doctypeKey]);
-});
-ipcMain.on("find-doc-save-search", (_e, doctypeKey, search) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  if (!skin) return;
-  const all = readFindSearches();
-  all[skin.doctypeKey] = findSavedSearch(skin.doctypeKey, search);
-  try {
-    fs.writeFileSync(findSearchesPath(), JSON.stringify(all));
-  } catch {
-    /* ignore — the search is simply not remembered */
-  }
-});
-
-ipcMain.handle("find-doc-peek", async (_e, doctypeKey, name) => {
-  const skin = findSkinFor(String(doctypeKey || ""));
-  const rec = typeof name === "string" ? name.trim() : "";
-  if (!skin || !rec) return { ok: false, reason: "Nothing to peek at.", doc: null };
-  const fetchImpl = erpSessionFetchImpl();
-  if (!fetchImpl) return { ok: false, reason: "ERP session not ready.", doc: null };
-  return frappeResourceGetDoc({ erpBase: ERP_BASE, doctype: skin.doctype, name: rec, fetchImpl });
-});
-
 ipcMain.on("find-doc-open-vanilla", (_e, doctypeKey, route) => {
   const skin = findSkinFor(doctypeKey);
   if (!skin) return;
@@ -11516,915 +11548,13 @@ ipcMain.on("shell-detour-back", () => {
   if (shellDetour) returnFromShellDetour("button");
 });
 
-/* ---------------- Printing (plan 2026-09-26 "Printing"; src/print-service.js) ---------------- */
+/* ---------------- Printing: electron/ipc/print.js ---------------- */
 
-/** Tests only (E2E=1): the next save dialog answers with this path instead of opening. */
-let e2eNextSavePath = "";
-/** @param {Electron.SaveDialogOptions} options */
-async function askSavePath(options) {
-  if (process.env.E2E === "1" && e2eNextSavePath) {
-    const filePath = e2eNextSavePath;
-    e2eNextSavePath = "";
-    return { canceled: false, filePath };
-  }
-  return dialog.showSaveDialog(win, options);
-}
+initPrinting({ erpBase: ERP_BASE, navDebug, erpEval, mainWindow: () => win, erpView: () => erp });
 
-function savePrintPrefs() {
-  try {
-    fs.writeFileSync(printPrefsPath(), JSON.stringify(printPrefs));
-  } catch {
-    /* ignore */
-  }
-}
+/* ---------------- Papers (the compare pane): electron/ipc/papers.js ---------------- */
 
-/**
- * What a print dialog needs for one doctype: ERPNext's Print Formats (and its default), Letter
- * Heads, the site's Print Settings, the printers this machine sees, and what was chosen last time.
- * @param {string} doctype ERPNext doctype, e.g. "Purchase Invoice"
- */
-async function printOptions(doctype) {
-  const dt = normalizeEditableText(doctype);
-  const raw = await erpEval(`(async () => {
-    try {
-      var dt = ${JSON.stringify(dt)};
-      var out = { ok: true, formats: [], defaultFormat: "", letterheads: [], defaultLetterhead: "", settings: {} };
-      if (dt) {
-        var f = await frappe.call({ method: "frappe.client.get_list", args: {
-          doctype: "Print Format", filters: { doc_type: dt, disabled: 0 }, fields: ["name"], order_by: "name asc", limit_page_length: 0 } });
-        out.formats = ((f && f.message) || []).map(function (r) { return r.name; });
-        try {
-          await frappe.model.with_doctype(dt);
-          out.defaultFormat = (frappe.get_meta(dt) || {}).default_print_format || "";
-        } catch (e) {}
-      }
-      var l = await frappe.call({ method: "frappe.client.get_list", args: {
-        doctype: "Letter Head", filters: { disabled: 0 }, fields: ["name", "is_default"], limit_page_length: 0 } });
-      out.letterheads = ((l && l.message) || []).map(function (r) { return r.name; });
-      var def = ((l && l.message) || []).find(function (r) { return Number(r.is_default); });
-      out.defaultLetterhead = def ? def.name : "";
-      var ps = await frappe.call({ method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
-      var p = (ps && ps.message) || {};
-      out.settings = {
-        allow_print_for_draft: p.allow_print_for_draft, allow_print_for_cancelled: p.allow_print_for_cancelled,
-        with_letterhead: p.with_letterhead, add_draft_heading: p.add_draft_heading,
-        pdf_page_size: p.pdf_page_size,
-      };
-      return out;
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  /** @type {{ name: string, displayName?: string, isDefault?: boolean }[]} */
-  let printers = [];
-  try {
-    if (win && !win.isDestroyed()) printers = await win.webContents.getPrintersAsync();
-  } catch {
-    printers = [];
-  }
-  const base = raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not read print settings." };
-  if (base.settings) lastPrintSettings = base.settings;
-  return {
-    ...base,
-    trouble: printTrouble,
-    // The three most recently used first (5zorro 2026-10-03), then the rest as the system lists them.
-    printers: sortPrintersByRecent(
-      printers.map((p) => ({
-        name: p.name,
-        displayName: p.displayName || p.name,
-        isDefault: !!p.isDefault,
-        // Full name + where it is, so two similar printers can be told apart (never truncated).
-        ...printerLabel(p),
-      })),
-      printPrefs.recentPrinters,
-    ).map((p) => ({ ...p, recent: printPrefs.recentPrinters.includes(p.name) })),
-    paperByPrinter: Object.fromEntries(
-      await Promise.all(printers.map(async (p) => [p.name, await printerPaper(p.name).catch(() => null)])),
-    ),
-    docPaper: (base.settings && base.settings.pdf_page_size) || "A4",
-    printAsImage: printPrefs.printAsImage,
-    remembered: {
-      format: printPrefs.formats[dt] || "",
-      withLetterhead: printPrefs.letterhead[dt],
-      printer: printPrefs.printers[printerPurposeFor(dt)] || "",
-    },
-  };
-}
-
-/** One hidden window for printer jobs: never shown (invariant 6), same session as the ERP view. */
-function newPrintWorker() {
-  return new BrowserWindow({
-    show: false,
-    width: 900,
-    height: 1200,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
-  });
-}
-
-/**
- * Load ERPNext's print view for one document and print it. With `deviceName` it prints silently
- * to that printer (a batch, no dialog per document); without, the system print dialog opens.
- * @param {BrowserWindow} worker
- * @param {import("../src/print-service.js").PrintItem} item
- * @param {{ deviceName?: string }} opts
- * @returns {Promise<{ ok: boolean, reason?: string }>}
- */
-async function printOneOnWorker(worker, item, opts) {
-  const url = printviewUrl(ERP_BASE, item);
-  let status = 0;
-  const onNav = (_e, _u, code) => {
-    status = code || status;
-  };
-  worker.webContents.on("did-navigate", onNav);
-  try {
-    await worker.loadURL(url);
-  } catch (e) {
-    return { ok: false, reason: `Could not load the print view (${String(e && e.message ? e.message : e)}).` };
-  } finally {
-    worker.webContents.removeListener("did-navigate", onNav);
-  }
-  if (status >= 400) {
-    const msg = await worker.webContents
-      .executeJavaScript(`(document.querySelector(".page-content, .error-message, body") || {}).innerText || ""`)
-      .catch(() => "");
-    return { ok: false, reason: `ERPNext refused (${status})${msg ? `: ${String(msg).trim().slice(0, 160)}` : ""}` };
-  }
-  // Fonts and images before paper: the page is otherwise printed half-drawn.
-  await worker.webContents
-    .executeJavaScript(
-      `Promise.all([document.fonts ? document.fonts.ready : null, ...Array.from(document.images).map((i) => i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))]).then(() => true)`,
-    )
-    .catch(() => {});
-  const silent = !!opts.deviceName;
-  return printWithTimeout(worker.webContents, {
-    silent,
-    deviceName: opts.deviceName || undefined,
-    printBackground: true,
-    // The print view is HTML: on a printer with different paper it lays out on that paper itself.
-    ...(opts.pageSize ? { pageSize: opts.pageSize } : {}),
-  });
-}
-
-/** SumatraPDF on Windows, when installed (SUMATRA_PDF, per-user or machine-wide install). */
-function findSumatraPdf() {
-  if (process.platform !== "win32") return "";
-  const candidates = [
-    process.env.SUMATRA_PDF,
-    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "SumatraPDF", "SumatraPDF.exe"),
-    process.env.ProgramFiles && path.join(process.env.ProgramFiles, "SumatraPDF", "SumatraPDF.exe"),
-  ].filter(Boolean);
-  return candidates.find((p) => {
-    try {
-      return fs.existsSync(p);
-    } catch {
-      return false;
-    }
-  }) || "";
-}
-
-/** @type {Map<string, { default: string, supported: string[] }>} per printer, this session */
-const printerPaperCache = new Map();
-
-/** Run a command; resolve its stdout (never reject). */
-function run(cmd, args, timeout = 8000) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout }, (err, out, errText) => resolve({ ok: !err, out: String(out || ""), err: String(errText || (err && err.message) || "") }));
-  });
-}
-
-/**
- * The paper a printer loads (printer hardening). CUPS reports it with `lpoptions -l` (default
- * starred); Windows with PowerShell's Get-PrintConfiguration. Unknown → null, and no ⚠ is shown.
- * @param {string} name
- */
-async function printerPaper(name) {
-  if (!name) return null;
-  if (printerPaperCache.has(name)) return printerPaperCache.get(name);
-  let paper = null;
-  if (process.platform === "linux" || process.platform === "darwin") {
-    const r = await run("lpoptions", ["-p", name, "-l"]);
-    if (r.ok) paper = parseCupsPaper(r.out);
-  } else if (process.platform === "win32") {
-    const r = await run("powershell.exe", ["-NoProfile", "-Command", `(Get-PrintConfiguration -PrinterName '${name.replace(/'/g, "''")}').PaperSize`]);
-    if (r.ok && r.out.trim()) paper = { default: parseCupsPaper(`PageSize: *${r.out.trim()}`).default, supported: [] };
-  }
-  if (paper && paper.default) printerPaperCache.set(name, paper);
-  return paper && paper.default ? paper : null;
-}
-
-/** "Print as image": a hidden page that flattens a PDF onto white at printer resolution. */
-async function rasterWorker(bytes) {
-  const w = newPrintWorker();
-  await w.loadFile(path.join(__dirname, "print-raster.html"));
-  for (let i = 0; i < 100; i += 1) {
-    if (await w.webContents.executeJavaScript("!!window.rasterReady").catch(() => false)) break;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  const info = await w.webContents.executeJavaScript(`window.rasterize(${JSON.stringify(Buffer.from(bytes).toString("base64"))}, 240)`);
-  return { worker: w, info };
-}
-
-/** @param {Uint8Array|Buffer} bytes @returns {Promise<Buffer>} the same pages, flat */
-async function rasterizePdf(bytes) {
-  const { worker } = await rasterWorker(bytes);
-  try {
-    return Buffer.from(await worker.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: "none" } }));
-  } finally {
-    if (!worker.isDestroyed()) worker.destroy();
-  }
-}
-
-/**
- * Electron's print with a deadline: a hung driver must not freeze a batch.
- * @param {Electron.WebContents} wc
- * @param {Electron.WebContentsPrintOptions} options
- */
-function printWithTimeout(wc, options, ms = 90_000) {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve({ ok: false, reason: "the printer did not answer within 90 seconds" }), ms);
-    wc.print(options, (success, failureReason) => {
-      clearTimeout(t);
-      resolve(success ? { ok: true } : { ok: false, reason: failureReason || "not printed" });
-    });
-  });
-}
-
-/**
- * Self-healing printer path: the document's PDF (ERPNext's, or the app's own when ERPNext's engine
- * is down) handed to the operating system's print command.
- * @param {BrowserWindow|null} worker
- * @param {import("../src/print-service.js").PrintItem} item
- * @param {string} deviceName
- */
-async function printViaOs(worker, item, deviceName, plan = { asImage: false, fitToPage: false, exact: false }) {
-  const got = await pdfForItem(worker, item);
-  if (!got.ok) return { ok: false, reason: got.reason, worker: got.worker };
-  let bytes = got.bytes;
-  if (plan.asImage) {
-    try {
-      bytes = await rasterizePdf(bytes);
-    } catch (e) {
-      navDebug("print-raster-fail", `${item.name}: ${String(e && e.message ? e.message : e)} — printing the PDF as is`);
-    }
-  }
-  const file = path.join(app.getPath("temp"), `erpnext-ui-print-${Date.now()}-${pdfFileName(item.name)}`);
-  fs.writeFileSync(file, bytes);
-  const cmd = osPrintCommand({ platform: process.platform, deviceName, file, title: item.name, sumatraPath: findSumatraPdf(), fitToPage: plan.fitToPage, exact: plan.exact });
-  if (!cmd) {
-    fs.rm(file, () => {});
-    // Windows without SumatraPDF: Chromium prints the flattened pages itself.
-    if (plan.asImage) {
-      const { worker: rw } = await rasterWorker(got.bytes);
-      try {
-        const r = await printWithTimeout(rw.webContents, { silent: true, deviceName, printBackground: true });
-        return { ...r, worker: got.worker };
-      } finally {
-        if (!rw.isDestroyed()) rw.destroy();
-      }
-    }
-    return { ok: false, reason: "This computer has no print command the app can use (on Windows, install SumatraPDF).", worker: got.worker };
-  }
-  const res = await new Promise((resolve) => {
-    execFile(cmd.cmd, cmd.args, { timeout: 60_000 }, (err, out, errText) =>
-      resolve(err ? { ok: false, reason: String(errText || err.message || err).trim().slice(0, 200) } : { ok: true, jobId: parseLpJobId(out) }),
-    );
-  });
-  // lp copies the file into the spool before it returns; the temp copy can go.
-  setTimeout(() => fs.rm(file, () => {}), 30_000);
-  return { ...res, worker: got.worker, healed: got.healed };
-}
-
-/**
- * @param {import("../src/print-service.js").PrintItem[]} items
- * @param {{ deviceName?: string }} opts
- */
-async function printItemsToPrinter(items, opts = {}) {
-  const list = Array.isArray(items) ? items : [];
-  // Self-healing: a printer that has gone away (unplugged, renamed, network down) is said up front
-  // rather than failing once per document; the jobs stay queued.
-  if (opts.deviceName && win && !win.isDestroyed()) {
-    const known = await win.webContents.getPrintersAsync().catch(() => null);
-    if (known && !known.some((p) => p.name === opts.deviceName)) {
-      const reason = `Printer "${opts.deviceName}" is not available on this computer now.`;
-      navDebug("print-done", reason);
-      return { ok: false, reason: `${reason} Pick another, or the system dialog — nothing was printed.`, results: list.map((item) => ({ item, ok: false, reason })) };
-    }
-  }
-  const asImage = typeof opts.printAsImage === "boolean" ? opts.printAsImage : printPrefs.printAsImage;
-  const paper = opts.deviceName ? await printerPaper(opts.deviceName) : null;
-  const mm = paperMismatch(lastPrintSettings.pdf_page_size || "A4", paper);
-  navDebug(
-    "print-start",
-    `${list.length} → ${opts.deviceName || "system dialog"}${opts.deviceName ? ` (as image ${asImage ? "on" : "off"}${mm.mismatch ? `, ${mm.doc} on ${mm.printer}` : ""})` : ""}`,
-  );
-  const worker = newPrintWorker();
-  let pdfWorker = null;
-  const results = [];
-  const jobs = [];
-  try {
-    for (const item of list) {
-      const plan = printPlan({ doctype: item.doctype, printAsImage: asImage, mismatch: mm.mismatch });
-      let r = { ok: false, reason: "" };
-      if (opts.deviceName && (plan.asImage || preferOsPrint)) {
-        // Print as image (the default) and the OS path both print the document's PDF.
-        r = await printViaOs(pdfWorker, item, opts.deviceName, plan);
-        pdfWorker = r.worker || pdfWorker;
-      } else {
-        r = await printOneOnWorker(worker, item, { ...opts, pageSize: plan.fitToPage && !plan.exact ? mm.printer : undefined });
-        if (!r.ok && opts.deviceName && isChromiumPrintRefusal(r.reason)) {
-          // Self-healing: Chromium refused the printer itself; the OS print command takes over
-          // for this document and the rest of the session.
-          navDebug("print-heal", `${opts.deviceName}: ${r.reason} → OS print`);
-          preferOsPrint = true;
-          r = await printViaOs(pdfWorker, item, opts.deviceName, plan);
-          pdfWorker = r.worker || pdfWorker;
-        }
-      }
-      if (r.ok && r.jobId) jobs.push({ id: r.jobId, printer: opts.deviceName, name: item.name, sentAt: Date.now() });
-      results.push({ item, ok: r.ok, reason: r.reason });
-      // The system dialog once is enough: cancelling it stops the batch.
-      if (!opts.deviceName && !r.ok && /cancel/i.test(String(r.reason || ""))) break;
-    }
-  } finally {
-    if (!worker.isDestroyed()) worker.destroy();
-    if (pdfWorker && !pdfWorker.isDestroyed()) pdfWorker.destroy();
-  }
-  const summary = summarizePrintResults(results, jobs.length ? "Sent" : "Printed");
-  navDebug("print-done", `${summary}${jobs.length ? ` jobs ${jobs.map((j) => j.id).join(",")}` : ""}`);
-  return { ok: results.length > 0 && results.every((r) => r.ok), results, summary, jobs };
-}
-
-/**
- * Where sent jobs stand (printer hardening): printed, still printing, or the printer stopped and
- * why. CUPS only; elsewhere a sent job reads as done.
- * @param {Array<{ id: string, printer: string, sentAt: number }>} jobs
- */
-async function printJobStatus(jobs) {
-  const list = Array.isArray(jobs) ? jobs.filter((j) => j && j.id && j.printer) : [];
-  if (process.platform !== "linux" && process.platform !== "darwin") return list.map((j) => ({ ...j, state: "done", reason: "" }));
-  let reasonsByPrinter = {};
-  try {
-    const ps = win && !win.isDestroyed() ? await win.webContents.getPrintersAsync() : [];
-    reasonsByPrinter = Object.fromEntries(ps.map((p) => [p.name, (p.options && p.options["printer-state-reasons"]) || ""]));
-  } catch {
-    reasonsByPrinter = {};
-  }
-  const out = [];
-  for (const j of list) {
-    const pending = await run("lpstat", ["-W", "not-completed", "-o", j.printer]);
-    const printer = await run("lpstat", ["-l", "-p", j.printer]);
-    const st = interpretJobStatus({
-      jobId: j.id,
-      pendingText: pending.out,
-      printerText: printer.out,
-      stateReasons: reasonsByPrinter[j.printer] || "",
-      waitedMs: Date.now() - (Number(j.sentAt) || Date.now()),
-    });
-    out.push({ ...j, ...st });
-  }
-  return out;
-}
-
-/**
- * Fetch one of ERPNext's PDFs over the ERP view's own session (it is logged in) and refuse
- * anything that is not a PDF — an error page must never be saved as one.
- * @param {string} url
- */
-async function fetchErpPdf(url) {
-  if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
-  try {
-    const res = await erp.webContents.session.fetch(url);
-    const type = res.headers.get("content-type") || "";
-    if (!res.ok || !/pdf/i.test(type)) {
-      const text = await res.text().catch(() => "");
-      let reason = `ERPNext did not return a PDF (${res.status}).`;
-      try {
-        const j = JSON.parse(text);
-        const msgs = j && j._server_messages ? JSON.parse(j._server_messages).map((m) => JSON.parse(m).message).join(" ") : "";
-        const said = msgs || (j && (j.exception || j.exc_type)) || "";
-        if (said) reason = `ERPNext: ${String(said).replace(/<[^>]+>/g, "").split("\n")[0].slice(0, 240)}`;
-      } catch {
-        if (text) reason += ` ${text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200)}`;
-      }
-      return { ok: false, reason };
-    }
-    return { ok: true, bytes: Buffer.from(await res.arrayBuffer()) };
-  } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
-  }
-}
-
-/**
- * Self-healing: when ERPNext's PDF engine fails (not a rule — see diagnosePrintFailure), make the
- * PDF from ERPNext's own print page with this app's Chromium. Same HTML and print style from
- * ERPNext; only the PDF maker differs (page breaks and headers may differ slightly from
- * wkhtmltopdf's).
- * @param {BrowserWindow} worker
- * @param {import("../src/print-service.js").PrintItem} item
- */
-async function renderPrintviewPdf(worker, item) {
-  let status = 0;
-  const onNav = (_e, _u, code) => {
-    status = code || status;
-  };
-  worker.webContents.on("did-navigate", onNav);
-  try {
-    await worker.loadURL(printviewUrl(ERP_BASE, item));
-  } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
-  } finally {
-    worker.webContents.removeListener("did-navigate", onNav);
-  }
-  if (status >= 400) return { ok: false, reason: `ERPNext refused the print page (${status}).` };
-  await worker.webContents
-    .executeJavaScript(`(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => true)`)
-    .catch(() => {});
-  const size = String(lastPrintSettings.pdf_page_size || "A4");
-  const pageSize = ["A3", "A4", "A5", "Legal", "Letter", "Tabloid"].includes(size) ? size : "A4";
-  try {
-    const bytes = await worker.webContents.printToPDF({ printBackground: true, pageSize });
-    return { ok: true, bytes };
-  } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
-  }
-}
-
-/**
- * ERPNext's PDF for one document, healed by the fallback when ERPNext's engine is what failed.
- * @param {BrowserWindow|null} worker reused across a batch; created on first need
- * @param {import("../src/print-service.js").PrintItem} item
- * @returns {Promise<{ ok: boolean, bytes?: Buffer, reason?: string, healed?: boolean, worker: BrowserWindow|null }>}
- */
-async function pdfForItem(worker, item) {
-  const got = await fetchErpPdf(pdfUrl(ERP_BASE, item));
-  if (got.ok) {
-    if (printTrouble && printTrouble.kind === "engine") printTrouble = null;
-    return { ...got, worker };
-  }
-  const d = diagnosePrintFailure(got.reason);
-  if (d.kind !== "engine") {
-    if (d.kind === "session") printTrouble = { ...d, at: new Date().toISOString() };
-    return { ok: false, reason: got.reason, worker };
-  }
-  printTrouble = { ...d, at: new Date().toISOString() };
-  navDebug("pdf-heal", `${item.name}: ${got.reason}`);
-  const w = worker || newPrintWorker();
-  const made = await renderPrintviewPdf(w, item);
-  return made.ok ? { ok: true, bytes: made.bytes, healed: true, worker: w } : { ok: false, reason: `${got.reason}; the app's own PDF failed too: ${made.reason}`, worker: w };
-}
-
-/** A sentence for a summary when some PDFs were made by the fallback. */
-function healedNote(count) {
-  return count
-    ? ` ${count === 1 ? "It was" : `${count} were`} made by this app because ERPNext's PDF engine failed — ${printTrouble ? printTrouble.fix : "IT can check the server"}.`
-    : "";
-}
-
-/**
- * Save ERPNext's PDFs: one merged file, or one file per document in a folder.
- * @param {import("../src/print-service.js").PrintItem[]} items
- * @param {{ merged?: boolean }} opts
- */
-async function saveItemsAsPdf(items, opts = {}) {
-  const list = Array.isArray(items) ? items : [];
-  if (!list.length) return { ok: false, reason: "Nothing to save." };
-  if (opts.merged || list.length === 1) {
-    const defaultName = list.length === 1 ? pdfFileName(list[0].name) : `${pdfFileName(list[0].name).replace(/\.pdf$/, "")}-and-${list.length - 1}-more.pdf`;
-    const pick = await askSavePath({
-      title: list.length === 1 ? "Save PDF" : `Save ${list.length} documents as one PDF`,
-      defaultPath: path.join(app.getPath("documents"), defaultName),
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
-    const first = list[0];
-    navDebug("pdf-start", `${list.length} merged → ${pick.filePath}${list.length > MULTI_PDF_SYNC_MAX ? " (large)" : ""}`);
-    if (list.length === 1) {
-      const one = await pdfForItem(null, first);
-      if (one.worker && !one.worker.isDestroyed()) one.worker.destroy();
-      if (!one.ok) {
-        navDebug("pdf-done", `failed: ${one.reason}`);
-        return { ok: false, reason: one.reason, trouble: printTrouble };
-      }
-      fs.writeFileSync(pick.filePath, one.bytes);
-      navDebug("pdf-done", `saved ${pick.filePath}${one.healed ? " (healed)" : ""}`);
-      return { ok: true, files: [pick.filePath], summary: `Saved PDF — ${pick.filePath}.${healedNote(one.healed ? 1 : 0)}`, trouble: printTrouble };
-    }
-    const got = await fetchErpPdf(
-      multiPdfUrl(ERP_BASE, list, { format: first.format, noLetterhead: first.noLetterhead, letterhead: first.letterhead }),
-    );
-    if (got.ok) {
-      if (printTrouble && printTrouble.kind === "engine") printTrouble = null;
-      fs.writeFileSync(pick.filePath, got.bytes);
-      navDebug("pdf-done", `saved ${pick.filePath}`);
-      return { ok: true, files: [pick.filePath], summary: `Saved ${list.length} documents as one PDF — ${pick.filePath}` };
-    }
-    if (diagnosePrintFailure(got.reason).kind !== "engine") {
-      navDebug("pdf-done", `failed: ${got.reason}`);
-      return { ok: false, reason: got.reason, trouble: printTrouble };
-    }
-    // Healing a merged file needs a PDF merger this app does not carry: save one file per document
-    // beside the chosen one instead, and say so.
-    const outcome = await savePdfsEach(list, path.dirname(pick.filePath));
-    return { ...outcome, summary: `ERPNext could not make one merged PDF, so each document was saved separately in ${path.dirname(pick.filePath)}. ${outcome.summary}` };
-  }
-  const dir = await dialog.showOpenDialog(win, {
-    title: `Save ${list.length} PDFs — one per document`,
-    defaultPath: app.getPath("documents"),
-    properties: ["openDirectory", "createDirectory"],
-  });
-  if (dir.canceled || !dir.filePaths || !dir.filePaths[0]) return { ok: false, cancelled: true, reason: "Not saved." };
-  navDebug("pdf-start", `${list.length} each → ${dir.filePaths[0]}`);
-  return savePdfsEach(list, dir.filePaths[0]);
-}
-
-/**
- * One PDF per document into a folder, healing engine failures per document.
- * @param {import("../src/print-service.js").PrintItem[]} list
- * @param {string} folder
- */
-async function savePdfsEach(list, folder) {
-  const results = [];
-  const files = [];
-  let worker = null;
-  let healed = 0;
-  const used = new Set();
-  try {
-    for (const item of list) {
-      const got = await pdfForItem(worker, item);
-      worker = got.worker;
-      if (!got.ok) {
-        results.push({ item, ok: false, reason: got.reason });
-        continue;
-      }
-      if (got.healed) healed += 1;
-      // Never over a file already there, nor over another document of this batch (R11-5).
-      const name = freeFileName(pdfFileName(item.name), (c) => used.has(c.toLowerCase()) || fs.existsSync(path.join(folder, c)));
-      used.add(name.toLowerCase());
-      const file = path.join(folder, name);
-      fs.writeFileSync(file, got.bytes);
-      files.push(file);
-      results.push({ item, ok: true });
-    }
-  } finally {
-    if (worker && !worker.isDestroyed()) worker.destroy();
-  }
-  const summary = summarizePrintResults(results, "Saved") + healedNote(healed);
-  navDebug("pdf-done", summary);
-  return { ok: results.every((r) => r.ok), results, files, summary, trouble: printTrouble };
-}
-
-/**
- * Frappe tried to open a print window (Vanilla's Print / PDF / list bulk print). Print button →
- * the system dialog, as in a browser; PDF / bulk → a save dialog. Never a popup.
- * @param {NonNullable<ReturnType<typeof classifyErpPrintUrl>>} req
- */
-async function handleErpPrintRequest(req) {
-  navDebug("print-intercept", `${req.kind} ${req.items.length}`);
-  if (req.kind === "printview") return printItemsToPrinter(req.items, {});
-  return saveItemsAsPdf(req.items, { merged: req.kind === "multi-pdf" });
-}
-
-/** Results for the print dialog: the queue as it stands, grouped. */
-function printQueueState() {
-  return { ok: true, queue: printQueue.map((q) => ({ ...q })), groups: groupPrintQueue(printQueue) };
-}
-
-ipcMain.handle("print-options", async (_e, doctype) => printOptions(doctype));
-ipcMain.handle("print-block-reason", async (_e, doc, settings) => printBlockReason(doc, settings));
-/**
- * Print or save, in place (the page never moves). `remember` stores the clerk's choices per
- * doctype / purpose (print-prefs.json), never on the site.
- */
-ipcMain.handle("print-run", async (_e, req) => {
-  const r = req && typeof req === "object" ? req : {};
-  const items = Array.isArray(r.items) ? r.items.filter((i) => i && i.doctype && i.name) : [];
-  if (!items.length) return { ok: false, reason: "Nothing to print." };
-  if (r.remember && typeof r.remember === "object") {
-    printPrefs = rememberPrintChoice(printPrefs, r.remember);
-    savePrintPrefs();
-  }
-  if (r.dest === "printer") {
-    return printItemsToPrinter(items, { deviceName: r.deviceName || "", printAsImage: typeof r.printAsImage === "boolean" ? r.printAsImage : undefined });
-  }
-  return saveItemsAsPdf(items, { merged: r.dest === "pdf-merged" });
-});
-ipcMain.handle("print-queue-get", async () => printQueueState());
-ipcMain.handle("print-job-status", async (_e, jobs) => printJobStatus(jobs));
-ipcMain.handle("print-queue-add", async (_e, items) => {
-  // An item queued without a format (a check run) takes the one last chosen for its doctype.
-  const withFormats = (Array.isArray(items) ? items : []).map((it) =>
-    it && !it.format && printPrefs.formats[it.doctype] ? { ...it, format: printPrefs.formats[it.doctype] } : it,
-  );
-  const r = addToPrintQueue(printQueue, withFormats);
-  printQueue = r.queue;
-  navDebug("print-queue-add", `+${r.added}${r.refused ? ` (${r.refused} over the limit)` : ""} = ${printQueue.length}`);
-  return { ...printQueueState(), added: r.added, refused: r.refused };
-});
-ipcMain.handle("print-queue-remove", async (_e, items) => {
-  printQueue = removeFromPrintQueue(printQueue, Array.isArray(items) ? items : []);
-  return printQueueState();
-});
-ipcMain.handle("print-queue-clear", async () => {
-  printQueue = [];
-  return printQueueState();
-});
-/**
- * Run the queue (or part of it): print to the printer, one merged PDF, or one PDF each. What
- * succeeded leaves the queue; what failed stays, with its reason in the summary.
- */
-ipcMain.handle("print-queue-run", async (_e, req) => {
-  const r = req && typeof req === "object" ? req : {};
-  const pick = Array.isArray(r.items) && r.items.length ? removeFromPrintQueue(printQueue, removeFromPrintQueue(printQueue, r.items)) : printQueue.slice();
-  if (!pick.length) return { ok: false, reason: "The print queue is empty." };
-  if (r.dest === "printer" && r.deviceName) {
-    printPrefs = rememberPrintChoice(printPrefs, { deviceName: r.deviceName });
-    savePrintPrefs();
-  }
-  const out =
-    r.dest === "printer"
-      ? await printItemsToPrinter(pick, { deviceName: r.deviceName || "", printAsImage: typeof r.printAsImage === "boolean" ? r.printAsImage : undefined })
-      : await saveItemsAsPdf(pick, { merged: r.dest === "pdf-merged" });
-  const done = out.results ? out.results.filter((x) => x.ok).map((x) => x.item) : out.ok ? pick : [];
-  printQueue = removeFromPrintQueue(printQueue, done);
-  return { ...out, ...printQueueState() };
-});
-
-/* ---------------- Compare pane (plan 2026-09-26 "Compare pane") ---------------- */
-
-/**
- * Attachments of these documents (ERPNext `File` rows), newest metadata only — the bytes come one
- * file at a time through papers-bytes.
- * @param {Array<{ doctype: string, name: string }>} sources
- */
-async function listPapers(sources) {
-  const list = (Array.isArray(sources) ? sources : [])
-    .filter((s) => s && s.doctype && s.name)
-    .slice(0, 20)
-    .map((s) => ({ doctype: String(s.doctype), name: String(s.name) }));
-  if (!list.length) return { ok: true, files: [] };
-  const raw = await erpEval(`(async () => {
-    try {
-      var out = [];
-      for (var s of ${JSON.stringify(list)}) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
-          doctype: "File",
-          filters: { attached_to_doctype: s.doctype, attached_to_name: s.name, is_folder: 0 },
-          fields: ["name", "file_name", "file_url", "is_private", "creation", "file_size", "attached_to_doctype", "attached_to_name"],
-          order_by: "creation asc", limit_page_length: 100 } });
-        out.push.apply(out, (r && r.message) || []);
-      }
-      return { ok: true, files: out };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e), files: [] };
-    }
-  })()`);
-  return raw && typeof raw === "object" ? raw : { ok: false, reason: "Could not list attachments.", files: [] };
-}
-
-/** One attachment's bytes over the ERP view's session (private files need it). */
-/** @param {number} maxBytes */
-function tooLargeReason(maxBytes) {
-  return maxBytes > MAX_PAPER_BYTES
-    ? `Too large for the app (over ${Math.round(maxBytes / 1048576)} MB) — download it from ERPNext in a browser.`
-    : "Too large to show here — open it instead.";
-}
-
-/**
- * The bytes of an ERPNext file over the clerk's session. The 25 MB default is the pane's preview
- * limit; Open and Download pass MAX_OPEN_BYTES, or a 30 MB scan could be neither shown nor opened.
- */
-async function paperBytes(fileUrl, maxBytes = MAX_PAPER_BYTES) {
-  const u = String(fileUrl || "");
-  if (!isErpFilePath(u)) return { ok: false, reason: "Not an ERPNext file address." };
-  if (!erp || erp.webContents.isDestroyed()) return { ok: false, reason: "ERP view not ready." };
-  try {
-    let res = await erp.webContents.session.fetch(`${ERP_BASE}${encodeURI(decodeURI(u))}`);
-    if (!res.ok) {
-      // The file's own address will not serve it (a private .html — see frappeDownloadPath): ask
-      // Frappe's download method, which checks the same permission.
-      const first = res.status;
-      res = await erp.webContents.session.fetch(`${ERP_BASE}${frappeDownloadPath(u)}`);
-      navDebug("paper-bytes-fallback", `${u} (${first}) → download_file ${res.status}`);
-    }
-    if (!res.ok) return { ok: false, reason: `ERPNext could not send the file (${res.status}).` };
-    // Refuse a big file before reading it, when the server says its size (R11-4).
-    if (Number(res.headers.get("content-length")) > maxBytes) return { ok: false, reason: tooLargeReason(maxBytes) };
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) return { ok: false, reason: tooLargeReason(maxBytes) };
-    return { ok: true, bytes: new Uint8Array(buf), type: res.headers.get("content-type") || "" };
-  } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
-  }
-}
-
-/**
- * Attach a dropped file to the document in ERPNext (private), the way Desk's own Attach does —
- * Frappe's upload_file from the logged-in page, CSRF token and all. Logged both sides (it writes).
- * @param {{ doctype?: string, name?: string, fileName?: string, bytes?: Uint8Array }} req
- */
-async function uploadPaper(req) {
-  const r = req || {};
-  const doctype = normalizeEditableText(r.doctype);
-  const name = normalizeEditableText(r.name);
-  const fileName = normalizeEditableText(r.fileName) || "paper";
-  if (!doctype || !name || /^new-/.test(name)) return { ok: false, reason: "Save the document first — ERPNext attaches files to a saved document." };
-  const bytes = r.bytes ? Buffer.from(r.bytes) : null;
-  if (!bytes || !bytes.length) return { ok: false, reason: "Empty file." };
-  if (bytes.length > MAX_PAPER_BYTES) return { ok: false, reason: "Too large (25 MB at most)." };
-  navDebug("paper-upload", `${doctype} ${name} ← ${fileName} (${bytes.length} bytes) start`);
-  const raw = await erpEval(`(async () => {
-    try {
-      var b64 = ${JSON.stringify(bytes.toString("base64"))};
-      var bin = atob(b64); var arr = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-      var fd = new FormData();
-      fd.append("file", new Blob([arr]), ${JSON.stringify(fileName)});
-      fd.append("is_private", "1");
-      fd.append("doctype", ${JSON.stringify(doctype)});
-      fd.append("docname", ${JSON.stringify(name)});
-      var res = await fetch("/api/method/upload_file", { method: "POST", body: fd,
-        headers: { "X-Frappe-CSRF-Token": frappe.csrf_token, Accept: "application/json" } });
-      var j = await res.json().catch(function () { return {}; });
-      if (!res.ok || !j.message) {
-        var msg = "";
-        try { msg = JSON.parse(JSON.parse(j._server_messages)[0]).message; } catch (e) {}
-        return { ok: false, reason: msg || j.exception || ("upload failed (" + res.status + ")") };
-      }
-      return { ok: true, file: { name: j.message.name, file_name: j.message.file_name, file_url: j.message.file_url, creation: j.message.creation } };
-    } catch (e) {
-      return { ok: false, reason: String(e && e.message ? e.message : e) };
-    }
-  })()`);
-  const res = raw && typeof raw === "object" ? raw : { ok: false, reason: "Upload failed." };
-  navDebug("paper-upload", `${doctype} ${name} ← ${fileName} ${res.ok ? `ok ${res.file && res.file.file_url}` : `failed: ${res.reason}`}`);
-  return res;
-}
-
-/** Open a paper in the system's own viewer (a temp copy). */
-/**
- * Windows: mark a file written from ERPNext's bytes as downloaded from the internet, as a browser
- * would, so SmartScreen and Office's Protected View / macro block treat it that way (review
- * 2026-10-19, R11-2). Elsewhere, and if the disk refuses the mark, nothing changes.
- * @param {string} file
- */
-function markFromInternet(file) {
-  if (process.platform !== "win32") return;
-  try {
-    fs.writeFileSync(`${file}:Zone.Identifier`, INTERNET_ZONE_MARK);
-  } catch (e) {
-    navDebug("paper-zone-mark-err", `${file}: ${String(e && e.message ? e.message : e)}`);
-  }
-}
-
-async function openPaper(req) {
-  const r = req || {};
-  // Documents only: the OS picks the program by extension, and an attached .exe would run.
-  const allowed = openablePaper(r.fileName);
-  if (!allowed.ok) {
-    navDebug("paper-open-refused", String(r.fileName || ""));
-    return { ok: false, reason: allowed.reason };
-  }
-  let bytes = r.bytes ? Buffer.from(r.bytes) : null;
-  if (!bytes && r.fileUrl) {
-    const got = await paperBytes(r.fileUrl, MAX_OPEN_BYTES);
-    if (!got.ok) return got;
-    bytes = Buffer.from(got.bytes);
-  }
-  if (!bytes) return { ok: false, reason: "Nothing to open." };
-  const file = path.join(app.getPath("temp"), `erpnext-ui-paper-${Date.now()}-${allowed.localName}`);
-  fs.writeFileSync(file, bytes);
-  markFromInternet(file);
-  const err = await shell.openPath(file);
-  return err ? { ok: false, reason: err } : { ok: true };
-}
-
-/**
- * Download one attachment (5zorro 2026-10-12, the attachments table under the notes): the clerk
- * picks where; the bytes come over the ERP view's session, as for the Papers pane. Writes only the
- * local file chosen.
- * @param {{ fileUrl?: string, fileName?: string }} req
- */
-async function downloadPaper(req) {
-  const r = req || {};
-  const safe = plainFileName(r.fileName || "attachment").replace(/[\\/:*?"<>|]+/g, "-") || "attachment";
-  const pick = await askSavePath({ title: "Download attachment", defaultPath: path.join(app.getPath("downloads"), safe) });
-  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
-  const got = await paperBytes(r.fileUrl, MAX_OPEN_BYTES);
-  if (!got.ok) {
-    navDebug("paper-download", `${r.fileUrl} failed: ${got.reason}`);
-    return got;
-  }
-  try {
-    fs.writeFileSync(pick.filePath, Buffer.from(got.bytes));
-    markFromInternet(pick.filePath);
-  } catch (e) {
-    return { ok: false, reason: String(e && e.message ? e.message : e) };
-  }
-  navDebug("paper-download", `${r.fileUrl} → ${pick.filePath}`);
-  return { ok: true, path: pick.filePath };
-}
-
-/**
- * "Save all as ZIP" (5zorro 2026-10-03): the papers shown in the pane, and — when asked — the
- * document itself as ERPNext prints it (its PO / receipt too), in one .zip. Printed PDFs go through
- * the self-healing PDF path. Writes only the local file the clerk chooses.
- * @param {{ zipName?: string, papers?: Array<{ fileName: string, fileUrl?: string, bytes?: Uint8Array }>, printDocs?: Array<{ doctype: string, name: string }> }} req
- */
-async function zipPapers(req) {
-  const r = req || {};
-  const papers = Array.isArray(r.papers) ? r.papers : [];
-  const docs = Array.isArray(r.printDocs) ? r.printDocs.filter((d) => d && d.doctype && d.name) : [];
-  if (!papers.length && !docs.length) return { ok: false, reason: "Nothing to save." };
-  const pick = await askSavePath({
-    title: "Save all as ZIP",
-    defaultPath: path.join(app.getPath("documents"), `${String(r.zipName || "papers").replace(/[\\/:*?"<>|]+/g, "-")}.zip`),
-    filters: [{ name: "ZIP", extensions: ["zip"] }],
-  });
-  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
-  navDebug("papers-zip", `${docs.length} printed + ${papers.length} papers → ${pick.filePath} start`);
-  const files = [];
-  const missed = [];
-  let worker = null;
-  try {
-    for (const d of docs) {
-      const got = await pdfForItem(worker, { doctype: d.doctype, name: d.name, format: printPrefs.formats[d.doctype] || "" });
-      worker = got.worker;
-      if (got.ok) files.push({ name: pdfFileName(d.name), bytes: new Uint8Array(got.bytes) });
-      else missed.push(`${d.name}: ${got.reason}`);
-    }
-  } finally {
-    if (worker && !worker.isDestroyed()) worker.destroy();
-  }
-  for (const p of papers) {
-    if (p.bytes) {
-      files.push({ name: p.fileName, bytes: new Uint8Array(p.bytes) });
-      continue;
-    }
-    const got = await paperBytes(p.fileUrl, MAX_OPEN_BYTES);
-    if (got.ok) files.push({ name: p.fileName, bytes: got.bytes });
-    else missed.push(`${p.fileName}: ${got.reason}`);
-  }
-  if (!files.length) return { ok: false, reason: `Nothing could be read — ${missed.join("; ")}` };
-  fs.writeFileSync(pick.filePath, buildZip(files));
-  const summary = `Saved ${files.length} file${files.length === 1 ? "" : "s"} in ${pick.filePath}${missed.length ? ` — not included: ${missed.join("; ")}` : "."}`;
-  navDebug("papers-zip", summary);
-  return { ok: !missed.length, files: files.length, summary };
-}
-
-ipcMain.handle("papers-zip", async (_e, req) => zipPapers(req));
-
-/** The document as ERPNext prints it (self-healing), for the pane to draw into one PDF. */
-ipcMain.handle("papers-printed-pdf", async (_e, d) => {
-  if (!d || !d.doctype || !d.name) return { ok: false, reason: "No document." };
-  const got = await pdfForItem(null, { doctype: d.doctype, name: d.name, format: printPrefs.formats[d.doctype] || "" });
-  if (got.worker && !got.worker.isDestroyed()) got.worker.destroy();
-  return got.ok ? { ok: true, bytes: new Uint8Array(got.bytes), healed: !!got.healed } : { ok: false, reason: got.reason };
-});
-
-/**
- * "Save as one PDF" (5zorro 2026-10-03): the pane hands over one HTML page with every paper laid
- * out page after page (PDF pages already drawn as images); Chromium prints it to a single PDF. No
- * PDF merger needed. Writes only the local file the clerk chooses.
- * @param {{ html?: string, fileName?: string }} req
- */
-ipcMain.handle("papers-pdf", async (_e, req) => {
-  const r = req || {};
-  if (!r.html) return { ok: false, reason: "Nothing to save." };
-  const pick = await askSavePath({
-    title: "Save as one PDF",
-    defaultPath: path.join(app.getPath("documents"), `${String(r.fileName || "papers").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`),
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (pick.canceled || !pick.filePath) return { ok: false, cancelled: true, reason: "Not saved." };
-  navDebug("papers-pdf", `→ ${pick.filePath} start`);
-  const page = path.join(app.getPath("temp"), `erpnext-ui-papers-${Date.now()}.html`);
-  fs.writeFileSync(page, r.html);
-  const worker = newPrintWorker();
-  try {
-    await worker.loadFile(page);
-    await worker.webContents
-      .executeJavaScript(`Promise.all(Array.from(document.images).map((i) => i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))).then(() => true)`)
-      .catch(() => {});
-    const size = String(lastPrintSettings.pdf_page_size || "A4");
-    const pageSize = ["A3", "A4", "A5", "Legal", "Letter", "Tabloid"].includes(size) ? size : "A4";
-    const bytes = await worker.webContents.printToPDF({ printBackground: true, pageSize });
-    fs.writeFileSync(pick.filePath, bytes);
-    navDebug("papers-pdf", `saved ${pick.filePath}`);
-    return { ok: true, summary: `Saved as one PDF — ${pick.filePath}` };
-  } catch (e) {
-    const reason = String(e && e.message ? e.message : e);
-    navDebug("papers-pdf", `failed: ${reason}`);
-    return { ok: false, reason };
-  } finally {
-    if (!worker.isDestroyed()) worker.destroy();
-    fs.rm(page, () => {});
-  }
-});
-ipcMain.handle("papers-list", async (_e, sources) => listPapers(sources));
-ipcMain.handle("papers-bytes", async (_e, fileUrl) => paperBytes(fileUrl));
-ipcMain.handle("papers-upload", async (_e, req) => uploadPaper(req));
-ipcMain.handle("papers-open", async (_e, req) => openPaper(req));
-ipcMain.handle("papers-download", async (_e, req) => downloadPaper(req));
+initPapers({ erpBase: ERP_BASE, navDebug, erpEval, erpView: () => erp });
 
 ipcMain.handle("get-doc-number-lead", async () => docNumberPrefs.lead);
 
@@ -12679,14 +11809,8 @@ ipcMain.handle("set-doc-number-lead", async (_e, lead) => {
 });
 ipcMain.handle("submit-draft-payment", async (_e, name) => actOnDraftPayment("submit", name));
 ipcMain.handle("delete-draft-payment", async (_e, name) => actOnDraftPayment("delete", name));
-ipcMain.handle("get-payment-batch-prefs", () => ({ ...paymentBatchPrefs }));
-ipcMain.handle("set-payment-batch-prefs", (_e, prefs) => {
-  const check = validatePaymentBatchPrefs(prefs);
-  if (!check.ok) return { ok: false, errors: check.errors, prefs: { ...paymentBatchPrefs } };
-  paymentBatchPrefs = mergePaymentBatchPrefs(prefs);
-  savePaymentBatchPrefs();
-  return { ok: true, prefs: { ...paymentBatchPrefs } };
-});
+/* Payment settings (batch prefs, delay calendar): electron/ipc/payment-settings.js */
+initPaymentSettings({ mainWindow: () => win });
 ipcMain.on("set-payment-doc-dirty", (_e, dirty) => {
   paymentDocDirty = !!dirty;
 });
@@ -12699,54 +11823,6 @@ ipcMain.handle("create-blank-payment-entry", async (_e, intent) => {
   const out = await createBlankPaymentEntryDoc(intent);
   navDebug("payment-create-blank", paymentWriteOutcomeLog(out));
   return out;
-});
-/**
- * Delay calendar (P3b/P3c). `exists` is load-bearing, not informational: the renderer only passes
- * the ratified-calendar probe into the date walk when a calendar file exists, because with no file
- * every bridge day would stop applying at once and there would be no UI to turn them back on.
- */
-ipcMain.handle("get-delay-calendar", () => {
-  try {
-    return { csv: fs.readFileSync(delayCalendarPath(), "utf8"), exists: true };
-  } catch {
-    return { csv: "", exists: false };
-  }
-});
-ipcMain.handle("set-delay-calendar", (_e, csv) => {
-  try {
-    fs.writeFileSync(delayCalendarPath(), String(csv == null ? "" : csv));
-    return { ok: true, exists: true, path: delayCalendarPath() };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-});
-/** Save-as, for the copy that goes into Excel. The renderer sends the Excel-flavoured text. */
-ipcMain.handle("export-delay-calendar", async (_e, csv) => {
-  const r = await askSavePath({
-    title: "Export delay calendar",
-    defaultPath: path.join(app.getPath("documents"), "delay-calendar.csv"),
-    filters: [{ name: "CSV (Excel)", extensions: ["csv"] }],
-  });
-  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
-  try {
-    fs.writeFileSync(r.filePath, String(csv == null ? "" : csv));
-    return { ok: true, path: r.filePath };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-});
-ipcMain.handle("import-delay-calendar", async () => {
-  const r = await dialog.showOpenDialog(win, {
-    title: "Import delay calendar",
-    properties: ["openFile"],
-    filters: [{ name: "CSV (Excel)", extensions: ["csv", "txt"] }],
-  });
-  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
-  try {
-    return { ok: true, text: fs.readFileSync(r.filePaths[0], "utf8"), path: r.filePaths[0] };
-  } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
-  }
 });
 ipcMain.handle("create-payment-term", async (_e, input) => {
   const i = input || {};
@@ -12763,624 +11839,8 @@ ipcMain.handle("create-payment-term", async (_e, input) => {
 });
 ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefaultsFacts(supplier));
 
-/**
- * P1 stage 3 — what the batch confirm needs before it can name its consequences: which of these
- * bills already has a submitted payment against it, and whether this site detaches or refuses.
- *
- * One query for the whole set rather than one per bill. A vendor with twelve outstanding bills is
- * an ordinary case, and twelve round trips to draw one confirm is how a dashboard gets slow enough
- * that a clerk stops reading it.
- */
-/**
- * What a supplier has loose, and what it could belong to — both read from ERPNext's **own**
- * Payment Reconciliation tool rather than from a query of ours (OI-171, after P1's amend).
- *
- * 🔴 **The tool is a virtual doctype**, so it is driven through `run_doc_method` with the document
- * passed as JSON — which its own `load_from_db` comment says is the intended path. Asking it for
- * the candidates means the rows we then hand back to `reconcile` are the rows it already believes
- * in: same filters, same outstanding amounts, same exchange rates, same cost centres. A
- * hand-rolled query would be a second opinion about which payments are reconcilable, and the
- * allocation would be validated against ERP's list, not ours.
- *
- * `amended_from` is read separately, because it is the one fact the tool does not return and the
- * only one that distinguishes "the bill this payment paid, re-issued" from "another open bill".
- *
- * @param {string} supplier
- */
-async function paymentRelinkFacts(supplier) {
-  const party = normalizeEditableText(supplier);
-  if (!party) return { ok: false, reason: "Supplier required." };
-  const payload = JSON.stringify({ party });
-  const raw = await erpEval(`(async () => {
-    ${ERP_LIST_JS}
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var i = ${payload};
-      var company = frappe.defaults.get_user_default("Company");
-      if (!company) {
-        var cs = await xList("Company", { limit: 1 });
-        company = cs && cs[0] && cs[0].name;
-      }
-      if (!company) return { ok: false, reason: "No Company configured." };
-      var account = await frappe.xcall("erpnext.accounts.party.get_party_account", {
-        party_type: "Supplier", party: i.party, company: company,
-      });
-      var doc = {
-        doctype: "Payment Reconciliation",
-        company: company,
-        party_type: "Supplier",
-        party: i.party,
-        receivable_payable_account: account,
-      };
-      var res = await frappe.call({
-        method: "run_doc_method",
-        args: { docs: JSON.stringify(doc), method: "get_unreconciled_entries" },
-      });
-      var got = (res && res.docs && res.docs[0]) || {};
-      var invoices = got.invoices || [];
-      // The tool does not say which of these is an amendment, and that is the whole question.
-      var amendedFrom = {};
-      var createdOf = {};
-      if (invoices.length) {
-        var names = invoices.map(function (r) { return r.invoice_number; });
-        var av = await frappe.call({
-          method: "frappe.client.get_list",
-          args: {
-            doctype: "Purchase Invoice",
-            filters: [["name", "in", names]],
-            fields: ["name", "amended_from", "creation"],
-            limit_page_length: 0,
-          },
-        });
-        var rows = (av && av.message) || [];
-        for (var a = 0; a < rows.length; a++) {
-          amendedFrom[rows[a].name] = rows[a].amended_from || "";
-          createdOf[rows[a].name] = rows[a].creation || "";
-        }
-      }
-      // The payments' own creation, for the same reason: an auto-link is only defensible when the
-      // payment is older than the amendment it is being attached to.
-      if ((got.payments || []).length) {
-        try {
-          var pn = got.payments.map(function (r) { return r.reference_name; });
-          var pv = await frappe.call({
-            method: "frappe.client.get_list",
-            args: {
-              doctype: "Payment Entry",
-              filters: [["name", "in", pn]],
-              fields: ["name", "creation"],
-              limit_page_length: 0,
-            },
-          });
-          var prows = (pv && pv.message) || [];
-          for (var b2 = 0; b2 < prows.length; b2++) createdOf[prows[b2].name] = prows[b2].creation || "";
-        } catch (eCr) { /* unknown creation simply blocks the auto-link */ }
-      }
-      // Read, never assumed — same rule as every other site setting the shell depends on. With
-      // auto-reconcile on, a loose payment may clear itself within the job interval (and may clear
-      // itself onto the WRONG bill, since ERPNext allocates oldest-first), so the advice differs.
-      var autoReconcile = null;
-      try {
-        var ar = await frappe.xcall("frappe.client.get_single_value", {
-          doctype: "Accounts Settings", field: "auto_reconcile_payments",
-        });
-        autoReconcile = !!Number(ar);
-      } catch (eAr) {
-        autoReconcile = null;
-      }
-      return {
-        ok: true,
-        company: company,
-        account: account,
-        payments: got.payments || [],
-        invoices: invoices,
-        amendedFrom: amendedFrom,
-        createdOf: createdOf,
-        autoReconcile: autoReconcile,
-      };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), step: "get_unreconciled_entries" };
-    }
-  })()`);
-  if (!(raw && typeof raw === "object") || !raw.ok) {
-    return {
-      ok: false,
-      reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read this vendor's unapplied payments."),
-    };
-  }
-  return raw;
-}
-
-ipcMain.handle("payment-relink-facts", async (_e, supplier) => {
-  const facts = await paymentRelinkFacts(supplier);
-  navDebug(
-    "payment-relink-facts",
-    `${supplier} ok=${facts.ok ? 1 : 0} payments=${(facts.payments || []).length} invoices=${(facts.invoices || []).length}${facts.reason ? ` reason=${facts.reason}` : ""}`,
-  );
-  return facts;
-});
-
-/**
- * Post one re-link, through ERPNext's own reconciler.
- *
- * 🔴 **We choose the pairing; ERPNext does the accounting.** `reconcile` runs
- * `reconcile_against_document`, which cancels the Payment Entry, rewrites its references, splits
- * where it has to and re-submits — none of which is ours to reimplement. The `allocation` row is
- * built from the rows the *fetch* returned (see `allocationRowFor`), so `validate_allocation` is
- * checking ERP's own numbers against themselves and the only thing we contributed is which invoice.
- *
- * The fetch is repeated here rather than trusting what the page held: between reading the board and
- * clicking, the bill may have been part-paid, and allocating a stale amount would throw mid-post.
- *
- * @param {{ supplier: string, payment: string, invoice: string, amount: number }} req
- */
-async function relinkPayment(req) {
-  const party = normalizeEditableText(req && req.supplier);
-  const payment = normalizeEditableText(req && req.payment);
-  const invoice = normalizeEditableText(req && req.invoice);
-  const amount = Number(req && req.amount);
-  if (!party || !payment || !invoice || !(amount > 0)) {
-    return { ok: false, reason: "Supplier, payment, bill and amount are all required." };
-  }
-  const facts = await paymentRelinkFacts(party);
-  if (!facts.ok) return facts;
-  const row = allocationRowFor(
-    { payment, invoice, amount, confidence: "high", why: "" },
-    facts.payments,
-    facts.invoices,
-  );
-  if (!row) {
-    return {
-      ok: false,
-      reason: `ERPNext no longer offers ${payment} against ${invoice} — it may have been reconciled or part-paid since this screen was drawn. Reopen Pay Outstanding.`,
-    };
-  }
-  const payload = JSON.stringify({
-    doc: {
-      doctype: "Payment Reconciliation",
-      company: facts.company,
-      party_type: "Supplier",
-      party,
-      receivable_payable_account: facts.account,
-      payments: facts.payments,
-      invoices: facts.invoices,
-      allocation: [row],
-    },
-  });
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var i = ${payload};
-      var res = await frappe.call({
-        method: "run_doc_method",
-        args: { docs: JSON.stringify(i.doc), method: "reconcile" },
-      });
-      if (res && res.exc) return { ok: false, reason: reasonFrom(res) };
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), step: "reconcile" };
-    }
-  })()`);
-  if (!(raw && typeof raw === "object")) {
-    return {
-      ok: false,
-      reason: "The shell lost contact with ERP during the re-link. Check the payment in ERPNext before retrying.",
-    };
-  }
-  if (!raw.ok) {
-    return { ok: false, reason: formatClientErrorReason(raw.reason || raw, "ERPNext refused the re-link.") };
-  }
-  // Posted. Now say who did it — permanently, and whichever path got here.
-  const note = relinkProvenanceNote(
-    { payment, invoice, amount: row.allocated_amount, confidence: "high", auto: req.auto === true, why: req.why || "" },
-    { auto: req.auto === true, user: req.user || "" },
-  );
-  const noted = await commentRelinkProvenance(payment, note);
-  return {
-    ok: true,
-    payment,
-    invoice,
-    amount: row.allocated_amount,
-    provenanceRecorded: noted.ok,
-    provenanceReason: noted.reason || "",
-  };
-}
-
-/**
- * The review flag an auto-link leaves behind, and the way it gets cleared.
- *
- * 🔴 **It lives in ERPNext, not in the shell.** The payment now carries an allocation nobody
- * typed; the only thing that stops that feeling like a glitch is an explanation attached to the
- * document itself, visible to anyone who opens it in a plain browser. Frappe's assignment (a ToDo
- * plus `_assign` on the document) is the native object for "somebody still has to look at this" —
- * it has an Open/Closed status, it shows on the form, and it needs no custom field, so nothing
- * about the site's schema changes.
- *
- * @param {string} payment @param {string} note
- */
-async function flagRelinkForReview(payment, note) {
-  const nm = normalizeEditableText(payment);
-  if (!nm) return { ok: false, reason: "Payment required." };
-  const payload = JSON.stringify({ name: nm, note });
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var i = ${payload};
-      await frappe.xcall("frappe.desk.form.assign_to.add", {
-        doctype: "Payment Entry",
-        name: i.name,
-        assign_to: [frappe.session.user],
-        description: i.note,
-      });
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e) };
-    }
-  })()`);
-  return raw && raw.ok ? { ok: true } : { ok: false, reason: (raw && raw.reason) || "Could not flag for review." };
-}
-
-/**
- * The durable half of the record: a Comment on the payment saying who made the allocation.
- *
- * 🔴 **Why this is separate from the review flag.** An assignment closes, and a closed one is
- * invisible — so on its own it cannot answer "was this typed by a person or posted by a rule?",
- * which is the question a reviewer needs *after* the review (5zorro 2026-09-26). A Comment never
- * closes, shows in the Desk timeline, and needs no custom field.
- *
- * Failing to write it does **not** fail the re-link: the allocation is already posted and correct,
- * and refusing to report success over a missing annotation would be the wrong trade. It is
- * reported instead, so the caller can say the record is thinner than it should be.
- *
- * @param {string} payment @param {string} content
- */
-async function commentRelinkProvenance(payment, content) {
-  const nm = normalizeEditableText(payment);
-  if (!nm) return { ok: false, reason: "Payment required." };
-  const payload = JSON.stringify({ name: nm, content });
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var i = ${payload};
-      await frappe.xcall("frappe.desk.form.utils.add_comment", {
-        reference_doctype: "Payment Entry",
-        reference_name: i.name,
-        content: i.content,
-        comment_email: frappe.session.user,
-        comment_by: frappe.session.user_fullname || frappe.session.user,
-      });
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e) };
-    }
-  })()`);
-  return raw && raw.ok ? { ok: true } : { ok: false, reason: (raw && raw.reason) || "Could not write the provenance comment." };
-}
-
-ipcMain.handle("relink-reviews", async () => {
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var res = await frappe.call({
-        method: "frappe.client.get_list",
-        args: {
-          doctype: "ToDo",
-          filters: [
-            ["reference_type", "=", "Payment Entry"],
-            ["status", "=", "Open"],
-            ["description", "like", "%Auto-linked by the Doc shell%"],
-          ],
-          fields: ["name", "reference_name", "description", "allocated_to"],
-          limit_page_length: 0,
-        },
-      });
-      var todos = (res && res.message) || [];
-      // 🔴 Whose payment each one is, read rather than parsed out of the note. The bill it was
-      // linked to has left the board by then — it is paid — so the vendor cannot be recovered from
-      // what is on screen, and matching a supplier name inside prose would break on the first
-      // vendor whose name appears in another vendor's note.
-      var partyOf = {};
-      if (todos.length) {
-        try {
-          var names = todos.map(function (t) { return t.reference_name; });
-          var pe = await frappe.call({
-            method: "frappe.client.get_list",
-            args: {
-              doctype: "Payment Entry",
-              filters: [["name", "in", names]],
-              fields: ["name", "party"],
-              limit_page_length: 0,
-            },
-          });
-          var prows = (pe && pe.message) || [];
-          for (var k = 0; k < prows.length; k++) partyOf[prows[k].name] = prows[k].party || "";
-        } catch (eP) { /* an unattributed review still shows, just not on a vendor card */ }
-      }
-      for (var t2 = 0; t2 < todos.length; t2++) {
-        todos[t2].party = partyOf[todos[t2].reference_name] || "";
-      }
-      return { ok: true, reviews: todos };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e) };
-    }
-  })()`);
-  if (!(raw && raw.ok)) {
-    return { ok: false, reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read pending reviews.") };
-  }
-  return raw;
-});
-
-ipcMain.handle("relink-review-close", async (_e, payment) => {
-  const nm = normalizeEditableText(payment);
-  if (!nm) return { ok: false, reason: "Payment required." };
-  const payload = JSON.stringify({ name: nm });
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      var i = ${payload};
-      await frappe.xcall("frappe.desk.form.assign_to.close", {
-        doctype: "Payment Entry", name: i.name, assign_to: frappe.session.user,
-      });
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e) };
-    }
-  })()`);
-  navDebug("relink-review-close", `${nm} ok=${raw && raw.ok ? 1 : 0}`);
-  if (!(raw && raw.ok)) {
-    return { ok: false, reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not close the review.") };
-  }
-  return { ok: true };
-});
-
-/**
- * Post the near-certain re-links for one supplier without asking, and flag each for review.
- *
- * 🔴 **Why posting beats asking here** (5zorro 2026-09-26): an unallocated payment *is* an open end
- * in the accounting. Holding the books wrong until somebody clicks is worse than making them right
- * and asking somebody to check — the first leaves a real error outstanding, the second leaves only
- * a question. So the click moved from *before* the posting to *after* it, and became optional.
- *
- * Only `auto` proposals qualify: exact amount, a single candidate, same supplier, and the payment
- * demonstrably older than the amendment. Everything else still waits for a click.
- *
- * @param {string} supplier
- */
-async function autoRelinkForSupplier(supplier) {
-  const facts = await paymentRelinkFacts(supplier);
-  if (!facts.ok) return { ok: false, reason: facts.reason, posted: [] };
-  const { proposals } = proposeRelinks({
-    payments: (facts.payments || []).map((p) => ({
-      name: p.reference_name,
-      unallocated: p.amount,
-      supplier,
-      created: (facts.createdOf || {})[p.reference_name] || "",
-    })),
-    invoices: (facts.invoices || []).map((i) => ({
-      name: i.invoice_number,
-      outstanding: i.outstanding_amount,
-      amendedFrom: (facts.amendedFrom || {})[i.invoice_number] || "",
-      supplier,
-      created: (facts.createdOf || {})[i.invoice_number] || "",
-    })),
-  });
-  const { auto, cappedOut } = splitAutoRelinks(proposals);
-  if (!auto.length) return { ok: true, posted: [], cappedOut };
-
-  const posted = [];
-  for (const p of auto) {
-    const res = await relinkPayment({
-      supplier,
-      payment: p.payment,
-      invoice: p.invoice,
-      amount: p.amount,
-      auto: true,
-      why: p.why,
-    });
-    navDebug(
-      "auto-relink",
-      `${supplier} ${p.payment} -> ${p.invoice} ok=${res.ok ? 1 : 0}${res.reason ? ` reason=${res.reason}` : ""}`,
-    );
-    if (!res.ok) {
-      // Stop at the first refusal. The rest are re-proposed next time from fresh facts, which is
-      // safer than pressing on against a ledger that just disagreed with us.
-      return { ok: false, reason: res.reason, posted, cappedOut };
-    }
-    const flag = await flagRelinkForReview(p.payment, relinkReviewNote(p));
-    // Review 10-19 R9-4: an auto-link with no review flag or no provenance comment must leave a trace.
-    navDebug(
-      "auto-relink",
-      `${p.payment} provenance=${res.provenanceRecorded ? 1 : `0 (${res.provenanceReason || "?"})`} flagged=${flag.ok ? 1 : `0 (${flag.reason || "?"})`}`,
-    );
-    posted.push({ ...p, flagged: flag.ok, flagReason: flag.reason || "" });
-  }
-  return { ok: true, posted, cappedOut };
-}
-
-ipcMain.handle("auto-relink", async (_e, supplier) => {
-  const out = await autoRelinkForSupplier(supplier);
-  navDebug(
-    "auto-relink",
-    `${supplier} posted=${(out.posted || []).length} ok=${out.ok ? 1 : 0}${out.reason ? ` reason=${out.reason}` : ""}`,
-  );
-  return out;
-});
-
-ipcMain.handle("payment-relink", async (_e, req) => {
-  navDebug("payment-relink", `start ${req && req.supplier} ${req && req.payment} -> ${req && req.invoice}`);
-  const out = await relinkPayment(req);
-  navDebug(
-    "payment-relink",
-    `${req && req.payment} ok=${out.ok ? 1 : 0}${out.ok ? ` provenance=${out.provenanceRecorded ? 1 : `0 (${out.provenanceReason || "?"})`}` : ""}${out.reason ? ` reason=${out.reason}` : ""}`,
-  );
-  return out;
-});
-
-ipcMain.handle("mode-change-facts", async (_e, invoices) => {
-  const names = (Array.isArray(invoices) ? invoices : [])
-    .map((n) => normalizeEditableText(n))
-    .filter(Boolean);
-  if (!names.length) return { ok: true, paymentsByInvoice: {}, unlinksPaymentsOnCancel: undefined };
-  const payload = JSON.stringify({ names });
-  const raw = await erpEval(`(async () => {
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var i = ${payload};
-      var counts = {};
-      try {
-        var res = await frappe.call({
-          method: "frappe.client.get_list",
-          args: {
-            doctype: "Payment Entry Reference",
-            filters: [
-              ["reference_doctype", "=", "Purchase Invoice"],
-              ["reference_name", "in", i.names],
-              ["docstatus", "=", 1],
-            ],
-            fields: ["reference_name", "parent"],
-            limit_page_length: 0,
-            parent: "Payment Entry",
-          },
-        });
-        var rows = (res && res.message) || [];
-        for (var r = 0; r < rows.length; r++) {
-          var key = rows[r].reference_name;
-          counts[key] = (counts[key] || 0) + 1;
-        }
-      } catch (ePaid) {
-        return { ok: false, reason: reasonFrom(ePaid), step: "payments" };
-      }
-      var unlinks = null;
-      try {
-        var sVal = await frappe.xcall("frappe.client.get_single_value", {
-          doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
-        });
-        unlinks = !!Number(sVal);
-      } catch (eSet) {
-        unlinks = null;
-      }
-      // Same two inputs the single-document confirm reads, for the same reason: amending an
-      // amendment gives \`<prefix>-2\`, not \`<name>-1\`.
-      var amendments = {};
-      try {
-        var av = await frappe.call({
-          method: "frappe.client.get_list",
-          args: {
-            doctype: "Purchase Invoice",
-            filters: [["name", "in", i.names]],
-            fields: ["name", "amended_from"],
-            limit_page_length: 0,
-          },
-        });
-        var arows = (av && av.message) || [];
-        for (var a = 0; a < arows.length; a++) amendments[arows[a].name] = !!arows[a].amended_from;
-      } catch (eAmend) {
-        amendments = {};
-      }
-      var amendCounter = null;
-      try {
-        var rule = await frappe.xcall("frappe.client.get_single_value", {
-          doctype: "Document Naming Settings", field: "default_amend_naming",
-        });
-        amendCounter = String(rule || "") !== "Default Naming";
-      } catch (eRule) {
-        amendCounter = null;
-      }
-      return { ok: true, counts: counts, unlinks: unlinks, amendments: amendments, amendCounter: amendCounter };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), step: "unknown" };
-    }
-  })()`);
-  if (!(raw && typeof raw === "object") || !raw.ok) {
-    return {
-      ok: false,
-      reason: formatClientErrorReason((raw && raw.reason) || raw, "Could not read payments against these bills."),
-    };
-  }
-  return {
-    ok: true,
-    paymentsByInvoice: raw.counts || {},
-    unlinksPaymentsOnCancel: raw.unlinks === null ? undefined : !!raw.unlinks,
-    amendmentsByInvoice: raw.amendments || {},
-    amendCounter: raw.amendCounter === null ? false : raw.amendCounter !== false,
-  };
-});
-
-/**
- * P1 stage 3 — run the plan, one bill at a time, and report one outcome per bill.
- *
- * 🔴 **Sequential, and it stops at the first bill that did not go as asked** (`modeChangeShouldStop`;
- * review 10-19, 5zorro 2026-10-20). Each bill is its own cancel-then-insert-then-submit, and
- * whatever made ERPNext refuse one usually refuses the next — carrying on would pile up cancelled
- * originals to sort out by hand. The rest are reported as not attempted, which they are, and the
- * panel offers "Try again" on them (`modeChangeRemainder`).
- *
- * Progress goes to the asking page as `mode-change-progress` events, one before and one after each
- * bill, so the panel's per-bill chips move while the batch runs.
- *
- * Every bill is submitted after the amend. An amended bill sitting as a draft is not outstanding,
- * so a batch that left drafts behind would take the vendor's bills *off* the very dashboard the
- * clerk is standing on.
- */
-ipcMain.handle("run-mode-change", async (e, work) => {
-  const items = (Array.isArray(work) ? work : [])
-    .map((w) => ({
-      invoice: normalizeEditableText(w && w.invoice),
-      patch: w && w.patch && typeof w.patch === "object" ? w.patch : null,
-    }))
-    .filter((w) => w.invoice && w.patch);
-  if (!items.length) return { ok: false, reason: "Nothing to change.", results: [] };
-
-  const progress = (payload) => {
-    try {
-      if (e && e.sender && !e.sender.isDestroyed()) e.sender.send("mode-change-progress", payload);
-    } catch {
-      /* the panel's chips are a courtesy; the returned results are the record */
-    }
-  };
-  navDebug("run-mode-change", `start ${items.length} bill(s): ${items.map((i) => i.invoice).join(",")}`);
-  const results = [];
-  let stopped = "";
-  for (const item of items) {
-    if (stopped) {
-      const skipped = { invoice: item.invoice, ok: false, cancelled: false, notAttempted: true, reason: `Not attempted — stopped after ${stopped}.` };
-      results.push(skipped);
-      progress(skipped);
-      continue;
-    }
-    progress({ invoice: item.invoice, phase: "working" });
-    const r = await voidAndAmendDoc("Purchase Invoice", item.invoice, { patch: item.patch, submit: true });
-    navDebug(
-      "run-mode-change",
-      `${item.invoice} ok=${r && r.ok ? 1 : 0} cancelled=${r && r.cancelled ? 1 : 0}${r && r.uncertain ? " uncertain=1" : ""} step=${(r && r.step) || ""} amended=${(r && r.amendedName) || ""} verified=${r && r.verified ? (r.verified.ok ? 1 : 0) : "?"}${r && r.reason ? ` reason=${r.reason}` : ""}`,
-    );
-    const one = {
-      invoice: item.invoice,
-      ok: !!(r && r.ok),
-      cancelled: !!(r && r.cancelled),
-      uncertain: !!(r && r.uncertain),
-      amendedName: (r && r.amendedName) || "",
-      // `undefined` when nothing was read back; `false` only when ERP was read and disagreed.
-      verified: r && r.verified ? r.verified.ok === true : undefined,
-      mismatches: (r && r.verified && r.verified.mismatches) || [],
-      missedRows: (r && r.patched && r.patched.missed) || [],
-      reason: (r && r.reason) || "",
-      step: (r && r.step) || "",
-    };
-    results.push(one);
-    progress(one);
-    if (modeChangeShouldStop(one)) stopped = item.invoice;
-  }
-  navDebug("run-mode-change", `done ok=${results.filter((r) => r.ok).length}/${results.length}${stopped ? ` stopped=${stopped}` : ""}`);
-  // The dashboard is now describing documents that no longer exist under those names.
-  return { ok: results.every((r) => r.ok), results, stopped };
-});
+/* Payment re-link and method change: electron/ipc/relink-method-change.js */
+initRelinkMethodChange({ navDebug, erpEval, voidAndAmendDoc });
 ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;

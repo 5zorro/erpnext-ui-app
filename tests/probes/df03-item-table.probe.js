@@ -13,11 +13,15 @@
  *   Tabs. Question: does the line stay where it is? Before the fix it jumped to the bottom with the
  *   cursor ("it jumped to the wrong row"). Now it stays, a banner says the sort is out of date, 🔄
  *   sorts (the cursor goes with its line), and clicking a header box sorts too.
+ * - The Item Receipt's lines (plan 2026-10-25, step 3's review; 5zorro, 2026-10-26: match the Bill
+ *   and the PO, "yes"): T-2 and T-1 run on it too. Before, its headers could not be clicked to sort
+ *   and it had no Line column. A further test asks, on the PO and the receipt: does the Line column
+ *   show each line's number, and does the Item subtotal sit under Amount?
  * Makes no records (nothing is saved).
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { keys, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -27,6 +31,9 @@ const SKINS = [
   { skin: "bill", route: "/app/purchase-invoice/new", lastBox: "project" },
   { skin: "po", route: "/app/purchase-order/new", lastBox: "schedule_date" },
 ];
+/** The sort tests' pages: the receipt takes a stock item, as a real one would. */
+const RECEIPT = { skin: "receipt", route: "/app/purchase-receipt/new", lastBox: "project", item: "ZZ-DF-STOCK" };
+const SORT_SKINS = [...SKINS, RECEIPT];
 
 /** One named key into the Doc page (Electron's key names: Escape, Up, Down, Right, Tab). */
 const press = (app, keyCode, modifiers = []) =>
@@ -59,16 +66,16 @@ const focusNav = (app, row, field) =>
  * A new doc as the AP clerk with the vendor set and lines carrying `ITEM` and the given qtys.
  * @returns {Promise<{ app: any, clerk: any }>}
  */
-async function openWithLines(skin, route, qtys) {
+async function openWithLines(skin, route, qtys, item = ITEM) {
   const app = await launchShell();
   await waitForE2eApi(app);
   await expect.poll(() => inErp(app, `!!(window.frappe && frappe.xcall)`), { timeout: 60_000 }).toBe(true);
   await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; });
   const clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
   await openNewDoc(app, skin, route);
-  await sleep(2500);
+  await docQuiet(app);
   await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return r && r.ok; })()`, 60_000);
-  await sleep(3000);
+  await docQuiet(app);
   await closeSourcePickers(app);
   const made = await inDoc(
     app,
@@ -77,7 +84,7 @@ async function openWithLines(skin, route, qtys) {
       let s = await window.erpDoc.getSnapshot();
       while (((s.doc.items) || []).length < qtys.length) { await window.erpDoc.addItem(); s = await window.erpDoc.getSnapshot(); }
       for (const [i, q] of qtys.entries()) {
-        const r = await window.erpDoc.setItem(i, "item_code", ${JSON.stringify(ITEM)});
+        const r = await window.erpDoc.setItem(i, "item_code", ${JSON.stringify(item)});
         if (!r || !r.ok) return "item " + i + ": " + ((r && r.reason) || "failed");
         await window.erpDoc.setItem(i, "qty", String(q));
       }
@@ -87,9 +94,9 @@ async function openWithLines(skin, route, qtys) {
   );
   expect(made).toBe("ok");
   await repaintDoc(app);
-  await sleep(1500);
+  await docQuiet(app);
   await closeSourcePickers(app);
-  await sleep(500);
+  await settle();
   return { app, clerk };
 }
 
@@ -105,7 +112,7 @@ for (const { skin, route, lastBox } of SKINS) {
       expect(await focusNav(app, 1, lastBox)).toBe(true);
       await press(app, "Tab");
       await press(app, "Tab");
-      await sleep(15_000);
+      await docQuiet(app, { timeout: 60_000 }); // both Tabs answered, under a 1.2 s lag on every call
       const w = await where(app);
       report(`t3-${skin}`, w);
       expect(w.lines).toBe(3);
@@ -123,22 +130,22 @@ for (const { skin, route, lastBox } of SKINS) {
 const screenRows = (app) =>
   inDoc(app, `(() => [...new Set([...document.querySelectorAll("input[data-row]")].map((i) => Number(i.dataset.row)))])()`);
 
-for (const { skin, route, lastBox } of SKINS) {
+for (const { skin, route, lastBox, item } of SORT_SKINS) {
   test(`T-2 (${skin}): in a table sorted by Qty, moves follow the screen`, async () => {
     test.setTimeout(6 * 60_000);
     let app = null;
     let clerk = null;
     const path = [];
     const step = async (label) => {
-      await sleep(900);
+      await docQuiet(app);
       const w = await where(app);
       path.push(`${label} → ${w.at} (${w.lines} lines)`);
       return w;
     };
     try {
-      ({ app, clerk } = await openWithLines(skin, route, [5, 1, 3]));
+      ({ app, clerk } = await openWithLines(skin, route, [5, 1, 3], item));
       await inDoc(app, `(() => { document.querySelector('th[data-sort="qty"]').click(); return true; })()`);
-      await sleep(1500);
+      await docQuiet(app);
       const rows = await screenRows(app);
       report(`t2-${skin}-screen`, rows);
       expect(rows).toEqual([1, 2, 0]);
@@ -166,14 +173,14 @@ for (const { skin, route, lastBox } of SKINS) {
 const staleShown = (app) =>
   inDoc(app, `(() => { const b = document.querySelector('[data-testid="items-sort-stale"]'); return !!b && !b.hidden; })()`);
 
-for (const { skin, route } of SKINS) {
+for (const { skin, route, item } of SORT_SKINS) {
   test(`T-1 (${skin}): sorted by Qty, an edited line stays put until the clerk sorts or clicks away`, async () => {
     test.setTimeout(6 * 60_000);
     let app = null;
     let clerk = null;
     const path = [];
     const step = async (label) => {
-      await sleep(1500);
+      await docQuiet(app);
       const w = await where(app);
       const rows = await screenRows(app);
       const stale = await staleShown(app);
@@ -181,7 +188,7 @@ for (const { skin, route } of SKINS) {
       return { ...w, rows, stale };
     };
     try {
-      ({ app, clerk } = await openWithLines(skin, route, [1, 2, 3]));
+      ({ app, clerk } = await openWithLines(skin, route, [1, 2, 3], item));
       await inDoc(app, `(() => { document.querySelector('th[data-sort="qty"]').click(); return true; })()`);
       expect((await step("sorted by Qty")).rows).toEqual([0, 1, 2]);
 
@@ -212,6 +219,33 @@ for (const { skin, route } of SKINS) {
       expect(away.stale).toBe(false);
     } finally {
       if (path.length) report(`t1-${skin}`, path);
+      if (clerk) await clerk.retire();
+      if (app) await app.close().catch(() => {});
+    }
+  });
+}
+
+for (const { skin, route, item } of [SKINS[1], RECEIPT]) {
+  test(`Line column (${skin}): each line's number, and the Item subtotal under Amount`, async () => {
+    test.setTimeout(6 * 60_000);
+    let app = null;
+    let clerk = null;
+    try {
+      ({ app, clerk } = await openWithLines(skin, route, [1, 2, 3], item));
+      const seen = await inDoc(
+        app,
+        `(() => {
+          const heads = [...document.querySelectorAll("#items-head-row th")].map((th) => th.textContent.replace(/[▲▼↑↓0-9\\s]+$/u, "").trim());
+          const lines = [...document.querySelectorAll("#items-body tr")].map((tr) => tr.querySelector("td") && tr.querySelector("td").textContent.trim());
+          const foot = [...document.querySelectorAll("#line-totals td")].findIndex((td) => /Item subtotal/.test(td.textContent));
+          return { heads, lines, foot };
+        })()`,
+      );
+      report(`line-${skin}`, seen);
+      expect(seen.heads[0]).toBe("Line");
+      expect(seen.lines).toEqual(["1", "2", "3"]);
+      expect(seen.foot).toBe(seen.heads.indexOf("Amount"));
+    } finally {
       if (clerk) await clerk.retire();
       if (app) await app.close().catch(() => {});
     }

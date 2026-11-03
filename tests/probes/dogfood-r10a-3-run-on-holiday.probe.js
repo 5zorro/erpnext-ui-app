@@ -7,7 +7,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inBoard, openBoard, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, inBoard, openBoard, openNewDoc, report, settle } from "./probe-helpers.js";
 
 const setRun = (app, date) =>
   inBoard(
@@ -23,7 +23,7 @@ test("R10a-3: a check run on a bank holiday says so", async () => {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
     await openBoard(app, { cards: false });
-    await sleep(2000);
+    await settle();
     await setRun(app, "2026-12-25");
     await expect.poll(async () => (await said(app)).prefs, { timeout: 10_000 }).toMatch(/2026|Dec/);
     const holiday = await said(app);

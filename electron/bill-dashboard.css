@@ -175,6 +175,8 @@
     .toast.show { opacity: 1; pointer-events: auto; }
     .toast.is-action { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
     .toast.fade-out { opacity: 0; transition: opacity 600ms ease; }
+    /* Over an open dialog (Assign's .src-back is 100, Allocate's backdrop 80): a second Apply held back. */
+    .toast.over-dialog { z-index: 120; }
 
     td.wrap-cell { white-space: normal; text-overflow: clip; }
 

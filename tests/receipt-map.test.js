@@ -63,7 +63,7 @@ describe("readReceiptHeader", () => {
 describe("readReceiptItemRows", () => {
   it("maps Bill-like item columns", () => {
     const rows = readReceiptItemRows(sampleDoc);
-    assert.deepEqual(rows[0], ["SKU-1", "Widget", 2, 10, 20, "JOB-1"]);
+    assert.deepEqual(rows[0], ["1", "SKU-1", "Widget", 2, 10, 20, "JOB-1"]);
   });
 });
 

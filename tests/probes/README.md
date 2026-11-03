@@ -147,6 +147,22 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
 - Steps shared by probes are in `probe-helpers.js`: `openNewDoc`, `keys` (real keystrokes —
   `e2e/GOTCHAS.md` #15), `focusTestId`, `escPeek`, `docState`, `erpAnswers`, `inDoc` / `inErp`
   (each gives up after a few seconds, so a stalled page shows as `"TIMEOUT"`, not a hung run).
+- **Wait for the page, not the clock** (plan 10-25 3b finding 7). After an action on the Doc page
+  (open, vendor, line, save, repaint), `await docQuiet(app)`: no call from the page to the main
+  process still out (`erpDoc.inFlight()`), no pick list search pending (`data-search-pending` on
+  its box, set while the search waits out its pause or is in flight), ERPNext with no request out
+  (`frappe.request.ajax_count`), and no repaint (`window.__docPaintedAt`) — held 300 ms. After
+  typing while something else is meant to stay in flight, `searchDone(app)` waits for the list
+  only. Elsewhere, poll for the thing the next step reads (`expect.poll`); `settle()` (300 ms, a
+  person's reaction time, 5zorro's figure) after a wait that already saw it; `leftHome(app)` after a Home tile.
+  `docQuiet` also waits for the app's background reads in ERPNext (warm lists, a Bill's line
+  details): when the next step only needs the login (`openNewDoc` already waited for that), use
+  `settle()` — `docQuiet` there cost `r10b-board-bills` 4 s more. A `sleep` stays only where time *is* the question: "nothing happens in the next 15 s", a fade
+  timed on purpose, a race the probe sets up, a clerk's pause it imitates — say which in a comment.
+  `docQuiet` cannot see what main does on its own timer: the warm pick-list copies load 2 s after a
+  Doc page opens, so a probe that then cuts ERPNext's search waits on `warmCopies(app)` first.
+- Chaos for one probe: `launchWithChaos()` (250 ms, 45 % unless the run set its own). Never set
+  `ERP_CHAOS_*` in `process.env` and leave it: every later probe in the same run inherits it.
 - Right after a peek returns (Esc), the ERPNext form reloads for a few seconds and the Doc page's
   snapshot is not `ok` — poll `docState(app).snapOk` before reading or typing. Esc keys sent to the
   Doc page do not reach a peek (it is the ERPNext view): use `escPeek`.
@@ -263,7 +279,10 @@ Build order: the runner, setup and scenes with the R9 group (the most setup), th
 **Built 2026-10-23 — every row has a probe** (`npm run dogfood:check` runs all 25 rows' probes,
 ~25 min, mostly R6c-2's give-up and R4-2's 205 drafts). Scenes for `dogfood:setup`: R9, R9-1,
 R10c-1, R2-2, R6c-4, R10c-3, R4-2, R6b-4, R6b-1 / R6b-2, R5-1, R6c-2 (`-- --list` says what each
-makes). Notes per row:
+makes). Paper DF-25 (plan 2026-10-03's trace chain) has a scene too, added 2026-11-01: it is not a
+row here and has no probe, because 5zorro types the paper; the scene makes only the customer,
+vendor and items the paper takes as already there, under the paper's own names, and never clears
+before making. Notes per row:
 
 - **Simulated, not ERPNext's own refusal:** R2-7 (no plain-bill path refuses a line rate; the
   ERPNext page's bridge refuses one call). Every other "ERPNext refuses" row uses a real ERPNext

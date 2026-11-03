@@ -13,7 +13,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report } from "../probe-helpers.js";
+import { sleep, inBoard, openBoard, openNewDoc, assertSandboxSite, keepScene, report, docQuiet } from "../probe-helpers.js";
 import { SCENES, inPage } from "../dogfood-scenes.js";
 import { cardOf, applyMethod, panelState, clickPanel } from "../method-panel-helpers.js";
 
@@ -27,7 +27,7 @@ test("R9: a batch method change stops at a refused cancel and finishes on Try ag
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new"); // the ERPNext page is logged in and ready
-    await sleep(1500);
+    await docQuiet(app);
     report("site", { companies: await assertSandboxSite(app) });
     made = await scene.make(app);
     report("scene", made);

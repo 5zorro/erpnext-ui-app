@@ -9,7 +9,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, repaintDoc, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 import { loginAsProbeUser } from "./probe-user.js";
 
 const VENDOR = "ALPINE SUPPLY CO";
@@ -27,14 +27,14 @@ test("R7-4: a source the clerk may not read shows its error, never spins", async
     clerk = await loginAsProbeUser(app, ["Purchase User"]);
 
     await openNewDoc(app, "po", "/app/purchase-order/new");
-    await sleep(2500);
+    await docQuiet(app);
     const set = await inDoc(app, `(async () => { const r = await window.erpDoc.setHeader("supplier", ${JSON.stringify(VENDOR)}); return r && r.ok ? "ok" : (r && r.reason) || "?"; })()`, 30_000);
     report("vendor", set);
-    await sleep(3000);
+    await docQuiet(app);
     await repaintDoc(app);
-    await sleep(1000);
+    await docQuiet(app);
     await closeSourcePickers(app);
-    await sleep(800);
+    await settle();
     await inDoc(app, `(() => { document.querySelector('[data-testid="doc-select-source"]').click(); return true; })()`);
     const listed = () =>
       inDoc(app, `(() => { const m = document.querySelector('[data-testid="doc-source-modal"]'); if (!m) return null; const items = [...m.querySelectorAll(".src-item")].map((b) => b.textContent); return { loading: items.some((t) => /Still loading/.test(t)), items, status: (document.getElementById("status") || {}).textContent || "" }; })()`);

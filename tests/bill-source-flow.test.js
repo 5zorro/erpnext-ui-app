@@ -8,6 +8,8 @@ import {
   applyMappedSourceHeaders,
   mappedItemFieldsForBill,
   supplierHeaderUnchanged,
+  billSourceChoiceAction,
+  billSourcePulledStatus,
 } from "../src/bill-source-flow.js";
 import { valuesMeaningfullyEqual } from "../src/dirty-gate.js";
 
@@ -61,5 +63,28 @@ describe("supplierHeaderUnchanged", () => {
     assert.equal(supplierHeaderUnchanged(doc, "SUP-1", valuesMeaningfullyEqual), true);
     assert.equal(supplierHeaderUnchanged(doc, "Alpine Co", valuesMeaningfullyEqual), true);
     assert.equal(supplierHeaderUnchanged(doc, "Other", valuesMeaningfullyEqual), false);
+  });
+});
+
+describe("billSourceChoiceAction — a pick in the Bill's source picker, Credit memo off", () => {
+  it("NIC, by mode or as the only item", () => {
+    assert.deepEqual(billSourceChoiceAction({ mode: "nic", items: [] }), { action: "nic" });
+    assert.deepEqual(billSourceChoiceAction({ mode: "merge", items: [{ kind: "nic" }] }), { action: "nic" });
+  });
+  it("nothing checked, or no choice, says to pick", () => {
+    assert.deepEqual(billSourceChoiceAction({ mode: "merge", items: [] }), { action: "warn" });
+    assert.deepEqual(billSourceChoiceAction(null), { action: "warn" });
+    assert.deepEqual(billSourceChoiceAction({ mode: "other", items: [{ kind: "po", name: "PO-1" }] }), { action: "warn" });
+  });
+  it("pulls the checked sources, named by name or kind", () => {
+    assert.deepEqual(
+      billSourceChoiceAction({ mode: "merge", items: [{ kind: "po", name: "PO-1", label: "x" }, { kind: "pr", name: "PR-2" }] }),
+      { action: "merge", payload: [{ kind: "po", name: "PO-1" }, { kind: "pr", name: "PR-2" }], labels: "PO-1, PR-2" },
+    );
+    assert.equal(billSourceChoiceAction({ mode: "merge", items: [{ kind: "po" }] }).labels, "po");
+  });
+  it("says one pulled source by name, several by count", () => {
+    assert.equal(billSourcePulledStatus([{ kind: "po", name: "PO-1" }]), "Pulled from PO-1.");
+    assert.equal(billSourcePulledStatus([{ kind: "po", name: "PO-1" }, { kind: "pr", name: "PR-2" }]), "Pulled from 2 sources.");
   });
 });

@@ -16,8 +16,12 @@
    once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
    `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
    the commit gate); step 3 built (the item rows, `src/doc-form-item-rows-ui.js`;
-   one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); next R6a-2's
-   four dialogs, then a performance deep dive over every probe's times and charts (3b), then R2-5.
+   one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); R6a-2's four
+   dialogs built (2026-10-27 … 31, `src/bill-*-modal-ui.js`); R2-5 started 2026-10-31 from the far
+   end (printing, Papers, Find, payment settings, then re-link and method change moved to
+   `electron/ipc/`). 3b, the
+   performance deep dive, ran 2026-11-01 (its report is in the plan), before R2-5's bridge /
+   doc-form / Bill moves.
    Decided: share, not merge, with every data-entry form in view
    (the doc-form page already runs six; Pay Outstanding and Journal Entry may follow).
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
@@ -34,6 +38,9 @@
    and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
+   **In flight:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter) — the
+   review of what is installed is done, the two-month wait is in force (`.npmrc`), and ESLint
+   10.9.1 is installed (2026-11-01); next its config, an import rule of our own, and `npm test`.
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
    **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
@@ -119,6 +126,7 @@ flowchart LR
 | `pwa/receiving/` · `src/receiving/` · `ops/receiving-proxy/` | **Parked** (plan 2026-09-21): the Receiving Scanner, a second client on the phone — its pages, its pure logic (also served to the pages as `/receiving/lib/`), and the Caddy front door in front of ERPNext's own web server (frappe_docker untouched). Phone setup: `docs/receiving-phone-setup.md`. Invariant 4 holds: the phone uses the proxy's address for both |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
+| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; how a move goes is in that plan's *Order*). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
 | `docs/` | beta-slice, commit conventions, **dated** working plans |
 | Museum `~/agent-harness/erpnext/doc-shell/` | Reference only — layouts, OIs, lessons |
@@ -188,6 +196,16 @@ flowchart LR
      (`isErpFilePath`); **Open** hands only document types to the OS (`openablePaper`) and marks the
      copy as from the internet on Windows; every name shown or saved goes through `plainFileName()`
      (no right-to-left-override disguises).
+
+10. **A repaint never changes what the clerk is editing** (5zorro 2026-11-01: *"repaints should not
+   affect the inputbox that has been directly or is currently directly edited by the user"*). A
+   late reply or snapshot repaints the page from the document it carries; that must not touch the
+   box being typed in, or one the clerk left whose write ERPNext has not answered yet. Keeping
+   focus is not enough: the text, the caret and an open pick list stay too. Header boxes skip such
+   a box (`paintHeaderInputIfAllowed`); the line tables (items and taxes, every form) rebuild their
+   rows but put the clerk's typing back by line and show a cell's pending value until its write
+   answers (`src/repaint-keeps-edit.js`). Prove a new repaint path with a probe that types while a
+   reply is held (`item-edit-survives-repaint`).
 
 ### Editing a submitted document (OI-171, built 2026-09-22…26)
 
@@ -931,7 +949,7 @@ cd ~/erpnext-ui-app && npm test && npm start
 |---|---|
 | `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
-| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
+| `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`; a probe waits for the page with `docQuiet` instead wherever time is not the question — `tests/probes/README.md` § *Writing one*) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
 | `npm run probe -- <name>` | One probe against the real app and the sandbox (`tests/probes/README.md`) |
 | `npm run dogfood:check` · `npm run dogfood:setup -- <row>` | Every `@dogfood` probe before a round; a row's scene left on the sandbox |

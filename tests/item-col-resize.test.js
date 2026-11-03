@@ -186,7 +186,8 @@ describe("Packet T — the taxes grid gets the same treatment", () => {
     for (const field of ["account_head", "description"]) {
       assert.match(
         taxTable,
-        new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\(r\\.${field}\\)\\}</span>`),
+        // The text shown may be the clerk's pending value (src/repaint-keeps-edit.js), so any variable.
+        new RegExp(`<td class="cell-wrap"><span class="cell-text">\\$\\{escapeHtml\\([\\w.]+\\)\\}</span><input type="text" data-tax-row="\\$\\{r\\.idx\\}" data-tax-field="${field}"`),
         `tax ${field} does not wrap`,
       );
     }

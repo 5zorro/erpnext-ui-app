@@ -43,8 +43,9 @@ import {
   emptyItemRowCleanupAction,
   lastItemRowToast,
 } from "./bill-item-guard.js";
-import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./doc-item-sort.js";
+import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState, lineTotalsColumns } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
+import { clearBeforeVendorSwitch as clearPageBeforeVendorSwitch } from "./vendor-change-ui.js";
 import {
   collectSourceRefsForProfile,
   sourceTermsDisplayBlocks,
@@ -160,6 +161,7 @@ const taxNotes = createTaxNotes({
 /** The taxes table (src/doc-form-tax-table-ui.js, shared with the Bill page; the Bill's way). */
 const taxTable = createTaxTable({
   el: () => el,
+  logFocus,
   head: () => el && el.taxesHead,
   api: () => api,
   lastDoc: () => lastDoc,
@@ -1164,14 +1166,7 @@ function paintItemsHead() {
 
 function buildLineTotalsFoot(cols) {
   if (!el.lineTotals) return;
-  const qtyIdx = cols.findIndex((c) => c.field === "qty");
-  const amtIdx = cols.findIndex(
-    (c) => c.displayOnly || (c.label && /amount/i.test(c.label)),
-  );
-  totalsLayout = {
-    qtyIdx: qtyIdx >= 0 ? qtyIdx : 2,
-    amtIdx: amtIdx >= 0 ? amtIdx : Math.max(0, cols.length - 2),
-  };
+  totalsLayout = lineTotalsColumns(cols);
   const cells = [];
   for (let i = 0; i < cols.length + 1; i++) {
     if (i === totalsLayout.qtyIdx) {
@@ -1531,6 +1526,23 @@ function vendorIsMissing(name, attempt) {
   });
 }
 
+/** Museum OI-200: before a vendor pick, a switch clears the whole document (`vendor-change-ui.js`). */
+function clearBeforeVendorSwitch(v) {
+  return clearPageBeforeVendorSwitch({
+    api,
+    value: v,
+    box: supplierInput(),
+    kept: String(paintedHeaderValue("supplier") ?? ""),
+    docLabel: docTitle(),
+    setStatus,
+    log: logFocus,
+    onCleared: (res) => {
+      noteUserEdit();
+      paint(res.doc, res.scratch || scratch);
+    },
+  });
+}
+
 function ensureHeaderLinkPickers() {
   if (!ui) return;
   for (const meta of ui.headerFields) {
@@ -1545,6 +1557,7 @@ function ensureHeaderLinkPickers() {
           return;
         }
         if (await vendorIsMissing(v, "vendor")) return;
+        if (!(await clearBeforeVendorSwitch(v))) return;
         const decision =
           ui.features.sourceModal &&
           shouldOpenSourceModalAfterVendorPick({
@@ -1569,6 +1582,7 @@ function ensureHeaderLinkPickers() {
             if (decision && decision.open) setStatus("Choose a source (or NIC).");
           },
           onHeaderFailure: (res) => {
+            if (res && res.superseded) return; // a newer pick owns the document (museum OI-200)
             setStatus((res && res.reason) || "Vendor update failed.", "err");
           },
         });
@@ -1911,6 +1925,8 @@ function paint(doc, snapScratch, opts = {}) {
   void ensureAtLeastOneItemRow(doc);
   } finally {
     painting = false;
+    // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
+    window.__docPaintedAt = Date.now();
     // Only when the repaint dropped focus: a box that survived keeps the clerk's typing untouched.
     const now = document.activeElement;
     if (focusAnchor && (!now || now === document.body)) restoreFocusAnchor(focusAnchor);

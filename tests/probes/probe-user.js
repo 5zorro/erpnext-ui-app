@@ -124,6 +124,12 @@ async function loginAsProbeUserUntimed(app, roles, opts) {
   async function back() {
     if (isBack) return;
     isBack = true;
+    // A reply still out when the cookies are swapped can set the clerk's session cookie again
+    // after the swap (seen once the probes stopped sleeping before this, plan 10-25 3b finding 7).
+    await expect
+      .poll(() => inErp(app, `(window.frappe && frappe.request && frappe.request.ajax_count) || 0`), { timeout: 30_000, intervals: [100] })
+      .toBe(0)
+      .catch(() => {});
     await app.evaluate(
       async ({ session }, [url, cookies]) => {
         const jar = session.defaultSession.cookies;

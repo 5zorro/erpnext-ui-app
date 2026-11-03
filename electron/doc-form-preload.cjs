@@ -1,6 +1,20 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
+/**
+ * Calls to the main process still waiting for their answer. Tests read it (`erpDoc.inFlight()`) to
+ * wait until the page is quiet instead of sleeping (probe-helpers `docQuiet`, plan 10-25 3b
+ * finding 7). Every `invoke` below goes through here.
+ */
+let inFlight = 0;
+const rawInvoke = ipcRenderer.invoke.bind(ipcRenderer);
+const invoke = (...args) => {
+  inFlight += 1;
+  return rawInvoke(...args).finally(() => {
+    inFlight -= 1;
+  });
+};
+
 /** @type {string|null} */
 let skinProfileId = null;
 
@@ -15,7 +29,7 @@ function onProfileSnapshot(cb) {
 
 async function ensureProfileId() {
   if (skinProfileId) return skinProfileId;
-  const ui = await ipcRenderer.invoke("doc-get-ui");
+  const ui = await invoke("doc-get-ui");
   skinProfileId = (ui && ui.profileId) || null;
   return skinProfileId;
 }
@@ -25,14 +39,17 @@ async function billActive() {
 }
 
 async function invokeSkin(billChannel, docChannel, ...args) {
-  return ipcRenderer.invoke((await billActive()) ? billChannel : docChannel, ...args);
+  return invoke((await billActive()) ? billChannel : docChannel, ...args);
 }
 
 contextBridge.exposeInMainWorld("erpDoc", {
-  getUi: () => ipcRenderer.invoke("doc-get-ui"),
-  getSnapshot: () => ipcRenderer.invoke("doc-get-snapshot"),
+  inFlight: () => inFlight,
+  getUi: () => invoke("doc-get-ui"),
+  getSnapshot: () => invoke("doc-get-snapshot"),
   setHeader: (field, value) => invokeSkin("bill-set-header", "doc-set-header", field, value),
-  setDateExpected: (value) => ipcRenderer.invoke("doc-set-date-expected", value),
+  // Museum OI-200: before a vendor switch — warn (Keep is the default), then clear the document.
+  clearForVendorChange: (value) => invoke("doc-clear-for-vendor-change", value),
+  setDateExpected: (value) => invoke("doc-set-date-expected", value),
   setItem: (rowIndex, field, value) =>
     invokeSkin("bill-set-item", "doc-set-item", rowIndex, field, value),
   addItem: () => invokeSkin("bill-add-item", "doc-add-item"),
@@ -49,36 +66,36 @@ contextBridge.exposeInMainWorld("erpDoc", {
   revertUnsaved: () => invokeSkin("bill-revert-unsaved", "doc-revert-unsaved"),
   findDocs: (prefill) => invokeSkin("bill-find", "doc-find", prefill || {}),
   refocusListFilter: (fieldname) =>
-    ipcRenderer.invoke("erp-refocus-list-filter", fieldname || "name"),
+    invoke("erp-refocus-list-filter", fieldname || "name"),
   newDoc: () => invokeSkin("bill-new", "doc-new"),
   // Printing (plan 2026-09-26 "Printing"): in place, never a popup — see src/print-dialog-ui.js.
   // Compare pane (plan 2026-09-26): the document's papers, over the ERP session.
-  papersList: (sources) => ipcRenderer.invoke("papers-list", sources || []),
-  papersBytes: (fileUrl) => ipcRenderer.invoke("papers-bytes", fileUrl || ""),
-  papersUpload: (req) => ipcRenderer.invoke("papers-upload", req || {}),
-  papersOpen: (req) => ipcRenderer.invoke("papers-open", req || {}),
-  papersDownload: (req) => ipcRenderer.invoke("papers-download", req || {}),
-  soCreatePoContext: (soName) => ipcRenderer.invoke("so-create-po-context", soName || ""),
-  soCreatePos: (req) => ipcRenderer.invoke("so-create-pos", req || {}),
-  soLineSources: (soName, itemCodes) => ipcRenderer.invoke("so-line-sources", soName || "", itemCodes || []),
-  soCreateCounts: (soName) => ipcRenderer.invoke("so-create-counts", soName || ""),
-  soVanillaCreate: (id) => ipcRenderer.invoke("so-vanilla-create", { id: id || "" }),
-  papersZip: (req) => ipcRenderer.invoke("papers-zip", req || {}),
-  papersPrintedPdf: (doc) => ipcRenderer.invoke("papers-printed-pdf", doc || {}),
-  papersPdf: (req) => ipcRenderer.invoke("papers-pdf", req || {}),
-  printOptions: (doctype) => ipcRenderer.invoke("print-options", doctype || ""),
-  printBlockReason: (doc, settings) => ipcRenderer.invoke("print-block-reason", doc || {}, settings || {}),
-  printRun: (req) => ipcRenderer.invoke("print-run", req || {}),
-  printQueueGet: () => ipcRenderer.invoke("print-queue-get"),
-  printJobStatus: (jobs) => ipcRenderer.invoke("print-job-status", jobs || []),
-  printQueueAdd: (items) => ipcRenderer.invoke("print-queue-add", items || []),
-  printQueueRemove: (items) => ipcRenderer.invoke("print-queue-remove", items || []),
-  printQueueClear: () => ipcRenderer.invoke("print-queue-clear"),
-  printQueueRun: (req) => ipcRenderer.invoke("print-queue-run", req || {}),
+  papersList: (sources) => invoke("papers-list", sources || []),
+  papersBytes: (fileUrl) => invoke("papers-bytes", fileUrl || ""),
+  papersUpload: (req) => invoke("papers-upload", req || {}),
+  papersOpen: (req) => invoke("papers-open", req || {}),
+  papersDownload: (req) => invoke("papers-download", req || {}),
+  soCreatePoContext: (soName) => invoke("so-create-po-context", soName || ""),
+  soCreatePos: (req) => invoke("so-create-pos", req || {}),
+  soLineSources: (soName, itemCodes) => invoke("so-line-sources", soName || "", itemCodes || []),
+  soCreateCounts: (soName) => invoke("so-create-counts", soName || ""),
+  soVanillaCreate: (id) => invoke("so-vanilla-create", { id: id || "" }),
+  papersZip: (req) => invoke("papers-zip", req || {}),
+  papersPrintedPdf: (doc) => invoke("papers-printed-pdf", doc || {}),
+  papersPdf: (req) => invoke("papers-pdf", req || {}),
+  printOptions: (doctype) => invoke("print-options", doctype || ""),
+  printBlockReason: (doc, settings) => invoke("print-block-reason", doc || {}, settings || {}),
+  printRun: (req) => invoke("print-run", req || {}),
+  printQueueGet: () => invoke("print-queue-get"),
+  printJobStatus: (jobs) => invoke("print-job-status", jobs || []),
+  printQueueAdd: (items) => invoke("print-queue-add", items || []),
+  printQueueRemove: (items) => invoke("print-queue-remove", items || []),
+  printQueueClear: () => invoke("print-queue-clear"),
+  printQueueRun: (req) => invoke("print-queue-run", req || {}),
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
-  refreshLinkList: (doctype) => ipcRenderer.invoke("link-list-refresh", doctype || ""),
-  linkExists: (doctype, name) => ipcRenderer.invoke("doc-link-exists", doctype || "", name || ""),
+  refreshLinkList: (doctype) => invoke("link-list-refresh", doctype || ""),
+  linkExists: (doctype, name) => invoke("doc-link-exists", doctype || "", name || ""),
   onSurfaceLeft: (cb) => {
     const handler = (_e, next) => cb(next);
     ipcRenderer.on("doc-surface-left", handler);
@@ -86,24 +103,24 @@ contextBridge.exposeInMainWorld("erpDoc", {
   },
   listAddresses: (role) => invokeSkin("bill-list-addresses", "doc-list-addresses", role || ""),
   listSourceSlice: (supplier, sliceId) =>
-    ipcRenderer.invoke("bill-list-source-slice", supplier || "", sliceId || ""),
+    invoke("bill-list-source-slice", supplier || "", sliceId || ""),
   mergeSource: async (kindOrItems, name) => {
     if (Array.isArray(kindOrItems)) {
-      return ipcRenderer.invoke("bill-merge-sources", kindOrItems);
+      return invoke("bill-merge-sources", kindOrItems);
     }
     return invokeSkin("bill-merge-source", "doc-merge-source", kindOrItems, name);
   },
-  fetchSourceTerms: (refs) => ipcRenderer.invoke("fetch-source-terms", refs || []),
+  fetchSourceTerms: (refs) => invoke("fetch-source-terms", refs || []),
   createCreditMemo: (sourceBillName) =>
-    ipcRenderer.invoke("bill-create-credit-memo", sourceBillName || ""),
+    invoke("bill-create-credit-memo", sourceBillName || ""),
   // P1 / OI-171. Two channels on purpose: the facts are read first so the confirm can name what it
   // is about to do, and the clerk can still back out after reading them.
   // The doctype travels with the call: this preload serves the Bill, PO and Item Receipt skins,
   // and each one means a different set of consequences to read before the confirm.
   voidAmendFacts: (doctype, name) =>
-    ipcRenderer.invoke("doc-void-amend-facts", doctype || "", name || ""),
+    invoke("doc-void-amend-facts", doctype || "", name || ""),
   voidAndAmend: (doctype, name) =>
-    ipcRenderer.invoke("doc-void-and-amend", doctype || "", name || ""),
+    invoke("doc-void-and-amend", doctype || "", name || ""),
   retryLoad: () => invokeSkin("bill-retry-load", "doc-retry-load"),
   openVanilla: async () =>
     ipcRenderer.send((await billActive()) ? "bill-open-vanilla" : "doc-open-vanilla"),
@@ -113,40 +130,40 @@ contextBridge.exposeInMainWorld("erpDoc", {
     ipcRenderer.send(
       (await billActive()) ? "bill-open-payment-terms-add" : "doc-open-payment-terms-add",
     ),
-  softPeekRoute: (route) => ipcRenderer.invoke("soft-peek-route", route || ""),
-  billReceiveFacts: (codes, company) => ipcRenderer.invoke("bill-receive-facts", codes || [], company || ""),
-  makeJitReceipts: (groups) => ipcRenderer.invoke("bill-jit-receipts", groups || []),
-  taxDefaultFacts: (supplier) => ipcRenderer.invoke("tax-default-facts", supplier || ""),
-  setBillReceiveAsk: (on) => ipcRenderer.invoke("set-bill-receive-ask", on !== false),
+  softPeekRoute: (route) => invoke("soft-peek-route", route || ""),
+  billReceiveFacts: (codes, company) => invoke("bill-receive-facts", codes || [], company || ""),
+  makeJitReceipts: (groups) => invoke("bill-jit-receipts", groups || []),
+  taxDefaultFacts: (supplier) => invoke("tax-default-facts", supplier || ""),
+  setBillReceiveAsk: (on) => invoke("set-bill-receive-ask", on !== false),
   detourBack: () => ipcRenderer.send("shell-detour-back"),
-  getNumberLead: () => ipcRenderer.invoke("get-doc-number-lead"),
-  setNumberLead: (lead) => ipcRenderer.invoke("set-doc-number-lead", lead || ""),
+  getNumberLead: () => invoke("get-doc-number-lead"),
+  setNumberLead: (lead) => invoke("set-doc-number-lead", lead || ""),
   logNav: (event, detail) => ipcRenderer.send("nav-debug", event || "renderer", detail != null ? String(detail) : ""),
   focusSurface: async () =>
     ipcRenderer.send((await billActive()) ? "bill-focus-surface" : "doc-focus-surface"),
   appendCalcHistory: (entry) => ipcRenderer.send("calc-history-append", entry || {}),
-  getCalcHistory: () => ipcRenderer.invoke("calc-history-list"),
-  copyCalcHistory: (id, mode) => ipcRenderer.invoke("calc-history-copy", id, mode || "table"),
-  getSiteRounding: () => ipcRenderer.invoke("calc-site-rounding"),
+  getCalcHistory: () => invoke("calc-history-list"),
+  copyCalcHistory: (id, mode) => invoke("calc-history-copy", id, mode || "table"),
+  getSiteRounding: () => invoke("calc-site-rounding"),
   // Bill-only
-  checkRef: (billNo, opts) => ipcRenderer.invoke("bill-check-ref", billNo, opts || {}),
+  checkRef: (billNo, opts) => invoke("bill-check-ref", billNo, opts || {}),
   prefetchVendorRefs: (supplier) =>
-    ipcRenderer.invoke("bill-prefetch-vendor-refs", supplier || ""),
+    invoke("bill-prefetch-vendor-refs", supplier || ""),
   setAmountDue: (value, markEdited) =>
-    ipcRenderer.invoke("bill-set-amount-due", value, !!markEdited),
-  listPayments: () => ipcRenderer.invoke("bill-list-payments"),
-  openAddPayment: () => ipcRenderer.invoke("bill-open-add-payment"),
+    invoke("bill-set-amount-due", value, !!markEdited),
+  listPayments: () => invoke("bill-list-payments"),
+  openAddPayment: () => invoke("bill-open-add-payment"),
   allocateCharge: (taxRowIndex, mode, custom) =>
-    ipcRenderer.invoke("bill-allocate-charge", taxRowIndex, mode || "amount", custom || []),
-  openLandedCost: () => ipcRenderer.invoke("bill-open-landed-cost"),
-  checkAccountCompanies: () => ipcRenderer.invoke("bill-account-company-check"),
-  listSalesOrdersForPicker: (payload) => ipcRenderer.invoke("bill-so-picker-list", payload || {}),
-  listProjectsForPicker: (customer) => ipcRenderer.invoke("bill-list-projects", customer || ""),
+    invoke("bill-allocate-charge", taxRowIndex, mode || "amount", custom || []),
+  openLandedCost: () => invoke("bill-open-landed-cost"),
+  checkAccountCompanies: () => invoke("bill-account-company-check"),
+  listSalesOrdersForPicker: (payload) => invoke("bill-so-picker-list", payload || {}),
+  listProjectsForPicker: (customer) => invoke("bill-list-projects", customer || ""),
   applyLineAllocation: (rowIndex, payload) =>
-    ipcRenderer.invoke("bill-apply-line-allocation", rowIndex, payload || {}),
+    invoke("bill-apply-line-allocation", rowIndex, payload || {}),
   planLineAllocation: (rowIndex, payload) =>
-    ipcRenderer.invoke("bill-plan-line-allocation", rowIndex, payload || {}),
-  openSupplierForm: (supplier) => ipcRenderer.invoke("bill-open-supplier-form", supplier || ""),
+    invoke("bill-plan-line-allocation", rowIndex, payload || {}),
+  openSupplierForm: (supplier) => invoke("bill-open-supplier-form", supplier || ""),
   openProjectAdd: () => ipcRenderer.send("bill-open-project-add"),
   onSnapshot: (cb) => onProfileSnapshot(cb),
   onOpenNavGate: (cb) => {

@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 29;
+  var VERSION = 31;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -806,6 +806,9 @@
     if (hasSupplierBillingDisplay(d)) {
       return { ready: true, reason: "address_display", field: SUPPLIER_BILLING_DISPLAY_FIELD };
     }
+    if (ctx.partyDetailsQuiet) {
+      return { ready: true, reason: "party_quiet_no_address", field: "" };
+    }
     if (ctx.allowMetaOnlyAtDeadline) {
       if (
         isSupplierPartySettled(d, {
@@ -858,6 +861,7 @@
     "dispatch_address",
   ];
   var SUPPLIER_PARTY_META_ONLY_GRACE_MS = 3000;
+  var SUPPLIER_PARTY_QUIET_HOLD_MS = 50;
 
   function hasSupplierAddressDisplaySignals(doc) {
     var d = doc && typeof doc === "object" ? doc : {};
@@ -895,22 +899,42 @@
     return false;
   }
 
+  /**
+   * Has ERPNext finished filling in the picked vendor? Twin of src/erp-form-bridge.js
+   * `partyDetailsQuiet` (why it is safe is there and in gotchas § ERPNext behaviour verified from
+   * source). A counter that cannot be read is "not quiet": the deadline rule stays in charge.
+   */
+  function partyDetailsQuiet(f) {
+    try {
+      var req = window.frappe && frappe.request;
+      if (!req || typeof req.ajax_count !== "number") return false;
+      return req.ajax_count === 0 && !f.updating_party_details;
+    } catch (eQ) {
+      return false;
+    }
+  }
+
   async function waitForSupplierBillingSnapshot(f, targetSupplier, baseline, maxWaitMs) {
     maxWaitMs = maxWaitMs || SUPPLIER_PARTY_SETTLE_MAX_MS;
     var deadline = Date.now() + maxWaitMs;
     /** @type {Array<{ event: string, remaining?: number, ms?: number, field?: string }>} */
     var timing = [];
     var done = false;
+    // Quiet must hold for SUPPLIER_PARTY_QUIET_HOLD_MS, not be one instant between two calls.
+    var quietSince = 0;
 
     function tryReady() {
       if (done || !f || !f.doc) return null;
       var now = Date.now();
       var remaining = deadline - now;
       if (remaining <= 0) return null;
+      if (!partyDetailsQuiet(f)) quietSince = 0;
+      else if (!quietSince) quietSince = now;
       var hit = supplierSnapshotReadyReason(f.doc, {
         targetSupplier: targetSupplier,
         baseline: baseline,
         allowMetaOnlyAtDeadline: supplierSnapshotAllowMetaOnly(deadline, now),
+        partyDetailsQuiet: !!quietSince && now - quietSince >= SUPPLIER_PARTY_QUIET_HOLD_MS,
       });
       if (hit.ready) {
         return {
@@ -1974,6 +1998,88 @@
   }
 
   /**
+   * What a vendor switch leaves alone (museum OI-200): which company, numbering and posting date
+   * the document has, what kind it is (a Debit Note stays one), its currency and price list, and
+   * the tax template (its rows are fetched again; added charges go).
+   */
+  var PARTY_CHANGE_KEEP = {
+    company: 1,
+    naming_series: 1,
+    posting_date: 1,
+    posting_time: 1,
+    set_posting_time: 1,
+    transaction_date: 1,
+    amended_from: 1,
+    is_return: 1,
+    currency: 1,
+    conversion_rate: 1,
+    buying_price_list: 1,
+    selling_price_list: 1,
+    price_list_currency: 1,
+    plc_conversion_rate: 1,
+    taxes_and_charges: 1,
+  };
+
+  /**
+   * Museum OI-200 (5zorro's option A): before a new vendor is set, clear the whole document —
+   * every field back to what a new one starts with, every table emptied — so nothing the old
+   * vendor brought can outlive a slow reply for the new one. The page has already warned. The
+   * party field itself is cleared too, so the next `setHeader` is a first pick.
+   * @param {string} partyField "supplier"
+   */
+  function clearForPartyChange(partyField) {
+    return (async function () {
+      try {
+        var f = window.cur_frm;
+        if (!f || !f.doc) return { ok: false, reason: "No form." };
+        if (f.doc.docstatus !== 0) return { ok: false, reason: "Only a draft can change its vendor." };
+        var dt = f.doc.doctype;
+        // A plain object, not frappe.model.get_new_doc: that one adds a doc to `locals` and
+        // consumes `frappe.route_options`.
+        var fresh = { doctype: dt, docstatus: 0, name: f.doc.name, __islocal: f.doc.__islocal };
+        frappe.model.set_default_values(fresh);
+        var tables = [];
+        var fields = [];
+        frappe.meta.get_docfields(dt).forEach(function (df) {
+          var fn = df.fieldname;
+          if (!fn || PARTY_CHANGE_KEEP[fn]) return;
+          if (frappe.model.table_fields.indexOf(df.fieldtype) >= 0) {
+            if ((f.doc[fn] || []).length) {
+              f.clear_table(fn);
+              tables.push(fn);
+            }
+            return;
+          }
+          if (frappe.model.no_value_type.indexOf(df.fieldtype) >= 0) return;
+          var v = fresh[fn] === undefined ? null : fresh[fn];
+          var was = f.doc[fn] === undefined ? null : f.doc[fn];
+          if (was === v || (was === "" && v == null) || (was == null && v === "")) return;
+          // Straight onto the doc, not set_value: no field's script may run on a half-cleared form.
+          f.doc[fn] = v;
+          fields.push(fn);
+        });
+        if (f.doc[partyField]) {
+          f.doc[partyField] = null;
+          if (fields.indexOf(partyField) < 0) fields.push(partyField);
+        }
+        if (f.doc.taxes_and_charges && frappe.meta.has_field(dt, "taxes")) {
+          var t = f.trigger("taxes_and_charges");
+          if (t && typeof t.then === "function") await t;
+          await afterAjaxQuiet();
+        }
+        await refreshTaxesAndTotals(f);
+        try {
+          f.refresh_fields();
+        } catch (eRf) {}
+        f.dirty();
+        return { ok: true, doc: JSON.parse(JSON.stringify(f.doc)), cleared: { fields: fields, tables: tables } };
+      } catch (e) {
+        return { ok: false, reason: String(e && e.message ? e.message : e) };
+      }
+    })();
+  }
+
+  /**
    * Receive Payment (A/R stage A1): list the customer's open invoices with ERPNext's own
    * `get_outstanding_documents` — the call behind Vanilla's "Get Outstanding Invoices" button —
    * which also allocates the amount received oldest-first. Needs the party's account, which the
@@ -2010,6 +2116,7 @@
   window.__docFormBridge = {
     version: VERSION,
     fetchOutstanding: fetchOutstanding,
+    clearForPartyChange: clearForPartyChange,
     waitForForm: waitForForm,
     snapshot: snapshot,
     setHeader: setHeader,

@@ -6,7 +6,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../e2e/helpers.js";
-import { sleep, openNewDoc, report } from "./probe-helpers.js";
+import { sleep, openNewDoc, report, leftHome } from "./probe-helpers.js";
 
 const inBoard = (app, js) => e2eCall(app, "execInView", "payOutstanding", js);
 
@@ -25,7 +25,7 @@ test("a vendor card that throws leaves the other vendors on the board", async ()
       });
     });
     await e2eCall(app, "execInView", "home", `document.querySelector('[data-testid="tile-pay-bills"]').click(); true`);
-    await sleep(3000);
+    await leftHome(app);
     if ((await e2eGet(app, "surfaceMode")) !== "pay-outstanding") {
       await e2eCall(app, "execInView", "chrome", `document.querySelector('[data-testid="lens-doc"]').click(); true`);
     }

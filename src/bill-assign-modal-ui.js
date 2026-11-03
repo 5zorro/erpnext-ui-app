@@ -17,10 +17,10 @@ import {
   assignPlanRequest,
   assignApplyRequest,
   assignMarginLines,
-  filterAssignProjects,
   assignProjectLabel,
 } from "./bill-assign.js";
 import { formatSalesOrderPickerLabel } from "./so-picker.js";
+import { createRepeatPressGuard, repeatPressToast } from "./bill-repeat-press.js";
 import { uiIconHtml } from "./ui-icons.js";
 import { renderCostingBox } from "./costing-box-ui.js";
 
@@ -34,16 +34,23 @@ import { renderCostingBox } from "./costing-box-ui.js";
  *   onClose: () => void,
  *   onApplied: (res: any) => void,
  *   refresh: () => Promise<unknown>,
+ *   toast: (text: string, onClick: () => void) => void,
+ *   clearToast: () => void,
  * }} AssignModalDeps
  *   `items` — the Bill's lines when the Sales Orders load (for their margins); `onClose` — the
  *   dialog is gone; `onApplied` — ERPNext took the allocation (`res` from `applyLineAllocation`),
- *   repaint; `refresh` — it refused, reload the Bill
+ *   repaint; `refresh` — it refused, reload the Bill; `toast` / `clearToast` — a
+ *   clickable notice over the dialog, for a second Apply held back (src/bill-repeat-press.js)
  */
 
 /** @param {AssignModalDeps} deps */
 export async function openAssignModal(deps) {
   const { api, rowIndex, supplier: sup, setStatus } = deps;
   let state = assignStart();
+  /** Closed: a load that answers late draws nothing (review M1). */
+  let closed = false;
+  /** A load is out, so the status line says "Loading…". */
+  let loading = false;
   const dispatch = (action) => {
     state = assignStep(state, action);
   };
@@ -97,6 +104,10 @@ export async function openAssignModal(deps) {
   }
 
   function close() {
+    closed = true;
+    clearTimeout(searchTimer);
+    window.removeEventListener("focus", onFocus);
+    if (loading) setStatus("Assign closed.");
     deps.onClose();
     document.removeEventListener("keydown", onKey, true);
     if (back.parentNode) back.parentNode.removeChild(back);
@@ -171,7 +182,10 @@ export async function openAssignModal(deps) {
       empty.className = "src-item link-action";
       empty.textContent = "No projects found — create Project in Vanilla…";
       empty.onclick = () => {
-        if (api.openProjectAdd) api.openProjectAdd();
+        if (!api.openProjectAdd) return;
+        // The project is made in Vanilla: fetch the list again on the way back (see onFocus).
+        projectsStale = true;
+        api.openProjectAdd();
       };
       body.appendChild(empty);
     }
@@ -214,14 +228,21 @@ export async function openAssignModal(deps) {
   async function goToSalesOrders() {
     const choice = assignCustomerChoice(state);
     setStatus("Loading Sales Orders…");
+    loading = true;
     const rows = await loadSalesOrders(choice.customer);
+    loading = false;
+    if (closed) return;
     dispatch({ type: "salesOrders", ...choice, rows });
     draw();
   }
 
   async function goToProjects() {
     setStatus("Loading projects…");
-    dispatch({ type: "projects", rows: await loadProjects(state.customer) });
+    loading = true;
+    const rows = await loadProjects(state.customer);
+    loading = false;
+    if (closed) return;
+    dispatch({ type: "projects", rows });
     draw();
   }
 
@@ -259,11 +280,18 @@ export async function openAssignModal(deps) {
     }
   }
 
+  // Apply writes to the Bill (and may make a bridge PO): a second press while it works is held
+  // back and said, never run silently (review S1).
+  const applyGuard = createRepeatPressGuard({
+    onRepeat: (runAgain) => deps.toast(repeatPressToast(assignView(state, rowIndex).primary), () => void runAgain()),
+    onIdle: deps.clearToast,
+  });
+
   async function onPrimary() {
     const next = assignPrimaryAction(state);
     if (next === "load-sales-orders") await goToSalesOrders();
     else if (next === "load-projects") await goToProjects();
-    else await applyAllocation();
+    else await applyGuard.press(applyAllocation);
   }
 
   function onKey(ev) {
@@ -279,22 +307,42 @@ export async function openAssignModal(deps) {
   let searchTimer = null;
   // Only the newest search may paint: a slow answer for older text must not replace it (R5b-1).
   let searchSeq = 0;
+  /**
+   * The projects were loaded once, on reaching the step, and the search filters that list as the
+   * clerk types (5zorro 2026-11-01: no fresh copy per keystroke; the typed text never went to
+   * ERPNext anyway). Fetched again only after the clerk went to create one in Vanilla.
+   */
+  let projectsStale = false;
+  let reloadSeq = 0;
+  async function reloadProjects() {
+    projectsStale = false;
+    const seq = ++reloadSeq;
+    const rows = await loadProjects(state.customer);
+    if (closed || seq !== reloadSeq || state.step !== "project") return;
+    dispatch({ type: "projectsReloaded", rows, text: searchEl.value });
+    draw();
+  }
+  function onFocus() {
+    if (projectsStale && state.step === "project") void reloadProjects();
+  }
+  window.addEventListener("focus", onFocus);
+
   searchEl.oninput = () => {
+    if (state.step === "project") {
+      dispatch({ type: "projectFilter", text: searchEl.value });
+      draw();
+      if (projectsStale) void reloadProjects();
+      return;
+    }
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
       const seq = ++searchSeq;
       const text = searchEl.value;
-      if (state.step === "customer") {
-        const rows = await loadCustomers(text);
-        if (seq !== searchSeq || state.step !== "customer") return;
-        dispatch({ type: "customers", rows });
-        draw();
-      } else if (state.step === "project") {
-        const rows = await loadProjects(state.customer);
-        if (seq !== searchSeq || state.step !== "project") return;
-        dispatch({ type: "projectsFound", rows: filterAssignProjects(rows, text) });
-        draw();
-      }
+      if (state.step !== "customer") return;
+      const rows = await loadCustomers(text);
+      if (seq !== searchSeq || state.step !== "customer") return;
+      dispatch({ type: "customers", rows });
+      draw();
     }, 180);
   };
 

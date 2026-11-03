@@ -8,7 +8,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, report } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, docQuiet } from "./probe-helpers.js";
 
 const call = (app, js) => inDoc(app, `(async () => { try { const r = await ${js}; return r && typeof r === "object" ? JSON.parse(JSON.stringify(r)) : r; } catch (e) { return "ERR " + (e && e.message); } })()`, 60_000);
 const SNAP = `window.erpDoc.getSnapshot()`;
@@ -18,17 +18,17 @@ test("R2-7: a refused line rate puts the other lines back and adds no offset", a
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     const account = await inErp(app, `(async () => ((await frappe.xcall("frappe.client.get_list", { doctype: "Account", filters: { root_type: "Expense", is_group: 0, account_type: ["in", ["Chargeable", "Expense Account", ""]] }, fields: ["name"], limit_page_length: 1 }))[0] || {}).name)()`, 15_000);
     report("charge-account", { account });
     await call(app, `window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO")`);
-    await sleep(2500);
+    await docQuiet(app);
     await call(app, `(async () => { const d = window.erpDoc;
       await d.setItem(0, "item_code", "SAMPLE-SKU-01"); await d.setItem(0, "qty", 2); await d.setItem(0, "rate", 10);
       let s = await d.getSnapshot(); if ((s.doc.items || []).length < 2) await d.addItem();
       await d.setItem(1, "item_code", "SAMPLE-SKU-02"); await d.setItem(1, "qty", 3); await d.setItem(1, "rate", 10);
       return true; })()`);
-    await sleep(1500);
+    await docQuiet(app);
     const added = await call(app, `window.erpDoc.addTax(${JSON.stringify(account)}, 10, "ZZ DF freight")`);
     report("tax", { ok: added && added.ok, reason: added && added.reason });
     const before = await call(app, SNAP);

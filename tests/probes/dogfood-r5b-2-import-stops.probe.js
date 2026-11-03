@@ -12,7 +12,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, erpDownAfter, erpUp, report, closeSourcePickers } from "./probe-helpers.js";
+import { sleep, inDoc, inErp, openNewDoc, erpDownAfter, erpUp, report, closeSourcePickers, docQuiet } from "./probe-helpers.js";
 
 const SKUS = ["SAMPLE-SKU-01", "SAMPLE-SKU-02", "SAMPLE-SKU-03", "SAMPLE-SKU-04"];
 const paste = (n) => ["SKU\tQty\tRate", ...Array.from({ length: n }, (_, i) => `${SKUS[i % 4]}\t${i + 1}\t10`)].join("\n");
@@ -33,9 +33,9 @@ test("R5b-2: an Import that stops part way says which lines are on the form", as
   try {
     await waitForE2eApi(app);
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
-    await sleep(1500);
+    await docQuiet(app);
     await inDoc(app, `(async () => { await window.erpDoc.setHeader("supplier", "ALPINE SUPPLY CO"); return true; })()`, 30_000);
-    await sleep(2500);
+    await docQuiet(app);
     await closeSourcePickers(app);
 
     // Control: ERPNext answering, every line filled in.

@@ -3,7 +3,7 @@
  * after a Bill is open with the line filled. Used by r6b4-split-by-need and the R2-2 dogfood probe.
  */
 import { expect } from "@playwright/test";
-import { sleep, inDoc, report, closeSourcePickers } from "./probe-helpers.js";
+import { inDoc, report, closeSourcePickers, docQuiet, settle } from "./probe-helpers.js";
 
 export const inDialog = (app, js) => inDoc(app, `(() => { const d = document.querySelector('[data-testid="bill-allocation-picker"]'); if (!d) return "NO DIALOG"; ${js} })()`);
 export const clickPrimary = (app) => inDialog(app, `d.querySelector('[data-act="pick"]').click(); return true;`);
@@ -24,19 +24,19 @@ export async function nextStep(app, want) {
 export async function assignToOrders(app, { row = 0, vendor, salesOrders, beforeProject }) {
   await inDoc(app, `(() => { document.querySelector('[data-testid="bill-vendor"]').value = ${JSON.stringify(vendor)}; return true; })()`);
   await closeSourcePickers(app);
-  await sleep(1000);
+  await docQuiet(app);
   const opened = await inDoc(app, `(() => { const b = document.querySelector('[data-testid="bill-assign-${row}"]'); if (!b) return false; b.click(); return true; })()`);
   expect(opened).toBe(true);
-  await sleep(1500);
+  await settle();
   await expect.poll(() => dialogTitle(app), { timeout: 10_000 }).toMatch(/pick customer/);
   await nextStep(app, /Sales order/); // all customers → Sales Orders
-  await sleep(500);
+  await docQuiet(app);
   const picked = await inDialog(
     app,
     `const want = ${JSON.stringify(salesOrders)}; let n = 0; for (const b of d.querySelectorAll(".src-item")) { if (want.some((w) => b.textContent.includes(w))) { b.click(); n++; } } return n;`,
   );
   report("picked", { picked });
-  await sleep(500);
+  await settle();
   if (beforeProject) await beforeProject();
   await nextStep(app, /Project/);
 }
