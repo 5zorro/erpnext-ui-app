@@ -416,7 +416,17 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    Copy with the clipboard stood in for, IT recovery's boxes, both dialogs' refusal / save /
    close, Feedback), the same before and after. Found on the way and fixed first (`6801ccc`):
    Print as image had been falling back to the plain PDF since printing moved (`__dirname` in an
-   ES module; probe `print-as-image`). main.js 11,925 → 11,350 lines. **How each move
+   ES module; probe `print-as-image`). main.js 11,925 → 11,350 lines.
+   **The warm pick lists, mapped 2026-11-02 (next):** state `linkListCopies`, `linkListBusy`,
+   `linkListGeneration`, `linkListUser`, `linkListMissing`, `LINK_LIST_ERP_HELPERS`; functions
+   `loadLinkList`, `checkLinkListChanged`, `warmLinkLists`, `dropLinkLists`; handlers
+   `doc-link-exists`, `link-list-refresh`. Outside callers: `searchLink` (answers from the copy
+   first), the login check (`tickLoginOnce` drops the copies on a user change), three warm-now
+   calls, the test hook `linkListsLoaded`. `searchLink` reads the copies directly, so the cleaner
+   cut moves link search with them (`searchLink`, `enrichAccountLinkResults`,
+   `rankSupplierSearchResults`, the three `*-search-link` handlers): "link search and its warm
+   copies" — to confirm on reading those helpers. Run long checks from a snapshot (HANDOFF §
+   Test strategy). **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js

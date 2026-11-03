@@ -144,6 +144,12 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
 
 - `<review-id or topic>-<what>.probe.js`; the header comment states the question and what the
   probe makes in the sandbox.
+- **The run's profile copies the clerk's settings** (every `.json` in their folder: prefs, IT
+  recovery, print choices). A door that acts outside the app on a setting — IT recovery's Autofix
+  runs a script, Copy writes the system clipboard, a print lands in `~/PDF/` — is stood in for in
+  the main process (`app.evaluate(({ dialog, clipboard }) => …)`), and its "do it" answer is never
+  given; a probe cleans up only what it can prove it made (`print-as-image`: its own CUPS job's
+  file). Found 2026-11-02: `health-incident-doors` reached this machine's real Autofix box.
 - Steps shared by probes are in `probe-helpers.js`: `openNewDoc`, `keys` (real keystrokes —
   `e2e/GOTCHAS.md` #15), `focusTestId`, `escPeek`, `docState`, `erpAnswers`, `inDoc` / `inErp`
   (each gives up after a few seconds, so a stalled page shows as `"TIMEOUT"`, not a hung run).
