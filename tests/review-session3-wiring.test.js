@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
  * what was built says how to find it).
  */
 
+import { mainProcessSource } from "./main-process-source.js";
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const main = read("../electron/main.js");
 const docPage = read("../src/doc-form-page.js");
@@ -141,7 +142,7 @@ describe("R3-1: focus put back after a wait is taken where the clerk is, not whe
 
 describe("R4-1: the login question is asked on events, never on the health beat", () => {
   it("tickHealth asks only when the server's state changed", () => {
-    const body = fnText(main, "tickHealth");
+    const body = fnText(mainProcessSource(), "tickHealth"); // electron/ipc/health-incidents.js
     assert.match(body, /if \(loginCheckOnHealthChange\(prevHealth, result\.status\)\) \{/);
     assert.equal((body.match(/tickLogin\(/g) || []).length, 1);
   });

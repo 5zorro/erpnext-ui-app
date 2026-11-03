@@ -23,8 +23,9 @@
 > **R2-5 started 2026-10-31 alongside, from the far end (his pick): printing, Papers, Find and
 > payment settings moved to `electron/ipc/`; after 3b, `nav:check` (109/109) and `dogfood:check`
 > (one probe's wait fixed) ran whole on 2026-11-01, then re-link and method change moved
-> (`electron/ipc/relink-method-change.js`). Next in the order: health / incidents, the warm pick
-> lists, then doc-form and Bill with the bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> (`electron/ipc/relink-method-change.js`), then health and incidents
+> (`electron/ipc/health-incidents.js`, 2026-11-02). Next in the order: the warm pick lists, then
+> doc-form and Bill with the bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -402,7 +403,20 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    their refusals): 16 lines, the same before and after. `dogfood-r9-batch` (a real batch method
    change through the panel) passes on the moved code. main.js 12,549 → 11,926 lines. ESLint is
    in the repo now (plan 10-31) but has no config yet; the import check was done by reading the
-   modules' `export`s, and the module's free names by hand. **How each move
+   modules' `export`s, and the module's free names by hand.
+   Health and incidents (`electron/ipc/health-incidents.js`, 2026-11-02): the DB light's beat and
+   its Diagnose dropdown, IT recovery settings, the Navigation / Focus issue dialogs and their
+   incidents, Feedback; 10 of the 15 shared variables move with it. It borrows the two trails
+   (`navDebug`, `focusDebug` and their rings, read for Diagnose), the login check (`lastHealth`,
+   `sendHealth`, `tickLogin`), what an incident freezes (`collect…IncidentContext`, which read the
+   whole shell) and the popover dismiss the other dropdowns share; `loadPrefs` calls
+   `loadHealthRemediation()`. Moved by script; every one of the 545 lines arrived (checked line by
+   line, the getter edits undone), lint (plan 10-31, now in `npm test`) found the module's 33
+   imports and `main.js`'s 31 unused ones. New probe `health-incident-doors`: 21 doors (Diagnose,
+   Copy with the clipboard stood in for, IT recovery's boxes, both dialogs' refusal / save /
+   close, Feedback), the same before and after. Found on the way and fixed first (`6801ccc`):
+   Print as image had been falling back to the plain PDF since printing moved (`__dirname` in an
+   ES module; probe `print-as-image`). main.js 11,925 → 11,350 lines. **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js
