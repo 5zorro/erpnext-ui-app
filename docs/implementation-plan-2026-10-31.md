@@ -6,8 +6,12 @@
 > two answers under *Open questions*). Installed at his yes (2026-11-01): `eslint` 10.9.1,
 > `@eslint/js` 10.0.1, `globals` 17.12.0, exact, as dev dependencies** — 69 packages added (the
 > youngest 62 days old), all with verified registry signatures, none with an install script;
-> `npm audit` reports only the `brace-expansion` / `minimatch` findings noted below. Next: the
-> config, the import rule, the fair test (Step 3), then `npm test` (Step 4). Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> `npm audit` reports only the `brace-expansion` / `minimatch` findings noted below. **The config and
+> the import rule are built (2026-11-02):** `eslint.config.js` and `scripts/eslint-import-names.js`
+> (`local/import-names`, parsed with espree, ESLint's own parser; 12 rule tests). The fair test:
+> both 2026-10-31 bugs are reported (the payment code before `5bef496`, four undefined names; a
+> `print.js` import pointed at the wrong module). Today's `electron/` and `src/`: 52 findings, one
+> a real bug (museum OI-196), the rest unused or dead code. Next: Step 4. Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
