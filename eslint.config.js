@@ -38,9 +38,10 @@ export default [
     },
   },
   {
-    // Electron's main process: Node.
+    // Electron's main process: Node. `nodeBuiltin`, not `node`: these are ES modules, which have no
+    // CommonJS `__dirname` / `require` / `module` (print.js used `__dirname` and Print as image broke).
     files: ["electron/**/*.js"],
-    languageOptions: { globals: { ...globals.node } },
+    languageOptions: { globals: { ...globals.nodeBuiltin } },
   },
   {
     // Preloads: CommonJS, run with Node and a page.
@@ -75,7 +76,7 @@ export default [
     // Tests, scripts and the Playwright specs run on Node. Specs and probes also hand functions to
     // the page (`page.evaluate`, `app.evaluate`), which run in the browser or Electron's main.
     files: ["tests/**/*.js", "scripts/**/*.js", "e2e/**/*.js", "playwright.config.js", "ops/**/*.js", "ops/**/*.mjs"],
-    languageOptions: { globals: { ...globals.node } },
+    languageOptions: { globals: { ...globals.nodeBuiltin } },
   },
   {
     files: ["e2e/**/*.js", "tests/probes/**/*.js"],
