@@ -137,7 +137,9 @@ test("health / incidents: every door answers as before", async () => {
     await inChrome(app, `(() => { window.erpUi.openDiagnose(); return true; })()`);
     diag = await windowFor(app, "diagnose-dropdown.html");
     const after = await diag.evaluate(() => window.erpDiagnose.refresh());
-    door("get-diagnose incidents", (after.lines || []).filter((l) => /probe: health-incident-doors|incident/i.test(String(l))).map((l) => String(l).replace(/\d+/g, "N")));
+    // The route each trail line names is where ERPNext happened to be (right after a sign-in it can
+    // still be on /app, on its way to /desk): not what this door is about, so it is left out.
+    door("get-diagnose incidents", (after.lines || []).filter((l) => /probe: health-incident-doors|incident/i.test(String(l))).map((l) => String(l).replace(/ @ \S+/, " @ <route>").replace(/\| \/\S*$/, "| <route>").replace(/\d+/g, "N")));
     await diag.evaluate(() => window.erpDiagnose.close());
     await gone(app, "diagnose-dropdown.html");
 
