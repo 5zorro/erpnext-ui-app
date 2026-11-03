@@ -159,6 +159,10 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
   details): when the next step only needs the login (`openNewDoc` already waited for that), use
   `settle()` — `docQuiet` there cost `r10b-board-bills` 4 s more. A `sleep` stays only where time *is* the question: "nothing happens in the next 15 s", a fade
   timed on purpose, a race the probe sets up, a clerk's pause it imitates — say which in a comment.
+  `docQuiet` cannot see what main does on its own timer: the warm pick-list copies load 2 s after a
+  Doc page opens, so a probe that then cuts ERPNext's search waits on `warmCopies(app)` first.
+- Chaos for one probe: `launchWithChaos()` (250 ms, 45 % unless the run set its own). Never set
+  `ERP_CHAOS_*` in `process.env` and leave it: every later probe in the same run inherits it.
 - Right after a peek returns (Esc), the ERPNext form reloads for a few seconds and the Doc page's
   snapshot is not `ok` — poll `docState(app).snapOk` before reading or typing. Esc keys sent to the
   Doc page do not reach a peek (it is the ERPNext view): use `escPeek`.

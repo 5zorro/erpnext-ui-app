@@ -2,7 +2,7 @@
  * Steps every probe needs (README.md here). Launch and `__erpE2e` come from `e2e/helpers.js`.
  */
 import { expect } from "@playwright/test";
-import { e2eCall, e2eGet } from "../../e2e/helpers.js";
+import { e2eCall, e2eGet, launchShell } from "../../e2e/helpers.js";
 import { noteWait, timed } from "../../e2e/test-timing.js";
 
 /** A deliberate pause: counted on the test's timing as its own wait, not the app's work. */
@@ -59,6 +59,26 @@ export const searchDone = (app, timeout = 15_000) =>
   expect
     .poll(() => inDoc(app, `document.querySelectorAll("[data-search-pending]").length`), { timeout, intervals: [50] })
     .toBe(0);
+
+/**
+ * Launch the app under chaos lag (each ERPNext call `ms` late, `pct` % of the time), unless the run
+ * already set its own. The setting is for this launch only: the next probe in the same run does not
+ * inherit it (two probes once set it and never put it back).
+ * @param {{ ms?: string, pct?: string }} [chaos]
+ */
+export async function launchWithChaos({ ms = "250", pct = "45" } = {}) {
+  const before = { ERP_CHAOS_LAG_MS: process.env.ERP_CHAOS_LAG_MS, ERP_CHAOS_LAG_PCT: process.env.ERP_CHAOS_LAG_PCT };
+  process.env.ERP_CHAOS_LAG_MS = before.ERP_CHAOS_LAG_MS || ms;
+  process.env.ERP_CHAOS_LAG_PCT = before.ERP_CHAOS_LAG_PCT || pct;
+  try {
+    return await launchShell();
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 
 /**
  * Wait until the warm pick-list copies for `doctypes` are loaded. Main loads them on its own 2 s
