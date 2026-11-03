@@ -317,7 +317,13 @@ export function createTaxTable(deps) {
             focusAfter(applyOpts);
             deps.setStatus("Tax row updated — totals refreshed.");
             if (Math.abs(n - Number(resAmt.doc?.taxes?.[ri]?.rate ?? n)) > 0.001) {
-              const resRate = await api().setTax(ri, "rate", String(n));
+              const rateLanded = writing(String(n));
+              let resRate;
+              try {
+                resRate = await api().setTax(ri, "rate", String(n));
+              } finally {
+                rateLanded();
+              }
               if (resRate && resRate.ok) {
                 deps.repaint(resRate);
                 focusAfter(applyOpts);
