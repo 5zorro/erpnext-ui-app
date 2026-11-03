@@ -84,8 +84,6 @@ describe("runSourcePickerFlow", () => {
   it("streams slices into controller while modal stays open", async () => {
     /** @type {string[]} */
     const applied = [];
-    /** @type {import("../src/source-modal-ui.js").SourceModalController | null} */
-    let ctl = null;
 
     const flowP = runSourcePickerFlow({
       supplier: "Alpine Supply",

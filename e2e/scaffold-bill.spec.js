@@ -3,7 +3,7 @@
  * Does not require a logged-in ERP form; asserts the bill surface mounts.
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
+import { launchShell, e2eCall, waitForE2eApi } from "./helpers.js";
 
 test.describe("scaffold: Doc Bill view", () => {
   /** @type {import('@playwright/test').ElectronApplication | undefined} */

@@ -3,7 +3,8 @@
  * ERPNext and Frappe use, plus `local/import-names` (scripts/eslint-import-names.js): a name
  * imported from a relative path must be exported there. Run: `npm run lint`.
  *
- * Scope for now is the app's own code, `electron/` and `src/` (Step 4: the tests and scripts next).
+ * Scope: the app (`electron/`, `src/`, `pwa/`), the tests and probes, the scripts, `ops/` and the
+ * Playwright specs.
  */
 import js from "@eslint/js";
 import globals from "globals";
@@ -27,7 +28,7 @@ export default [
       // The byte-order mark in sheet-preview.js's regular expression strips it on purpose.
       "no-irregular-whitespace": ["error", { skipRegExps: true }],
       // An unused `catch (e)` name is the older spelling of `catch {}`; `_name` marks an argument kept for its place.
-      "no-unused-vars": ["error", { caughtErrors: "none", argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "no-unused-vars": ["error", { caughtErrors: "none", argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true }],
       // Off: all 17 cases on 2026-11-02 were a safe starting value set before a try or an if chain
       // (`let response = 2` before a dialog), none a bug; rewriting them would change nothing.
       "no-useless-assignment": "off",
@@ -55,9 +56,40 @@ export default [
     },
   },
   {
+    // The receiving scanner's pages (parked plan 09-21) and its service worker. Its `./lib/` is
+    // src/receiving/, mapped by the proxy (ops/receiving-proxy/compose.yml).
+    files: ["pwa/**/*.js"],
+    languageOptions: { globals: { ...globals.browser } },
+    rules: { "local/import-names": ["error", { served: [{ from: "pwa/receiving/lib", to: "src/receiving" }] }] },
+  },
+  {
+    files: ["pwa/**/sw.js"],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     // Pages: the browser.
     files: ["src/**/*.js"],
     languageOptions: { globals: { ...globals.browser } },
+  },
+  {
+    // Tests, scripts and the Playwright specs run on Node. Specs and probes also hand functions to
+    // the page (`page.evaluate`, `app.evaluate`), which run in the browser or Electron's main.
+    files: ["tests/**/*.js", "scripts/**/*.js", "e2e/**/*.js", "playwright.config.js", "ops/**/*.js", "ops/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    files: ["e2e/**/*.js", "tests/probes/**/*.js"],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+  {
+    // Probes hand functions to ERPNext's own page (`inPage`), where Frappe's names exist.
+    files: ["tests/probes/**/*.js"],
+    languageOptions: { globals: { frappe: "readonly" } },
+  },
+  {
+    // The tests compile the code strings the app injects into pages, to run them.
+    files: ["tests/**/*.js", "e2e/**/*.js"],
+    rules: { "no-new-func": "off" },
   },
   {
     // src/ modules the main process or the test tooling also runs: Node's `process` / `Buffer`.

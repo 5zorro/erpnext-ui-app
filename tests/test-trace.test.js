@@ -64,7 +64,7 @@ describe("test trace: one test's chart, built at its end", () => {
 describe("test trace: where the spans come from", () => {
   it("the app appends its ERPNext calls and chaos delays to the run's folder, in test runs only; the reporter charts every test's end", () => {
     const main = read("../electron/main.js");
-    assert.match(main, /function noteTestSpan\(group, name, start, end = Date\.now\(\)\) \{\n  if \(process\.env\.E2E !== "1" \|\| !process\.env\.ERP_USER_DATA_DIR\) return;/);
+    assert.match(main, /function noteTestSpan\(group, name, start, end = Date\.now\(\)\) \{\n {2}if \(process\.env\.E2E !== "1" \|\| !process\.env\.ERP_USER_DATA_DIR\) return;/);
     assert.match(main, /"test-spans\.jsonl"/);
     assert.match(main, /noteTestSpan\("chaos lag", callName \? `\$\{callName\} \(\$\{channel\}\)` : channel, end - ms, end\)/);
     assert.match(main, /noteTestSpan\("ERPNext calls", method, start\)/);
@@ -105,6 +105,6 @@ describe("test trace: what is kept", () => {
     assert.match(reporter, /const FAILED = new Set\(\["failed", "timedOut", "interrupted"\]\);/);
     assert.match(reporter, /if \(FAILED\.has\(result\.status\)\) keepFailure\(title, trace\);/);
     assert.match(reporter, /for \(const log of \["nav-debug\.log", "focus-debug\.log"\]\)[\s\S]*logTail\(fs\.readFileSync\(src\)\)/);
-    assert.match(reporter, /onBegin\(config, suite\) \{\n    this\.started = new Date\(\);\n    sweepStaleTraces\(\);/);
+    assert.match(reporter, /onBegin\(config, suite\) \{\n {4}this\.started = new Date\(\);\n {4}sweepStaleTraces\(\);/);
   });
 });

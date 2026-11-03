@@ -70,7 +70,7 @@ child.on("exit", (status, signal) => {
   if (signal) process.exit(1);
   if (scope !== "all") process.exit(status ?? 1);
   console.log("\nLint (npm run lint):");
-  const lint = spawn(process.execPath, [path.join(ROOT, "node_modules", "eslint", "bin", "eslint.js"), "electron", "src"], {
+  const lint = spawn(process.execPath, [path.join(ROOT, "node_modules", "eslint", "bin", "eslint.js"), "."], {
     cwd: ROOT,
     stdio: "inherit",
   });

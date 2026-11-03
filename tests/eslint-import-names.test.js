@@ -24,6 +24,11 @@ tester.run("local/import-names", importNames, {
     { filename, code: 'import * as all from "./lib.js";' },
     { filename, code: 'export { a } from "./lib.js";' },
     { filename, code: 'import { anything } from "eslint";' }, // packages are not checked
+    {
+      filename,
+      code: 'import { a } from "./served/lib.js";',
+      options: [{ served: [{ from: path.relative(process.cwd(), path.join(dir, "served")), to: path.relative(process.cwd(), dir) }] }],
+    },
   ],
   invalid: [
     {
@@ -36,6 +41,13 @@ tester.run("local/import-names", importNames, {
     { filename, code: 'import more from "./more.js";', errors: [{ messageId: "missingDefault" }] },
     { filename, code: 'import { a } from "./gone.js";', errors: [{ messageId: "missingFile" }] },
     { filename, code: 'export { nope } from "./lib.js";', errors: [{ messageId: "missingName" }] },
+    // a folder served from another: read from where it really is
+    {
+      filename,
+      code: 'import { gone } from "./served/lib.js";',
+      options: [{ served: [{ from: path.relative(process.cwd(), path.join(dir, "served")), to: path.relative(process.cwd(), dir) }] }],
+      errors: [{ messageId: "missingName", data: { name: "gone", spec: "./served/lib.js" } }],
+    },
     // a target the rule cannot read is reported, never passed unchecked
     { filename, code: 'import { x } from "./broken.js";', errors: [{ messageId: "unreadable" }] },
   ],

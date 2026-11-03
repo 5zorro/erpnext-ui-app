@@ -37,7 +37,7 @@ test("R2-1: a reload mid-save ends the wait and New still works", async () => {
     const total = billCompareTotal(snap.doc);
     await inDoc(app, `(() => { const a = document.querySelector('[data-testid="bill-amount-due"]'); a.focus(); a.value = ${JSON.stringify(String(total))}; a.dispatchEvent(new Event("input", { bubbles: true })); a.blur(); return true; })()`);
     // Hold ERPNext's save call 5 s, so the reload below lands while the step is running.
-    await inErp(app, `(() => { const orig = frappe.call; frappe.call = function (opts) { const m = String((opts && opts.method) || opts || ""); if (/savedocs|frappe\.client\.(save|insert)/.test(m)) return new Promise((r) => setTimeout(r, 5000)).then(() => orig.apply(this, arguments)); return orig.apply(this, arguments); }; return true; })()`);
+    await inErp(app, `(() => { const orig = frappe.call; frappe.call = function (opts) { const m = String((opts && opts.method) || opts || ""); if (/savedocs|frappe\\.client\\.(save|insert)/.test(m)) return new Promise((r) => setTimeout(r, 5000)).then(() => orig.apply(this, arguments)); return orig.apply(this, arguments); }; return true; })()`);
     await inDoc(app, `(() => { document.getElementById("btn-save").click(); return true; })()`);
     // Save asks first whether the goods came with the bill: Bill only.
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="bill-receive-bill-only"]')`), { timeout: 10_000 }).toBe(true);

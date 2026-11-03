@@ -15,8 +15,11 @@
 > fixed (one import; probe `bill-terms-typed`, failed before), the dead code removed, 17 safe
 > starting values left with `no-useless-assignment` off (reason in the config), `no-new-func` on;
 > lint is clean and runs at the end of `npm test` (`npm run lint` alone), and CI runs
-> `npm ci --ignore-scripts` first. Left: the import rule over the tests and scripts, and the
-> stale `allowScripts` entry. The dependency policy (Steps 1–2)
+> `npm ci --ignore-scripts` first. **Then the whole repo (2026-11-02):** lint covers the tests,
+> probes, scripts, specs, `ops/` and `pwa/` (`npm run lint` = `eslint .`; the import rule maps the
+> scanner's `./lib/` to `src/receiving/`, as its proxy does), and the stale `allowScripts` entry is
+> removed (no installed package has an install script; `npm install-scripts ls` is clean). Plan
+> 10-31's steps are all done. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.

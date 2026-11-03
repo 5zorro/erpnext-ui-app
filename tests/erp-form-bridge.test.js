@@ -28,7 +28,6 @@ import {
   supplierAddressSnapshotReady,
   supplierSnapshotReadyReason,
   hasSupplierBillingDisplay,
-  SUPPLIER_BILLING_DISPLAY_FIELD,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {

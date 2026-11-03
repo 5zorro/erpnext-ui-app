@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 
 const electronDir = fileURLToPath(new URL("../electron/", import.meta.url));
 const docFormHtml = readFileSync(join(electronDir, "doc-form.html"), "utf8");

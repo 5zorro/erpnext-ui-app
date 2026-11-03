@@ -45,7 +45,7 @@ test("R6c-4: a refused just-in-time receipt leaves no draft and says why", async
     report("line", { item: line.item_code, warehouse: line.warehouse });
     expect(line.warehouse).toBe(made.warehouse);
     // Repaint the page from ERPNext's document, as a snapshot from main does.
-    const snap = await repaintDoc(app);
+    await repaintDoc(app);
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="bill-rec-0-by"]')`), { timeout: 10_000 }).toBe(true);
     await inDoc(app, `document.querySelector('[data-testid="bill-rec-0-by"]').closest("td").click()`);
     await expect.poll(() => inDoc(app, `!!document.querySelector('[data-testid="bill-rec-editor"]')`), { timeout: 10_000 }).toBe(true);

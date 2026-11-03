@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ownFormPeekHolds } from "../src/peek-stack.js";
-import { pushHistory, splitHistory, RECENT_MAX } from "../src/history.js";
+import { pushHistory, splitHistory } from "../src/history.js";
 import {
   PEEK_CHILD_CAP,
   applyPeekTreeToHistory,

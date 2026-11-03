@@ -19,7 +19,6 @@ import {
   applySourceSliceToGroups,
   rollUpReceiptRows,
   sourceSlicesForSkin,
-  SOURCE_LIST_SLICE_DEFS,
   SOURCE_LIST_SLICE_ORDER,
 } from "../src/source-list-slices.js";
 

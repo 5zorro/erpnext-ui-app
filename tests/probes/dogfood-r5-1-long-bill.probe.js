@@ -11,7 +11,6 @@ import { launchShell, waitForE2eApi } from "../../e2e/helpers.js";
 import { sleep, keys, inDoc, openNewDoc, report, closeSourcePickers, repaintDoc, docQuiet } from "./probe-helpers.js";
 
 const LINES = 25;
-const SNAP = `(async () => { const s = await window.erpDoc.getSnapshot(); return { doc: s.doc }; })()`;
 
 /** Page-wide listeners on window and document in the Doc page, by type (Chrome DevTools protocol). */
 const listeners = (app) =>

@@ -3,7 +3,7 @@
  * Gotcha: assert bounds via main getBounds(), not Playwright page geometry.
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, e2eCall, e2eGet, waitForE2eApi } from "./helpers.js";
+import { launchShell, e2eCall, waitForE2eApi } from "./helpers.js";
 
 const OFF_X = -20000;
 

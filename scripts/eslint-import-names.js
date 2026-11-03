@@ -13,6 +13,10 @@
  * (`export { a } from`). Not checked: bare package names, `.cjs` / `.json` targets, namespace
  * imports, `import()` calls. A target that does `export * from "./y.js"` is followed. A target that
  * cannot be read or parsed is reported, so the rule never passes a file it did not check.
+ *
+ * Option `served: [{ from, to }]` (paths from the working directory): an import that resolves under
+ * `from` is read from `to` instead — for a folder a web server maps onto another (the receiving
+ * scanner's `pwa/receiving/lib/` is `src/receiving/`, ops/receiving-proxy/compose.yml).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -91,7 +95,23 @@ export const importNames = {
   meta: {
     type: "problem",
     docs: { description: "A name imported from a relative path is exported by that file" },
-    schema: [],
+    schema: [
+      {
+        type: "object",
+        properties: {
+          served: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { from: { type: "string" }, to: { type: "string" } },
+              required: ["from", "to"],
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+    ],
     messages: {
       missingFile: "'{{spec}}' does not exist.",
       missingName: "'{{name}}' is not exported by '{{spec}}'.",
@@ -101,10 +121,19 @@ export const importNames = {
   },
   create(context) {
     const filename = context.filename || (context.getFilename && context.getFilename());
+    const cwd = context.cwd || process.cwd();
+    const served = ((context.options[0] && context.options[0].served) || []).map((m) => ({
+      from: path.resolve(cwd, m.from) + path.sep,
+      to: path.resolve(cwd, m.to) + path.sep,
+    }));
+    const servedPath = (p) => {
+      const m = served.find((s) => p.startsWith(s.from));
+      return m ? m.to + p.slice(m.from.length) : p;
+    };
     const check = (node) => {
       const spec = node.source && node.source.value;
       if (!isChecked(spec) || !filename || filename === "<input>" || filename === "<text>") return;
-      const target = path.resolve(path.dirname(filename), spec);
+      const target = servedPath(path.resolve(path.dirname(filename), spec));
       if (!fs.existsSync(target)) {
         context.report({ node: node.source, messageId: "missingFile", data: { spec } });
         return;
