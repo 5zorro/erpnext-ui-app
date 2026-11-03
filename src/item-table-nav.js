@@ -32,7 +32,7 @@ export function isPrintableInputKey(key, mods = {}) {
  * @param {number|null|undefined} selectionEnd
  * @param {number|null|undefined} valueLength
  */
-export function caretAtCellStart(selectionStart, selectionEnd, valueLength) {
+export function caretAtCellStart(selectionStart, _selectionEnd, _valueLength) {
   const start = Number(selectionStart);
   if (!Number.isFinite(start)) return true;
   return start <= 0;

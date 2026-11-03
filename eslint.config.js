@@ -28,6 +28,12 @@ export default [
       "no-irregular-whitespace": ["error", { skipRegExps: true }],
       // An unused `catch (e)` name is the older spelling of `catch {}`; `_name` marks an argument kept for its place.
       "no-unused-vars": ["error", { caughtErrors: "none", argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      // Off: all 17 cases on 2026-11-02 were a safe starting value set before a try or an if chain
+      // (`let response = 2` before a dialog), none a bug; rewriting them would change nothing.
+      "no-useless-assignment": "off",
+      // On, so the three deliberate `new Function` uses in doc-actions.js keep their reasons in their
+      // eslint-disable comments and a new one has to give its own.
+      "no-new-func": "error",
     },
   },
   {

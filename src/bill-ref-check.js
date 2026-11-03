@@ -188,7 +188,6 @@ export function compareBillRefToRecentPattern(typed, recentRefs) {
 
   const droppedOutlier = priors[dropIdx];
   const kept = priors.filter((_, i) => i !== dropIdx);
-  const keptSigs = kept.map((p) => billRefClassSignature(p));
 
   /** @type {Map<number, number>} */
   const lenVotes = new Map();

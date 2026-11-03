@@ -3,11 +3,8 @@
  */
 
 import {
-  applyHeaderSortClick,
   compareBySortSpecs,
   normalizeSortSpecs,
-  sortHeaderArrow,
-  sortHeaderState,
 } from "./item-sort-specs.js";
 
 export {

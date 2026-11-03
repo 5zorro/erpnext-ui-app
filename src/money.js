@@ -13,7 +13,7 @@ import { DEFAULT_SITE_ROUNDING, roundByConvention, roundingRemainder, remainderN
 export function parseMoney(value) {
   if (value == null || value === "") return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const n = Number(String(value).replace(/[^0-9.\-]/g, ""));
+  const n = Number(String(value).replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 

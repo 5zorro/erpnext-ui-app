@@ -83,7 +83,7 @@ export function rowIndexOf(sortedBills) {
 export function orderAggregatesByFirstRow(items, keysOf, rowIndex) {
   const list = Array.isArray(items) ? items.slice() : [];
   const idx = new Map();
-  list.forEach((item, i) => {
+  list.forEach((item) => {
     const positions = (keysOf(item) || [])
       .map((k) => rowIndex.get(str(k)))
       .filter((n) => typeof n === "number");

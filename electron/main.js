@@ -310,7 +310,6 @@ import { surfaceIsDocLens, surfaceOwnsRoute, surfacePlacement } from "../src/she
 import {
   BILL_FIND_TIMEOUT_MS,
   BILL_SAVE_TIMEOUT_MS,
-  classifyPrintNavResult,
   timeoutFailure,
 } from "../src/bill-action-flow.js";
 import {
@@ -3294,13 +3293,13 @@ async function linkedReceiptsForBillDoc(doc) {
 /**
  * Vendor account #s at supplier (Customer Number At Supplier) — payment identity, not SO customer.
  * @param {string} supplier
- * @param {string} [company]
+ * @param {string} [_company]
  * @returns {Promise<string[]>}
  */
-async function vendorAccountNumbersForSupplier(supplier, company) {
+async function vendorAccountNumbersForSupplier(supplier, _company) {
   const sup = supplier != null ? String(supplier).trim() : "";
   if (!sup) return [];
-  const co = company != null ? String(company).trim() : "";
+  // `_company` is not used to filter (museum OI-204): every company's numbers come back.
   const raw = await erpEval(`(async () => {
     ${ERP_LIST_JS}
     ${PE_REASON_FROM_JS}
@@ -11307,7 +11306,7 @@ ipcMain.on("set-wash-pattern", (_e, pattern) => {
 // payment-doc.html found a Receive payment: show it in the Receive Payment Doc form (A/R A1).
 ipcMain.on("payment-doc-open-receive", (_e, name) => {
   const rec = typeof name === "string" ? name.trim() : "";
-  if (!rec || surfaceMode !== "payment-doc" || !/^[\w .\-]+$/.test(rec)) return;
+  if (!rec || surfaceMode !== "payment-doc" || !/^[\w .-]+$/.test(rec)) return;
   navDebug("payment-doc-open-receive", rec);
   showDocForm("receive-payment", paymentEntryRoute(rec), { skipDirtyGate: true });
 });

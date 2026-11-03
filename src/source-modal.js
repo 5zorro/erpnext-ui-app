@@ -79,7 +79,7 @@ export function toggleSourceSelection(selectedKeys, item) {
  * @param {SourceItem|null|undefined} activeItem
  * @returns {{ mode: "nic"|"merge"|"none", items: SourceItem[], reason?: string }}
  */
-export function resolveSourcesToCommit(groups, selectedKeys, activeItem) {
+export function resolveSourcesToCommit(groups, selectedKeys, _activeItem) {
   const keys = [...(selectedKeys || [])].filter(Boolean);
   if (keys.includes("nic")) {
     return { mode: "nic", items: [{ label: "NIC", kind: "nic" }] };

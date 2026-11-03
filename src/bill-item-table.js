@@ -10,11 +10,8 @@ import {
   normalizeLineAllocation,
 } from "./bill-line-allocation.js";
 import {
-  applyHeaderSortClick,
   compareBySortSpecs,
   normalizeSortSpecs,
-  sortHeaderArrow,
-  sortHeaderState,
 } from "./item-sort-specs.js";
 
 export {

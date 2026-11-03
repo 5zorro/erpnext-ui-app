@@ -7,7 +7,6 @@ import {
   decorateHistoryEntry,
   shouldOmitHistoryRoute,
 } from "./history-nav.js";
-import { copyRefForDoc } from "./history-copy-ref.js";
 
 export const HISTORY_CAP = 12;
 /** M1.5: visible in Recent; remainder goes under Older (collapsed). */

@@ -333,7 +333,7 @@ describe("erp-form-bridge-page save settle contract", () => {
       "party fields must be set before the item table is rebuilt",
     );
     assert.match(page, /hasSupplierBillingDisplay/);
-    assert.match(page, /isSupplierPartyMetaOnlyChange/);
+    assert.match(page, /function isSupplierPartySettled\(doc, ctx\)/);
     assert.match(page, /clearRow:\s*clearRow/);
     assert.match(page, /SAVE_CALL_TIMEOUT_MS\s*=\s*12000/);
     assert.match(page, /collectVisibleVanillaErrors/);

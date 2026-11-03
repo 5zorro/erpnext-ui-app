@@ -55,7 +55,7 @@ export function normalizeEditableText(value) {
 export function normalizeEditableNumber(value) {
   const t = normalizeEditableText(value);
   if (t === "") return null;
-  const n = Number(String(t).replace(/[^0-9.\-]/g, ""));
+  const n = Number(String(t).replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 

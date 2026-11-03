@@ -10,7 +10,6 @@ import {
   toggleSourceSelection,
   resolveSourcesToCommit,
   findSourceItemByKey,
-  groupHasSelectableItem,
   firstSelectableItemIndex,
   nextSelectableGroupIndex,
 } from "./source-modal.js";

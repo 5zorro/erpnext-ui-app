@@ -194,7 +194,7 @@
 
   function withAutoAcceptConfirm(run) {
     var original = frappe.confirm;
-    frappe.confirm = function (msg, yes, no) {
+    frappe.confirm = function (msg, yes, _no) {
       if (isPostingDateConfirmMsg(msg)) {
         try {
           if (typeof yes === "function") yes();
@@ -823,10 +823,6 @@
     return { ready: false, reason: "waiting" };
   }
 
-  function supplierAddressSnapshotReady(doc, ctx) {
-    return supplierSnapshotReadyReason(doc, ctx).ready;
-  }
-
   function normalizeSupplierKey(value) {
     return String(value == null ? "" : value).trim();
   }
@@ -851,7 +847,6 @@
     return false;
   }
 
-  var SUPPLIER_PARTY_META_FIELDS = ["supplier_name", "payment_terms_template"];
   var SUPPLIER_ADDRESS_DISPLAY_FIELDS = [
     "supplier_address",
     "address_display",
@@ -867,17 +862,6 @@
     var d = doc && typeof doc === "object" ? doc : {};
     for (var i = 0; i < SUPPLIER_ADDRESS_DISPLAY_FIELDS.length; i++) {
       if (stripHtml(d[SUPPLIER_ADDRESS_DISPLAY_FIELDS[i]])) return true;
-    }
-    return false;
-  }
-
-  function isSupplierPartyMetaOnlyChange(doc, baseline) {
-    var d = doc && typeof doc === "object" ? doc : {};
-    var base = baseline && typeof baseline === "object" ? baseline : {};
-    if (hasSupplierAddressDisplaySignals(d)) return false;
-    for (var m = 0; m < SUPPLIER_PARTY_META_FIELDS.length; m++) {
-      var mf = SUPPLIER_PARTY_META_FIELDS[m];
-      if (stripHtml(d[mf]) !== stripHtml(base[mf])) return true;
     }
     return false;
   }

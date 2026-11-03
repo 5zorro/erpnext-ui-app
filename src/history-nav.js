@@ -2,7 +2,7 @@
  * Recent / Doc-lens navigation policy (OI-112 / OI-113 / OI-118).
  * Pure helpers — Electron main decides surfaces; this decides *intent*.
  */
-import { routeInfo, normalizeAppRoute, routesReferToSameDoc } from "./route-info.js";
+import { normalizeAppRoute, routesReferToSameDoc } from "./route-info.js";
 import { profileByDoctypeKey } from "./doc-skin-registry.js";
 import { hasDocSkin } from "./lens-context.js";
 import { normalizeDoctypeKey } from "./lens-prefs.js";

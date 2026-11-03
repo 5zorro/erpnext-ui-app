@@ -5,7 +5,7 @@
  */
 
 import { amountDueMatchesGrandTotal, billCompareTotal, BILL_EXPENSE_NOTE } from "./bill-map.js";
-import { normalizeAppRoute, isNewDocRecord, routeInfo } from "./route-info.js";
+import { normalizeAppRoute, routeInfo } from "./route-info.js";
 import { commitGateContinues } from "./bill-toolbar.js";
 
 /** @typedef {"idle"|"validating"|"saving"|"submitting"|"success"|"error"} CommitGatePhase */
