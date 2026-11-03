@@ -197,6 +197,16 @@ flowchart LR
      copy as from the internet on Windows; every name shown or saved goes through `plainFileName()`
      (no right-to-left-override disguises).
 
+10. **A repaint never changes what the clerk is editing** (5zorro 2026-11-01: *"repaints should not
+   affect the inputbox that has been directly or is currently directly edited by the user"*). A
+   late reply or snapshot repaints the page from the document it carries; that must not touch the
+   box being typed in, or one the clerk left whose write ERPNext has not answered yet. Keeping
+   focus is not enough: the text, the caret and an open pick list stay too. Header boxes skip such
+   a box (`paintHeaderInputIfAllowed`); the line tables (items and taxes, every form) rebuild their
+   rows but put the clerk's typing back by line and show a cell's pending value until its write
+   answers (`src/repaint-keeps-edit.js`). Prove a new repaint path with a probe that types while a
+   reply is held (`item-edit-survives-repaint`).
+
 ### Editing a submitted document (OI-171, built 2026-09-22…26)
 
 ERPNext cannot edit a submitted document, so *edit* means **void and amend**: cancel it, then insert

@@ -24,6 +24,7 @@ import { billTaxesSubtotal, readBillTaxRowsForSort, sortBillTaxRows } from "./bi
 import { applyHeaderSortClick, sortHeaderArrow, sortHeaderState } from "./item-sort-specs.js";
 import { neighborTaxCell, nextTaxCellTab, taxNavPos, taxRowNavFields } from "./bill-tax-table-nav.js";
 import { displayTaxRateForRow, taxAmountFromRate, taxRateBaseFromDoc } from "./bill-tax-sync.js";
+import { createPendingWrites, lineKeyFor, trackTyping, captureLiveEdit, restoreLiveEdit } from "./repaint-keeps-edit.js";
 
 function escapeHtml(v) {
   return String(v ?? "")
@@ -44,6 +45,7 @@ function escapeHtml(v) {
  *   api: () => { setTax?: Function, deleteTax?: Function } | null | undefined,
  *   lastDoc: () => any,
  *   painting: () => boolean,
+ *   logFocus?: (event: string, detail?: string) => void,
  *   editable: () => boolean,
  *   shown?: () => boolean,
  *   readOnly?: () => boolean,
@@ -77,6 +79,9 @@ export function createTaxTable(deps) {
   const hasLineCol = deps.headers.some((h) => h.sortKey === "lineNo");
   const colCount = deps.headers.length + 1;
   let sortSpecs = [deps.defaultSort];
+  /** A repaint keeps the clerk's edits (src/repaint-keeps-edit.js; museum OI-202). */
+  const pendingWrites = createPendingWrites();
+  const TAX_CELL_ATTRS = { rowAttr: "data-tax-row", fieldAttr: "data-tax-field" };
   let headWired = false;
   /** True while a Tab / arrow move commits a cell, so the blur it causes does not commit again. */
   let tabGuard = false;
@@ -168,21 +173,31 @@ export function createTaxTable(deps) {
             <td></td>
           </tr>`;
         }
-        const rateVal = displayTaxRateForRow(r, doc);
+        // A write still out shows the clerk's value, not the document's older one (museum OI-202).
+        const lineKey = lineKeyFor(taxRaw, r.idx);
+        const mine = (f, docVal) => {
+          const w = pendingWrites.get(lineKey, f);
+          return w ? w.value : docVal;
+        };
+        const account = mine("account_head", r.account_head);
+        const description = mine("description", r.description);
+        const addDeduct = mine("add_deduct_tax", r.add_deduct_tax);
+        const rateVal = mine("rate", displayTaxRateForRow(r, doc));
         const rateShown = rateVal === "" || rateVal == null ? "" : formatGroupedNumber(Number(rateVal));
-        const amtShown = r.tax_amount === "" || r.tax_amount == null ? "" : formatGroupedNumber(r.tax_amount);
+        const amtVal = mine("tax_amount", r.tax_amount);
+        const amtShown = amtVal === "" || amtVal == null ? "" : formatGroupedNumber(amtVal);
         const buttons = deps.rowButtonsHtml ? deps.rowButtonsHtml(taxRaw || r, r.idx, canEdit) : "";
-        return `<tr data-taxidx="${r.idx}">
+        return `<tr data-taxidx="${r.idx}" data-line="${escapeHtml(lineKey)}">
           ${lineCell(`<span class="ro">${escapeHtml(String(r.lineNo))}</span>`)}
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.account_head)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(r.account_head)}" data-testid="${p}-tax-${r.idx}-account" /></td>
-          <td class="cell-wrap"><span class="cell-text">${escapeHtml(r.description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(r.description)}" data-testid="${p}-tax-${r.idx}-desc" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(account)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="account_head" value="${escapeHtml(account)}" data-testid="${p}-tax-${r.idx}-account" /></td>
+          <td class="cell-wrap"><span class="cell-text">${escapeHtml(description)}</span><input type="text" data-tax-row="${r.idx}" data-tax-field="description" value="${escapeHtml(description)}" data-testid="${p}-tax-${r.idx}-desc" /></td>
           <td><span class="ro">${escapeHtml(r.charge_type)}</span>${deps.taxNotes.fixedMarkerHtml(taxRaw, r.idx)}</td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="rate" value="${escapeHtml(rateShown)}" data-testid="${p}-tax-${r.idx}-rate" /></td>
           <td class="num"><input type="text" inputmode="decimal" class="money-cost" data-tax-row="${r.idx}" data-tax-field="tax_amount" value="${escapeHtml(amtShown)}" data-testid="${p}-tax-${r.idx}-amount" /></td>
           <td>
             <select data-tax-row="${r.idx}" data-tax-field="add_deduct_tax" data-testid="${p}-tax-${r.idx}-adddeduct">
-              <option value="Add"${r.add_deduct_tax === "Add" ? " selected" : ""}>Add</option>
-              <option value="Deduct"${r.add_deduct_tax === "Deduct" ? " selected" : ""}>Deduct</option>
+              <option value="Add"${addDeduct === "Add" ? " selected" : ""}>Add</option>
+              <option value="Deduct"${addDeduct === "Deduct" ? " selected" : ""}>Deduct</option>
             </select>
           </td>
           <td style="white-space:nowrap">
@@ -208,6 +223,13 @@ export function createTaxTable(deps) {
     }
     const field = inp.getAttribute("data-tax-field") || "";
     const ri = Number(inp.getAttribute("data-tax-row"));
+    // The clerk's own typing marks the cell, so a repaint keeps it (src/repaint-keeps-edit.js).
+    const typing = trackTyping(inp);
+    /** Mark this cell's write as out (a repaint shows `value`); returns its `landed`. */
+    const writing = (value) => {
+      typing.committed();
+      return pendingWrites.start(lineKeyFor(rowNow(), ri), field, value);
+    };
     // The walk moves between cells itself (DF-02); the browser's Tab order never enters the rows.
     inp.tabIndex = -1;
     let taxBusy = false;
@@ -229,9 +251,15 @@ export function createTaxTable(deps) {
     const apply = async (value, applyOpts = {}) => {
       if (!api() || deps.painting() || !api().setTax || taxBusy) return null;
       taxBusy = true;
+      const landed = writing(value);
       try {
         deps.setStatus(`Updating tax ${field}…`);
-        const res = await api().setTax(ri, field, value);
+        let res;
+        try {
+          res = await api().setTax(ri, field, value);
+        } finally {
+          landed();
+        }
         if (res && res.ok) {
           deps.noteUserEdit();
           deps.repaint(res);
@@ -274,9 +302,15 @@ export function createTaxTable(deps) {
           return;
         }
         taxBusy = true;
+        const landed = writing(String(n));
         try {
           deps.setStatus("Updating tax amount from rate…");
-          const resAmt = await api().setTax(ri, "tax_amount", String(amt));
+          let resAmt;
+          try {
+            resAmt = await api().setTax(ri, "tax_amount", String(amt));
+          } finally {
+            landed();
+          }
           if (resAmt && resAmt.ok) {
             deps.noteUserEdit();
             deps.repaint(resAmt);
@@ -439,6 +473,7 @@ export function createTaxTable(deps) {
       deps.paintMoneyStack(doc);
       return;
     }
+    const live = captureLiveEdit(body, TAX_CELL_ATTRS);
     body.innerHTML = rowsHtml(doc, rows, canEdit);
     deps.sizeColumns();
     body.querySelectorAll("[data-tax-row]").forEach((inp) => wireCell(/** @type {HTMLInputElement} */ (inp)));
@@ -447,6 +482,8 @@ export function createTaxTable(deps) {
     if (deps.wireRowButtons) deps.wireRowButtons(body);
     deps.paintMoneyStack(doc);
     deps.taxNotes.followDoc(doc);
+    const kept = restoreLiveEdit(body, live, TAX_CELL_ATTRS);
+    if (kept && deps.logFocus) deps.logFocus(`live-edit-${kept}`, `tax ${live.field} line=${live.line || live.row}`);
   }
 
   return { paint, paintHead, reset, rowsHtml };

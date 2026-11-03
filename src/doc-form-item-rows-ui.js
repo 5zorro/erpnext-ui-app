@@ -17,6 +17,7 @@ import { isEmptyItemCode, shouldBlockDeleteLastItemRow } from "./bill-item-guard
 import { valuesMeaningfullyEqual, dirtyCompareKindForField, normalizeEditableText } from "./dirty-gate.js";
 import { filterDateInputValue, parseDocDate, formatDocDateDisplay } from "./doc-date.js";
 import { wireDateField } from "./doc-form-date-field-ui.js";
+import { createPendingWrites, lineKeyFor, trackTyping, captureLiveEdit, restoreLiveEdit } from "./repaint-keeps-edit.js";
 
 function escapeHtml(v) {
   return String(v ?? "")
@@ -91,6 +92,11 @@ export function createItemRows(deps) {
   let inFlight = null;
   const p = deps.testIdPrefix;
 
+  /** A repaint keeps the clerk's edits (src/repaint-keeps-edit.js; museum OI-202). */
+  const pendingWrites = createPendingWrites();
+  const CELL_ATTRS = { rowAttr: "data-row", fieldAttr: "data-field" };
+  const lineKeyOf = (doc, ri) => lineKeyFor(deps.lines(doc)[ri], ri);
+
   /** The cells every form shares; null for a column the page's `cellHtml` already painted. */
   function sharedCellHtml(col, val, ri, canEdit) {
     if (col.displayOnly || col.field == null) {
@@ -154,9 +160,12 @@ export function createItemRows(deps) {
       .map((model) => {
         const ri = model.rowIndex;
         const r = deps.cellsOf(model);
+        const lineKey = lineKeyOf(doc, ri);
         const cells = cols
           .map((col, ci) => {
-            const val = r[ci] ?? "";
+            // A write still out shows the clerk's value, not the document's older one.
+            const pending = col.field ? pendingWrites.get(lineKey, col.field) : undefined;
+            const val = pending ? pending.value ?? "" : r[ci] ?? "";
             const own = deps.cellHtml ? deps.cellHtml(col, val, model, canEdit, doc) : null;
             return own != null ? own : sharedCellHtml(col, val, ri, canEdit);
           })
@@ -166,7 +175,7 @@ export function createItemRows(deps) {
           ? `<td><button type="button" class="del" data-del="${ri}" title="Remove line" tabindex="-1" data-testid="${p}-del-${ri}">×</button></td>`
           : `<td></td>`;
         const attrs = deps.rowAttrs ? deps.rowAttrs(model) : "";
-        return `<tr data-rowidx="${ri}"${attrs}>${cells}${del}</tr>`;
+        return `<tr data-rowidx="${ri}" data-line="${escapeHtml(lineKey)}"${attrs}>${cells}${del}</tr>`;
       })
       .join("");
   }
@@ -185,6 +194,8 @@ export function createItemRows(deps) {
     // while the input has focus, so this is not load-bearing for correctness
     // mid-edit -- it is here so a cell reads right the instant you leave it,
     // without waiting for a repaint that may never come.
+    // The clerk's own typing marks the cell, so a repaint keeps it (`captureLiveEdit`).
+    const typing = trackTyping(inp);
     const cellText = inp.closest("td.cell-wrap")?.querySelector(".cell-text");
     if (cellText) {
       const syncCellText = () => {
@@ -259,10 +270,19 @@ export function createItemRows(deps) {
     };
     const apply = async (value, opts = {}) => {
       if (!api() || deps.painting()) return;
+      // The typing is committed now: the write's answer repaints ERPNext's value in this cell (a
+      // key typed after this marks it again); until then a repaint shows the clerk's value.
+      typing.committed();
+      const landed = pendingWrites.start(lineKeyOf(deps.lastDoc(), ri), field, value);
       const run = async () => {
         deps.setStatus(`Updating ${field}…`);
         const moveMark = deps.userMoves.mark();
-        const res = await api().setItem(ri, field, value);
+        let res;
+        try {
+          res = await api().setItem(ri, field, value);
+        } finally {
+          landed();
+        }
         if (res && res.ok) {
           deps.noteUserEdit();
           deps.repaint(res);
@@ -425,6 +445,7 @@ export function createItemRows(deps) {
   function paint(doc, models, cols) {
     const table = deps.table();
     if (!table) return;
+    const live = captureLiveEdit(table, CELL_ATTRS);
     table.innerHTML = rowsHtml(doc, models, cols);
     deps.afterRows(doc);
     table.querySelectorAll("input[data-row]").forEach((inp) => wireCell(/** @type {HTMLInputElement} */ (inp)));
@@ -435,6 +456,8 @@ export function createItemRows(deps) {
         deps.beginAmountBackIn(/** @type {HTMLElement} */ (btn), Number(btn.getAttribute("data-back-in")));
       });
     });
+    const kept = restoreLiveEdit(table, live, CELL_ATTRS);
+    if (kept) deps.logFocus(`live-edit-${kept}`, `${live.field} line=${live.line || live.row}${live.listed ? " list" : ""}`);
   }
 
   return {

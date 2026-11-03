@@ -276,6 +276,7 @@ export async function bootBillFormPage(api) {
   /** The taxes table (src/doc-form-tax-table-ui.js, shared with the doc-form page). */
   const taxTable = createTaxTable({
     el: () => el,
+    logFocus,
     head: () => document.getElementById("taxes-head-row"),
     api: () => api,
     lastDoc: () => lastDoc,

@@ -138,7 +138,7 @@ describe("the shared rows: what each page paints", () => {
       cellHtml: (col) => (col.field === "item_code" ? "<td>BILL-OWN</td>" : null),
     });
     const html = rows.rowsHtml({}, models, COLS);
-    assert.match(html, /<tr data-rowidx="0" data-wash-source="w0"><td class="num line-meta"><span class="ro">1<\/span><\/td><td>BILL-OWN<\/td>/);
+    assert.match(html, /<tr data-rowidx="0" data-line="#0" data-wash-source="w0"><td class="num line-meta"><span class="ro">1<\/span><\/td><td>BILL-OWN<\/td>/);
     assert.match(html, /data-del="1" title="Remove line" tabindex="-1" data-testid="bill-del-1"/);
     assert.match(html, /Amount ÷ Qty → Cost\)" data-testid="bill-amt-0"/);
     assert.doesNotMatch(html, /doc-/);
@@ -226,6 +226,45 @@ describe("the shared rows: a cell's write", () => {
     rows.paint(state.doc, models, COLS);
     assert.deepEqual(wired.map((w) => w.field), ["item_code", "qty", "rate"]);
     assert.deepEqual(calls.filter((c) => c[0] === "picker" || c[0] === "calc"), [["picker", "Item"], ["calc", "qty"], ["calc", "rate"]]);
+  });
+});
+
+describe("the shared rows: a repaint keeps the clerk's edits (museum OI-202)", () => {
+  it("a cell left with its write still out repaints with the clerk's value; the write's own answer repaints ERPNext's", async () => {
+    const seen = [];
+    let answer;
+    const held = new Promise((r) => (answer = r));
+    /** @type {any} */
+    let rows = null;
+    const ctx = setup({
+      api: () => ({ setItem: async () => (await held, { ok: true, doc: ctx.state.doc }) }),
+      repaint: (res) => seen.push(rows.rowsHtml(res.doc, models, COLS)),
+    });
+    rows = ctx.rows;
+    ctx.state.doc = { name: "PO-1", items: [{ name: "row-a", item_code: "A", qty: 1, rate: 10 }, { name: "row-b", item_code: "B", qty: 2, rate: 5 }] };
+    const qty = cell("qty", 1, "9");
+    ctx.state.inputs = [qty];
+    rows.paint(ctx.state.doc, models, COLS);
+    const writing = qty.fire("change");
+    await settle();
+    // A late repaint of the document from before the write: line B's Qty is the clerk's 9.
+    const late = rows.rowsHtml(ctx.state.doc, models, COLS);
+    assert.match(late, /data-line="row-b"[^]*?data-field="qty" value="9"/);
+    assert.match(late, /data-line="row-a"[^]*?data-field="qty" value="1"/);
+    answer();
+    await writing;
+    // The answer repaints what ERPNext has (here still 2): the mark is gone before that repaint.
+    assert.match(seen[0], /data-line="row-b"[^]*?data-field="qty" value="2"/);
+  });
+
+  it("a refused write drops the mark, so the reload shows ERPNext's value", async () => {
+    const { rows, state } = setup();
+    state.setItemRes = { ok: false, reason: "nope" };
+    const qty = cell("qty", 0, "9");
+    state.inputs = [qty];
+    rows.paint(state.doc, models, COLS);
+    await qty.fire("change");
+    assert.match(rows.rowsHtml(state.doc, models, COLS), /data-row="0" data-field="qty" value="1"/);
   });
 });
 

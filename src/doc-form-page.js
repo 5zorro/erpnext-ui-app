@@ -161,6 +161,7 @@ const taxNotes = createTaxNotes({
 /** The taxes table (src/doc-form-tax-table-ui.js, shared with the Bill page; the Bill's way). */
 const taxTable = createTaxTable({
   el: () => el,
+  logFocus,
   head: () => el && el.taxesHead,
   api: () => api,
   lastDoc: () => lastDoc,
