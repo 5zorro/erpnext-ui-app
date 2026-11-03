@@ -16,7 +16,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const PROBE_USER_LOCK = path.join(ROOT, "test-logs", "probe-user.lock.json");
+
+/**
+ * Where the machine-wide probe locks live: the main checkout's `test-logs/`, even when this copy
+ * is a `git worktree` (a snapshot the checks run from while the main folder is edited). Every
+ * checkout shares the one sandbox and the same probe users, so they must share the locks.
+ */
+function mainCheckoutRoot() {
+  try {
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return common ? path.dirname(common) : ROOT;
+  } catch {
+    return ROOT;
+  }
+}
+export const PROBE_LOCK_DIR = path.join(mainCheckoutRoot(), "test-logs");
+export const PROBE_USER_LOCK = path.join(PROBE_LOCK_DIR, "probe-user.lock.json");
 const BACKEND = process.env.ERP_BACKEND_CONTAINER || "frappe_docker-backend-1";
 const SITE = process.env.ERP_SITE || "frontend";
 

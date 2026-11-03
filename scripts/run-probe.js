@@ -7,7 +7,8 @@
  *    nothing needs restoring (`--with-app-open`, from before, is accepted and ignored);
  * 2. runs headless with WAYLAND_DISPLAY and DISPLAY cleared (e2e/GOTCHAS.md #12: a window on his
  *    desktop steals his keyboard);
- * 3. one run at a time: a second waits for the first (`test-logs/probe-run.lock.json`), since a
+ * 3. one run at a time, across every checkout of the repo (a `git worktree` snapshot too): a second
+ *    waits for the first (the main checkout's `test-logs/probe-run.lock.json`), since a
  *    run starts by retiring any probe user left in the lock, which would end the other's clerk;
  * 4. if the run used a restricted probe user (tests/probes/probe-user.js), retires it — disabled,
  *    its sessions ended — however the run ended. A user a killed `run-probe` left enabled is
@@ -25,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROBE_USER_LOCK, readProbeUserLock, retireLockedProbeUsers } from "../tests/probes/probe-user-retire.js";
+import { PROBE_LOCK_DIR, PROBE_USER_LOCK, readProbeUserLock, retireLockedProbeUsers } from "../tests/probes/probe-user-retire.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROBES = path.join(ROOT, "tests", "probes");
@@ -34,7 +35,8 @@ const PROBES = path.join(ROOT, "tests", "probes");
 // which used to keep a second run out too (it saw the first run's app); and a run starts by retiring
 // any probe user in the lock, which would end another run's clerk mid-test. A second run waits for
 // the first — up to an hour, then gives up — and the lock goes when this process ends, however.
-const RUN_LOCK = path.join(ROOT, "test-logs", "probe-run.lock.json");
+// In the main checkout's test-logs/ even from a `git worktree` snapshot: one sandbox, one queue.
+const RUN_LOCK = path.join(PROBE_LOCK_DIR, "probe-run.lock.json");
 const alive = (pid) => {
   try {
     process.kill(pid, 0);

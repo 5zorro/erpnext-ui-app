@@ -741,7 +741,16 @@ the 'i can't work while the probes are running'"*).**
   (timing probes may be flakier while he works).
 - **One probe run at a time** (`test-logs/probe-run.lock.json`; a second waits, up to an hour). A
   run starts by retiring any leftover probe user, which would end another run's clerk. A spec run
-  can go alongside.
+  can go alongside. The lock and the probe-user lock live in the **main checkout's** `test-logs/`,
+  so a run from a `git worktree` queues with runs from the main folder.
+- **Checks from a snapshot, while the code is edited.** A probe launches the app from the folder's
+  live files, so editing during a long check (`dogfood:check`, `nav:check`) changes what the later
+  probes test. Run it from a frozen copy instead:
+  `git worktree add --detach <dir> $(git stash create || git rev-parse HEAD)` (the working tree,
+  uncommitted changes included, without touching it or the stash list), then
+  `ln -s "$PWD/node_modules" <dir>/node_modules`, and run the check in `<dir>`. Afterwards
+  `rm <dir>/node_modules && git worktree remove <dir>`. Tried 2026-11-02: a probe from the copy and
+  one from the main folder queued on the shared lock, both passed.
 - **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
   A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
   `test-logs/failures/` (the newest 30). Nothing kept goes under `test-results/`, which Playwright
