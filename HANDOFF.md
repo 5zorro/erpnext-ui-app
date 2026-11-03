@@ -947,7 +947,8 @@ cd ~/erpnext-ui-app && npm test && npm start
 
 | Command | What |
 |---|---|
-| `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
+| `npm test` | Required before every push; pure unit tests (`node --test`), then the lint check. Every run is logged to `test-logs/` (untracked) |
+| `npm run lint` | The lint check alone: ESLint's recommended rules plus our import rule over `electron/` and `src/` (`eslint.config.js` gives each setting's reason; plan 2026-10-31). A failure fails `npm test`, here and in CI |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
 | `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`; a probe waits for the page with `docQuiet` instead wherever time is not the question — `tests/probes/README.md` § *Writing one*) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |

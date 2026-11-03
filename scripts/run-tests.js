@@ -5,6 +5,9 @@
  * (plan 2026-10-19 § Test-run log). `test-logs/` is untracked.
  *
  * Extra arguments are passed to `node --test` in place of the default file list.
+ *
+ * The whole run (no arguments) ends with the lint check, `npm run lint` (eslint.config.js; plan
+ * 2026-10-31, Step 4): a lint error fails `npm test` the way a failing unit test does, here and in CI.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -64,5 +67,16 @@ child.on("exit", (status, signal) => {
     },
   ]);
   if (run.failures.length) console.log(`\nRun logged: test-logs/runs/${logName}`);
-  process.exit(signal ? 1 : status ?? 1);
+  if (signal) process.exit(1);
+  if (scope !== "all") process.exit(status ?? 1);
+  console.log("\nLint (npm run lint):");
+  const lint = spawn(process.execPath, [path.join(ROOT, "node_modules", "eslint", "bin", "eslint.js"), "electron", "src"], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
+  lint.on("exit", (lintStatus, lintSignal) => {
+    if (lintStatus === 0) console.log("Lint: clean.");
+    else console.log("Lint: FAILED — see above (eslint.config.js says what each rule is for).");
+    process.exit(status || (lintSignal ? 1 : lintStatus ?? 1));
+  });
 });

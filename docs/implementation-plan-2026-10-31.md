@@ -1,6 +1,6 @@
 # Implementation plan 2026-10-31 — dependencies first, then a linter
 
-> **Status 2026-11-01: Step 1 done (the report below); Step 2's waiting rule is in force
+> **Status 2026-11-02: Steps 1–4 done (lint in `npm test`; what is left at the end of this box). Step 1 done (the report below); Step 2's waiting rule is in force
 > (`.npmrc`: `min-release-age=60`; an advisory fix after 7 days, his yes) and Electron is on 43.8.3
 > under it; the checker is chosen: ESLint, with an import rule of our own instead of a plugin (his
 > two answers under *Open questions*). Installed at his yes (2026-11-01): `eslint` 10.9.1,
@@ -11,7 +11,12 @@
 > (`local/import-names`, parsed with espree, ESLint's own parser; 12 rule tests). The fair test:
 > both 2026-10-31 bugs are reported (the payment code before `5bef496`, four undefined names; a
 > `print.js` import pointed at the wrong module). Today's `electron/` and `src/`: 52 findings, one
-> a real bug (museum OI-196), the rest unused or dead code. Next: Step 4. Nothing is installed in the repo for it. The dependency policy (Steps 1–2)
+> a real bug (museum OI-196), the rest unused or dead code. **Step 4 done 2026-11-02:** OI-196
+> fixed (one import; probe `bill-terms-typed`, failed before), the dead code removed, 17 safe
+> starting values left with `no-useless-assignment` off (reason in the config), `no-new-func` on;
+> lint is clean and runs at the end of `npm test` (`npm run lint` alone), and CI runs
+> `npm ci --ignore-scripts` first. Left: the import rule over the tests and scripts, and the
+> stale `allowScripts` entry. The dependency policy (Steps 1–2)
 > still comes before any package goes in. The order is: **(1)** review what is installed now, **(2)** agree the rules for adding a
 > package, **(3)** pick a linter under those rules, **(4)** run it in `npm test`. Steps 1 and 2 need
 > no new package. Step 3 is his decision.
