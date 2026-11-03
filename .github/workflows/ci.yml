@@ -15,5 +15,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # The lockfile's exact versions. No install script runs: the unit tests need none (not
+      # Electron's download), and this npm may predate the repo's allowScripts list.
+      - name: Install dev dependencies (the lint rule's tests need ESLint)
+        run: npm ci --ignore-scripts
       - name: Run unit tests (no ERPNext required)
         run: npm test
