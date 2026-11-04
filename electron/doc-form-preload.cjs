@@ -8,9 +8,88 @@ const { contextBridge, ipcRenderer } = require("electron");
  */
 let inFlight = 0;
 const rawInvoke = ipcRenderer.invoke.bind(ipcRenderer);
-const invoke = (...args) => {
+
+/*
+ * A new Bill is painted at once, before ERPNext has made its blank (5zorro 2026-11-03: a new Bill
+ * waits on nothing for its first paint and the cursor in Vendor). Until ERPNext's blank arrives the
+ * page shows a provisional one (`snap.provisional`): calls that would touch ERPNext's form are held
+ * here, in the order made, and sent once the real blank of the same open arrives (`openToken`).
+ * If that open fails or another replaces it, they are refused with a reason, never sent to a
+ * different document. Searches and everything that does not touch the form go straight through.
+ */
+/** Calls that change the form: the first one held tells main the clerk has typed (its gate asks). */
+const HELD_EDITS = new Set([
+  "bill-set-header", "doc-set-header", "doc-clear-for-vendor-change", "doc-set-date-expected",
+  "bill-set-item", "doc-set-item", "bill-add-item", "doc-add-item", "bill-delete-item", "doc-delete-item",
+  "bill-clear-all-qty", "doc-clear-all-qty", "bill-set-tax", "doc-set-tax", "bill-add-tax", "doc-add-tax",
+  "bill-delete-tax", "doc-delete-tax", "bill-save", "doc-save", "bill-set-amount-due",
+  "bill-merge-source", "bill-merge-sources", "doc-merge-source", "bill-apply-line-allocation",
+  "bill-allocate-charge", "bill-jit-receipts", "bill-attach-file", "doc-attach-file",
+]);
+/** Calls that read the form: held too, so they read ERPNext's blank, not the one being replaced. */
+const HELD_READS = new Set([
+  "doc-get-snapshot", "bill-list-mandatory", "doc-list-mandatory", "bill-revert-unsaved", "doc-revert-unsaved",
+  "bill-list-addresses", "doc-list-addresses", "bill-list-payments", "bill-account-company-check",
+  "bill-check-ref", "bill-plan-line-allocation",
+]);
+/** @type {{ token: number, queue: Array<{ run: () => Promise<any>, resolve: (v: any) => void }>, told: boolean, draining: boolean } | null} */
+let provisional = null;
+
+function refuseHeld(hold, reason) {
+  for (const h of hold.queue.splice(0)) h.resolve({ ok: false, reason });
+}
+
+async function drainHeld(hold) {
+  hold.draining = true;
+  while (hold.queue.length) {
+    const h = hold.queue.shift();
+    try {
+      h.resolve(await h.run());
+    } catch (e) {
+      h.resolve({ ok: false, reason: String((e && e.message) || e) });
+    }
+  }
+  if (provisional === hold) provisional = null;
+}
+
+/** Every snapshot passes here first (registered before the page's own listener). */
+ipcRenderer.on("doc-snapshot", (_e, snap) => {
+  const hold = provisional;
+  if (snap && snap.provisional) {
+    if (hold && !hold.draining) refuseHeld(hold, "A newer document replaced the new bill before ERPNext opened it — this was not kept.");
+    provisional = { token: Number(snap.openToken) || 0, queue: [], told: false, draining: false };
+    return;
+  }
+  if (!hold || hold.draining) return;
+  if (snap && snap.ok && snap.doc && Number(snap.openToken) === hold.token) {
+    void drainHeld(hold);
+    return;
+  }
+  provisional = null;
+  refuseHeld(
+    hold,
+    snap && Number(snap.openToken) === hold.token
+      ? `ERPNext did not open the new bill (${(snap && snap.reason) || "no reason given"}) — this was not kept.`
+      : "Another document replaced the new bill before ERPNext opened it — this was not kept.",
+  );
+});
+
+const invoke = (channel, ...args) => {
   inFlight += 1;
-  return rawInvoke(...args).finally(() => {
+  const run = () => rawInvoke(channel, ...args);
+  const hold = provisional;
+  let call;
+  if (hold && (HELD_EDITS.has(channel) || HELD_READS.has(channel))) {
+    if (HELD_EDITS.has(channel) && !hold.told) {
+      hold.told = true;
+      ipcRenderer.send("doc-provisional-edit", hold.token);
+    }
+    // While held calls are being sent, a new one joins the end of the line (drainHeld takes it).
+    call = new Promise((resolve) => hold.queue.push({ run, resolve }));
+  } else {
+    call = run();
+  }
+  return call.finally(() => {
     inFlight -= 1;
   });
 };

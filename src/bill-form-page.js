@@ -382,6 +382,14 @@ export async function bootBillFormPage(api) {
   let lastLinkedReceipts = [];
   /** Last ERP doc name painted — detect Bill→Bill nav and force-clear stale header shell. */
   let paintedBillDocName = "";
+  /** The name a provisional blank is painted under (paint, opts.provisional). */
+  const PROVISIONAL_BILL = "\u0000provisional";
+  /**
+   * Which open of a document the page is on (main stamps each open's snapshots with `openToken`).
+   * A vendor pick that started on an earlier open stops before it writes: its checks are live, and
+   * New pressed meanwhile would otherwise send it to the next Bill.
+   */
+  let openToken = 0;
   /** @type {{ key: string, asc: boolean }} */
   /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
   let itemSortSpecs = [{ key: "lineNo", asc: true }];
@@ -2260,8 +2268,16 @@ export async function bootBillFormPage(api) {
         setStatus("Bill is not a draft — cannot set vendor.", "warn");
         return;
       }
+      const pickedOn = openToken;
+      const leftBill = () => {
+        if (pickedOn === openToken) return false;
+        logFocus("vendor-pick-dropped", `picked on open ${pickedOn}, now open ${openToken}`);
+        return true;
+      };
       if (await vendorIsMissing(v, "vendor")) return;
+      if (leftBill()) return;
       if (!(await clearBeforeVendorSwitch(v))) return;
+      if (leftBill()) return;
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "link_pick",
         hasSupplier: !!normalizeEditableText(v),
@@ -2283,7 +2299,9 @@ export async function bootBillFormPage(api) {
         supplier: v,
         decision,
         setHeader: (field, value) =>
-          withFieldSettleLoading(field, api.setHeader(field, value)),
+          leftBill()
+            ? Promise.resolve({ ok: false, superseded: true })
+            : withFieldSettleLoading(field, api.setHeader(field, value)),
         openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
           if (res && res.paymentTermsSettle) {
@@ -3060,9 +3078,17 @@ export async function bootBillFormPage(api) {
   }
 
   function paint(doc, scratchDue, opts = {}) {
-    if (doc && doc.name && String(doc.name) !== docShownName) {
-      docShownName = String(doc.name);
+    // ERPNext's blank arriving after the provisional one (a new Bill painted before ERPNext made
+    // its blank, 5zorro 2026-11-03) is the same Bill to the clerk: their moves still count from
+    // when it first appeared, and their typing, place and open pick list are left alone.
+    const afterProvisional =
+      !opts.provisional && paintedBillDocName === PROVISIONAL_BILL && !!(doc && doc.__islocal);
+    if (opts.provisional) {
+      docShownName = PROVISIONAL_BILL;
       docShownMoveMark = userMoves.mark();
+    } else if (doc && doc.name && String(doc.name) !== docShownName) {
+      if (!(afterProvisional && docShownName === PROVISIONAL_BILL)) docShownMoveMark = userMoves.mark();
+      docShownName = String(doc.name);
     }
     painting = true;
     const savedFocus = opts.preserveFocus ?? captureBillFocus();
@@ -3118,7 +3144,7 @@ export async function bootBillFormPage(api) {
     }
     setFormBlocked(false);
     const nextDocName = String(doc.name || "");
-    const docIdentityChanged = nextDocName !== paintedBillDocName;
+    const docIdentityChanged = !afterProvisional && nextDocName !== paintedBillDocName;
     if (docIdentityChanged) {
       vendorPickSourceSession = null;
       sourcePickerInflight = null;
@@ -3184,12 +3210,12 @@ export async function bootBillFormPage(api) {
     );
     const linkedPosArg = opts.linkedPos ?? lastLinkedPos;
     paintLinkedSources(doc, linkedPosArg, opts.linkedReceipts ?? lastLinkedReceipts, lastEnrichPending);
-    if (opts.linkedPos !== undefined) {
+    if (opts.linkedPos !== undefined && !opts.provisional) {
       void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
     }
     paintHeaderInputIfAllowed(el.memo, "remarks", stripReceivedBlock(h.Memo ?? ""), headerPaintOpts("remarks"));
     paintCreditLinks(doc);
-    void paintSourceTerms(doc);
+    if (!opts.provisional) void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
     syncAddressPickers(canEdit);
     syncDueDateField(doc, canEdit);
@@ -3218,7 +3244,7 @@ export async function bootBillFormPage(api) {
         el.voidAmend.title = action.hint;
       }
     }
-    void paintAppliedPayments(doc);
+    if (!opts.provisional) void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
     el.date.readOnly = !canEdit;
@@ -3243,20 +3269,31 @@ export async function bootBillFormPage(api) {
     const name = doc.name || "(new)";
     if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
     if (reloadNotice.text) setStatus(reloadNotice.text, "warn");
+    else if (opts.provisional) setStatus("New bill · ERPNext is still opening it — what you type is sent as soon as it is ready");
     else setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
     if (docNumberUi) docNumberUi.paint();
-    if (comparePane) comparePane.refresh();
-    if (attachList) void attachList.refresh();
+    // What reads ERPNext's copy of this Bill waits for it (the provisional blank has none yet).
+    if (!opts.provisional) {
+      if (comparePane) comparePane.refresh();
+      if (attachList) void attachList.refresh();
+    }
     paintDirtyPill();
     paintChip();
-    void ensureAtLeastOneItemRow(doc);
-    runBillRefCheck(el.billno ? el.billno.value : "");
+    if (!opts.provisional) {
+      void ensureAtLeastOneItemRow(doc);
+      runBillRefCheck(el.billno ? el.billno.value : "");
+    }
     if (opts.focusVendor) {
       docCapsOn = true;
       if (docCapsUi) docCapsUi.syncCapsButton();
-      if (canEdit) vendorFocused = focusVendorField();
+      // Already there from the provisional paint, with the clerk typing: not again (select()
+      // would mark their text, and the next key would replace it).
+      if (afterProvisional && document.activeElement === el.vendor) {
+        vendorFocused = true;
+        logFocus("focus-vendor-kept", "already in Vendor from the provisional blank");
+      } else if (canEdit) vendorFocused = focusVendorField();
     }
-    paintedBillDocName = nextDocName;
+    paintedBillDocName = opts.provisional ? PROVISIONAL_BILL : nextDocName;
     } finally {
       painting = false;
       // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
@@ -4351,18 +4388,20 @@ export async function bootBillFormPage(api) {
       // background enrich progress is the same page filling in, not a reload.
       if (!(snap && snap.enrichProgress)) taxNotes.collapseDefaultNote();
       if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
+      if (snap && Number(snap.openToken) > 0) openToken = Number(snap.openToken);
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
       // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
       // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
       // Not on background-enrich progress: that is the same page filling in.
-      if (attachList && !(snap && snap.enrichProgress)) void attachList.refresh(true);
+      if (attachList && !(snap && (snap.enrichProgress || snap.provisional))) void attachList.refresh(true);
     });
   }
   function paintSnapshot(snap) {
     paint(snap && snap.doc, snap && snap.amountDue, {
-        caller: snap && snap.enrichProgress ? "enrich-progress" : "onSnapshot",
+        caller: snap && snap.enrichProgress ? "enrich-progress" : snap && snap.provisional ? "provisional" : "onSnapshot",
         reason: snap && snap.reason,
+        provisional: !!(snap && snap.provisional),
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
         // DC-4: after an ERPNext reload the boxes show the reloaded form, never the lost typing.

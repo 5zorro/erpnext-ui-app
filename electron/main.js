@@ -4790,6 +4790,27 @@ async function waitForDocForm(timeoutMs = 25000) {
   };
 }
 
+/** The open (billLoadGen) whose provisional blank the clerk typed into (doc-provisional-edit). */
+let provisionalEditToken = 0;
+
+/**
+ * The provisional blank a new Bill paints before ERPNext's arrives: no values at all, so that
+ * when ERPNext's blank arrives, every box the clerk left alone takes ERPNext's value (an empty
+ * box is always painted; one with typing is kept: src/bill-header-paint.js).
+ * @param {string} doctype
+ */
+function provisionalBlankDoc(doctype) {
+  return { doctype, name: "", docstatus: 0, __islocal: 1, __unsaved: 1, items: [], taxes: [] };
+}
+
+ipcMain.on("doc-provisional-edit", (_e, token) => {
+  const t = Number(token) || 0;
+  if (!t || t !== billLoadGen) return;
+  provisionalEditToken = t;
+  dirtyState = markUserEdited(dirtyState);
+  navDebug("doc-provisional-edit", `open=${t} — typed before ERPNext's blank arrived; held until it does`);
+});
+
 /**
  * A new document without reloading ERPNext (5zorro 2026-11-03: a new Bill was loading the whole
  * ERPNext page twice, 1–7 s, where ERPNext's own "+ Add" takes ~0.3 s). The blank is built in the
@@ -5123,23 +5144,41 @@ async function showDocForm(skinId, route, opts = {}) {
     if (skinId === "bill") {
       billLoadPhase = BILL_LOAD_LOADING;
     }
-    pushDocFormSnapshot({
-      ok: false,
-      reason:
-        skinId === "bill"
-          ? "Loading Purchase Invoice in Vanilla…"
-          : `Loading ${profile.doctype} in Vanilla…`,
-      doc: null,
-      scratch: { dateExpected: skinId === "bill" || openingFreshNew ? "" : dateExpectedScratch },
-      amountDue: skinId === "bill" ? "" : undefined,
-      userEdited: false,
-    });
+    // A fresh new Bill is painted at once, cursor in Vendor, before ERPNext has made its blank
+    // (5zorro 2026-11-03): a provisional blank. The page's preload holds what would touch the
+    // form until ERPNext's blank of this same open arrives (doc-form-preload.cjs).
+    // Vanilla → Doc on the form Vanilla is showing: read it where it is (below), never provisional.
+    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
+    const provisionalBill = skinId === "bill" && openingFreshNew && !inPlace;
+    if (provisionalBill) {
+      pushDocFormSnapshot({
+        ok: true,
+        provisional: true,
+        openToken: billLoadToken,
+        doc: provisionalBlankDoc(profile.doctype),
+        amountDue: "",
+        userEdited: false,
+        isNew: true,
+        focusVendor: true,
+      });
+    } else {
+      pushDocFormSnapshot({
+        ok: false,
+        reason:
+          skinId === "bill"
+            ? "Loading Purchase Invoice in Vanilla…"
+            : `Loading ${profile.doctype} in Vanilla…`,
+        doc: null,
+        scratch: { dateExpected: skinId === "bill" || openingFreshNew ? "" : dateExpectedScratch },
+        amountDue: skinId === "bill" ? "" : undefined,
+        userEdited: false,
+      });
+    }
 
     const target = erpUrl(ERP_BASE, currentRoute);
     // Vanilla → Doc on the form Vanilla is showing: read it where it is. Reloading would drop
     // an unsaved draft the clerk typed in Vanilla (5zorro 2026-09-30: type in Vanilla, switch
     // to Doc, everything comes along).
-    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
     if (inPlace) navDebug("doc-open-in-place", currentRoute);
     // Every Doc open checks the warm pick lists, not only a page boot (doc-get-ui): 5zorro's
     // dogfood 2026-10-21 opened Bills four times in place and only the first checked.
@@ -5216,13 +5255,16 @@ async function showDocForm(skinId, route, opts = {}) {
     if (skinId === "bill") {
       billLoadPhase = billLoadPhaseAfterSnap(!!snap.ok);
     }
+    // Typed into the provisional blank: those edits are on their way (held in the page), so the
+    // Bill counts as edited from here, and a gate asks before leaving it.
+    const typedWhileOpening = skinId === "bill" && provisionalEditToken === billLoadToken && billLoadToken > 0;
     if (snap.ok) {
       dirtyState = finishLensApply(
         {
           doc: snap.doc,
           isDirty: !!snap.isDirty,
           isNew: !!snap.isNew,
-          userEdited: false,
+          userEdited: typedWhileOpening,
           baselineJson: null,
         },
         true,
@@ -5261,6 +5303,7 @@ async function showDocForm(skinId, route, opts = {}) {
       if (skinId === "bill") {
         pushDocFormSnapshot({
           ok: true,
+          openToken: billLoadToken,
           doc: snap.doc,
           amountDue: amountDueScratch,
           linkedPos: snap.linkedPos || [],
@@ -5268,7 +5311,7 @@ async function showDocForm(skinId, route, opts = {}) {
           enrichPending: snap.enrichPending,
           poLineMeta: snap.poLineMeta || {},
           lineAllocations: snap.lineAllocations || {},
-          userEdited: carriedEdits,
+          userEdited: carriedEdits || typedWhileOpening,
           isNew: !!snap.isNew,
           focusVendor: true,
         });
@@ -5290,7 +5333,7 @@ async function showDocForm(skinId, route, opts = {}) {
         baselineJson: null,
         doc: null,
       };
-      pushDocFormSnapshot({ ...snap, userEdited: false, focusVendor: false });
+      pushDocFormSnapshot({ ...snap, openToken: billLoadToken, userEdited: false, focusVendor: false });
     }
     syncE2eApi();
   };
