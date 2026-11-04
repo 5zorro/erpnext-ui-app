@@ -532,6 +532,23 @@ the app (each run has its own profile folder), but it is still long and loads th
 to update. The rules it
 fixed (2026-10-24):
 
+- **A new document waits on nothing (5zorro 2026-11-03).** Baseline: ERPNext's own list "+ Add"
+  shows a blank Purchase Invoice in ~0.3–0.8 s and puts the cursor nowhere (probe
+  `new-bill-instant` times both, every run). (1) When ERPNext is up and nothing would be asked, a new
+  document is made in the page the way "+ Add" makes it, `frappe.new_doc`, after forgetting that
+  doctype's unsaved blanks locally (`openFreshNewDocInPlace`). Before, two full page loads
+  (1–7 s). Anything a load would treat differently takes the full load: a saved document with
+  unsaved edits, a "leave page?" the load would stop to ask (Chromium asks only once the page has
+  been used by hand), a dialog other than a plain ERPNext message, a save out, the doctype not loaded
+  yet. (2) A new Bill paints a provisional blank at once, cursor in Vendor, before ERPNext's blank
+  exists. The Doc page's preload holds every call that touches the form until ERPNext's blank of
+  *that* open arrives (`openToken`), then sends them in order. If another open replaces it or it
+  fails, they are refused with a reason, never sent to another document. When ERPNext's blank
+  arrives it is the same Bill to the page: the clerk's typing, place and open pick list stay. A
+  vendor pick whose live checks are still out when another open starts stops before it writes (the
+  page compares `openToken`; defensive, no probe reproduces that race yet). New pressed while a New is still opening joins it (`billNewInflight`,
+  the double-press guard), so the clerk's typing stays on the one blank. The PO and Item Receipt get
+  (1) only.
 - **Opening another document from a Doc page asks** about unsaved typing, wherever the door is
   (Recent, Drafts, Find, a link): `showDocForm` gates unless it is the same document or the caller
   already asked (`skipDirtyGate`, New). It used to skip the gate on any Doc page (N-1).

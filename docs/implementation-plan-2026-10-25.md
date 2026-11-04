@@ -26,7 +26,9 @@
 > (`electron/ipc/relink-method-change.js`), then health and incidents
 > (`electron/ipc/health-incidents.js`, 2026-11-02), then link search with its warm pick lists
 > (`electron/ipc/link-search.js`, 2026-11-03). Next in the order: doc-form, then Bill with the
-> bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> bridge (*Order*, item 4).** Alongside, at 5zorro's word (2026-11-03): **a new Bill waits on
+> nothing** (§ *A new Bill waits on nothing*), and the shell's refused calls no longer leave
+> ERPNext's message box in the ERPNext page (gotchas G27). 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -440,8 +442,10 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    (twice) and after; `dogfood:check` 25/25 on the moved code (from a snapshot). Found on the way: two tests that read main.js alone (no `frappe.db.*` in
    the ERPNext-page scripts; every injection goes through `erpExec`) had stopped seeing moved code;
    both read `tests/main-process-source.js` now. main.js 11,350 → 10,901 lines. Seen, left as it
-   was: the AP clerk cannot read Project, so that list's copy fails and its trail line says
-   `reason=undefined` (frappe rejects with no message); the list stays live, as designed.
+   was then: the AP clerk cannot read Project, so that list's copy failed and its trail line said
+   `reason=undefined`. It turned out to leave ERPNext's "Insufficient Permission" box in the hidden
+   page on every open. Fixed 2026-11-03 (gotchas G27): a list the clerk may not read is not copied,
+   and the shell's own calls are silent.
    **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
@@ -471,6 +475,46 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
      5zorro to decide: it is one dev dependency.
 
 Each step is its own commit, behaviour unchanged, `npm test` green, the named probes re-run.
+
+## A new Bill waits on nothing (2026-11-03, 5zorro's ask)
+
+5zorro: *"when i hit "new bill" or i hit "home" then "bill" that the new bill page is not instant. It
+should wait on nothing via api to get the initial paint up and sticking a cursor into the initial
+input box."* And: *"I ask to have a "baseline" that we are competing against."*
+
+**Measured (probe `new-bill-instant`, AP clerk, this machine; it repeats the baseline every run):**
+
+| | Ready (cursor in Vendor / blank shown) |
+|---|---|
+| Baseline: ERPNext's list "+ Add" | 0.11–0.83 s (no cursor placed) |
+| Baseline: a full load of `/app/purchase-invoice/new` | 0.47–2.3 s |
+| Shell before: New on a Bill / Home → New Bill | 0.9–5.4 s / 0.9–7.4 s |
+| Shell with B (all four in place) | 0.88–1.03 s (within ~0.1–0.3 s of "+ Add" in the same run) |
+
+Where the old time went: the ERPNext page loaded twice in full (`/app`, then the `/new` route,
+~1.6 s), then ERPNext's Desk started up again (~3.1 s), then the form (0.1–0.6 s). The 2 s warm-list
+check joined that queue on a loaded machine.
+
+**Built (his order, "b then a"; his rule: clear an unsaved blank without a server call, keep
+stability in mind):**
+- **B.** `openFreshNewDocInPlace`: when ERPNext is up and a load would ask nothing, the blank is made
+  in the page as "+ Add" makes it (gotchas G28). Every case a load treats differently takes the full
+  load (HANDOFF § Navigation spine). The bridge's `waitForForm` takes `notNames` to wait for the
+  fresh blank and ERPNext's opening calls (bridge 32).
+- **A.** The provisional blank: painted at once, cursor in Vendor; the Doc page's preload holds what
+  touches the form until ERPNext's blank of the same open arrives (`openToken`), then sends it in
+  order, or refuses it with a reason. `tests/doc-form-preload-hold.test.js` keeps every channel
+  sorted. Bill only; the PO and Item Receipt get B. Its probe found a race older than A: a vendor
+  pick whose live checks (does the vendor exist, clear before a switch) were still out when New was
+  pressed again was written to the next Bill. Re-checked, that run was the double-press guard (a New
+  while one is opening joins it, so there was one Bill); the probe now replaces the blank with another
+  open. The pick still notes the open it started on and stops (defensive; no probe reproduces that
+  race yet).
+- **Commits:** B `0888e11`, A `f5bb484`, the refused-call fix `f4c21c1` (G27). Proofs: B's focused
+  probes 26/26 from a snapshot; A's two slow-ERPNext tests fail on B and pass on A; the fix's
+  no-box doors fail on A and pass with it.
+- **Found on the way:** museum OI-206 (the Project box, fixed with G27's sweep), OI-207 (the
+  bridge's `waitForForm` leaves its hooks behind, not decided).
 
 ## 3b — the performance report (2026-11-01)
 
