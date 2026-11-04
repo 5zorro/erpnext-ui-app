@@ -1111,7 +1111,10 @@ From Frappe v16.31.0's source, confirmed by probe `erp-hooks-no-leak` (museum OI
   adds itself to a set and leaves it when it ends. Before, every wait that had to wait added three
   handlers for good, and one wait ending removed every wait's jQuery handlers (they shared one
   namespace). Anything else injected into the page follows the same rule: a `window.__erp…` flag
-  (route hop, the soft-peek Esc key) or a once-per-page record.
+  (route hop, the soft-peek Esc key) or a once-per-page record. A script injected again in a new
+  copy (the Simplified skin, once per switch into it) hooks once and calls whichever copy is
+  installed now: its form-refresh patch and its posting-stamp `validate` hook
+  (`window.__ssPostingStampHooked`; before, each copy added one, probe `r12-simplified-in-page`).
 - **When it bit:** rarely, as it turned out. A saved document opens by reloading ERPNext's page,
   and a New builds its blank before the wait starts, so ordinary opens added nothing. A wait that
   has to wait on an in-place page (the Doc page taking its form back after a peek or a detour in

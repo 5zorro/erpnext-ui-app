@@ -5,7 +5,8 @@
  * one pane, its tab links carry Frappe's own click handler again)? Back on a new Bill, is the skin
  * applied again (an assumed field carries the assumption note), or does the skin say it is installed
  * while ERPNext's refresh still calls the copy that was torn down? Makes no records (new Bills are
- * never saved; lens-prefs.json is restored by `npm run probe`).
+ * never saved; lens-prefs.json is restored by `npm run probe`). Then two more round trips: the skin's
+ * posting-stamp hook is added to ERPNext's page once, not once per copy (museum OI-207, G29).
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
@@ -27,6 +28,7 @@ const STATE = `(() => {
     forcedPanes: panes.filter((p) => p.style.display === "block").length,
     panes: panes.length,
     clickHandlers: ev.map((h) => h.namespace || "frappe"),
+    validateHandlers: (((frappe.ui.form.handlers || {})["Purchase Invoice"] || {}).validate || []).length,
   };
 })()`;
 
@@ -58,6 +60,28 @@ test("R12-1: Simplified leaves cleanly in-page and applies again on the way back
     const again = await inErp(app, STATE);
     report("again", again);
 
+    // Two more round trips: each comes back to a fresh copy of the skin, and Frappe keeps every
+    // form handler for the life of the page (gotchas G29), so a copy that added its own posting-stamp
+    // validate handler left one more behind each time.
+    for (let trip = 1; trip <= 2; trip += 1) {
+      await inErp(app, `(() => { frappe.set_route("app", "supplier"); return true; })()`);
+      await expect.poll(async () => (await inErp(app, STATE)).installed, { timeout: 20_000 }).toBe(false);
+      await inErp(app, `(() => { frappe.new_doc("Purchase Invoice"); return true; })()`);
+      await expect.poll(async () => (await inErp(app, STATE).catch(() => null)) || {}, { timeout: 15_000 }).toMatchObject({ installed: true, note: true }).catch(() => {});
+    }
+    const trips = await inErp(app, STATE);
+    report("after two more round trips", trips);
+
+    // And the one hook still stamps: ERPNext's validate step (run here without saving) puts a
+    // typed posting date back to today and unticks Edit Posting Date.
+    const stamp = await inErp(
+      app,
+      `(() => { const f = cur_frm; f.doc.set_posting_time = 1; f.doc.posting_date = frappe.datetime.add_days(frappe.datetime.get_today(), -3); (frappe.ui.form.handlers["Purchase Invoice"].validate || []).forEach((h) => { try { h(f); } catch (e) {} }); return { today: frappe.datetime.get_today(), posting: f.doc.posting_date, tick: f.doc.set_posting_time }; })()`,
+    );
+    report("stamp after the round trips", stamp);
+
+    expect.soft(trips.validateHandlers, "Purchase Invoice validate handlers after three round trips").toBe(on.validateHandlers);
+    expect.soft(stamp, "the posting stamp").toEqual({ today: stamp.today, posting: stamp.today, tick: 0 });
     expect(away.forcedPanes).toBe(0);
     expect(away.clickHandlers).toContain("frappe");
     expect(back).toMatchObject({ installed: true, note: true });
