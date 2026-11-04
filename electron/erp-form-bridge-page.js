@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 32;
+  var VERSION = 33;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -1018,6 +1018,53 @@
   }
 
   /**
+   * The hooks `waitForForm` listens on, registered once per page (the form hooks once per doctype)
+   * and shared by every wait: each wait adds its `succeed` to `formWaiters` and removes it when it
+   * ends. Frappe keeps form and router handlers for the life of the page and cannot remove a router
+   * handler (`frappe.router.off` wraps the handler anew, so it never matches; gotchas G29), so a wait
+   * that registered its own left three dead handlers behind on every document opened.
+   */
+  var formWaiters = new Set();
+  var formWaitHooks = { jq: false, router: false, doctypes: {} };
+  function wakeFormWaiters() {
+    Array.from(formWaiters).forEach(function (fn) {
+      try {
+        fn();
+      } catch (eW) {}
+    });
+  }
+  function installFormWaitHooks(doctype) {
+    // Each is marked only once registered: an early wait (Frappe still loading) leaves it to the next.
+    if (!formWaitHooks.jq) {
+      try {
+        if (window.jQuery) {
+          jQuery(document).on(
+            "form-load.docFormBridgeWait form-refresh.docFormBridgeWait page-change.docFormBridgeWait",
+            wakeFormWaiters,
+          );
+          formWaitHooks.jq = true;
+        }
+      } catch (eJ) {}
+    }
+    if (!formWaitHooks.router) {
+      try {
+        if (frappe.router && typeof frappe.router.on === "function") {
+          frappe.router.on("change", wakeFormWaiters);
+          formWaitHooks.router = true;
+        }
+      } catch (eR) {}
+    }
+    if (doctype && !formWaitHooks.doctypes[doctype]) {
+      try {
+        if (frappe.ui && frappe.ui.form && frappe.ui.form.on) {
+          frappe.ui.form.on(doctype, { onload: wakeFormWaiters, refresh: wakeFormWaiters });
+          formWaitHooks.doctypes[doctype] = true;
+        }
+      } catch (eF) {}
+    }
+  }
+
+  /**
    * Wait until cur_frm matches doctype.
    * Events: form hooks, router, MutationObserver, one after_ajax pulse. Timeout = deadline only.
    */
@@ -1042,9 +1089,7 @@
           if (obs) obs.disconnect();
         } catch (e0) {}
         obs = null;
-        try {
-          if (window.jQuery) jQuery(document).off(".docFormBridge");
-        } catch (e1) {}
+        formWaiters.delete(succeed);
       }
 
       function succeed() {
@@ -1092,37 +1137,8 @@
         return;
       }
 
-      try {
-        if (window.jQuery) {
-          jQuery(document).on(
-            "form-load.docFormBridge form-refresh.docFormBridge page-change.docFormBridge",
-            function () {
-              succeed();
-            },
-          );
-        }
-      } catch (e3) {}
-
-      try {
-        if (doctype && frappe.ui && frappe.ui.form && frappe.ui.form.on) {
-          frappe.ui.form.on(doctype, {
-            onload: function () {
-              succeed();
-            },
-            refresh: function () {
-              succeed();
-            },
-          });
-        }
-      } catch (e4) {}
-
-      try {
-        if (frappe.router && typeof frappe.router.on === "function") {
-          frappe.router.on("change", function () {
-            succeed();
-          });
-        }
-      } catch (e5) {}
+      formWaiters.add(succeed);
+      installFormWaitHooks(doctype);
 
       try {
         var root = document.documentElement || document.body;

@@ -463,7 +463,7 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
 | A/R Doc skins (plan 2026-09-26 A1) | `estimate-map.js`, `sales-order-map.js`, `sales-invoice-map.js`, `receive-payment-map.js` (layouts as data), read by `sales-doc-map.js`; `doc-skin-registry.js` `DOC_FORM_MAPS` / `docFormMapFor` is what the page and `main.js` ask instead of `profileId === "po"` | More `doc-form.html` layouts. Receive Payment is `layoutOnly` (it shares Payment Entry with Pay Bills): reached by layout key, never by `profileByDoctypeKey` — see *Two registries* |
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
-| Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
+| Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR). Hooks it adds to ERPNext's page are registered once per page and shared (gotchas G29) |
 | Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |

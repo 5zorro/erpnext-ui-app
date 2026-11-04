@@ -1093,3 +1093,26 @@ From Frappe v16.31.0's source, confirmed by probe `new-bill-instant` (as the AP 
   on it (engine.io-client 6.5.3, `closeOnBeforeunload` false).
 - **A form's snapshot keeps `__islocal`** (`JSON.parse(JSON.stringify(f.doc))`), which is how the
   Bill page tells ERPNext's arriving blank from a saved document.
+
+## G29 — What the shell adds to ERPNext's page stays until the page reloads (2026-11-03)
+
+From Frappe v16.31.0's source, confirmed by probe `erp-hooks-no-leak` (museum OI-207):
+- **`frappe.ui.form.on(doctype, {...})` handlers live for the life of the page.** They are pushed
+  onto `frappe.ui.form.handlers[doctype][event]` (`form/script_manager.js`) and run on every later
+  form of that doctype. `frappe.ui.form.off(doctype, event)` empties the *whole* list, ERPNext's own
+  handlers included, so it is no way to take back one of ours. `on` also sets
+  `cur_frm.events[event]` to the newest handler when the open form is that doctype; nothing in
+  v16.31 calls `frm.events.refresh` / `onload` directly, so that is harmless today.
+- **`frappe.router.on("change", fn)` cannot be undone.** The router's emitter
+  (`event_emitter.js`) wraps `fn` in a new arrow function both when binding and in `off`, so `off`
+  never matches.
+- **So register once per page, and share.** The bridge's `waitForForm` registers its form hooks
+  once per doctype and its router / jQuery hooks once per page (`installFormWaitHooks`); each wait
+  adds itself to a set and leaves it when it ends. Before, every wait that had to wait added three
+  handlers for good, and one wait ending removed every wait's jQuery handlers (they shared one
+  namespace). Anything else injected into the page follows the same rule: a `window.__erp…` flag
+  (route hop, the soft-peek Esc key) or a once-per-page record.
+- **When it bit:** rarely, as it turned out. A saved document opens by reloading ERPNext's page,
+  and a New builds its blank before the wait starts, so ordinary opens added nothing. A wait that
+  has to wait on an in-place page (the Doc page taking its form back after a peek or a detour in
+  Vanilla) added three handlers each time.
