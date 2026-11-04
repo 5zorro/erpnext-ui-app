@@ -9,9 +9,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { ERP_LIST_JS, PE_REASON_FROM_JS } from "../src/erp-refusal-reason.js";
+import { mainProcessSource } from "./main-process-source.js";
 
 const read = (rel) => fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
-const main = read("electron/main.js");
+/** main.js and the electron/ipc/ modules split from it, as one text (line numbers count through it). */
+const main = mainProcessSource();
 const bridge = read("electron/erp-form-bridge-page.js");
 
 /** Code lines only: comments say "frappe.db" on purpose. */
@@ -22,7 +24,7 @@ const codeCalls = (src) =>
     .filter(({ l }) => /frappe\.db\.\w+/.test(l) && !/^\s*(\/\/|\*|\/\*)/.test(l));
 
 describe("no frappe.db.* in the ERPNext-page scripts (R7-5)", () => {
-  for (const [name, src] of [["electron/main.js", main], ["electron/erp-form-bridge-page.js", bridge]]) {
+  for (const [name, src] of [["electron/main.js + electron/ipc/", main], ["electron/erp-form-bridge-page.js", bridge]]) {
     it(`${name} calls none`, () => {
       assert.deepEqual(codeCalls(src).map(({ n, l }) => `${n}: ${l.trim()}`), []);
     });

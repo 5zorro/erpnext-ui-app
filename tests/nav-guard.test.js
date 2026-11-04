@@ -102,11 +102,12 @@ describe("leaving ERPNext from the ERP view", () => {
   });
 
   it("main.js guards redirects as well as links, and every injection goes through erpExec", async () => {
-    const { readFileSync } = await import("node:fs");
-    const main = readFileSync(new URL("../electron/main.js", import.meta.url), "utf8");
+    // main.js and the electron/ipc/ modules split from it: a moved family must not inject directly either.
+    const { mainProcessSource } = await import("./main-process-source.js");
+    const main = mainProcessSource();
     assert.match(main, /erp\.webContents\.on\("will-redirect"[\s\S]{0,400}warnOffBase\(url, "redirect"\)/);
     assert.match(main, /erp\.webContents\.on\("will-navigate"[\s\S]{0,300}warnOffBase\(url, "link"\)/);
-    const direct = main.match(/erp\.webContents\.executeJavaScript\(/g) || [];
+    const direct = main.match(/(?:erp|erpView\(\))\.webContents\.executeJavaScript\(/g) || [];
     assert.equal(direct.length, 1, "only erpExec itself may call executeJavaScript on the ERP view");
     const exec = main.slice(main.indexOf("function erpExec("), main.indexOf("function erpExec(") + 400);
     assert.match(exec, /!isAllowedErpUrl\(ERP_BASE, url\)/);
