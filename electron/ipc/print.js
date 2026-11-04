@@ -152,7 +152,7 @@ async function printOptions(doctype) {
       var dt = ${JSON.stringify(dt)};
       var out = { ok: true, formats: [], defaultFormat: "", letterheads: [], defaultLetterhead: "", settings: {} };
       if (dt) {
-        var f = await frappe.call({ method: "frappe.client.get_list", args: {
+        var f = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Print Format", filters: { doc_type: dt, disabled: 0 }, fields: ["name"], order_by: "name asc", limit_page_length: 0 } });
         out.formats = ((f && f.message) || []).map(function (r) { return r.name; });
         try {
@@ -160,12 +160,12 @@ async function printOptions(doctype) {
           out.defaultFormat = (frappe.get_meta(dt) || {}).default_print_format || "";
         } catch (e) {}
       }
-      var l = await frappe.call({ method: "frappe.client.get_list", args: {
+      var l = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Letter Head", filters: { disabled: 0 }, fields: ["name", "is_default"], limit_page_length: 0 } });
       out.letterheads = ((l && l.message) || []).map(function (r) { return r.name; });
       var def = ((l && l.message) || []).find(function (r) { return Number(r.is_default); });
       out.defaultLetterhead = def ? def.name : "";
-      var ps = await frappe.call({ method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
+      var ps = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
       var p = (ps && ps.message) || {};
       out.settings = {
         allow_print_for_draft: p.allow_print_for_draft, allow_print_for_cancelled: p.allow_print_for_cancelled,

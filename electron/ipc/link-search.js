@@ -74,7 +74,7 @@ export async function searchLink(doctype, txt, filters) {
       // One line per run of misses (a name typed letter by letter), not one per keystroke.
       if (!linkListMissing.has(dt)) navDebug("link-list", `miss dt=${dt} len=${q.trim().length} -> live`);
       linkListMissing.add(dt);
-    } else if (lastLogin().state === "in") {
+    } else if (lastLogin().state === "in" && !linkListNoRead.has(dt)) {
       void loadLinkList(dt, "search");
     }
   }
@@ -103,7 +103,7 @@ export async function searchLink(doctype, txt, filters) {
           filterPairs.forEach(function (p) { filterObj[p[0]] = p[1]; });
           args.filters = filterObj;
         }
-        var r = await frappe.call({
+        var r = await frappe.call({ silent: true,
           method: "frappe.desk.search.search_link",
           args: args
         });
@@ -181,6 +181,8 @@ let linkListUser = "";
 
 /** Lists whose last search missed the copy, so the trail logs a miss once per run. */
 const linkListMissing = new Set();
+/** Lists this user may not read: never copied, searched live (until the user changes). */
+const linkListNoRead = new Set();
 
 /** The ERP-page side of a load or check: meta, the active-row filters, vendors' last POs. */
 const LINK_LIST_ERP_HELPERS = `
@@ -205,14 +207,14 @@ const LINK_LIST_ERP_HELPERS = `
       filters: [["docstatus", "=", 1]],
       group_by: "supplier",
       limit_page_length: 0
-    });
+    }, "POST", { silent: true });
     var out = {};
     (rows || []).forEach(function (r) { if (r && r.supplier) out[r.supplier] = String(r.last_po || ""); });
     var fyStart = "";
     try {
       var fy = frappe.defaults && frappe.defaults.get_user_default ? frappe.defaults.get_user_default("fiscal_year") : "";
       if (fy) {
-        var v = await frappe.xcall("frappe.client.get_value", { doctype: "Fiscal Year", filters: fy, fieldname: "year_start_date" });
+        var v = await frappe.xcall("frappe.client.get_value", { doctype: "Fiscal Year", filters: fy, fieldname: "year_start_date" }, "POST", { silent: true });
         fyStart = (v && v.year_start_date) || "";
       }
     } catch (e) {}
@@ -236,14 +238,19 @@ function loadLinkList(doctype, why) {
         if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
         ${LINK_LIST_ERP_HELPERS}
         var dt = ${JSON.stringify(doctype)};
+        // A list the clerk may not read is not copied (its whole-list read would be refused); its
+        // search stays live. Asked of the page's own permissions, no server call (gotchas G27).
+        if (frappe.model && typeof frappe.model.can_read === "function" && frappe.boot && frappe.boot.user && !frappe.model.can_read(dt)) {
+          return { ok: true, noPermission: true };
+        }
         var meta = await metaOf(dt);
         var rows = await frappe.xcall("frappe.desk.search.search_link", {
           txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: ${LINK_LIST_MAX_ROWS + 1}
-        });
+        }, "POST", { silent: true });
         if ((rows || []).length > ${LINK_LIST_MAX_ROWS}) return { ok: true, tooMany: rows.length };
         var ranked = await frappe.xcall("frappe.client.get_list", {
           doctype: dt, fields: ["name", "modified"], order_by: meta.order, limit_page_length: 0
-        });
+        }, "POST", { silent: true });
         var newest = "";
         (ranked || []).forEach(function (r) { if (r.modified > newest) newest = r.modified; });
         var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null, fyStart: "" };
@@ -266,6 +273,11 @@ function loadLinkList(doctype, why) {
       navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
       // Opening a Doc page moves the ERPNext page too, which can cut a load off: try once more.
       if (!/-retry$/.test(why)) retryLater = true;
+      return;
+    }
+    if (raw.noPermission) {
+      linkListNoRead.add(doctype);
+      navDebug("link-list", `no-permission dt=${doctype} -> stays live`);
       return;
     }
     if (raw.tooMany) {
@@ -321,7 +333,7 @@ function checkLinkListChanged(doctype, why) {
           doctype: dt, fields: ["name", "modified"],
           filters: [["modified", ">", ${JSON.stringify(copy.newestModified || "1900-01-01")}]],
           limit_page_length: 501
-        });
+        }, "POST", { silent: true });
         if ((changed || []).length > 500) return { ok: true, tooMany: true };
         var names = (changed || []).map(function (r) { return r.name; });
         var newest = "";
@@ -330,9 +342,9 @@ function checkLinkListChanged(doctype, why) {
           ? await frappe.xcall("frappe.desk.search.search_link", {
               txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: names.length + 1,
               filters: { name: ["in", names] }
-            })
+            }, "POST", { silent: true })
           : [];
-        var count = await frappe.xcall("frappe.client.get_count", { doctype: dt, filters: meta.active });
+        var count = await frappe.xcall("frappe.client.get_count", { doctype: dt, filters: meta.active }, "POST", { silent: true });
         var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null };
         return { ok: true, names: names, fresh: fresh || [], newest: newest, count: count, lastPo: po.lastPo };
       } catch (e) {
@@ -379,6 +391,7 @@ export function warmLinkLists(why, minAgeMs = 10_000) {
   const now = Date.now();
   for (const dt of WARM_LINK_DOCTYPES) {
     const copy = linkListCopies.get(dt);
+    if (linkListNoRead.has(dt)) continue;
     if (!copy) void loadLinkList(dt, why);
     else if (now - copy.checkedAt >= minAgeMs) void checkLinkListChanged(dt, why);
   }
@@ -389,6 +402,7 @@ export function dropLinkLists(why) {
   linkListGeneration += 1;
   linkListUser = "";
   linkListMissing.clear();
+  linkListNoRead.clear();
   if (!linkListCopies.size) return;
   navDebug("link-list", `dropped ${linkListCopies.size} via=${why}`);
   linkListCopies.clear();
@@ -500,7 +514,7 @@ function registerLinkSearchHandlers() {
         if (dt === "Customer") or.push([dt, "customer_name", "=", n]);
         var rows = await frappe.xcall("frappe.client.get_list", {
           doctype: dt, fields: ["name"], or_filters: or, limit_page_length: 1
-        });
+        }, "POST", { silent: true });
         return { ok: true, exists: (rows || []).length > 0 };
       } catch (e) {
         return { ok: false, reason: String((e && e.message) || e) };

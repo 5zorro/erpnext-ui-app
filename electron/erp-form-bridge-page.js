@@ -82,10 +82,10 @@
     a.doctype = doctype;
     if (!a.fields) a.fields = ["name"];
     if (!("limit" in a)) a.limit = 20;
-    return frappe.xcall("frappe.desk.reportview.get_list", a);
+    return frappe.xcall("frappe.desk.reportview.get_list", a, "POST", { silent: true });
   }
   function xValue(doctype, filters, fieldname) {
-    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname }, "POST", { silent: true });
   }
 
   /** A refused xList / xValue: its own message, else the reply ERPNext refused with. */
@@ -1174,7 +1174,7 @@
     try {
       var d = f && f.doc;
       if (!d || d.doctype !== "Purchase Invoice" || !d.bill_date || !d.payment_terms_template || d.is_return) return false;
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.controllers.accounts_controller.get_payment_terms",
         args: {
           terms_template: d.payment_terms_template,
@@ -1200,7 +1200,7 @@
       var party_type = f.doc.doctype === "Sales Invoice" ? "Customer" : "Supplier";
       var party = f.doc.doctype === "Sales Invoice" ? f.doc.customer : f.doc.supplier;
       if (!party) return { due_date: null };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.party.get_due_date",
         args: {
           posting_date: f.doc.posting_date,

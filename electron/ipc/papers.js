@@ -46,7 +46,7 @@ async function listPapers(sources) {
     try {
       var out = [];
       for (var s of ${JSON.stringify(list)}) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "File",
           filters: { attached_to_doctype: s.doctype, attached_to_name: s.name, is_folder: 0 },
           fields: ["name", "file_name", "file_url", "is_private", "creation", "file_size", "attached_to_doctype", "attached_to_name"],

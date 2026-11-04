@@ -7,7 +7,9 @@
  * one with filters (live, vendors re-ranked by PO activity), an Account search (live, each row's
  * company added), a list that is never copied; "does this record still exist?" both ways; Refresh
  * of a copied list and of one that is not; the PO page's own search door; and the copies dropped
- * when the user changes (the clerk signs out, the admin is back).
+ * when the user changes (the clerk signs out, the admin is back). And no refusal along the way
+ * leaves ERPNext's message box in its page (gotchas G27): the list the clerk may not read (Project)
+ * is not copied, and a refused live search of it says why in the shell, silently in ERPNext.
  *
  * Acts as the AP clerk.
  */
@@ -35,6 +37,10 @@ async function search(app, doctype, txt, filters) {
   };
 }
 
+/** ERPNext's message boxes open in its page (the shell's own refusals must leave none). */
+const erpBoxes = (app) =>
+  inErp(app, `((frappe.ui && frappe.ui.open_dialogs) || []).map((d) => String((d && d.$wrapper && d.$wrapper.find(".modal-body").text()) || "").replace(/\\s+/g, " ").trim().slice(0, 80))`, 5000);
+
 /** The run's `link-list` / `link-missing` trail lines, digits normalized. */
 function trail(userData) {
   try {
@@ -58,6 +64,7 @@ function outcome(lines, dt) {
   const mine = lines.filter((l) => l.includes(` dt=${dt} `) || l.endsWith(` dt=${dt}`));
   if (mine.some((l) => /^link-list: loaded /.test(l))) return "loaded";
   if (mine.some((l) => /^link-list: too-many /.test(l))) return "too-many";
+  if (mine.some((l) => /^link-list: no-permission /.test(l))) return "no-permission";
   const failed = mine.find((l) => /^link-list: load-failed .* via=\S+-retry/.test(l));
   return failed ? `failed: ${failed.replace(/^.* reason=/, "")}` : "";
 }
@@ -81,6 +88,11 @@ test("link search: every door answers as before", async () => {
     await expect.poll(() => WARM.every((dt) => outcome(trail(userData), dt)), { timeout: 30_000, intervals: [200] }).toBe(true);
     door("copies loaded", (await e2eCall(app, "linkListsLoaded")).sort());
     door("copy outcomes", Object.fromEntries(WARM.map((dt) => [dt, outcome(trail(userData), dt)])));
+    // A refused call must not leave ERPNext's message box in the hidden ERPNext page (gotchas G27):
+    // as the AP clerk, Project is refused.
+    const boxesAfterCopies = await erpBoxes(app);
+    door("ERPNext boxes after the copies", boxesAfterCopies);
+    expect(boxesAfterCopies, "a refused copy left ERPNext's message box in its page").toEqual([]);
 
     door("search Supplier ''", await search(app, "Supplier", ""));
     door("search Supplier 'A'", await search(app, "Supplier", "A"));
@@ -91,6 +103,10 @@ test("link search: every door answers as before", async () => {
     door("search Account ''", await search(app, "Account", ""));
     door("search Company '' (never copied)", await search(app, "Company", ""));
     door("search no doctype", await search(app, "", "A"));
+    door("search Project (the clerk may not read it)", await search(app, "Project", ""));
+    const boxesAfterSearch = await erpBoxes(app);
+    door("ERPNext boxes after the refused search", boxesAfterSearch);
+    expect(boxesAfterSearch, "a refused search left ERPNext's message box in its page").toEqual([]);
 
     const someVendor = await inErp(app, `frappe.xcall("frappe.client.get_list", { doctype: "Supplier", fields: ["name"], order_by: "name asc", limit_page_length: 1 }).then((r) => (r[0] && r[0].name) || "")`, 15_000);
     door("exists a vendor", await inDoc(app, `window.erpDoc.linkExists("Supplier", ${JSON.stringify(someVendor)})`, 15_000));

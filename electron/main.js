@@ -5468,7 +5468,7 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
     ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
         args: { dt: "Purchase Invoice", dn: billName },
       });
@@ -5487,7 +5487,7 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
             ? frappe.datetime.get_today()
             : null);
       }
-      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      var inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       if (inserted && inserted.exc) {
         return { ok: false, reason: reasonFrom(inserted), step: "insert" };
       }
@@ -5541,7 +5541,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       var paidAmount = ${paidLit};
       var r;
       try {
-        r = await frappe.call({
+        r = await frappe.call({ silent: true,
           method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
           args: {
             dt: "Purchase Invoice",
@@ -5586,7 +5586,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       }
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -5597,7 +5597,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
       var submitted;
       try {
-        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
       } catch (eSub) {
         return {
           ok: false,
@@ -5667,7 +5667,7 @@ async function fetchPaymentEntryDraftsForInvoices(invoices, opts = {}) {
       for (var i = 0; i < invoices.length; i++) {
         var r;
         try {
-          r = await frappe.call({
+          r = await frappe.call({ silent: true,
             method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
             args: {
               dt: "Purchase Invoice",
@@ -5731,7 +5731,7 @@ async function insertAndSubmitPaymentEntry(pe) {
       var pe = ${docLit};
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -5742,7 +5742,7 @@ async function insertAndSubmitPaymentEntry(pe) {
       if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
       var submitted;
       try {
-        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
       } catch (eSub) {
         return {
           ok: false,
@@ -5863,7 +5863,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
       var i = ${payload};
       var acct;
       try {
-        acct = await frappe.call({
+        acct = await frappe.call({ silent: true,
           method: "erpnext.accounts.party.get_party_account",
           args: { party_type: "Supplier", party: i.party, company: i.company },
         });
@@ -5892,7 +5892,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
       if (i.memo) { doc.remarks = i.memo; doc.custom_remarks = 1; }
       var r;
       try {
-        r = await frappe.call({ method: "frappe.client.insert", args: { doc: doc } });
+        r = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: doc } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -5933,7 +5933,7 @@ async function createPaymentTermDocs(input = {}) {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       // The numbers too, not just the names (review 10-19 R10c-3): a term with this name is reused
       // when its numbers match, so a half-finished create can be finished.
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: {
           doctype: "Payment Term",
@@ -5944,7 +5944,7 @@ async function createPaymentTermDocs(input = {}) {
       });
       // Template names too (P4e): an installment plan gets a name of its own, and a collision on
       // it is worth a sentence rather than a unique:1 traceback.
-      var rt = await frappe.call({
+      var rt = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: { doctype: "Payment Terms Template", fields: ["name"], limit_page_length: 0 },
       });
@@ -5979,7 +5979,7 @@ async function createPaymentTermDocs(input = {}) {
       for (var n = 0; n < i.terms.length; n++) {
         var one;
         try {
-          one = await frappe.call({ method: "frappe.client.insert", args: { doc: i.terms[n] } });
+          one = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: i.terms[n] } });
         } catch (eTerm) {
           return { ok: false, reason: reasonFrom(eTerm), step: "insert-term", made: made };
         }
@@ -5988,7 +5988,7 @@ async function createPaymentTermDocs(input = {}) {
         if (n === 0) t = one;
       }
       try {
-        var tp = await frappe.call({ method: "frappe.client.insert", args: { doc: i.template } });
+        var tp = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: i.template } });
         if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template", made: made };
       } catch (eTpl) {
         return { ok: false, reason: reasonFrom(eTpl), step: "insert-template", made: made };
@@ -6030,7 +6030,7 @@ async function resolveErpCompany() {
   const raw = await erpEval(`(async () => {
     try {
       if (!window.frappe || !frappe.call) return { ok: false };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
       });
@@ -6073,14 +6073,14 @@ async function fetchPaymentDefaultsFacts(supplier) {
       var i = ${payload};
       var out = { ok: true, company: i.company, companyName: "", abbr: "", history: [], customerNumbers: [] };
       try {
-        var c = await frappe.call({
+        var c = await frappe.call({ silent: true,
           method: "frappe.client.get_value",
           args: { doctype: "Company", filters: { name: i.company }, fieldname: ["company_name", "abbr"] },
         });
         if (c && c.message) { out.companyName = c.message.company_name || ""; out.abbr = c.message.abbr || ""; }
       } catch (eCompany) {}
       try {
-        var list = await frappe.call({
+        var list = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: { doctype: "Mode of Payment", fields: ["name", "type", "enabled"], limit_page_length: 0 },
         });
@@ -6089,7 +6089,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
         for (var k = 0; k < rows.length; k++) {
           var rec = { name: rows[k].name, type: rows[k].type, enabled: rows[k].enabled, accounts: [] };
           try {
-            var full = await frappe.call({ method: "frappe.client.get", args: { doctype: "Mode of Payment", name: rows[k].name } });
+            var full = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Mode of Payment", name: rows[k].name } });
             rec.accounts = ((full && full.message && full.message.accounts) || []).map(function (a) {
               return { company: a.company, default_account: a.default_account };
             });
@@ -6099,7 +6099,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
         out.modes = modes;
       } catch (eModes) {}
       try {
-        var h = await frappe.call({
+        var h = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Entry",
@@ -6113,7 +6113,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
       } catch (eHistory) {}
       if (i.supplier) {
         try {
-          var s = await frappe.call({ method: "frappe.client.get", args: { doctype: "Supplier", name: i.supplier } });
+          var s = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Supplier", name: i.supplier } });
           out.customerNumbers = ((s && s.message && s.message.customer_numbers) || []).map(function (r) {
             return { company: r.company, customer_number: r.customer_number };
           });
@@ -6176,7 +6176,7 @@ async function savePaymentEntryFields(name, patch) {
       var fields = ${JSON.stringify(fields)};
       var cur;
       try {
-        cur = await frappe.call({
+        cur = await frappe.call({ silent: true,
           method: "frappe.client.get_value",
           args: { doctype: "Payment Entry", filters: { name: name }, fieldname: "docstatus" },
         });
@@ -6194,7 +6194,7 @@ async function savePaymentEntryFields(name, patch) {
       }
       var r;
       try {
-        r = await frappe.call({
+        r = await frappe.call({ silent: true,
           method: "frappe.client.set_value",
           args: { doctype: "Payment Entry", name: name, fieldname: fields },
         });
@@ -6223,7 +6223,7 @@ async function fetchPaymentEntry(name) {
   const raw = await erpEval(`(async () => {
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get",
         args: { doctype: "Payment Entry", name: ${nameLit} },
       });
@@ -6261,7 +6261,7 @@ async function listBillPaymentEntries(billName) {
       var billName = ${billLit};
       var peList = [];
       try {
-        var pes = await frappe.call({
+        var pes = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Entry",
@@ -6280,7 +6280,7 @@ async function listBillPaymentEntries(billName) {
       }
       if (!peList.length) {
         try {
-          var refs = await frappe.call({
+          var refs = await frappe.call({ silent: true,
             method: "frappe.client.get_list",
             args: {
               doctype: "Payment Entry Reference",
@@ -6304,7 +6304,7 @@ async function listBillPaymentEntries(billName) {
             allocBy[ref.parent] = ref.allocated_amount;
           }
           if (parents.length) {
-            var pes2 = await frappe.call({
+            var pes2 = await frappe.call({ silent: true,
               method: "frappe.client.get_list",
               args: {
                 doctype: "Payment Entry",
@@ -6399,7 +6399,7 @@ async function fetchOutstandingBills() {
       // vendors together on screen).
       var companies = [];
       try {
-        var companyResp = await frappe.call({
+        var companyResp = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
         });
@@ -6417,7 +6417,7 @@ async function fetchOutstandingBills() {
         filters: { party_type: "Supplier", based_on_payment_terms: 1 },
       };
       if (company) reportArgs.filters.company = company;
-      var report = await frappe.call({ method: "frappe.desk.query_report.run", args: reportArgs });
+      var report = await frappe.call({ silent: true, method: "frappe.desk.query_report.run", args: reportArgs });
       var rows = ((report && report.message && report.message.result) || []).filter(
         function (r) { return r && r.voucher_no; },
       );
@@ -6428,7 +6428,7 @@ async function fetchOutstandingBills() {
       var schedulesByInvoice = {};
       var fields = ${JSON.stringify(OUTSTANDING_SCHEDULE_FIELDS)};
       for (var at = 0; at < vouchers.length; at += 200) {
-        var sched = await frappe.call({
+        var sched = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Schedule",
@@ -6478,7 +6478,7 @@ async function reloadBillDocAfterPayment(billName) {
         await cur_frm.reload_doc();
         return { ok: true, doc: JSON.parse(JSON.stringify(cur_frm.doc)) };
       }
-      var g = await frappe.call({
+      var g = await frappe.call({ silent: true,
         method: "frappe.client.get",
         args: { doctype: "Purchase Invoice", name: billName },
       });
@@ -6712,13 +6712,13 @@ async function readSalesOrderOpenLines(salesOrders, itemCode) {
         filters: [["parent", "in", ${JSON.stringify(salesOrders)}], ["item_code", "=", ${JSON.stringify(itemCode)}], ["docstatus", "=", 1]],
         order_by: "parent asc, idx asc",
         limit_page_length: 0,
-      });
+      }, "POST", { silent: true });
       var heads = await frappe.xcall("frappe.client.get_list", {
         doctype: "Sales Order",
         fields: ["name", "status"],
         filters: [["name", "in", ${JSON.stringify(salesOrders)}]],
         limit_page_length: 0,
-      });
+      }, "POST", { silent: true });
       return { ok: true, rows: rows || [], heads: heads || [] };
     } catch (e) {
       return { ok: false, reason: String((e && e.message) || e || "could not read the Sales Orders") };
@@ -6782,7 +6782,7 @@ async function commentCostingAssumptions(targets, content) {
         await frappe.xcall("frappe.desk.form.utils.add_comment", {
           reference_doctype: p[0], reference_name: p[1], content: ${JSON.stringify(content)},
           comment_email: frappe.session.user, comment_by: frappe.session.user_fullname || frappe.session.user,
-        });
+        }, "POST", { silent: true });
       } catch (e) { out.push(p[1]); }
     }
     return { failed: out };
@@ -6813,7 +6813,7 @@ async function uomIsWholeNumber(uom) {
   if (!name) return null;
   const r = await erpEval(`(async () => {
     try {
-      var v = await frappe.xcall("frappe.client.get_value", { doctype: "UOM", filters: ${JSON.stringify(name)}, fieldname: "must_be_whole_number" });
+      var v = await frappe.xcall("frappe.client.get_value", { doctype: "UOM", filters: ${JSON.stringify(name)}, fieldname: "must_be_whole_number" }, "POST", { silent: true });
       return { ok: true, whole: !!(v && Number(v.must_be_whole_number)) };
     } catch (e) {
       return { ok: false };
@@ -7660,7 +7660,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         fields: ${JSON.stringify(spec.fields)},
         order_by: ${JSON.stringify(spec.order_by)},
         limit_page_length: ${spec.limit},
-      });
+      }, "POST", { silent: true });
       var lines = null;
       var orderLines = ${JSON.stringify(spec.orderLines || null)};
       if (orderLines) {
@@ -7671,7 +7671,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         for (var p = 0; p < 5 && page.length; p++) {
           var some = await frappe.xcall("frappe.client.get_list", { doctype: "Sales Order",
             filters: [["name", "in", page.map(function (r) { return r.name; })]],
-            fields: orderLines, order_by: ${JSON.stringify(spec.order_by)}, limit_page_length: 0 });
+            fields: orderLines, order_by: ${JSON.stringify(spec.order_by)}, limit_page_length: 0 }, "POST", { silent: true });
           for (var i = 0; i < (some || []).length; i++) {
             all.push(some[i]);
             if (Number(some[i].stock_qty) > Number(some[i].ordered_qty)) due[some[i].name] = 1;
@@ -7679,7 +7679,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
           if (Object.keys(due).length >= 50 || page.length < ${spec.limit}) break;
           page = await frappe.xcall("frappe.client.get_list", {
             doctype: ${JSON.stringify(spec.doctype)}, filters: ${JSON.stringify(spec.filters)}, fields: ["name"],
-            order_by: ${JSON.stringify(spec.order_by)}, limit_start: (p + 1) * ${spec.limit}, limit_page_length: ${spec.limit} });
+            order_by: ${JSON.stringify(spec.order_by)}, limit_start: (p + 1) * ${spec.limit}, limit_page_length: ${spec.limit} }, "POST", { silent: true });
         }
         rows = all;
       }
@@ -7688,7 +7688,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         try {
           lines = await frappe.xcall("frappe.client.get_list", { doctype: "Purchase Receipt",
             filters: [["name", "in", rows.map(function (r) { return r.name; })]],
-            fields: ["name", "\`tabPurchase Receipt Item\`.purchase_order as purchase_order"], limit_page_length: 0 });
+            fields: ["name", "\`tabPurchase Receipt Item\`.purchase_order as purchase_order"], limit_page_length: 0 }, "POST", { silent: true });
         } catch (eLines) { lines = null; }
       }
       return { ok: true, rows: rows || [], lines: lines };
@@ -7754,7 +7754,7 @@ async function mergeBillSources(items) {
     const nm = String(it.name).trim();
     const mapped = await erpEval(`(async () => {
       try {
-        var r = await frappe.call({
+        var r = await frappe.call({ silent: true,
           method: ${JSON.stringify(method)},
           args: { source_name: ${JSON.stringify(nm)} },
         });
@@ -7839,7 +7839,7 @@ async function voidAndAmendFacts(doctype, name) {
           limit_page_length: 0,
         };
         if (parentDoctype) args.parent = parentDoctype;
-        var res = await frappe.call({ method: "frappe.client.get_list", args: args });
+        var res = await frappe.call({ silent: true, method: "frappe.client.get_list", args: args });
         return (res && res.message) || [];
       }
 
@@ -7847,7 +7847,7 @@ async function voidAndAmendFacts(doctype, name) {
       try {
         amended = await frappe.xcall("frappe.client.is_document_amended", {
           doctype: i.doctype, docname: i.name,
-        });
+        }, "POST", { silent: true });
       } catch (eAm) {
         return { ok: false, reason: reasonFrom(eAm), step: "is_document_amended" };
       }
@@ -7866,7 +7866,7 @@ async function voidAndAmendFacts(doctype, name) {
       try {
         var rule = await frappe.xcall("frappe.client.get_single_value", {
           doctype: "Document Naming Settings", field: "default_amend_naming",
-        });
+        }, "POST", { silent: true });
         amendCounter = String(rule || "") !== "Default Naming";
       } catch (eRule) {
         amendCounter = null;
@@ -7914,7 +7914,7 @@ async function voidAndAmendFacts(doctype, name) {
         try {
           var s = await frappe.xcall("frappe.client.get_single_value", {
             doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
-          });
+          }, "POST", { silent: true });
           unlinks = !!Number(s);
         } catch (eSet) {
           unlinks = null;
@@ -8065,7 +8065,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       try {
         var already = await frappe.xcall("frappe.client.is_document_amended", {
           doctype: i.doctype, docname: i.name,
-        });
+        }, "POST", { silent: true });
         if (already) {
           return { ok: false, cancelled: false, reason: "This document has already been amended once, which is all ERPNext allows.", step: "is_document_amended" };
         }
@@ -8074,7 +8074,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       }
 
       var read = async function (step) {
-        var got = await frappe.call({
+        var got = await frappe.call({ silent: true,
           method: "frappe.client.get",
           args: { doctype: i.doctype, name: i.name },
         });
@@ -8098,7 +8098,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
 
       if (startedAt === 1) {
         try {
-          await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name });
+          await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name }, "POST", { silent: true });
         } catch (eCancel) {
           return { ok: false, cancelled: false, reason: reasonFrom(eCancel), step: "cancel" };
         }
@@ -8138,7 +8138,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
 
       var made = null;
       try {
-        var ins = await frappe.call({ method: "frappe.client.insert", args: { doc: draft } });
+        var ins = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: draft } });
         if (ins && ins.exc) {
           return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(ins), step: "insert" };
         }
@@ -8155,7 +8155,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       // so by carrying \`amendedName\`.
       if (i.submit) {
         try {
-          var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: made } });
+          var sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: made } });
           if (sub && sub.exc) {
             return { ok: false, cancelled: true, name: i.name, amendedName: made.name, reason: reasonFrom(sub), step: "submit", droppedRows: droppedRows, patched: patched };
           }
@@ -8174,7 +8174,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       var verified = null;
       if (i.patch) {
         try {
-          var back = await frappe.xcall("frappe.client.get", { doctype: i.doctype, name: made.name });
+          var back = await frappe.xcall("frappe.client.get", { doctype: i.doctype, name: made.name }, "POST", { silent: true });
           verified = verifyAmendPatch(back, i.patch);
         } catch (eVer) {
           verified = null;
@@ -8215,7 +8215,7 @@ async function createCreditMemoFrom(sourceBillName) {
   await ensureErpFormBridge();
   const mapped = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.doctype.purchase_invoice.purchase_invoice.make_debit_note",
         args: { source_name: ${JSON.stringify(nm)} },
       });
@@ -8432,7 +8432,7 @@ ipcMain.handle("bill-list-projects", async (_e, customer) => {
         fields: ["name", "project_name", "customer", "status"],
         order_by: "modified desc",
         limit_page_length: 40,
-      });
+      }, "POST", { silent: true });
       return { ok: true, projects: rows || [] };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e), projects: [] };
@@ -8527,7 +8527,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         var company = ${JSON.stringify(company || "")};
 
         // frappe.xcall, not frappe.db.* — the latter never settles on a server error (G19).
-        var soDoc = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: sos[0] });
+        var soDoc = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: sos[0] }, "POST", { silent: true });
         if (!soDoc) return { ok: false, reason: "Sales Order not found." };
         var co = company || soDoc.company;
         if (!co) return { ok: false, reason: "Company missing." };
@@ -8572,7 +8572,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
       }
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: po } });
       } catch (eIns) {
         return { ok: false, step: "insert", reason: serverMsg(eIns) };
       }
@@ -8581,13 +8581,13 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         return { ok: false, step: "insert", reason: "The Purchase Order insert returned no name." };
       }
       try {
-        var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        var submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
         var finalDoc = submitted && submitted.message ? submitted.message : saved;
         return { ok: true, poName: finalDoc.name, title: finalDoc.title || title };
       } catch (eSub) {
         var why = serverMsg(eSub);
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: saved.name } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Order", name: saved.name } });
           return { ok: false, step: "submit", draft: saved.name, draftDeleted: true, reason: why };
         } catch (eDel) {
           return { ok: false, step: "submit", draft: saved.name, draftDeleted: false, reason: why };
@@ -9719,7 +9719,7 @@ ipcMain.handle("so-create-po-context", async (_e, soName) => {
   if (!so) return { ok: false, reason: "No Sales Order." };
   const raw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.client.get_list", args: {
+      var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Purchase Order",
         fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
         filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(so)}], ["docstatus", "=", 0]],
@@ -9772,7 +9772,7 @@ async function soCreatePos(so, selected, pendingByLine) {
   const raw = await erpEval(`(async () => {
     var pending = ${JSON.stringify(pendingByLine)};
     try {
-      var m = await frappe.call({ method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
+      var m = await frappe.call({ silent: true, method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
         args: { source_name: ${JSON.stringify(so)}, selected_items: ${JSON.stringify(selected)} } });
       var docs = (m && m.message) || [];
       var saved = [], failed = [];
@@ -9794,10 +9794,10 @@ async function soCreatePos(so, selected, pendingByLine) {
         d.items = (d.items || []).filter(function (it) { return Number(it.qty) > 0; });
         try {
           if (!d.items.length) {
-            await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: d.name } });
+            await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Order", name: d.name } });
             continue;
           }
-          var sv = await frappe.call({ method: "frappe.client.save", args: { doc: d } });
+          var sv = await frappe.call({ silent: true, method: "frappe.client.save", args: { doc: d } });
           saved.push(sv.message);
         } catch (e) {
           saved.push(d);
@@ -9833,7 +9833,7 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
     var so = ${JSON.stringify(so)}, codes = ${JSON.stringify([...new Set(codes)])};
     async function list(args) {
       try {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: Object.assign({ limit_page_length: 0 }, args) });
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: Object.assign({ limit_page_length: 0 }, args) });
         return (r && r.message) || [];
       } catch (e) { return null; }
     }
@@ -9857,7 +9857,7 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
     // the order may read its Comments there, while listing Comment needs System Manager.
     (async function () {
       try {
-        var di = await frappe.call({ method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
+        var di = await frappe.call({ silent: true, method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
         var cs = (di && di.docinfo && di.docinfo.comments) || [];
         return cs.filter(function (c) { return String(c.content || "").indexOf(${JSON.stringify(COSTING_TOKEN)}) >= 0; })
           .map(function (c) { return { name: c.name, creation: c.creation, content: c.content }; });
@@ -9882,7 +9882,7 @@ ipcMain.handle("so-create-counts", async (_e, soName) => {
   if (!so) return { ok: false, reason: "No Sales Order.", counts: {} };
   const raw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.desk.notifications.get_open_count", args: { doctype: "Sales Order", name: ${JSON.stringify(so)} } });
+      var r = await frappe.call({ silent: true, method: "frappe.desk.notifications.get_open_count", args: { doctype: "Sales Order", name: ${JSON.stringify(so)} } });
       return { ok: true, message: r && r.message };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -10124,8 +10124,8 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
     // The order's lines still to order, less what is on draft POs (src/so-create-po.js).
     const ctx = await erpEval(`(async () => {
       try {
-        var so = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: ${JSON.stringify(source)} });
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var so = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: ${JSON.stringify(source)} }, "POST", { silent: true });
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Purchase Order",
           fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
           filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(source)}], ["docstatus", "=", 0]],
@@ -10147,7 +10147,7 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
   }
   const mapped = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: ${JSON.stringify(method)},
         args: ${JSON.stringify(args)},
       });
@@ -10437,7 +10437,7 @@ ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
 async function fetchDraftPayments() {
   const raw = await erpEval(`(async () => {
     try {
-      var list = await frappe.call({
+      var list = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: {
           doctype: "Payment Entry",
@@ -10450,7 +10450,7 @@ async function fetchDraftPayments() {
       var names = ((list && list.message) || []).map(function (r) { return r.name; });
       var docs = await Promise.all(names.map(async function (name) {
         try {
-          var r = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
+          var r = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
           return (r && r.message) || null;
         } catch (eDoc) {
           return null;
@@ -10481,7 +10481,7 @@ async function actOnDraftPayment(action, name) {
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
     try {
-      var got = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
+      var got = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
       var doc = got && got.message;
       if (!doc) return { ok: false, reason: "Payment Entry not found — it may already be gone.", step: "read" };
       if (Number(doc.docstatus) !== 0) {
@@ -10489,7 +10489,7 @@ async function actOnDraftPayment(action, name) {
       }
       if (${JSON.stringify(action)} === "delete") {
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
         } catch (eDel) {
           return { ok: false, reason: reasonFrom(eDel), step: "delete" };
         }
@@ -10497,7 +10497,7 @@ async function actOnDraftPayment(action, name) {
       }
       var sub;
       try {
-        sub = await frappe.call({ method: "frappe.client.submit", args: { doc: doc } });
+        sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: doc } });
       } catch (eSub) {
         return { ok: false, reason: reasonFrom(eSub), step: "submit" };
       }
@@ -10659,17 +10659,17 @@ ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
       var codes = ${JSON.stringify(list)};
       var stock = [];
       if (codes.length) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Item", filters: [["name", "in", codes], ["is_stock_item", "=", 1]],
           fields: ["name"], limit_page_length: 0 } });
         stock = ((r && r.message) || []).map(function (x) { return x.name; });
       }
-      var wh = await frappe.call({ method: "frappe.client.get_single_value",
+      var wh = await frappe.call({ silent: true, method: "frappe.client.get_single_value",
         args: { doctype: "Stock Settings", field: "default_warehouse" } });
       var perpetual = true;
       var co = ${JSON.stringify(String(company || ""))};
       if (co) {
-        var c = await frappe.call({ method: "frappe.client.get_value",
+        var c = await frappe.call({ silent: true, method: "frappe.client.get_value",
           args: { doctype: "Company", filters: { name: co }, fieldname: "enable_perpetual_inventory" } });
         perpetual = !!(c && c.message && Number(c.message.enable_perpetual_inventory));
       }
@@ -10696,7 +10696,7 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
   if (!live || !live.ok || !live.doc) return { ok: false, reason: (live && live.reason) || "Could not read the bill." };
   const whRaw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.client.get_single_value",
+      var r = await frappe.call({ silent: true, method: "frappe.client.get_single_value",
         args: { doctype: "Stock Settings", field: "default_warehouse" } });
       return (r && r.message) || "";
     } catch (e) {
@@ -10711,13 +10711,13 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     const likeToken = JSON.stringify("%" + madeFromBillToken(live.doc.name) + "%");
     prior = await erpEval(`(async () => {
       try {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Purchase Receipt",
           filters: [["docstatus", "=", 1], ["remarks", "like", ${likeToken}]],
           fields: ["name"], limit_page_length: 0 } });
         var out = [];
         for (var i = 0; i < ((r && r.message) || []).length; i++) {
-          var d = await frappe.call({ method: "frappe.client.get", args: { doctype: "Purchase Receipt", name: r.message[i].name } });
+          var d = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Purchase Receipt", name: r.message[i].name } });
           var doc = d && d.message;
           if (doc) out.push({ name: doc.name, posting_date: doc.posting_date, remarks: doc.remarks || "",
             items: (doc.items || []).map(function (it) { return { name: it.name, item_code: it.item_code, qty: it.qty }; }) });
@@ -10759,21 +10759,21 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
       var serverMsg = function (e) { return reasonFrom(e && e.message ? e : undefined); };
       var ins;
       try {
-        ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
+        ins = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
       } catch (e) {
         return { ok: false, cancelled: false, step: "insert", reason: serverMsg(e) };
       }
       var draft = ins && ins.message && ins.message.name;
       if (!draft) return { ok: false, cancelled: false, step: "insert", reason: "The receipt insert returned no name." };
       try {
-        var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: ins.message } });
+        var sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: ins.message } });
         var d = sub.message;
         var items = (d.items || []).slice().sort(function (a, b) { return a.idx - b.idx; }).map(function (r) { return r.name; });
         return { ok: true, name: d.name, items: items };
       } catch (eSub) {
         var why = serverMsg(eSub);
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Receipt", name: draft } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Receipt", name: draft } });
           return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: true, reason: why };
         } catch (eDel) {
           return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: false, reason: why };
@@ -10847,13 +10847,13 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
 ipcMain.handle("tax-default-facts", async (_e, supplier) => {
   const raw = await erpEval(`(async () => {
     try {
-      var d = await frappe.call({ method: "frappe.client.get_list", args: {
+      var d = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Purchase Taxes and Charges Template", filters: { is_default: 1, disabled: 0 },
         fields: ["name"], limit_page_length: 1 } });
       var sup = ${JSON.stringify(String(supplier || ""))};
       var rule = null;
       if (sup) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Tax Rule", filters: { tax_type: "Purchase", supplier: sup },
           fields: ["name", "purchase_tax_template"], order_by: "priority desc", limit_page_length: 1 } });
         var row = r && r.message && r.message[0];

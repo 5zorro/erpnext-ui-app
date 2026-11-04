@@ -126,3 +126,54 @@ describe("a refused read is pending, not empty (the Bill's background loading, R
   });
 });
 
+
+/**
+ * The end of the call that opens at `src[open]` (a "("), skipping strings, comments and `${…}`.
+ * @returns {number} the index of its ")"
+ */
+function callEnd(src, open) {
+  const close = { "(": ")", "[": "]", "{": "}" };
+  const stack = [];
+  for (let j = open; j < src.length; j += 1) {
+    const c = src[j];
+    if (c === "/" && src[j + 1] === "/") j = src.indexOf("\n", j);
+    else if (c === "/" && src[j + 1] === "*") j = src.indexOf("*/", j) + 1;
+    else if (c === '"' || c === "'") {
+      for (j += 1; j < src.length && src[j] !== c; j += 1) if (src[j] === "\\") j += 1;
+    } else if (c === "$" && src[j + 1] === "{") {
+      stack.push("}");
+      j += 1;
+    } else if (close[c]) stack.push(close[c]);
+    else if (c === ")" || c === "]" || c === "}") {
+      assert.equal(stack.pop(), c, `unbalanced near ${src.slice(open, open + 80)}`);
+      if (!stack.length) return j;
+    }
+  }
+  throw new Error(`no end for ${src.slice(open, open + 80)}`);
+}
+
+describe("the shell's own calls in the ERPNext page are silent (gotchas G27)", () => {
+  // A refused call otherwise leaves ERPNext's message box in the (hidden) ERPNext page.
+  const sources = [
+    ["electron/main.js + electron/ipc/", main],
+    ["electron/erp-form-bridge-page.js", bridge],
+    ["src/erp-refusal-reason.js", read("src/erp-refusal-reason.js")],
+  ];
+  for (const [name, src] of sources) {
+    it(`${name}: every frappe.call / frappe.xcall passes silent: true`, () => {
+      const loud = [];
+      let checked = 0;
+      for (const m of src.matchAll(/frappe\.(x?call)\(/g)) {
+        const open = m.index + m[0].length - 1;
+        const call = src.slice(m.index, callEnd(src, open) + 1);
+        checked += 1;
+        // The bridge's save reads ERPNext's refusal, closes the box itself, and reads the box when
+        // the refusal has no text.
+        if (/savedocs/.test(call)) continue;
+        if (!/silent: true/.test(call)) loud.push(call.replace(/\s+/g, " ").slice(0, 100));
+      }
+      assert.ok(checked > 0, "no calls found");
+      assert.deepEqual(loud, []);
+    });
+  }
+});
