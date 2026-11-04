@@ -4791,6 +4791,111 @@ async function waitForDocForm(timeoutMs = 25000) {
 }
 
 /**
+ * A new document without reloading ERPNext (5zorro 2026-11-03: a new Bill was loading the whole
+ * ERPNext page twice, 1–7 s, where ERPNext's own "+ Add" takes ~0.3 s). The blank is built in the
+ * page the way "+ Add" builds it — `frappe.new_doc`, no server call once the doctype is loaded —
+ * after forgetting this doctype's unsaved blanks locally, so the new route cannot hand an old one
+ * back (what the full load was there for). Every case the full load handles differently takes the
+ * full load instead (the caller's fallback), so it still asks what it asked before:
+ *   - ERPNext not up here (no Desk, a load of the shell's under way, the doctype not loaded yet,
+ *     a create page of its own, a dialog open — a plain ERPNext message is closed instead, as a
+ *     load would, its words kept in the trail — or a save out);
+ *   - a saved document has unsaved edits;
+ *   - the page would stop a load to ask "leave page?" — the same question asked of it (a
+ *     cancelable `beforeunload`; Frappe's is the only listener that cancels), and, as Chromium
+ *     requires before it asks, the page has been used by hand;
+ *   - the fresh blank does not show in time.
+ * @param {string} doctype
+ * @returns {Promise<boolean>} true when the fresh blank is on ERPNext's form
+ */
+async function openFreshNewDocInPlace(doctype) {
+  const dt = String(doctype || "").trim();
+  const skip = (why) => {
+    navDebug("doc-new-in-place", `skip ${dt}: ${why} -> full load`);
+    return false;
+  };
+  if (!dt) return skip("no doctype");
+  if (!erpIsWarm()) return skip("ERPNext not up");
+  if (erpLoadWaiter) return skip("a load is under way");
+  if (!/^\/(app|desk)(\/|$)/.test(currentErpPathname() || "")) return skip("not on the Desk");
+  const started = Date.now();
+  if (simplifiedSkinInstalled) await removeSimplifiedSkin();
+  const raw = await erpEval(`(() => {
+    try {
+      var dt = ${JSON.stringify(dt)};
+      if (!window.frappe || !frappe.new_doc || !frappe.model || !frappe.router || !window.locals) return { ok: false, reason: "Desk not ready" };
+      if (!(locals.DocType && locals.DocType[dt])) return { ok: false, reason: "doctype not loaded" };
+      if (frappe.create_routes && frappe.create_routes[dt]) return { ok: false, reason: "create route" };
+      if (frappe.ui && frappe.ui.form && frappe.ui.form.is_saving) return { ok: false, reason: "a save is out" };
+      // A plain ERPNext message (frappe.msgprint) holds no input and a load would close it unread:
+      // it is closed here too, its words kept in the trail. Any other dialog: the full load.
+      var dialogs = (frappe.ui && frappe.ui.open_dialogs) || [];
+      var describe = function (d) {
+        return String((d && (d.title || (d.$wrapper && d.$wrapper.find(".modal-title").first().text()))) || "?").slice(0, 60) +
+          " «" + String((d && d.$wrapper && d.$wrapper.find(".modal-body").text()) || "").replace(/\\s+/g, " ").trim().slice(0, 160) + "»";
+      };
+      var others = dialogs.filter(function (d) { return d !== frappe.msg_dialog; });
+      if (others.length) return { ok: false, reason: "a dialog is open: " + others.map(describe).join(" | ") };
+      var closed = dialogs.length ? describe(frappe.msg_dialog) : "";
+      var forms = frappe.views && frappe.views.formview
+        ? Object.keys(frappe.views.formview).map(function (k) { return frappe.views.formview[k] && frappe.views.formview[k].frm; }).filter(function (x) { return x && x.doc; })
+        : [];
+      // A saved document with unsaved edits: the full load asks about it (or drops it) as ever.
+      for (var i = 0; i < forms.length; i += 1) {
+        if (!forms[i].doc.__islocal && forms[i].is_dirty && forms[i].is_dirty()) {
+          return { ok: false, reason: "unsaved edits to " + forms[i].doctype + " " + forms[i].doc.name };
+        }
+      }
+      // Would a load stop to ask "leave page?" Frappe's listener says yes for any form edited since
+      // it was drawn (the shell's own writes too); Chromium asks only once the page has been used
+      // by hand (sticky activation), so in the Doc lens, where the clerk types in the shell, it never does.
+      var ask = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(ask);
+      var wouldStop = ask.defaultPrevented || ask.returnValue === false || (typeof ask.returnValue === "string" && !!ask.returnValue);
+      var used = !navigator.userActivation || navigator.userActivation.hasBeenActive;
+      if (wouldStop && used) return { ok: false, reason: "a load would ask about unsaved changes" };
+      // The unsaved blanks a load would drop: this doctype's are forgotten below; the others stop
+      // holding a "leave page?" listener, as they would after a load.
+      forms.forEach(function (x) {
+        if (x.doc.__islocal && x.doctype !== dt && x.beforeUnloadListener) {
+          removeEventListener("beforeunload", x.beforeUnloadListener, { capture: true });
+        }
+      });
+      var stale = [];
+      Object.keys(locals[dt] || {}).forEach(function (n) {
+        var d = locals[dt][n];
+        if (d && d.__islocal) stale.push(n);
+      });
+      var f = window.cur_frm;
+      if (f && f.doc && f.doc.doctype === dt && stale.indexOf(f.doc.name) < 0) stale.push(f.doc.name);
+      stale.forEach(function (n) {
+        var d = locals[dt] && locals[dt][n];
+        if (!d || !d.__islocal) return;
+        try { d.__unsaved = 0; } catch (e0) {}
+        frappe.model.clear_doc(dt, n);
+      });
+      // Closed without its re_route (docs/gotchas.md G27): a "Not permitted" box sends ERPNext back a
+      // page when it closes, which would take the page off the new blank. A load drops it unrun too.
+      if (closed) {
+        delete frappe.msg_dialog.custom_onhide;
+        frappe.msg_dialog.hide();
+      }
+      frappe.new_doc(dt);
+      return { ok: true, stale: stale, closed: closed };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e) };
+    }
+  })()`);
+  if (!raw || !raw.ok) return skip((raw && raw.reason) || "no answer");
+  if (raw.closed) navDebug("doc-new-in-place", `closed ERPNext's message ${raw.closed}`);
+  // "" keeps the wait on a fresh blank even when there was no form to replace.
+  const shown = await bridgeCall("waitForForm", dt, 8000, { notNames: [...(raw.stale || []), ""] });
+  if (!shown || !shown.ok) return skip(`blank not shown: ${(shown && shown.reason) || "no answer"}`);
+  navDebug("doc-new-in-place", `${dt} ${shown.doc && shown.doc.name} ms=${Date.now() - started} replaced=${(raw.stale || []).length}`);
+  return true;
+}
+
+/**
  * Replace the open ERP form with a blank new doc (home / toolbar New).
  * @param {string} doctype
  */
@@ -5039,7 +5144,10 @@ async function showDocForm(skinId, route, opts = {}) {
     // Every Doc open checks the warm pick lists, not only a page boot (doc-get-ui): 5zorro's
     // dogfood 2026-10-21 opened Bills four times in place and only the first checked.
     setTimeout(() => warmLinkLists("doc-open"), 2000);
-    const loaded = inPlace
+    // A fresh new document is built in the page when ERPNext is up and nothing would be asked
+    // (openFreshNewDocInPlace); otherwise the full load, as before.
+    const freshInPlace = !inPlace && openingFreshNew && (await openFreshNewDocInPlace(profile.doctype));
+    const loaded = inPlace || freshInPlace
       ? true
       : openingFreshNew
         ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
@@ -5062,7 +5170,8 @@ async function showDocForm(skinId, route, opts = {}) {
       dateExpectedScratch = "";
     }
     if (openingFreshNew && skinId !== "bill") {
-      let fresh = await forceFreshNewDocInErp(profile.doctype);
+      // Made in place, the blank is fresh already: read it rather than make a second one.
+      let fresh = freshInPlace ? await snapshotDocForm() : await forceFreshNewDocInErp(profile.doctype);
       // A layout that is one kind of its doctype (Receive Payment) sets that kind on the blank
       // form first, the way Vanilla's own Payment Type field would be chosen (A/R stage A1).
       const defaults = (docFormUiPayload(skinId) || {}).newDocDefaults;

@@ -76,7 +76,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 31);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 32);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -319,7 +319,7 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 31/);
+    assert.match(page, /var VERSION = 32/);
     assert.match(page, /partyDetailsQuiet: !!quietSince && now - quietSince >= SUPPLIER_PARTY_QUIET_HOLD_MS/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     // A mapped doc's party fields must be applied through set_value, and before the item

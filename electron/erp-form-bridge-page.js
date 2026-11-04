@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 31;
+  var VERSION = 32;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -634,11 +634,19 @@
     })();
   }
 
-  function formMatches(doctype) {
+  /**
+   * @param {string} doctype
+   * @param {string[]} [notNames] a fresh blank was asked for (a new document made in place): the
+   *   form must show a new, unsaved document that is none of these (the forms it replaces).
+   */
+  function formMatches(doctype, notNames) {
     var f = window.cur_frm;
     if (!f || !f.doc) return false;
-    if (!doctype) return true;
-    return f.doctype === doctype || f.doc.doctype === doctype;
+    if (doctype && f.doctype !== doctype && f.doc.doctype !== doctype) return false;
+    if (notNames && notNames.length) {
+      if (!f.doc.__islocal || notNames.indexOf(f.doc.name) >= 0 || f.docname !== f.doc.name) return false;
+    }
+    return true;
   }
 
   function snapshot(doctype) {
@@ -1013,8 +1021,16 @@
    * Wait until cur_frm matches doctype.
    * Events: form hooks, router, MutationObserver, one after_ajax pulse. Timeout = deadline only.
    */
-  function waitForForm(doctype, timeoutMs) {
+  /**
+   * @param {string} doctype
+   * @param {number} [timeoutMs]
+   * @param {{ notNames?: string[] }} [opts] `notNames`: wait for a fresh blank, not these forms
+   *   (formMatches); its answer then also waits for ERPNext's own opening calls to land, so the
+   *   snapshot carries the defaults its form scripts set.
+   */
+  function waitForForm(doctype, timeoutMs, opts) {
     timeoutMs = timeoutMs || 25000;
+    var notNames = opts && Array.isArray(opts.notNames) && opts.notNames.length ? opts.notNames : null;
     return new Promise(function (resolve) {
       var finished = false;
       var timer = null;
@@ -1033,10 +1049,16 @@
 
       function succeed() {
         if (finished) return;
-        if (!formMatches(doctype)) return;
+        if (!formMatches(doctype, notNames)) return;
         finished = true;
         cleanup();
-        resolve(snapshot(doctype));
+        if (!notNames) {
+          resolve(snapshot(doctype));
+          return;
+        }
+        afterAjaxQuiet(4000).then(function () {
+          resolve(snapshot(doctype));
+        });
       }
 
       function fail(reason) {
@@ -1065,7 +1087,7 @@
         });
       }
 
-      if (formMatches(doctype)) {
+      if (formMatches(doctype, notNames)) {
         succeed();
         return;
       }
@@ -1118,7 +1140,7 @@
       });
 
       timer = setTimeout(function () {
-        if (formMatches(doctype)) succeed();
+        if (formMatches(doctype, notNames)) succeed();
         else fail();
       }, timeoutMs);
     });
