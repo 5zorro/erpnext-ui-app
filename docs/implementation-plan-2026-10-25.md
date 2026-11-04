@@ -24,8 +24,9 @@
 > payment settings moved to `electron/ipc/`; after 3b, `nav:check` (109/109) and `dogfood:check`
 > (one probe's wait fixed) ran whole on 2026-11-01, then re-link and method change moved
 > (`electron/ipc/relink-method-change.js`), then health and incidents
-> (`electron/ipc/health-incidents.js`, 2026-11-02). Next in the order: the warm pick lists, then
-> doc-form and Bill with the bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
+> (`electron/ipc/health-incidents.js`, 2026-11-02), then link search with its warm pick lists
+> (`electron/ipc/link-search.js`, 2026-11-03). Next in the order: doc-form, then Bill with the
+> bridge (*Order*, item 4).** 5zorro paused his DF-03 dogfood round partway (2026-10-25) until
 > this plan is done: most of what he was finding would have added to the refactor's work. Promoted from the architecture review (plan 2026-10-19,
 > closed 2026-10-25) at 5zorro's word: *"one part of the plan is to have a separate session to break
 > about main.js into separation of concerns and merge doc form and bill form to have 'don't repeat
@@ -417,7 +418,7 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    close, Feedback), the same before and after. Found on the way and fixed first (`6801ccc`):
    Print as image had been falling back to the plain PDF since printing moved (`__dirname` in an
    ES module; probe `print-as-image`). main.js 11,925 → 11,350 lines.
-   **The warm pick lists, mapped 2026-11-02 (next):** state `linkListCopies`, `linkListBusy`,
+   **The warm pick lists, mapped 2026-11-02:** state `linkListCopies`, `linkListBusy`,
    `linkListGeneration`, `linkListUser`, `linkListMissing`, `LINK_LIST_ERP_HELPERS`; functions
    `loadLinkList`, `checkLinkListChanged`, `warmLinkLists`, `dropLinkLists`; handlers
    `doc-link-exists`, `link-list-refresh`. Outside callers: `searchLink` (answers from the copy
@@ -426,7 +427,22 @@ keeps them as the vocabulary the check/ACH document will reuse. The item rows' `
    cut moves link search with them (`searchLink`, `enrichAccountLinkResults`,
    `rankSupplierSearchResults`, the three `*-search-link` handlers): "link search and its warm
    copies" — to confirm on reading those helpers. Run long checks from a snapshot (HANDOFF §
-   Test strategy). **How each move
+   Test strategy).
+   **Built 2026-11-03 that way** (`electron/ipc/link-search.js`): the four state variables and
+   the ERPNext-page helpers, the load / check / warm / drop functions, `searchLink` with its
+   Account and vendor enrichments, and the `bill-search-link`, `doc-search-link`,
+   `doc-link-exists` and `link-list-refresh` handlers. It borrows `erpEval`, `navDebug`,
+   `raceTimeout` and two getters, `lastLogin()` and `dirtyState()` (the Account search marks
+   rows of another company than the open Bill's). main.js reads `linkListsUser()` (the login
+   check drops the copies when the user changes) and `linkListsLoaded()` (the test hook); Pay
+   Outstanding's search handler stays with Pay Outstanding and imports `searchLink`. Every one of
+   the 455 lines arrived; lint clean. New probe `link-search-doors`: 20 doors, the same before
+   (twice) and after; `dogfood:check` 25/25 on the moved code (from a snapshot). Found on the way: two tests that read main.js alone (no `frappe.db.*` in
+   the ERPNext-page scripts; every injection goes through `erpExec`) had stopped seeing moved code;
+   both read `tests/main-process-source.js` now. main.js 11,350 → 10,901 lines. Seen, left as it
+   was: the AP clerk cannot read Project, so that list's copy fails and its trail line says
+   `reason=undefined` (frappe rejects with no message); the list stays live, as designed.
+   **How each move
    goes** (keep it the same for the rest):
    - The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
      from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js
