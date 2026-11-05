@@ -23,7 +23,18 @@
 >      `dogfood-warm-new-vendor`, `dogfood-warm-lists-chaos` pass.
 >   3. **One failed-save path and wording for every Doc form, failing loud with ERPNext's reason**
 >      (R6a-1 step 2 kept the two pages' wordings as found: the Bill's "Save did not finish", the
->      doc-form's "ERPNext rejected the save").
+>      doc-form's "ERPNext rejected the save"). Today: the Bill (`commitGateErpFailureView`,
+>      `bill-action-flow.js`) tells a timeout from a refusal and words ERPNext's message plainly
+>      (`humanizeBillErpMessage`); a refused toolbar Save shows a toast + the red status line
+>      (`announceSaveBlocker`). Doc-form (`docCommitGateErpFailureView`, `doc-action-flow.js`)
+>      calls a timeout "ERPNext rejected the save" (wrong: it may still save), shows ERPNext's raw
+>      text, and opens the direct-save gate dialog on a refused toolbar Save. **Agreed 2026-11-05:**
+>      one wording module for every form — refused with a reason: "Save rejected — ERPNext says:
+>      <its reason, in plain words>"; no reason: "Save rejected — ERPNext gave no reason; open
+>      Vanilla to read its message"; no answer: "Save did not finish — ERPNext did not answer in
+>      N s and may still save it; reload before trying again" — shown the Bill's way (toast + red
+>      status), no dialog (memory: no blocking dialogs unless the gate is the point). The commit
+>      gate, when it is open, shows the same words.
 >   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
 >      functions, measured 2026-11-04).
 > - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
@@ -35,6 +46,14 @@
 >   gate asked; the page's check never fired). Main now refuses the pick's clear and write once a
 >   newer Bill open has started; both cases pass, and fail with the check off.
 > - **Already parked, no action:** OI-187, OI-188, OI-189, OI-190 (settled with multi-window).
+> - **Found in the end-of-session review (2026-11-05), for his sort:** only the vendor pick sends its
+>   open (`openToken`) with its writes. The Bill page's other writes (16 `setHeader` calls, line
+>   add / delete, taxes, the item rows' cells) go without one, so a blur write in flight while the
+>   clerk opens another Bill can, by the same path, land on the Bill opened; and the unsaved-changes
+>   gate does not count a write still in flight (in the probe it did not ask). Proposed: the page
+>   stamps every Bill write with its current `openToken` in one place (the API adapter), and main
+>   refuses any Bill write for a left open (`billOpenLeft`), with the probe extended to a typed
+>   Bill number. Or leave it to multi-window, which gives each window's writes their own document.
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's

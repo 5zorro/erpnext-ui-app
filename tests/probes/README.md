@@ -186,6 +186,10 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
   `session.defaultSession.webRequest.onBeforeRequest` once): the Bill's item lookups are
   `run_doc_method`, its background PO/receipt reads `/api/resource/…`, live link searches
   `search_link`.
+- A **held reply** (not a refused one): `holdRequests(app, urlPart, bodyPart)` keeps the matching
+  requests in flight until `releaseHeld(app)`, so the clerk's next move lands inside the wait every
+  run (`heldCount` says how many wait); then `erpUp`. The pick's "does this vendor exist" is
+  `frappe.client.get_list` with the vendor's name in its body (`vendor-pick-left-bill.probe.js`).
 - Bill steps a probe must answer as a clerk would: Save and Submit ask "receive with this bill?"
   first (`bill-receive-bill-only`), Submit needs the amount due typed (`bill-amount-due`,
   `billCompareTotal`); the page reads the vendor from its box, which `setHeader` does not repaint

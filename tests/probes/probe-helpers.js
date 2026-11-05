@@ -216,6 +216,39 @@ export const erpDownAfter = (app, part, n) =>
   }, [part, n]);
 export const erpUp = (app) => app.evaluate(({ session }) => session.defaultSession.webRequest.onBeforeRequest(null));
 
+/**
+ * A held reply: every request to ERPNext whose URL contains `urlPart` and whose body (decoded)
+ * contains `bodyPart` is held in flight, not refused, until `releaseHeld`; everything else goes
+ * through. Lag makes edges common (5zorro): this puts the clerk's next move inside a reply's wait
+ * every run. `heldCount` says how many wait. Like `erpDown`, it replaces the session's request
+ * hook: call `releaseHeld`, then `erpUp`, in `finally`. Example: `vendor-pick-left-bill.probe.js`.
+ */
+export const holdRequests = (app, urlPart, bodyPart) =>
+  app.evaluate(({ session }, [u, b]) => {
+    globalThis.__probeHeld = [];
+    session.defaultSession.webRequest.onBeforeRequest((d, cb) => {
+      if (d.url.includes(u)) {
+        const body = (d.uploadData || []).map((x) => (x.bytes ? Buffer.from(x.bytes).toString("utf8") : "")).join("");
+        let text = body;
+        try {
+          text = decodeURIComponent(body.replace(/\+/g, " "));
+        } catch {
+          /* keep it raw */
+        }
+        if (text.includes(b)) {
+          globalThis.__probeHeld.push(cb);
+          return;
+        }
+      }
+      cb({});
+    });
+  }, [urlPart, bodyPart]);
+export const heldCount = (app) => app.evaluate(() => (globalThis.__probeHeld || []).length);
+export const releaseHeld = (app) =>
+  app.evaluate(() => {
+    for (const cb of (globalThis.__probeHeld || []).splice(0)) cb({});
+  });
+
 /** In a Find page. */
 export const inFind = (app, js, ms) => inView(app, "findDoc", js, ms);
 

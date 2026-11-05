@@ -20,35 +20,8 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { launchShell, waitForE2eApi, e2eCall } from "../../e2e/helpers.js";
-import { inDoc, inErp, openNewDoc, report, docQuiet, sleep, keys, searchDone, warmCopies, focusTestId, erpUp } from "./probe-helpers.js";
+import { inDoc, inErp, openNewDoc, report, docQuiet, sleep, keys, searchDone, warmCopies, focusTestId, erpUp, holdRequests, heldCount, releaseHeld } from "./probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "./probe-user.js";
-
-/** Hold every request to ERPNext whose URL has `urlPart` and whose body names `bodyPart`. */
-const holdRequests = (app, urlPart, bodyPart) =>
-  app.evaluate(({ session }, [u, b]) => {
-    globalThis.__probeHeld = [];
-    session.defaultSession.webRequest.onBeforeRequest((d, cb) => {
-      if (d.url.includes(u)) {
-        const body = (d.uploadData || []).map((x) => (x.bytes ? Buffer.from(x.bytes).toString("utf8") : "")).join("");
-        let text = body;
-        try {
-          text = decodeURIComponent(body.replace(/\+/g, " "));
-        } catch {
-          /* keep it raw */
-        }
-        if (text.includes(b)) {
-          globalThis.__probeHeld.push(cb);
-          return;
-        }
-      }
-      cb({});
-    });
-  }, [urlPart, bodyPart]);
-const heldCount = (app) => app.evaluate(() => (globalThis.__probeHeld || []).length);
-const releaseHeld = (app) =>
-  app.evaluate(() => {
-    for (const cb of (globalThis.__probeHeld || []).splice(0)) cb({});
-  });
 
 /** ERPNext's open form: which Bill, its vendor, its line count, whether it has unsaved changes. */
 const erpForm = (app) =>
@@ -95,6 +68,7 @@ for (const kind of ["draft", "submitted"]) {
       expect(target, `a ${kind} Bill with a vendor to open`).toBeTruthy();
       const vendor = vendors.find((v) => v !== target.supplier);
       report("scene", { target, vendor });
+      expect(vendor, "another vendor to pick").toBeTruthy();
 
       await openNewDoc(app, "bill", "/app/purchase-invoice/new");
       await docQuiet(app);
@@ -143,6 +117,7 @@ for (const kind of ["draft", "submitted"]) {
       expect.soft(after && after.lines, "its lines").toBe(before && before.lines);
       expect.soft(after && after.unsaved, "no unsaved change in ERPNext's form").toBe(false);
     } finally {
+      if (app) await releaseHeld(app).catch(() => {});
       if (app) await erpUp(app).catch(() => {});
       if (clerk) await clerk.retire().catch((e) => report("retire-failed", String(e)));
       if (app && draft) {
