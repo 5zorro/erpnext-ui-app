@@ -6,8 +6,8 @@ export function billApiFromErpDoc(api) {
   if (!api) throw new Error("Doc API missing");
   return {
     getSnapshot: () => api.getSnapshot(),
-    setHeader: (field, value) => api.setHeader(field, value),
-    clearForVendorChange: (value) => api.clearForVendorChange(value),
+    setHeader: (field, value, opts) => api.setHeader(field, value, opts),
+    clearForVendorChange: (value, opts) => api.clearForVendorChange(value, opts),
     checkRef: (billNo, opts) => api.checkRef(billNo, opts || {}),
     prefetchVendorRefs: (supplier) =>
       api.prefetchVendorRefs ? api.prefetchVendorRefs(supplier || "") : Promise.resolve({ ok: false }),

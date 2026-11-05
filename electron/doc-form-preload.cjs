@@ -125,9 +125,9 @@ contextBridge.exposeInMainWorld("erpDoc", {
   inFlight: () => inFlight,
   getUi: () => invoke("doc-get-ui"),
   getSnapshot: () => invoke("doc-get-snapshot"),
-  setHeader: (field, value) => invokeSkin("bill-set-header", "doc-set-header", field, value),
+  setHeader: (field, value, opts) => invokeSkin("bill-set-header", "doc-set-header", field, value, opts || null),
   // Museum OI-200: before a vendor switch — warn (Keep is the default), then clear the document.
-  clearForVendorChange: (value) => invoke("doc-clear-for-vendor-change", value),
+  clearForVendorChange: (value, opts) => invoke("doc-clear-for-vendor-change", value, opts || null),
   setDateExpected: (value) => invoke("doc-set-date-expected", value),
   setItem: (rowIndex, field, value) =>
     invokeSkin("bill-set-item", "doc-set-item", rowIndex, field, value),

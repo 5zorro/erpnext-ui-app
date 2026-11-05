@@ -7406,9 +7406,30 @@ async function billSetHeader(field, value) {
   }
   return raw;
 }
-ipcMain.handle("bill-set-header", (_e, field, value) =>
-  field === "supplier" ? queuedVendorWrite("write", () => billSetHeader(field, value)) : billSetHeader(field, value),
-);
+ipcMain.handle("bill-set-header", (_e, field, value, opts) => {
+  if (billOpenLeft(opts)) return billOpenLeftAnswer("write", field, opts);
+  return field === "supplier"
+    ? queuedVendorWrite("write", () => billSetHeader(field, value), opts)
+    : billSetHeader(field, value);
+});
+
+/**
+ * A Bill page's write names the open it was asked on (`openToken`, the page's copy of
+ * `billLoadGen`). When a newer Bill open has started since, or the Bill is no longer open, the
+ * write is for a Bill the clerk has left and must not land on the one ERPNext shows now (plan
+ * 2026-10-25 closeout, probe `vendor-pick-left-bill`: a vendor picked on a new Bill, its check
+ * cut off by opening a submitted Bill, was written into that Bill's form). Main decides, not the
+ * page: the page learns of the new open only when its form arrives, main the moment it starts.
+ * @param {{ openToken?: number }|null|undefined} opts
+ */
+function billOpenLeft(opts) {
+  const token = Number(opts && opts.openToken) || 0;
+  return token > 0 && (activeDocSkin !== "bill" || token !== billLoadGen);
+}
+function billOpenLeftAnswer(kind, field, opts) {
+  navDebug("bill-open-left", `${kind} ${field || ""} dropped: asked on open ${Number(opts && opts.openToken) || 0}, now ${activeDocSkin === "bill" ? billLoadGen : activeDocSkin || "none"}`);
+  return { ok: false, superseded: true, reason: "The Bill this was for is no longer open." };
+}
 
 /**
  * Museum OI-200, follow-up (5zorro 2026-11-01: a re-pick while the server lags is the common
@@ -7432,12 +7453,14 @@ const openDocKey = () => `${activeDocSkin || ""}|${(dirtyState.doc && dirtyState
  * @template T
  * @param {"clear"|"write"} kind
  * @param {() => Promise<T>} step
+ * @param {{ openToken?: number }|null} [opts] the Bill open the page asked on (`billOpenLeft`)
  * @returns {Promise<T | { ok: false, superseded: true, reason: string }>}
  */
-function queuedVendorWrite(kind, step) {
+function queuedVendorWrite(kind, step, opts = null) {
   const asked = vendorPickSeq;
   const docAsked = openDocKey();
   const run = async () => {
+    if (billOpenLeft(opts)) return billOpenLeftAnswer(kind, "supplier", opts);
     if (asked !== vendorPickSeq || docAsked !== openDocKey()) {
       navDebug("vendor-change", `superseded ${kind} (pick ${asked}, now ${vendorPickSeq}; doc ${docAsked} -> ${openDocKey()})`);
       return { ok: false, superseded: true, reason: "A newer vendor pick replaced this one." };
@@ -7515,9 +7538,10 @@ async function clearForVendorChange(value) {
     scratch: { dateExpected: dateExpectedScratch },
   };
 }
-ipcMain.handle("doc-clear-for-vendor-change", (_e, value) => {
+ipcMain.handle("doc-clear-for-vendor-change", (_e, value, opts) => {
+  if (billOpenLeft(opts)) return billOpenLeftAnswer("clear", "supplier", opts);
   vendorPickSeq += 1;
-  return queuedVendorWrite("clear", () => clearForVendorChange(value));
+  return queuedVendorWrite("clear", () => clearForVendorChange(value), opts);
 });
 
 ipcMain.handle("bill-check-ref", async (_e, billNo, opts) => checkBillRef(billNo, opts));

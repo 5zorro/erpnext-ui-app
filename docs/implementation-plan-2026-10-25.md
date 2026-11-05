@@ -26,8 +26,14 @@
 >      doc-form's "ERPNext rejected the save").
 >   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
 >      functions, measured 2026-11-04).
-> - **Waiting on his answer:** 3b findings 3, 5 and 6 (judged "leave"); the shared rows module's
->   ~35 hooks; the vendor pick's open check that no probe has reproduced.
+> - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
+>   module's hooks go with item 4; item 3's failed-save path shows the Bill's way on every form (a
+>   toast and the red status line, no dialog: *"i don't like blocking modals and dialogues unless
+>   the gate is the point"*); a probe for the vendor pick's open check. **Built 2026-11-05:** the
+>   probe `vendor-pick-left-bill` holds the pick's "does the vendor exist" reply and opens another
+>   Bill meanwhile: the vendor was written into that Bill's form (a draft and a submitted one; no
+>   gate asked; the page's check never fired). Main now refuses the pick's clear and write once a
+>   newer Bill open has started; both cases pass, and fail with the check off.
 > - **Already parked, no action:** OI-187, OI-188, OI-189, OI-190 (settled with multi-window).
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
@@ -538,8 +544,9 @@ stability in mind):**
   pick whose live checks (does the vendor exist, clear before a switch) were still out when New was
   pressed again was written to the next Bill. Re-checked, that run was the double-press guard (a New
   while one is opening joins it, so there was one Bill); the probe now replaces the blank with another
-  open. The pick still notes the open it started on and stops (defensive; no probe reproduces that
-  race yet).
+  open. The pick still notes the open it started on and stops. **2026-11-05: that check was too
+  late** (closeout item 8, probe `vendor-pick-left-bill`); main now refuses the pick's clear and
+  write for a Bill the clerk has left (HANDOFF § Navigation spine).
 - **Commits:** B `0888e11`, A `f5bb484`, the refused-call fix `f4c21c1` (G27). Proofs: B's focused
   probes 26/26 from a snapshot; A's two slow-ERPNext tests fail on B and pass on A; the fix's
   no-box doors fail on A and pass with it.

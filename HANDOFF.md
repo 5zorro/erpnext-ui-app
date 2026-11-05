@@ -619,8 +619,13 @@ fixed (2026-10-24):
   *that* open arrives (`openToken`), then sends them in order. If another open replaces it or it
   fails, they are refused with a reason, never sent to another document. When ERPNext's blank
   arrives it is the same Bill to the page: the clerk's typing, place and open pick list stay. A
-  vendor pick whose live checks are still out when another open starts stops before it writes (the
-  page compares `openToken`; defensive, no probe reproduces that race yet). New pressed while a New is still opening joins it (`billNewInflight`,
+  vendor pick whose live checks are still out when another open starts never writes to the Bill
+  opened: the pick sends the open it started on (`openToken`) with its clear and its write, and
+  **main** refuses either once a newer Bill open has started (`billOpenLeft`, trail
+  `bill-open-left`). The page's own check comes too late: opening a saved Bill reloads the ERPNext
+  page, which ends the pick's question at once, before the page hears of the new Bill (probe
+  `vendor-pick-left-bill`, a held reply: before, the vendor landed on the draft or submitted Bill
+  opened, with no gate asked). Not yet on the PO / Item Receipt pages (they have no open counter). New pressed while a New is still opening joins it (`billNewInflight`,
   the double-press guard), so the clerk's typing stays on the one blank. The PO and Item Receipt get
   (1) only.
 - **Opening another document from a Doc page asks** about unsaved typing, wherever the door is

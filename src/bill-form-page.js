@@ -2234,10 +2234,11 @@ export async function bootBillFormPage(api) {
   }
 
   /** Museum OI-200: before a vendor pick, a switch clears the whole Bill (`vendor-change-ui.js`). */
-  function clearBeforeVendorSwitch(v) {
+  function clearBeforeVendorSwitch(v, pickedOn = 0) {
     return clearPageBeforeVendorSwitch({
       api,
       value: v,
+      openToken: pickedOn,
       box: el.vendor,
       kept: String(paintedHeaderValue("supplier") ?? ""),
       docLabel: "bill",
@@ -2277,7 +2278,7 @@ export async function bootBillFormPage(api) {
       };
       if (await vendorIsMissing(v, "vendor")) return;
       if (leftBill()) return;
-      if (!(await clearBeforeVendorSwitch(v))) return;
+      if (!(await clearBeforeVendorSwitch(v, pickedOn))) return;
       if (leftBill()) return;
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "link_pick",
@@ -2302,7 +2303,7 @@ export async function bootBillFormPage(api) {
         setHeader: (field, value) =>
           leftBill()
             ? Promise.resolve({ ok: false, superseded: true })
-            : withFieldSettleLoading(field, api.setHeader(field, value)),
+            : withFieldSettleLoading(field, api.setHeader(field, value, { openToken: pickedOn })),
         openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
           if (res && res.paymentTermsSettle) {
