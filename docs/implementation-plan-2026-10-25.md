@@ -54,6 +54,7 @@
 >   stamps every Bill write with its current `openToken` in one place (the API adapter), and main
 >   refuses any Bill write for a left open (`billOpenLeft`), with the probe extended to a typed
 >   Bill number. Or leave it to multi-window, which gives each window's writes their own document.
+>   **His pick (2026-11-05): leave it to multi-window** (museum OI-040).
 
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
