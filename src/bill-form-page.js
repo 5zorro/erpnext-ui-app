@@ -771,6 +771,7 @@ export async function bootBillFormPage(api) {
       api,
       linkMounted,
       setStatus,
+      pickerScope: () => "bill",
       onCreatePeek: (input, doctype) => {
         peekReturn = peekReturnTarget(input, doctype);
       },

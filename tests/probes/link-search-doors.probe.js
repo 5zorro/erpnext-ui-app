@@ -57,8 +57,13 @@ function trail(userData) {
   }
 }
 
-/** The lists main.js copies (src/link-list-cache.js WARM_LINK_DOCTYPES). */
-const WARM = ["Supplier", "Customer", "Item", "Payment Terms Template", "Mode of Payment", "Project", "Sales Taxes and Charges Template", "Purchase Taxes and Charges Template"];
+/**
+ * The copied lists (src/link-list-cache.js WARM_LINK_DOCTYPES) a Bill's pickers use: since the
+ * closeout of plan 2026-10-25 an opening warms only its own form's lists (probe
+ * `warm-lists-used-only`), so Customer and the two tax templates are no longer copied here and the
+ * "copies loaded" / "copy outcomes" doors list five lists, not eight.
+ */
+const WARM = ["Supplier", "Item", "Payment Terms Template", "Mode of Payment", "Project"];
 /** A list's settled load outcome in the trail, or "" while it has none. */
 function outcome(lines, dt) {
   const mine = lines.filter((l) => l.includes(` dt=${dt} `) || l.endsWith(` dt=${dt}`));
@@ -82,7 +87,7 @@ test("link search: every door answers as before", async () => {
 
     await openNewDoc(app, "bill", "/app/purchase-invoice/new");
     await docQuiet(app);
-    await warmCopies(app, ["Supplier", "Customer", "Item", "Mode of Payment"]);
+    await warmCopies(app, ["Supplier", "Item", "Mode of Payment"]);
     // Every copied list has its outcome: loaded, too many to copy, or failed on its one retry (a
     // first try can be cut off by the page reloading as the Doc page opens).
     await expect.poll(() => WARM.every((dt) => outcome(trail(userData), dt)), { timeout: 30_000, intervals: [200] }).toBe(true);

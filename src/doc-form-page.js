@@ -511,6 +511,7 @@ function linkPickerDeps() {
     api,
     linkMounted,
     setStatus,
+    pickerScope: () => (ui && ui.profileId) || "",
     onCreatePeek: (input, doctype) => {
       peekReturn = peekReturnTarget(input, doctype);
     },

@@ -328,6 +328,11 @@ search for two (the search, then the vendors' last POs). Rules, with the numbers
   names starting with the text first, then the rest, each in plain string order (capitals first);
   vendors then re-ranked by PO activity (OI-131). The copy is `search_link` itself (empty text, no
   page limit) plus each row's rank from one ordered `get_list`. Proven 54/54 against live.
+- **Only the open form's lists (5zorro 2026-11-04: no request a form does not use):** each picker
+  tells main which list it searches, once per form (`link-picker-mounted`, from the shared
+  `mountLinkPicker`; `electron/ipc/link-search.js` keeps them per form). A Doc open, a peek's
+  return and a picker mounted on the open form warm only those; a list no opened form has a
+  picker for is copied only when something searches it (probe `warm-lists-used-only`).
 - **Freshness:** loaded 2 s after a Doc open (the ERPNext page is moving to the same document at
   that moment and cut every load off; a cut-off load retries once 3 s later); "changed since" on
   every Doc open (≥ 10 s apart), right after a peek returns (Create Vendor…), and at most once a

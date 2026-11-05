@@ -35,13 +35,15 @@ let raceTimeout = async (p) => p;
 let lastLogin = () => ({ state: "unknown", user: null });
 /** The open Bill as main.js holds it (its company, for the Account search). @type {() => { doc?: any }} */
 let dirtyState = () => ({});
+/** Which Doc form is open now (main.js `activeDocSkin`), so a picker's list is noted against it. */
+let activeSkin = () => null;
 
 /**
  * Once, at start-up: what link search borrows from main.js, then its IPC handlers.
- * @param {{ erpEval: typeof erpEval, navDebug: typeof navDebug, raceTimeout: typeof raceTimeout, lastLogin: typeof lastLogin, dirtyState: typeof dirtyState }} deps
+ * @param {{ erpEval: typeof erpEval, navDebug: typeof navDebug, raceTimeout: typeof raceTimeout, lastLogin: typeof lastLogin, dirtyState: typeof dirtyState, activeSkin: typeof activeSkin }} deps
  */
 export function initLinkSearch(deps) {
-  ({ erpEval, navDebug, raceTimeout, lastLogin, dirtyState } = deps);
+  ({ erpEval, navDebug, raceTimeout, lastLogin, dirtyState, activeSkin } = deps);
   registerLinkSearchHandlers();
 }
 
@@ -385,11 +387,64 @@ function checkLinkListChanged(doctype, why) {
   return run;
 }
 
-/** Load what is missing; check what is older than `minAgeMs`. In the background. */
-export function warmLinkLists(why, minAgeMs = 10_000) {
+/**
+ * The lists each Doc form's pickers use, as the page mounts them (`link-picker-mounted`; plan
+ * 2026-10-25 closeout, 5zorro: no request a form does not use). A form's opening warms only its own
+ * lists; one it has not mounted yet this launch is warmed when its picker mounts.
+ * @type {Map<string, Set<string>>}
+ */
+const linkListsBySkin = new Map();
+/** Lists noted since the last warm, warmed together once the page has settled. */
+const pickerListsPending = new Set();
+let pickerWarmTimer = null;
+
+/** The lists the Doc form open now uses (empty until its pickers have mounted once). */
+function listsOfOpenForm() {
+  const skin = activeSkin();
+  return skin ? [...(linkListsBySkin.get(skin) || [])] : [];
+}
+
+/** Warm the open Doc form's lists: on its opening, or now (`minAgeMs` 0) after a peek. */
+export function warmOpenFormLinkLists(why, minAgeMs = 10_000) {
+  warmLinkLists(why, minAgeMs, listsOfOpenForm());
+}
+
+/**
+ * A picker mounted on a Doc form (`skin`, the form the page shows; the Bill page mounts its
+ * pickers when it loads, before any Bill is open): note its list, and warm it if that form had not
+ * used it, if that form is the one open. `false` only when the page should tell again (no form
+ * named).
+ */
+function notePickerList(skin, doctype) {
+  const dt = String(doctype || "").trim();
+  skin = String(skin || "").trim();
+  if (!skin) return false;
+  if (!dt || !WARM_LINK_DOCTYPES.includes(dt)) return true;
+  let used = linkListsBySkin.get(skin);
+  if (!used) linkListsBySkin.set(skin, (used = new Set()));
+  if (used.has(dt)) return true;
+  used.add(dt);
+  // A page loaded ahead (the Bill page at start-up) only notes: that form's opening warms it.
+  if (skin !== activeSkin()) return true;
+  pickerListsPending.add(dt);
+  // Not at once: the ERPNext page may still be moving to the form, which would cut the load off.
+  if (!pickerWarmTimer) {
+    pickerWarmTimer = setTimeout(() => {
+      pickerWarmTimer = null;
+      const lists = [...pickerListsPending];
+      pickerListsPending.clear();
+      warmLinkLists("picker-mounted", 10_000, lists);
+    }, 2000);
+  }
+  return true;
+}
+
+/** Load what is missing of `doctypes`; check what is older than `minAgeMs`. In the background. */
+export function warmLinkLists(why, minAgeMs = 10_000, doctypes = []) {
   if (lastLogin().state !== "in") return;
   const now = Date.now();
   for (const dt of WARM_LINK_DOCTYPES) {
+    if (!doctypes.includes(dt)) continue;
     const copy = linkListCopies.get(dt);
     if (linkListNoRead.has(dt)) continue;
     if (!copy) void loadLinkList(dt, why);
@@ -530,6 +585,8 @@ function registerLinkSearchHandlers() {
     }
     return { ok: true, exists: !!raw.exists };
   });
+
+  ipcMain.handle("link-picker-mounted", (_e, skin, doctype) => notePickerList(skin, doctype));
 
   ipcMain.handle("link-list-refresh", async (_e, doctype) => {
     const dt = String(doctype || "").trim();

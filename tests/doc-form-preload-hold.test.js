@@ -24,6 +24,7 @@ const PASSED = new Map([
   ["bill-search-link", "pick lists answer from the shell's copies (or live search, no form)"],
   ["doc-search-link", "same"],
   ["link-list-refresh", "same"],
+  ["link-picker-mounted", "notes which lists the page's pickers use; no form"],
   ["doc-link-exists", "asks ERPNext whether a record exists; no form"],
   ["bill-new", "New again replaces the provisional blank (its held calls are refused)"],
   ["doc-new", "same"],

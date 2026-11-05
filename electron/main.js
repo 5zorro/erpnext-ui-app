@@ -95,7 +95,7 @@ import { initRelinkMethodChange } from "./ipc/relink-method-change.js";
 import {
   initLinkSearch,
   searchLink,
-  warmLinkLists,
+  warmOpenFormLinkLists,
   dropLinkLists,
   linkListsUser,
   linkListsLoaded,
@@ -2175,7 +2175,7 @@ function dismissSoftPeekFromEsc() {
   if (surfaceMode !== "erp") return;
   // Back from a peek (Create Vendor…, an edit in Vanilla): what was just made or changed there
   // is what the clerk types next, so check the warm lists now rather than in a minute.
-  setTimeout(() => warmLinkLists("peek-return", 0), 1500);
+  setTimeout(() => warmOpenFormLinkLists("peek-return", 0), 1500);
   const here = currentErpPathname() || currentRoute || "";
   const decision = resolveSoftPeekEscAction({
     parked: parkedDocSurface,
@@ -5182,7 +5182,7 @@ async function showDocForm(skinId, route, opts = {}) {
     if (inPlace) navDebug("doc-open-in-place", currentRoute);
     // Every Doc open checks the warm pick lists, not only a page boot (doc-get-ui): 5zorro's
     // dogfood 2026-10-21 opened Bills four times in place and only the first checked.
-    setTimeout(() => warmLinkLists("doc-open"), 2000);
+    setTimeout(() => warmOpenFormLinkLists("doc-open"), 2000);
     // A fresh new document is built in the page when ERPNext is up and nothing would be asked
     // (openFreshNewDocInPlace); otherwise the full load, as before.
     const freshInPlace = !inPlace && openingFreshNew && (await openFreshNewDocInPlace(profile.doctype));
@@ -9514,7 +9514,7 @@ ipcMain.handle("doc-get-ui", () => {
   if (!activeDocSkin) return null;
   // A Doc page opening is when its pickers are about to be typed into (plan 2026-10-21). Not at
   // once: the ERPNext page is moving to the same document, which would cut the loads off.
-  setTimeout(() => warmLinkLists("doc-open"), 2000);
+  setTimeout(() => warmOpenFormLinkLists("doc-open"), 2000);
   return docFormUiPayload(activeDocSkin);
 });
 
@@ -10936,6 +10936,7 @@ initLinkSearch({
   raceTimeout,
   lastLogin: () => lastLogin,
   dirtyState: () => dirtyState,
+  activeSkin: () => activeDocSkin,
 });
 initHealthIncidents({
   erpBase: ERP_BASE,

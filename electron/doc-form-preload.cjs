@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld("erpDoc", {
   searchLink: (doctype, txt, filters) =>
     invokeSkin("bill-search-link", "doc-search-link", doctype, txt || "", filters || null),
   refreshLinkList: (doctype) => invoke("link-list-refresh", doctype || ""),
+  notePickerList: (skin, doctype) => invoke("link-picker-mounted", skin || "", doctype || ""),
   linkExists: (doctype, name) => invoke("doc-link-exists", doctype || "", name || ""),
   onSurfaceLeft: (cb) => {
     const handler = (_e, next) => cb(next);

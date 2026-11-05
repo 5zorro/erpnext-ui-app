@@ -10,7 +10,11 @@
 >      Sales Order ones that read a lens preference, the blank-sandbox Estimate price, the A/R
 >      Invoice / Receive Payment and desk-hatch ones, OI-190's void-and-amend.
 >   2. **The warm pick lists make no request a form does not use** (3b finding 4: every Doc open
->      rechecked all 8 lists).
+>      rechecked all 8 lists). **Built 2026-11-05:** each picker tells main its list once per form;
+>      an opening warms only those. Probe `warm-lists-used-only` failed on the code before (Customer
+>      and both tax templates copied with no picker for them) and passes; `link-search-doors` now
+>      waits on the Bill's five lists, not eight (its copy doors change on purpose);
+>      `dogfood-warm-new-vendor`, `dogfood-warm-lists-chaos` pass.
 >   3. **One failed-save path and wording for every Doc form, failing loud with ERPNext's reason**
 >      (R6a-1 step 2 kept the two pages' wordings as found: the Bill's "Save did not finish", the
 >      doc-form's "ERPNext rejected the save").
