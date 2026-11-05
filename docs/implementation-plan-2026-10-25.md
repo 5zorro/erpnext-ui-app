@@ -8,7 +8,13 @@
 >   1. **The smoke specs that fail on any code are removed** (*"it makes debugging new stuff
 >      hairy, and the purpose of the tests likely is lost to time or is now irrelevant"*): the
 >      Sales Order ones that read a lens preference, the blank-sandbox Estimate price, the A/R
->      Invoice / Receive Payment and desk-hatch ones, OI-190's void-and-amend.
+>      Invoice / Receive Payment and desk-hatch ones, OI-190's void-and-amend. **Done 2026-11-05:**
+>      12 tests that failed on the code before (run 2026-11-05 from a snapshot of `8e36ebd`):
+>      `scaffold-ar-doc-skins` whole (its 4 tests; the A/R family has no spec now),
+>      `scaffold-peek-return-focus`'s Sales Order blocks (create Customer ×2, create Item on line
+>      2, Create ▾ › Purchase Order, the Sources column), `scaffold-find-doc`'s F3 and "sort …
+>      remember the search", `scaffold-bill`'s void-and-amend offer (OI-190). What those covered
+>      on the Sales Order has no spec now; the probes and `nav:check` do not reach it either.
 >   2. **The warm pick lists make no request a form does not use** (3b finding 4: every Doc open
 >      rechecked all 8 lists). **Built 2026-11-05:** each picker tells main its list once per form;
 >      an opening warms only those. Probe `warm-lists-used-only` failed on the code before (Customer
