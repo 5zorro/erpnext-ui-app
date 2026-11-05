@@ -1,5 +1,25 @@
 # Implementation plan 2026-10-25 — split `main.js` by concern; write the Bill / doc-form code once
 
+> **Closing (2026-11-04).** The rules that outlive the plan are in HANDOFF § *Main-process code by
+> concern*. The residuals, as 5zorro sorted them the same day:
+> - **To multi-window (museum OI-040):** R2-5's doc-form and Bill moves. They hold the
+>   one-of-everything state multi-window must make per window, so they are done once, there.
+> - **Promoted, built before this file is deleted** (his words; he dogfoods after them):
+>   1. **The smoke specs that fail on any code are removed** (*"it makes debugging new stuff
+>      hairy, and the purpose of the tests likely is lost to time or is now irrelevant"*): the
+>      Sales Order ones that read a lens preference, the blank-sandbox Estimate price, the A/R
+>      Invoice / Receive Payment and desk-hatch ones, OI-190's void-and-amend.
+>   2. **The warm pick lists make no request a form does not use** (3b finding 4: every Doc open
+>      rechecked all 8 lists).
+>   3. **One failed-save path and wording for every Doc form, failing loud with ERPNext's reason**
+>      (R6a-1 step 2 kept the two pages' wordings as found: the Bill's "Save did not finish", the
+>      doc-form's "ERPNext rejected the save").
+>   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
+>      functions, measured 2026-11-04).
+> - **Waiting on his answer:** 3b findings 3, 5 and 6 (judged "leave"); the shared rows module's
+>   ~35 hooks; the vendor pick's open check that no probe has reproduced.
+> - **Already parked, no action:** OI-187, OI-188, OI-189, OI-190 (settled with multi-window).
+
 > **Status: step 0 built (2026-10-25): 0a, T-3, T-2, T-1. R6a-1 steps 1–2 built (2026-10-26).
 > R6a-1 step 3 built (2026-10-26): the item rows, and one taxes table for every form, the Bill's
 > way (5zorro). Plan 2026-10-26 (tests that run while the app is open, and where their time goes)

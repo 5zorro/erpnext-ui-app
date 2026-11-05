@@ -12,18 +12,12 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
-   `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
-   once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
-   `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
-   the commit gate); step 3 built (the item rows, `src/doc-form-item-rows-ui.js`;
-   one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); R6a-2's four
-   dialogs built (2026-10-27 … 31, `src/bill-*-modal-ui.js`); R2-5 started 2026-10-31 from the far
-   end (printing, Papers, Find, payment settings, then re-link and method change, health and
-   incidents, then link search with its warm copies moved to `electron/ipc/`). 3b, the
-   performance deep dive, ran 2026-11-01 (its report is in the plan), before R2-5's bridge /
-   doc-form / Bill moves.
-   Decided: share, not merge, with every data-entry form in view
-   (the doc-form page already runs six; Pay Outstanding and Journal Entry may follow).
+   `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form
+   code once — R2-5, R6a-1, R6a-2 from the review) — **closing (2026-11-04):** its rules are
+   folded into **Main-process code by concern** below (where each concern lives, how a family
+   moves, the shared Doc-form modules); its doc-form and Bill moves go with multi-window (museum
+   OI-040); the four items 5zorro promoted at the closeout are being built (its status box), then
+   the file is deleted. Code comments citing "plan 2026-10-25" mean that section.
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
@@ -38,12 +32,13 @@
    and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
-   **In flight:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter) — the
-   review of what is installed is done, the two-month wait is in force (`.npmrc`), and ESLint
-   10.9.1 is installed (2026-11-01); next its config, an import rule of our own, and `npm test`.
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
+   **Closed:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter; closed
+   2026-11-04) — the package policy and its reasons are in `AGENT_CONVENTIONS.md` § *Packages*,
+   the lint commands in *Run / validate* below, each lint setting's reason in `eslint.config.js`.
+   Code comments citing "plan 2026-10-31" mean those.
+   `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
    where their time goes; built and closed 2026-10-26) — folded into **Test strategy** below (the
    rules) and *Run / validate* (`npm run test:times`, the charts); its performance follow-up is
    plan 10-25's step 3b. Code comments citing "plan 2026-10-26" mean that section.
@@ -126,7 +121,7 @@ flowchart LR
 | `pwa/receiving/` · `src/receiving/` · `ops/receiving-proxy/` | **Parked** (plan 2026-09-21): the Receiving Scanner, a second client on the phone — its pages, its pure logic (also served to the pages as `/receiving/lib/`), and the Caddy front door in front of ERPNext's own web server (frappe_docker untouched). Phone setup: `docs/receiving-phone-setup.md`. Invariant 4 holds: the phone uses the proxy's address for both |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
-| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; how a move goes is in that plan's *Order*). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
+| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; which families, and how a move goes: **Main-process code by concern** below). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
 | `docs/` | beta-slice, commit conventions, **dated** working plans |
 | Museum `~/agent-harness/erpnext/doc-shell/` | Reference only — layouts, OIs, lessons |
@@ -436,6 +431,80 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
   `frappe.desk.form.load.get_docinfo` — anyone who can read the order may read its Comments there,
   while listing the Comment doctype needs System Manager. `costingNotesByLine` places a note by the
   `salesOrderItem` its rows name; a note on an order with no line for the item places nothing.
+
+### Main-process code by concern, and the Doc forms' shared code (folded from plan 2026-10-25, 2026-11-04)
+
+Plan 2026-10-25 split `main.js` by concern (review 10-19 R2-5) and wrote the code the Bill and
+the doc-form pages had twice once (R6a-1, R6a-2). Nothing a clerk sees was meant to change; where
+it did, 5zorro asked for it (the doc-form forms' taxes table works like the Bill's; × is mouse-only;
+ALL CAPS is one layer). Code comments citing "plan 2026-10-25" or "plan 10-25" mean this section;
+its full text (step 0's DF-03 fixes T-1…T-3, each move's proof, the 3b performance report) is in
+git history, the parent of the commit that deleted it.
+
+**Moved to `electron/ipc/`** (main.js 13,534 → 11,041 lines): `print.js` (the print dialog,
+printing in place, the queue, the self-healing PDF), `papers.js` (the compare pane's attachments),
+`find.js` (the Find pages' list, peek and remembered search), `payment-settings.js` (the batch prefs
+and the delay calendar), `relink-method-change.js` (payment re-link and method change),
+`health-incidents.js` (the DB light, Diagnose, IT recovery, the issue dialogs, Feedback),
+`link-search.js` (every pick list's search and the warm copies).
+
+**Still in `main.js`, on purpose (5zorro, 2026-11-04):** the doc-form and Bill handlers (about 70 of
+the 136 left) with the bridge driving, the navigation spine, the lenses. Their state is one of
+everything: one hidden ERPNext page (`erp`), one `dirtyState`, one `currentRoute`, one
+`surfaceMode`, one open counter (`billLoadGen` / `billLoadToken`). Moving that word for word keeps
+it one of everything, and multi-window (museum OI-040) needs it per window, so those two moves are
+done once, as the first build step of multi-window, into a per-window home.
+
+**How a family moves** (keep it the same for any later move):
+- The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
+  from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js variable
+  that is replaced over time (`win`, `erp`) is lent as a getter (`mainWindow()`, `erpView()`), the
+  only edit inside moved code. The rest of main.js reads the module through named exports, never
+  its state directly.
+- Handlers register inside `register<Family>Handlers()`, so importing a module does nothing until
+  main.js calls its init.
+- Tests that find a handler or a pinned line read `tests/main-process-source.js` (main.js, then each
+  `electron/ipc/*.js`), never main.js alone. The coverage map (`src/architecture-families.js`)
+  lists the new file under its family.
+- **Proof:** lint (in `npm test`; its import rule catches a named import that does not exist, which
+  would stop the app at start-up), `npm test`, one headless start (`E2E=1 ERP_USER_DATA_DIR=<tmp>`
+  under `timeout -k 5 25`; read the errors), the family's specs from `npm run dogfood:for-change`
+  (compare failure names with a run on the code before, not counts). Where nothing drives a door,
+  a **doors probe** does: it walks every door and `report`s what the clerk sees, run on the code
+  before (twice, to see what varies) and after, the outputs `diff`ed. Keep it in `tests/probes/`
+  (`pay-settings-doors`, `relink-method-doors`, `health-incident-doors`, `link-search-doors`).
+
+**Share, not merge (5zorro, 2026-10-25), with every data-entry form in view.** The Bill and the
+doc-form page stay two pages; what they share is a module both import, each page's extras passed in
+as hooks. The doc-form page runs six forms (PO, Item Receipt, Estimate, Sales Order, Invoice, Receive
+Payment). Rules for a shared module:
+- It talks about *lines*, not items: the lines table comes from the layout (`linesTable`, default
+  `items`), and a rule really about items (an empty Item line is deleted on Tab) is a hook.
+- Bill-only or A/P-only behaviour (Rec'd, Assign, account-company blockers, the Bill's own save)
+  comes in as a hook, never a `profileId` branch inside the module.
+- When the two pages differ, the Bill's way wins (5zorro's dogfooded page).
+
+| Shared module | What it does for both pages |
+|---|---|
+| `item-table-keys-ui.js`, `item-table-nav.js`, `item-sort-hold.js` | The lines table's keys: edit / nav mode, Tab and the arrows in screen order, a key dropped while a write is out (≤ 10 s), the order held while the clerk types and the "Sort is out of date 🔄" banner |
+| `doc-form-item-rows-ui.js` | The rows: every shared cell, its write and the focus after it, pick lists, tape, × (each page adds its own cells after) |
+| `doc-form-tax-table-ui.js` | One taxes table for every form, the Bill's: the walk, commit on a move, a rate on a fixed row works out its amount, Rate % from the net total |
+| `doc-form-commit-gate-ui.js` (+ `doc-commit-gate-ui.js`, its DOM) | The commit gate: toolbar actions, the navigation gate, the preflight, doc-form's direct save |
+| `repaint-keeps-edit.js` | A repaint never changes the box being typed in (invariant 10) |
+| `doc-form-date-field-ui.js`, `doc-form-line-tabs-ui.js`, `doc-form-tax-notes-ui.js`, `calc/site-rounding-ask.js`, `item-import-ui.js`, `address-picker-ui.js` | Smaller shared pieces |
+| `bill-assign.js` + `-modal-ui.js`, `bill-informal-link.js` + `-modal-ui.js`, `bill-source-modal-ui.js` + `bill-source-flow.js`, `bill-allocate-charge-modal-ui.js` | The Bill's four dialogs, out of its closure (R6a-2); Assign's steps are a pure reducer |
+
+**For a new form (Journal Entry, Pay Outstanding's pages), what it would pass:** `lines: (d) =>
+d.accounts`, `lineKey: (l) => l.account` and its columns. Two item names are still built into the
+keys: ↑ / ↓ move in `qty`, and the focus after a write lands on the next line's `item_code`; each
+becomes a layout setting when a form without them shares the module. Receive Payment's `references`
+lines were left alone (5zorro, 2026-10-25). `.taxes-table` / `.taxes-add` in `doc-fields.css` stay
+for the check / ACH document to reuse.
+
+**Still duplicated** (measured 2026-11-04 with `r6a-same-named-functions.py`, the local notes file
+says where): 569 identical lines in 36 same-named functions, down from 1,295 in 55. The largest are
+`onHeaderBlur` (52), `beginAmountBackIn` (48), `doSave` (46), `paint` (45), `openSourcePicker` (36),
+`removeAllTaxes` (30). The pages are 4,428 (Bill) and 2,628 (doc-form) lines.
 
 ### Extension points (where new work plugs in)
 
