@@ -46,7 +46,7 @@ test("R2-1: a reload mid-save ends the wait and New still works", async () => {
     report("saving", { status: await inDoc(app, `document.getElementById("status").textContent`) });
     await e2eCall(app, "reloadErp");
     const t0 = Date.now();
-    await expect.poll(() => inDoc(app, `document.getElementById("status").textContent`), { timeout: 60_000 }).toMatch(/reloaded before the step finished/);
+    await expect.poll(() => inDoc(app, `document.getElementById("status").textContent`), { timeout: 60_000 }).toMatch(/Save did not finish — the ERPNext page reloaded before ERPNext answered and may still save it/);
     const after = await inDoc(app, `({ status: document.getElementById("status").textContent, saveDisabled: document.getElementById("btn-save").disabled })`);
     report("after-reload", { ...after, ms: Date.now() - t0 });
     expect(after.saveDisabled).toBe(false);

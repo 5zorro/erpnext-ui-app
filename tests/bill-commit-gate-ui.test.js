@@ -31,7 +31,7 @@ describe("Bill commit-gate modal contract", () => {
     assert.match(billFormPage, /Doc Bill \+ live ERP meta preflight passed/);
     assert.match(billFormPage, /listMandatory/);
     assert.match(billFormPage, /mergeSaveBlockers/);
-    assert.match(billFormPage, /commitGateErpFailureView/);
+    assert.match(billFormPage, /saveFailure\(r, \{ submit: !!submit, humanize: humanizeBillErpMessage \}\)/);
   });
 
   it("supports Escape, backdrop click, and traps Tab inside the modal choices", () => {

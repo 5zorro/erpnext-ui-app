@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createCommitGate } from "../src/doc-form-commit-gate-ui.js";
+import { saveFailure } from "../src/save-failure.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -63,7 +64,6 @@ function setup(over = {}) {
       readyTitle: () => "Doc Bill + live ERP meta preflight passed",
       cancelHint: () => "Choose Cancel to return to the Bill and fix these fields.",
       saveWarning: () => "",
-      erpFailureView: (reason) => ({ title: "ERPNext rejected the save:", blockers: [reason], blocked: true, hint: "x" }),
     },
     ...over,
   };
@@ -129,26 +129,27 @@ describe("the commit gate: saving from it", () => {
     assert.equal(els.commitGate.hidden, false);
   });
 
-  it("a save ERPNext refuses with blockers shows them all, keeps the gate, runs nothing", async () => {
-    const refused = [];
-    const { gate, els, calls, state } = setup({ afterSaveRefused: (reason, b) => refused.push([reason, b]) });
-    state.saveRes = { ok: false, reason: "Mandatory", blockers: ["Due Date is required."] };
+  it("a save that fails shows the page's failure words (save-failure.js), keeps the gate, runs nothing", async () => {
+    const { gate, els, calls, state } = setup();
+    const reply = { ok: false, outcome: "refused", erpReason: "Due Date is required.", reason: "Due Date is required.", blockers: ["Due Date is required."] };
+    state.saveRes = { ...reply, failure: saveFailure(reply, { submit: true }) };
     await gate.requestToolbarAction("find");
     await gate.resolve("submit");
     assert.deepEqual(calls, [["save", true]]);
     assert.deepEqual(state.meta, ["Due Date is required."]);
+    assert.equal(els.commitGateValidationTitle.textContent, "Submit rejected — ERPNext says:");
     assert.equal(els.commitGateBlockers.items.length, 1);
-    assert.equal(els.commitGateHint.textContent, "Choose Cancel to return to the Bill and fix these fields.");
-    assert.deepEqual(refused, [["Mandatory", ["Due Date is required."]]]);
     assert.equal(els.commitGate.hidden, false);
   });
 
-  it("a save refused without blockers shows ERPNext's reason", async () => {
+  it("no answer is never called a rejection in the gate", async () => {
     const { gate, els, state } = setup();
-    state.saveRes = { ok: false, reason: "Timed out" };
+    const reply = { ok: false, timedOut: true, waitedMs: 12000, reason: "Save did not finish in Vanilla within 12s" };
+    state.saveRes = { ...reply, failure: saveFailure(reply) };
     await gate.requestToolbarAction("find");
     await gate.resolve("save");
-    assert.equal(els.commitGateValidationTitle.textContent, "ERPNext rejected the save:");
+    assert.equal(els.commitGateValidationTitle.textContent, "Save did not finish — ERPNext did not answer in 12 s");
+    assert.doesNotMatch(els.commitGateHint.textContent, /rejected/i);
   });
 });
 
@@ -216,28 +217,6 @@ describe("the commit gate: the live preflight", () => {
   });
 });
 
-describe("the commit gate: direct save (doc-form)", () => {
-  it("shows why a Submit was refused; Save & submit from it closes it once it works", async () => {
-    const copy = { textContent: "" };
-    const { gate, els, buttons, calls } = setup({ directSave: { copyEl: () => copy } });
-    gate.openDirectSaveBlocked(["Supplier is required."], { submit: true });
-    assert.equal(els.commitGateTitle.textContent, "Cannot submit yet");
-    assert.equal(buttons.discard.hidden, true);
-    assert.equal(buttons.save.hidden, true);
-    await gate.resolve("submit");
-    assert.deepEqual(calls, [["save", true]]);
-    assert.equal(els.commitGate.hidden, true);
-    assert.equal(buttons.discard.hidden, false);
-    assert.equal(copy.textContent, "This decision must be resolved before you can continue.");
-  });
-
-  it("a page without it (the Bill) never opens it", () => {
-    const { gate, els } = setup();
-    gate.openDirectSaveBlocked(["x"], {});
-    assert.equal(els.commitGate.hidden, true);
-  });
-});
-
 describe("both pages use the shared gate and keep none of their own", () => {
   for (const page of ["../src/bill-form-page.js", "../src/doc-form-page.js"]) {
     it(page.slice(7), () => {
@@ -251,8 +230,11 @@ describe("both pages use the shared gate and keep none of their own", () => {
       }
     });
   }
-  it("the doc-form page has the direct-save gate; the Bill does not", () => {
-    assert.match(read("../src/doc-form-page.js"), /directSave: \{ copyEl:/);
-    assert.doesNotMatch(read("../src/bill-form-page.js"), /directSave:/);
+  it("a failed toolbar Save opens no dialog on either page (5zorro: no blocking dialog unless the gate is the point)", () => {
+    for (const page of ["../src/bill-form-page.js", "../src/doc-form-page.js"]) {
+      const src = read(page);
+      assert.doesNotMatch(src, /openDirectSaveBlocked|directSave:/, page);
+      assert.match(src, /announceSaveFailure\(/, page);
+    }
   });
 });

@@ -210,9 +210,9 @@ import {
   commitGateSaveEnabled,
   billExpensesTaxOrientation,
   gateTriggerLabel,
-  commitGateErpFailureView,
-  formatSaveFailureReason,
 } from "../src/bill-action-flow.js";
+import { saveFailure } from "../src/save-failure.js";
+import { createDocToast } from "../src/doc-toast-ui.js";
 import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
 import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
@@ -655,6 +655,12 @@ export async function bootBillFormPage(api) {
     expenseNote: document.querySelector("[data-testid='bill-expense-note']"),
   };
   if (el.docTitle) el.docTitle.textContent = "Bill";
+  // The toast and the status line's scroll (shared with every Doc form, `doc-toast-ui.js`).
+  const toast = createDocToast({ toastEl: () => el.toast, statusEl: () => el.status, setStatus: (t, c) => setStatus(t, c) });
+  const showBlockingToast = toast.showBlocking;
+  const showToast = toast.show;
+  const showDialogToast = toast.showOverDialog;
+  const hideDialogToast = toast.hideOverDialog;
   
   function commitGateEls() {
     return {
@@ -855,15 +861,6 @@ export async function bootBillFormPage(api) {
     el.status.className = "status" + (cls ? " " + cls : "");
   }
 
-  function scrollStatusIntoView() {
-    if (el.status) {
-      try {
-        el.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      } catch {
-        el.status.scrollIntoView();
-      }
-    }
-  }
 
   function scrollToBillItems() {
     if (el.tabItems && el.panelExpenses && el.panelExpenses.hidden === false) {
@@ -881,121 +878,31 @@ export async function bootBillFormPage(api) {
   }
 
   /**
-   * A clickable toast shown over an open dialog (the dialogs' backdrops sit above the toast's own
-   * layer), cleared by `hideDialogToast` (review S1: a second Apply held back).
-   * @param {string} text
-   * @param {() => void} onClick
+   * A save that failed or was held back: the words every form uses (`save-failure.js`), in the red
+   * status line and a toast. The Bill's own toasts for its PO-limit cases go first.
+   * @param {import("./save-failure.js").SaveFailure} failure
+   * @param {string[]} [rawTexts] the reply's own texts (which PO-limit case it is)
    */
-  function showDialogToast(text, onClick) {
-    if (el.toast) el.toast.classList.add("over-dialog");
-    showBlockingToast(text, () => {
-      hideDialogToast();
-      onClick();
-    });
-  }
-
-  function hideDialogToast() {
-    if (!el.toast || !el.toast.classList.contains("over-dialog")) return;
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = null;
-    el.toast.classList.remove("show", "fade-out", "is-action", "over-dialog");
-    el.toast.onclick = null;
-    el.toast.hidden = true;
-    el.toast.textContent = "";
-  }
-
-  /**
-   * @param {string} text
-   * @param {(() => void)|null} [onClick]
-   * @param {number} [ms]
-   */
-  function showBlockingToast(text, onClick, ms = 8000) {
-    if (!el.toast) {
-      scrollStatusIntoView();
-      setStatus(text, "err");
-      return;
-    }
-    if (toastTimer) clearTimeout(toastTimer);
-    el.toast.hidden = false;
-    el.toast.textContent = text;
-    el.toast.classList.remove("fade-out");
-    el.toast.classList.add("show");
-    if (onClick) {
-      el.toast.classList.add("is-action");
-      el.toast.onclick = () => {
-        onClick();
-        scrollStatusIntoView();
-      };
+  function announceSaveFailure(failure, rawTexts = []) {
+    const texts = rawTexts.filter(Boolean).map(String);
+    if (texts.some((t) => t === OVERBILL_CAP_CACHE_BLOCKER)) {
+      toast.announceSaveFailure(failure, { toast: "PO limits still loading — wait for source columns, then Save again.", onClick: scrollToBillItems });
+    } else if (texts.some(isOverBillingError)) {
+      toast.announceSaveFailure(failure, { toast: "Over PO limit — click to review items (excess must be a NIC row).", onClick: scrollToBillItems });
     } else {
-      el.toast.classList.remove("is-action");
-      el.toast.onclick = null;
+      toast.announceSaveFailure(failure);
     }
-    toastTimer = setTimeout(() => {
-      el.toast.classList.add("fade-out");
-      el.toast.classList.remove("is-action");
-      el.toast.onclick = null;
-      toastTimer = setTimeout(() => {
-        el.toast.classList.remove("show", "fade-out");
-        el.toast.hidden = true;
-        el.toast.textContent = "";
-        toastTimer = null;
-      }, 650);
-    }, ms);
   }
 
   /**
+   * A save held back by the Bill's own checks (before ERPNext is asked).
    * @param {string} reason
    * @param {string[]|undefined} blockers
+   * @param {boolean} [submit]
    */
-  function announceSaveBlocker(reason, blockers) {
-    scrollStatusIntoView();
-    const rawTexts = [reason, ...(Array.isArray(blockers) ? blockers : [])]
-      .filter(Boolean)
-      .map(String);
-    const texts = rawTexts.map(humanizeBillErpMessage).filter(Boolean);
-    const msg = texts[0] || "Save blocked — fix validation issues.";
-    if (rawTexts.some((t) => t === OVERBILL_CAP_CACHE_BLOCKER)) {
-      showBlockingToast("PO limits still loading — wait for source columns, then Save again.", () => {
-        scrollToBillItems();
-      });
-    } else if (rawTexts.some(isOverBillingError)) {
-      showBlockingToast("Over PO limit — click to review items (excess must be a NIC row).", () => {
-        scrollToBillItems();
-      });
-    } else {
-      showBlockingToast("Blocking validation — click to see details at top.", () => {
-        scrollStatusIntoView();
-      });
-    }
-    setStatus(msg, "err");
-  }
-  
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let toastTimer = null;
-  /**
-   * Fading notice (last-row delete, etc.).
-   * @param {string} text
-   * @param {number} [ms]
-   */
-  function showToast(text, ms = 3200) {
-    if (!el.toast) {
-      setStatus(text, "warn");
-      return;
-    }
-    if (toastTimer) clearTimeout(toastTimer);
-    el.toast.hidden = false;
-    el.toast.textContent = text;
-    el.toast.classList.remove("fade-out");
-    el.toast.classList.add("show");
-    toastTimer = setTimeout(() => {
-      el.toast.classList.add("fade-out");
-      toastTimer = setTimeout(() => {
-        el.toast.classList.remove("show", "fade-out");
-        el.toast.hidden = true;
-        el.toast.textContent = "";
-        toastTimer = null;
-      }, 650);
-    }, ms);
+  function announceSaveBlocker(reason, blockers, submit = false) {
+    const list = Array.isArray(blockers) && blockers.length ? blockers : [reason];
+    announceSaveFailure(saveFailure({ ok: false, reason, blockers: list }, { submit, humanize: humanizeBillErpMessage }), [reason, ...list]);
   }
   
   /**
@@ -1137,14 +1044,12 @@ export async function bootBillFormPage(api) {
     },
     runAction: (action, trigger) => runPendingAction(action, trigger),
     announceBlocker: (text, blockers) => announceSaveBlocker(text, blockers),
-    afterSaveRefused: (reason, blockers) => announceSaveBlocker(reason, blockers),
     text: {
       title: () => "Bill",
       triggerLabel: gateTriggerLabel,
       readyTitle: () => "Doc Bill + live ERP meta preflight passed",
       cancelHint: () => "Choose Cancel to return to the Bill and fix these fields.",
       saveWarning: commitGateSaveWarning,
-      erpFailureView: commitGateErpFailureView,
     },
   });
   
@@ -3654,7 +3559,7 @@ export async function bootBillFormPage(api) {
     if (typeof api.navDebug === "function") api.navDebug("jit-receipts-start", `groups=${p.groups.length}`);
     setStatus("Saving the draft before making Item Receipts…");
     const saved = await api.save({ submit: false });
-    if (!(saved && saved.ok)) return stop(formatSaveFailureReason(saved, "Save draft"));
+    if (!(saved && saved.ok)) return stop(saveFailure(saved, { humanize: humanizeBillErpMessage }).status);
     paint(saved.doc, amountDue);
     setStatus(`Making ${p.groups.length} Item Receipt${p.groups.length === 1 ? "" : "s"}…`);
     const made = await api.makeJitReceipts(p.groups);
@@ -3678,7 +3583,7 @@ export async function bootBillFormPage(api) {
     // receipts, and a retry cannot make them twice (dogfood 2026-10-10).
     const kept = await api.save({ submit: false });
     if (!(kept && kept.ok)) {
-      return stop(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made, but saving their links failed: ${formatSaveFailureReason(kept, "Save draft")} Submit again — the receipts are reused, not made twice.`);
+      return stop(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made, but saving their links failed: ${saveFailure(kept, { humanize: humanizeBillErpMessage }).status} Submit again — the receipts are reused, not made twice.`);
     }
     paint(kept.doc, amountDue);
     setStatus(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made and linked — submitting the bill…`);
@@ -3776,7 +3681,7 @@ export async function bootBillFormPage(api) {
       }
       const blockers = currentSaveBlockers();
       if (!commitGateSaveEnabled(blockers)) {
-        announceSaveBlocker(blockers[0] || "Fix Amount Due checksum before save.", blockers);
+        announceSaveBlocker(blockers[0] || "Fix Amount Due checksum before save.", blockers, !!submit);
         return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
       }
       const capBlockers = listPoCapCacheBlockers();
@@ -3784,7 +3689,7 @@ export async function bootBillFormPage(api) {
         if (typeof api.navDebug === "function") {
           api.navDebug("bill-overbill-cache-block-renderer", capBlockers[0]);
         }
-        announceSaveBlocker(capBlockers[0], capBlockers);
+        announceSaveBlocker(capBlockers[0], capBlockers, !!submit);
         return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
       const receive = await resolveReceiveBeforeSave(!!submit);
@@ -3850,22 +3755,20 @@ export async function bootBillFormPage(api) {
       if (r && Array.isArray(r.blockers) && r.blockers.length) {
         metaBlockers = r.blockers;
       }
-      const reason = formatSaveFailureReason(
-        r,
-        submit ? "Save & submit" : "Save draft",
-      );
-      announceSaveBlocker(reason, r && Array.isArray(r.blockers) ? r.blockers : undefined);
+      const failure = saveFailure(r, { submit: !!submit, humanize: humanizeBillErpMessage });
+      announceSaveFailure(failure, r ? [r.reason, ...(Array.isArray(r.blockers) ? r.blockers : [])] : []);
       if (splitCount > 0) {
         setStatus(
-          `${reason} (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC — retry Save & submit).`,
+          `${failure.status} (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC — retry Save & submit).`,
           "err",
         );
       }
       return {
         ok: false,
-        reason,
+        reason: failure.status,
         blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
         timedOut: !!(r && r.timedOut),
+        failure,
       };
     } finally {
       saveInFlight = false;

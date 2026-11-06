@@ -66,13 +66,13 @@ import {
   billExpensesTaxOrientation,
   commitGateProgressLabel,
   commitGateSuccessLabel,
-  formatSaveFailureReason,
 } from "./bill-action-flow.js";
+import { saveFailure, plainErpText } from "./save-failure.js";
+import { createDocToast } from "./doc-toast-ui.js";
 import {
   listDocFormSaveBlockers,
   docGateTriggerLabel,
   docCommitGateSaveWarning,
-  docCommitGateErpFailureView,
   commitGateSaveEnabled,
   linkDoctypeForDocField,
   focusTargetAfterDocSourceModal,
@@ -332,7 +332,7 @@ function buildDocFormEl() {
     commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
     commitGateBlockers: document.getElementById("commit-gate-blockers"),
     commitGateHint: document.getElementById("commit-gate-hint"),
-    commitGateCopy: document.getElementById("commit-gate-copy"),
+    toast: document.getElementById("bill-toast"),
     addLine: document.getElementById("btn-add-line"),
     importItems: document.getElementById("btn-import-items"),
     clearQty: null,
@@ -801,8 +801,8 @@ function currentSaveBlockers() {
 
 /**
  * The commit gate (src/doc-form-commit-gate-ui.js, shared with the Bill page): the one gate over
- * unsaved work, opened by Find / New / Print or a navigation, and the direct-save gate that shows
- * why a Save or Submit was refused.
+ * unsaved work, opened by Find / New / Print or a navigation. A toolbar Save or Submit that fails
+ * opens no gate: `announceSaveFailure` says it, the Bill's way.
  */
 const commitGate = createCommitGate({
   els: commitGateEls,
@@ -835,16 +835,14 @@ const commitGate = createCommitGate({
     paintDirtyPill();
   },
   runAction: (action) => runPendingAction(action),
-  announceBlocker: (text) => setStatus(text, "warn"),
+  announceBlocker: (text, blockers) => announceSaveFailure(saveFailure({ ok: false, reason: text, blockers }, { humanize: erpWords })),
   text: {
     title: () => docTitle(),
     triggerLabel: (trigger) => docGateTriggerLabel(trigger, gateLabels()),
     readyTitle: () => `${docTitle()} + live ERP meta preflight passed`,
     cancelHint: () => `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
     saveWarning: (blockers) => docCommitGateSaveWarning(blockers, docTitle()),
-    erpFailureView: (reason) => docCommitGateErpFailureView(reason, docTitle()),
   },
-  directSave: { copyEl: () => el && el.commitGateCopy },
 });
 
 function docFindPrefill() {
@@ -900,8 +898,25 @@ function focusItemCell(rowIndex, field, opts = {}) {
   itemKeys.focusCell(rowIndex, field, opts);
 }
 
+/** The toast and the status line's scroll, shared with the Bill page (`doc-toast-ui.js`). */
+const toast = createDocToast({ toastEl: () => el && el.toast, statusEl: () => el && el.status, setStatus: (t, c) => setStatus(t, c) });
+
 function showToast(text) {
-  setStatus(text, "warn");
+  toast.show(text);
+}
+
+/** ERPNext's words in this form's own: "This document" named, a Purchase Receipt an Item Receipt. */
+function erpWords(text) {
+  return plainErpText(text, { title: docTitle(), doctype: (ui && ui.doctype) || "" });
+}
+
+/**
+ * A save that failed or was held back: the red status line and a toast, the Bill's way — no
+ * dialog (5zorro: no blocking dialog unless the gate is the point).
+ * @param {import("./save-failure.js").SaveFailure} failure
+ */
+function announceSaveFailure(failure) {
+  toast.announceSaveFailure(failure);
 }
 
 /**
@@ -2119,8 +2134,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
-      commitGate.openDirectSaveBlocked(blockers, { submit });
-      setStatus(blockers[0] || "Fix save prerequisites first.", "err");
+      announceSaveFailure(saveFailure({ ok: false, blockers }, { submit: !!submit, humanize: erpWords }));
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
     const choice = submit ? "submit" : "save";
@@ -2139,28 +2153,14 @@ async function doSave(submit) {
     if (r && Array.isArray(r.blockers) && r.blockers.length) {
       metaBlockers = r.blockers;
     }
-    const reason = formatSaveFailureReason(
-      r,
-      submit ? "Save & submit" : "Save draft",
-    );
-    setStatus(reason, "err");
-    const mergedBlockers = mergeSaveBlockers(
-      listDocFormSaveBlockers({
-        doc: lastDoc,
-        supplier: supplierInput() && supplierInput().value,
-      }),
-      r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
-    );
-    commitGate.openDirectSaveBlocked(mergedBlockers, {
-      submit,
-      erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
-      reason,
-    });
+    const failure = saveFailure(r, { submit: !!submit, humanize: erpWords });
+    announceSaveFailure(failure);
     return {
       ok: false,
-      reason,
+      reason: failure.status,
       blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
       timedOut: !!(r && r.timedOut),
+      failure,
     };
   } finally {
     saveInFlight = false;

@@ -2804,10 +2804,16 @@ async function erpEval(js, chaosChannel = "erpEval", bridgeMethod = "") {
       resolve(value);
     };
     /** @param {string} why */
-    const interrupt = (why) => finish({ ok: false, reason: `The ERPNext page ${why} before the step finished.` });
+    // Marked for a save's words (src/save-failure.js): no answer came, so it may still have saved.
+    const interrupt = (why) => finish({ ok: false, outcome: "no-answer", interrupted: why, reason: `The ERPNext page ${why} before the step finished.` });
     pendingErpEvals.add(interrupt);
     erpExec(js).then(finish, (e) =>
-      finish({ ok: false, notRun: !!(e && /** @type {any} */ (e).notRun), reason: String(e && e.message ? e.message : e) }),
+      finish({
+        ok: false,
+        notRun: !!(e && /** @type {any} */ (e).notRun),
+        outcome: e && /** @type {any} */ (e).notRun ? "not-sent" : "no-answer",
+        reason: String(e && e.message ? e.message : e),
+      }),
     );
   });
 }
@@ -2833,7 +2839,7 @@ function interruptPendingErpEvals(why) {
  * @param {Promise<T>} promise
  * @param {number} ms
  * @param {string} what
- * @returns {Promise<T|{ ok: false, timedOut: true, reason: string }>}
+ * @returns {Promise<T|{ ok: false, timedOut: true, outcome: "no-answer", waitedMs: number, reason: string }>}
  */
 async function raceTimeout(promise, ms, what) {
   let timer;
@@ -2841,7 +2847,7 @@ async function raceTimeout(promise, ms, what) {
     return await Promise.race([
       promise,
       new Promise((resolve) => {
-        timer = setTimeout(() => resolve(timeoutFailure(what)), ms);
+        timer = setTimeout(() => resolve({ ...timeoutFailure(what), outcome: "no-answer", waitedMs: ms }), ms);
       }),
     ]);
   } finally {
@@ -6678,7 +6684,8 @@ async function saveBillFromErp(opts = {}) {
     }
     return { ...raw, overbillRepaired: repair.repaired };
   }
-  const out = raw && typeof raw === "object" ? raw : { ok: false, reason: "Save failed." };
+  // No reply from the ERPNext page at all: whether ERPNext was asked is not known.
+  const out = raw && typeof raw === "object" ? raw : { ok: false, outcome: "no-answer", reason: "Save failed — the ERPNext page gave no reply." };
   return { ...out, doc: dirtyState.doc, overbillRepaired: repair.repaired };
 }
 
@@ -10049,7 +10056,7 @@ async function saveDocFormFromErp(opts = {}) {
   }
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
-    : { ok: false, reason: "Save failed." };
+    : { ok: false, outcome: "no-answer", reason: "Save failed — the ERPNext page gave no reply." };
 }
 
 ipcMain.handle("doc-save", async (_e, opts) =>

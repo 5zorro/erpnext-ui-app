@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 33;
+  var VERSION = 34;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -429,15 +429,22 @@
    * fails (msgprint shown, callback never called) — that caused Doc Bill's long timeout.
    * We preflight mandatories, clear stuck freeze locks, race savedocs against a short
    * deadline, and scrape visible Vanilla messages when the call never returns.
+   *
+   * Every failed reply says which case it is (`outcome`, worded by src/save-failure.js):
+   * "not-sent" — stopped before ERPNext was asked; "refused" — ERPNext (its server, or its form
+   * scripts) said no, nothing saved, `erpReason` its words ("" when it gave none); "no-answer" —
+   * no reply in `waitedMs`, or the connection broke (HTTP 0 / 502 / 503 / 504): it may still save;
+   * "unread" — ERPNext answered yes but no document came back.
    */
   function saveDoc(action) {
     return (async function () {
       try {
         var f = window.cur_frm;
-        if (!f || !f.doc) return { ok: false, reason: "No form open in Vanilla (cur_frm missing)." };
+        if (!f || !f.doc) return { ok: false, outcome: "not-sent", reason: "No form open in Vanilla (cur_frm missing)." };
         if (f.doc.docstatus !== 0) {
           return {
             ok: false,
+            outcome: "not-sent",
             reason:
               "Document is not a draft (docstatus=" +
               f.doc.docstatus +
@@ -461,6 +468,7 @@
         if (pre && pre.blockers && pre.blockers.length) {
           return {
             ok: false,
+            outcome: "not-sent",
             preflight: true,
             blockers: pre.blockers,
             reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
@@ -481,6 +489,8 @@
             var visible = collectVisibleVanillaErrors();
             return {
               ok: false,
+              outcome: "refused",
+              erpReason: visible.length ? visible.join(" · ") : trigMsg || "",
               reason: visible.length ? visible.join(" · ") : trigMsg || "Client validation failed.",
               blockers: visible.length ? visible : [trigMsg],
             };
@@ -489,6 +499,8 @@
             var visFail = collectVisibleVanillaErrors();
             return {
               ok: false,
+              outcome: "refused",
+              erpReason: visFail.length ? visFail.join(" · ") : "",
               reason:
                 (visFail.length ? visFail.join(" · ") : null) ||
                 "Client validation failed (form script set frappe.validated = false).",
@@ -501,6 +513,7 @@
           if (pre && pre.blockers && pre.blockers.length) {
             return {
               ok: false,
+              outcome: "not-sent",
               preflight: true,
               blockers: pre.blockers,
               reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
@@ -519,7 +532,9 @@
               var scraped = collectVisibleVanillaErrors();
               finish({
                 ok: false,
+                outcome: "no-answer",
                 timedOut: true,
+                waitedMs: SAVE_CALL_TIMEOUT_MS,
                 blockers: scraped.length ? scraped : undefined,
                 reason: scraped.length
                   ? scraped.join(" · ")
@@ -530,7 +545,7 @@
               });
             }, SAVE_CALL_TIMEOUT_MS);
 
-            frappe.call({
+            var req = frappe.call({
               method: "frappe.desk.form.save.savedocs",
               args: { doc: f.doc, action: action },
               freeze: true,
@@ -548,6 +563,8 @@
                   } catch (eHide) {}
                   finish({
                     ok: false,
+                    outcome: "refused",
+                    erpReason: msg || "",
                     reason: msg || "Save failed — ERPNext gave no reason.",
                     blockers: msg ? [msg] : undefined,
                   });
@@ -577,6 +594,7 @@
                 } catch (eJson) {
                   finish({
                     ok: false,
+                    outcome: "unread",
                     reason: "Save succeeded but could not read document back — reload the Bill.",
                   });
                   return;
@@ -585,6 +603,7 @@
                   var scrapedOk = collectVisibleVanillaErrors();
                   finish({
                     ok: false,
+                    outcome: "unread",
                     reason:
                       (scrapedOk.length ? scrapedOk.join(" · ") : null) ||
                       "Vanilla returned no document after " + action + ".",
@@ -604,6 +623,20 @@
               },
               error: function (r) {
                 clearTimeout(timer);
+                // No reply from ERPNext itself: the connection broke (0) or the proxy gave up
+                // waiting (502 / 503 / 504) — the save may still go through.
+                var httpStatus = req && typeof req.status === "number" ? req.status : 0;
+                if (httpStatus === 0 || httpStatus === 502 || httpStatus === 503 || httpStatus === 504) {
+                  var scrapedGone = collectVisibleVanillaErrors();
+                  finish({
+                    ok: false,
+                    outcome: "no-answer",
+                    httpStatus: httpStatus,
+                    reason: action + " got no reply from ERPNext (HTTP " + httpStatus + ").",
+                    blockers: scrapedGone.length ? scrapedGone : undefined,
+                  });
+                  return;
+                }
                 // A refusal (HTTP 417) lands here, not in `callback`: read ERPNext's own message
                 // first — the scraped dialog carries its chrome ("Message … Confirm") — R6b-2.
                 var errMsg = refusalText(r);
@@ -614,6 +647,9 @@
                 } catch (eHide2) {}
                 finish({
                   ok: false,
+                  outcome: "refused",
+                  httpStatus: httpStatus,
+                  erpReason: errMsg || (scrapedErr.length ? scrapedErr.join(" · ") : ""),
                   reason:
                     errMsg ||
                     (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
@@ -629,7 +665,7 @@
         });
       } catch (e) {
         clearSaveLocks();
-        return { ok: false, reason: String(e && e.message ? e.message : e) };
+        return { ok: false, outcome: "not-sent", reason: String(e && e.message ? e.message : e) };
       }
     })();
   }

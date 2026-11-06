@@ -139,27 +139,6 @@ export function commitGateSaveWarning(blockers = []) {
 }
 
 /**
- * Gate panel state after ERPNext rejects a save (local preflight had already passed).
- * @param {string} [reason]
- * @returns {{ title: string, blockers: string[], hint: string, blocked: boolean }}
- */
-export function commitGateErpFailureView(reason) {
-  const text =
-    reason && String(reason).trim()
-      ? String(reason).trim()
-      : "ERPNext rejected the save (no detail returned).";
-  const timedOut = /timed out/i.test(text);
-  return {
-    title: timedOut ? "Save did not finish:" : "ERPNext rejected the save:",
-    blockers: [text],
-    hint: timedOut
-      ? "Cancel, open Vanilla to see the live error/freeze, fix or reload, then try again."
-      : "Cancel to return to the Bill and fix what Vanilla reported, or Discard / try again.",
-    blocked: true,
-  };
-}
-
-/**
  * Whether save-based gate buttons may be clicked.
  * @param {string[]} blockers
  */
@@ -307,27 +286,6 @@ export function timeoutFailure(what, opts = {}) {
     reason: `${what} timed out —${mid}${suggest}`.replace(/\s+/g, " ").trim(),
     blockers: detail ? [detail] : undefined,
   };
-}
-
-/**
- * Prefer a concrete ERP/Vanilla reason over a generic timeout string.
- * @param {{ ok?: boolean, timedOut?: boolean, reason?: string, blockers?: string[], preflight?: boolean }|null|undefined} raw
- * @param {string} [fallbackWhat]
- */
-export function formatSaveFailureReason(raw, fallbackWhat = "Save") {
-  if (!raw || typeof raw !== "object") {
-    return `${fallbackWhat} failed — no response from Vanilla.`;
-  }
-  if (Array.isArray(raw.blockers) && raw.blockers.length) {
-    return raw.blockers.filter(Boolean).join(" · ");
-  }
-  if (raw.reason && String(raw.reason).trim()) {
-    return String(raw.reason).trim();
-  }
-  if (raw.timedOut) {
-    return timeoutFailure(fallbackWhat).reason;
-  }
-  return `${fallbackWhat} failed — check Vanilla validations.`;
 }
 
 /**

@@ -35,6 +35,19 @@
 >      N s and may still save it; reload before trying again" — shown the Bill's way (toast + red
 >      status), no dialog (memory: no blocking dialogs unless the gate is the point). The commit
 >      gate, when it is open, shows the same words.
+>      **Built 2026-11-06:** `src/save-failure.js` words every failed save on both pages (plus
+>      "Can't save yet — …" for a save the shell's own checks stop, and two cases found on the
+>      way: the ERPNext page reloading under a save is "did not finish … may still save it", and
+>      "may have gone through" when ERPNext says yes but sends no document); the case comes from a
+>      mark the bridge puts on each reply (bridge v34; HTTP 0 / 502 / 503 / 504 = no answer), not
+>      from the words. The Bill's toast is shared (`src/doc-toast-ui.js`, its element moved into
+>      the shared chrome); doc-form's direct-save dialog is removed, and with it, by reading the code
+>      (not probed), a refused save from the navigation gate that swapped the gate's navigation for
+>      the dialog without releasing main's wait. Text
+>      scraped off ERPNext's page is left out of "no answer": in the probe it was the earlier
+>      refusal's dialog. Probe `save-failure-words` (a real refusal on a PO and a Bill, and a held
+>      PO save) fails on the code before and passes; `double-press`,
+>      `dogfood-r2-1-reload-mid-save` (its words updated) and the Bill / doc-form specs pass.
 >   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
 >      functions, measured 2026-11-04).
 > - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
