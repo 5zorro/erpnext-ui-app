@@ -847,7 +847,9 @@ the 'i can't work while the probes are running'"*).**
   would leave new files out; the real index and stash are untouched; `node_modules` and
   `test-logs` are links to the main folder's, so the run's logs stay here), run the check in
   `<dir>`, then `npm run snapshot -- --remove <dir>`. Tried 2026-11-02: a probe from a copy and
-  one from the main folder queued on the shared lock, both passed.
+  one from the main folder queued on the shared lock, both passed. For a red run (a new probe on the code
+  before the fix), the copy's own `HEAD` already holds the working tree, so restore the old code by
+  name: `git -C <dir> checkout <old-commit> -- electron src` (not `HEAD`), keeping the new probe.
 - **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
   A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
   `test-logs/failures/` (the newest 30). Nothing kept goes under `test-results/`, which Playwright

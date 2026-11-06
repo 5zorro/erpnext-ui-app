@@ -67,7 +67,7 @@ import {
   commitGateProgressLabel,
   commitGateSuccessLabel,
 } from "./bill-action-flow.js";
-import { saveFailure, plainErpText } from "./save-failure.js";
+import { saveFailure, saveFailureKind, plainErpText } from "./save-failure.js";
 import { createDocToast } from "./doc-toast-ui.js";
 import {
   listDocFormSaveBlockers,
@@ -2150,7 +2150,9 @@ async function doSave(submit) {
       setStatus(commitGateSuccessLabel(choice));
       return { ok: true };
     }
-    if (r && Array.isArray(r.blockers) && r.blockers.length) {
+    // An unanswered save's texts are scraped off ERPNext's page (maybe an earlier refusal still on
+    // screen): never kept as blockers.
+    if (r && Array.isArray(r.blockers) && r.blockers.length && saveFailureKind(r) !== "no-answer") {
       metaBlockers = r.blockers;
     }
     const failure = saveFailure(r, { submit: !!submit, humanize: erpWords });

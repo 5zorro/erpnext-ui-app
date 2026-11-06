@@ -160,8 +160,9 @@ export function createCommitGate(deps) {
     if (saveRes && saveRes.ok) return true;
     const refused = saveRes && Array.isArray(saveRes.blockers) ? saveRes.blockers.filter(Boolean) : [];
     setBusy(false);
-    if (refused.length) deps.setMetaBlockers(refused);
     const failure = saveRes && saveRes.failure;
+    // No answer: its texts were scraped off ERPNext's page and may be stale — not blockers.
+    if (refused.length && !(failure && failure.kind === "no-answer")) deps.setMetaBlockers(refused);
     if (failure && failure.gate) {
       paintCommitGateValidation(els(), failure.gate);
     } else {

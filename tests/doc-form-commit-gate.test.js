@@ -151,6 +151,15 @@ describe("the commit gate: saving from it", () => {
     assert.equal(els.commitGateValidationTitle.textContent, "Save did not finish — ERPNext did not answer in 12 s");
     assert.doesNotMatch(els.commitGateHint.textContent, /rejected/i);
   });
+
+  it("an unanswered save's scraped texts never become blockers (they may be an earlier refusal's)", async () => {
+    const { gate, state } = setup();
+    const reply = { ok: false, outcome: "no-answer", timedOut: true, waitedMs: 12000, blockers: ["Message Could not find Project: X Confirm"] };
+    state.saveRes = { ...reply, failure: saveFailure(reply) };
+    await gate.requestToolbarAction("find");
+    await gate.resolve("save");
+    assert.deepEqual(state.meta, []);
+  });
 });
 
 describe("the commit gate: navigation", () => {

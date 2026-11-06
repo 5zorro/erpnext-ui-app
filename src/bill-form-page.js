@@ -211,7 +211,7 @@ import {
   billExpensesTaxOrientation,
   gateTriggerLabel,
 } from "../src/bill-action-flow.js";
-import { saveFailure } from "../src/save-failure.js";
+import { saveFailure, saveFailureKind } from "../src/save-failure.js";
 import { createDocToast } from "../src/doc-toast-ui.js";
 import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
@@ -3752,7 +3752,9 @@ export async function bootBillFormPage(api) {
         }
         return { ok: true };
       }
-      if (r && Array.isArray(r.blockers) && r.blockers.length) {
+      // An unanswered save's texts are scraped off ERPNext's page (maybe an earlier refusal still
+      // on screen): never kept as blockers.
+      if (r && Array.isArray(r.blockers) && r.blockers.length && saveFailureKind(r) !== "no-answer") {
         metaBlockers = r.blockers;
       }
       const failure = saveFailure(r, { submit: !!submit, humanize: humanizeBillErpMessage });

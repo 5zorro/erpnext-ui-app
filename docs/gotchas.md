@@ -1066,6 +1066,10 @@ Python sets `_error_message`, but an app or a later version may.
   messages are what the shell reads back.
 - To close one of these boxes from code, `delete frappe.msg_dialog.custom_onhide` first, or
   closing it can move the page.
+- Text scraped off the page later can be one of these leftovers: in probe `save-failure-words`
+  (2026-11-06) a save that got no answer scraped the *earlier* refusal's box ("Message Could not
+  find Project: … Confirm"). So an unanswered save never shows or keeps scraped text
+  (`src/save-failure.js`, the pages' `doSave`, the commit gate).
 
 ## G28 — How ERPNext builds a blank form, and what a reload of it costs (2026-11-03)
 
@@ -1119,3 +1123,19 @@ From Frappe v16.31.0's source, confirmed by probe `erp-hooks-no-leak` (museum OI
   and a New builds its blank before the wait starts, so ordinary opens added nothing. A wait that
   has to wait on an in-place page (the Doc page taking its form back after a peek or a detour in
   Vanilla) added three handlers each time.
+
+## G30 — A failed `frappe.call` says why only through its request's HTTP status (2026-11-06)
+
+**Cause (Frappe v16.31.0, `frappe/public/js/frappe/request.js`, `frappe.request.call`):** the
+`error` callback given to `frappe.call` gets the parsed reply only for a 417 (a refusal:
+validation, a missing link). For 401 / 403 / 404 / 413 / 500 / 502 / 504 / 508 it is called with
+**no argument**, after Frappe shows its own box ("Request Timed Out" for 504, "Internal Server
+Error" for 502); any other status, 0 included (the connection broke), passes the jqXHR. So the
+callback alone cannot tell "ERPNext said no" (417, 500: nothing saved, the transaction rolled
+back) from "no reply from ERPNext itself" (0, 502, 503, 504: a proxy gave up or the line broke,
+and the server may still finish the save).
+
+**Rule:** `frappe.call(...)` returns the jqXHR (`$.ajax(...)`; not with `debounce`): keep it and
+read `.status` in the callback. The bridge's `saveDoc` does (`var req = frappe.call(...)`) and
+marks 0 / 502 / 503 / 504 as no answer (`outcome: "no-answer"`), everything else as refused.
+

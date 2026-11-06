@@ -627,13 +627,11 @@
                 // waiting (502 / 503 / 504) — the save may still go through.
                 var httpStatus = req && typeof req.status === "number" ? req.status : 0;
                 if (httpStatus === 0 || httpStatus === 502 || httpStatus === 503 || httpStatus === 504) {
-                  var scrapedGone = collectVisibleVanillaErrors();
                   finish({
                     ok: false,
                     outcome: "no-answer",
                     httpStatus: httpStatus,
                     reason: action + " got no reply from ERPNext (HTTP " + httpStatus + ").",
-                    blockers: scrapedGone.length ? scrapedGone : undefined,
                   });
                   return;
                 }

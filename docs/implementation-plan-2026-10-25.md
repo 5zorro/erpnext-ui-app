@@ -48,6 +48,11 @@
 >      refusal's dialog. Probe `save-failure-words` (a real refusal on a PO and a Bill, and a held
 >      PO save) fails on the code before and passes; `double-press`,
 >      `dogfood-r2-1-reload-mid-save` (its words updated) and the Bill / doc-form specs pass.
+>      End-of-session review: an unanswered save's scraped texts were still kept as save blockers
+>      (on both pages and in the gate, as before), so a stale refusal could show as "Save is
+>      blocked by: …"; now never (gotchas G27, G30 for the HTTP status). Filed, not fixed: Save
+>      again after "did not finish" on a new document can make a second draft (museum OI-209,
+>      with multi-window).
 >   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
 >      functions, measured 2026-11-04).
 > - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
