@@ -744,6 +744,8 @@ export async function bootBillFormPage(api) {
 
   /** The clerk's move count when the bill on screen first appeared (focusVendorField). */
   let docShownMoveMark = 0;
+  /** The box holding the focus then: the last bill's place, not the clerk's on this one. */
+  let docShownFocus = null;
   let docShownName = "";
 
   function linkPickerDeps() {
@@ -2363,7 +2365,7 @@ export async function bootBillFormPage(api) {
   
   /** A new bill starts in Vendor, unless the clerk is already somewhere on it (src/party-focus.js). */
   function focusVendorField() {
-    return focusPartyBox({ box: el.vendor, shownMark: docShownMoveMark, userMoves, logFocus });
+    return focusPartyBox({ box: el.vendor, shownMark: docShownMoveMark, shownFocus: docShownFocus, userMoves, logFocus });
   }
   
   async function requestLinkedSourcePeek(route, kind) {
@@ -2640,8 +2642,12 @@ export async function bootBillFormPage(api) {
     if (opts.provisional) {
       docShownName = PROVISIONAL_BILL;
       docShownMoveMark = userMoves.mark();
+      docShownFocus = document.activeElement;
     } else if (doc && doc.name && String(doc.name) !== docShownName) {
-      if (!(afterProvisional && docShownName === PROVISIONAL_BILL)) docShownMoveMark = userMoves.mark();
+      if (!(afterProvisional && docShownName === PROVISIONAL_BILL)) {
+        docShownMoveMark = userMoves.mark();
+        docShownFocus = document.activeElement;
+      }
       docShownName = String(doc.name);
     }
     painting = true;

@@ -53,6 +53,12 @@ describe("the opening focus in Vendor", () => {
     assert.equal(focusPartyBox(deps), false);
     assert.equal(box.focused, 0);
   });
+  it("the box left focused from the last document is not the clerk's place on this one", () => {
+    const leftOver = { getAttribute: (a) => (a === "data-field" ? "transaction_date" : null) };
+    const { box, deps } = setup({ active: leftOver });
+    assert.equal(focusPartyBox({ ...deps, shownFocus: /** @type {any} */ (leftOver) }), true);
+    assert.equal(box.focused, 1);
+  });
   it("no party box: nothing", () => {
     const { deps } = setup();
     assert.equal(focusPartyBox({ ...deps, box: null }), false);

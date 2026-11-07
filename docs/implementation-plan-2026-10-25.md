@@ -77,7 +77,12 @@
 >      `r7-4-purchase-user-sources`, `vendor-pick-left-bill`, `new-bill-instant`, `nav-spine-find`,
 >      `dogfood-d3-vendor-chaos`; specs `scaffold-bill`, `-bill-taxes`, `-typed-dates`,
 >      `-form-switch`, `-jit-receipt` (18), `-peek-return-focus`, `-find-doc`, `-print`,
->      `-receive-gate`, `-chrome` (27): all pass.
+>      `-receive-gate`, `-chrome` (27): all pass. End-of-session review: the shared Vendor-focus
+>      rule took the box left focused from the last document for the clerk's place, so a new PO
+>      (or Bill — there since 2026-10-11) opened from the shell while that box held the page's
+>      focus did not start in Vendor (the old doc-form code always moved). Now that box does not
+>      count (`party-focus-kept`, two more cases, both failed before the fix). Also `lines` /
+>      `keyField` are options of the shared lines (a Journal Entry passes its accounts).
 > - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
 >   module's hooks go with item 4; item 3's failed-save path shows the Bill's way on every form (a
 >   toast and the red status line, no dialog: *"i don't like blocking modals and dialogues unless

@@ -498,7 +498,7 @@ Payment). Rules for a shared module:
 | `doc-form-commit-gate-ui.js` (+ `doc-commit-gate-ui.js`, its DOM) | The commit gate: toolbar actions, the navigation gate, the preflight. A toolbar Save that fails opens no gate |
 | `save-failure.js` + `doc-toast-ui.js` | One wording for a failed save on every form, shown the Bill's way: the red status line and a toast, no dialog (5zorro: no blocking dialog unless the gate is the point). The case comes from the reply's `outcome` mark, never its words: not sent ("Can't save yet — …"), refused ("Save rejected — ERPNext says: …", or "gave no reason; open Vanilla"), no answer ("Save did not finish — ERPNext did not answer in N s and may still save it; reload before trying again"; also when the ERPNext page reloaded under it), unread ("may have gone through"). The bridge's `saveDoc` marks every reply (HTTP 0 / 502 / 503 / 504 count as no answer: the save may still go through); main's `raceTimeout` and an interrupted `erpEval` mark theirs. A new save path must mark its replies too, or it reads as "not sent". Probe `save-failure-words` |
 | `repaint-keeps-edit.js` | A repaint never changes the box being typed in (invariant 10) |
-| `party-focus.js`, `doc-source-picker-open.js`, `doc-toolbar-actions.js`, `doc-source-terms-dom.js` `paintSourceTermsBlock` | A new form's opening focus in Vendor, never pulling the clerk out of a box they clicked into (probe `party-focus-kept`); opening the source picker, its pick session forgotten on another document; Find / New / Print; the source documents' terms |
+| `party-focus.js`, `doc-source-picker-open.js`, `doc-toolbar-actions.js`, `doc-source-terms-dom.js` `paintSourceTermsBlock` | A new form's opening focus in Vendor, never pulling the clerk out of a box they clicked into, but the box left focused from the last document does not count (the page keeps its boxes; probe `party-focus-kept`); opening the source picker, its pick session forgotten on another document; Find / New / Print; the source documents' terms |
 | `doc-form-date-field-ui.js`, `doc-form-line-tabs-ui.js`, `doc-form-tax-notes-ui.js`, `calc/site-rounding-ask.js`, `item-import-ui.js`, `address-picker-ui.js` | Smaller shared pieces |
 | `bill-assign.js` + `-modal-ui.js`, `bill-informal-link.js` + `-modal-ui.js`, `bill-source-modal-ui.js` + `bill-source-flow.js`, `bill-allocate-charge-modal-ui.js` | The Bill's four dialogs, out of its closure (R6a-2); Assign's steps are a pure reducer |
 
@@ -510,8 +510,9 @@ so a shared copy would take more hooks than it saves. The rest are a few lines e
 shared module with the page's own boxes. The two pages also differ on purpose in the status pill
 before a document arrives (doc-form says "loading").
 
-**For a new form (Journal Entry, Pay Outstanding's pages), what it would pass:** `lines: (d) =>
-d.accounts`, `lineKey: (l) => l.account` and its columns. Two item names are still built into the
+**For a new form (Journal Entry, Pay Outstanding's pages), what it would pass:** to
+`createDocLines`, `lines: (d) => d.accounts` and `keyField: "account"`; to the keys,
+`lineKey: (l) => l.account`; and its columns. Two item names are still built into the
 keys: ↑ / ↓ move in `qty`, and the focus after a write lands on the next line's `item_code`; each
 becomes a layout setting when a form without them shares the module. Receive Payment's `references`
 lines were left alone (5zorro, 2026-10-25). `.taxes-table` / `.taxes-add` in `doc-fields.css` stay
@@ -849,7 +850,11 @@ the 'i can't work while the probes are running'"*).**
 - **One probe run at a time** (`test-logs/probe-run.lock.json`; a second waits, up to an hour). A
   run starts by retiring any leftover probe user, which would end another run's clerk. A spec run
   can go alongside. The lock and the probe-user lock live in the **main checkout's** `test-logs/`,
-  so a run from a `git worktree` queues with runs from the main folder.
+  so a run from a `git worktree` queues with runs from the main folder. To run checks one after
+  another, chain them in one script (probes queue on the lock anyway). Don't wait on another run
+  with `pgrep -f '<pattern>'` written in the waiting script itself: the pattern is in that
+  script's own command line, so it finds itself and waits forever (2026-11-06: 1.5 h, nothing
+  ran). Write it as `[p]attern`, and check the first probe has started before counting on it.
 - **Checks from a snapshot, while the code is edited.** A probe launches the app from the folder's
   live files, so editing during a long check (`dogfood:check`, `nav:check`) changes what the later
   probes test. Run it from a frozen copy instead: `npm run snapshot -- <dir>` (a `git worktree` of

@@ -55,6 +55,8 @@ import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-ret
  *   showsTaxes?: () => boolean,
  *   taxesLocked?: () => string,
  *   lineSums?: () => { sumQty: (doc: any) => number, sumAmt: (doc: any) => number, formatTotal: (n: number) => string } | null,
+ *   lines?: (doc: any) => any[],
+ *   keyField?: string,
  *   rows: Partial<import("./doc-form-item-rows-ui.js").ItemRowsDeps>,
  * }} DocLinesOpts
  *
@@ -62,7 +64,8 @@ import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-ret
  * Customer); a page with none (the Bill: its Vendor box goes to Vendor add) leaves it out.
  * `tableKey`: where each table's column widths are kept. `taxesLocked`: a reason the taxes cannot
  * be removed now (the Bill: Allocate is open), or "". `lineSums`: null hides the line totals.
- * `rows`: the rows module's settings only this page has (its own cells, the Bill's Qty split).
+ * `lines` / `keyField`: the form's lines and the field that names one (default `doc.items`,
+ * `item_code`; a Journal Entry would pass its accounts). `rows`: the rows module's settings only this page has (its own cells, the Bill's Qty split).
  */
 
 /**
@@ -78,7 +81,8 @@ export function createDocLines(page, opts) {
   const p = page.testIdPrefix;
   const deleteLine = opts.deleteLine || ((ri) => page.api().deleteItem(ri));
   const canAddLines = opts.canAddLines || (() => true);
-  const lines = (doc) => (doc && Array.isArray(doc.items) ? doc.items : []);
+  const lines = opts.lines || ((doc) => (doc && Array.isArray(doc.items) ? doc.items : []));
+  const keyField = opts.keyField || "item_code";
 
   function setItemCellMode(mode) {
     page.itemKeys.setMode(mode);
@@ -171,9 +175,8 @@ export function createDocLines(page, opts) {
   /** The Amount button: type the line's amount, and the rate becomes Amount ÷ Qty. */
   function beginAmountBackIn(btn, ri) {
     const td = btn.closest("td");
-    const lastDoc = page.lastDoc();
-    if (!td || !lastDoc || !lastDoc.items || !lastDoc.items[ri]) return;
-    const row = lastDoc.items[ri];
+    const row = lines(page.lastDoc())[ri];
+    if (!td || !row) return;
     const rate = page.rateLabel;
     const priorAmt =
       row.amount != null && row.amount !== ""
@@ -344,7 +347,7 @@ export function createDocLines(page, opts) {
     painting: () => page.painting(),
     editable: () => page.editable(),
     lines,
-    keyField: "item_code",
+    keyField,
     itemKeys: page.itemKeys,
     calcActiveOn: (inp) => page.calcUi.getState().mode === "active" && page.calcUi.getInput() === inp,
     testIdPrefix: p,

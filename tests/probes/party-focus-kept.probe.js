@@ -55,3 +55,44 @@ test("clicking into another box as a new PO opens is not pulled back to Vendor",
     if (app) await app.close().catch(() => {});
   }
 });
+
+/**
+ * The other side of the rule: a clerk in a box on one document who opens a new one from outside
+ * the page (the shell's New) still starts the new one in Vendor. The page keeps its header boxes
+ * from one document to the next, so the box the clerk was in can still hold the page's focus.
+ */
+for (const [skin, route, opener] of [["po", "/app/purchase-order/new", "openPo"], ["bill", "/app/purchase-invoice/new", "openBill"]]) {
+  test(`${skin}: a new one opened while the clerk was in a box on the last one starts in Vendor`, async () => {
+    test.setTimeout(150_000);
+    let app = null;
+    let clerk = null;
+    const vendorField = "supplier";
+    try {
+      app = await launchShell();
+      await waitForE2eApi(app);
+      await expect.poll(() => inErp(app, `!!(window.frappe && frappe.xcall)`), { timeout: 30_000 }).toBe(true);
+      clerk = await loginAsProbeUser(app, AP_CLERK.roles, { as: AP_CLERK.name });
+      await e2eCall(app, opener, route);
+      await expect.poll(async () => e2eGet(app, "surfaceMode"), { timeout: 20_000 }).toBe("doc");
+      await expect.poll(() => where(app), { timeout: 40_000, intervals: [50] }).toBe(vendorField);
+      await sleep(1500);
+      // The clerk goes to another box on this one…
+      const other = await inDoc(app, `(() => { const i = [...document.querySelectorAll('input[data-field]')].find((x) => x.dataset.field !== "supplier" && !x.readOnly && !x.disabled && x.offsetParent && x.type === "text" && !x.closest("#items-body")); if (!i) return null; i.focus(); return i.dataset.field; })()`);
+      report("in", { other });
+      expect(other).toBeTruthy();
+      expect(await where(app)).toBe(other);
+      // …then opens a new one from the shell, not from the page.
+      const docName = () => inDoc(app, `(async () => { const s = await window.erpDoc.getSnapshot(); return (s && s.doc && s.doc.name) || ""; })()`);
+      const before = await docName();
+      await e2eCall(app, opener, route);
+      await expect.poll(docName, { timeout: 30_000, message: "a new one opened" }).not.toBe(before);
+      await sleep(3000);
+      const after = await where(app);
+      report("after-new", { before, now: await docName(), after });
+      expect(after, "the new one starts in Vendor").toBe(vendorField);
+    } finally {
+      if (clerk) await clerk.retire().catch((e) => report("retire-failed", String(e)));
+      if (app) await app.close().catch(() => {});
+    }
+  });
+}

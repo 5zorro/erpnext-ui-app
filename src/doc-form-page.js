@@ -462,6 +462,8 @@ const {
 
 /** The clerk's move count when the document on screen first appeared (focusVendorField). */
 let docShownMoveMark = 0;
+/** The box holding the focus then: the last document's place, not the clerk's on this one. */
+let docShownFocus = null;
 let docShownName = "";
 
 function linkPickerDeps() {
@@ -1404,7 +1406,7 @@ function clearPaintedForm() {
 
 /** A new form starts in its party box, unless the clerk is already somewhere on it (src/party-focus.js). */
 function focusVendorField() {
-  return focusPartyBox({ box: supplierInput(), shownMark: docShownMoveMark, userMoves, logFocus });
+  return focusPartyBox({ box: supplierInput(), shownMark: docShownMoveMark, shownFocus: docShownFocus, userMoves, logFocus });
 }
 
 function paintedHeaderValue(field) {
@@ -1430,6 +1432,7 @@ function paint(doc, snapScratch, opts = {}) {
   // The clerk's moves count from when this document first appeared (focusVendorField).
   if (doc && doc.name && String(doc.name) !== docShownName) {
     docShownMoveMark = userMoves.mark();
+    docShownFocus = document.activeElement;
     docShownName = String(doc.name);
   }
   painting = true;

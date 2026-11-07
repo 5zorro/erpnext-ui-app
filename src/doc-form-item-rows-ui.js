@@ -6,7 +6,8 @@
  * removes it), the link pick lists, the tape on Qty / Rate, the date filter, and the × and Amount
  * buttons.
  *
- * The Bill and doc-form pages both call this; what differs comes in through `deps`: the page's own
+ * Both pages reach it through src/doc-form-lines-ui.js, which fills the shared settings from the
+ * page object; what differs comes in through `deps`: the page's own
  * cells come first (`cellHtml`: the Bill's Rec'd, Assign and order peeks; doc-form's sources),
  * then the shared ones. A page wires its own buttons after `paint` returns.
  */
