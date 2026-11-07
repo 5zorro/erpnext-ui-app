@@ -55,6 +55,29 @@
 >      with multi-window).
 >   4. **The rest of the duplication between the two pages is shared** (569 identical lines in 36
 >      functions, measured 2026-11-04).
+>      **Built 2026-11-06:** 323 alike lines left (same-named functions; the two pages 735 lines
+>      shorter). `src/doc-form-lines-ui.js` takes one `page` object from each page (how to read
+>      its state and repaint), used by all of the lines code: of the 35 settings each page gave
+>      the rows, only its own are left (10 on the Bill, 6 on doc-form: its cells, pick lists, the
+>      Bill's Qty split). Moved with it: Amount →
+>      rate, one line on a new form, an empty line removed, the way back from a line's create peek,
+>      Remove all taxes, the money stack, the line totals, the column sizing. Also shared:
+>      `party-focus.js` (a new form's opening Vendor focus), `doc-source-picker-open.js`,
+>      `doc-toolbar-actions.js` (Find / New / Print), `paintSourceTermsBlock`. Two drifts found,
+>      settled the Bill's way: doc-form's opening Vendor focus still retried at 50 and 200 ms and
+>      could pull the clerk out of a box they had clicked into (the Bill stopped that 2026-10-11;
+>      probe `party-focus-kept` fails on the code before), and doc-form kept a vendor pick's
+>      source-picker session from one document to the next (the Bill forgets it). Words that now
+>      follow the Bill's: "removed all taxes on this purchase order" (was "here"), "New Purchase
+>      Order failed." / "Purchase Order list opened (filter focus missed)." Left in each page on
+>      purpose: HANDOFF § *Share, not merge*. Proof: `npm test` (new: `doc-form-lines`,
+>      `party-focus`, `doc-source-picker-open`); from snapshots, probes `item-table-keys`,
+>      `df03-item-table`, `item-edit-survives-repaint`, `party-focus-kept` (red on `2bd48e1`),
+>      `vendor-switch`, `r5b5-po-missing-vendor`, `d2-bill-missing-vendor`, `df03-po-source-focus`,
+>      `r7-4-purchase-user-sources`, `vendor-pick-left-bill`, `new-bill-instant`, `nav-spine-find`,
+>      `dogfood-d3-vendor-chaos`; specs `scaffold-bill`, `-bill-taxes`, `-typed-dates`,
+>      `-form-switch`, `-jit-receipt` (18), `-peek-return-focus`, `-find-doc`, `-print`,
+>      `-receive-gate`, `-chrome` (27): all pass.
 > - **His answers (2026-11-05):** 3b findings 3, 5 and 6 dropped (decision log); the shared rows
 >   module's hooks go with item 4; item 3's failed-save path shows the Bill's way on every form (a
 >   toast and the red status line, no dialog: *"i don't like blocking modals and dialogues unless

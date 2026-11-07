@@ -492,13 +492,23 @@ Payment). Rules for a shared module:
 | Shared module | What it does for both pages |
 |---|---|
 | `item-table-keys-ui.js`, `item-table-nav.js`, `item-sort-hold.js` | The lines table's keys: edit / nav mode, Tab and the arrows in screen order, a key dropped while a write is out (≤ 10 s), the order held while the clerk types and the "Sort is out of date 🔄" banner |
+| `doc-form-lines-ui.js` | Around the rows, for both pages: the `page` object (`DocPage`: how to read the page's state and repaint it — the one set of settings the shared code takes), and with it the rows themselves (`createItemRows`, each page adding only its own cells and the Bill's Qty split), Amount → rate ("back into cost"), one line on a new form, an empty line removed on leaving it, the way back from a line's "create …" peek, Remove all taxes (the Bill's Allocate lock is an option), the money stack, the line totals, column sizing |
 | `doc-form-item-rows-ui.js` | The rows: every shared cell, its write and the focus after it, pick lists, tape, × (each page adds its own cells after) |
 | `doc-form-tax-table-ui.js` | One taxes table for every form, the Bill's: the walk, commit on a move, a rate on a fixed row works out its amount, Rate % from the net total |
 | `doc-form-commit-gate-ui.js` (+ `doc-commit-gate-ui.js`, its DOM) | The commit gate: toolbar actions, the navigation gate, the preflight. A toolbar Save that fails opens no gate |
 | `save-failure.js` + `doc-toast-ui.js` | One wording for a failed save on every form, shown the Bill's way: the red status line and a toast, no dialog (5zorro: no blocking dialog unless the gate is the point). The case comes from the reply's `outcome` mark, never its words: not sent ("Can't save yet — …"), refused ("Save rejected — ERPNext says: …", or "gave no reason; open Vanilla"), no answer ("Save did not finish — ERPNext did not answer in N s and may still save it; reload before trying again"; also when the ERPNext page reloaded under it), unread ("may have gone through"). The bridge's `saveDoc` marks every reply (HTTP 0 / 502 / 503 / 504 count as no answer: the save may still go through); main's `raceTimeout` and an interrupted `erpEval` mark theirs. A new save path must mark its replies too, or it reads as "not sent". Probe `save-failure-words` |
 | `repaint-keeps-edit.js` | A repaint never changes the box being typed in (invariant 10) |
+| `party-focus.js`, `doc-source-picker-open.js`, `doc-toolbar-actions.js`, `doc-source-terms-dom.js` `paintSourceTermsBlock` | A new form's opening focus in Vendor, never pulling the clerk out of a box they clicked into (probe `party-focus-kept`); opening the source picker, its pick session forgotten on another document; Find / New / Print; the source documents' terms |
 | `doc-form-date-field-ui.js`, `doc-form-line-tabs-ui.js`, `doc-form-tax-notes-ui.js`, `calc/site-rounding-ask.js`, `item-import-ui.js`, `address-picker-ui.js` | Smaller shared pieces |
 | `bill-assign.js` + `-modal-ui.js`, `bill-informal-link.js` + `-modal-ui.js`, `bill-source-modal-ui.js` + `bill-source-flow.js`, `bill-allocate-charge-modal-ui.js` | The Bill's four dialogs, out of its closure (R6a-2); Assign's steps are a pure reducer |
+
+**Left in each page on purpose** (2026-11-06; same-named functions with lines alike: 323, from 563):
+the header's blur (`onHeaderBlur`), `doSave`, `paint`, the header pick lists, the items head and
+where Tab goes after the last line. Their alike lines sit between each form's own steps (the Bill's
+due date, bill number check and Remarks block; doc-form's Date Expected and its layouts' fields),
+so a shared copy would take more hooks than it saves. The rest are a few lines each that call a
+shared module with the page's own boxes. The two pages also differ on purpose in the status pill
+before a document arrives (doc-form says "loading").
 
 **For a new form (Journal Entry, Pay Outstanding's pages), what it would pass:** `lines: (d) =>
 d.accounts`, `lineKey: (l) => l.account` and its columns. Two item names are still built into the

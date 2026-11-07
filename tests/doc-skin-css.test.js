@@ -108,11 +108,12 @@ describe("Packet T — line-grid readability CSS (2026-09-06)", () => {
   });
 
   it("A1: every line grid is sized with growSection, so it can still grow when it must", () => {
-    for (const [name, page] of [["bill", billFormPage], ["doc-form", docFormPage]]) {
-      const calls = page.match(/autoSizeItemColumns\(table, \{[^}]*\}\)/g) || [];
-      assert.equal(calls.length, 2, `${name}: items + taxes`);
-      for (const c of calls) assert.match(c, /growSection: table\.closest\("\.bill-section"\)/, `${name}: ${c}`);
-    }
+    // Both pages size their grids through the shared lines (src/doc-form-lines-ui.js).
+    const docLines = readFileSync(join(electronDir, "..", "src", "doc-form-lines-ui.js"), "utf8");
+    const calls = docLines.match(/autoSizeItemColumns\(table, \{[^}]*\}\)/g) || [];
+    assert.equal(calls.length, 2, "items + taxes");
+    for (const c of calls) assert.match(c, /growSection: table\.closest\("\.bill-section"\)/, c);
+    for (const page of [billFormPage, docFormPage]) assert.match(page, /createDocLines\(/);
   });
 
   it("A1: does not disturb the padding .line-tabs' negative pull depends on", () => {
@@ -171,7 +172,7 @@ describe("Packet T step B — display layer (2026-09-06)", () => {
     );
     assert.match(itemRows, /data-testid="\$\{p\}-cell-\$\{ri\}-\$\{col\.field\}"/, "row builder lost its cell testid");
     for (const [label, src] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(src, /createItemRows\(\{/, `${label} does not use the shared rows`);
+      assert.match(src, /createDocLines\(/, `${label} does not use the shared rows`);
       assert.match(src, new RegExp(`testIdPrefix: "${label}"`), `${label} lost its testid prefix`);
     }
   });

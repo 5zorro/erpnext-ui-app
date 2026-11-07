@@ -14,6 +14,8 @@ const resizeSrc = src("../src/item-col-resize.js");
 const billFormPage = src("../src/bill-form-page.js");
 const docFormPage = src("../src/doc-form-page.js");
 const taxTable = src("../src/doc-form-tax-table-ui.js");
+/** The sizing both pages share (plan 10-25 closeout item 4). */
+const docLines = src("../src/doc-form-lines-ui.js");
 const docFieldsCss = src("../electron/doc-fields.css");
 
 describe("item-col-resize — total on a missing or empty table", () => {
@@ -87,15 +89,17 @@ describe("item-col-resize — width policy", () => {
 
 describe("item-col-resize — wiring into both row painters", () => {
   it("both pages size their item grid after painting rows", () => {
+    // The sizers are written once (src/doc-form-lines-ui.js); both pages take them from there.
+    assert.match(docLines, /function sizeItemColumns\(\)/, "no item sizer");
+    assert.match(docLines, /paintLineTotals\(doc\);\n\s*sizeItemColumns\(\);/, "does not size after paint");
     for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(page, /function sizeItemColumns\(\)/, `${label} has no item sizer`);
-      assert.match(page, /paintLineTotals\(doc\);\n\s*sizeItemColumns\(\);/, `${label} does not size after paint`);
+      assert.match(page, /createDocLines\(/, `${label} does not use the shared lines`);
     }
   });
 
   it("both pages size their tax grid too", () => {
+    assert.match(docLines, /function sizeTaxColumns\(\)/, "no tax sizer");
     for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(page, /function sizeTaxColumns\(\)/, `${label} has no tax sizer`);
       assert.match(page, /sizeColumns: \(\) => sizeTaxColumns\(\)/, `${label} does not hand the shared table its sizer`);
     }
     // The shared taxes table (plan 10-25 step 3) sizes right after it paints the rows.
@@ -103,14 +107,14 @@ describe("item-col-resize — wiring into both row painters", () => {
   });
 
   it("PO and Item Receipt keep independent widths", () => {
-    assert.match(docFormPage, /\$\{\(ui && ui\.profileId\) \|\| "doc"\}-items/);
-    assert.match(docFormPage, /\$\{\(ui && ui\.profileId\) \|\| "doc"\}-taxes/);
+    assert.match(docFormPage, /tableKey: \(table\) => `\$\{\(ui && ui\.profileId\) \|\| "doc"\}-\$\{table\}`/);
+    assert.match(billFormPage, /tableKey: \(table\) => `bill-\$\{table\}`/);
   });
 
   it("sizing failures cannot break a repaint", () => {
-    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      const fn = page.slice(page.indexOf("function sizeItemColumns"));
-      assert.match(fn.slice(0, 600), /try \{[\s\S]*?\} catch \{/, `${label} sizer is unguarded`);
+    for (const name of ["sizeItemColumns", "sizeTaxColumns"]) {
+      const fn = docLines.slice(docLines.indexOf(`function ${name}`));
+      assert.match(fn.slice(0, 600), /try \{[\s\S]*?\} catch \{/, `${name} is unguarded`);
     }
   });
 });
@@ -164,10 +168,8 @@ describe("Packet T D — density control", () => {
     assert.match(resizeSrc, /button\.dataset\.densityWired = "1";/);
   });
 
-  it("is mounted by both pages", () => {
-    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(page, /mountDensityControl\(\{ table, button: document\.getElementById\("btn-density"\) \}\)/, label);
-    }
+  it("is mounted by both pages (through the shared lines)", () => {
+    assert.match(docLines, /mountDensityControl\(\{ table, button: document\.getElementById\("btn-density"\) \}\)/);
   });
 
   it("survives with no button and no table", () => {
@@ -201,8 +203,6 @@ describe("Packet T — the taxes grid gets the same treatment", () => {
     // The sticky CSS is scoped to #panel-items, so the taxes grid would only be
     // carrying inert state.
     assert.match(resizeSrc, /if \(!opts \|\| opts\.sticky !== false\) applyStickyOffsets/);
-    for (const [label, page] of [["bill", billFormPage], ["doc", docFormPage]]) {
-      assert.match(page, /sticky: false/, `${label} taxes still request sticky`);
-    }
+    assert.match(docLines, /sticky: false/, "taxes still request sticky");
   });
 });

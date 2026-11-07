@@ -398,7 +398,7 @@ describe("item-table-keys-ui: both pages use it", () => {
     const src = read(page);
     it(`${page}: wires every item cell through the shared keys, with its own columns`, () => {
       // The cell wiring is shared (src/doc-form-item-rows-ui.js); each page passes its own columns.
-      assert.match(src, /createItemRows\(\{[\s\S]*?navFields: \(\) =>/);
+      assert.match(src, /createDocLines\([\s\S]*?navFields: \(\) =>/);
       assert.doesNotMatch(src, /itemTableKeyDecision|neighborItemCell/, "a copy of the key handler is back");
     });
   }
