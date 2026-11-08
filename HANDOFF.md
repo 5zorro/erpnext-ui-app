@@ -12,12 +12,6 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
-   `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form
-   code once — R2-5, R6a-1, R6a-2 from the review) — **closing (2026-11-04):** its rules are
-   folded into **Main-process code by concern** below (where each concern lives, how a family
-   moves, the shared Doc-form modules); its doc-form and Bill moves go with multi-window (museum
-   OI-040); the four items 5zorro promoted at the closeout are being built (its status box), then
-   the file is deleted. Code comments citing "plan 2026-10-25" mean that section.
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
@@ -34,7 +28,16 @@
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter; closed
+   **Closed:** `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill /
+   doc-form code once — R2-5, R6a-1, R6a-2 from the review; closed 2026-11-07) — folded into
+   **Main-process code by concern** below (where each concern lives, how a family moves, the
+   shared Doc-form modules, what each page keeps on purpose), the failed-save wording into the
+   module map (`save-failure.js`). Its doc-form and Bill moves go with multi-window (museum
+   OI-040), as do the Bill's writes without an open stamp and a second draft after "did not
+   finish" (OI-209). Code comments citing "plan 2026-10-25", "plan 10-25" or its step 3b findings
+   mean that section; the plan's full text (step 0's DF-03 fixes, each move's proof, the 3b
+   performance report, *A new Bill waits on nothing*) is the parent of the commit that deleted it.
+   `implementation-plan-2026-10-31.md` (dependencies first, then a linter; closed
    2026-11-04) — the package policy and its reasons are in `AGENT_CONVENTIONS.md` § *Packages*,
    the lint commands in *Run / validate* below, each lint setting's reason in `eslint.config.js`.
    Code comments citing "plan 2026-10-31" mean those.
