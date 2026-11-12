@@ -71,7 +71,7 @@ async function paymentRelinkFacts(supplier) {
       if (!company) return { ok: false, reason: "No Company configured." };
       var account = await frappe.xcall("erpnext.accounts.party.get_party_account", {
         party_type: "Supplier", party: i.party, company: company,
-      });
+      }, "POST", { silent: true });
       var doc = {
         doctype: "Payment Reconciliation",
         company: company,
@@ -79,7 +79,7 @@ async function paymentRelinkFacts(supplier) {
         party: i.party,
         receivable_payable_account: account,
       };
-      var res = await frappe.call({
+      var res = await frappe.call({ silent: true,
         method: "run_doc_method",
         args: { docs: JSON.stringify(doc), method: "get_unreconciled_entries" },
       });
@@ -90,7 +90,7 @@ async function paymentRelinkFacts(supplier) {
       var createdOf = {};
       if (invoices.length) {
         var names = invoices.map(function (r) { return r.invoice_number; });
-        var av = await frappe.call({
+        var av = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Purchase Invoice",
@@ -110,7 +110,7 @@ async function paymentRelinkFacts(supplier) {
       if ((got.payments || []).length) {
         try {
           var pn = got.payments.map(function (r) { return r.reference_name; });
-          var pv = await frappe.call({
+          var pv = await frappe.call({ silent: true,
             method: "frappe.client.get_list",
             args: {
               doctype: "Payment Entry",
@@ -130,7 +130,7 @@ async function paymentRelinkFacts(supplier) {
       try {
         var ar = await frappe.xcall("frappe.client.get_single_value", {
           doctype: "Accounts Settings", field: "auto_reconcile_payments",
-        });
+        }, "POST", { silent: true });
         autoReconcile = !!Number(ar);
       } catch (eAr) {
         autoReconcile = null;
@@ -210,7 +210,7 @@ async function relinkPayment(req) {
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       var i = ${payload};
-      var res = await frappe.call({
+      var res = await frappe.call({ silent: true,
         method: "run_doc_method",
         args: { docs: JSON.stringify(i.doc), method: "reconcile" },
       });
@@ -271,7 +271,7 @@ async function flagRelinkForReview(payment, note) {
         name: i.name,
         assign_to: [frappe.session.user],
         description: i.note,
-      });
+      }, "POST", { silent: true });
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: reasonFrom(e) };
@@ -309,7 +309,7 @@ async function commentRelinkProvenance(payment, content) {
         content: i.content,
         comment_email: frappe.session.user,
         comment_by: frappe.session.user_fullname || frappe.session.user,
-      });
+      }, "POST", { silent: true });
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: reasonFrom(e) };
@@ -397,7 +397,7 @@ function registerRelinkMethodChangeHandlers() {
       ${PE_REASON_FROM_JS}
       try {
         if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-        var res = await frappe.call({
+        var res = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "ToDo",
@@ -419,7 +419,7 @@ function registerRelinkMethodChangeHandlers() {
         if (todos.length) {
           try {
             var names = todos.map(function (t) { return t.reference_name; });
-            var pe = await frappe.call({
+            var pe = await frappe.call({ silent: true,
               method: "frappe.client.get_list",
               args: {
                 doctype: "Payment Entry",
@@ -456,7 +456,7 @@ function registerRelinkMethodChangeHandlers() {
         var i = ${payload};
         await frappe.xcall("frappe.desk.form.assign_to.close", {
           doctype: "Payment Entry", name: i.name, assign_to: frappe.session.user,
-        });
+        }, "POST", { silent: true });
         return { ok: true };
       } catch (e) {
         return { ok: false, reason: reasonFrom(e) };
@@ -509,7 +509,7 @@ function registerRelinkMethodChangeHandlers() {
         var i = ${payload};
         var counts = {};
         try {
-          var res = await frappe.call({
+          var res = await frappe.call({ silent: true,
             method: "frappe.client.get_list",
             args: {
               doctype: "Payment Entry Reference",
@@ -535,7 +535,7 @@ function registerRelinkMethodChangeHandlers() {
         try {
           var sVal = await frappe.xcall("frappe.client.get_single_value", {
             doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
-          });
+          }, "POST", { silent: true });
           unlinks = !!Number(sVal);
         } catch (eSet) {
           unlinks = null;
@@ -544,7 +544,7 @@ function registerRelinkMethodChangeHandlers() {
         // amendment gives \`<prefix>-2\`, not \`<name>-1\`.
         var amendments = {};
         try {
-          var av = await frappe.call({
+          var av = await frappe.call({ silent: true,
             method: "frappe.client.get_list",
             args: {
               doctype: "Purchase Invoice",
@@ -562,7 +562,7 @@ function registerRelinkMethodChangeHandlers() {
         try {
           var rule = await frappe.xcall("frappe.client.get_single_value", {
             doctype: "Document Naming Settings", field: "default_amend_naming",
-          });
+          }, "POST", { silent: true });
           amendCounter = String(rule || "") !== "Default Naming";
         } catch (eRule) {
           amendCounter = null;

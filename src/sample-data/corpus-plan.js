@@ -129,11 +129,6 @@ export const AR_PAYMENT_FIXTURE_KEYS = Object.freeze([
 export const AR_INSTALLMENT_ROWS = 12;
 export const AR_INSTALLMENT_AMOUNT = 250.0;
 
-/** @param {number} n */
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
-
 export const DEFAULT_COUNTS = Object.freeze({
   quotation: 25,
   sales_order: 25,

@@ -116,7 +116,7 @@ describe("the indicator is actually visible", () => {
   });
 
   it("wraps the vendor write rather than the whole form", () => {
-    assert.match(billFormPage, /withFieldSettleLoading\(field, api\.setHeader\(field, value\)\)/);
+    assert.match(billFormPage, /withFieldSettleLoading\(field, api\.setHeader\(field, value[,)]/);
     assert.match(billFormPage, /const timer = setTimeout\(show, FIELD_LOADING_SHOW_AFTER_MS\)/);
     // The clear has to survive a rejected write, or a failed vendor pick leaves the form
     // sweeping forever.

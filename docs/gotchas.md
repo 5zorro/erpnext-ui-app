@@ -1038,3 +1038,104 @@ Read from source and from this instance. Each of these cost real time to establi
   itself is always allowed and terms never constrain it; a schedule row needs no Payment Term at
   all (only `due_date` + `payment_amount`), rows must sum to the grand total, and **no two rows may
   share a due date**.
+
+## G27 — A refused call leaves ERPNext's message box in the ERPNext page, even a hidden one (2026-11-03)
+
+**Observed:** as the AP clerk (no read on Project), every Doc page open left "Insufficient
+Permission for Project" open in the ERPNext page. The warm pick lists' load of Project was
+refused. In the Doc lens the ERPNext page is hidden, so nobody saw it until they switched to
+Vanilla, where it was waiting. It also kept `frappe.ui.open_dialogs` non-empty, which a new
+document made in place has to deal with (`openFreshNewDocInPlace`).
+
+**Cause (Frappe v16.31.0, `frappe/public/js/frappe/request.js`):** `frappe.xcall` is `frappe.call`
+underneath, and when a reply carries `_server_messages`, `frappe.request.cleanup` shows them with
+`frappe.msgprint`. That covers every refusal (permission, validation, a missing record).
+Nothing stops it except `opts.silent`: `frappe.xcall(method, args, type, { silent: true })`.
+A silent call still sets `frappe.last_response`, so the reason is still read the usual way (G22,
+`reasonFrom`). A 403 whose reply has `_error_message` gets its own "Not permitted" box with
+`re_route: true`, silent or not. Closing that box sends ERPNext back a page
+(`frappe.set_route(prev_route)` in `msg_dialog.custom_onhide`, `ui/messages.js`). Nothing in v16.31's
+Python sets `_error_message`, but an app or a later version may.
+
+**Rules:**
+- The shell's own calls in the ERPNext page (lookups, lists, checks: things the clerk did not
+  ask ERPNext for in the ERPNext page) should be silent. The shell shows its own reason, in its
+  own words, where the clerk is looking. Museum OI-206 holds the sweep and the warm-list fix
+  (skip a list the clerk cannot read, from `frappe.model.can_read`, with no server call).
+- ERPNext's *own* form calls (a save, a field's change script) are not ours to silence. Their
+  messages are what the shell reads back.
+- To close one of these boxes from code, `delete frappe.msg_dialog.custom_onhide` first, or
+  closing it can move the page.
+- Text scraped off the page later can be one of these leftovers: in probe `save-failure-words`
+  (2026-11-06) a save that got no answer scraped the *earlier* refusal's box ("Message Could not
+  find Project: … Confirm"). So an unanswered save never shows or keeps scraped text
+  (`src/save-failure.js`, the pages' `doSave`, the commit gate).
+
+## G28 — How ERPNext builds a blank form, and what a reload of it costs (2026-11-03)
+
+From Frappe v16.31.0's source, confirmed by probe `new-bill-instant` (as the AP clerk, this machine):
+- **The list's "+ Add" button is `frappe.new_doc(doctype)`** (`model/create_new.js`). It calls
+  `with_doctype` (a server call only the first time the doctype is opened in the page), then
+  `make_quick_entry`. A doctype with child tables, or not marked quick entry, opens the full form,
+  and `frappe.model.get_new_doc` builds the blank **in the page**: a `new-<doctype>-<random>` name,
+  `__islocal` / `__unsaved`, field defaults, the user's defaults from boot, `route_options`, the
+  mandatory child rows, and its `docinfo`. `show_doc` then finds it in `locals` and draws it. The
+  form scripts (`onload` / `refresh`) may then call the server. Blank shown in ~0.3–0.8 s; ERPNext
+  puts the cursor nowhere.
+- **The URL `/app/<doctype>/new` asks the server first:** `show_doc` → `with_doc(doctype, "new")`
+  → `frappe.desk.form.load.getdoc` for a record named "new". Only when that comes back empty does it
+  build the same local blank (`render_new_doc`). A full page load of that URL: ~0.9–2.3 s.
+- **An unsaved blank stays in `locals`** until the page reloads, and the `/new` route reuses
+  nothing on its own. To be sure of a fresh one without a reload, clear that doctype's `__islocal`
+  docs (`frappe.model.clear_doc`, after `__unsaved = 0`) before `frappe.new_doc`
+  (`openFreshNewDocInPlace` in main.js).
+- **A blank is dirty from birth** (`__unsaved` 1), and any write to it adds the form's "leave
+  page?" listener. Whether a load would actually ask is Chromium's call, made only once the page has
+  been used by hand (G23). The shell asks the page the same question with a cancelable
+  `beforeunload` event plus `navigator.userActivation.hasBeenActive`. The only other listener in
+  v16.31 is the sidebar's, which just remembers a sidebar state. The realtime socket does not close
+  on it (engine.io-client 6.5.3, `closeOnBeforeunload` false).
+- **A form's snapshot keeps `__islocal`** (`JSON.parse(JSON.stringify(f.doc))`), which is how the
+  Bill page tells ERPNext's arriving blank from a saved document.
+
+## G29 — What the shell adds to ERPNext's page stays until the page reloads (2026-11-03)
+
+From Frappe v16.31.0's source, confirmed by probe `erp-hooks-no-leak` (museum OI-207):
+- **`frappe.ui.form.on(doctype, {...})` handlers live for the life of the page.** They are pushed
+  onto `frappe.ui.form.handlers[doctype][event]` (`form/script_manager.js`) and run on every later
+  form of that doctype. `frappe.ui.form.off(doctype, event)` empties the *whole* list, ERPNext's own
+  handlers included, so it is no way to take back one of ours. `on` also sets
+  `cur_frm.events[event]` to the newest handler when the open form is that doctype; nothing in
+  v16.31 calls `frm.events.refresh` / `onload` directly, so that is harmless today.
+- **`frappe.router.on("change", fn)` cannot be undone.** The router's emitter
+  (`event_emitter.js`) wraps `fn` in a new arrow function both when binding and in `off`, so `off`
+  never matches.
+- **So register once per page, and share.** The bridge's `waitForForm` registers its form hooks
+  once per doctype and its router / jQuery hooks once per page (`installFormWaitHooks`); each wait
+  adds itself to a set and leaves it when it ends. Before, every wait that had to wait added three
+  handlers for good, and one wait ending removed every wait's jQuery handlers (they shared one
+  namespace). Anything else injected into the page follows the same rule: a `window.__erp…` flag
+  (route hop, the soft-peek Esc key) or a once-per-page record. A script injected again in a new
+  copy (the Simplified skin, once per switch into it) hooks once and calls whichever copy is
+  installed now: its form-refresh patch and its posting-stamp `validate` hook
+  (`window.__ssPostingStampHooked`; before, each copy added one, probe `r12-simplified-in-page`).
+- **When it bit:** rarely, as it turned out. A saved document opens by reloading ERPNext's page,
+  and a New builds its blank before the wait starts, so ordinary opens added nothing. A wait that
+  has to wait on an in-place page (the Doc page taking its form back after a peek or a detour in
+  Vanilla) added three handlers each time.
+
+## G30 — A failed `frappe.call` says why only through its request's HTTP status (2026-11-06)
+
+**Cause (Frappe v16.31.0, `frappe/public/js/frappe/request.js`, `frappe.request.call`):** the
+`error` callback given to `frappe.call` gets the parsed reply only for a 417 (a refusal:
+validation, a missing link). For 401 / 403 / 404 / 413 / 500 / 502 / 504 / 508 it is called with
+**no argument**, after Frappe shows its own box ("Request Timed Out" for 504, "Internal Server
+Error" for 502); any other status, 0 included (the connection broke), passes the jqXHR. So the
+callback alone cannot tell "ERPNext said no" (417, 500: nothing saved, the transaction rolled
+back) from "no reply from ERPNext itself" (0, 502, 503, 504: a proxy gave up or the line broke,
+and the server may still finish the save).
+
+**Rule:** `frappe.call(...)` returns the jqXHR (`$.ajax(...)`; not with `debounce`): keep it and
+read `.status` in the callback. The bridge's `saveDoc` does (`var req = frappe.call(...)`) and
+marks 0 / 502 / 503 / 504 as no answer (`outcome: "no-answer"`), everything else as refused.
+

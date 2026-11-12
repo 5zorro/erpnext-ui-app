@@ -1,18 +1,19 @@
 /**
  * The commit gate's flow, written once for every Doc form page (plan 2026-10-25, R6a-1 step 2):
  * the one gate a toolbar action (Find / New / Print) or a navigation opens over unsaved work, its
- * choices (Cancel, Discard, Save draft, Save & submit, then continue), the live ERP meta preflight
- * while it is open, and — on pages that ask for it — the direct-save gate that shows why a Save or
- * Submit was refused. The DOM helpers it paints with are `doc-commit-gate-ui.js`.
+ * choices (Cancel, Discard, Save draft, Save & submit, then continue), and the live ERP meta
+ * preflight while it is open. The DOM helpers it paints with are `doc-commit-gate-ui.js`.
  *
  * The Bill and doc-form pages both call this; what differs comes in through `deps`: the words
- * (the Bill keeps its own — "Doc Bill", "Save did not finish" on a timeout), the save blockers and
- * how the preflight reads them, the save, what a discard repaints, and the toolbar actions.
+ * ("Doc Bill" or the form's title), the save blockers and how the preflight reads them, the save,
+ * what a discard repaints, and the toolbar actions. A save that fails is worded by
+ * `save-failure.js` on every form: the page's `save` returns those words (`failure`), and the gate
+ * shows them while it is open. A toolbar Save or Submit that fails opens no gate: the page says so
+ * in its status line and a toast (5zorro: no blocking dialog unless the gate is the point).
  */
 
 import {
   commitGateTitleText,
-  configureDirectSaveGateChrome,
   hideCommitGateEl,
   paintCommitGateValidation,
   setCommitGateBusy,
@@ -32,33 +33,29 @@ import { commitGateSaveEnabled, nextAfterGate } from "./bill-action-flow.js";
  *   saveBlockers: () => string[],
  *   setMetaBlockers: (blockers: string[]) => void,
  *   preflight: { can: () => boolean, read: () => Promise<any>, apply: (result: any) => void },
- *   save: (submit: boolean) => Promise<{ ok?: boolean, reason?: string, blockers?: string[] }|null|undefined>,
+ *   save: (submit: boolean) => Promise<{ ok?: boolean, reason?: string, blockers?: string[], failure?: import("./save-failure.js").SaveFailure }|null|undefined>,
  *   afterDiscard: (res: any, trigger: any) => void,
  *   runAction: (action: string, trigger: any) => Promise<void>,
  *   announceBlocker: (text: string, blockers?: string[]) => void,
- *   afterSaveRefused?: (reason: string, blockers?: string[]) => void,
  *   text: {
  *     title: () => string,
  *     triggerLabel: (trigger: any) => string,
  *     readyTitle: () => string,
  *     cancelHint: () => string,
  *     saveWarning: (blockers: string[]) => string,
- *     erpFailureView: (reason: string) => object,
  *   },
- *   directSave?: { copyEl: () => HTMLElement|null|undefined },
  * }} CommitGateDeps
  *
  * `preflight`: `can` says whether there is anything to ask; `read` asks ERPNext (mandatory fields,
  * and on the Bill account companies); `apply(result)` stores the blockers it found — `apply(null)`
  * when the read failed. Only the newest read is applied. `setMetaBlockers`: a refused save names its
- * blockers; the gate stores them and shows `saveBlockers()` again. `announceBlocker`: Save chosen
- * while blocked. `afterSaveRefused`: after the gate shows a refused save (the Bill also says it in
- * the status line). `directSave`: the page has the direct-save gate (`copyEl`: its explanation line).
+ * blockers; the gate stores them. `announceBlocker`: Save chosen while blocked. The page's `save` has already said a failure in
+ * its status line and toast; the gate shows the same words (`failure.gate`).
  */
 
 /** @param {CommitGateDeps} deps */
 export function createCommitGate(deps) {
-  /** @type {any} GateTrigger | { kind: "direct-save", submit } | null — the one gate's reason to be open */
+  /** @type {any} GateTrigger | null — the one gate's reason to be open */
   let pending = null;
   let preflightSeq = 0;
 
@@ -80,7 +77,6 @@ export function createCommitGate(deps) {
   function toolbarAction() {
     if (!pending) return "";
     if (pending.kind === "toolbar") return pending.action;
-    if (pending.kind === "direct-save") return "direct-save";
     return "";
   }
 
@@ -96,7 +92,6 @@ export function createCommitGate(deps) {
 
   function hide() {
     pending = null;
-    if (deps.directSave) configureDirectSaveGateChrome(els(), { active: false, copyEl: deps.directSave.copyEl() });
     hideCommitGateEl(els());
     setBusy(false);
   }
@@ -145,22 +140,6 @@ export function createCommitGate(deps) {
     show();
   }
 
-  /** Save or Submit was refused before it reached ERPNext (or ERPNext refused it): say why, offer it again. */
-  function openDirectSaveBlocked(blockers, opts = {}) {
-    if (!deps.directSave) return;
-    pending = { kind: "direct-save", submit: !!opts.submit };
-    const e = els();
-    if (e.commitGateTitle) e.commitGateTitle.textContent = opts.submit ? "Cannot submit yet" : "Cannot save yet";
-    configureDirectSaveGateChrome(e, { submit: !!opts.submit, active: true, copyEl: deps.directSave.copyEl() });
-    if (opts.erpFailure) {
-      paintCommitGateValidation(e, deps.text.erpFailureView(opts.reason));
-    } else {
-      paintCommitGateValidation(e, { blockers, blocked: true, title: "Save is blocked by:", cancelHint: deps.text.cancelHint() });
-    }
-    setBusy(false);
-    show();
-  }
-
   function cancelFromOutside() {
     const gate = els().commitGate;
     if (!gate || gate.hidden) return;
@@ -179,16 +158,17 @@ export function createCommitGate(deps) {
     setBusy(true);
     const saveRes = await deps.save(choice === "submit");
     if (saveRes && saveRes.ok) return true;
-    const reason = (saveRes && saveRes.reason) || "Save failed.";
-    const refused = saveRes && Array.isArray(saveRes.blockers) ? saveRes.blockers : undefined;
+    const refused = saveRes && Array.isArray(saveRes.blockers) ? saveRes.blockers.filter(Boolean) : [];
     setBusy(false);
-    if (refused && refused.length) {
-      deps.setMetaBlockers(refused);
-      paintCommitGateValidation(els(), { blockers: deps.saveBlockers(), blocked: true, title: "Save is blocked by:", hint: deps.text.cancelHint() });
+    const failure = saveRes && saveRes.failure;
+    // No answer: its texts were scraped off ERPNext's page and may be stale — not blockers.
+    if (refused.length && !(failure && failure.kind === "no-answer")) deps.setMetaBlockers(refused);
+    if (failure && failure.gate) {
+      paintCommitGateValidation(els(), failure.gate);
     } else {
-      paintCommitGateValidation(els(), deps.text.erpFailureView(reason));
+      const reason = (saveRes && saveRes.reason) || "Save failed.";
+      paintCommitGateValidation(els(), { blockers: refused.length ? deps.saveBlockers() : [reason], blocked: true, title: "Save is blocked by:", hint: deps.text.cancelHint() });
     }
-    if (deps.afterSaveRefused) deps.afterSaveRefused(reason, refused);
     return false;
   }
 
@@ -201,11 +181,6 @@ export function createCommitGate(deps) {
     if (!trigger || !choice || choice === "cancel") {
       hide();
       resolveNav(navToken, false);
-      return;
-    }
-
-    if (trigger.kind === "direct-save") {
-      if ((choice === "save" || choice === "submit") && (await saveFromGate(choice))) hide();
       return;
     }
 
@@ -276,7 +251,6 @@ export function createCommitGate(deps) {
     hide,
     refreshHint,
     refreshPreflight,
-    openDirectSaveBlocked,
     cancelFromOutside,
     resolve,
     requestToolbarAction,

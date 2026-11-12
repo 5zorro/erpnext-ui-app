@@ -51,7 +51,8 @@ export const ARCHITECTURE_FAMILIES = [
     label: "Toolbar, health / login, diagnose, feedback, shell plumbing",
     modules: ["config", "health", "health-remediation", "diagnose", "feedback-url", "ui-icons", "erp-http-list", "frappe-error", "html-reachability",
       "web-contents-listener-budget"],
-    paths: ["electron/chrome.html", "electron/preload.cjs", "electron/diagnose-dropdown.html", "electron/diagnose-preload.cjs", "electron/assets/"],
+    paths: ["electron/chrome.html", "electron/preload.cjs", "electron/diagnose-dropdown.html", "electron/diagnose-preload.cjs", "electron/assets/",
+      "electron/ipc/health-incidents.js"],
     e2e: ["health-indicator.spec.js", "scaffold-url-api.spec.js", "scaffold-window-fit.spec.js", "scaffold-chrome.spec.js"],
     noPaper: "toolbar and health are covered by layer-3 smoke; the Log in button was proven by hand 2026-09-29",
   },
@@ -72,12 +73,12 @@ export const ARCHITECTURE_FAMILIES = [
   {
     id: "doc-form",
     label: "Doc skin machinery shared by every form — layout, line tables, pickers, addresses, dates, numbers",
-    modules: ["doc-form-*", "doc-skin-registry", "doc-chrome", "doc-caps", "doc-caps-ui", "doc-commit-gate-ui", "doc-date", "doc-address", "address-*", "repaint-keeps-edit",
+    modules: ["doc-form-*", "doc-skin-registry", "doc-chrome", "doc-caps", "doc-caps-ui", "doc-commit-gate-ui", "doc-toast-ui", "save-failure", "party-focus", "doc-toolbar-actions", "doc-source-picker-open", "doc-date", "doc-address", "address-*", "repaint-keeps-edit",
       "link-*", "missing-vendor", "missing-vendor-ui", "vendor-change", "vendor-change-ui", "vendor-activity", "field-loading", "mapped-header-fields", "item-*", "doc-item-sort", "doc-number-*", "doc-terms", "doc-terms-fields",
       "doc-source-terms", "doc-source-terms-dom", "doc-shell-kind", "erp-form-bridge", "account-company"],
     paths: ["electron/doc-form.html", "electron/doc-form.head.html", "electron/doc-form.footer.html", "electron/doc-form-body.fragment.html",
       "electron/doc-chrome.fragment.html", "electron/doc-form-preload.cjs", "electron/doc-skin.css", "electron/doc-fields.css",
-      "electron/erp-form-bridge-page.js", "scripts/assemble-doc-form-html.js"],
+      "electron/erp-form-bridge-page.js", "scripts/assemble-doc-form-html.js", "electron/ipc/link-search.js"],
     e2e: ["scaffold-typed-dates.spec.js", "scaffold-form-switch.spec.js"],
   },
   {
@@ -103,7 +104,7 @@ export const ARCHITECTURE_FAMILIES = [
     id: "ar",
     label: "A/R Doc skins — Estimate, Sales Order, Invoice, Receive Payment",
     modules: ["estimate-map", "sales-*", "so-create-*", "so-line-*", "receive-payment-map"],
-    e2e: ["scaffold-ar-doc-skins.spec.js"],
+    e2e: [],
   },
   {
     id: "edit-submitted",

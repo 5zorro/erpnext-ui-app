@@ -27,7 +27,7 @@
  * to stay silent when in doubt, and the tests carry an explicit negative-control list.
  */
 
-import { parsePaymentTermGrace, stripGraceSuffix, withGraceSuffix } from "./payment-term-grace.js";
+import { parsePaymentTermGrace, withGraceSuffix } from "./payment-term-grace.js";
 
 /**
  * The credit-period token in a term name: the number attached to `NET`.

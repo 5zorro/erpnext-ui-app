@@ -74,8 +74,18 @@ install script, and the cheaper rung of the ladder above). That covers dev tools
 install whose output feeds a commit. The project `.npmrc` takes no version younger than two months
 (`min-release-age=60`). A release that fixes a published security advisory may go in after a week,
 named with `--min-release-age-exclude=<package>` on that one install, never in `.npmrc`. New
-packages are pinned exactly, and an install or upgrade is its own commit. The policy and its
-reasons: `docs/implementation-plan-2026-10-31.md`.
+packages are pinned exactly, the lockfile is committed, setup and CI use `npm ci` (CI with
+`--ignore-scripts`), and an install or upgrade is its own commit with the lockfile's change read
+and summarised in its message. Install scripts stay off: no installed package runs one today
+(`npm install-scripts ls`). The review of what is installed (each package's publisher, age and
+`npm audit`) is repeated before each release and whenever a package is added.
+
+Why (5zorro, 2026-10-31: wary of a suggested dependency that later carries a rootkit): a suggested
+name can be a lookalike of a real one; a real package can turn bad when its maintainer's account is
+taken over, and a version range then pulls the bad version in; a package can run code the moment
+it is installed; and every package brings others, each one more publisher to trust. A hijacked
+version is usually found and pulled within days, hence the wait. The full review and the checker
+comparison (plan 2026-10-31, closed 2026-11-04) are in git history.
 
 ## Pointers
 

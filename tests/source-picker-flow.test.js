@@ -44,7 +44,6 @@ describe("mayAutoOpenSourcePicker", () => {
 describe("runSourcePickerFlow", () => {
   it("resolves when user closes, not when slices finish", async () => {
     const order = [];
-    const t0 = Date.now();
 
     const flowP = runSourcePickerFlow({
       supplier: "Alpine Supply",
@@ -74,18 +73,16 @@ describe("runSourcePickerFlow", () => {
     });
 
     const result = await flowP;
-    const elapsed = Date.now() - t0;
     assert.equal(result.kind, "cancel");
-    assert.ok(elapsed < 40, `expected fast resolve, got ${elapsed}ms`);
     assert.ok(order.includes("modal-close"));
+    // The proof is the order, not a stopwatch: every slice takes 50 ms, so a flow that waited for
+    // them would have one ended here. (A "< 40 ms" check failed once at 47 ms on a loaded machine.)
     assert.equal(order.filter((x) => x.startsWith("slice-end:")).length, 0);
   });
 
   it("streams slices into controller while modal stays open", async () => {
     /** @type {string[]} */
     const applied = [];
-    /** @type {import("../src/source-modal-ui.js").SourceModalController | null} */
-    let ctl = null;
 
     const flowP = runSourcePickerFlow({
       supplier: "Alpine Supply",

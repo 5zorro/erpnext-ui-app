@@ -36,7 +36,7 @@ export function isBillPaidErpField(field) {
  */
 export function defaultPaidAmountForIsPaid(doc, amountDueScratch) {
   if (isAmountDueEntered(amountDueScratch)) {
-    const a = Number(String(amountDueScratch).replace(/[^0-9.\-]/g, ""));
+    const a = Number(String(amountDueScratch).replace(/[^0-9.-]/g, ""));
     if (Number.isFinite(a) && a > 0) return a;
   }
   const d = doc && typeof doc === "object" ? doc : {};

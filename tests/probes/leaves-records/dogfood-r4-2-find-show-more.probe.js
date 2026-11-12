@@ -10,7 +10,7 @@
  * (drafts). Only the deleted-document log and the next numbers remain. The vendor stays.
  */
 import { test, expect } from "@playwright/test";
-import { launchShell, waitForE2eApi, e2eCall, e2eGet } from "../../../e2e/helpers.js";
+import { launchShell, waitForE2eApi, e2eGet } from "../../../e2e/helpers.js";
 import { inDoc, inFind, openNewDoc, assertSandboxSite, keepScene, erpDown, erpUp, report, settle } from "../probe-helpers.js";
 import { SCENES } from "../dogfood-scenes.js";
 

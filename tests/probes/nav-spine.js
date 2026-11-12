@@ -507,7 +507,6 @@ async function runCell(app, cell, docs, n) {
     await move(app, cell, docs, seen);
     delete seen.step;
   } catch (e) {
-    // eslint-disable-next-line no-control-regex
     const msg = String((e && e.message) || e).replace(/\x1b\[[0-9;]*m/g, "");
     const got = /Received: +(.*)/.exec(msg);
     seen.error = `${seen.step || "?"}: ${msg.split("\n")[0]}${got ? ` (got ${got[1]})` : ""}`.slice(0, 300);

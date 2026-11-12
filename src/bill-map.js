@@ -513,7 +513,7 @@ export function amountDueChecksumStatus(amountDue, grandTotal, eps = 0.005) {
 export function amountDueDelta(amountDue, compareTotal) {
   if (!isAmountDueEntered(amountDue)) return null;
   if (compareTotal == null || compareTotal === "") return null;
-  const a = Number(String(amountDue).replace(/[^0-9.\-]/g, ""));
+  const a = Number(String(amountDue).replace(/[^0-9.-]/g, ""));
   const g = Number(compareTotal);
   if (!Number.isFinite(a) || !Number.isFinite(g)) return null;
   return a - g;
@@ -566,7 +566,7 @@ export function amountDueChecksumChip(amountDue, compareTotal, eps = 0.005) {
   const abs = Math.abs(delta);
   const money = usd(abs);
   const signedMoney = delta > 0 ? `+${money}` : `−${money}`;
-  const title = `Off by ${money} (typed ${usd(Number(String(amountDue).replace(/[^0-9.\-]/g, "")))} vs bill total ${usd(Number(compareTotal))})`;
+  const title = `Off by ${money} (typed ${usd(Number(String(amountDue).replace(/[^0-9.-]/g, "")))} vs bill total ${usd(Number(compareTotal))})`;
   return {
     status,
     icon: "alert",
@@ -738,7 +738,7 @@ export function billCompareTotal(doc) {
 export function amountDueMatchesGrandTotal(amountDue, grandTotal, eps = 0.005) {
   if (!isAmountDueEntered(amountDue)) return true;
   if (grandTotal == null || grandTotal === "") return false;
-  const a = Number(String(amountDue).replace(/[^0-9.\-]/g, ""));
+  const a = Number(String(amountDue).replace(/[^0-9.-]/g, ""));
   const g = Number(grandTotal);
   if (!Number.isFinite(a) || !Number.isFinite(g)) return false;
   return Math.abs(a - g) <= eps;
@@ -830,7 +830,7 @@ export function reconciliationReport(doc, amountDue, eps = 0.005) {
   const dueEmpty = !isAmountDueEntered(amountDue);
   const dueNum = dueEmpty
     ? null
-    : Number(String(amountDue).replace(/[^0-9.\-]/g, ""));
+    : Number(String(amountDue).replace(/[^0-9.-]/g, ""));
   const linesVsGrand =
     Number.isFinite(grand) && Number.isFinite(linesSum)
       ? Math.abs(linesSum - grand) <= eps

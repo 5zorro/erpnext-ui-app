@@ -8,7 +8,7 @@
 
 import { SEED_PROFILES, SEED_VALUES } from "./simplified-seed-profiles.js";
 
-const VERSION = 15;
+const VERSION = 16;
 
 /** CSS for L1/L2/L3 field states + assumptions bar (assume.css production port). */
 const SIMPLIFIED_CSS = `
@@ -571,18 +571,24 @@ export function buildSimplifiedPayload() {
      submitted. The Doc Bill shows only the Supplier Invoice Date (it drives the due date);
      Simplified cannot hide Posting Date (ERPNext requires it), so under the Doc-skin profile it is
      quiet, Edit Posting Date is locked unticked, and save stamps today. */
-  var postingStampInstalled = false;
+  function stampPostingDate(frm) {
+    if (destroyed || !frm || !frm.doc || frm.doc.docstatus !== 0) return;
+    if (load("Purchase Invoice").source !== "doc-skin") return;
+    var today = frappe.datetime.get_today();
+    if (!Number(frm.doc.set_posting_time) && frm.doc.posting_date === today) return;
+    /* Direct: no triggers mid-save. */
+    frm.doc.set_posting_time = 0; frm.doc.posting_date = today;
+    try { frm.refresh_fields(["set_posting_time", "posting_date"]); } catch(e) {}
+  }
+  /* Frappe keeps a form handler for the life of the page and has no way to take back one of
+     ours (gotchas G29), so the validate hook is added once per page and calls whichever copy of
+     the skin is installed now, like the refresh patch below. */
   function installPostingStamp() {
-    if (postingStampInstalled || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
-    postingStampInstalled = true;
+    if (window.__ssPostingStampHooked || !window.frappe || !frappe.ui || !frappe.ui.form || !frappe.ui.form.on) return;
+    window.__ssPostingStampHooked = true;
     frappe.ui.form.on("Purchase Invoice", "validate", function(frm) {
-      if (destroyed || !frm || !frm.doc || frm.doc.docstatus !== 0) return;
-      if (load("Purchase Invoice").source !== "doc-skin") return;
-      var today = frappe.datetime.get_today();
-      if (!Number(frm.doc.set_posting_time) && frm.doc.posting_date === today) return;
-      /* Direct: no triggers mid-save. */
-      frm.doc.set_posting_time = 0; frm.doc.posting_date = today;
-      try { frm.refresh_fields(["set_posting_time", "posting_date"]); } catch(e) {}
+      var skin = window.__simplifiedSkin;
+      if (skin && typeof skin.stampPostingDate === "function") skin.stampPostingDate(frm);
     });
   }
 
@@ -1055,6 +1061,7 @@ export function buildSimplifiedPayload() {
     load: load,
     save: save,
     destroy: destroy,
+    stampPostingDate: stampPostingDate,
   };
 
   console.log("[simplified-skin] installed v" + VERSION);

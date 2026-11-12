@@ -7,7 +7,6 @@ import {
   amountDueChecksumChip,
   amountDueGrandPointer,
   billCompareTotal,
-  billMoneyStack,
   sumBillLineQty,
   sumBillLineAmount,
   formatBillLineTotal,
@@ -84,10 +83,7 @@ import {
 import {
   BILL_TAX_SORTABLE_HEADERS,
 } from "../src/bill-tax-sort.js";
-import {
-  emptyItemRowCleanupAction,
-  LAST_ITEM_ROW_TOAST,
-} from "../src/bill-item-guard.js";
+import { LAST_ITEM_ROW_TOAST } from "../src/bill-item-guard.js";
 import {
   billRowHasSource,
   formatQtyForErp,
@@ -135,19 +131,14 @@ import {
   itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "../src/link-picker-policy.js";
-import {
-  autoSizeItemColumns,
-  mountColResize,
-  mountDensityControl,
-} from "./item-col-resize.js";
-import { CELL_MODE_EDIT, CELL_MODE_NAV } from "../src/item-table-nav.js";
+import { CELL_MODE_NAV } from "../src/item-table-nav.js";
 import { createItemTableKeys } from "../src/item-table-keys-ui.js";
 import { createSiteRoundingAsk } from "../src/calc/site-rounding-ask.js";
 import { wireDateField } from "../src/doc-form-date-field-ui.js";
 import { setLineTab, wireLineTabs } from "../src/doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "../src/doc-form-tax-notes-ui.js";
 import { createCommitGate } from "../src/doc-form-commit-gate-ui.js";
-import { createItemRows } from "../src/doc-form-item-rows-ui.js";
+import { createDocLines } from "../src/doc-form-lines-ui.js";
 import { createTaxTable } from "../src/doc-form-tax-table-ui.js";
 
 /**
@@ -157,7 +148,8 @@ import { createTaxTable } from "../src/doc-form-tax-table-ui.js";
 const BILL_NAV_FIELDS = itemNavFieldsFromCols(BILL_ITEM_COLS);
 import { wireDocCapsUi } from "../src/doc-caps-ui.js";
 import { wireDocNumberLead } from "../src/doc-number-ui.js";
-import { openPrintDialog } from "../src/print-dialog-ui.js";
+import { runDocToolbarAction } from "../src/doc-toolbar-actions.js";
+import { createSourcePickerOpener } from "../src/doc-source-picker-open.js";
 import { mountComparePane } from "../src/compare-pane-ui.js";
 import { canAttachTo } from "../src/attachment-list.js";
 import { mountAttachmentList } from "../src/attachment-list-ui.js";
@@ -175,19 +167,17 @@ import {
   focusIsInOtherField,
   vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
-import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "../src/peek-return-focus.js";
 import {
   fieldsSettlingFor,
   remainingHoldMs,
   FIELD_LOADING_SHOW_AFTER_MS,
 } from "../src/field-loading.js";
-import { mayAutoOpenSourcePicker } from "../src/source-picker-flow.js";
 import { wireCommitGateChrome } from "../src/doc-commit-gate-ui.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "../src/doc-source-flow.js";
 import { clearBeforeVendorSwitch as clearPageBeforeVendorSwitch } from "../src/vendor-change-ui.js";
 import { focusTargetAfterSourceModal } from "../src/bill-source-flow.js";
-import { collectBillSourceRefs, sourceTermsDisplayBlocks } from "../src/doc-source-terms.js";
-import { paintSourceTermsFields } from "../src/doc-source-terms-dom.js";
+import { collectBillSourceRefs } from "../src/doc-source-terms.js";
+import { paintSourceTermsBlock } from "../src/doc-source-terms-dom.js";
 import {
   valuesMeaningfullyEqual,
   dirtyCompareKindForField,
@@ -210,12 +200,11 @@ import {
   commitGateSaveEnabled,
   billExpensesTaxOrientation,
   gateTriggerLabel,
-  commitGateErpFailureView,
-  formatSaveFailureReason,
 } from "../src/bill-action-flow.js";
+import { saveFailure, saveFailureKind } from "../src/save-failure.js";
+import { createDocToast } from "../src/doc-toast-ui.js";
 import { mergeSaveBlockers } from "../src/erp-form-bridge.js";
 import { createFieldCalcUi } from "../src/calc/attach-field-calc.js";
-import { rateFromBackedInAmount } from "../src/calc/back-in-amount.js";
 import {
   applyDocWashToDocument,
   setDocWashVariant,
@@ -226,7 +215,8 @@ import { wireItemImportButton } from "../src/item-import-ui.js";
 import { formatDueDateSettleLog } from "../src/bill-payment-terms-settle.js";
 import { installFocusRing, logFocus } from "../src/focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "../src/user-move-guard.js";
-import { captureBillFocus, restoreBillFocus, isBillFormFocusTarget } from "../src/bill-focus-guard.js";
+import { captureBillFocus, restoreBillFocus } from "../src/bill-focus-guard.js";
+import { focusPartyBox } from "../src/party-focus.js";
 import { shouldScheduleInvoiceDateFocus } from "../src/stale-focus-guard.js";
 import {
   LINKED_SOURCE_LOADING_PLACEHOLDER,
@@ -260,7 +250,6 @@ export async function bootBillFormPage(api) {
   let comparePane = null;
   /** The attached files under the notes (src/attachment-list-ui.js). */
   let attachList = null;
-  let removingTaxes = false;
   /**
    * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the doc-form page): the ⓘ on
    * a row the clerk made a fixed amount, "Vendor tax template default ⓘ", and holding Remove all.
@@ -270,7 +259,7 @@ export async function bootBillFormPage(api) {
     api: () => api,
     lastDoc: () => lastDoc,
     setStatus: (text, cls) => setStatus(text, cls),
-    removingTaxes: () => removingTaxes,
+    removingTaxes: () => docLines.removingTaxes(),
     removeAllTaxes: (opts) => removeAllTaxes(opts),
     testIdPrefix: "bill",
   });
@@ -293,7 +282,7 @@ export async function bootBillFormPage(api) {
     setStatus,
     noteUserEdit,
     sizeColumns: () => sizeTaxColumns(),
-    paintMoneyStack,
+    paintMoneyStack: (doc) => paintMoneyStack(doc),
     rowButtonsHtml: (taxRow, idx, canEdit) =>
       canEdit && isAllocatableChargeRow(taxRow)
         ? `<button type="button" class="alloc-btn" data-tax-alloc="${idx}" tabindex="-1" data-testid="bill-tax-alloc-${idx}" title="Move this charge into item costs (mouse only — grand total unchanged).">Allocate into items</button>`
@@ -329,10 +318,6 @@ export async function bootBillFormPage(api) {
     },
   });
 
-  /** @param {"edit"|"nav"} mode */
-  function setItemCellMode(mode) {
-    itemKeys.setMode(mode);
-  }
 
   /** Shift+Tab / ← out of the first line's first box: Amount Due, or the bill number. */
   function focusBeforeItemsTable() {
@@ -357,14 +342,21 @@ export async function bootBillFormPage(api) {
   const linkMounted = new WeakMap();
   /** Prevent stacking multiple source modals. */
   const sourceModalOpenRef = { current: false };
-  /** One auto-open session per vendor link pick — closed flag is SSoT (source-picker-flow). */
-  /** @type {{ supplier: string, userClosed: boolean } | null} */
-  let vendorPickSourceSession = null;
-  /** Coalesce parallel openSourcePicker calls for same supplier. */
-  /** @type {Promise<{ ok?: boolean, kind?: string, reason?: string }|void>|null} */
-  let sourcePickerInflight = null;
-  /** @type {string} */
-  let sourcePickerInflightSupplier = "";
+  /** Opening the source picker: its checks, the pick's session, the one in flight (src/doc-source-picker-open.js). */
+  const sourcePicker = createSourcePickerOpener({
+    api: () => api,
+    available: () => true,
+    editable: () => editable(),
+    lastDoc: () => lastDoc,
+    partyBox: () => el.vendor,
+    title: () => "Bill",
+    sourceLabel: () => "Select PO / source",
+    anotherDialogOpen: () => sourceModalOpenRef.current || informalLinkPickerOpen,
+    vendorIsMissing: (name, attempt) => vendorIsMissing(name, attempt),
+    setStatus: (text, cls) => setStatus(text, cls),
+    logFocus,
+    run: (sup, trigger) => runBillSourcePicker(sup, trigger),
+  });
   let allocationPickerOpen = false;
   /** True while the credit-memo informal-link picker (Bill or Sales Order) is open. */
   let informalLinkPickerOpen = false;
@@ -382,6 +374,14 @@ export async function bootBillFormPage(api) {
   let lastLinkedReceipts = [];
   /** Last ERP doc name painted — detect Bill→Bill nav and force-clear stale header shell. */
   let paintedBillDocName = "";
+  /** The name a provisional blank is painted under (paint, opts.provisional). */
+  const PROVISIONAL_BILL = "\u0000provisional";
+  /**
+   * Which open of a document the page is on (main stamps each open's snapshots with `openToken`).
+   * A vendor pick that started on an earlier open stops before it writes: its checks are live, and
+   * New pressed meanwhile would otherwise send it to the next Bill.
+   */
+  let openToken = 0;
   /** @type {{ key: string, asc: boolean }} */
   /** @type {import("../src/item-sort-specs.js").SortSpec[]} */
   let itemSortSpecs = [{ key: "lineNo", asc: true }];
@@ -647,6 +647,12 @@ export async function bootBillFormPage(api) {
     expenseNote: document.querySelector("[data-testid='bill-expense-note']"),
   };
   if (el.docTitle) el.docTitle.textContent = "Bill";
+  // The toast and the status line's scroll (shared with every Doc form, `doc-toast-ui.js`).
+  const toast = createDocToast({ toastEl: () => el.toast, statusEl: () => el.status, setStatus: (t, c) => setStatus(t, c) });
+  const showBlockingToast = toast.showBlocking;
+  const showToast = toast.show;
+  const showDialogToast = toast.showOverDialog;
+  const hideDialogToast = toast.hideOverDialog;
   
   function commitGateEls() {
     return {
@@ -665,107 +671,90 @@ export async function bootBillFormPage(api) {
   document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
   document.addEventListener("pointerdown", () => userMoves.bump(), true);
 
-  /** The lines table's rows (src/doc-form-item-rows-ui.js, shared with the doc-form page). */
-  const itemRows = createItemRows({
-    table: () => el && el.items,
-    api: () => api,
-    lastDoc: () => lastDoc,
-    painting: () => painting,
-    editable: () => editable(),
-    lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
-    keyField: "item_code",
-    itemKeys,
-    calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
-    testIdPrefix: "bill",
-    rateLabel: "Cost",
-    cellsOf: (model) => [model.lineNo, model.poLine, ...model.cells],
-    cellHtml: billLineCellHtml,
-    rowAttrs: (model) => ` data-wash-source="${model.washRole}"`,
-    canDeleteLines: () => true,
-    afterRows: (doc) => {
-      paintLineTotals(doc);
-      sizeItemColumns();
+  /** The lines and taxes, shared with doc-form (src/doc-form-lines-ui.js; its rows: doc-form-item-rows-ui.js). */
+  const docLines = createDocLines(
+    {
+      title: () => "Bill",
+      testIdPrefix: "bill",
+      rateLabel: "Cost",
+      el: () => el,
+      api: () => api,
+      lastDoc: () => lastDoc,
+      painting: () => painting,
+      editable: () => editable(),
+      repaint: (res) => paint(res.doc, amountDue),
+      refresh: () => refresh(),
+      setStatus: (text, cls) => setStatus(text, cls),
+      noteUserEdit: () => noteUserEdit(),
+      showToast: (text) => showToast(text),
+      logFocus,
+      userMoves,
+      calcUi,
+      attachCalc: (inp, opts) => wireFieldCalc(inp, opts),
+      itemKeys,
     },
-    navFields: () => BILL_NAV_FIELDS,
-    isMoneyField: (field) => field === "rate",
-    linkDoctype: (field) => linkDoctypeForBillField(field),
-    mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
-    attachCalc: (inp, opts) => wireFieldCalc(inp, opts),
-    // A Qty over the PO's splits the line (maybeSplitQtyOverPoLimit), from the tape or a refused write.
-    beforeCalcCommit: async (field, ri, value) => field === "qty" && (await maybeSplitQtyOverPoLimit(ri, value)),
-    afterRefused: async (field, ri, value, reason) =>
-      field === "qty" && isOverBillingError(reason) && (await maybeSplitQtyOverPoLimit(ri, value)),
-    deleteLine: (ri) => deleteLineKeepingReceived(ri),
-    repaint: (res) => paint(res.doc, amountDue),
-    repaintCleared: (res, ri) => {
-      if (lineAllocations && typeof lineAllocations === "object") {
-        delete lineAllocations[ri];
-        delete lineAllocations[String(ri)];
-      }
-      if (poLineMeta && typeof poLineMeta === "object") {
-        delete poLineMeta[ri];
-        delete poLineMeta[String(ri)];
-      }
-      paint(res.doc, amountDue, {
-        lineAllocations,
-        poLineMeta,
-      });
+    {
+      tableKey: (table) => `bill-${table}`,
+      lastRowToast: () => LAST_ITEM_ROW_TOAST,
+      focusAfterLeaving: () => focusAfterLeavingItemsTable(),
+      taxNotes,
+      deleteLine: (ri) => deleteLineKeepingReceived(ri),
+      taxesLocked: () =>
+        taxRowDeleteAllowed(allocateChargeModalOpen) ? "" : "Finish or cancel Allocate to stock before removing taxes.",
+      lineSums: () => ({ sumQty: sumBillLineQty, sumAmt: sumBillLineAmount, formatTotal: formatBillLineTotal }),
+      rows: {
+        cellsOf: (model) => [model.lineNo, model.poLine, ...model.cells],
+        cellHtml: (...args) => billLineCellHtml(...args),
+        rowAttrs: (model) => ` data-wash-source="${model.washRole}"`,
+        navFields: () => BILL_NAV_FIELDS,
+        isMoneyField: (field) => field === "rate",
+        linkDoctype: (field) => linkDoctypeForBillField(field),
+        mountLinkPicker: (inp, doctype, apply) => mountBillLinkPicker(inp, doctype, apply),
+        // A Qty over the PO's splits the line (maybeSplitQtyOverPoLimit), from the tape or a refused write.
+        beforeCalcCommit: async (field, ri, value) => field === "qty" && (await maybeSplitQtyOverPoLimit(ri, value)),
+        afterRefused: async (field, ri, value, reason) =>
+          field === "qty" && isOverBillingError(reason) && (await maybeSplitQtyOverPoLimit(ri, value)),
+        repaintCleared: (res, ri) => {
+          if (lineAllocations && typeof lineAllocations === "object") {
+            delete lineAllocations[ri];
+            delete lineAllocations[String(ri)];
+          }
+          if (poLineMeta && typeof poLineMeta === "object") {
+            delete poLineMeta[ri];
+            delete poLineMeta[String(ri)];
+          }
+          paint(res.doc, amountDue, {
+            lineAllocations,
+            poLineMeta,
+          });
+        },
+      },
     },
-    lastRowToast: () => LAST_ITEM_ROW_TOAST,
-    showToast,
-    setStatus,
-    noteUserEdit,
-    setItemCellMode,
+  );
+  const {
+    itemRows,
     focusItemCell,
-    focusAfterLeaving: () => focusAfterLeavingItemsTable(),
-    userMoves,
-    logFocus,
-    refresh: () => refresh(),
-    cleanupEmptyLine: (ri, code) => cleanupEmptyItemRow(ri, code),
-    beginAmountBackIn,
-  });
+    ensureAtLeastOneItemRow,
+    comeBackFromPeek,
+    removeAllTaxes,
+    paintMoneyStack,
+    paintLineTotals,
+    sizeTaxColumns,
+  } = docLines;
+
   /** The clerk's move count when the bill on screen first appeared (focusVendorField). */
   let docShownMoveMark = 0;
+  /** The box holding the focus then: the last bill's place, not the clerk's on this one. */
+  let docShownFocus = null;
   let docShownName = "";
-
-  /** The line cell a "create …" peek was opened from (DF-02). */
-  let peekReturn = null;
-  /** The line a create peek came back to; held from the empty-line cleanup until the clerk moves. */
-  let peekHold = null;
-
-  /** True while a create errand (out, or just back) owns this line — see peekErrandHoldsRow. */
-  function peekHoldsRow(ri) {
-    return peekErrandHoldsRow(peekReturn, peekHold, ri, !!peekHold && userMoves.movedSince(peekHold.mark));
-  }
-
-  /** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
-  async function comeBackFromPeek(leftFrom) {
-    const plan = peekReturnPlan(peekReturn, leftFrom);
-    peekHold = plan && plan.row != null ? { row: plan.row, mark: userMoves.mark() } : null;
-    peekReturn = null;
-    // The Bill opens create peeks from line cells only (its Vendor box goes to Vendor add).
-    if (!plan || plan.row == null) return;
-    if (plan.fill && api && editable()) {
-      const res = await api.setItem(plan.row, plan.field, plan.fill);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, amountDue);
-        setStatus(`New Item ${plan.fill} is on line ${plan.row + 1}.`);
-      } else {
-        setStatus((res && res.reason) || `Could not put ${plan.fill} on line ${plan.row + 1}.`, "warn");
-      }
-    }
-    focusItemCell(plan.row, plan.field, { mode: plan.fill ? CELL_MODE_NAV : CELL_MODE_EDIT });
-  }
 
   function linkPickerDeps() {
     return {
       api,
       linkMounted,
       setStatus,
-      onCreatePeek: (input, doctype) => {
-        peekReturn = peekReturnTarget(input, doctype);
-      },
+      pickerScope: () => "bill",
+      onCreatePeek: (input, doctype) => docLines.notePeekFrom(input, doctype),
       onBeforePick: (value, doctype, btn) => {
         if (doctype !== "Account") return;
         if (btn && btn.getAttribute("data-company-mismatch") === "1") {
@@ -846,15 +835,6 @@ export async function bootBillFormPage(api) {
     el.status.className = "status" + (cls ? " " + cls : "");
   }
 
-  function scrollStatusIntoView() {
-    if (el.status) {
-      try {
-        el.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      } catch {
-        el.status.scrollIntoView();
-      }
-    }
-  }
 
   function scrollToBillItems() {
     if (el.tabItems && el.panelExpenses && el.panelExpenses.hidden === false) {
@@ -872,143 +852,34 @@ export async function bootBillFormPage(api) {
   }
 
   /**
-   * A clickable toast shown over an open dialog (the dialogs' backdrops sit above the toast's own
-   * layer), cleared by `hideDialogToast` (review S1: a second Apply held back).
-   * @param {string} text
-   * @param {() => void} onClick
+   * A save that failed or was held back: the words every form uses (`save-failure.js`), in the red
+   * status line and a toast. The Bill's own toasts for its PO-limit cases go first.
+   * @param {import("./save-failure.js").SaveFailure} failure
+   * @param {string[]} [rawTexts] the reply's own texts (which PO-limit case it is)
    */
-  function showDialogToast(text, onClick) {
-    if (el.toast) el.toast.classList.add("over-dialog");
-    showBlockingToast(text, () => {
-      hideDialogToast();
-      onClick();
-    });
-  }
-
-  function hideDialogToast() {
-    if (!el.toast || !el.toast.classList.contains("over-dialog")) return;
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = null;
-    el.toast.classList.remove("show", "fade-out", "is-action", "over-dialog");
-    el.toast.onclick = null;
-    el.toast.hidden = true;
-    el.toast.textContent = "";
-  }
-
-  /**
-   * @param {string} text
-   * @param {(() => void)|null} [onClick]
-   * @param {number} [ms]
-   */
-  function showBlockingToast(text, onClick, ms = 8000) {
-    if (!el.toast) {
-      scrollStatusIntoView();
-      setStatus(text, "err");
-      return;
-    }
-    if (toastTimer) clearTimeout(toastTimer);
-    el.toast.hidden = false;
-    el.toast.textContent = text;
-    el.toast.classList.remove("fade-out");
-    el.toast.classList.add("show");
-    if (onClick) {
-      el.toast.classList.add("is-action");
-      el.toast.onclick = () => {
-        onClick();
-        scrollStatusIntoView();
-      };
+  function announceSaveFailure(failure, rawTexts = []) {
+    const texts = rawTexts.filter(Boolean).map(String);
+    if (texts.some((t) => t === OVERBILL_CAP_CACHE_BLOCKER)) {
+      toast.announceSaveFailure(failure, { toast: "PO limits still loading — wait for source columns, then Save again.", onClick: scrollToBillItems });
+    } else if (texts.some(isOverBillingError)) {
+      toast.announceSaveFailure(failure, { toast: "Over PO limit — click to review items (excess must be a NIC row).", onClick: scrollToBillItems });
     } else {
-      el.toast.classList.remove("is-action");
-      el.toast.onclick = null;
+      toast.announceSaveFailure(failure);
     }
-    toastTimer = setTimeout(() => {
-      el.toast.classList.add("fade-out");
-      el.toast.classList.remove("is-action");
-      el.toast.onclick = null;
-      toastTimer = setTimeout(() => {
-        el.toast.classList.remove("show", "fade-out");
-        el.toast.hidden = true;
-        el.toast.textContent = "";
-        toastTimer = null;
-      }, 650);
-    }, ms);
   }
 
   /**
+   * A save held back by the Bill's own checks (before ERPNext is asked).
    * @param {string} reason
    * @param {string[]|undefined} blockers
+   * @param {boolean} [submit]
    */
-  function announceSaveBlocker(reason, blockers) {
-    scrollStatusIntoView();
-    const rawTexts = [reason, ...(Array.isArray(blockers) ? blockers : [])]
-      .filter(Boolean)
-      .map(String);
-    const texts = rawTexts.map(humanizeBillErpMessage).filter(Boolean);
-    const msg = texts[0] || "Save blocked — fix validation issues.";
-    if (rawTexts.some((t) => t === OVERBILL_CAP_CACHE_BLOCKER)) {
-      showBlockingToast("PO limits still loading — wait for source columns, then Save again.", () => {
-        scrollToBillItems();
-      });
-    } else if (rawTexts.some(isOverBillingError)) {
-      showBlockingToast("Over PO limit — click to review items (excess must be a NIC row).", () => {
-        scrollToBillItems();
-      });
-    } else {
-      showBlockingToast("Blocking validation — click to see details at top.", () => {
-        scrollStatusIntoView();
-      });
-    }
-    setStatus(msg, "err");
+  function announceSaveBlocker(reason, blockers, submit = false) {
+    const list = Array.isArray(blockers) && blockers.length ? blockers : [reason];
+    announceSaveFailure(saveFailure({ ok: false, reason, blockers: list }, { submit, humanize: humanizeBillErpMessage }), [reason, ...list]);
   }
   
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let toastTimer = null;
-  /**
-   * Fading notice (last-row delete, etc.).
-   * @param {string} text
-   * @param {number} [ms]
-   */
-  function showToast(text, ms = 3200) {
-    if (!el.toast) {
-      setStatus(text, "warn");
-      return;
-    }
-    if (toastTimer) clearTimeout(toastTimer);
-    el.toast.hidden = false;
-    el.toast.textContent = text;
-    el.toast.classList.remove("fade-out");
-    el.toast.classList.add("show");
-    toastTimer = setTimeout(() => {
-      el.toast.classList.add("fade-out");
-      toastTimer = setTimeout(() => {
-        el.toast.classList.remove("show", "fade-out");
-        el.toast.hidden = true;
-        el.toast.textContent = "";
-        toastTimer = null;
-      }, 650);
-    }, ms);
-  }
-  
-  /**
-   * Vanilla requires ≥1 item — seed a blank line when the grid is empty.
-   * @param {object|null|undefined} doc
-   */
-  async function ensureAtLeastOneItemRow(doc) {
-    if (!api || !editable() || painting) return;
-    const items = doc && Array.isArray(doc.items) ? doc.items : [];
-    if (items.length > 0) return;
-    const res = await api.addItem();
-    if (res && res.ok) {
-      noteUserEdit();
-      paint(res.doc, amountDue);
-    }
-  }
-  
-  /**
-   * Remove blank Item rows when the clerk dismisses the picker / leaves the cell.
-   * @param {number} rowIndex
-   * @param {string} itemCode
-   */
+  /** Tab out of the last line: the tax account box, else Add tax, else nowhere. */
   function focusAfterLeavingItemsTable() {
     if (el.addLine) el.addLine.tabIndex = -1;
     try {
@@ -1029,28 +900,6 @@ export async function bootBillFormPage(api) {
       }
     } catch {
       /* ignore */
-    }
-  }
-  
-  async function cleanupEmptyItemRow(rowIndex, itemCode) {
-    if (!api || !editable() || painting || itemKeys.busy()) return;
-    if (peekHoldsRow(rowIndex)) {
-      logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
-      return;
-    }
-    const rowCount =
-      lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-    const decision = emptyItemRowCleanupAction(rowCount, itemCode);
-    if (decision.action !== "delete") return;
-    setStatus("Removing empty line…");
-    const removed = await deleteLineKeepingReceived(rowIndex);
-    if (removed && removed.ok) {
-      noteUserEdit();
-      paint(removed.doc, amountDue);
-      setStatus("Empty line removed.");
-      focusAfterLeavingItemsTable();
-    } else if (removed && removed.blockedLastRow) {
-      showToast(removed.reason || LAST_ITEM_ROW_TOAST);
     }
   }
   
@@ -1128,65 +977,39 @@ export async function bootBillFormPage(api) {
     },
     runAction: (action, trigger) => runPendingAction(action, trigger),
     announceBlocker: (text, blockers) => announceSaveBlocker(text, blockers),
-    afterSaveRefused: (reason, blockers) => announceSaveBlocker(reason, blockers),
     text: {
       title: () => "Bill",
       triggerLabel: gateTriggerLabel,
       readyTitle: () => "Doc Bill + live ERP meta preflight passed",
       cancelHint: () => "Choose Cancel to return to the Bill and fix these fields.",
       saveWarning: commitGateSaveWarning,
-      erpFailureView: commitGateErpFailureView,
     },
   });
   
+  /** Find / New / Print (src/doc-toolbar-actions.js); a gated Find carries the Ref the clerk typed. */
   async function runPendingAction(action, trigger = null) {
-    if (!api) return;
-    if (action === "find") {
-      const prefill =
-        trigger && trigger.findPrefill && typeof trigger.findPrefill === "object"
-          ? trigger.findPrefill
-          : {};
-      const hasPrefill = !!(prefill.billNo && String(prefill.billNo).trim());
-      setStatus(hasPrefill ? "Opening Bill list with Ref filter…" : "Opening Bill list…");
-      const res = await api.findBills(prefill);
-      try {
-        if (document.activeElement && typeof document.activeElement.blur === "function") {
-          document.activeElement.blur();
-        }
-      } catch {
-        /* ignore */
-      }
-      // Re-assert filter focus after Find IPC (chrome WebContents can steal OS focus).
-      let post = null;
-      if (res && res.ok && api.refocusListFilter) {
-        try {
-          post = await api.refocusListFilter(res.focusField || "bill_no");
-        } catch {
-          /* ignore */
-        }
-      }
-      if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
-      else if (res.focusOk === false || (post && post.ok === false)) {
-        setStatus(res.reason || post?.reason || "Bill list opened (filter focus missed).", "warn");
-      } else if (res.prefilled) {
-        setStatus(res.reason || "Bill list opened with Ref / vendor filters.");
-      } else setStatus("Bill list opened — type in Supplier Invoice No.");
-      return;
-    }
-    if (action === "new") {
-      setStatus("Starting new Bill…");
-      const res = await api.newBill();
-      if (res && res.ok) {
-        setStatus("New Bill.");
-        focusVendorField();
-      } else setStatus((res && res.reason) || "New Bill failed.", "err");
-      return;
-    }
-    if (action === "print") {
-      // In place: the dialog prints / saves ERPNext's own output; the Bill never moves.
-      await openPrintDialog({ api, doc: lastDoc, label: "Bill" });
-      return;
-    }
+    await runDocToolbarAction(action, {
+      api,
+      lastDoc,
+      title: "Bill",
+      setStatus,
+      find: () => {
+        const prefill =
+          trigger && trigger.findPrefill && typeof trigger.findPrefill === "object" ? trigger.findPrefill : {};
+        const hasPrefill = !!(prefill.billNo && String(prefill.billNo).trim());
+        return {
+          opening: hasPrefill ? "Opening Bill list with Ref filter…" : "Opening Bill list…",
+          open: () => api.findBills(prefill),
+          focusField: "bill_no",
+          opened: (res) =>
+            res.prefilled
+              ? res.reason || "Bill list opened with Ref / vendor filters."
+              : "Bill list opened — type in Supplier Invoice No.",
+        };
+      },
+      newDoc: () => api.newBill(),
+      afterNew: () => focusVendorField(),
+    });
   }
   
 
@@ -1361,7 +1184,7 @@ export async function bootBillFormPage(api) {
     return resolveBillRefSupplier({
       docSupplier: lastDoc && lastDoc.supplier,
       domSupplier: el.vendor && el.vendor.value,
-      pendingPickSupplier: vendorPickSourceSession && vendorPickSourceSession.supplier,
+      pendingPickSupplier: sourcePicker.pickedSupplier(),
     });
   }
 
@@ -1422,118 +1245,9 @@ export async function bootBillFormPage(api) {
     el.amountdue.value = plain || (amountDue !== "" ? String(amountDue) : "");
   }
   
-  function focusItemCell(rowIndex, field, opts = {}) {
-    itemKeys.focusCell(rowIndex, field, opts);
-  }
-  
   function editable() {
     return isDraftBillDoc(lastDoc);
   }
-  
-  function paintLineTotals(doc) {
-    if (!el.lineTotals) return;
-    const items = doc && Array.isArray(doc.items) ? doc.items : [];
-    if (!items.length) {
-      el.lineTotals.hidden = true;
-      return;
-    }
-    el.lineTotals.hidden = false;
-    el.totQty.textContent = formatBillLineTotal(sumBillLineQty(doc));
-    el.totAmt.innerHTML =
-      formatUsdAmountHtml(sumBillLineAmount(doc)) || formatBillLineTotal(sumBillLineAmount(doc));
-  }
-  
-  function paintMoneyStack(doc) {
-    const stack = billMoneyStack(doc);
-    const fmt = (n) => formatUsdAmountHtml(n) || "$0.00";
-    if (el.msItems) el.msItems.innerHTML = fmt(stack.itemSubtotal);
-    if (el.msTaxes) el.msTaxes.innerHTML = fmt(stack.taxesTotal);
-    if (el.msGrand) {
-      el.msGrand.innerHTML =
-        stack.grandTotal != null ? fmt(stack.grandTotal) : "—";
-    }
-    if (el.msNote) {
-      if (stack.note) {
-        el.msNote.hidden = false;
-        el.msNote.textContent = stack.note;
-      } else {
-        el.msNote.hidden = true;
-        el.msNote.textContent = "";
-      }
-    }
-  }
-  
-  /**
-   * Clear the template field first (or ERPNext refills the rows from it), then every row.
-   * @param {{ quiet?: boolean }} [opts]
-   */
-  async function removeAllTaxes(opts = {}) {
-    if (!api || !editable() || !lastDoc || removingTaxes) return;
-    if (!taxRowDeleteAllowed(allocateChargeModalOpen)) {
-      setStatus("Finish or cancel Allocate to stock before removing taxes.", "warn");
-      return;
-    }
-    removingTaxes = true;
-    try {
-      const name = String(lastDoc.name || "");
-      taxNotes.removedOn.add(name);
-      let doc = lastDoc;
-      if (doc.taxes_and_charges) {
-        const r = await api.setHeader("taxes_and_charges", "");
-        if (!(r && r.ok)) {
-          setStatus((r && r.reason) || "Could not clear the tax template.", "err");
-          return;
-        }
-        doc = r.doc || doc;
-      }
-      for (let i = (Array.isArray(doc.taxes) ? doc.taxes.length : 0) - 1; i >= 0; i -= 1) {
-        const r = await api.deleteTax(i);
-        if (!(r && r.ok)) {
-          setStatus((r && r.reason) || "Could not remove a tax row.", "err");
-          break;
-        }
-        doc = r.doc || doc;
-      }
-      noteUserEdit();
-      paint(doc, amountDue);
-      setStatus(
-        opts.quiet
-          ? "ERPNext put the template's taxes back; removed again — you removed all taxes on this bill. Add tax/charge adds one."
-          : "All taxes and charges removed. They stay removed until you save; Add tax/charge adds one back.",
-      );
-    } finally {
-      removingTaxes = false;
-    }
-  }
-
-    /**
-     * Packet T C — size the line grid from its content, then arm the drag
-     * handles. Runs after every repaint because the header row is rebuilt each
-     * time; both calls are idempotent.
-     */
-    function sizeItemColumns() {
-      try {
-        const table = el.items && el.items.closest ? el.items.closest("table") : null;
-        if (!table) return;
-        mountColResize(table, { tableKey: "bill-items", onChange: sizeItemColumns });
-        mountDensityControl({ table, button: document.getElementById("btn-density") });
-        autoSizeItemColumns(table, { tableKey: "bill-items", growSection: table.closest(".bill-section") });
-      } catch {
-        /* column sizing is presentation; never let it break a repaint */
-      }
-    }
-
-    function sizeTaxColumns() {
-      try {
-        const table =
-          el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
-        if (!table) return;
-        mountColResize(table, { tableKey: "bill-taxes", onChange: sizeTaxColumns });
-        autoSizeItemColumns(table, { tableKey: "bill-taxes", sticky: false, growSection: table.closest(".bill-section") });
-      } catch {
-        /* ignore */
-      }
-    }
 
   // ---- DF-02 J: Rec'd by / Rec'd Date. Pending who/when live in the draft's own Remarks block
   // (src/jit-receipt.js), written on every change, so the draft carries them and the gate guards
@@ -1814,71 +1528,6 @@ export async function bootBillFormPage(api) {
       return `<td class="rec-col"><span class="ro" data-testid="bill-rec-${ri}-${which}"${from}>${escapeHtml(shown) || "—"}</span></td>`;
     }
     return null;
-  }
-  
-  /**
-   * Click Amount → temporary input + calc; commit writes rate = amount ÷ qty.
-   * @param {HTMLElement} btn
-   * @param {number} ri
-   */
-  function beginAmountBackIn(btn, ri) {
-    const td = btn.closest("td");
-    if (!td || !lastDoc || !lastDoc.items || !lastDoc.items[ri]) return;
-    const row = lastDoc.items[ri];
-    const priorAmt =
-      row.amount != null && row.amount !== ""
-        ? String(row.amount)
-        : String((Number(row.qty) || 0) * (Number(row.rate) || 0) || "");
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.inputMode = "decimal";
-    inp.className = "money-cost amount-back-in-input";
-    inp.dataset.testid = `bill-amt-edit-${ri}`;
-    inp.setAttribute("data-testid", `bill-amt-edit-${ri}`);
-    const n0 = parseMoney(priorAmt);
-    inp.value = n0 != null ? String(n0) : "";
-    td.replaceChildren(inp);
-    setStatus("Back into cost: enter Amount (calc OK) — Cost = Amount ÷ Qty.");
-    const finishRestore = () => {
-      paint(lastDoc, amountDue);
-    };
-    wireFieldCalc(inp, {
-      kind: "amount",
-      commitOnIdleBlur: true,
-      onCommit: async (value) => {
-        const qty = row.qty;
-        const derived = rateFromBackedInAmount(value, qty);
-        if (!derived.ok) {
-          setStatus(derived.reason, "warn");
-          finishRestore();
-          return;
-        }
-        setStatus("Updating cost from amount…");
-        const res = await api.setItem(ri, "rate", derived.rateText);
-        if (res && res.ok) {
-          noteUserEdit();
-          paint(res.doc, amountDue);
-          setStatus(`Cost set to ${derived.rateText} (Amount ÷ Qty).`);
-        } else {
-          setStatus((res && res.reason) || "Could not update cost.", "err");
-          await refresh();
-        }
-      },
-    });
-    inp.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape" && calcUi.getState().mode !== "active") {
-        ev.preventDefault();
-        // Detach before paint so blur does not idle-commit the edit.
-        calcUi.clear(inp.value);
-        finishRestore();
-      }
-    });
-    inp.focus();
-    try {
-      inp.select();
-    } catch {
-      /* ignore */
-    }
   }
   
   function paintDocStatusBadge(doc) {
@@ -2225,10 +1874,11 @@ export async function bootBillFormPage(api) {
   }
 
   /** Museum OI-200: before a vendor pick, a switch clears the whole Bill (`vendor-change-ui.js`). */
-  function clearBeforeVendorSwitch(v) {
+  function clearBeforeVendorSwitch(v, pickedOn = 0) {
     return clearPageBeforeVendorSwitch({
       api,
       value: v,
+      openToken: pickedOn,
       box: el.vendor,
       kept: String(paintedHeaderValue("supplier") ?? ""),
       docLabel: "bill",
@@ -2260,15 +1910,23 @@ export async function bootBillFormPage(api) {
         setStatus("Bill is not a draft — cannot set vendor.", "warn");
         return;
       }
+      const pickedOn = openToken;
+      const leftBill = () => {
+        if (pickedOn === openToken) return false;
+        logFocus("vendor-pick-dropped", `picked on open ${pickedOn}, now open ${openToken}`);
+        return true;
+      };
       if (await vendorIsMissing(v, "vendor")) return;
-      if (!(await clearBeforeVendorSwitch(v))) return;
+      if (leftBill()) return;
+      if (!(await clearBeforeVendorSwitch(v, pickedOn))) return;
+      if (leftBill()) return;
       const decision = shouldOpenSourceModalAfterVendorPick({
         trigger: "link_pick",
         hasSupplier: !!normalizeEditableText(v),
         editable: true,
         modalAlreadyOpen: sourceModalOpenRef.current,
       });
-      vendorPickSourceSession = { supplier: normalizeEditableText(v), userClosed: false };
+      sourcePicker.notePick(v);
       prefetchVendorBillRefs(v);
       setStatus("Setting vendor…");
       try {
@@ -2283,7 +1941,9 @@ export async function bootBillFormPage(api) {
         supplier: v,
         decision,
         setHeader: (field, value) =>
-          withFieldSettleLoading(field, api.setHeader(field, value)),
+          leftBill()
+            ? Promise.resolve({ ok: false, superseded: true })
+            : withFieldSettleLoading(field, api.setHeader(field, value, { openToken: pickedOn })),
         openSourcePicker: (supplier) => openSourcePicker(supplier, { trigger: "link_pick" }),
         onHeaderSuccess: (res) => {
           if (res && res.paymentTermsSettle) {
@@ -2364,59 +2024,7 @@ export async function bootBillFormPage(api) {
    * @param {{ trigger?: "link_pick" | "blur" | "toolbar" | "unknown" }} [opts]
    */
   async function openSourcePicker(supplier, opts = {}) {
-    const trigger = opts.trigger || "unknown";
-    const listSlice = api && api.listSourceSlice;
-    if (!api || !listSlice) {
-      setStatus("Source picker API missing — restart the shell.", "err");
-      return { ok: false, reason: "api_missing" };
-    }
-    // Every modal on this page must respect every other one. The credit-memo link picker
-    // checked these two from day one; they did not check it back, so a toolbar Select PO
-    // could stack a second dialog on top of an open link picker.
-    if (sourceModalOpenRef.current || informalLinkPickerOpen) {
-      return { ok: false, reason: "already_open" };
-    }
-    if (!editable()) {
-      setStatus("Bill is not a draft — source picker locked.", "warn");
-      return { ok: false, reason: "not_editable" };
-    }
-    const sup =
-      normalizeEditableText(supplier) ||
-      normalizeEditableText(lastDoc && lastDoc.supplier) ||
-      normalizeEditableText(el.vendor.value);
-    if (!sup) {
-      setStatus("Pick a vendor before Select PO / source.", "warn");
-      return { ok: false, reason: "no_supplier" };
-    }
-    // The vendor pick checked already; Select PO and a vendor typed then left were not (D2).
-    if (trigger !== "link_pick" && (await vendorIsMissing(sup, "sources"))) {
-      return { ok: false, reason: "vendor_missing" };
-    }
-
-    if (trigger === "link_pick") {
-      /* session reset happens in link picker onPicked (explicit user pick only) */
-    } else if (trigger === "toolbar") {
-      vendorPickSourceSession = null;
-    }
-
-    const gate = mayAutoOpenSourcePicker(vendorPickSourceSession, sup, trigger);
-    if (!gate.ok) {
-      logFocus("source-modal-skip", `${trigger}:${gate.reason || "blocked"}`);
-      return { ok: false, reason: gate.reason || "blocked" };
-    }
-
-    if (sourcePickerInflight && sourcePickerInflightSupplier === sup && trigger !== "toolbar") {
-      return sourcePickerInflight;
-    }
-
-    sourcePickerInflightSupplier = sup;
-    sourcePickerInflight = runBillSourcePicker(sup, trigger).finally(() => {
-      if (sourcePickerInflightSupplier === sup) {
-        sourcePickerInflight = null;
-        sourcePickerInflightSupplier = "";
-      }
-    });
-    return sourcePickerInflight;
+    return sourcePicker.open(supplier, opts);
   }
 
   /**
@@ -2442,11 +2050,9 @@ export async function bootBillFormPage(api) {
       isOpenRef: sourceModalOpenRef,
       setStatus,
       log: (event, detail) => logFocus(event, detail || ""),
-      mayOpen: (vendor, trig) => mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+      mayOpen: (vendor, trig) => sourcePicker.mayOpen(vendor, trig),
       onUserClose: (kind) => {
-        if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
-          vendorPickSourceSession.userClosed = true;
-        }
+        sourcePicker.noteClosed(sup);
         if (focusTargetAfterSourceModal(kind) === "invoice_date") scheduleFocusInvoiceDateField();
       },
       searchBills: () => searchSourceBillRows("", sup, currentName),
@@ -2757,39 +2363,9 @@ export async function bootBillFormPage(api) {
     if (blocked && reason) setStatus(reason, "warn");
   }
   
+  /** A new bill starts in Vendor, unless the clerk is already somewhere on it (src/party-focus.js). */
   function focusVendorField() {
-    // A new bill starts in Vendor — unless the clerk is already somewhere on it (a slow load and
-    // they clicked into a line), and never a retry after they have moved (user-move-guard.js).
-    const already = document.activeElement;
-    if (already && already !== el.vendor && isBillFormFocusTarget(already)) {
-      logFocus("focus-vendor-skipped", "clerk already in a field");
-      return false;
-    }
-    // Moves count from when this bill first appeared, not from this call: a repaint can drop the
-    // clerk's focus before the opening focus is asked for.
-    const moveMark = docShownMoveMark;
-    if (userMoves.movedSince(moveMark)) {
-      logFocus("focus-vendor-skipped", "clerk moved since the bill appeared");
-      return false;
-    }
-    const tryFocus = () => {
-      if (userMoves.movedSince(moveMark)) return;
-      try {
-        el.vendor.focus({ preventScroll: false });
-        el.vendor.select();
-      } catch {
-        try {
-          el.vendor.focus();
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-    // Now, and once more after layout. (The old 50/200/500 ms retries were a debugging leftover
-    // from 2026-07 — 5zorro 2026-10-11 — and the late ones could land after the clerk had moved.)
-    tryFocus();
-    requestAnimationFrame(tryFocus);
-    return true;
+    return focusPartyBox({ box: el.vendor, shownMark: docShownMoveMark, shownFocus: docShownFocus, userMoves, logFocus });
   }
   
   async function requestLinkedSourcePeek(route, kind) {
@@ -3052,17 +2628,27 @@ export async function bootBillFormPage(api) {
     lastLinkedPos = [];
     lastLinkedReceipts = [];
     lastEnrichPending = null;
-    vendorPickSourceSession = null;
-    sourcePickerInflight = null;
-    sourcePickerInflightSupplier = "";
+    sourcePicker.forget();
     paintedBillDocName = "";
     logFocus("paint-clear-shell", "loading");
   }
 
   function paint(doc, scratchDue, opts = {}) {
-    if (doc && doc.name && String(doc.name) !== docShownName) {
-      docShownName = String(doc.name);
+    // ERPNext's blank arriving after the provisional one (a new Bill painted before ERPNext made
+    // its blank, 5zorro 2026-11-03) is the same Bill to the clerk: their moves still count from
+    // when it first appeared, and their typing, place and open pick list are left alone.
+    const afterProvisional =
+      !opts.provisional && paintedBillDocName === PROVISIONAL_BILL && !!(doc && doc.__islocal);
+    if (opts.provisional) {
+      docShownName = PROVISIONAL_BILL;
       docShownMoveMark = userMoves.mark();
+      docShownFocus = document.activeElement;
+    } else if (doc && doc.name && String(doc.name) !== docShownName) {
+      if (!(afterProvisional && docShownName === PROVISIONAL_BILL)) {
+        docShownMoveMark = userMoves.mark();
+        docShownFocus = document.activeElement;
+      }
+      docShownName = String(doc.name);
     }
     painting = true;
     const savedFocus = opts.preserveFocus ?? captureBillFocus();
@@ -3118,11 +2704,9 @@ export async function bootBillFormPage(api) {
     }
     setFormBlocked(false);
     const nextDocName = String(doc.name || "");
-    const docIdentityChanged = nextDocName !== paintedBillDocName;
+    const docIdentityChanged = !afterProvisional && nextDocName !== paintedBillDocName;
     if (docIdentityChanged) {
-      vendorPickSourceSession = null;
-      sourcePickerInflight = null;
-      sourcePickerInflightSupplier = "";
+      sourcePicker.forget();
       logFocus("paint-doc-swap", `${paintedBillDocName || "(none)"} → ${nextDocName || "(none)"}`);
       closeAllLinkDropdowns();
       hideMissingVendorBanner();
@@ -3184,12 +2768,12 @@ export async function bootBillFormPage(api) {
     );
     const linkedPosArg = opts.linkedPos ?? lastLinkedPos;
     paintLinkedSources(doc, linkedPosArg, opts.linkedReceipts ?? lastLinkedReceipts, lastEnrichPending);
-    if (opts.linkedPos !== undefined) {
+    if (opts.linkedPos !== undefined && !opts.provisional) {
       void maybePrefillRemarksFromLinkedPos(doc, linkedPosArg, { linkedPosChanged: true });
     }
     paintHeaderInputIfAllowed(el.memo, "remarks", stripReceivedBlock(h.Memo ?? ""), headerPaintOpts("remarks"));
     paintCreditLinks(doc);
-    void paintSourceTerms(doc);
+    if (!opts.provisional) void paintSourceTerms(doc);
     const canEdit = isDraftBillDoc(doc);
     syncAddressPickers(canEdit);
     syncDueDateField(doc, canEdit);
@@ -3218,7 +2802,7 @@ export async function bootBillFormPage(api) {
         el.voidAmend.title = action.hint;
       }
     }
-    void paintAppliedPayments(doc);
+    if (!opts.provisional) void paintAppliedPayments(doc);
     el.vendor.readOnly = !canEdit;
     el.terms.readOnly = !canEdit;
     el.date.readOnly = !canEdit;
@@ -3243,20 +2827,31 @@ export async function bootBillFormPage(api) {
     const name = doc.name || "(new)";
     if (reloadNotice.text && reloadNotice.name !== String(doc.name || "")) reloadNotice = { text: "", name: "" };
     if (reloadNotice.text) setStatus(reloadNotice.text, "warn");
+    else if (opts.provisional) setStatus("New bill · ERPNext is still opening it — what you type is sent as soon as it is ready");
     else setStatus(`${name} · ${isDraftBillDoc(doc) ? "Draft" : "Posted"}`);
     if (docNumberUi) docNumberUi.paint();
-    if (comparePane) comparePane.refresh();
-    if (attachList) void attachList.refresh();
+    // What reads ERPNext's copy of this Bill waits for it (the provisional blank has none yet).
+    if (!opts.provisional) {
+      if (comparePane) comparePane.refresh();
+      if (attachList) void attachList.refresh();
+    }
     paintDirtyPill();
     paintChip();
-    void ensureAtLeastOneItemRow(doc);
-    runBillRefCheck(el.billno ? el.billno.value : "");
+    if (!opts.provisional) {
+      void ensureAtLeastOneItemRow(doc);
+      runBillRefCheck(el.billno ? el.billno.value : "");
+    }
     if (opts.focusVendor) {
       docCapsOn = true;
       if (docCapsUi) docCapsUi.syncCapsButton();
-      if (canEdit) vendorFocused = focusVendorField();
+      // Already there from the provisional paint, with the clerk typing: not again (select()
+      // would mark their text, and the next key would replace it).
+      if (afterProvisional && document.activeElement === el.vendor) {
+        vendorFocused = true;
+        logFocus("focus-vendor-kept", "already in Vendor from the provisional blank");
+      } else if (canEdit) vendorFocused = focusVendorField();
     }
-    paintedBillDocName = nextDocName;
+    paintedBillDocName = opts.provisional ? PROVISIONAL_BILL : nextDocName;
     } finally {
       painting = false;
       // When the last repaint ended: tests wait for the page to be quiet (probe-helpers `docQuiet`).
@@ -3325,22 +2920,8 @@ export async function bootBillFormPage(api) {
   }
   
   async function paintSourceTerms(doc) {
-    if (!el.sourceTermsBlock || !el.sourceTermsFields || !api || !api.fetchSourceTerms) return;
-    const refs = collectBillSourceRefs(doc);
-    if (!refs.length) {
-      el.sourceTermsBlock.hidden = true;
-      el.sourceTermsFields.replaceChildren();
-      return;
-    }
-    const res = await api.fetchSourceTerms(refs);
-    const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
-    if (!blocks.length) {
-      el.sourceTermsBlock.hidden = true;
-      el.sourceTermsFields.replaceChildren();
-      return;
-    }
-    paintSourceTermsFields(el.sourceTermsFields, blocks);
-    el.sourceTermsBlock.hidden = false;
+    if (!el.sourceTermsBlock) return;
+    await paintSourceTermsBlock({ block: el.sourceTermsBlock, fields: el.sourceTermsFields, api, refs: collectBillSourceRefs(doc) });
   }
   
   function paintedHeaderValue(field) {
@@ -3615,7 +3196,7 @@ export async function bootBillFormPage(api) {
     if (typeof api.navDebug === "function") api.navDebug("jit-receipts-start", `groups=${p.groups.length}`);
     setStatus("Saving the draft before making Item Receipts…");
     const saved = await api.save({ submit: false });
-    if (!(saved && saved.ok)) return stop(formatSaveFailureReason(saved, "Save draft"));
+    if (!(saved && saved.ok)) return stop(saveFailure(saved, { humanize: humanizeBillErpMessage }).status);
     paint(saved.doc, amountDue);
     setStatus(`Making ${p.groups.length} Item Receipt${p.groups.length === 1 ? "" : "s"}…`);
     const made = await api.makeJitReceipts(p.groups);
@@ -3639,7 +3220,7 @@ export async function bootBillFormPage(api) {
     // receipts, and a retry cannot make them twice (dogfood 2026-10-10).
     const kept = await api.save({ submit: false });
     if (!(kept && kept.ok)) {
-      return stop(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made, but saving their links failed: ${formatSaveFailureReason(kept, "Save draft")} Submit again — the receipts are reused, not made twice.`);
+      return stop(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made, but saving their links failed: ${saveFailure(kept, { humanize: humanizeBillErpMessage }).status} Submit again — the receipts are reused, not made twice.`);
     }
     paint(kept.doc, amountDue);
     setStatus(`Item Receipt${made.made.length === 1 ? "" : "s"} ${made.made.join(", ")} made and linked — submitting the bill…`);
@@ -3737,7 +3318,7 @@ export async function bootBillFormPage(api) {
       }
       const blockers = currentSaveBlockers();
       if (!commitGateSaveEnabled(blockers)) {
-        announceSaveBlocker(blockers[0] || "Fix Amount Due checksum before save.", blockers);
+        announceSaveBlocker(blockers[0] || "Fix Amount Due checksum before save.", blockers, !!submit);
         return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
       }
       const capBlockers = listPoCapCacheBlockers();
@@ -3745,7 +3326,7 @@ export async function bootBillFormPage(api) {
         if (typeof api.navDebug === "function") {
           api.navDebug("bill-overbill-cache-block-renderer", capBlockers[0]);
         }
-        announceSaveBlocker(capBlockers[0], capBlockers);
+        announceSaveBlocker(capBlockers[0], capBlockers, !!submit);
         return { ok: false, reason: capBlockers[0], blockers: capBlockers };
       }
       const receive = await resolveReceiveBeforeSave(!!submit);
@@ -3808,25 +3389,25 @@ export async function bootBillFormPage(api) {
         }
         return { ok: true };
       }
-      if (r && Array.isArray(r.blockers) && r.blockers.length) {
+      // An unanswered save's texts are scraped off ERPNext's page (maybe an earlier refusal still
+      // on screen): never kept as blockers.
+      if (r && Array.isArray(r.blockers) && r.blockers.length && saveFailureKind(r) !== "no-answer") {
         metaBlockers = r.blockers;
       }
-      const reason = formatSaveFailureReason(
-        r,
-        submit ? "Save & submit" : "Save draft",
-      );
-      announceSaveBlocker(reason, r && Array.isArray(r.blockers) ? r.blockers : undefined);
+      const failure = saveFailure(r, { submit: !!submit, humanize: humanizeBillErpMessage });
+      announceSaveFailure(failure, r ? [r.reason, ...(Array.isArray(r.blockers) ? r.blockers : [])] : []);
       if (splitCount > 0) {
         setStatus(
-          `${reason} (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC — retry Save & submit).`,
+          `${failure.status} (split ${splitCount} over-PO line${splitCount === 1 ? "" : "s"} to NIC — retry Save & submit).`,
           "err",
         );
       }
       return {
         ok: false,
-        reason,
+        reason: failure.status,
         blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
         timedOut: !!(r && r.timedOut),
+        failure,
       };
     } finally {
       saveInFlight = false;
@@ -4351,18 +3932,20 @@ export async function bootBillFormPage(api) {
       // background enrich progress is the same page filling in, not a reload.
       if (!(snap && snap.enrichProgress)) taxNotes.collapseDefaultNote();
       if (snap && snap.notice) reloadNotice = { text: String(snap.notice), name: String((snap.doc && snap.doc.name) || "") };
+      if (snap && Number(snap.openToken) > 0) openToken = Number(snap.openToken);
       paintSnapshot(snap);
       if (snap && snap.softPeekReturn) void comeBackFromPeek(snap.peekReturnFrom || "");
       // Every time ERPNext hands the page its document (back from Vanilla, a peek, a reload), re-read
       // the files: one attached in Vanilla keeps the name, so the name alone never notices it.
       // Not on background-enrich progress: that is the same page filling in.
-      if (attachList && !(snap && snap.enrichProgress)) void attachList.refresh(true);
+      if (attachList && !(snap && (snap.enrichProgress || snap.provisional))) void attachList.refresh(true);
     });
   }
   function paintSnapshot(snap) {
     paint(snap && snap.doc, snap && snap.amountDue, {
-        caller: snap && snap.enrichProgress ? "enrich-progress" : "onSnapshot",
+        caller: snap && snap.enrichProgress ? "enrich-progress" : snap && snap.provisional ? "provisional" : "onSnapshot",
         reason: snap && snap.reason,
+        provisional: !!(snap && snap.provisional),
         focusVendor: !!(snap && snap.focusVendor),
         userEdited: snap && snap.userEdited,
         // DC-4: after an ERPNext reload the boxes show the reloaded form, never the lost typing.

@@ -7,9 +7,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   loginRouteFor,
-  pingHealth,
   probeLogin,
-  loginCheckOnHealthChange,
   loginCheckAfterRefusal,
 } from "../src/health.js";
 import {
@@ -54,33 +52,17 @@ import {
   ownFormPeekHolds,
 } from "../src/peek-stack.js";
 import { buildRouteHopReporterJs, sanitizeRouteHop } from "../src/erp-route-hop.js";
-import { appendNavDebug, formatNavDebugLines, debugLogNeedsRotation } from "../src/nav-debug.js";
+import { appendNavDebug, debugLogNeedsRotation } from "../src/nav-debug.js";
 import { applyWebContentsListenerBudget } from "../src/web-contents-listener-budget.js";
-import { appendFocusDebug, formatFocusDebugLines } from "../src/focus-debug.js";
+import { appendFocusDebug } from "../src/focus-debug.js";
 import { isVendorSwitch, vendorChangeLosses, vendorChangeDialogSpec } from "../src/vendor-change.js";
 import { shouldAcceptErpTrackNav, shouldClearErpNavIntent, shouldBlockDocHijackForListIntent, resolveErpNavIntent } from "../src/erp-nav-intent.js";
-import {
-  NAV_INCIDENT_NOTE_MAX,
-  buildNavIncident,
-  formatNavIncidentContextLines,
-  formatNavIncidentsDigest,
-  appendNavIncident,
-  serializeNavIncidentLine,
-} from "../src/nav-incident.js";
 import {
   DROP_STALE_AMEND_ROWS_JS,
   APPLY_AMEND_PATCH_JS,
   voidAmendProbes,
 } from "../src/doc-actions.js";
 import { voidAmendOutcome } from "../src/void-amend-flow.js";
-import {
-  FOCUS_INCIDENT_NOTE_MAX,
-  buildFocusIncident,
-  formatFocusIncidentContextLines,
-  formatFocusIncidentsDigest,
-  appendFocusIncident,
-  serializeFocusIncidentLine,
-} from "../src/focus-incident.js";
 import {
   SHELL_RELAYOUT_EVENTS,
   RELAYOUT_SETTLE_MS,
@@ -110,6 +92,22 @@ import { initPapers } from "./ipc/papers.js";
 import { initFind } from "./ipc/find.js";
 import { initPaymentSettings, loadPaymentBatchPrefs } from "./ipc/payment-settings.js";
 import { initRelinkMethodChange } from "./ipc/relink-method-change.js";
+import {
+  initLinkSearch,
+  searchLink,
+  warmOpenFormLinkLists,
+  dropLinkLists,
+  linkListsUser,
+  linkListsLoaded,
+} from "./ipc/link-search.js";
+import {
+  initHealthIncidents,
+  tickHealth,
+  closeDiagnoseDropdown,
+  closeNavIncidentDialog,
+  diagnoseOpen,
+  loadHealthRemediation,
+} from "./ipc/health-incidents.js";
 import { planPaymentTermsCreate } from "../src/payment-term-plan.js";
 import {
   mergePaymentDirectionPrefs,
@@ -148,28 +146,9 @@ import {
   calcSourceLabel,
   markCalcHistoryPriorSession,
 } from "../src/calc/session-history.js";
-import {
-  classifyHostClass,
-  formatDiagnoseLines,
-  diagnoseCopyText,
-  appendPingLog,
-} from "../src/diagnose.js";
-import {
-  HEALTH_REMEDIATION_FILENAME,
-  EMPTY_HEALTH_REMEDIATION,
-  normalizeHealthRemediationPrefs,
-  remediationUiState,
-  applyRemediationSetup,
-  isSafeNotifyUrl,
-  isAllowedAutofixScriptPath,
-  autofixReady,
-} from "../src/health-remediation.js";
-import { spawn } from "node:child_process";
 import { findListFocusField, findListFocusLabel } from "../src/doc-chrome.js";
 import {
   resolveFeedbackFormUrl,
-  buildFeedbackUrl,
-  isPlaceholderFeedbackUrl,
 } from "../src/feedback-url.js";
 import {
   shouldGateNavigation,
@@ -224,24 +203,13 @@ import {
   poRowsNeedingScheduleStamp,
   shouldStampPoDateExpectedOnSave,
 } from "../src/po-map.js";
-import { normalizeSearchLinkResults, PAYMENT_TERMS_TEMPLATE_NEW_ROUTE } from "../src/link-search.js";
+import { PAYMENT_TERMS_TEMPLATE_NEW_ROUTE } from "../src/link-search.js";
 import {
-  annotateAccountLinkOptions,
   accountNamesOnBillDoc,
   listAccountCompanyMismatchBlockers,
 } from "../src/account-company.js";
 import { formatClientErrorReason } from "../src/frappe-error.js";
 import { mergeSinglePaymentEntries } from "../src/payment-entry-batch.js";
-import { rankSupplierLinkOptions, utcYmd } from "../src/vendor-activity.js";
-import {
-  WARM_LINK_DOCTYPES,
-  LINK_LIST_MAX_ROWS,
-  buildLinkListCopy,
-  searchLinkListCopy,
-  mergeChangedSince,
-  linkListCheckDue,
-  linkListCopyable,
-} from "../src/link-list-cache.js";
 import { combineMappedBillSources } from "../src/source-modal.js";
 import { buildSourceGroupFromSliceRows, rollUpReceiptRows } from "../src/source-list-slices.js";
 import { receiptDocFor, matchExistingReceipt, madeFromBillToken } from "../src/jit-receipt.js";
@@ -310,7 +278,6 @@ import { surfaceIsDocLens, surfaceOwnsRoute, surfacePlacement } from "../src/she
 import {
   BILL_FIND_TIMEOUT_MS,
   BILL_SAVE_TIMEOUT_MS,
-  classifyPrintNavResult,
   timeoutFailure,
 } from "../src/bill-action-flow.js";
 import {
@@ -322,7 +289,6 @@ import {
 } from "../src/bill-load-phase.js";
 import {
   resolveErpBase,
-  HEALTH_PING_PATH,
   HEALTH_PING_MS,
   TAB_BAR_HEIGHT,
 } from "../src/config.js";
@@ -435,30 +401,10 @@ let lensHijackLock = false;
 let erpNavIntentPath = null;
 /** @type {ReturnType<typeof setTimeout>|null} */
 let erpNavIntentTimer = null;
-/** @type {{ status: string, code: number|null, latencyMs: number|null, lastOkAt: string|null, internetOk: boolean|null }} */
-let diagnoseState = {
-  status: "unknown",
-  code: null,
-  latencyMs: null,
-  lastOkAt: null,
-  internetOk: null,
-};
 /** @type {import("../src/nav-debug.js").NavDebugEntry[]} */
 let navDebugLog = [];
 /** @type {import("../src/focus-debug.js").FocusDebugEntry[]} */
 let focusDebugLog = [];
-/** @type {object[]} */
-let navIncidentRing = [];
-/** @type {object[]} */
-let focusIncidentRing = [];
-/** Frozen context while the Nav issue dialog is open. */
-let navIncidentDraft = null;
-/** Frozen context while the Focus issue dialog is open. */
-let focusIncidentDraft = null;
-/** @type {import("../src/health-remediation.js").HealthRemediationPrefs} */
-let healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
-/** @type {object[]} */
-let pingLog = [];
 /** Scratch Amount Due for Doc Bill (not an ERP field). */
 let amountDueScratch = "";
 /** Last committed Amount Due for dirty compares (focus/typing must not poison). */
@@ -728,9 +674,6 @@ function billReceivePrefsPath() {
 function navStatePath() {
   return path.join(app.getPath("userData"), "nav-state.json");
 }
-function healthRemediationPath() {
-  return path.join(app.getPath("userData"), HEALTH_REMEDIATION_FILENAME);
-}
 function loadPrefs() {
   try {
     lensPrefs = JSON.parse(fs.readFileSync(prefsPath(), "utf8")) || {};
@@ -754,13 +697,7 @@ function loadPrefs() {
     calcHistory = [];
     submittedDocs = [];
   }
-  try {
-    healthRemediation = normalizeHealthRemediationPrefs(
-      JSON.parse(fs.readFileSync(healthRemediationPath(), "utf8")),
-    );
-  } catch {
-    healthRemediation = { ...EMPTY_HEALTH_REMEDIATION };
-  }
+  loadHealthRemediation();
   loadPaymentBatchPrefs();
   try {
     paymentDirectionPrefs = mergePaymentDirectionPrefs(
@@ -805,13 +742,6 @@ function syncWashPatternEverywhere() {
 function savePaymentDirectionPrefs() {
   try {
     fs.writeFileSync(paymentDirectionPrefsPath(), JSON.stringify(paymentDirectionPrefs));
-  } catch {
-    /* ignore */
-  }
-}
-function saveHealthRemediation() {
-  try {
-    fs.writeFileSync(healthRemediationPath(), JSON.stringify(healthRemediation, null, 2));
   } catch {
     /* ignore */
   }
@@ -1029,7 +959,7 @@ function syncE2eApi() {
     getActiveDocSkin: () => activeDocSkin,
     currentRoute: () => currentRoute,
     /** Which warm pick-list copies are loaded (they load 2 s after a Doc page opens; probe-helpers `warmCopies`). */
-    linkListsLoaded: () => [...linkListCopies.keys()],
+    linkListsLoaded: () => linkListsLoaded(),
     execInView: (name, js) => {
       const map = { chrome, home, hist, erp, docForm, payOutstanding, paymentDoc, findDoc };
       const view = map[name];
@@ -1098,7 +1028,7 @@ async function tickLoginOnce(why) {
   }
   const becameIn = r.state === "in" && lastLogin.state !== "in";
   // A health blip reads "unknown" and keeps the copies; logging out, or someone else in, drops them.
-  if (r.state === "out" || (r.state === "in" && linkListUser && r.user !== linkListUser)) {
+  if (r.state === "out" || (r.state === "in" && linkListsUser() && r.user !== linkListsUser())) {
     dropLinkLists(`login ${lastLogin.state}->${r.state}`);
   }
   lastLogin = { state: r.state, user: r.user };
@@ -1259,7 +1189,7 @@ function sendUiState() {
       docTabHint: lensTabs.docHint,
       simplifiedAvailable: lensTabs.simplified,
       route: ctx.route,
-      diagnoseOpen: !!(diagnoseWin && !diagnoseWin.isDestroyed()),
+      diagnoseOpen: diagnoseOpen(),
       softPeekActive: !!(parkedDocSurface && surfaceMode === "erp") || peekingAway,
       detourBack: detourBackLabel(shellDetour, surfaceMode, currentRoute || "", ERP_BASE),
       softPeekHint: softPeekReturnLabel(
@@ -2245,7 +2175,7 @@ function dismissSoftPeekFromEsc() {
   if (surfaceMode !== "erp") return;
   // Back from a peek (Create Vendor…, an edit in Vanilla): what was just made or changed there
   // is what the clerk types next, so check the warm lists now rather than in a minute.
-  setTimeout(() => warmLinkLists("peek-return", 0), 1500);
+  setTimeout(() => warmOpenFormLinkLists("peek-return", 0), 1500);
   const here = currentErpPathname() || currentRoute || "";
   const decision = resolveSoftPeekEscAction({
     parked: parkedDocSurface,
@@ -2874,10 +2804,16 @@ async function erpEval(js, chaosChannel = "erpEval", bridgeMethod = "") {
       resolve(value);
     };
     /** @param {string} why */
-    const interrupt = (why) => finish({ ok: false, reason: `The ERPNext page ${why} before the step finished.` });
+    // Marked for a save's words (src/save-failure.js): no answer came, so it may still have saved.
+    const interrupt = (why) => finish({ ok: false, outcome: "no-answer", interrupted: why, reason: `The ERPNext page ${why} before the step finished.` });
     pendingErpEvals.add(interrupt);
     erpExec(js).then(finish, (e) =>
-      finish({ ok: false, notRun: !!(e && /** @type {any} */ (e).notRun), reason: String(e && e.message ? e.message : e) }),
+      finish({
+        ok: false,
+        notRun: !!(e && /** @type {any} */ (e).notRun),
+        outcome: e && /** @type {any} */ (e).notRun ? "not-sent" : "no-answer",
+        reason: String(e && e.message ? e.message : e),
+      }),
     );
   });
 }
@@ -2903,7 +2839,7 @@ function interruptPendingErpEvals(why) {
  * @param {Promise<T>} promise
  * @param {number} ms
  * @param {string} what
- * @returns {Promise<T|{ ok: false, timedOut: true, reason: string }>}
+ * @returns {Promise<T|{ ok: false, timedOut: true, outcome: "no-answer", waitedMs: number, reason: string }>}
  */
 async function raceTimeout(promise, ms, what) {
   let timer;
@@ -2911,7 +2847,7 @@ async function raceTimeout(promise, ms, what) {
     return await Promise.race([
       promise,
       new Promise((resolve) => {
-        timer = setTimeout(() => resolve(timeoutFailure(what)), ms);
+        timer = setTimeout(() => resolve({ ...timeoutFailure(what), outcome: "no-answer", waitedMs: ms }), ms);
       }),
     ]);
   } finally {
@@ -3294,13 +3230,13 @@ async function linkedReceiptsForBillDoc(doc) {
 /**
  * Vendor account #s at supplier (Customer Number At Supplier) — payment identity, not SO customer.
  * @param {string} supplier
- * @param {string} [company]
+ * @param {string} [_company]
  * @returns {Promise<string[]>}
  */
-async function vendorAccountNumbersForSupplier(supplier, company) {
+async function vendorAccountNumbersForSupplier(supplier, _company) {
   const sup = supplier != null ? String(supplier).trim() : "";
   if (!sup) return [];
-  const co = company != null ? String(company).trim() : "";
+  // `_company` is not used to filter (museum OI-204): every company's numbers come back.
   const raw = await erpEval(`(async () => {
     ${ERP_LIST_JS}
     ${PE_REASON_FROM_JS}
@@ -3925,16 +3861,10 @@ function place() {
   }
 }
 
-/** @type {BrowserWindow|null} */
-let diagnoseWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let calcHistoryWin = null;
 /** @type {import("electron").BrowserWindow|null} */
 let submittedWin = null;
-/** @type {import("electron").BrowserWindow|null} */
-let navIncidentWin = null;
-/** @type {import("electron").BrowserWindow|null} */
-let focusIncidentWin = null;
 
 /**
  * Click-away for frameless popovers.
@@ -4015,148 +3945,6 @@ function bindTransientPopoverDismiss(popover, closeFn) {
   };
 
   popover.on("closed", cleanup);
-}
-
-function closeDiagnoseDropdown() {
-  if (diagnoseWin && !diagnoseWin.isDestroyed()) {
-    try {
-      diagnoseWin.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  diagnoseWin = null;
-  sendUiState();
-}
-
-function closeNavIncidentDialog() {
-  if (navIncidentWin && !navIncidentWin.isDestroyed()) {
-    try {
-      navIncidentWin.close();
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-function navIncidentPayload() {
-  return {
-    contextLines: formatNavIncidentContextLines(navIncidentDraft || {}),
-    logPath: app.isReady() ? navIncidentLogPath() : "",
-    noteMax: NAV_INCIDENT_NOTE_MAX,
-  };
-}
-
-function openNavIncidentDialog() {
-  if (!win || win.isDestroyed()) return;
-  closeDiagnoseDropdown();
-  if (navIncidentWin && !navIncidentWin.isDestroyed()) {
-    navIncidentWin.focus();
-    return;
-  }
-  navIncidentDraft = collectNavIncidentContext();
-  navDebug("nav-incident-open", currentRoute || "");
-  navIncidentWin = new BrowserWindow({
-    parent: win,
-    modal: false,
-    frame: true,
-    title: "Navigation issue",
-    show: false,
-    width: 460,
-    height: 560,
-    minWidth: 380,
-    minHeight: 420,
-    resizable: true,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: false,
-    autoHideMenuBar: true,
-    backgroundColor: "#1a252f",
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, "nav-incident-preload.cjs"),
-    },
-  });
-  navIncidentWin.loadFile(path.join(__dirname, "nav-incident-dialog.html"));
-  navIncidentWin.once("ready-to-show", () => {
-    if (!navIncidentWin || navIncidentWin.isDestroyed()) return;
-    navIncidentWin.webContents.send("nav-incident-data", navIncidentPayload());
-    navIncidentWin.show();
-    navIncidentWin.focus();
-  });
-  navIncidentWin.on("closed", () => {
-    if (navIncidentDraft) navDebug("nav-incident-cancel", currentRoute || "");
-    navIncidentDraft = null;
-    navIncidentWin = null;
-  });
-}
-
-function closeFocusIncidentDialog() {
-  if (focusIncidentWin && !focusIncidentWin.isDestroyed()) {
-    try {
-      focusIncidentWin.close();
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-function focusIncidentPayload() {
-  return {
-    contextLines: formatFocusIncidentContextLines(focusIncidentDraft || {}),
-    logPath: app.isReady() ? focusIncidentLogPath() : "",
-    noteMax: FOCUS_INCIDENT_NOTE_MAX,
-  };
-}
-
-function openFocusIncidentDialog() {
-  if (!win || win.isDestroyed()) return;
-  closeDiagnoseDropdown();
-  if (focusIncidentWin && !focusIncidentWin.isDestroyed()) {
-    focusIncidentWin.focus();
-    return;
-  }
-  focusIncidentDraft = collectFocusIncidentContext();
-  focusDebug("focus-incident-open", currentRoute || "", { surface: "main" });
-  focusIncidentWin = new BrowserWindow({
-    parent: win,
-    modal: false,
-    frame: true,
-    title: "Focus issue",
-    show: false,
-    width: 480,
-    height: 580,
-    minWidth: 380,
-    minHeight: 440,
-    resizable: true,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: false,
-    autoHideMenuBar: true,
-    backgroundColor: "#1a252f",
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, "focus-incident-preload.cjs"),
-    },
-  });
-  focusIncidentWin.loadFile(path.join(__dirname, "focus-incident-dialog.html"));
-  focusIncidentWin.once("ready-to-show", () => {
-    if (!focusIncidentWin || focusIncidentWin.isDestroyed()) return;
-    focusIncidentWin.webContents.send("focus-incident-data", focusIncidentPayload());
-    focusIncidentWin.show();
-    focusIncidentWin.focus();
-  });
-  focusIncidentWin.on("closed", () => {
-    if (focusIncidentDraft) focusDebug("focus-incident-cancel", currentRoute || "", { surface: "main" });
-    focusIncidentDraft = null;
-    focusIncidentWin = null;
-  });
 }
 
 function closeCalcHistoryDropdown() {
@@ -4348,56 +4136,6 @@ function openSubmittedDropdown(anchor = {}) {
   bindTransientPopoverDismiss(submittedWin, closeSubmittedDropdown);
   submittedWin.on("closed", () => {
     submittedWin = null;
-  });
-}
-
-function openDiagnoseDropdown() {
-  if (!win || win.isDestroyed()) return;
-  if (diagnoseWin && !diagnoseWin.isDestroyed()) {
-    diagnoseWin.focus();
-    return;
-  }
-  const snap = diagnoseSnapshot();
-  diagnoseWin = new BrowserWindow({
-    parent: win,
-    modal: false,
-    frame: false,
-    show: false,
-    width: 340,
-    height: 420,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    autoHideMenuBar: true,
-    backgroundColor: "#1a252f",
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, "diagnose-preload.cjs"),
-    },
-  });
-  const wb = win.getBounds();
-  const cb = win.getContentBounds();
-  const frameTop = Math.max(0, wb.height - cb.height);
-  // Dropdown under the DB light (top-right of content area).
-  const x = Math.round(wb.x + wb.width - 360);
-  const y = Math.round(wb.y + frameTop + TAB_BAR_HEIGHT - 4);
-  diagnoseWin.setPosition(Math.max(0, x), Math.max(0, y));
-  diagnoseWin.loadFile(path.join(__dirname, "diagnose-dropdown.html"));
-  diagnoseWin.once("ready-to-show", () => {
-    if (!diagnoseWin || diagnoseWin.isDestroyed()) return;
-    diagnoseWin.webContents.send("diagnose-data", snap);
-    diagnoseWin.show();
-    diagnoseWin.focus();
-    sendUiState();
-  });
-  bindTransientPopoverDismiss(diagnoseWin, closeDiagnoseDropdown);
-  diagnoseWin.on("closed", () => {
-    diagnoseWin = null;
-    sendUiState();
   });
 }
 
@@ -5058,6 +4796,132 @@ async function waitForDocForm(timeoutMs = 25000) {
   };
 }
 
+/** The open (billLoadGen) whose provisional blank the clerk typed into (doc-provisional-edit). */
+let provisionalEditToken = 0;
+
+/**
+ * The provisional blank a new Bill paints before ERPNext's arrives: no values at all, so that
+ * when ERPNext's blank arrives, every box the clerk left alone takes ERPNext's value (an empty
+ * box is always painted; one with typing is kept: src/bill-header-paint.js).
+ * @param {string} doctype
+ */
+function provisionalBlankDoc(doctype) {
+  return { doctype, name: "", docstatus: 0, __islocal: 1, __unsaved: 1, items: [], taxes: [] };
+}
+
+ipcMain.on("doc-provisional-edit", (_e, token) => {
+  const t = Number(token) || 0;
+  if (!t || t !== billLoadGen) return;
+  provisionalEditToken = t;
+  dirtyState = markUserEdited(dirtyState);
+  navDebug("doc-provisional-edit", `open=${t} — typed before ERPNext's blank arrived; held until it does`);
+});
+
+/**
+ * A new document without reloading ERPNext (5zorro 2026-11-03: a new Bill was loading the whole
+ * ERPNext page twice, 1–7 s, where ERPNext's own "+ Add" takes ~0.3 s). The blank is built in the
+ * page the way "+ Add" builds it — `frappe.new_doc`, no server call once the doctype is loaded —
+ * after forgetting this doctype's unsaved blanks locally, so the new route cannot hand an old one
+ * back (what the full load was there for). Every case the full load handles differently takes the
+ * full load instead (the caller's fallback), so it still asks what it asked before:
+ *   - ERPNext not up here (no Desk, a load of the shell's under way, the doctype not loaded yet,
+ *     a create page of its own, a dialog open — a plain ERPNext message is closed instead, as a
+ *     load would, its words kept in the trail — or a save out);
+ *   - a saved document has unsaved edits;
+ *   - the page would stop a load to ask "leave page?" — the same question asked of it (a
+ *     cancelable `beforeunload`; Frappe's is the only listener that cancels), and, as Chromium
+ *     requires before it asks, the page has been used by hand;
+ *   - the fresh blank does not show in time.
+ * @param {string} doctype
+ * @returns {Promise<boolean>} true when the fresh blank is on ERPNext's form
+ */
+async function openFreshNewDocInPlace(doctype) {
+  const dt = String(doctype || "").trim();
+  const skip = (why) => {
+    navDebug("doc-new-in-place", `skip ${dt}: ${why} -> full load`);
+    return false;
+  };
+  if (!dt) return skip("no doctype");
+  if (!erpIsWarm()) return skip("ERPNext not up");
+  if (erpLoadWaiter) return skip("a load is under way");
+  if (!/^\/(app|desk)(\/|$)/.test(currentErpPathname() || "")) return skip("not on the Desk");
+  const started = Date.now();
+  if (simplifiedSkinInstalled) await removeSimplifiedSkin();
+  const raw = await erpEval(`(() => {
+    try {
+      var dt = ${JSON.stringify(dt)};
+      if (!window.frappe || !frappe.new_doc || !frappe.model || !frappe.router || !window.locals) return { ok: false, reason: "Desk not ready" };
+      if (!(locals.DocType && locals.DocType[dt])) return { ok: false, reason: "doctype not loaded" };
+      if (frappe.create_routes && frappe.create_routes[dt]) return { ok: false, reason: "create route" };
+      if (frappe.ui && frappe.ui.form && frappe.ui.form.is_saving) return { ok: false, reason: "a save is out" };
+      // A plain ERPNext message (frappe.msgprint) holds no input and a load would close it unread:
+      // it is closed here too, its words kept in the trail. Any other dialog: the full load.
+      var dialogs = (frappe.ui && frappe.ui.open_dialogs) || [];
+      var describe = function (d) {
+        return String((d && (d.title || (d.$wrapper && d.$wrapper.find(".modal-title").first().text()))) || "?").slice(0, 60) +
+          " «" + String((d && d.$wrapper && d.$wrapper.find(".modal-body").text()) || "").replace(/\\s+/g, " ").trim().slice(0, 160) + "»";
+      };
+      var others = dialogs.filter(function (d) { return d !== frappe.msg_dialog; });
+      if (others.length) return { ok: false, reason: "a dialog is open: " + others.map(describe).join(" | ") };
+      var closed = dialogs.length ? describe(frappe.msg_dialog) : "";
+      var forms = frappe.views && frappe.views.formview
+        ? Object.keys(frappe.views.formview).map(function (k) { return frappe.views.formview[k] && frappe.views.formview[k].frm; }).filter(function (x) { return x && x.doc; })
+        : [];
+      // A saved document with unsaved edits: the full load asks about it (or drops it) as ever.
+      for (var i = 0; i < forms.length; i += 1) {
+        if (!forms[i].doc.__islocal && forms[i].is_dirty && forms[i].is_dirty()) {
+          return { ok: false, reason: "unsaved edits to " + forms[i].doctype + " " + forms[i].doc.name };
+        }
+      }
+      // Would a load stop to ask "leave page?" Frappe's listener says yes for any form edited since
+      // it was drawn (the shell's own writes too); Chromium asks only once the page has been used
+      // by hand (sticky activation), so in the Doc lens, where the clerk types in the shell, it never does.
+      var ask = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(ask);
+      var wouldStop = ask.defaultPrevented || ask.returnValue === false || (typeof ask.returnValue === "string" && !!ask.returnValue);
+      var used = !navigator.userActivation || navigator.userActivation.hasBeenActive;
+      if (wouldStop && used) return { ok: false, reason: "a load would ask about unsaved changes" };
+      // The unsaved blanks a load would drop: this doctype's are forgotten below; the others stop
+      // holding a "leave page?" listener, as they would after a load.
+      forms.forEach(function (x) {
+        if (x.doc.__islocal && x.doctype !== dt && x.beforeUnloadListener) {
+          removeEventListener("beforeunload", x.beforeUnloadListener, { capture: true });
+        }
+      });
+      var stale = [];
+      Object.keys(locals[dt] || {}).forEach(function (n) {
+        var d = locals[dt][n];
+        if (d && d.__islocal) stale.push(n);
+      });
+      var f = window.cur_frm;
+      if (f && f.doc && f.doc.doctype === dt && stale.indexOf(f.doc.name) < 0) stale.push(f.doc.name);
+      stale.forEach(function (n) {
+        var d = locals[dt] && locals[dt][n];
+        if (!d || !d.__islocal) return;
+        try { d.__unsaved = 0; } catch (e0) {}
+        frappe.model.clear_doc(dt, n);
+      });
+      // Closed without its re_route (docs/gotchas.md G27): a "Not permitted" box sends ERPNext back a
+      // page when it closes, which would take the page off the new blank. A load drops it unrun too.
+      if (closed) {
+        delete frappe.msg_dialog.custom_onhide;
+        frappe.msg_dialog.hide();
+      }
+      frappe.new_doc(dt);
+      return { ok: true, stale: stale, closed: closed };
+    } catch (e) {
+      return { ok: false, reason: String((e && e.message) || e) };
+    }
+  })()`);
+  if (!raw || !raw.ok) return skip((raw && raw.reason) || "no answer");
+  if (raw.closed) navDebug("doc-new-in-place", `closed ERPNext's message ${raw.closed}`);
+  // "" keeps the wait on a fresh blank even when there was no form to replace.
+  const shown = await bridgeCall("waitForForm", dt, 8000, { notNames: [...(raw.stale || []), ""] });
+  if (!shown || !shown.ok) return skip(`blank not shown: ${(shown && shown.reason) || "no answer"}`);
+  navDebug("doc-new-in-place", `${dt} ${shown.doc && shown.doc.name} ms=${Date.now() - started} replaced=${(raw.stale || []).length}`);
+  return true;
+}
+
 /**
  * Replace the open ERP form with a blank new doc (home / toolbar New).
  * @param {string} doctype
@@ -5286,28 +5150,49 @@ async function showDocForm(skinId, route, opts = {}) {
     if (skinId === "bill") {
       billLoadPhase = BILL_LOAD_LOADING;
     }
-    pushDocFormSnapshot({
-      ok: false,
-      reason:
-        skinId === "bill"
-          ? "Loading Purchase Invoice in Vanilla…"
-          : `Loading ${profile.doctype} in Vanilla…`,
-      doc: null,
-      scratch: { dateExpected: skinId === "bill" || openingFreshNew ? "" : dateExpectedScratch },
-      amountDue: skinId === "bill" ? "" : undefined,
-      userEdited: false,
-    });
+    // A fresh new Bill is painted at once, cursor in Vendor, before ERPNext has made its blank
+    // (5zorro 2026-11-03): a provisional blank. The page's preload holds what would touch the
+    // form until ERPNext's blank of this same open arrives (doc-form-preload.cjs).
+    // Vanilla → Doc on the form Vanilla is showing: read it where it is (below), never provisional.
+    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
+    const provisionalBill = skinId === "bill" && openingFreshNew && !inPlace;
+    if (provisionalBill) {
+      pushDocFormSnapshot({
+        ok: true,
+        provisional: true,
+        openToken: billLoadToken,
+        doc: provisionalBlankDoc(profile.doctype),
+        amountDue: "",
+        userEdited: false,
+        isNew: true,
+        focusVendor: true,
+      });
+    } else {
+      pushDocFormSnapshot({
+        ok: false,
+        reason:
+          skinId === "bill"
+            ? "Loading Purchase Invoice in Vanilla…"
+            : `Loading ${profile.doctype} in Vanilla…`,
+        doc: null,
+        scratch: { dateExpected: skinId === "bill" || openingFreshNew ? "" : dateExpectedScratch },
+        amountDue: skinId === "bill" ? "" : undefined,
+        userEdited: false,
+      });
+    }
 
     const target = erpUrl(ERP_BASE, currentRoute);
     // Vanilla → Doc on the form Vanilla is showing: read it where it is. Reloading would drop
     // an unsaved draft the clerk typed in Vanilla (5zorro 2026-09-30: type in Vanilla, switch
     // to Doc, everything comes along).
-    const inPlace = erpIsWarm() && opensInPlace(currentErpPathname(), currentRoute, ERP_BASE);
     if (inPlace) navDebug("doc-open-in-place", currentRoute);
     // Every Doc open checks the warm pick lists, not only a page boot (doc-get-ui): 5zorro's
     // dogfood 2026-10-21 opened Bills four times in place and only the first checked.
-    setTimeout(() => warmLinkLists("doc-open"), 2000);
-    const loaded = inPlace
+    setTimeout(() => warmOpenFormLinkLists("doc-open"), 2000);
+    // A fresh new document is built in the page when ERPNext is up and nothing would be asked
+    // (openFreshNewDocInPlace); otherwise the full load, as before.
+    const freshInPlace = !inPlace && openingFreshNew && (await openFreshNewDocInPlace(profile.doctype));
+    const loaded = inPlace || freshInPlace
       ? true
       : openingFreshNew
         ? await erpForceReopenRoute(currentRoute, { forceLoad: true })
@@ -5330,7 +5215,8 @@ async function showDocForm(skinId, route, opts = {}) {
       dateExpectedScratch = "";
     }
     if (openingFreshNew && skinId !== "bill") {
-      let fresh = await forceFreshNewDocInErp(profile.doctype);
+      // Made in place, the blank is fresh already: read it rather than make a second one.
+      let fresh = freshInPlace ? await snapshotDocForm() : await forceFreshNewDocInErp(profile.doctype);
       // A layout that is one kind of its doctype (Receive Payment) sets that kind on the blank
       // form first, the way Vanilla's own Payment Type field would be chosen (A/R stage A1).
       const defaults = (docFormUiPayload(skinId) || {}).newDocDefaults;
@@ -5375,13 +5261,16 @@ async function showDocForm(skinId, route, opts = {}) {
     if (skinId === "bill") {
       billLoadPhase = billLoadPhaseAfterSnap(!!snap.ok);
     }
+    // Typed into the provisional blank: those edits are on their way (held in the page), so the
+    // Bill counts as edited from here, and a gate asks before leaving it.
+    const typedWhileOpening = skinId === "bill" && provisionalEditToken === billLoadToken && billLoadToken > 0;
     if (snap.ok) {
       dirtyState = finishLensApply(
         {
           doc: snap.doc,
           isDirty: !!snap.isDirty,
           isNew: !!snap.isNew,
-          userEdited: false,
+          userEdited: typedWhileOpening,
           baselineJson: null,
         },
         true,
@@ -5420,6 +5309,7 @@ async function showDocForm(skinId, route, opts = {}) {
       if (skinId === "bill") {
         pushDocFormSnapshot({
           ok: true,
+          openToken: billLoadToken,
           doc: snap.doc,
           amountDue: amountDueScratch,
           linkedPos: snap.linkedPos || [],
@@ -5427,7 +5317,7 @@ async function showDocForm(skinId, route, opts = {}) {
           enrichPending: snap.enrichPending,
           poLineMeta: snap.poLineMeta || {},
           lineAllocations: snap.lineAllocations || {},
-          userEdited: carriedEdits,
+          userEdited: carriedEdits || typedWhileOpening,
           isNew: !!snap.isNew,
           focusVendor: true,
         });
@@ -5449,7 +5339,7 @@ async function showDocForm(skinId, route, opts = {}) {
         baselineJson: null,
         doc: null,
       };
-      pushDocFormSnapshot({ ...snap, userEdited: false, focusVendor: false });
+      pushDocFormSnapshot({ ...snap, openToken: billLoadToken, userEdited: false, focusVendor: false });
     }
     syncE2eApi();
   };
@@ -5584,7 +5474,7 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
     ${PE_REASON_FROM_JS}
     try {
       var billName = ${billLit};
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
         args: { dt: "Purchase Invoice", dn: billName },
       });
@@ -5603,7 +5493,7 @@ async function createDraftPaymentEntryForBill(billName, meta = {}) {
             ? frappe.datetime.get_today()
             : null);
       }
-      var inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+      var inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       if (inserted && inserted.exc) {
         return { ok: false, reason: reasonFrom(inserted), step: "insert" };
       }
@@ -5657,7 +5547,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       var paidAmount = ${paidLit};
       var r;
       try {
-        r = await frappe.call({
+        r = await frappe.call({ silent: true,
           method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
           args: {
             dt: "Purchase Invoice",
@@ -5702,7 +5592,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       }
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -5713,7 +5603,7 @@ async function createJitPaymentEntryForBill(billName, intent) {
       if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
       var submitted;
       try {
-        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
       } catch (eSub) {
         return {
           ok: false,
@@ -5783,7 +5673,7 @@ async function fetchPaymentEntryDraftsForInvoices(invoices, opts = {}) {
       for (var i = 0; i < invoices.length; i++) {
         var r;
         try {
-          r = await frappe.call({
+          r = await frappe.call({ silent: true,
             method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
             args: {
               dt: "Purchase Invoice",
@@ -5847,7 +5737,7 @@ async function insertAndSubmitPaymentEntry(pe) {
       var pe = ${docLit};
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: pe } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: pe } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -5858,7 +5748,7 @@ async function insertAndSubmitPaymentEntry(pe) {
       if (!saved) return { ok: false, reason: "Payment Entry insert returned empty.", step: "insert" };
       var submitted;
       try {
-        submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
       } catch (eSub) {
         return {
           ok: false,
@@ -5979,7 +5869,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
       var i = ${payload};
       var acct;
       try {
-        acct = await frappe.call({
+        acct = await frappe.call({ silent: true,
           method: "erpnext.accounts.party.get_party_account",
           args: { party_type: "Supplier", party: i.party, company: i.company },
         });
@@ -6008,7 +5898,7 @@ async function createBlankPaymentEntryDoc(intent = {}) {
       if (i.memo) { doc.remarks = i.memo; doc.custom_remarks = 1; }
       var r;
       try {
-        r = await frappe.call({ method: "frappe.client.insert", args: { doc: doc } });
+        r = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: doc } });
       } catch (eIns) {
         return { ok: false, reason: reasonFrom(eIns), step: "insert" };
       }
@@ -6049,7 +5939,7 @@ async function createPaymentTermDocs(input = {}) {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
       // The numbers too, not just the names (review 10-19 R10c-3): a term with this name is reused
       // when its numbers match, so a half-finished create can be finished.
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: {
           doctype: "Payment Term",
@@ -6060,7 +5950,7 @@ async function createPaymentTermDocs(input = {}) {
       });
       // Template names too (P4e): an installment plan gets a name of its own, and a collision on
       // it is worth a sentence rather than a unique:1 traceback.
-      var rt = await frappe.call({
+      var rt = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: { doctype: "Payment Terms Template", fields: ["name"], limit_page_length: 0 },
       });
@@ -6095,7 +5985,7 @@ async function createPaymentTermDocs(input = {}) {
       for (var n = 0; n < i.terms.length; n++) {
         var one;
         try {
-          one = await frappe.call({ method: "frappe.client.insert", args: { doc: i.terms[n] } });
+          one = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: i.terms[n] } });
         } catch (eTerm) {
           return { ok: false, reason: reasonFrom(eTerm), step: "insert-term", made: made };
         }
@@ -6104,7 +5994,7 @@ async function createPaymentTermDocs(input = {}) {
         if (n === 0) t = one;
       }
       try {
-        var tp = await frappe.call({ method: "frappe.client.insert", args: { doc: i.template } });
+        var tp = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: i.template } });
         if (tp && tp.exc) return { ok: false, reason: reasonFrom(tp), step: "insert-template", made: made };
       } catch (eTpl) {
         return { ok: false, reason: reasonFrom(eTpl), step: "insert-template", made: made };
@@ -6146,7 +6036,7 @@ async function resolveErpCompany() {
   const raw = await erpEval(`(async () => {
     try {
       if (!window.frappe || !frappe.call) return { ok: false };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
       });
@@ -6189,14 +6079,14 @@ async function fetchPaymentDefaultsFacts(supplier) {
       var i = ${payload};
       var out = { ok: true, company: i.company, companyName: "", abbr: "", history: [], customerNumbers: [] };
       try {
-        var c = await frappe.call({
+        var c = await frappe.call({ silent: true,
           method: "frappe.client.get_value",
           args: { doctype: "Company", filters: { name: i.company }, fieldname: ["company_name", "abbr"] },
         });
         if (c && c.message) { out.companyName = c.message.company_name || ""; out.abbr = c.message.abbr || ""; }
       } catch (eCompany) {}
       try {
-        var list = await frappe.call({
+        var list = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: { doctype: "Mode of Payment", fields: ["name", "type", "enabled"], limit_page_length: 0 },
         });
@@ -6205,7 +6095,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
         for (var k = 0; k < rows.length; k++) {
           var rec = { name: rows[k].name, type: rows[k].type, enabled: rows[k].enabled, accounts: [] };
           try {
-            var full = await frappe.call({ method: "frappe.client.get", args: { doctype: "Mode of Payment", name: rows[k].name } });
+            var full = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Mode of Payment", name: rows[k].name } });
             rec.accounts = ((full && full.message && full.message.accounts) || []).map(function (a) {
               return { company: a.company, default_account: a.default_account };
             });
@@ -6215,7 +6105,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
         out.modes = modes;
       } catch (eModes) {}
       try {
-        var h = await frappe.call({
+        var h = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Entry",
@@ -6229,7 +6119,7 @@ async function fetchPaymentDefaultsFacts(supplier) {
       } catch (eHistory) {}
       if (i.supplier) {
         try {
-          var s = await frappe.call({ method: "frappe.client.get", args: { doctype: "Supplier", name: i.supplier } });
+          var s = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Supplier", name: i.supplier } });
           out.customerNumbers = ((s && s.message && s.message.customer_numbers) || []).map(function (r) {
             return { company: r.company, customer_number: r.customer_number };
           });
@@ -6292,7 +6182,7 @@ async function savePaymentEntryFields(name, patch) {
       var fields = ${JSON.stringify(fields)};
       var cur;
       try {
-        cur = await frappe.call({
+        cur = await frappe.call({ silent: true,
           method: "frappe.client.get_value",
           args: { doctype: "Payment Entry", filters: { name: name }, fieldname: "docstatus" },
         });
@@ -6310,7 +6200,7 @@ async function savePaymentEntryFields(name, patch) {
       }
       var r;
       try {
-        r = await frappe.call({
+        r = await frappe.call({ silent: true,
           method: "frappe.client.set_value",
           args: { doctype: "Payment Entry", name: name, fieldname: fields },
         });
@@ -6339,7 +6229,7 @@ async function fetchPaymentEntry(name) {
   const raw = await erpEval(`(async () => {
     try {
       if (!window.frappe || !frappe.call) return { ok: false, reason: "ERP Desk not ready." };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "frappe.client.get",
         args: { doctype: "Payment Entry", name: ${nameLit} },
       });
@@ -6377,7 +6267,7 @@ async function listBillPaymentEntries(billName) {
       var billName = ${billLit};
       var peList = [];
       try {
-        var pes = await frappe.call({
+        var pes = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Entry",
@@ -6396,7 +6286,7 @@ async function listBillPaymentEntries(billName) {
       }
       if (!peList.length) {
         try {
-          var refs = await frappe.call({
+          var refs = await frappe.call({ silent: true,
             method: "frappe.client.get_list",
             args: {
               doctype: "Payment Entry Reference",
@@ -6420,7 +6310,7 @@ async function listBillPaymentEntries(billName) {
             allocBy[ref.parent] = ref.allocated_amount;
           }
           if (parents.length) {
-            var pes2 = await frappe.call({
+            var pes2 = await frappe.call({ silent: true,
               method: "frappe.client.get_list",
               args: {
                 doctype: "Payment Entry",
@@ -6515,7 +6405,7 @@ async function fetchOutstandingBills() {
       // vendors together on screen).
       var companies = [];
       try {
-        var companyResp = await frappe.call({
+        var companyResp = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: { doctype: "Company", fields: ["name"], limit_page_length: 0 },
         });
@@ -6533,7 +6423,7 @@ async function fetchOutstandingBills() {
         filters: { party_type: "Supplier", based_on_payment_terms: 1 },
       };
       if (company) reportArgs.filters.company = company;
-      var report = await frappe.call({ method: "frappe.desk.query_report.run", args: reportArgs });
+      var report = await frappe.call({ silent: true, method: "frappe.desk.query_report.run", args: reportArgs });
       var rows = ((report && report.message && report.message.result) || []).filter(
         function (r) { return r && r.voucher_no; },
       );
@@ -6544,7 +6434,7 @@ async function fetchOutstandingBills() {
       var schedulesByInvoice = {};
       var fields = ${JSON.stringify(OUTSTANDING_SCHEDULE_FIELDS)};
       for (var at = 0; at < vouchers.length; at += 200) {
-        var sched = await frappe.call({
+        var sched = await frappe.call({ silent: true,
           method: "frappe.client.get_list",
           args: {
             doctype: "Payment Schedule",
@@ -6594,7 +6484,7 @@ async function reloadBillDocAfterPayment(billName) {
         await cur_frm.reload_doc();
         return { ok: true, doc: JSON.parse(JSON.stringify(cur_frm.doc)) };
       }
-      var g = await frappe.call({
+      var g = await frappe.call({ silent: true,
         method: "frappe.client.get",
         args: { doctype: "Purchase Invoice", name: billName },
       });
@@ -6794,7 +6684,8 @@ async function saveBillFromErp(opts = {}) {
     }
     return { ...raw, overbillRepaired: repair.repaired };
   }
-  const out = raw && typeof raw === "object" ? raw : { ok: false, reason: "Save failed." };
+  // No reply from the ERPNext page at all: whether ERPNext was asked is not known.
+  const out = raw && typeof raw === "object" ? raw : { ok: false, outcome: "no-answer", reason: "Save failed — the ERPNext page gave no reply." };
   return { ...out, doc: dirtyState.doc, overbillRepaired: repair.repaired };
 }
 
@@ -6828,13 +6719,13 @@ async function readSalesOrderOpenLines(salesOrders, itemCode) {
         filters: [["parent", "in", ${JSON.stringify(salesOrders)}], ["item_code", "=", ${JSON.stringify(itemCode)}], ["docstatus", "=", 1]],
         order_by: "parent asc, idx asc",
         limit_page_length: 0,
-      });
+      }, "POST", { silent: true });
       var heads = await frappe.xcall("frappe.client.get_list", {
         doctype: "Sales Order",
         fields: ["name", "status"],
         filters: [["name", "in", ${JSON.stringify(salesOrders)}]],
         limit_page_length: 0,
-      });
+      }, "POST", { silent: true });
       return { ok: true, rows: rows || [], heads: heads || [] };
     } catch (e) {
       return { ok: false, reason: String((e && e.message) || e || "could not read the Sales Orders") };
@@ -6898,7 +6789,7 @@ async function commentCostingAssumptions(targets, content) {
         await frappe.xcall("frappe.desk.form.utils.add_comment", {
           reference_doctype: p[0], reference_name: p[1], content: ${JSON.stringify(content)},
           comment_email: frappe.session.user, comment_by: frappe.session.user_fullname || frappe.session.user,
-        });
+        }, "POST", { silent: true });
       } catch (e) { out.push(p[1]); }
     }
     return { failed: out };
@@ -6929,7 +6820,7 @@ async function uomIsWholeNumber(uom) {
   if (!name) return null;
   const r = await erpEval(`(async () => {
     try {
-      var v = await frappe.xcall("frappe.client.get_value", { doctype: "UOM", filters: ${JSON.stringify(name)}, fieldname: "must_be_whole_number" });
+      var v = await frappe.xcall("frappe.client.get_value", { doctype: "UOM", filters: ${JSON.stringify(name)}, fieldname: "must_be_whole_number" }, "POST", { silent: true });
       return { ok: true, whole: !!(v && Number(v.must_be_whole_number)) };
     } catch (e) {
       return { ok: false };
@@ -7064,378 +6955,6 @@ async function deleteBillItem(rowIndex) {
   return raw;
 }
 
-async function searchLink(doctype, txt, filters) {
-  if (typeof doctype !== "string" || !doctype.trim()) {
-    return { ok: false, reason: "doctype required", results: [] };
-  }
-  const q = txt == null ? "" : String(txt);
-  // Warm pick lists (plan 2026-10-21): an unfiltered search of a copied list is answered here.
-  const dt = doctype.trim();
-  if (linkListCopyable(dt, filters)) {
-    const copy = linkListCopies.get(dt);
-    if (copy) {
-      if (linkListCheckDue(copy, Date.now())) void checkLinkListChanged(dt, "search");
-      const hit = searchLinkListCopy(copy, q, { asOf: utcYmd() });
-      if (!hit.miss) {
-        linkListMissing.delete(dt);
-        return { ok: true, results: hit.results, source: "copy", asOf: copy.checkedAt };
-      }
-      // One line per run of misses (a name typed letter by letter), not one per keystroke.
-      if (!linkListMissing.has(dt)) navDebug("link-list", `miss dt=${dt} len=${q.trim().length} -> live`);
-      linkListMissing.add(dt);
-    } else if (lastLogin.state === "in") {
-      void loadLinkList(dt, "search");
-    }
-  }
-  const filterPairs =
-    filters && typeof filters === "object" && !Array.isArray(filters)
-      ? Object.entries(filters).filter(([, v]) => v != null && v !== "")
-      : [];
-  const raw = await erpEval(`(async () => {
-    ${ERP_LIST_JS}
-    ${PE_REASON_FROM_JS}
-    try {
-      if (!window.frappe) return { ok: false, reason: "ERP Desk not ready (no frappe)." };
-      var doctype = ${JSON.stringify(doctype)};
-      var txt = ${JSON.stringify(q)};
-      var filterPairs = ${JSON.stringify(filterPairs)};
-      var rows = [];
-      if (frappe.call) {
-        var args = {
-          txt: txt,
-          doctype: doctype,
-          reference_doctype: "Purchase Invoice",
-          page_length: 25
-        };
-        if (filterPairs.length) {
-          var filterObj = {};
-          filterPairs.forEach(function (p) { filterObj[p[0]] = p[1]; });
-          args.filters = filterObj;
-        }
-        var r = await frappe.call({
-          method: "frappe.desk.search.search_link",
-          args: args
-        });
-        rows = (r && r.message) ? r.message : [];
-      } else if (frappe.xcall) {
-        var fields = ["name"];
-        if (doctype === "Supplier") fields.push("supplier_name");
-        if (doctype === "Item") fields.push("item_name");
-        var listFilters = txt ? [["name", "like", "%" + txt + "%"]] : [];
-        filterPairs.forEach(function (p) {
-          // A Frappe filter dict value can be ["in", [...]] as well as a bare value -- the
-          // search_link path above passes it straight through, so this fallback must too.
-          if (Array.isArray(p[1]) && p[1].length === 2 && typeof p[1][0] === "string") {
-            listFilters.push([p[0], p[1][0], p[1][1]]);
-          } else {
-            listFilters.push([p[0], "=", p[1]]);
-          }
-        });
-        var list = await xList(doctype, {
-          fields: fields,
-          filters: listFilters,
-          limit: 25,
-          order_by: "modified desc"
-        });
-        rows = (list || []).map(function (row) {
-          return {
-            value: row.name,
-            description: row.supplier_name || row.item_name || row.name
-          };
-        });
-      } else {
-        return { ok: false, reason: "No search API on this Desk session." };
-      }
-      return { ok: true, results: rows };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), results: [] };
-    }
-  })()`);
-  if (!raw || !raw.ok) {
-    return {
-      ok: false,
-      reason: (raw && raw.reason) || "Link search failed",
-      results: [],
-    };
-  }
-  let results = normalizeSearchLinkResults(raw.results);
-  if (doctype.trim() === "Account") {
-    results = await enrichAccountLinkResults(results);
-  }
-  if (doctype.trim() !== "Supplier" || !results.length) {
-    return { ok: true, results, source: "live" };
-  }
-  const ranked = await rankSupplierSearchResults(results);
-  return { ok: true, results: ranked, source: "live" };
-}
-
-/*
- * ── Warm pick lists (plan 2026-10-21, OI-185) ──────────────────────────────────────────────────
- * One copy per list, for the user logged in; searched by `searchLinkListCopy` in ERPNext's order.
- * 🔴 Only `frappe.xcall` in here: `frappe.db.get_list` never settles when the server raises
- * (proven 2026-10-21), and a load that never settled would hold an erpEval for good (review 10-19
- * R5b-4). A failed or oversized load leaves the list live, as before.
- */
-/** @type {Map<string, import("../src/link-list-cache.js").LinkListCopy>} */
-const linkListCopies = new Map();
-/** One load or check per list at a time. @type {Map<string, Promise<unknown>>} */
-const linkListBusy = new Map();
-/** Bumped when the copies are dropped, so a load started for the last user is thrown away. */
-let linkListGeneration = 0;
-/** Whose permissions the copies were read with. */
-let linkListUser = "";
-/** Lists whose last search missed the copy, so the trail logs a miss once per run. */
-const linkListMissing = new Set();
-
-/** The ERP-page side of a load or check: meta, the active-row filters, vendors' last POs. */
-const LINK_LIST_ERP_HELPERS = `
-  var withTimeout = function (p, ms) {
-    return Promise.race([p, new Promise(function (_, no) { setTimeout(function () { no(new Error("timed out")); }, ms); })]);
-  };
-  var metaOf = async function (dt) {
-    try { await withTimeout(frappe.model.with_doctype(dt), 5000); } catch (e) {}
-    var m = (frappe.get_meta && frappe.get_meta(dt)) || {};
-    var check = function (f) {
-      return (m.fields || []).some(function (d) { return d.fieldname === f && d.fieldtype === "Check"; });
-    };
-    var active = [];
-    if (check("enabled")) active.push([dt, "enabled", "=", 1]);
-    if (check("disabled")) active.push([dt, "disabled", "!=", 1]);
-    return { order: "idx desc, " + (m.sort_field || "modified") + " " + (m.sort_order || "DESC"), active: active };
-  };
-  var vendorsLastPo = async function () {
-    var rows = await frappe.xcall("frappe.client.get_list", {
-      doctype: "Purchase Order",
-      fields: ["supplier", { MAX: "transaction_date", as: "last_po" }],
-      filters: [["docstatus", "=", 1]],
-      group_by: "supplier",
-      limit_page_length: 0
-    });
-    var out = {};
-    (rows || []).forEach(function (r) { if (r && r.supplier) out[r.supplier] = String(r.last_po || ""); });
-    var fyStart = "";
-    try {
-      var fy = frappe.defaults && frappe.defaults.get_user_default ? frappe.defaults.get_user_default("fiscal_year") : "";
-      if (fy) {
-        var v = await frappe.xcall("frappe.client.get_value", { doctype: "Fiscal Year", filters: fy, fieldname: "year_start_date" });
-        fyStart = (v && v.year_start_date) || "";
-      }
-    } catch (e) {}
-    return { lastPo: out, fyStart: fyStart };
-  };
-`;
-
-/**
- * The whole list, as `search_link` returns it, plus each row's rank. Answers live meanwhile.
- * @param {string} doctype
- * @param {string} why for the trail
- */
-function loadLinkList(doctype, why) {
-  if (linkListBusy.has(doctype)) return linkListBusy.get(doctype);
-  const gen = linkListGeneration;
-  const started = Date.now();
-  let retryLater = false;
-  const run = (async () => {
-    const evalLoad = erpEval(`(async () => {
-      try {
-        if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
-        ${LINK_LIST_ERP_HELPERS}
-        var dt = ${JSON.stringify(doctype)};
-        var meta = await metaOf(dt);
-        var rows = await frappe.xcall("frappe.desk.search.search_link", {
-          txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: ${LINK_LIST_MAX_ROWS + 1}
-        });
-        if ((rows || []).length > ${LINK_LIST_MAX_ROWS}) return { ok: true, tooMany: rows.length };
-        var ranked = await frappe.xcall("frappe.client.get_list", {
-          doctype: dt, fields: ["name", "modified"], order_by: meta.order, limit_page_length: 0
-        });
-        var newest = "";
-        (ranked || []).forEach(function (r) { if (r.modified > newest) newest = r.modified; });
-        var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null, fyStart: "" };
-        return {
-          ok: true,
-          rows: rows || [],
-          rank: (ranked || []).map(function (r) { return r.name; }),
-          newest: newest,
-          lastPo: po.lastPo,
-          fyStart: po.fyStart
-        };
-      } catch (e) {
-        return { ok: false, reason: String((e && e.message) || e) };
-      }
-    })()`);
-    // A deadline: a stalled ERPNext page must not hold this list's load (and its Refresh) for good.
-    const raw = await raceTimeout(evalLoad, 30_000, `${doctype} list load`);
-    if (gen !== linkListGeneration) return;
-    if (!raw || !raw.ok) {
-      navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
-      // Opening a Doc page moves the ERPNext page too, which can cut a load off: try once more.
-      if (!/-retry$/.test(why)) retryLater = true;
-      return;
-    }
-    if (raw.tooMany) {
-      navDebug("link-list", `too-many dt=${doctype} rows=${raw.tooMany} -> stays live`);
-      return;
-    }
-    // Raw rows, not normalized: a title shown as the label (Project, tax templates) is searched too.
-    const copy = buildLinkListCopy(doctype, raw.rows, raw.rank, {
-      now: Date.now(),
-      newestModified: raw.newest,
-      lastPo: raw.lastPo,
-      fyStart: raw.fyStart,
-    });
-    linkListCopies.set(doctype, copy);
-    linkListUser = lastLogin.user || "";
-    navDebug("link-list", `loaded dt=${doctype} rows=${copy.rows.length} ms=${Date.now() - started} via=${why}`);
-  })()
-    .catch((e) => navDebug("link-list", `load-failed dt=${doctype} via=${why} reason=${(e && e.message) || String(e)}`))
-    .finally(() => {
-      linkListBusy.delete(doctype);
-      if (retryLater) {
-        setTimeout(() => {
-          if (gen === linkListGeneration && !linkListCopies.has(doctype)) void loadLinkList(doctype, `${why}-retry`);
-        }, 3000);
-      }
-    });
-  linkListBusy.set(doctype, run);
-  return run;
-}
-
-/**
- * "Anything changed since?" — re-read the rows modified since the copy's newest, then compare
- * counts: a delete or a rename leaves a different count, and the whole list is reloaded.
- * @param {string} doctype
- * @param {string} why
- */
-function checkLinkListChanged(doctype, why) {
-  const copy = linkListCopies.get(doctype);
-  if (!copy) return loadLinkList(doctype, why);
-  if (linkListBusy.has(doctype)) return linkListBusy.get(doctype);
-  const gen = linkListGeneration;
-  // Marked checked now, so a burst of searches asks once.
-  linkListCopies.set(doctype, { ...copy, checkedAt: Date.now() });
-  let reload = false;
-  const run = (async () => {
-    const evalCheck = erpEval(`(async () => {
-      try {
-        if (!window.frappe || !frappe.xcall) return { ok: false, reason: "ERP Desk not ready" };
-        ${LINK_LIST_ERP_HELPERS}
-        var dt = ${JSON.stringify(doctype)};
-        var meta = await metaOf(dt);
-        var changed = await frappe.xcall("frappe.client.get_list", {
-          doctype: dt, fields: ["name", "modified"],
-          filters: [["modified", ">", ${JSON.stringify(copy.newestModified || "1900-01-01")}]],
-          limit_page_length: 501
-        });
-        if ((changed || []).length > 500) return { ok: true, tooMany: true };
-        var names = (changed || []).map(function (r) { return r.name; });
-        var newest = "";
-        (changed || []).forEach(function (r) { if (r.modified > newest) newest = r.modified; });
-        var fresh = names.length
-          ? await frappe.xcall("frappe.desk.search.search_link", {
-              txt: "", doctype: dt, reference_doctype: "Purchase Invoice", page_length: names.length + 1,
-              filters: { name: ["in", names] }
-            })
-          : [];
-        var count = await frappe.xcall("frappe.client.get_count", { doctype: dt, filters: meta.active });
-        var po = dt === "Supplier" ? await vendorsLastPo() : { lastPo: null };
-        return { ok: true, names: names, fresh: fresh || [], newest: newest, count: count, lastPo: po.lastPo };
-      } catch (e) {
-        return { ok: false, reason: String((e && e.message) || e) };
-      }
-    })()`);
-    const raw = await raceTimeout(evalCheck, 20_000, `${doctype} list check`);
-    if (gen !== linkListGeneration) return;
-    if (!raw || !raw.ok) {
-      navDebug("link-list", `check-failed dt=${doctype} via=${why} reason=${(raw && raw.reason) || "no answer"}`);
-      return;
-    }
-    if (raw.tooMany) {
-      reload = true;
-      navDebug("link-list", `check dt=${doctype} via=${why} changed=500+ -> reload`);
-      return;
-    }
-    const now = linkListCopies.get(doctype) || copy;
-    const merged = mergeChangedSince(now, raw.names, raw.fresh, {
-      now: Date.now(),
-      newestModified: raw.newest,
-      ...(doctype === "Supplier" ? { lastPo: raw.lastPo } : {}),
-    });
-    linkListCopies.set(doctype, merged.copy);
-    if (Number(raw.count) !== merged.copy.rows.length) {
-      reload = true;
-      navDebug("link-list", `check dt=${doctype} via=${why} count=${raw.count} copy=${merged.copy.rows.length} -> reload`);
-    } else if (merged.changed) {
-      navDebug("link-list", `check dt=${doctype} via=${why} changed=${merged.changed} removed=${merged.removed}`);
-    }
-  })()
-    .catch((e) => navDebug("link-list", `check-failed dt=${doctype} via=${why} reason=${e && e.message}`))
-    .finally(() => {
-      linkListBusy.delete(doctype);
-      if (reload) void loadLinkList(doctype, `${why}-reload`);
-    });
-  linkListBusy.set(doctype, run);
-  return run;
-}
-
-/** Load what is missing; check what is older than `minAgeMs`. In the background. */
-function warmLinkLists(why, minAgeMs = 10_000) {
-  if (lastLogin.state !== "in") return;
-  const now = Date.now();
-  for (const dt of WARM_LINK_DOCTYPES) {
-    const copy = linkListCopies.get(dt);
-    if (!copy) void loadLinkList(dt, why);
-    else if (now - copy.checkedAt >= minAgeMs) void checkLinkListChanged(dt, why);
-  }
-}
-
-/** Another user's permissions are not this one's: drop every copy. */
-function dropLinkLists(why) {
-  linkListGeneration += 1;
-  linkListUser = "";
-  linkListMissing.clear();
-  if (!linkListCopies.size) return;
-  navDebug("link-list", `dropped ${linkListCopies.size} via=${why}`);
-  linkListCopies.clear();
-}
-
-/**
- * Attach Account.company and de-emphasize other-company rows vs open Bill company.
- * @param {Array<{ value: string, description: string }>} results
- */
-async function enrichAccountLinkResults(results) {
-  if (!results.length) return results;
-  const names = results.map((r) => r.value).filter(Boolean);
-  const billCompany = normalizeEditableText(dirtyState.doc && dirtyState.doc.company);
-  const namesLit = JSON.stringify(names);
-  const raw = await erpEval(`(async () => {
-    ${ERP_LIST_JS}
-    ${PE_REASON_FROM_JS}
-    try {
-      var names = ${namesLit};
-      if (!names.length) return { ok: true, byName: {} };
-      var list = await xList("Account", {
-        fields: ["name", "company"],
-        filters: [["name", "in", names]],
-        limit: names.length,
-      });
-      var byName = {};
-      (list || []).forEach(function (row) {
-        if (row && row.name) byName[row.name] = row.company || "";
-      });
-      return { ok: true, byName: byName };
-    } catch (e) {
-      return { ok: false, reason: reasonFrom(e), byName: {} };
-    }
-  })()`);
-  const byName = (raw && raw.byName) || {};
-  const withCompany = results.map((r) => ({
-    ...r,
-    company: byName[r.value] || "",
-  }));
-  return annotateAccountLinkOptions(withCompany, billCompany);
-}
-
 /**
  * Resolve Account.company for names on the open Bill; return save-gate blockers.
  */
@@ -7483,122 +7002,6 @@ async function listBillAccountCompanyMismatches() {
     accountCompanyByName: byName,
   });
   return { ok: true, blockers, byName };
-}
-
-/**
- * Last submitted PO date per supplier + company FY start (OI-131).
- * Search still works if this extra hop fails.
- * @param {Array<{ value: string, description: string }>} results
- */
-async function rankSupplierSearchResults(results) {
-  const names = results.map((r) => r.value).filter(Boolean);
-  if (!names.length) return results;
-  const extra = await erpEval(`(async () => {
-    ${ERP_LIST_JS}
-    ${PE_REASON_FROM_JS}
-    try {
-      var names = ${JSON.stringify(names)};
-      var lastPo = {};
-      if (frappe.xcall) {
-        var pos = await xList("Purchase Order", {
-          fields: ["supplier", "transaction_date"],
-          filters: [["supplier", "in", names], ["docstatus", "=", 1]],
-          order_by: "transaction_date desc",
-          limit: 200
-        });
-        (pos || []).forEach(function (row) {
-          if (row.supplier && !lastPo[row.supplier]) lastPo[row.supplier] = row.transaction_date;
-        });
-      }
-      var fyStart = "";
-      try {
-        var fy = frappe.defaults && frappe.defaults.get_user_default
-          ? frappe.defaults.get_user_default("fiscal_year")
-          : "";
-        if (fy) {
-          var v = await xValue("Fiscal Year", fy, "year_start_date");
-          if (v && v.message && v.message.year_start_date) fyStart = v.message.year_start_date;
-          else if (v && v.year_start_date) fyStart = v.year_start_date;
-          else if (typeof v === "string") fyStart = v;
-        }
-      } catch (e) {}
-      return { ok: true, lastPo: lastPo, fyStart: fyStart || "" };
-    } catch (e) {
-      return { ok: false, lastPo: {}, fyStart: "" };
-    }
-  })()`);
-  if (!extra || typeof extra !== "object") return results;
-  return rankSupplierLinkOptions(results, extra.lastPo || {}, {
-    fyStart: extra.fyStart || "",
-    asOf: utcYmd(),
-  });
-}
-
-async function tickHealth() {
-  const result = await pingHealth({
-    erpBase: ERP_BASE,
-    pingPath: HEALTH_PING_PATH,
-    timeoutMs: 3000,
-  });
-  const now = new Date();
-  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  if (result.status === "ok") diagnoseState.lastOkAt = clock;
-  diagnoseState = {
-    ...diagnoseState,
-    status: result.status,
-    code: result.code,
-    latencyMs: result.latencyMs,
-  };
-  pingLog = appendPingLog(pingLog, {
-    at: now.toISOString(),
-    status: result.status,
-    code: result.code,
-    latencyMs: result.latencyMs,
-  });
-  const prevHealth = lastHealth;
-  sendHealth(result.status);
-  // Review 10-19 R4-1: no login question on the beat — it would keep the session from idling out.
-  if (loginCheckOnHealthChange(prevHealth, result.status)) {
-    tickLogin(prevHealth === "unknown" ? "launch" : "health").catch(() => {});
-  }
-}
-
-function diagnoseSnapshot() {
-  const lines = formatDiagnoseLines({
-    erpBase: ERP_BASE,
-    status: diagnoseState.status,
-    code: diagnoseState.code,
-    latencyMs: diagnoseState.latencyMs,
-    lastOkAt: diagnoseState.lastOkAt,
-    internetOk: diagnoseState.internetOk,
-  });
-  const navLines = formatNavDebugLines(navDebugLog);
-  const incidentLines = formatNavIncidentsDigest(navIncidentRing);
-  const focusLines = formatFocusDebugLines(focusDebugLog);
-  const focusIncidentLines = formatFocusIncidentsDigest(focusIncidentRing);
-  const allLines = [
-    ...lines,
-    "",
-    ...navLines,
-    "",
-    ...incidentLines,
-    "",
-    ...focusLines,
-    "",
-    ...focusIncidentLines,
-  ];
-  const remediation = remediationUiState(healthRemediation, {
-    status: diagnoseState.status,
-  });
-  return {
-    lines: allLines,
-    copyText: diagnoseCopyText(allLines),
-    hostClass: classifyHostClass(ERP_BASE),
-    version: APP_VERSION,
-    updateStub: "Shell updates: ask IT (packaged updater later).",
-    remediation,
-    healthStatus: diagnoseState.status,
-  };
 }
 
 /** True after the clerk chose "Continue here" — the ERP view may then roam that site. */
@@ -7849,165 +7252,6 @@ ipcMain.handle("get-config", () => ({
   focusIncidentLogPath: app.isReady() ? focusIncidentLogPath() : "",
 }));
 
-ipcMain.handle("get-diagnose", () => diagnoseSnapshot());
-
-ipcMain.handle("copy-diagnose", () => {
-  const snap = diagnoseSnapshot();
-  clipboard.writeText(snap.copyText || "");
-  return { ok: true };
-});
-
-/**
- * IT recovery setup wizard (notify HTTPS form vs autofix absolute script).
- * Never invents a default script path.
- */
-ipcMain.handle("health-remediation-setup", async () => {
-  const parent = win && !win.isDestroyed() ? win : undefined;
-  const { response } = await dialog.showMessageBox(parent, {
-    type: "question",
-    buttons: ["Notify IT (HTTPS form)", "Autofix (pick script)", "Clear settings", "Cancel"],
-    defaultId: 0,
-    cancelId: 3,
-    title: "IT recovery settings",
-    message: "How should this PC handle ERP unreachable?",
-    detail:
-      "Notify opens an https:// form (e.g. Google Form).\n" +
-      "Autofix runs only a script you pick on this PC — clones ship with none (security).\n" +
-      "See docs/erp-unreachable.md.",
-  });
-  if (response === 3) return { ok: true, action: "cancel" };
-  if (response === 2) {
-    const applied = applyRemediationSetup(healthRemediation, { mode: "unset" });
-    healthRemediation = applied.prefs;
-    saveHealthRemediation();
-    return { ok: true, action: "cleared", message: "Recovery settings cleared." };
-  }
-  if (response === 0) {
-    const { response: urlBox } = await dialog.showMessageBox(parent, {
-      type: "question",
-      buttons: ["Save URL from clipboard", "Cancel"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Notify form URL",
-      message: "Copy your https:// form URL, then Save.",
-      detail:
-        (healthRemediation.notifyUrl
-          ? `Current: ${healthRemediation.notifyUrl}\n\n`
-          : "") + "Clipboard must contain an https:// URL (Google Form, ticket intake, etc.).",
-    });
-    if (urlBox === 1) return { ok: true, action: "cancel" };
-    const clip = clipboard.readText().trim();
-    if (!isSafeNotifyUrl(clip)) {
-      return {
-        ok: false,
-        message:
-          "Clipboard is not a valid https:// URL. Copy the form link, then try Notify again.",
-      };
-    }
-    const applied = applyRemediationSetup(healthRemediation, {
-      mode: "notify",
-      notifyUrl: clip,
-    });
-    if (!applied.ok) return { ok: false, message: applied.reason };
-    healthRemediation = applied.prefs;
-    saveHealthRemediation();
-    return { ok: true, action: "notify", message: "Notify IT saved (HTTPS form from clipboard)." };
-  }
-  const picked = await dialog.showOpenDialog(parent, {
-    title: "Choose IT autofix script (absolute path)",
-    properties: ["openFile"],
-    filters: [
-      { name: "Scripts", extensions: ["sh", "bash", "bat", "cmd", "ps1"] },
-      { name: "All files", extensions: ["*"] },
-    ],
-  });
-  if (picked.canceled || !picked.filePaths || !picked.filePaths[0]) {
-    return { ok: true, action: "cancel" };
-  }
-  const scriptPath = picked.filePaths[0];
-  if (!isAllowedAutofixScriptPath(scriptPath)) {
-    return { ok: false, message: "That path is not allowed (need an absolute path)." };
-  }
-  if (!fs.existsSync(scriptPath)) {
-    return { ok: false, message: "File does not exist." };
-  }
-  const applied = applyRemediationSetup(healthRemediation, {
-    mode: "autofix",
-    autofixScriptPath: scriptPath,
-  });
-  if (!applied.ok) return { ok: false, message: applied.reason };
-  healthRemediation = applied.prefs;
-  saveHealthRemediation();
-  return {
-    ok: true,
-    action: "autofix",
-    message: `Autofix saved. Start ERPNext will run:\n${scriptPath}`,
-  };
-});
-
-ipcMain.handle("health-remediation-notify", async () => {
-  const prefs = normalizeHealthRemediationPrefs(healthRemediation);
-  if (prefs.mode !== "notify" || !isSafeNotifyUrl(prefs.notifyUrl)) {
-    return { ok: false, message: "Notify is not configured. Use Set up first." };
-  }
-  await shell.openExternal(prefs.notifyUrl);
-  return { ok: true, action: "opened" };
-});
-
-ipcMain.handle("health-remediation-autofix", async () => {
-  const prefs = normalizeHealthRemediationPrefs(healthRemediation);
-  if (!autofixReady(prefs)) {
-    return {
-      ok: false,
-      message: "Autofix is not configured. Use Set up and pick an absolute script path.",
-    };
-  }
-  const scriptPath = prefs.autofixScriptPath;
-  if (!fs.existsSync(scriptPath)) {
-    return { ok: false, message: `Script missing:\n${scriptPath}` };
-  }
-  const parent = win && !win.isDestroyed() ? win : undefined;
-  const { response } = await dialog.showMessageBox(parent, {
-    type: "warning",
-    buttons: ["Run script", "Cancel"],
-    defaultId: 1,
-    cancelId: 1,
-    title: "Start ERPNext?",
-    message: "Run the IT-configured recovery script?",
-    detail: scriptPath,
-  });
-  if (response !== 0) return { ok: true, action: "cancel" };
-
-  return await new Promise((resolve) => {
-    const isWin = process.platform === "win32";
-    const child = isWin
-      ? spawn(scriptPath, [], { shell: false, windowsHide: true })
-      : spawn("/bin/bash", [scriptPath], { shell: false });
-    let stderr = "";
-    child.stderr?.on("data", (chunk) => {
-      stderr += String(chunk);
-      if (stderr.length > 2000) stderr = stderr.slice(-2000);
-    });
-    child.on("error", (err) => {
-      resolve({ ok: false, message: String(err && err.message ? err.message : err) });
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve({
-          ok: true,
-          action: "ran",
-          message: "Script finished (exit 0). Re-check the DB light in a few seconds.",
-        });
-      } else {
-        resolve({
-          ok: false,
-          message: `Script exited ${code}.${stderr ? `\n${stderr}` : ""}`,
-        });
-      }
-    });
-  });
-});
-
 ipcMain.on("calc-history-append", (_e, raw) => {
   noteCalcHistoryAppend(raw);
 });
@@ -8061,14 +7305,6 @@ ipcMain.handle("history-copy-ref", (_e, text) => {
   return { ok: true, text: ref };
 });
 
-ipcMain.on("open-diagnose", () => openDiagnoseDropdown());
-ipcMain.on("diagnose-dropdown-close", () => closeDiagnoseDropdown());
-ipcMain.on("diagnose-dropdown-ready", (e) => {
-  if (diagnoseWin && !diagnoseWin.isDestroyed() && e.sender === diagnoseWin.webContents) {
-    e.sender.send("diagnose-data", diagnoseSnapshot());
-  }
-});
-
 ipcMain.on("open-calc-history", (_e, anchor) => {
   openCalcHistoryDropdown(anchor && typeof anchor === "object" ? anchor : {});
 });
@@ -8077,56 +7313,6 @@ ipcMain.on("calc-history-dropdown-ready", (e) => {
   if (calcHistoryWin && !calcHistoryWin.isDestroyed() && e.sender === calcHistoryWin.webContents) {
     e.sender.send("calc-history-data", calcHistoryPayload());
   }
-});
-
-ipcMain.on("open-nav-incident", () => openNavIncidentDialog());
-ipcMain.on("nav-incident-close", () => closeNavIncidentDialog());
-ipcMain.on("nav-incident-ready", (e) => {
-  if (navIncidentWin && !navIncidentWin.isDestroyed() && e.sender === navIncidentWin.webContents) {
-    e.sender.send("nav-incident-data", navIncidentPayload());
-  }
-});
-ipcMain.handle("nav-incident-submit", (_e, note) => {
-  const frozen = navIncidentDraft || collectNavIncidentContext();
-  const incident = buildNavIncident(frozen, note, new Date().toISOString());
-  if (!incident) {
-    return { ok: false, reason: "Write a short note — empty reports are skipped." };
-  }
-  const file = navIncidentLogPath();
-  try {
-    fs.appendFileSync(file, serializeNavIncidentLine(incident), { encoding: "utf8" });
-  } catch (err) {
-    return { ok: false, reason: String(err && err.message ? err.message : err) };
-  }
-  navIncidentRing = appendNavIncident(navIncidentRing, incident);
-  navDebug("user-incident", incident.note.slice(0, 180));
-  navIncidentDraft = null;
-  return { ok: true, path: file, at: incident.at };
-});
-
-ipcMain.on("open-focus-incident", () => openFocusIncidentDialog());
-ipcMain.on("focus-incident-close", () => closeFocusIncidentDialog());
-ipcMain.on("focus-incident-ready", (e) => {
-  if (focusIncidentWin && !focusIncidentWin.isDestroyed() && e.sender === focusIncidentWin.webContents) {
-    e.sender.send("focus-incident-data", focusIncidentPayload());
-  }
-});
-ipcMain.handle("focus-incident-submit", (_e, note) => {
-  const frozen = focusIncidentDraft || collectFocusIncidentContext();
-  const incident = buildFocusIncident(frozen, note, new Date().toISOString());
-  if (!incident) {
-    return { ok: false, reason: "Write a short note — empty reports are skipped." };
-  }
-  const file = focusIncidentLogPath();
-  try {
-    fs.appendFileSync(file, serializeFocusIncidentLine(incident), { encoding: "utf8" });
-  } catch (err) {
-    return { ok: false, reason: String(err && err.message ? err.message : err) };
-  }
-  focusIncidentRing = appendFocusIncident(focusIncidentRing, incident);
-  focusDebug("user-focus-incident", incident.note.slice(0, 180), { surface: "main" });
-  focusIncidentDraft = null;
-  return { ok: true, path: file, at: incident.at };
 });
 
 ipcMain.on("focus-debug", (e, payload) => {
@@ -8141,52 +7327,6 @@ ipcMain.on("focus-debug", (e, payload) => {
     surface,
     active: p.active && typeof p.active === "object" ? p.active : null,
   });
-});
-
-ipcMain.handle("open-feedback", async () => {
-  try {
-    const base = resolveFeedbackFormUrl(process.env);
-    const url = buildFeedbackUrl(base, {
-      version: APP_VERSION,
-      hostClass: classifyHostClass(ERP_BASE),
-    });
-    if (!win || win.isDestroyed()) {
-      await shell.openExternal(url);
-      return { ok: true, placeholder: isPlaceholderFeedbackUrl(base), url };
-    }
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: ["Open in browser", "Copy link", "Cancel"],
-      defaultId: 0,
-      cancelId: 2,
-      title: "Feedback",
-      message: isPlaceholderFeedbackUrl(base)
-        ? "Feedback form (placeholder — set FEEDBACK_FORM_URL for your real form)"
-        : "Send feedback via Google Form?",
-      detail: url,
-    });
-    if (response === 0) {
-      await shell.openExternal(url);
-      return { ok: true, action: "open", placeholder: isPlaceholderFeedbackUrl(base), url };
-    }
-    if (response === 1) {
-      clipboard.writeText(url);
-      return { ok: true, action: "copy", placeholder: isPlaceholderFeedbackUrl(base), url };
-    }
-    return { ok: true, action: "cancel", url };
-  } catch (e) {
-    const reason = String(e && e.message ? e.message : e);
-    if (win && !win.isDestroyed()) {
-      await dialog.showMessageBox(win, {
-        type: "warning",
-        buttons: ["OK"],
-        title: "Could not open Feedback",
-        message: "Something went wrong opening the feedback form.",
-        detail: reason,
-      });
-    }
-    return { ok: false, reason };
-  }
 });
 
 ipcMain.handle("bill-get-snapshot", async () => snapshotBill());
@@ -8273,9 +7413,30 @@ async function billSetHeader(field, value) {
   }
   return raw;
 }
-ipcMain.handle("bill-set-header", (_e, field, value) =>
-  field === "supplier" ? queuedVendorWrite("write", () => billSetHeader(field, value)) : billSetHeader(field, value),
-);
+ipcMain.handle("bill-set-header", (_e, field, value, opts) => {
+  if (billOpenLeft(opts)) return billOpenLeftAnswer("write", field, opts);
+  return field === "supplier"
+    ? queuedVendorWrite("write", () => billSetHeader(field, value), opts)
+    : billSetHeader(field, value);
+});
+
+/**
+ * A Bill page's write names the open it was asked on (`openToken`, the page's copy of
+ * `billLoadGen`). When a newer Bill open has started since, or the Bill is no longer open, the
+ * write is for a Bill the clerk has left and must not land on the one ERPNext shows now (plan
+ * 2026-10-25 closeout, probe `vendor-pick-left-bill`: a vendor picked on a new Bill, its check
+ * cut off by opening a submitted Bill, was written into that Bill's form). Main decides, not the
+ * page: the page learns of the new open only when its form arrives, main the moment it starts.
+ * @param {{ openToken?: number }|null|undefined} opts
+ */
+function billOpenLeft(opts) {
+  const token = Number(opts && opts.openToken) || 0;
+  return token > 0 && (activeDocSkin !== "bill" || token !== billLoadGen);
+}
+function billOpenLeftAnswer(kind, field, opts) {
+  navDebug("bill-open-left", `${kind} ${field || ""} dropped: asked on open ${Number(opts && opts.openToken) || 0}, now ${activeDocSkin === "bill" ? billLoadGen : activeDocSkin || "none"}`);
+  return { ok: false, superseded: true, reason: "The Bill this was for is no longer open." };
+}
 
 /**
  * Museum OI-200, follow-up (5zorro 2026-11-01: a re-pick while the server lags is the common
@@ -8299,12 +7460,14 @@ const openDocKey = () => `${activeDocSkin || ""}|${(dirtyState.doc && dirtyState
  * @template T
  * @param {"clear"|"write"} kind
  * @param {() => Promise<T>} step
+ * @param {{ openToken?: number }|null} [opts] the Bill open the page asked on (`billOpenLeft`)
  * @returns {Promise<T | { ok: false, superseded: true, reason: string }>}
  */
-function queuedVendorWrite(kind, step) {
+function queuedVendorWrite(kind, step, opts = null) {
   const asked = vendorPickSeq;
   const docAsked = openDocKey();
   const run = async () => {
+    if (billOpenLeft(opts)) return billOpenLeftAnswer(kind, "supplier", opts);
     if (asked !== vendorPickSeq || docAsked !== openDocKey()) {
       navDebug("vendor-change", `superseded ${kind} (pick ${asked}, now ${vendorPickSeq}; doc ${docAsked} -> ${openDocKey()})`);
       return { ok: false, superseded: true, reason: "A newer vendor pick replaced this one." };
@@ -8382,9 +7545,10 @@ async function clearForVendorChange(value) {
     scratch: { dateExpected: dateExpectedScratch },
   };
 }
-ipcMain.handle("doc-clear-for-vendor-change", (_e, value) => {
+ipcMain.handle("doc-clear-for-vendor-change", (_e, value, opts) => {
+  if (billOpenLeft(opts)) return billOpenLeftAnswer("clear", "supplier", opts);
   vendorPickSeq += 1;
-  return queuedVendorWrite("clear", () => clearForVendorChange(value));
+  return queuedVendorWrite("clear", () => clearForVendorChange(value), opts);
 });
 
 ipcMain.handle("bill-check-ref", async (_e, billNo, opts) => checkBillRef(billNo, opts));
@@ -8527,7 +7691,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         fields: ${JSON.stringify(spec.fields)},
         order_by: ${JSON.stringify(spec.order_by)},
         limit_page_length: ${spec.limit},
-      });
+      }, "POST", { silent: true });
       var lines = null;
       var orderLines = ${JSON.stringify(spec.orderLines || null)};
       if (orderLines) {
@@ -8538,7 +7702,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         for (var p = 0; p < 5 && page.length; p++) {
           var some = await frappe.xcall("frappe.client.get_list", { doctype: "Sales Order",
             filters: [["name", "in", page.map(function (r) { return r.name; })]],
-            fields: orderLines, order_by: ${JSON.stringify(spec.order_by)}, limit_page_length: 0 });
+            fields: orderLines, order_by: ${JSON.stringify(spec.order_by)}, limit_page_length: 0 }, "POST", { silent: true });
           for (var i = 0; i < (some || []).length; i++) {
             all.push(some[i]);
             if (Number(some[i].stock_qty) > Number(some[i].ordered_qty)) due[some[i].name] = 1;
@@ -8546,7 +7710,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
           if (Object.keys(due).length >= 50 || page.length < ${spec.limit}) break;
           page = await frappe.xcall("frappe.client.get_list", {
             doctype: ${JSON.stringify(spec.doctype)}, filters: ${JSON.stringify(spec.filters)}, fields: ["name"],
-            order_by: ${JSON.stringify(spec.order_by)}, limit_start: (p + 1) * ${spec.limit}, limit_page_length: ${spec.limit} });
+            order_by: ${JSON.stringify(spec.order_by)}, limit_start: (p + 1) * ${spec.limit}, limit_page_length: ${spec.limit} }, "POST", { silent: true });
         }
         rows = all;
       }
@@ -8555,7 +7719,7 @@ async function fetchBillSourceSlice(supplier, sliceId) {
         try {
           lines = await frappe.xcall("frappe.client.get_list", { doctype: "Purchase Receipt",
             filters: [["name", "in", rows.map(function (r) { return r.name; })]],
-            fields: ["name", "\`tabPurchase Receipt Item\`.purchase_order as purchase_order"], limit_page_length: 0 });
+            fields: ["name", "\`tabPurchase Receipt Item\`.purchase_order as purchase_order"], limit_page_length: 0 }, "POST", { silent: true });
         } catch (eLines) { lines = null; }
       }
       return { ok: true, rows: rows || [], lines: lines };
@@ -8621,7 +7785,7 @@ async function mergeBillSources(items) {
     const nm = String(it.name).trim();
     const mapped = await erpEval(`(async () => {
       try {
-        var r = await frappe.call({
+        var r = await frappe.call({ silent: true,
           method: ${JSON.stringify(method)},
           args: { source_name: ${JSON.stringify(nm)} },
         });
@@ -8706,7 +7870,7 @@ async function voidAndAmendFacts(doctype, name) {
           limit_page_length: 0,
         };
         if (parentDoctype) args.parent = parentDoctype;
-        var res = await frappe.call({ method: "frappe.client.get_list", args: args });
+        var res = await frappe.call({ silent: true, method: "frappe.client.get_list", args: args });
         return (res && res.message) || [];
       }
 
@@ -8714,7 +7878,7 @@ async function voidAndAmendFacts(doctype, name) {
       try {
         amended = await frappe.xcall("frappe.client.is_document_amended", {
           doctype: i.doctype, docname: i.name,
-        });
+        }, "POST", { silent: true });
       } catch (eAm) {
         return { ok: false, reason: reasonFrom(eAm), step: "is_document_amended" };
       }
@@ -8733,7 +7897,7 @@ async function voidAndAmendFacts(doctype, name) {
       try {
         var rule = await frappe.xcall("frappe.client.get_single_value", {
           doctype: "Document Naming Settings", field: "default_amend_naming",
-        });
+        }, "POST", { silent: true });
         amendCounter = String(rule || "") !== "Default Naming";
       } catch (eRule) {
         amendCounter = null;
@@ -8781,7 +7945,7 @@ async function voidAndAmendFacts(doctype, name) {
         try {
           var s = await frappe.xcall("frappe.client.get_single_value", {
             doctype: "Accounts Settings", field: "unlink_payment_on_cancellation_of_invoice",
-          });
+          }, "POST", { silent: true });
           unlinks = !!Number(s);
         } catch (eSet) {
           unlinks = null;
@@ -8932,7 +8096,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       try {
         var already = await frappe.xcall("frappe.client.is_document_amended", {
           doctype: i.doctype, docname: i.name,
-        });
+        }, "POST", { silent: true });
         if (already) {
           return { ok: false, cancelled: false, reason: "This document has already been amended once, which is all ERPNext allows.", step: "is_document_amended" };
         }
@@ -8941,7 +8105,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       }
 
       var read = async function (step) {
-        var got = await frappe.call({
+        var got = await frappe.call({ silent: true,
           method: "frappe.client.get",
           args: { doctype: i.doctype, name: i.name },
         });
@@ -8965,7 +8129,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
 
       if (startedAt === 1) {
         try {
-          await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name });
+          await frappe.xcall("frappe.client.cancel", { doctype: i.doctype, name: i.name }, "POST", { silent: true });
         } catch (eCancel) {
           return { ok: false, cancelled: false, reason: reasonFrom(eCancel), step: "cancel" };
         }
@@ -9005,7 +8169,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
 
       var made = null;
       try {
-        var ins = await frappe.call({ method: "frappe.client.insert", args: { doc: draft } });
+        var ins = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: draft } });
         if (ins && ins.exc) {
           return { ok: false, cancelled: true, name: i.name, reason: reasonFrom(ins), step: "insert" };
         }
@@ -9022,7 +8186,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       // so by carrying \`amendedName\`.
       if (i.submit) {
         try {
-          var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: made } });
+          var sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: made } });
           if (sub && sub.exc) {
             return { ok: false, cancelled: true, name: i.name, amendedName: made.name, reason: reasonFrom(sub), step: "submit", droppedRows: droppedRows, patched: patched };
           }
@@ -9041,7 +8205,7 @@ async function voidAndAmendDocOnce(dt, nm, opts) {
       var verified = null;
       if (i.patch) {
         try {
-          var back = await frappe.xcall("frappe.client.get", { doctype: i.doctype, name: made.name });
+          var back = await frappe.xcall("frappe.client.get", { doctype: i.doctype, name: made.name }, "POST", { silent: true });
           verified = verifyAmendPatch(back, i.patch);
         } catch (eVer) {
           verified = null;
@@ -9082,7 +8246,7 @@ async function createCreditMemoFrom(sourceBillName) {
   await ensureErpFormBridge();
   const mapped = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.doctype.purchase_invoice.purchase_invoice.make_debit_note",
         args: { source_name: ${JSON.stringify(nm)} },
       });
@@ -9299,7 +8463,7 @@ ipcMain.handle("bill-list-projects", async (_e, customer) => {
         fields: ["name", "project_name", "customer", "status"],
         order_by: "modified desc",
         limit_page_length: 40,
-      });
+      }, "POST", { silent: true });
       return { ok: true, projects: rows || [] };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e), projects: [] };
@@ -9394,7 +8558,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         var company = ${JSON.stringify(company || "")};
 
         // frappe.xcall, not frappe.db.* — the latter never settles on a server error (G19).
-        var soDoc = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: sos[0] });
+        var soDoc = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: sos[0] }, "POST", { silent: true });
         if (!soDoc) return { ok: false, reason: "Sales Order not found." };
         var co = company || soDoc.company;
         if (!co) return { ok: false, reason: "Company missing." };
@@ -9439,7 +8603,7 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
       }
       var inserted;
       try {
-        inserted = await frappe.call({ method: "frappe.client.insert", args: { doc: po } });
+        inserted = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: po } });
       } catch (eIns) {
         return { ok: false, step: "insert", reason: serverMsg(eIns) };
       }
@@ -9448,13 +8612,13 @@ ipcMain.handle("bill-apply-line-allocation", async (_e, rowIndex, payload) => {
         return { ok: false, step: "insert", reason: "The Purchase Order insert returned no name." };
       }
       try {
-        var submitted = await frappe.call({ method: "frappe.client.submit", args: { doc: saved } });
+        var submitted = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: saved } });
         var finalDoc = submitted && submitted.message ? submitted.message : saved;
         return { ok: true, poName: finalDoc.name, title: finalDoc.title || title };
       } catch (eSub) {
         var why = serverMsg(eSub);
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: saved.name } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Order", name: saved.name } });
           return { ok: false, step: "submit", draft: saved.name, draftDeleted: true, reason: why };
         } catch (eDel) {
           return { ok: false, step: "submit", draft: saved.name, draftDeleted: false, reason: why };
@@ -10320,7 +9484,6 @@ ipcMain.handle("bill-revert-unsaved", async () => {
   return out && out.ok ? { ...out, amountDue: amountDueScratch } : out;
 });
 
-ipcMain.handle("bill-search-link", async (_e, doctype, txt, filters) => searchLink(doctype, txt, filters));
 ipcMain.handle("bill-account-company-check", async () => listBillAccountCompanyMismatches());
 ipcMain.on("bill-open-vanilla", () => {
   const route = currentRoute.includes("purchase-invoice")
@@ -10382,7 +9545,7 @@ ipcMain.handle("doc-get-ui", () => {
   if (!activeDocSkin) return null;
   // A Doc page opening is when its pickers are about to be typed into (plan 2026-10-21). Not at
   // once: the ERPNext page is moving to the same document, which would cut the loads off.
-  setTimeout(() => warmLinkLists("doc-open"), 2000);
+  setTimeout(() => warmOpenFormLinkLists("doc-open"), 2000);
   return docFormUiPayload(activeDocSkin);
 });
 
@@ -10587,7 +9750,7 @@ ipcMain.handle("so-create-po-context", async (_e, soName) => {
   if (!so) return { ok: false, reason: "No Sales Order." };
   const raw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.client.get_list", args: {
+      var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Purchase Order",
         fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
         filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(so)}], ["docstatus", "=", 0]],
@@ -10640,7 +9803,7 @@ async function soCreatePos(so, selected, pendingByLine) {
   const raw = await erpEval(`(async () => {
     var pending = ${JSON.stringify(pendingByLine)};
     try {
-      var m = await frappe.call({ method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
+      var m = await frappe.call({ silent: true, method: "erpnext.selling.doctype.sales_order.sales_order.make_purchase_order",
         args: { source_name: ${JSON.stringify(so)}, selected_items: ${JSON.stringify(selected)} } });
       var docs = (m && m.message) || [];
       var saved = [], failed = [];
@@ -10662,10 +9825,10 @@ async function soCreatePos(so, selected, pendingByLine) {
         d.items = (d.items || []).filter(function (it) { return Number(it.qty) > 0; });
         try {
           if (!d.items.length) {
-            await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Order", name: d.name } });
+            await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Order", name: d.name } });
             continue;
           }
-          var sv = await frappe.call({ method: "frappe.client.save", args: { doc: d } });
+          var sv = await frappe.call({ silent: true, method: "frappe.client.save", args: { doc: d } });
           saved.push(sv.message);
         } catch (e) {
           saved.push(d);
@@ -10701,7 +9864,7 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
     var so = ${JSON.stringify(so)}, codes = ${JSON.stringify([...new Set(codes)])};
     async function list(args) {
       try {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: Object.assign({ limit_page_length: 0 }, args) });
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: Object.assign({ limit_page_length: 0 }, args) });
         return (r && r.message) || [];
       } catch (e) { return null; }
     }
@@ -10725,7 +9888,7 @@ ipcMain.handle("so-line-sources", async (_e, soName, itemCodes) => {
     // the order may read its Comments there, while listing Comment needs System Manager.
     (async function () {
       try {
-        var di = await frappe.call({ method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
+        var di = await frappe.call({ silent: true, method: "frappe.desk.form.load.get_docinfo", args: { doctype: "Sales Order", name: so } });
         var cs = (di && di.docinfo && di.docinfo.comments) || [];
         return cs.filter(function (c) { return String(c.content || "").indexOf(${JSON.stringify(COSTING_TOKEN)}) >= 0; })
           .map(function (c) { return { name: c.name, creation: c.creation, content: c.content }; });
@@ -10750,7 +9913,7 @@ ipcMain.handle("so-create-counts", async (_e, soName) => {
   if (!so) return { ok: false, reason: "No Sales Order.", counts: {} };
   const raw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.desk.notifications.get_open_count", args: { doctype: "Sales Order", name: ${JSON.stringify(so)} } });
+      var r = await frappe.call({ silent: true, method: "frappe.desk.notifications.get_open_count", args: { doctype: "Sales Order", name: ${JSON.stringify(so)} } });
       return { ok: true, message: r && r.message };
     } catch (e) {
       return { ok: false, reason: String(e && e.message ? e.message : e) };
@@ -10893,7 +10056,7 @@ async function saveDocFormFromErp(opts = {}) {
   }
   return raw && typeof raw === "object"
     ? { ...raw, scratch: { dateExpected: dateExpectedScratch } }
-    : { ok: false, reason: "Save failed." };
+    : { ok: false, outcome: "no-answer", reason: "Save failed — the ERPNext page gave no reply." };
 }
 
 ipcMain.handle("doc-save", async (_e, opts) =>
@@ -10972,49 +10135,6 @@ ipcMain.handle("doc-revert-unsaved", async () => {
   return out && out.ok ? { ...out, scratch: { dateExpected: dateExpectedScratch } } : out;
 });
 
-ipcMain.handle("doc-search-link", async (_e, doctype, txt) => searchLink(doctype, txt));
-// Plan 2026-10-21 D2: does this record still exist? Asked live, never from the warm copy — the
-// copy is exactly what can be stale. `exists: null` = could not tell; the caller does not block.
-ipcMain.handle("doc-link-exists", async (_e, doctype, name) => {
-  const dt = String(doctype || "").trim();
-  const n = normalizeEditableText(name);
-  if (!dt || !n) return { ok: true, exists: null };
-  const evalExists = erpEval(`(async () => {
-    try {
-      var dt = ${JSON.stringify(dt)};
-      var n = ${JSON.stringify(n)};
-      var or = [[dt, "name", "=", n]];
-      if (dt === "Supplier") or.push([dt, "supplier_name", "=", n]);
-      if (dt === "Customer") or.push([dt, "customer_name", "=", n]);
-      var rows = await frappe.xcall("frappe.client.get_list", {
-        doctype: dt, fields: ["name"], or_filters: or, limit_page_length: 1
-      });
-      return { ok: true, exists: (rows || []).length > 0 };
-    } catch (e) {
-      return { ok: false, reason: String((e && e.message) || e) };
-    }
-  })()`);
-  // 5 s at most: a vendor pick waits on this before anything opens, and "could not tell" never blocks.
-  const raw = await raceTimeout(evalExists, 5_000, "vendor check");
-  if (!raw || !raw.ok) return { ok: true, exists: null };
-  if (!raw.exists) {
-    navDebug("link-missing", `dt=${dt} name=${n.slice(0, 60)}`);
-    // The copy offered it, so the copy is stale: catch it up.
-    if (linkListCopies.has(dt)) void checkLinkListChanged(dt, "missing");
-  }
-  return { ok: true, exists: !!raw.exists };
-});
-ipcMain.handle("link-list-refresh", async (_e, doctype) => {
-  const dt = String(doctype || "").trim();
-  if (!WARM_LINK_DOCTYPES.includes(dt)) return { ok: false, reason: "Not a copied list." };
-  navDebug("link-list", `refresh dt=${dt}`);
-  if (linkListBusy.has(dt)) await linkListBusy.get(dt);
-  linkListCopies.delete(dt);
-  await loadLinkList(dt, "refresh");
-  const copy = linkListCopies.get(dt);
-  return copy ? { ok: true, asOf: copy.checkedAt } : { ok: false, reason: "Could not reload the list — searching ERPNext directly." };
-});
-
 ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
   // Which ERPNext mapper fills this skin from this kind of source (src/po-source.js): the Item
   // Receipt from a PO; the PO from a Material Request, Supplier Quotation or Sales Order (S3).
@@ -11035,8 +10155,8 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
     // The order's lines still to order, less what is on draft POs (src/so-create-po.js).
     const ctx = await erpEval(`(async () => {
       try {
-        var so = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: ${JSON.stringify(source)} });
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var so = await frappe.xcall("frappe.client.get", { doctype: "Sales Order", name: ${JSON.stringify(source)} }, "POST", { silent: true });
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Purchase Order",
           fields: ["name", "\`tabPurchase Order Item\`.sales_order_item as sales_order_item", "\`tabPurchase Order Item\`.stock_qty as stock_qty"],
           filters: [["Purchase Order Item", "sales_order", "=", ${JSON.stringify(source)}], ["docstatus", "=", 0]],
@@ -11058,7 +10178,7 @@ ipcMain.handle("doc-merge-source", async (_e, kind, name) => {
   }
   const mapped = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: ${JSON.stringify(method)},
         args: ${JSON.stringify(args)},
       });
@@ -11307,7 +10427,7 @@ ipcMain.on("set-wash-pattern", (_e, pattern) => {
 // payment-doc.html found a Receive payment: show it in the Receive Payment Doc form (A/R A1).
 ipcMain.on("payment-doc-open-receive", (_e, name) => {
   const rec = typeof name === "string" ? name.trim() : "";
-  if (!rec || surfaceMode !== "payment-doc" || !/^[\w .\-]+$/.test(rec)) return;
+  if (!rec || surfaceMode !== "payment-doc" || !/^[\w .-]+$/.test(rec)) return;
   navDebug("payment-doc-open-receive", rec);
   showDocForm("receive-payment", paymentEntryRoute(rec), { skipDirtyGate: true });
 });
@@ -11348,7 +10468,7 @@ ipcMain.handle("get-outstanding-bills", async () => fetchOutstandingBills());
 async function fetchDraftPayments() {
   const raw = await erpEval(`(async () => {
     try {
-      var list = await frappe.call({
+      var list = await frappe.call({ silent: true,
         method: "frappe.client.get_list",
         args: {
           doctype: "Payment Entry",
@@ -11361,7 +10481,7 @@ async function fetchDraftPayments() {
       var names = ((list && list.message) || []).map(function (r) { return r.name; });
       var docs = await Promise.all(names.map(async function (name) {
         try {
-          var r = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
+          var r = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Payment Entry", name: name } });
           return (r && r.message) || null;
         } catch (eDoc) {
           return null;
@@ -11392,7 +10512,7 @@ async function actOnDraftPayment(action, name) {
   const raw = await erpEval(`(async () => {
     ${PE_REASON_FROM_JS}
     try {
-      var got = await frappe.call({ method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
+      var got = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Payment Entry", name: ${JSON.stringify(pe)} } });
       var doc = got && got.message;
       if (!doc) return { ok: false, reason: "Payment Entry not found — it may already be gone.", step: "read" };
       if (Number(doc.docstatus) !== 0) {
@@ -11400,7 +10520,7 @@ async function actOnDraftPayment(action, name) {
       }
       if (${JSON.stringify(action)} === "delete") {
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Payment Entry", name: doc.name } });
         } catch (eDel) {
           return { ok: false, reason: reasonFrom(eDel), step: "delete" };
         }
@@ -11408,7 +10528,7 @@ async function actOnDraftPayment(action, name) {
       }
       var sub;
       try {
-        sub = await frappe.call({ method: "frappe.client.submit", args: { doc: doc } });
+        sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: doc } });
       } catch (eSub) {
         return { ok: false, reason: reasonFrom(eSub), step: "submit" };
       }
@@ -11570,17 +10690,17 @@ ipcMain.handle("bill-receive-facts", async (_e, codes, company) => {
       var codes = ${JSON.stringify(list)};
       var stock = [];
       if (codes.length) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Item", filters: [["name", "in", codes], ["is_stock_item", "=", 1]],
           fields: ["name"], limit_page_length: 0 } });
         stock = ((r && r.message) || []).map(function (x) { return x.name; });
       }
-      var wh = await frappe.call({ method: "frappe.client.get_single_value",
+      var wh = await frappe.call({ silent: true, method: "frappe.client.get_single_value",
         args: { doctype: "Stock Settings", field: "default_warehouse" } });
       var perpetual = true;
       var co = ${JSON.stringify(String(company || ""))};
       if (co) {
-        var c = await frappe.call({ method: "frappe.client.get_value",
+        var c = await frappe.call({ silent: true, method: "frappe.client.get_value",
           args: { doctype: "Company", filters: { name: co }, fieldname: "enable_perpetual_inventory" } });
         perpetual = !!(c && c.message && Number(c.message.enable_perpetual_inventory));
       }
@@ -11607,7 +10727,7 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
   if (!live || !live.ok || !live.doc) return { ok: false, reason: (live && live.reason) || "Could not read the bill." };
   const whRaw = await erpEval(`(async () => {
     try {
-      var r = await frappe.call({ method: "frappe.client.get_single_value",
+      var r = await frappe.call({ silent: true, method: "frappe.client.get_single_value",
         args: { doctype: "Stock Settings", field: "default_warehouse" } });
       return (r && r.message) || "";
     } catch (e) {
@@ -11622,13 +10742,13 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
     const likeToken = JSON.stringify("%" + madeFromBillToken(live.doc.name) + "%");
     prior = await erpEval(`(async () => {
       try {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Purchase Receipt",
           filters: [["docstatus", "=", 1], ["remarks", "like", ${likeToken}]],
           fields: ["name"], limit_page_length: 0 } });
         var out = [];
         for (var i = 0; i < ((r && r.message) || []).length; i++) {
-          var d = await frappe.call({ method: "frappe.client.get", args: { doctype: "Purchase Receipt", name: r.message[i].name } });
+          var d = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Purchase Receipt", name: r.message[i].name } });
           var doc = d && d.message;
           if (doc) out.push({ name: doc.name, posting_date: doc.posting_date, remarks: doc.remarks || "",
             items: (doc.items || []).map(function (it) { return { name: it.name, item_code: it.item_code, qty: it.qty }; }) });
@@ -11670,21 +10790,21 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
       var serverMsg = function (e) { return reasonFrom(e && e.message ? e : undefined); };
       var ins;
       try {
-        ins = await frappe.call({ method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
+        ins = await frappe.call({ silent: true, method: "frappe.client.insert", args: { doc: ${JSON.stringify(built.doc)} } });
       } catch (e) {
         return { ok: false, cancelled: false, step: "insert", reason: serverMsg(e) };
       }
       var draft = ins && ins.message && ins.message.name;
       if (!draft) return { ok: false, cancelled: false, step: "insert", reason: "The receipt insert returned no name." };
       try {
-        var sub = await frappe.call({ method: "frappe.client.submit", args: { doc: ins.message } });
+        var sub = await frappe.call({ silent: true, method: "frappe.client.submit", args: { doc: ins.message } });
         var d = sub.message;
         var items = (d.items || []).slice().sort(function (a, b) { return a.idx - b.idx; }).map(function (r) { return r.name; });
         return { ok: true, name: d.name, items: items };
       } catch (eSub) {
         var why = serverMsg(eSub);
         try {
-          await frappe.call({ method: "frappe.client.delete", args: { doctype: "Purchase Receipt", name: draft } });
+          await frappe.call({ silent: true, method: "frappe.client.delete", args: { doctype: "Purchase Receipt", name: draft } });
           return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: true, reason: why };
         } catch (eDel) {
           return { ok: false, cancelled: false, step: "submit", draft: draft, draftDeleted: false, reason: why };
@@ -11758,13 +10878,13 @@ ipcMain.handle("bill-jit-receipts", async (_e, groups) => {
 ipcMain.handle("tax-default-facts", async (_e, supplier) => {
   const raw = await erpEval(`(async () => {
     try {
-      var d = await frappe.call({ method: "frappe.client.get_list", args: {
+      var d = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Purchase Taxes and Charges Template", filters: { is_default: 1, disabled: 0 },
         fields: ["name"], limit_page_length: 1 } });
       var sup = ${JSON.stringify(String(supplier || ""))};
       var rule = null;
       if (sup) {
-        var r = await frappe.call({ method: "frappe.client.get_list", args: {
+        var r = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Tax Rule", filters: { tax_type: "Purchase", supplier: sup },
           fields: ["name", "purchase_tax_template"], order_by: "priority desc", limit_page_length: 1 } });
         var row = r && r.message && r.message[0];
@@ -11841,6 +10961,33 @@ ipcMain.handle("get-payment-defaults", async (_e, supplier) => fetchPaymentDefau
 
 /* Payment re-link and method change: electron/ipc/relink-method-change.js */
 initRelinkMethodChange({ navDebug, erpEval, voidAndAmendDoc });
+initLinkSearch({
+  erpEval,
+  navDebug,
+  raceTimeout,
+  lastLogin: () => lastLogin,
+  dirtyState: () => dirtyState,
+  activeSkin: () => activeDocSkin,
+});
+initHealthIncidents({
+  erpBase: ERP_BASE,
+  appVersion: APP_VERSION,
+  mainWindow: () => win,
+  currentRoute: () => currentRoute,
+  lastHealth: () => lastHealth,
+  navDebugLog: () => navDebugLog,
+  focusDebugLog: () => focusDebugLog,
+  navDebug,
+  focusDebug,
+  sendUiState,
+  sendHealth,
+  tickLogin,
+  collectNavIncidentContext,
+  collectFocusIncidentContext,
+  bindTransientPopoverDismiss,
+  navIncidentLogPath,
+  focusIncidentLogPath,
+});
 ipcMain.on("open-payment-doc", (_e, name) => showPaymentDoc(String(name || "")));
 ipcMain.on("set-pay-outstanding-dirty", (_e, dirty) => {
   payOutstandingDirty = !!dirty;

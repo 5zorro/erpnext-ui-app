@@ -8,6 +8,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   MULTI_PDF_SYNC_MAX,
   addToPrintQueue,
@@ -35,6 +36,9 @@ import {
 } from "../../src/print-service.js";
 import { normalizeEditableText } from "../../src/dirty-gate.js";
 import { freeFileName } from "../../src/zip-store.js";
+
+/** electron/, where the page files are (an ES module has no `__dirname`; this one is in electron/ipc/). */
+const ELECTRON_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /* What main.js lends (initPrinting). */
 let ERP_BASE = "";
@@ -148,7 +152,7 @@ async function printOptions(doctype) {
       var dt = ${JSON.stringify(dt)};
       var out = { ok: true, formats: [], defaultFormat: "", letterheads: [], defaultLetterhead: "", settings: {} };
       if (dt) {
-        var f = await frappe.call({ method: "frappe.client.get_list", args: {
+        var f = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
           doctype: "Print Format", filters: { doc_type: dt, disabled: 0 }, fields: ["name"], order_by: "name asc", limit_page_length: 0 } });
         out.formats = ((f && f.message) || []).map(function (r) { return r.name; });
         try {
@@ -156,12 +160,12 @@ async function printOptions(doctype) {
           out.defaultFormat = (frappe.get_meta(dt) || {}).default_print_format || "";
         } catch (e) {}
       }
-      var l = await frappe.call({ method: "frappe.client.get_list", args: {
+      var l = await frappe.call({ silent: true, method: "frappe.client.get_list", args: {
         doctype: "Letter Head", filters: { disabled: 0 }, fields: ["name", "is_default"], limit_page_length: 0 } });
       out.letterheads = ((l && l.message) || []).map(function (r) { return r.name; });
       var def = ((l && l.message) || []).find(function (r) { return Number(r.is_default); });
       out.defaultLetterhead = def ? def.name : "";
-      var ps = await frappe.call({ method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
+      var ps = await frappe.call({ silent: true, method: "frappe.client.get", args: { doctype: "Print Settings", name: "Print Settings" } });
       var p = (ps && ps.message) || {};
       out.settings = {
         allow_print_for_draft: p.allow_print_for_draft, allow_print_for_cancelled: p.allow_print_for_cancelled,
@@ -313,7 +317,7 @@ async function printerPaper(name) {
 /** "Print as image": a hidden page that flattens a PDF onto white at printer resolution. */
 async function rasterWorker(bytes) {
   const w = newPrintWorker();
-  await w.loadFile(path.join(__dirname, "print-raster.html"));
+  await w.loadFile(path.join(ELECTRON_DIR, "print-raster.html"));
   for (let i = 0; i < 100; i += 1) {
     if (await w.webContents.executeJavaScript("!!window.rasterReady").catch(() => false)) break;
     await new Promise((r) => setTimeout(r, 100));

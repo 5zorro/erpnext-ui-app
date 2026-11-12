@@ -7,10 +7,12 @@
   "type": "module",
   "main": "electron/main.js",
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || ^22.13.0 || >=24"
   },
   "scripts": {
     "test": "node scripts/run-tests.js",
+    "lint": "eslint .",
+    "snapshot": "node scripts/snapshot.js",
     "test:flaky": "node scripts/test-flaky.js",
     "test:times": "node scripts/test-times.js",
     "probe": "node scripts/run-probe.js",
@@ -45,9 +47,6 @@
     "globals": "17.12.0"
   },
   "_architecture_note": "Shell talks to ERPNext over HTTP/API only. Vanilla Desk remains available for troubleshooting in a stock browser. Clean Core: never edit vendor apps/frappe or apps/erpnext.",
-  "allowScripts": {
-    "electron@33.4.11": true
-  },
   "dependencies": {
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.3.289"

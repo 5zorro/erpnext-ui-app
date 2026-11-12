@@ -23,8 +23,8 @@ touches 5zorro's prefs, login, Drafts shelf or `nav-debug.log`, and **runs while
 (`--with-app-open`, from before, is ignored). After the run, its `nav-debug.log` / `focus-debug.log`
 are kept in `test-logs/profile-logs/probe/` and the folder is deleted. `scripts/run-probe.js`
 runs headless with `WAYLAND_DISPLAY` and `DISPLAY` cleared (a window on his desktop takes his
-keyboard). **One probe run at a time:** a second waits for the first (`test-logs/probe-run.lock.json`,
-up to an hour), because a run starts by retiring any probe user left in the lock, which would end
+keyboard). **One probe run at a time:** a second waits for the first (the main checkout's
+`test-logs/probe-run.lock.json`, shared by a `git worktree` snapshot — HANDOFF § Test strategy; up to an hour), because a run starts by retiring any probe user left in the lock, which would end
 the other run's clerk mid-test. The seed copy is taken while his app may be writing: a torn
 `Cookies` copy would show as a probe that is not logged in — run it again. Proven 2026-10-26: a probe run left nothing changed in the real folder (the code before
 changed 12 files there), and ran beside a second copy of the app (the code before refused, exit 3).
@@ -144,6 +144,12 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
 
 - `<review-id or topic>-<what>.probe.js`; the header comment states the question and what the
   probe makes in the sandbox.
+- **The run's profile copies the clerk's settings** (every `.json` in their folder: prefs, IT
+  recovery, print choices). A door that acts outside the app on a setting — IT recovery's Autofix
+  runs a script, Copy writes the system clipboard, a print lands in `~/PDF/` — is stood in for in
+  the main process (`app.evaluate(({ dialog, clipboard }) => …)`), and its "do it" answer is never
+  given; a probe cleans up only what it can prove it made (`print-as-image`: its own CUPS job's
+  file). Found 2026-11-02: `health-incident-doors` reached this machine's real Autofix box.
 - Steps shared by probes are in `probe-helpers.js`: `openNewDoc`, `keys` (real keystrokes —
   `e2e/GOTCHAS.md` #15), `focusTestId`, `escPeek`, `docState`, `erpAnswers`, `inDoc` / `inErp`
   (each gives up after a few seconds, so a stalled page shows as `"TIMEOUT"`, not a hung run).
@@ -180,6 +186,10 @@ uses up a Bill number, so on company data it would leave gaps in the invoice ser
   `session.defaultSession.webRequest.onBeforeRequest` once): the Bill's item lookups are
   `run_doc_method`, its background PO/receipt reads `/api/resource/…`, live link searches
   `search_link`.
+- A **held reply** (not a refused one): `holdRequests(app, urlPart, bodyPart)` keeps the matching
+  requests in flight until `releaseHeld(app)`, so the clerk's next move lands inside the wait every
+  run (`heldCount` says how many wait); then `erpUp`. The pick's "does this vendor exist" is
+  `frappe.client.get_list` with the vendor's name in its body (`vendor-pick-left-bill.probe.js`).
 - Bill steps a probe must answer as a clerk would: Save and Submit ask "receive with this bill?"
   first (`bill-receive-bill-only`), Submit needs the amount due typed (`bill-amount-due`,
   `billCompareTotal`); the page reads the vendor from its box, which `setHeader` does not repaint

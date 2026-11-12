@@ -25,6 +25,9 @@ OI-108 (schema research, superseded by `src/trace-links.js`).
 > dogfood setup is automated; (b) stage 4 waits on the 09-26 Find-page dogfood. Order to keep:
 > stage 3 adds the `trace-fetch` IPC to `electron/main.js`, which plan 10-25 R2-5 is about to split
 > by concern, so build stage 3 after R2-5 (or straight into its new layout), not before.
+> **2026-11-04: plan 10-25 closed; that block is gone.** Build stage 3's `trace-fetch` as its own
+> `electron/ipc/trace.js` (HANDOFF § *Main-process code by concern*), not into `main.js`; it reads
+> ERPNext's records, not the open form, so multi-window should not have to touch it (check when built).
 >
 > **2026-11-01: (a) is half done.** 5zorro types DF-25 himself; its scene is built
 > (`npm run dogfood:setup -- DF-25`: customer LAKESIDE MARINE SUPPLY, vendor CASCADE FITTINGS CO.,

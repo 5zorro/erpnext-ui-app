@@ -28,7 +28,6 @@ import {
   supplierAddressSnapshotReady,
   supplierSnapshotReadyReason,
   hasSupplierBillingDisplay,
-  SUPPLIER_BILLING_DISPLAY_FIELD,
 } from "../src/erp-form-bridge.js";
 
 describe("formMatchesDoctype", () => {
@@ -77,7 +76,7 @@ describe("pickItemAutofillFields", () => {
 describe("stripHtmlPlain", () => {
   it("strips tags", () => {
     assert.equal(stripHtmlPlain("<p>Hi</p>"), "Hi");
-    assert.equal(DOC_FORM_BRIDGE_VERSION, 31);
+    assert.equal(DOC_FORM_BRIDGE_VERSION, 34);
     assert.equal(SUPPLIER_PARTY_SETTLE_MAX_MS, 12000);
   });
 });
@@ -320,7 +319,7 @@ describe("erp-form-bridge-page save settle contract", () => {
     assert.match(page, /alignPostingDateLikeVanillaOk/);
     assert.match(page, /withAutoAcceptConfirm/);
     assert.match(page, /isPostingDateConfirmMsg/);
-    assert.match(page, /var VERSION = 31/);
+    assert.match(page, /var VERSION = 34/);
     assert.match(page, /partyDetailsQuiet: !!quietSince && now - quietSince >= SUPPLIER_PARTY_QUIET_HOLD_MS/);
     assert.match(page, /waitForSupplierBillingSnapshot/);
     // A mapped doc's party fields must be applied through set_value, and before the item
@@ -333,7 +332,7 @@ describe("erp-form-bridge-page save settle contract", () => {
       "party fields must be set before the item table is rebuilt",
     );
     assert.match(page, /hasSupplierBillingDisplay/);
-    assert.match(page, /isSupplierPartyMetaOnlyChange/);
+    assert.match(page, /function isSupplierPartySettled\(doc, ctx\)/);
     assert.match(page, /clearRow:\s*clearRow/);
     assert.match(page, /SAVE_CALL_TIMEOUT_MS\s*=\s*12000/);
     assert.match(page, /collectVisibleVanillaErrors/);

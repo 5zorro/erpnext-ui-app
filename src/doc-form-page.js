@@ -13,11 +13,9 @@ import {
 } from "./po-map.js";
 import { docFormMapFor } from "./doc-skin-registry.js";
 import { salesProgressCells } from "./sales-doc-map.js";
-import { billMoneyStack } from "./bill-map.js";
 import { BILL_TAX_SORTABLE_HEADERS } from "./bill-tax-sort.js";
 import {
   formatGroupedNumber,
-  formatUsdAmountHtml,
   parseMoney,
   moneyOrSum,
 } from "./money.js";
@@ -25,32 +23,21 @@ import {
   itemNavFieldsFromCols,
   linkPickOwnsCommit,
 } from "./link-picker-policy.js";
-import {
-  autoSizeItemColumns,
-  mountColResize,
-  mountDensityControl,
-} from "./item-col-resize.js";
-import { CELL_MODE_EDIT, CELL_MODE_NAV } from "./item-table-nav.js";
+import { CELL_MODE_NAV } from "./item-table-nav.js";
 import { createItemTableKeys } from "./item-table-keys-ui.js";
 import { createSiteRoundingAsk } from "./calc/site-rounding-ask.js";
 import { wireDateField } from "./doc-form-date-field-ui.js";
 import { setLineTab, wireLineTabs } from "./doc-form-line-tabs-ui.js";
 import { createTaxNotes } from "./doc-form-tax-notes-ui.js";
 import { createCommitGate } from "./doc-form-commit-gate-ui.js";
-import { createItemRows } from "./doc-form-item-rows-ui.js";
+import { createDocLines } from "./doc-form-lines-ui.js";
 import { createTaxTable } from "./doc-form-tax-table-ui.js";
-import {
-  emptyItemRowCleanupAction,
-  lastItemRowToast,
-} from "./bill-item-guard.js";
+import { lastItemRowToast } from "./bill-item-guard.js";
 import { sortDocItemRowModels, sortableHeadersFromCols, applyHeaderSortClick, sortHeaderArrow, sortHeaderState, lineTotalsColumns } from "./doc-item-sort.js";
 import { shouldOpenSourceModalAfterVendorPick, runVendorPickWithSourceModal } from "./doc-source-flow.js";
 import { clearBeforeVendorSwitch as clearPageBeforeVendorSwitch } from "./vendor-change-ui.js";
-import {
-  collectSourceRefsForProfile,
-  sourceTermsDisplayBlocks,
-} from "./doc-source-terms.js";
-import { paintSourceTermsFields } from "./doc-source-terms-dom.js";
+import { collectSourceRefsForProfile } from "./doc-source-terms.js";
+import { paintSourceTermsBlock } from "./doc-source-terms-dom.js";
 import { FREEFORM_TERMS_LABEL, ERP_FREEFORM_TERMS_FIELD } from "./doc-terms-fields.js";
 import {
   valuesMeaningfullyEqual,
@@ -66,13 +53,13 @@ import {
   billExpensesTaxOrientation,
   commitGateProgressLabel,
   commitGateSuccessLabel,
-  formatSaveFailureReason,
 } from "./bill-action-flow.js";
+import { saveFailure, saveFailureKind, plainErpText } from "./save-failure.js";
+import { createDocToast } from "./doc-toast-ui.js";
 import {
   listDocFormSaveBlockers,
   docGateTriggerLabel,
   docCommitGateSaveWarning,
-  docCommitGateErpFailureView,
   commitGateSaveEnabled,
   linkDoctypeForDocField,
   focusTargetAfterDocSourceModal,
@@ -82,10 +69,7 @@ import { offeredDocActions } from "./doc-actions.js";
 import { runVoidAndAmend } from "./void-amend-flow.js";
 import { mergeSaveBlockers } from "./erp-form-bridge.js";
 import { showSourceModal } from "./source-modal-ui.js";
-import {
-  runSourcePickerFlow,
-  mayAutoOpenSourcePicker,
-} from "./source-picker-flow.js";
+import { runSourcePickerFlow } from "./source-picker-flow.js";
 import { mountLinkPicker, closeAllLinkDropdowns } from "./link-picker-ui.js";
 import { lateVendorMayOpenSources } from "./missing-vendor.js";
 import {
@@ -94,10 +78,10 @@ import {
   focusIsInOtherField,
   vendorIsMissing as checkVendorMissing,
 } from "./missing-vendor-ui.js";
-import { peekReturnTarget, peekReturnPlan, peekErrandHoldsRow } from "./peek-return-focus.js";
 import { uiIconHtml } from "./ui-icons.js";
 import { installFocusRing, logFocus } from "./focus-debug-client.js";
 import { createUserMoveGuard, isUserMoveKey } from "./user-move-guard.js";
+import { focusPartyBox } from "./party-focus.js";
 import { shouldRestoreFocusAnchor } from "./stale-focus-guard.js";
 import { wireCommitGateChrome } from "./doc-commit-gate-ui.js";
 import {
@@ -108,7 +92,6 @@ import {
   REFRESH_BUTTON_TITLE,
 } from "./doc-chrome.js";
 import { createFieldCalcUi } from "./calc/attach-field-calc.js";
-import { rateFromBackedInAmount } from "./calc/back-in-amount.js";
 import { calcSourceLabel } from "./calc/session-history.js";
 import { addressTextareaRows } from "./address-format.js";
 import {
@@ -119,7 +102,8 @@ import { wireItemImportButton } from "./item-import-ui.js";
 import { wireDocCapsUi } from "./doc-caps-ui.js";
 import { theirNumberFor } from "./doc-number-pref.js";
 import { wireDocNumberLead } from "./doc-number-ui.js";
-import { openPrintDialog } from "./print-dialog-ui.js";
+import { runDocToolbarAction } from "./doc-toolbar-actions.js";
+import { createSourcePickerOpener } from "./doc-source-picker-open.js";
 import { mountComparePane } from "./compare-pane-ui.js";
 import { canAttachTo } from "./attachment-list.js";
 import { mountAttachmentList } from "./attachment-list-ui.js";
@@ -144,7 +128,6 @@ let api = null;
 /** @type {import("./doc-skin-registry.js").ReturnType<import("./doc-skin-registry.js").docFormUiPayload>} */
 let ui = null;
 let lastDoc = null;
-let removingTaxes = false;
 /**
  * The taxes table's notes (src/doc-form-tax-notes-ui.js, shared with the Bill page): the ⓘ on a
  * row the clerk made a fixed amount, "Vendor tax template default ⓘ", and holding Remove all.
@@ -154,7 +137,7 @@ const taxNotes = createTaxNotes({
   api: () => api,
   lastDoc: () => lastDoc,
   setStatus: (text, cls) => setStatus(text, cls),
-  removingTaxes: () => removingTaxes,
+  removingTaxes: () => docLines.removingTaxes(),
   removeAllTaxes: (opts) => removeAllTaxes(opts),
   testIdPrefix: "doc",
 });
@@ -212,12 +195,21 @@ let metaBlockers = [];
 /** @type {WeakMap<HTMLElement, true>} */
 const linkMounted = new WeakMap();
 const sourceModalOpenRef = { current: false };
-/** @type {{ supplier: string, userClosed: boolean } | null} */
-let vendorPickSourceSession = null;
-/** @type {Promise<{ ok?: boolean, kind?: string, reason?: string }|void>|null} */
-let sourcePickerInflight = null;
-/** @type {string} */
-let sourcePickerInflightSupplier = "";
+/** Opening the source picker: its checks, the pick's session, the one in flight (src/doc-source-picker-open.js). */
+const sourcePicker = createSourcePickerOpener({
+  api: () => api,
+  available: () => !!(ui && ui.features.sourceModal),
+  editable: () => editable(),
+  lastDoc: () => lastDoc,
+  partyBox: () => supplierInput(),
+  title: () => docTitle(),
+  sourceLabel: () => (ui && ui.sourceLabel) || "Select PO",
+  anotherDialogOpen: () => sourceModalOpenRef.current,
+  vendorIsMissing: (name, attempt) => vendorIsMissing(name, attempt),
+  setStatus: (text, cls) => setStatus(text, cls),
+  logFocus,
+  run: (sup, trigger) => runDocSourcePicker(sup, trigger),
+});
 const addressPickerOpenRef = { current: false };
 /**
  * The lines table's keys: the cell's edit / nav mode, moves between cells, Tab past the last box
@@ -240,11 +232,6 @@ const itemKeys = createItemTableKeys({
     if (lastDoc) paintItems(lastDoc);
   },
 });
-
-/** @param {"edit"|"nav"} mode */
-function setItemCellMode(mode) {
-  itemKeys.setMode(mode);
-}
 
 /** @type {{ key: string, asc: boolean }} */
 /** @type {import("./item-sort-specs.js").SortSpec[]} */
@@ -332,7 +319,7 @@ function buildDocFormEl() {
     commitGateValidationTitle: document.getElementById("commit-gate-validation-title"),
     commitGateBlockers: document.getElementById("commit-gate-blockers"),
     commitGateHint: document.getElementById("commit-gate-hint"),
-    commitGateCopy: document.getElementById("commit-gate-copy"),
+    toast: document.getElementById("bill-toast"),
     addLine: document.getElementById("btn-add-line"),
     importItems: document.getElementById("btn-import-items"),
     clearQty: null,
@@ -406,114 +393,86 @@ const userMoves = createUserMoveGuard();
 document.addEventListener("keydown", (ev) => { if (isUserMoveKey(ev.key)) userMoves.bump(); }, true);
 document.addEventListener("pointerdown", () => userMoves.bump(), true);
 
-/** The lines table's rows (src/doc-form-item-rows-ui.js, shared with the Bill). */
-const itemRows = createItemRows({
-  table: () => el && el.items,
-  api: () => api,
-  lastDoc: () => lastDoc,
-  painting: () => painting,
-  editable: () => editable(),
-  lines: (doc) => (doc && Array.isArray(doc.items) ? doc.items : []),
-  keyField: "item_code",
-  itemKeys,
-  calcActiveOn: (inp) => calcUi.getState().mode === "active" && calcUi.getInput() === inp,
-  testIdPrefix: "doc",
-  rateLabel: "Rate",
-  lineNoTitle: () => `${docTitle()} line number`,
-  cellsOf: (model) => model.cells,
-  cellHtml: (col, _val, model, _canEdit, doc) => {
-    if (!col.sources) return null;
-    const ri = model.rowIndex;
-    const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
-    return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
+/** The lines and taxes, shared with the Bill (src/doc-form-lines-ui.js; its rows: doc-form-item-rows-ui.js). */
+const docLines = createDocLines(
+  {
+    title: () => docTitle(),
+    testIdPrefix: "doc",
+    rateLabel: "Rate",
+    el: () => el,
+    api: () => api,
+    lastDoc: () => lastDoc,
+    painting: () => painting,
+    editable: () => editable(),
+    repaint: (res) => paint(res.doc, res.scratch || scratch),
+    refresh: () => refresh(),
+    setStatus: (text, cls) => setStatus(text, cls),
+    noteUserEdit: () => noteUserEdit(),
+    showToast: (text) => showToast(text),
+    logFocus,
+    userMoves,
+    calcUi,
+    attachCalc: (inp, opts) =>
+      calcUi.attach(inp, {
+        kind: opts.kind,
+        commitOnIdleBlur: !!opts.commitOnIdleBlur,
+        isPainting: () => painting,
+        isEditable: () => editable(),
+        onHistory: publishCalcHistory,
+        onCommit: opts.onCommit,
+      }),
+    itemKeys,
   },
-  canDeleteLines: () => linesAreAddable(),
-  afterRows: (doc) => {
-    paintLineTotals(doc);
-    sizeItemColumns();
+  {
+    // Keyed by form, so the PO and the Item Receipt keep their own column widths.
+    tableKey: (table) => `${(ui && ui.profileId) || "doc"}-${table}`,
+    lastRowToast: () => lastItemRowToast(docTitle()),
+    focusHeaderField: (field) => focusHeaderField(field),
+    focusAfterLeaving: () => focusAfterLeavingItemsTable(),
+    taxNotes,
+    canAddLines: () => linesAreAddable(),
+    showsTaxes: () => !!(ui && ui.features.taxes),
+    lineSums: () => (ui && ui.features.lineTotals ? mapHelpers() : null),
+    rows: {
+      lineNoTitle: () => `${docTitle()} line number`,
+      cellHtml: (col, _val, model, _canEdit, doc) => {
+        if (!col.sources) return null;
+        const ri = model.rowIndex;
+        const lineName = (doc.items && doc.items[ri] && doc.items[ri].name) || "";
+        return `<td class="so-sources" data-sources-line="${escapeHtml(lineName)}">${lineSources ? lineSources.cellHtml(lineName) : ""}</td>`;
+      },
+      navFields: () => itemNavFieldsFromCols(ui.itemCols),
+      isMoneyField: (field) => field === "rate" || isMoneyCol(field),
+      linkDoctype: (field) => linkDoctypeForDocField(field, ui.headerFields, ui.itemCols),
+      mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
+    },
   },
-  navFields: () => itemNavFieldsFromCols(ui.itemCols),
-  isMoneyField: (field) => field === "rate" || isMoneyCol(field),
-  linkDoctype: (field) => linkDoctypeForDocField(field, ui.headerFields, ui.itemCols),
-  mountLinkPicker: (inp, doctype, apply) => mountDocLinkPicker(inp, doctype, apply),
-  attachCalc: (inp, opts) =>
-    calcUi.attach(inp, {
-      kind: opts.kind,
-      isPainting: () => painting,
-      isEditable: () => editable(),
-      onHistory: publishCalcHistory,
-      onCommit: opts.onCommit,
-    }),
-  deleteLine: (ri) => api.deleteItem(ri),
-  repaint: (res) => paint(res.doc, res.scratch || scratch),
-  lastRowToast: () => lastItemRowToast(docTitle()),
-  showToast,
-  setStatus,
-  noteUserEdit,
-  setItemCellMode,
+);
+const {
+  itemRows,
   focusItemCell,
-  focusAfterLeaving: () => focusAfterLeavingItemsTable(),
-  userMoves,
-  logFocus,
-  refresh: () => refresh(),
-  cleanupEmptyLine: (ri, code) => cleanupEmptyItemRow(ri, code),
-  beginAmountBackIn,
-});
+  ensureAtLeastOneItemRow,
+  comeBackFromPeek,
+  removeAllTaxes,
+  paintMoneyStack,
+  paintLineTotals,
+  sizeItemColumns,
+  sizeTaxColumns,
+} = docLines;
 
-/** The line cell a "create …" peek was opened from (DF-02). */
-let peekReturn = null;
-/** The line a create peek came back to; held from the empty-line cleanup until the clerk moves. */
-let peekHold = null;
-
-/** True while a create errand (out, or just back) owns this line — see peekErrandHoldsRow. */
-function peekHoldsRow(ri) {
-  return peekErrandHoldsRow(peekReturn, peekHold, ri, !!peekHold && userMoves.movedSince(peekHold.mark));
-}
-
-/** Back from a create peek: fill the cell with the saved record, then put the cursor there. */
-async function comeBackFromPeek(leftFrom) {
-  const plan = peekReturnPlan(peekReturn, leftFrom);
-  const what = (peekReturn && peekReturn.doctype) || "";
-  peekHold = plan && plan.row != null ? { row: plan.row, mark: userMoves.mark() } : null;
-  peekReturn = null;
-  if (!plan) return;
-  if (plan.row == null) {
-    // A header field — the Sales Order's Customer (DF-03).
-    if (plan.fill && api && editable()) {
-      const res = await api.setHeader(plan.field, plan.fill);
-      if (res && res.ok && !res.skipped) {
-        noteUserEdit();
-        await refresh();
-        setStatus(`New ${what} ${plan.fill} is set.`);
-      } else if (!res || !res.ok) {
-        setStatus((res && res.reason) || `Could not set ${plan.fill}.`, "warn");
-      }
-    }
-    focusHeaderField(plan.field);
-    return;
-  }
-  if (plan.fill && api && editable()) {
-    const res = await api.setItem(plan.row, plan.field, plan.fill);
-    if (res && res.ok) {
-      noteUserEdit();
-      if (res.scratch) scratch = res.scratch;
-      paint(res.doc, res.scratch || scratch);
-      setStatus(`New Item ${plan.fill} is on line ${plan.row + 1}.`);
-    } else {
-      setStatus((res && res.reason) || `Could not put ${plan.fill} on line ${plan.row + 1}.`, "warn");
-    }
-  }
-  focusItemCell(plan.row, plan.field, { mode: plan.fill ? CELL_MODE_NAV : CELL_MODE_EDIT });
-}
+/** The clerk's move count when the document on screen first appeared (focusVendorField). */
+let docShownMoveMark = 0;
+/** The box holding the focus then: the last document's place, not the clerk's on this one. */
+let docShownFocus = null;
+let docShownName = "";
 
 function linkPickerDeps() {
   return {
     api,
     linkMounted,
     setStatus,
-    onCreatePeek: (input, doctype) => {
-      peekReturn = peekReturnTarget(input, doctype);
-    },
+    pickerScope: () => (ui && ui.profileId) || "",
+    onCreatePeek: (input, doctype) => docLines.notePeekFrom(input, doctype),
   };
 }
 
@@ -564,25 +523,12 @@ function docTitle() {
 }
 
 async function paintSourceTerms(doc) {
-  if (!ui?.features.sourceTerms || !el.sourceTermsBlock || !el.sourceTermsFields || !api?.fetchSourceTerms) {
-    if (el.sourceTermsBlock) el.sourceTermsBlock.hidden = true;
-    return;
-  }
-  const refs = collectSourceRefsForProfile(ui.profileId, doc);
-  if (!refs.length) {
+  if (!el.sourceTermsBlock) return;
+  if (!ui?.features.sourceTerms || !el.sourceTermsFields || !api?.fetchSourceTerms) {
     el.sourceTermsBlock.hidden = true;
-    el.sourceTermsFields.replaceChildren();
     return;
   }
-  const res = await api.fetchSourceTerms(refs);
-  const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
-  if (!blocks.length) {
-    el.sourceTermsBlock.hidden = true;
-    el.sourceTermsFields.replaceChildren();
-    return;
-  }
-  paintSourceTermsFields(el.sourceTermsFields, blocks);
-  el.sourceTermsBlock.hidden = false;
+  await paintSourceTermsBlock({ block: el.sourceTermsBlock, fields: el.sourceTermsFields, api, refs: collectSourceRefsForProfile(ui.profileId, doc) });
 }
 
 function addressFieldPickable(meta) {
@@ -800,8 +746,8 @@ function currentSaveBlockers() {
 
 /**
  * The commit gate (src/doc-form-commit-gate-ui.js, shared with the Bill page): the one gate over
- * unsaved work, opened by Find / New / Print or a navigation, and the direct-save gate that shows
- * why a Save or Submit was refused.
+ * unsaved work, opened by Find / New / Print or a navigation. A toolbar Save or Submit that fails
+ * opens no gate: `announceSaveFailure` says it, the Bill's way.
  */
 const commitGate = createCommitGate({
   els: commitGateEls,
@@ -834,16 +780,14 @@ const commitGate = createCommitGate({
     paintDirtyPill();
   },
   runAction: (action) => runPendingAction(action),
-  announceBlocker: (text) => setStatus(text, "warn"),
+  announceBlocker: (text, blockers) => announceSaveFailure(saveFailure({ ok: false, reason: text, blockers }, { humanize: erpWords })),
   text: {
     title: () => docTitle(),
     triggerLabel: (trigger) => docGateTriggerLabel(trigger, gateLabels()),
     readyTitle: () => `${docTitle()} + live ERP meta preflight passed`,
     cancelHint: () => `Choose Cancel to return to the ${docTitle()} and fix these fields.`,
     saveWarning: (blockers) => docCommitGateSaveWarning(blockers, docTitle()),
-    erpFailureView: (reason) => docCommitGateErpFailureView(reason, docTitle()),
   },
-  directSave: { copyEl: () => el && el.commitGateCopy },
 });
 
 function docFindPrefill() {
@@ -851,97 +795,45 @@ function docFindPrefill() {
   return poFindPrefillFromDoc(lastDoc) || {};
 }
 
+/** Find / New / Print (src/doc-toolbar-actions.js). */
 async function runPendingAction(action) {
-  if (!api) return;
-  if (action === "find") {
-    setStatus(`Opening ${docTitle()} list…`);
-    const prefill = docFindPrefill();
-    const res = await api.findDocs(prefill);
-    try {
-      if (document.activeElement && typeof document.activeElement.blur === "function") {
-        document.activeElement.blur();
-      }
-    } catch {
-      /* ignore */
-    }
-    let post = null;
-    if (res && res.ok && api.refocusListFilter) {
-      try {
-        post = await api.refocusListFilter(res.focusField || "name");
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!(res && res.ok)) setStatus((res && res.reason) || "Find failed.", "err");
-    else if (res.focusOk === false || (post && post.ok === false)) {
-      setStatus(res.reason || post?.reason || "List opened (filter focus missed).", "warn");
-    } else setStatus(
-      res.prefilled
-        ? `${docTitle()} list opened — logbook PO# prefilled.`
-        : `${docTitle()} list opened — type in PO# (logbook) or ID.`,
-    );
-    return;
-  }
-  if (action === "new") {
-    setStatus(`Starting new ${docTitle()}…`);
-    const res = await api.newDoc();
-    if (res && res.ok) setStatus(`New ${docTitle()}.`);
-    else setStatus((res && res.reason) || "New failed.", "err");
-    return;
-  }
-  if (action === "print") {
-    // In place: the dialog prints / saves ERPNext's own output; the page never moves.
-    await openPrintDialog({ api, doc: lastDoc, label: docTitle() });
-  }
+  await runDocToolbarAction(action, {
+    api,
+    lastDoc,
+    title: docTitle(),
+    setStatus,
+    find: () => ({
+      opening: `Opening ${docTitle()} list…`,
+      open: () => api.findDocs(docFindPrefill()),
+      focusField: "name",
+      opened: (res) =>
+        res.prefilled
+          ? `${docTitle()} list opened — logbook PO# prefilled.`
+          : `${docTitle()} list opened — type in PO# (logbook) or ID.`,
+    }),
+    newDoc: () => api.newDoc(),
+  });
 }
 
-function focusItemCell(rowIndex, field, opts = {}) {
-  itemKeys.focusCell(rowIndex, field, opts);
-}
+/** The toast and the status line's scroll, shared with the Bill page (`doc-toast-ui.js`). */
+const toast = createDocToast({ toastEl: () => el && el.toast, statusEl: () => el && el.status, setStatus: (t, c) => setStatus(t, c) });
 
 function showToast(text) {
-  setStatus(text, "warn");
+  toast.show(text);
+}
+
+/** ERPNext's words in this form's own: "This document" named, a Purchase Receipt an Item Receipt. */
+function erpWords(text) {
+  return plainErpText(text, { title: docTitle(), doctype: (ui && ui.doctype) || "" });
 }
 
 /**
- * Vanilla requires ≥1 item — seed a blank line when the grid is empty.
- * @param {object|null|undefined} doc
+ * A save that failed or was held back: the red status line and a toast, the Bill's way — no
+ * dialog (5zorro: no blocking dialog unless the gate is the point).
+ * @param {import("./save-failure.js").SaveFailure} failure
  */
-async function ensureAtLeastOneItemRow(doc) {
-  if (!api || !editable() || painting || !linesAreAddable()) return;
-  const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  if (items.length > 0) return;
-  const res = await api.addItem();
-  if (res && res.ok) {
-    noteUserEdit();
-    paint(res.doc, res.scratch || scratch);
-  }
-}
-
-/**
- * Remove blank Item rows when the clerk dismisses the picker / leaves the cell.
- * @param {number} rowIndex
- * @param {string} itemCode
- */
-async function cleanupEmptyItemRow(rowIndex, itemCode) {
-  if (!api || !editable() || painting || itemKeys.busy()) return;
-  if (peekHoldsRow(rowIndex)) {
-    logFocus("empty-line-kept", `line ${rowIndex + 1}: create errand`);
-    return;
-  }
-  const rowCount = lastDoc && Array.isArray(lastDoc.items) ? lastDoc.items.length : 0;
-  const decision = emptyItemRowCleanupAction(rowCount, itemCode);
-  if (decision.action !== "delete") return;
-  setStatus("Removing empty line…");
-  const removed = await api.deleteItem(rowIndex);
-  if (removed && removed.ok) {
-    noteUserEdit();
-    paint(removed.doc, removed.scratch || scratch);
-    setStatus("Empty line removed.");
-    focusAfterLeavingItemsTable();
-  } else if (removed && removed.blockedLastRow) {
-    showToast(removed.reason || lastItemRowToast(docTitle()));
-  }
+function announceSaveFailure(failure) {
+  toast.announceSaveFailure(failure);
 }
 
 function focusHeaderField(fieldName) {
@@ -1071,46 +963,6 @@ function focusAfterLeavingItemsTable() {
   }
 }
 
-/**
- * Packet T C — size the line grid from its content, then arm the drag handles.
- * Runs after every repaint because the header row is rebuilt each time; both
- * calls are idempotent. Keyed by profile so PO and Item Receipt keep their own
- * column widths.
- */
-function itemsTableKey() {
-  return `${(ui && ui.profileId) || "doc"}-items`;
-}
-
-function taxesTableKey() {
-  return `${(ui && ui.profileId) || "doc"}-taxes`;
-}
-
-function sizeItemColumns() {
-  try {
-    const table = el && el.items && el.items.closest ? el.items.closest("table") : null;
-    if (!table) return;
-    const tableKey = itemsTableKey();
-    mountColResize(table, { tableKey, onChange: sizeItemColumns });
-    mountDensityControl({ table, button: document.getElementById("btn-density") });
-    autoSizeItemColumns(table, { tableKey, growSection: table.closest(".bill-section") });
-  } catch {
-    /* column sizing is presentation; never let it break a repaint */
-  }
-}
-
-function sizeTaxColumns() {
-  try {
-    const table =
-      el && el.taxesBody && el.taxesBody.closest ? el.taxesBody.closest("table") : null;
-    if (!table) return;
-    const tableKey = taxesTableKey();
-    mountColResize(table, { tableKey, onChange: sizeTaxColumns });
-    autoSizeItemColumns(table, { tableKey, sticky: false, growSection: table.closest(".bill-section") });
-  } catch {
-    /* ignore */
-  }
-}
-
 function paintItemsHead() {
   if (!el.itemsHead || !ui) return;
   const headers = sortableHeadersFromCols(ui.itemCols);
@@ -1201,44 +1053,6 @@ function buildLineTotalsFoot(cols) {
   }
 }
 
-function paintLineTotals(doc) {
-  if (!el.lineTotals || !ui || !ui.features.lineTotals) return;
-  const items = doc && Array.isArray(doc.items) ? doc.items : [];
-  const totQty = document.getElementById("tot-qty");
-  const totAmt = document.getElementById("tot-amt");
-  if (!items.length) {
-    el.lineTotals.hidden = true;
-    return;
-  }
-  el.lineTotals.hidden = false;
-  const helpers = mapHelpers();
-  if (totQty) totQty.textContent = helpers.formatTotal(helpers.sumQty(doc));
-  if (totAmt) {
-    totAmt.innerHTML =
-      formatUsdAmountHtml(helpers.sumAmt(doc)) || helpers.formatTotal(helpers.sumAmt(doc));
-  }
-}
-
-function paintMoneyStack(doc) {
-  if (!ui || !ui.features.taxes) return;
-  const stack = billMoneyStack(doc);
-  const fmt = (n) => formatUsdAmountHtml(n) || "$0.00";
-  if (el.msItems) el.msItems.innerHTML = fmt(stack.itemSubtotal);
-  if (el.msTaxes) el.msTaxes.innerHTML = fmt(stack.taxesTotal);
-  if (el.msGrand) {
-    el.msGrand.innerHTML = stack.grandTotal != null ? fmt(stack.grandTotal) : "—";
-  }
-  if (el.msNote) {
-    if (stack.note) {
-      el.msNote.hidden = false;
-      el.msNote.textContent = stack.note;
-    } else {
-      el.msNote.hidden = true;
-      el.msNote.textContent = "";
-    }
-  }
-}
-
 /**
  * The Sales Order's progress strip (delivered / billed / status) — read-only facts ERPNext keeps.
  * @param {object|null|undefined} doc
@@ -1259,44 +1073,6 @@ function isPurchaseTaxDoc(doc) {
   return !!doc && (doc.doctype === "Purchase Order" || doc.doctype === "Purchase Receipt");
 }
 
-/** Clear the template field first (or ERPNext refills the rows from it), then every row. */
-async function removeAllTaxes(opts = {}) {
-  if (!api || !editable() || !lastDoc || removingTaxes) return;
-  removingTaxes = true;
-  try {
-    taxNotes.removedOn.add(String(lastDoc.name || ""));
-    let doc = lastDoc;
-    let sc = scratch;
-    if (doc.taxes_and_charges) {
-      const r = await api.setHeader("taxes_and_charges", "");
-      if (!(r && r.ok)) {
-        setStatus((r && r.reason) || "Could not clear the tax template.", "err");
-        return;
-      }
-      doc = r.doc || doc;
-      if (r.scratch) sc = r.scratch;
-    }
-    for (let i = (Array.isArray(doc.taxes) ? doc.taxes.length : 0) - 1; i >= 0; i -= 1) {
-      const r = await api.deleteTax(i);
-      if (!(r && r.ok)) {
-        setStatus((r && r.reason) || "Could not remove a tax row.", "err");
-        break;
-      }
-      doc = r.doc || doc;
-      if (r.scratch) sc = r.scratch;
-    }
-    noteUserEdit();
-    paint(doc, sc);
-    setStatus(
-      opts.quiet
-        ? "ERPNext put the template's taxes back; removed again — you removed all taxes here. Add tax/charge adds one."
-        : "All taxes and charges removed. They stay removed until you save; Add tax/charge adds one back.",
-    );
-  } finally {
-    removingTaxes = false;
-  }
-}
-
 function paintItems(doc) {
   if (!ui) return;
   paintItemsHead();
@@ -1306,72 +1082,6 @@ function paintItems(doc) {
     doc,
   );
   itemRows.paint(doc, models, cols);
-}
-
-/**
- * Click Amount → temporary input + calc; commit writes rate = amount ÷ qty.
- * @param {HTMLElement} btn
- * @param {number} ri
- */
-function beginAmountBackIn(btn, ri) {
-  const td = btn.closest("td");
-  if (!td || !lastDoc || !lastDoc.items || !lastDoc.items[ri]) return;
-  const row = lastDoc.items[ri];
-  const priorAmt =
-    row.amount != null && row.amount !== ""
-      ? String(row.amount)
-      : String((Number(row.qty) || 0) * (Number(row.rate) || 0) || "");
-  const inp = document.createElement("input");
-  inp.type = "text";
-  inp.inputMode = "decimal";
-  inp.className = "money-cost amount-back-in-input";
-  inp.setAttribute("data-testid", `doc-amt-edit-${ri}`);
-  const n0 = parseMoney(priorAmt);
-  inp.value = n0 != null ? String(n0) : "";
-  td.replaceChildren(inp);
-  setStatus("Back into rate: enter Amount (calc OK) — Rate = Amount ÷ Qty.");
-  const finishRestore = () => {
-    paint(lastDoc, scratch);
-  };
-  calcUi.attach(inp, {
-    kind: "amount",
-    commitOnIdleBlur: true,
-    isPainting: () => painting,
-    isEditable: () => editable(),
-    onHistory: publishCalcHistory,
-    onCommit: async (value) => {
-      const derived = rateFromBackedInAmount(value, row.qty);
-      if (!derived.ok) {
-        setStatus(derived.reason, "warn");
-        finishRestore();
-        return;
-      }
-      setStatus("Updating rate from amount…");
-      const res = await api.setItem(ri, "rate", derived.rateText);
-      if (res && res.ok) {
-        noteUserEdit();
-        paint(res.doc, res.scratch || scratch);
-        setStatus(`Rate set to ${derived.rateText} (Amount ÷ Qty).`);
-      } else {
-        setStatus((res && res.reason) || "Could not update rate.", "err");
-        await refresh();
-      }
-    },
-  });
-  inp.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && calcUi.getState().mode !== "active") {
-      ev.preventDefault();
-      // Detach before paint so blur does not idle-commit the edit.
-      calcUi.clear(inp.value);
-      finishRestore();
-    }
-  });
-  inp.focus();
-  try {
-    inp.select();
-  } catch {
-    /* ignore */
-  }
 }
 
 function buildHeaderFields(fields) {
@@ -1567,7 +1277,7 @@ function ensureHeaderLinkPickers() {
             modalAlreadyOpen: sourceModalOpenRef.current,
           });
         setStatus("Setting vendor…");
-        vendorPickSourceSession = { supplier: normalizeEditableText(v), userClosed: false };
+        sourcePicker.notePick(v);
         await runVendorPickWithSourceModal({
           supplier: v,
           decision: decision || { open: false },
@@ -1600,53 +1310,7 @@ function ensureHeaderLinkPickers() {
 }
 
 async function openSourcePicker(supplier, opts = {}) {
-  const trigger = opts.trigger || "unknown";
-  const listSlice = api && api.listSourceSlice;
-  if (!listSlice || !ui || !ui.features.sourceModal) {
-    setStatus("Source picker API missing — restart the shell.", "err");
-    return { ok: false, reason: "api_missing" };
-  }
-  if (sourceModalOpenRef.current) return { ok: false, reason: "already_open" };
-  if (!editable()) {
-    setStatus(`${docTitle()} is not a draft — source picker locked.`, "warn");
-    return { ok: false, reason: "not_editable" };
-  }
-  const supInp = supplierInput();
-  const sup =
-    normalizeEditableText(supplier) ||
-    normalizeEditableText(lastDoc && lastDoc.supplier) ||
-    normalizeEditableText(supInp && supInp.value);
-  if (!sup) {
-    setStatus(`Pick a vendor before ${ui.sourceLabel || "Select PO"}.`, "warn");
-    return { ok: false, reason: "no_supplier" };
-  }
-  // The vendor pick checked already; the toolbar and a vendor typed then left were not (R5b-5).
-  if (trigger !== "link_pick" && (await vendorIsMissing(sup, "sources"))) {
-    return { ok: false, reason: "vendor_missing" };
-  }
-
-  if (trigger === "toolbar") {
-    vendorPickSourceSession = null;
-  }
-
-  const gate = mayAutoOpenSourcePicker(vendorPickSourceSession, sup, trigger);
-  if (!gate.ok) {
-    logFocus("source-modal-skip", `${trigger}:${gate.reason || "blocked"}`);
-    return { ok: false, reason: gate.reason || "blocked" };
-  }
-
-  if (sourcePickerInflight && sourcePickerInflightSupplier === sup && trigger !== "toolbar") {
-    return sourcePickerInflight;
-  }
-
-  sourcePickerInflightSupplier = sup;
-  sourcePickerInflight = runDocSourcePicker(sup, trigger).finally(() => {
-    if (sourcePickerInflightSupplier === sup) {
-      sourcePickerInflight = null;
-      sourcePickerInflightSupplier = "";
-    }
-  });
-  return sourcePickerInflight;
+  return sourcePicker.open(supplier, opts);
 }
 
 /**
@@ -1663,12 +1327,9 @@ async function runDocSourcePicker(sup, trigger) {
     skinId: ui.profileId,
     listSourceSlice: (vendor, sliceId) => api.listSourceSlice(vendor, sliceId),
     log: (event, detail) => logFocus(event, detail || ""),
-    mayOpen: (vendor, trig) =>
-      mayAutoOpenSourcePicker(vendorPickSourceSession, vendor, trig),
+    mayOpen: (vendor, trig) => sourcePicker.mayOpen(vendor, trig),
     onUserClose: () => {
-      if (vendorPickSourceSession && vendorPickSourceSession.supplier === sup) {
-        vendorPickSourceSession.userClosed = true;
-      }
+      sourcePicker.noteClosed(sup);
     },
     onStreamComplete: ({ errors }) => {
       if (errors.length && sourceModalOpenRef.current) {
@@ -1743,25 +1404,9 @@ function clearPaintedForm() {
   paintMoneyStack(null);
 }
 
+/** A new form starts in its party box, unless the clerk is already somewhere on it (src/party-focus.js). */
 function focusVendorField() {
-  const v = supplierInput();
-  if (!v) return;
-  const tryFocus = () => {
-    try {
-      v.focus({ preventScroll: false });
-      v.select();
-    } catch {
-      try {
-        v.focus();
-      } catch {
-        /* ignore */
-      }
-    }
-  };
-  tryFocus();
-  requestAnimationFrame(tryFocus);
-  setTimeout(tryFocus, 50);
-  setTimeout(tryFocus, 200);
+  return focusPartyBox({ box: supplierInput(), shownMark: docShownMoveMark, shownFocus: docShownFocus, userMoves, logFocus });
 }
 
 function paintedHeaderValue(field) {
@@ -1784,6 +1429,12 @@ function paint(doc, snapScratch, opts = {}) {
   // the repaint — after whatever the caller waited on — so a box rebuilt under them is refocused,
   // and a clerk who already moved on is left where they are.
   const focusAnchor = opts.keepFocus ? captureFocusAnchor() : null;
+  // The clerk's moves count from when this document first appeared (focusVendorField).
+  if (doc && doc.name && String(doc.name) !== docShownName) {
+    docShownMoveMark = userMoves.mark();
+    docShownFocus = document.activeElement;
+    docShownName = String(doc.name);
+  }
   painting = true;
   try {
   calcUi.clear();
@@ -1791,6 +1442,8 @@ function paint(doc, snapScratch, opts = {}) {
   if (String((doc && doc.name) || "") !== String((lastDoc && lastDoc.name) || "")) {
     closeAllLinkDropdowns();
     hideMissingVendorBanner();
+    // The Bill's way: the source picker's session belongs to the document it was made on.
+    sourcePicker.forget();
   }
   lastDoc = doc || null;
   scratch = snapScratch && typeof snapScratch === "object" ? { ...snapScratch } : {};
@@ -2118,8 +1771,7 @@ async function doSave(submit) {
     }
     const blockers = currentSaveBlockers();
     if (!commitGateSaveEnabled(blockers)) {
-      commitGate.openDirectSaveBlocked(blockers, { submit });
-      setStatus(blockers[0] || "Fix save prerequisites first.", "err");
+      announceSaveFailure(saveFailure({ ok: false, blockers }, { submit: !!submit, humanize: erpWords }));
       return { ok: false, reason: blockers[0] || "Local save checks failed.", blockers };
     }
     const choice = submit ? "submit" : "save";
@@ -2135,31 +1787,19 @@ async function doSave(submit) {
       setStatus(commitGateSuccessLabel(choice));
       return { ok: true };
     }
-    if (r && Array.isArray(r.blockers) && r.blockers.length) {
+    // An unanswered save's texts are scraped off ERPNext's page (maybe an earlier refusal still on
+    // screen): never kept as blockers.
+    if (r && Array.isArray(r.blockers) && r.blockers.length && saveFailureKind(r) !== "no-answer") {
       metaBlockers = r.blockers;
     }
-    const reason = formatSaveFailureReason(
-      r,
-      submit ? "Save & submit" : "Save draft",
-    );
-    setStatus(reason, "err");
-    const mergedBlockers = mergeSaveBlockers(
-      listDocFormSaveBlockers({
-        doc: lastDoc,
-        supplier: supplierInput() && supplierInput().value,
-      }),
-      r && Array.isArray(r.blockers) ? r.blockers : reason ? [reason] : [],
-    );
-    commitGate.openDirectSaveBlocked(mergedBlockers, {
-      submit,
-      erpFailure: !(r && Array.isArray(r.blockers) && r.blockers.length),
-      reason,
-    });
+    const failure = saveFailure(r, { submit: !!submit, humanize: erpWords });
+    announceSaveFailure(failure);
     return {
       ok: false,
-      reason,
+      reason: failure.status,
       blockers: r && Array.isArray(r.blockers) ? r.blockers : undefined,
       timedOut: !!(r && r.timedOut),
+      failure,
     };
   } finally {
     saveInFlight = false;

@@ -14,7 +14,6 @@ import {
   resolveImportRecord,
   mergeImportDescription,
   MAX_ITEM_IMPORT_ROWS,
-  IMPORT_COL_IGNORE,
   IMPORT_COL_DESCRIPTION_APPEND,
   IMPORT_COL_LINE_AMOUNT,
 } from "../src/item-import-cleaner.js";

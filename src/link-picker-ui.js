@@ -61,8 +61,35 @@ export function closeAllLinkDropdowns() {
  *   setStatus: (text: string, cls?: string) => void,
  *   onBeforePick?: (value: string, doctype: string, btn: HTMLButtonElement|null) => void,
  *   optionDataAttrs?: (row: import("./link-search.js").LinkOption) => Record<string, string>,
+ *   pickerScope?: () => string,
  * }} LinkPickerDeps
  */
+
+/**
+ * Which lists this page's pickers use, told to the main process once per form (`pickerScope`, the
+ * form showing: a doc-form page switches forms in place), so a Doc open warms only those lists
+ * (electron/ipc/link-search.js `notePickerList`).
+ * @type {Set<string>}
+ */
+const pickerListsTold = new Set();
+/**
+ * @param {LinkPickerDeps} deps
+ * @param {string} doctype
+ */
+function tellPickerList(deps, doctype) {
+  const api = deps.api;
+  if (!api || typeof api.notePickerList !== "function") return;
+  const scope = deps.pickerScope ? deps.pickerScope() : "";
+  if (!scope) return;
+  const key = `${scope}|${doctype}`;
+  if (pickerListsTold.has(key)) return;
+  pickerListsTold.add(key);
+  Promise.resolve(api.notePickerList(scope, doctype))
+    .then((noted) => {
+      if (noted === false) pickerListsTold.delete(key);
+    })
+    .catch(() => pickerListsTold.delete(key));
+}
 
 /**
  * @param {string|null|undefined} v
@@ -97,6 +124,7 @@ export function mountLinkPicker(input, doctype, onPicked, deps, pickOpts = {}) {
   const { api, linkMounted, setStatus, onBeforePick, optionDataAttrs, onCreatePeek } = deps;
   if (!input || linkMounted.get(input)) return;
   linkMounted.set(input, true);
+  tellPickerList(deps, doctype);
   const wrap = document.createElement("div");
   wrap.className = "link-wrap";
   input.parentNode.insertBefore(wrap, input);

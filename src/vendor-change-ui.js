@@ -8,7 +8,8 @@
 
 /**
  * @param {{
- *   api: { clearForVendorChange?: (v: string) => Promise<any> } | null | undefined,
+ *   api: { clearForVendorChange?: (v: string, opts?: { openToken?: number }) => Promise<any> } | null | undefined,
+ *   openToken?: number,
  *   value: string,
  *   box: HTMLInputElement | null | undefined,
  *   kept: string,
@@ -25,7 +26,7 @@ export async function clearBeforeVendorSwitch(o) {
   if (!o.api || !o.api.clearForVendorChange) return true;
   let res;
   try {
-    res = await o.api.clearForVendorChange(o.value);
+    res = await o.api.clearForVendorChange(o.value, o.openToken ? { openToken: o.openToken } : undefined);
   } catch (e) {
     res = { ok: false, reason: `Could not clear the ${o.docLabel} for the new vendor: ${String((e && e.message) || e)}` };
   }

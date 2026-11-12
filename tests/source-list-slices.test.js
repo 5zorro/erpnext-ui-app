@@ -4,7 +4,6 @@ import {
   buildBillSourceLoadingGroups,
   buildSourceGroupFromSliceRows,
   applySourceSliceToGroups,
-  SOURCE_LIST_SLICE_DEFS,
   SOURCE_LIST_SLICE_ORDER,
 } from "../src/source-list-slices.js";
 import { isSelectableSourceItem } from "../src/source-modal.js";

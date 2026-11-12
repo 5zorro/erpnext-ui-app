@@ -6,8 +6,8 @@ export function billApiFromErpDoc(api) {
   if (!api) throw new Error("Doc API missing");
   return {
     getSnapshot: () => api.getSnapshot(),
-    setHeader: (field, value) => api.setHeader(field, value),
-    clearForVendorChange: (value) => api.clearForVendorChange(value),
+    setHeader: (field, value, opts) => api.setHeader(field, value, opts),
+    clearForVendorChange: (value, opts) => api.clearForVendorChange(value, opts),
     checkRef: (billNo, opts) => api.checkRef(billNo, opts || {}),
     prefetchVendorRefs: (supplier) =>
       api.prefetchVendorRefs ? api.prefetchVendorRefs(supplier || "") : Promise.resolve({ ok: false }),
@@ -52,6 +52,8 @@ export function billApiFromErpDoc(api) {
     searchLink: (doctype, txt, filters) => api.searchLink(doctype, txt || "", filters || null),
     refreshLinkList: (doctype) =>
       api.refreshLinkList ? api.refreshLinkList(doctype || "") : Promise.resolve({ ok: false }),
+    notePickerList: (skin, doctype) =>
+      api.notePickerList ? api.notePickerList(skin || "", doctype || "") : Promise.resolve(true),
     linkExists: (doctype, name) =>
       api.linkExists ? api.linkExists(doctype || "", name || "") : Promise.resolve({ ok: true, exists: null }),
     checkAccountCompanies: () => api.checkAccountCompanies(),

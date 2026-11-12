@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VERSION = 31;
+  var VERSION = 34;
   if (window.__docFormBridge && window.__docFormBridge.version >= VERSION) return;
 
   /** Must stay ≤ BILL_SAVE_TIMEOUT_MS in bill-action-flow.js (outer Electron race). */
@@ -82,10 +82,10 @@
     a.doctype = doctype;
     if (!a.fields) a.fields = ["name"];
     if (!("limit" in a)) a.limit = 20;
-    return frappe.xcall("frappe.desk.reportview.get_list", a);
+    return frappe.xcall("frappe.desk.reportview.get_list", a, "POST", { silent: true });
   }
   function xValue(doctype, filters, fieldname) {
-    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+    return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname }, "POST", { silent: true });
   }
 
   /** A refused xList / xValue: its own message, else the reply ERPNext refused with. */
@@ -194,7 +194,7 @@
 
   function withAutoAcceptConfirm(run) {
     var original = frappe.confirm;
-    frappe.confirm = function (msg, yes, no) {
+    frappe.confirm = function (msg, yes, _no) {
       if (isPostingDateConfirmMsg(msg)) {
         try {
           if (typeof yes === "function") yes();
@@ -429,15 +429,22 @@
    * fails (msgprint shown, callback never called) — that caused Doc Bill's long timeout.
    * We preflight mandatories, clear stuck freeze locks, race savedocs against a short
    * deadline, and scrape visible Vanilla messages when the call never returns.
+   *
+   * Every failed reply says which case it is (`outcome`, worded by src/save-failure.js):
+   * "not-sent" — stopped before ERPNext was asked; "refused" — ERPNext (its server, or its form
+   * scripts) said no, nothing saved, `erpReason` its words ("" when it gave none); "no-answer" —
+   * no reply in `waitedMs`, or the connection broke (HTTP 0 / 502 / 503 / 504): it may still save;
+   * "unread" — ERPNext answered yes but no document came back.
    */
   function saveDoc(action) {
     return (async function () {
       try {
         var f = window.cur_frm;
-        if (!f || !f.doc) return { ok: false, reason: "No form open in Vanilla (cur_frm missing)." };
+        if (!f || !f.doc) return { ok: false, outcome: "not-sent", reason: "No form open in Vanilla (cur_frm missing)." };
         if (f.doc.docstatus !== 0) {
           return {
             ok: false,
+            outcome: "not-sent",
             reason:
               "Document is not a draft (docstatus=" +
               f.doc.docstatus +
@@ -461,6 +468,7 @@
         if (pre && pre.blockers && pre.blockers.length) {
           return {
             ok: false,
+            outcome: "not-sent",
             preflight: true,
             blockers: pre.blockers,
             reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
@@ -481,6 +489,8 @@
             var visible = collectVisibleVanillaErrors();
             return {
               ok: false,
+              outcome: "refused",
+              erpReason: visible.length ? visible.join(" · ") : trigMsg || "",
               reason: visible.length ? visible.join(" · ") : trigMsg || "Client validation failed.",
               blockers: visible.length ? visible : [trigMsg],
             };
@@ -489,6 +499,8 @@
             var visFail = collectVisibleVanillaErrors();
             return {
               ok: false,
+              outcome: "refused",
+              erpReason: visFail.length ? visFail.join(" · ") : "",
               reason:
                 (visFail.length ? visFail.join(" · ") : null) ||
                 "Client validation failed (form script set frappe.validated = false).",
@@ -501,6 +513,7 @@
           if (pre && pre.blockers && pre.blockers.length) {
             return {
               ok: false,
+              outcome: "not-sent",
               preflight: true,
               blockers: pre.blockers,
               reason: pre.blockers.join(" · ") || "Missing mandatory fields.",
@@ -519,7 +532,9 @@
               var scraped = collectVisibleVanillaErrors();
               finish({
                 ok: false,
+                outcome: "no-answer",
                 timedOut: true,
+                waitedMs: SAVE_CALL_TIMEOUT_MS,
                 blockers: scraped.length ? scraped : undefined,
                 reason: scraped.length
                   ? scraped.join(" · ")
@@ -530,7 +545,7 @@
               });
             }, SAVE_CALL_TIMEOUT_MS);
 
-            frappe.call({
+            var req = frappe.call({
               method: "frappe.desk.form.save.savedocs",
               args: { doc: f.doc, action: action },
               freeze: true,
@@ -548,6 +563,8 @@
                   } catch (eHide) {}
                   finish({
                     ok: false,
+                    outcome: "refused",
+                    erpReason: msg || "",
                     reason: msg || "Save failed — ERPNext gave no reason.",
                     blockers: msg ? [msg] : undefined,
                   });
@@ -577,6 +594,7 @@
                 } catch (eJson) {
                   finish({
                     ok: false,
+                    outcome: "unread",
                     reason: "Save succeeded but could not read document back — reload the Bill.",
                   });
                   return;
@@ -585,6 +603,7 @@
                   var scrapedOk = collectVisibleVanillaErrors();
                   finish({
                     ok: false,
+                    outcome: "unread",
                     reason:
                       (scrapedOk.length ? scrapedOk.join(" · ") : null) ||
                       "Vanilla returned no document after " + action + ".",
@@ -604,6 +623,18 @@
               },
               error: function (r) {
                 clearTimeout(timer);
+                // No reply from ERPNext itself: the connection broke (0) or the proxy gave up
+                // waiting (502 / 503 / 504) — the save may still go through.
+                var httpStatus = req && typeof req.status === "number" ? req.status : 0;
+                if (httpStatus === 0 || httpStatus === 502 || httpStatus === 503 || httpStatus === 504) {
+                  finish({
+                    ok: false,
+                    outcome: "no-answer",
+                    httpStatus: httpStatus,
+                    reason: action + " got no reply from ERPNext (HTTP " + httpStatus + ").",
+                  });
+                  return;
+                }
                 // A refusal (HTTP 417) lands here, not in `callback`: read ERPNext's own message
                 // first — the scraped dialog carries its chrome ("Message … Confirm") — R6b-2.
                 var errMsg = refusalText(r);
@@ -614,6 +645,9 @@
                 } catch (eHide2) {}
                 finish({
                   ok: false,
+                  outcome: "refused",
+                  httpStatus: httpStatus,
+                  erpReason: errMsg || (scrapedErr.length ? scrapedErr.join(" · ") : ""),
                   reason:
                     errMsg ||
                     (scrapedErr.length ? scrapedErr.join(" · ") : null) ||
@@ -629,16 +663,24 @@
         });
       } catch (e) {
         clearSaveLocks();
-        return { ok: false, reason: String(e && e.message ? e.message : e) };
+        return { ok: false, outcome: "not-sent", reason: String(e && e.message ? e.message : e) };
       }
     })();
   }
 
-  function formMatches(doctype) {
+  /**
+   * @param {string} doctype
+   * @param {string[]} [notNames] a fresh blank was asked for (a new document made in place): the
+   *   form must show a new, unsaved document that is none of these (the forms it replaces).
+   */
+  function formMatches(doctype, notNames) {
     var f = window.cur_frm;
     if (!f || !f.doc) return false;
-    if (!doctype) return true;
-    return f.doctype === doctype || f.doc.doctype === doctype;
+    if (doctype && f.doctype !== doctype && f.doc.doctype !== doctype) return false;
+    if (notNames && notNames.length) {
+      if (!f.doc.__islocal || notNames.indexOf(f.doc.name) >= 0 || f.docname !== f.doc.name) return false;
+    }
+    return true;
   }
 
   function snapshot(doctype) {
@@ -823,10 +865,6 @@
     return { ready: false, reason: "waiting" };
   }
 
-  function supplierAddressSnapshotReady(doc, ctx) {
-    return supplierSnapshotReadyReason(doc, ctx).ready;
-  }
-
   function normalizeSupplierKey(value) {
     return String(value == null ? "" : value).trim();
   }
@@ -851,7 +889,6 @@
     return false;
   }
 
-  var SUPPLIER_PARTY_META_FIELDS = ["supplier_name", "payment_terms_template"];
   var SUPPLIER_ADDRESS_DISPLAY_FIELDS = [
     "supplier_address",
     "address_display",
@@ -867,17 +904,6 @@
     var d = doc && typeof doc === "object" ? doc : {};
     for (var i = 0; i < SUPPLIER_ADDRESS_DISPLAY_FIELDS.length; i++) {
       if (stripHtml(d[SUPPLIER_ADDRESS_DISPLAY_FIELDS[i]])) return true;
-    }
-    return false;
-  }
-
-  function isSupplierPartyMetaOnlyChange(doc, baseline) {
-    var d = doc && typeof doc === "object" ? doc : {};
-    var base = baseline && typeof baseline === "object" ? baseline : {};
-    if (hasSupplierAddressDisplaySignals(d)) return false;
-    for (var m = 0; m < SUPPLIER_PARTY_META_FIELDS.length; m++) {
-      var mf = SUPPLIER_PARTY_META_FIELDS[m];
-      if (stripHtml(d[mf]) !== stripHtml(base[mf])) return true;
     }
     return false;
   }
@@ -1026,11 +1052,66 @@
   }
 
   /**
+   * The hooks `waitForForm` listens on, registered once per page (the form hooks once per doctype)
+   * and shared by every wait: each wait adds its `succeed` to `formWaiters` and removes it when it
+   * ends. Frappe keeps form and router handlers for the life of the page and cannot remove a router
+   * handler (`frappe.router.off` wraps the handler anew, so it never matches; gotchas G29), so a wait
+   * that registered its own left three dead handlers behind on every document opened.
+   */
+  var formWaiters = new Set();
+  var formWaitHooks = { jq: false, router: false, doctypes: {} };
+  function wakeFormWaiters() {
+    Array.from(formWaiters).forEach(function (fn) {
+      try {
+        fn();
+      } catch (eW) {}
+    });
+  }
+  function installFormWaitHooks(doctype) {
+    // Each is marked only once registered: an early wait (Frappe still loading) leaves it to the next.
+    if (!formWaitHooks.jq) {
+      try {
+        if (window.jQuery) {
+          jQuery(document).on(
+            "form-load.docFormBridgeWait form-refresh.docFormBridgeWait page-change.docFormBridgeWait",
+            wakeFormWaiters,
+          );
+          formWaitHooks.jq = true;
+        }
+      } catch (eJ) {}
+    }
+    if (!formWaitHooks.router) {
+      try {
+        if (frappe.router && typeof frappe.router.on === "function") {
+          frappe.router.on("change", wakeFormWaiters);
+          formWaitHooks.router = true;
+        }
+      } catch (eR) {}
+    }
+    if (doctype && !formWaitHooks.doctypes[doctype]) {
+      try {
+        if (frappe.ui && frappe.ui.form && frappe.ui.form.on) {
+          frappe.ui.form.on(doctype, { onload: wakeFormWaiters, refresh: wakeFormWaiters });
+          formWaitHooks.doctypes[doctype] = true;
+        }
+      } catch (eF) {}
+    }
+  }
+
+  /**
    * Wait until cur_frm matches doctype.
    * Events: form hooks, router, MutationObserver, one after_ajax pulse. Timeout = deadline only.
    */
-  function waitForForm(doctype, timeoutMs) {
+  /**
+   * @param {string} doctype
+   * @param {number} [timeoutMs]
+   * @param {{ notNames?: string[] }} [opts] `notNames`: wait for a fresh blank, not these forms
+   *   (formMatches); its answer then also waits for ERPNext's own opening calls to land, so the
+   *   snapshot carries the defaults its form scripts set.
+   */
+  function waitForForm(doctype, timeoutMs, opts) {
     timeoutMs = timeoutMs || 25000;
+    var notNames = opts && Array.isArray(opts.notNames) && opts.notNames.length ? opts.notNames : null;
     return new Promise(function (resolve) {
       var finished = false;
       var timer = null;
@@ -1042,17 +1123,21 @@
           if (obs) obs.disconnect();
         } catch (e0) {}
         obs = null;
-        try {
-          if (window.jQuery) jQuery(document).off(".docFormBridge");
-        } catch (e1) {}
+        formWaiters.delete(succeed);
       }
 
       function succeed() {
         if (finished) return;
-        if (!formMatches(doctype)) return;
+        if (!formMatches(doctype, notNames)) return;
         finished = true;
         cleanup();
-        resolve(snapshot(doctype));
+        if (!notNames) {
+          resolve(snapshot(doctype));
+          return;
+        }
+        afterAjaxQuiet(4000).then(function () {
+          resolve(snapshot(doctype));
+        });
       }
 
       function fail(reason) {
@@ -1081,42 +1166,13 @@
         });
       }
 
-      if (formMatches(doctype)) {
+      if (formMatches(doctype, notNames)) {
         succeed();
         return;
       }
 
-      try {
-        if (window.jQuery) {
-          jQuery(document).on(
-            "form-load.docFormBridge form-refresh.docFormBridge page-change.docFormBridge",
-            function () {
-              succeed();
-            },
-          );
-        }
-      } catch (e3) {}
-
-      try {
-        if (doctype && frappe.ui && frappe.ui.form && frappe.ui.form.on) {
-          frappe.ui.form.on(doctype, {
-            onload: function () {
-              succeed();
-            },
-            refresh: function () {
-              succeed();
-            },
-          });
-        }
-      } catch (e4) {}
-
-      try {
-        if (frappe.router && typeof frappe.router.on === "function") {
-          frappe.router.on("change", function () {
-            succeed();
-          });
-        }
-      } catch (e5) {}
+      formWaiters.add(succeed);
+      installFormWaitHooks(doctype);
 
       try {
         var root = document.documentElement || document.body;
@@ -1134,7 +1190,7 @@
       });
 
       timer = setTimeout(function () {
-        if (formMatches(doctype)) succeed();
+        if (formMatches(doctype, notNames)) succeed();
         else fail();
       }, timeoutMs);
     });
@@ -1168,7 +1224,7 @@
     try {
       var d = f && f.doc;
       if (!d || d.doctype !== "Purchase Invoice" || !d.bill_date || !d.payment_terms_template || d.is_return) return false;
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.controllers.accounts_controller.get_payment_terms",
         args: {
           terms_template: d.payment_terms_template,
@@ -1194,7 +1250,7 @@
       var party_type = f.doc.doctype === "Sales Invoice" ? "Customer" : "Supplier";
       var party = f.doc.doctype === "Sales Invoice" ? f.doc.customer : f.doc.supplier;
       if (!party) return { due_date: null };
-      var r = await frappe.call({
+      var r = await frappe.call({ silent: true,
         method: "erpnext.accounts.party.get_due_date",
         args: {
           posting_date: f.doc.posting_date,

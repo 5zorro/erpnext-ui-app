@@ -105,10 +105,10 @@ export const ERP_LIST_JS = String.raw`function xList(doctype, args) {
   a.doctype = doctype;
   if (!a.fields) a.fields = ["name"];
   if (!("limit" in a)) a.limit = 20;
-  return frappe.xcall("frappe.desk.reportview.get_list", a);
+  return frappe.xcall("frappe.desk.reportview.get_list", a, "POST", { silent: true });
 }
 function xValue(doctype, filters, fieldname) {
-  return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname });
+  return frappe.xcall("frappe.client.get_value", { doctype: doctype, filters: filters, fieldname: fieldname }, "POST", { silent: true });
 }`;
 
 /**

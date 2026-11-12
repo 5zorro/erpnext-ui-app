@@ -3,6 +3,7 @@
  */
 
 import { setWashSourceAttr } from "./doc-wash.js";
+import { sourceTermsDisplayBlocks } from "./doc-source-terms.js";
 
 /**
  * @typedef {import("./doc-source-terms.js").SourceTermsDisplayBlock} SourceTermsDisplayBlock
@@ -39,4 +40,24 @@ export function paintSourceTermsFields(container, blocks) {
     field.append(label, body);
     container.append(field);
   }
+}
+
+/**
+ * The source documents' terms under a Doc form (written once for every Doc form page, plan
+ * 2026-10-25 closeout item 4): ask ERPNext for the terms of the documents the lines came from,
+ * and show them, or hide the block when there are none.
+ * @param {{ block: HTMLElement|null|undefined, fields: HTMLElement|null|undefined, api: any, refs: any[] }} opts
+ */
+export async function paintSourceTermsBlock({ block, fields, api, refs }) {
+  if (!block || !fields) return;
+  const hide = () => {
+    block.hidden = true;
+    fields.replaceChildren();
+  };
+  if (!api || !api.fetchSourceTerms || !refs.length) return hide();
+  const res = await api.fetchSourceTerms(refs);
+  const blocks = sourceTermsDisplayBlocks(refs, res && res.termsByKey, res && res.remarksByKey);
+  if (!blocks.length) return hide();
+  paintSourceTermsFields(fields, blocks);
+  block.hidden = false;
 }

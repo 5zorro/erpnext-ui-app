@@ -83,23 +83,6 @@ export function docCommitGateSaveWarning(blockers = [], docTitle = "Doc form") {
 }
 
 /**
- * @param {string} [reason]
- * @param {string} [docTitle]
- */
-export function docCommitGateErpFailureView(reason, docTitle = "Doc form") {
-  const text =
-    reason && String(reason).trim()
-      ? String(reason).trim()
-      : "ERPNext rejected the save (no detail returned).";
-  return {
-    title: "ERPNext rejected the save:",
-    blockers: [text],
-    hint: `Cancel to return to the ${docTitle} and fix what Vanilla reported, or Discard / try again.`,
-    blocked: true,
-  };
-}
-
-/**
  * Resolve ERP Link doctype from header/item column meta.
  *
  * @param {string} field

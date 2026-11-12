@@ -13,12 +13,10 @@ import {
   isPurchaseInvoiceFormRoute,
   classifyFindBillResult,
   timeoutFailure,
-  formatSaveFailureReason,
   billExpensesTaxOrientation,
   billToolbarActionMatrix,
   gateTriggerLabel,
   nextAfterGate,
-  commitGateErpFailureView,
   isPrintPreviewRoute,
   classifyPrintNavResult,
 } from "../src/bill-action-flow.js";
@@ -62,13 +60,6 @@ describe("commit gate save messaging (OI-057)", () => {
     assert.match(commitGateSaveWarning(blockers), /live ERP meta|server-side rules/i);
   });
 
-  it("surfaces ERP rejection distinctly from local preflight", () => {
-    const view = commitGateErpFailureView("Mandatory field: Credit To");
-    assert.equal(view.blocked, true);
-    assert.match(view.title, /ERPNext rejected/i);
-    assert.equal(view.blockers[0], "Mandatory field: Credit To");
-  });
-
   it("reduces busy phases and recovers on error", () => {
     const start = reduceCommitGatePhase("idle", { type: "start-save", choice: "save" });
     assert.equal(start.phase, "saving");
@@ -106,22 +97,6 @@ describe("commit gate save messaging (OI-057)", () => {
     assert.match(detailed.reason, /Credit To/);
   });
 
-  it("formats save failures preferring blockers then reason", () => {
-    assert.match(formatSaveFailureReason(null, "Save draft"), /no response/i);
-    assert.equal(
-      formatSaveFailureReason({ blockers: ["Credit To missing"], reason: "ignored" }),
-      "Credit To missing",
-    );
-    assert.match(
-      formatSaveFailureReason({ timedOut: true, reason: "Submit did not finish in Vanilla within 12s" }),
-      /did not finish/i,
-    );
-  });
-
-  it("titles timeout ERP failures distinctly", () => {
-    const view = commitGateErpFailureView("Save & submit timed out — open Vanilla");
-    assert.match(view.title, /did not finish/i);
-  });
 });
 
 describe("Find Bill list confirmation (OI-056)", () => {

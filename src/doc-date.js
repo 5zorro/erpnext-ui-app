@@ -4,8 +4,6 @@
  * Partial MM/DD uses the year nearest to "today" by month distance.
  */
 
-const ALLOWED_RE = /[0-9/\-.]/g;
-
 /**
  * Strip disallowed characters from a date field value.
  * @param {unknown} raw

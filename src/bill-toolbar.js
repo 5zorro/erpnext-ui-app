@@ -101,7 +101,6 @@ export function commitGateAllowsAction(action, choice, ctx = {}) {
  * @param {{ isNew?: boolean }} [ctx]
  */
 export function commitGateChoiceEnabled(action, choice, ctx = {}) {
-  if (action === "direct-save" && choice === "discard") return false;
   if (action === "print" && choice === "discard" && ctx.isNew) return false;
   return true;
 }

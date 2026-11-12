@@ -14,7 +14,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { launchShell, waitForE2eApi } from "../../../e2e/helpers.js";
-import { sleep, inDoc, inErp, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
+import { inDoc, inErp, openNewDoc, assertSandboxSite, report } from "../probe-helpers.js";
 import { loginAsProbeUser, AP_CLERK } from "../probe-user.js";
 import { ERP_LIST_JS, PE_REASON_FROM_JS } from "../../../src/erp-refusal-reason.js";
 

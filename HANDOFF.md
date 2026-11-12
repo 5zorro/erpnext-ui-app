@@ -12,18 +12,6 @@
 3. Dated working plans (create new when a museum OI tranche is promoted). Each one's status box,
    at the top, says where it stands; read only the plan your work is in.
    **In flight:**
-   `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill / doc-form code
-   once — R2-5, R6a-1, R6a-2 from the review) — step 0 built (the items table's keys written once,
-   `src/item-table-keys-ui.js`, and three DF-03 fixes); R6a-1 steps 1–2 built (shared leaves,
-   the commit gate); step 3 built (the item rows, `src/doc-form-item-rows-ui.js`;
-   one taxes table for every form, the Bill's way, `src/doc-form-tax-table-ui.js`); R6a-2's four
-   dialogs built (2026-10-27 … 31, `src/bill-*-modal-ui.js`); R2-5 started 2026-10-31 from the far
-   end (printing, Papers, Find, payment settings, then re-link and method change moved to
-   `electron/ipc/`). 3b, the
-   performance deep dive, ran 2026-11-01 (its report is in the plan), before R2-5's bridge /
-   doc-form / Bill moves.
-   Decided: share, not merge, with every data-entry form in view
-   (the doc-form page already runs six; Pay Outstanding and Journal Entry may follow).
    `implementation-plan-2026-10-24.md` (the navigation matrix, `npm run nav:check`; DC-4) — built;
    rules folded into **Navigation spine** below.
    `implementation-plan-2026-10-12.md` (the Sales Order as the A/R dashboard) — built, being
@@ -38,12 +26,22 @@
    and P6.
    `implementation-plan-2026-09-08.md` (Payment terms as structured data + the batching
    assumptions) — **superseded 2026-09-16**; closes with 09-16 (its last item is 09-16's P4d).
-   **In flight:** `implementation-plan-2026-10-31.md` (dependencies first, then a linter) — the
-   review of what is installed is done, the two-month wait is in force (`.npmrc`), and ESLint
-   10.9.1 is installed (2026-11-01); next its config, an import rule of our own, and `npm test`.
    **Parked:** `implementation-plan-2026-09-21.md` (the Receiving Scanner, a second client on the
    phone; parked 2026-09-25) — its status box and *Resuming after the pause* say where it stands.
-   **Closed:** `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
+   **Closed:** `implementation-plan-2026-10-25.md` (split `main.js` by concern; write the Bill /
+   doc-form code once — R2-5, R6a-1, R6a-2 from the review; closed 2026-11-07) — folded into
+   **Main-process code by concern** below (where each concern lives, how a family moves, the
+   shared Doc-form modules, what each page keeps on purpose), the failed-save wording into the
+   module map (`save-failure.js`). Its doc-form and Bill moves go with multi-window (museum
+   OI-040), as do the Bill's writes without an open stamp and a second draft after "did not
+   finish" (OI-209). Code comments citing "plan 2026-10-25", "plan 10-25" or its step 3b findings
+   mean that section; the plan's full text (step 0's DF-03 fixes, each move's proof, the 3b
+   performance report, *A new Bill waits on nothing*) is the parent of the commit that deleted it.
+   `implementation-plan-2026-10-31.md` (dependencies first, then a linter; closed
+   2026-11-04) — the package policy and its reasons are in `AGENT_CONVENTIONS.md` § *Packages*,
+   the lint commands in *Run / validate* below, each lint setting's reason in `eslint.config.js`.
+   Code comments citing "plan 2026-10-31" mean those.
+   `implementation-plan-2026-10-26.md` (tests that run while the app is open, and
    where their time goes; built and closed 2026-10-26) — folded into **Test strategy** below (the
    rules) and *Run / validate* (`npm run test:times`, the charts); its performance follow-up is
    plan 10-25's step 3b. Code comments citing "plan 2026-10-26" mean that section.
@@ -126,7 +124,7 @@ flowchart LR
 | `pwa/receiving/` · `src/receiving/` · `ops/receiving-proxy/` | **Parked** (plan 2026-09-21): the Receiving Scanner, a second client on the phone — its pages, its pure logic (also served to the pages as `/receiving/lib/`), and the Caddy front door in front of ERPNext's own web server (frappe_docker untouched). Phone setup: `docs/receiving-phone-setup.md`. Invariant 4 holds: the phone uses the proxy's address for both |
 | `tests/*.test.js` | Unit tests; same change as the `src/` they cover |
 | `electron/main.js` | Wires views + IPC; calls into `src/` |
-| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; how a move goes is in that plan's *Order*). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
+| `electron/ipc/<family>.js` | One family's main-process code and IPC handlers, moved out of `main.js` (plan 2026-10-25 R2-5; which families, and how a move goes: **Main-process code by concern** below). Each holds its own state, gets what it borrows from `init<Family>(deps)`, and is read by wiring tests through `tests/main-process-source.js` |
 | `electron/*.html` + `*-preload.cjs` | Chrome / splash / history UI surfaces |
 | `docs/` | beta-slice, commit conventions, **dated** working plans |
 | Museum `~/agent-harness/erpnext/doc-shell/` | Reference only — layouts, OIs, lessons |
@@ -333,6 +331,11 @@ search for two (the search, then the vendors' last POs). Rules, with the numbers
   names starting with the text first, then the rest, each in plain string order (capitals first);
   vendors then re-ranked by PO activity (OI-131). The copy is `search_link` itself (empty text, no
   page limit) plus each row's rank from one ordered `get_list`. Proven 54/54 against live.
+- **Only the open form's lists (5zorro 2026-11-04: no request a form does not use):** each picker
+  tells main which list it searches, once per form (`link-picker-mounted`, from the shared
+  `mountLinkPicker`; `electron/ipc/link-search.js` keeps them per form). A Doc open, a peek's
+  return and a picker mounted on the open form warm only those; a list no opened form has a
+  picker for is copied only when something searches it (probe `warm-lists-used-only`).
 - **Freshness:** loaded 2 s after a Doc open (the ERPNext page is moving to the same document at
   that moment and cut every load off; a cut-off load retries once 3 s later); "changed since" on
   every Doc open (≥ 10 s apart), right after a peek returns (Create Vendor…), and at most once a
@@ -437,6 +440,92 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
   while listing the Comment doctype needs System Manager. `costingNotesByLine` places a note by the
   `salesOrderItem` its rows name; a note on an order with no line for the item places nothing.
 
+### Main-process code by concern, and the Doc forms' shared code (folded from plan 2026-10-25, 2026-11-04)
+
+Plan 2026-10-25 split `main.js` by concern (review 10-19 R2-5) and wrote the code the Bill and
+the doc-form pages had twice once (R6a-1, R6a-2). Nothing a clerk sees was meant to change; where
+it did, 5zorro asked for it (the doc-form forms' taxes table works like the Bill's; × is mouse-only;
+ALL CAPS is one layer). Code comments citing "plan 2026-10-25" or "plan 10-25" mean this section;
+its full text (step 0's DF-03 fixes T-1…T-3, each move's proof, the 3b performance report) is in
+git history, the parent of the commit that deleted it.
+
+**Moved to `electron/ipc/`** (main.js 13,534 → 11,041 lines): `print.js` (the print dialog,
+printing in place, the queue, the self-healing PDF), `papers.js` (the compare pane's attachments),
+`find.js` (the Find pages' list, peek and remembered search), `payment-settings.js` (the batch prefs
+and the delay calendar), `relink-method-change.js` (payment re-link and method change),
+`health-incidents.js` (the DB light, Diagnose, IT recovery, the issue dialogs, Feedback),
+`link-search.js` (every pick list's search and the warm copies).
+
+**Still in `main.js`, on purpose (5zorro, 2026-11-04):** the doc-form and Bill handlers (about 70 of
+the 136 left) with the bridge driving, the navigation spine, the lenses. Their state is one of
+everything: one hidden ERPNext page (`erp`), one `dirtyState`, one `currentRoute`, one
+`surfaceMode`, one open counter (`billLoadGen` / `billLoadToken`). Moving that word for word keeps
+it one of everything, and multi-window (museum OI-040) needs it per window, so those two moves are
+done once, as the first build step of multi-window, into a per-window home.
+
+**How a family moves** (keep it the same for any later move):
+- The code moves word for word. Its state moves with it as module-level `let`s; what it borrows
+  from main.js is set once by `init<Family>(deps)`, called where the block was. A main.js variable
+  that is replaced over time (`win`, `erp`) is lent as a getter (`mainWindow()`, `erpView()`), the
+  only edit inside moved code. The rest of main.js reads the module through named exports, never
+  its state directly.
+- Handlers register inside `register<Family>Handlers()`, so importing a module does nothing until
+  main.js calls its init.
+- Tests that find a handler or a pinned line read `tests/main-process-source.js` (main.js, then each
+  `electron/ipc/*.js`), never main.js alone. The coverage map (`src/architecture-families.js`)
+  lists the new file under its family.
+- **Proof:** lint (in `npm test`; its import rule catches a named import that does not exist, which
+  would stop the app at start-up), `npm test`, one headless start (`E2E=1 ERP_USER_DATA_DIR=<tmp>`
+  under `timeout -k 5 25`; read the errors), the family's specs from `npm run dogfood:for-change`
+  (compare failure names with a run on the code before, not counts). Where nothing drives a door,
+  a **doors probe** does: it walks every door and `report`s what the clerk sees, run on the code
+  before (twice, to see what varies) and after, the outputs `diff`ed. Keep it in `tests/probes/`
+  (`pay-settings-doors`, `relink-method-doors`, `health-incident-doors`, `link-search-doors`).
+
+**Share, not merge (5zorro, 2026-10-25), with every data-entry form in view.** The Bill and the
+doc-form page stay two pages; what they share is a module both import, each page's extras passed in
+as hooks. The doc-form page runs six forms (PO, Item Receipt, Estimate, Sales Order, Invoice, Receive
+Payment). Rules for a shared module:
+- It talks about *lines*, not items: the lines table comes from the layout (`linesTable`, default
+  `items`), and a rule really about items (an empty Item line is deleted on Tab) is a hook.
+- Bill-only or A/P-only behaviour (Rec'd, Assign, account-company blockers, the Bill's own save)
+  comes in as a hook, never a `profileId` branch inside the module.
+- When the two pages differ, the Bill's way wins (5zorro's dogfooded page).
+
+| Shared module | What it does for both pages |
+|---|---|
+| `item-table-keys-ui.js`, `item-table-nav.js`, `item-sort-hold.js` | The lines table's keys: edit / nav mode, Tab and the arrows in screen order, a key dropped while a write is out (≤ 10 s), the order held while the clerk types and the "Sort is out of date 🔄" banner |
+| `doc-form-lines-ui.js` | Around the rows, for both pages: the `page` object (`DocPage`: how to read the page's state and repaint it — the one set of settings the shared code takes), and with it the rows themselves (`createItemRows`, each page adding only its own cells and the Bill's Qty split), Amount → rate ("back into cost"), one line on a new form, an empty line removed on leaving it, the way back from a line's "create …" peek, Remove all taxes (the Bill's Allocate lock is an option), the money stack, the line totals, column sizing |
+| `doc-form-item-rows-ui.js` | The rows: every shared cell, its write and the focus after it, pick lists, tape, × (each page adds its own cells after) |
+| `doc-form-tax-table-ui.js` | One taxes table for every form, the Bill's: the walk, commit on a move, a rate on a fixed row works out its amount, Rate % from the net total |
+| `doc-form-commit-gate-ui.js` (+ `doc-commit-gate-ui.js`, its DOM) | The commit gate: toolbar actions, the navigation gate, the preflight. A toolbar Save that fails opens no gate |
+| `save-failure.js` + `doc-toast-ui.js` | One wording for a failed save on every form, shown the Bill's way: the red status line and a toast, no dialog (5zorro: no blocking dialog unless the gate is the point). The case comes from the reply's `outcome` mark, never its words: not sent ("Can't save yet — …"), refused ("Save rejected — ERPNext says: …", or "gave no reason; open Vanilla"), no answer ("Save did not finish — ERPNext did not answer in N s and may still save it; reload before trying again"; also when the ERPNext page reloaded under it), unread ("may have gone through"). The bridge's `saveDoc` marks every reply (HTTP 0 / 502 / 503 / 504 count as no answer: the save may still go through); main's `raceTimeout` and an interrupted `erpEval` mark theirs. A new save path must mark its replies too, or it reads as "not sent". Probe `save-failure-words` |
+| `repaint-keeps-edit.js` | A repaint never changes the box being typed in (invariant 10) |
+| `party-focus.js`, `doc-source-picker-open.js`, `doc-toolbar-actions.js`, `doc-source-terms-dom.js` `paintSourceTermsBlock` | A new form's opening focus in Vendor, never pulling the clerk out of a box they clicked into, but the box left focused from the last document does not count (the page keeps its boxes; probe `party-focus-kept`); opening the source picker, its pick session forgotten on another document; Find / New / Print; the source documents' terms |
+| `doc-form-date-field-ui.js`, `doc-form-line-tabs-ui.js`, `doc-form-tax-notes-ui.js`, `calc/site-rounding-ask.js`, `item-import-ui.js`, `address-picker-ui.js` | Smaller shared pieces |
+| `bill-assign.js` + `-modal-ui.js`, `bill-informal-link.js` + `-modal-ui.js`, `bill-source-modal-ui.js` + `bill-source-flow.js`, `bill-allocate-charge-modal-ui.js` | The Bill's four dialogs, out of its closure (R6a-2); Assign's steps are a pure reducer |
+
+**Left in each page on purpose** (2026-11-06; same-named functions with lines alike: 323, from 563):
+the header's blur (`onHeaderBlur`), `doSave`, `paint`, the header pick lists, the items head and
+where Tab goes after the last line. Their alike lines sit between each form's own steps (the Bill's
+due date, bill number check and Remarks block; doc-form's Date Expected and its layouts' fields),
+so a shared copy would take more hooks than it saves. The rest are a few lines each that call a
+shared module with the page's own boxes. The two pages also differ on purpose in the status pill
+before a document arrives (doc-form says "loading").
+
+**For a new form (Journal Entry, Pay Outstanding's pages), what it would pass:** to
+`createDocLines`, `lines: (d) => d.accounts` and `keyField: "account"`; to the keys,
+`lineKey: (l) => l.account`; and its columns. Two item names are still built into the
+keys: ↑ / ↓ move in `qty`, and the focus after a write lands on the next line's `item_code`; each
+becomes a layout setting when a form without them shares the module. Receive Payment's `references`
+lines were left alone (5zorro, 2026-10-25). `.taxes-table` / `.taxes-add` in `doc-fields.css` stay
+for the check / ACH document to reuse.
+
+**Still duplicated** (measured 2026-11-04 with `r6a-same-named-functions.py`, the local notes file
+says where): 569 identical lines in 36 same-named functions, down from 1,295 in 55. The largest are
+`onHeaderBlur` (52), `beginAmountBackIn` (48), `doSave` (46), `paint` (45), `openSourcePicker` (36),
+`removeAllTaxes` (30). The pages are 4,428 (Bill) and 2,628 (doc-form) lines.
+
 ### Extension points (where new work plugs in)
 
 | Capability | Pure module(s) | Electron surface |
@@ -463,7 +552,7 @@ are bought for. The rules (`src/bill-line-allocation.js` `planSalesOrderSplit`, 
 | A/R Doc skins (plan 2026-09-26 A1) | `estimate-map.js`, `sales-order-map.js`, `sales-invoice-map.js`, `receive-payment-map.js` (layouts as data), read by `sales-doc-map.js`; `doc-skin-registry.js` `DOC_FORM_MAPS` / `docFormMapFor` is what the page and `main.js` ask instead of `profileId === "po"` | More `doc-form.html` layouts. Receive Payment is `layoutOnly` (it shares Payment Entry with Pay Bills): reached by layout key, never by `profileByDoctypeKey` — see *Two registries* |
 | Bill map (M3a) | `bill-map.js` | Header/item projectors; Amount Due checksum |
 | Dirty-gate (M3b) | `dirty-gate.js` | Nav prompt classifier (wire in M3c) |
-| Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR) |
+| Doc ↔ Vanilla form bridge | `erp-form-bridge.js` + `electron/erp-form-bridge-page.js` | Event-driven `waitForForm` / `setRow` / `setHeader` (Bill template → PO/IR). Hooks it adds to ERPNext's page are registered once per page and shared (gotchas G29) |
 | Lens prefs | `lens-prefs.js` | Per-doctype last lens; default **doc**; persisted `lens-prefs.json` across restarts |
 | Lens context | `lens-context.js` (`DOC_SKIN_INDEX` + `ready`) | Doc tab only when indexed **and ready** |
 | Simplified skin (thin-inject) | `assume-applier-payload.js`, `assume-core.js`, `simplified-seed-profiles.js` | `ensureSimplifiedSkin` / `removeSimplifiedSkin` in `main.js` — injects into the **live Vanilla form**; a new doctype ships as a seed profile, not new shell code |
@@ -532,6 +621,28 @@ the app (each run has its own profile folder), but it is still long and loads th
 to update. The rules it
 fixed (2026-10-24):
 
+- **A new document waits on nothing (5zorro 2026-11-03).** Baseline: ERPNext's own list "+ Add"
+  shows a blank Purchase Invoice in ~0.3–0.8 s and puts the cursor nowhere (probe
+  `new-bill-instant` times both, every run). (1) When ERPNext is up and nothing would be asked, a new
+  document is made in the page the way "+ Add" makes it, `frappe.new_doc`, after forgetting that
+  doctype's unsaved blanks locally (`openFreshNewDocInPlace`). Before, two full page loads
+  (1–7 s). Anything a load would treat differently takes the full load: a saved document with
+  unsaved edits, a "leave page?" the load would stop to ask (Chromium asks only once the page has
+  been used by hand), a dialog other than a plain ERPNext message, a save out, the doctype not loaded
+  yet. (2) A new Bill paints a provisional blank at once, cursor in Vendor, before ERPNext's blank
+  exists. The Doc page's preload holds every call that touches the form until ERPNext's blank of
+  *that* open arrives (`openToken`), then sends them in order. If another open replaces it or it
+  fails, they are refused with a reason, never sent to another document. When ERPNext's blank
+  arrives it is the same Bill to the page: the clerk's typing, place and open pick list stay. A
+  vendor pick whose live checks are still out when another open starts never writes to the Bill
+  opened: the pick sends the open it started on (`openToken`) with its clear and its write, and
+  **main** refuses either once a newer Bill open has started (`billOpenLeft`, trail
+  `bill-open-left`). The page's own check comes too late: opening a saved Bill reloads the ERPNext
+  page, which ends the pick's question at once, before the page hears of the new Bill (probe
+  `vendor-pick-left-bill`, a held reply: before, the vendor landed on the draft or submitted Bill
+  opened, with no gate asked). Not yet on the PO / Item Receipt pages (they have no open counter). New pressed while a New is still opening joins it (`billNewInflight`,
+  the double-press guard), so the clerk's typing stays on the one blank. The PO and Item Receipt get
+  (1) only.
 - **Opening another document from a Doc page asks** about unsaved typing, wherever the door is
   (Recent, Drafts, Find, a link): `showDocForm` gates unless it is the same document or the caller
   already asked (`skipDirtyGate`, New). It used to skip the gate on any Doc page (N-1).
@@ -741,7 +852,22 @@ the 'i can't work while the probes are running'"*).**
   (timing probes may be flakier while he works).
 - **One probe run at a time** (`test-logs/probe-run.lock.json`; a second waits, up to an hour). A
   run starts by retiring any leftover probe user, which would end another run's clerk. A spec run
-  can go alongside.
+  can go alongside. The lock and the probe-user lock live in the **main checkout's** `test-logs/`,
+  so a run from a `git worktree` queues with runs from the main folder. To run checks one after
+  another, chain them in one script (probes queue on the lock anyway). Don't wait on another run
+  with `pgrep -f '<pattern>'` written in the waiting script itself: the pattern is in that
+  script's own command line, so it finds itself and waits forever (2026-11-06: 1.5 h, nothing
+  ran). Write it as `[p]attern`, and check the first probe has started before counting on it.
+- **Checks from a snapshot, while the code is edited.** A probe launches the app from the folder's
+  live files, so editing during a long check (`dogfood:check`, `nav:check`) changes what the later
+  probes test. Run it from a frozen copy instead: `npm run snapshot -- <dir>` (a `git worktree` of
+  everything not ignored, new files included, made through a temporary index — `git stash create`
+  would leave new files out; the real index and stash are untouched; `node_modules` and
+  `test-logs` are links to the main folder's, so the run's logs stay here), run the check in
+  `<dir>`, then `npm run snapshot -- --remove <dir>`. Tried 2026-11-02: a probe from a copy and
+  one from the main folder queued on the shared lock, both passed. For a red run (a new probe on the code
+  before the fix), the copy's own `HEAD` already holds the working tree, so restore the old code by
+  name: `git -C <dir> checkout <old-commit> -- electron src` (not `HEAD`), keeping the new probe.
 - **Charts.** Every test's timeline chart is written to `test-logs/traces/` (the latest per test).
   A failed or timed-out test also keeps its chart and the last 512 KB of the run's debug log in
   `test-logs/failures/` (the newest 30). Nothing kept goes under `test-results/`, which Playwright
@@ -947,7 +1073,9 @@ cd ~/erpnext-ui-app && npm test && npm start
 
 | Command | What |
 |---|---|
-| `npm test` | Required before every push; pure unit tests (`node --test`). Every run is logged to `test-logs/` (untracked) |
+| `npm test` | Required before every push; pure unit tests (`node --test`), then the lint check. Every run is logged to `test-logs/` (untracked) |
+| `npm run snapshot -- <dir>` · `-- --remove <dir>` | A frozen copy of the working tree to run a long check from while the code is edited (§ Test strategy) |
+| `npm run lint` | The lint check alone: ESLint's recommended rules plus our import rule over the whole repo (`eslint.config.js` gives each setting's reason; plan 2026-10-31). A failure fails `npm test`, here and in CI |
 | `npm run test:flaky` | Tests that failed and passed on the same code; `test-logs/flaky-history.md` keeps the report at each rotation |
 | `npm run test:times [-- probe\|e2e] [<name>]` | Where spec and probe time goes, slowest first: each test's median split into **work** (the app and ERPNext), its **own waits** (a probe's `sleep`; a probe waits for the page with `docQuiet` instead wherever time is not the question — `tests/probes/README.md` § *Writing one*) and **chaos lag** (summed; a chaos-mode run is its own row), plus the stages launch / app ready / form loaded / clerk login (`e2e/test-timing.js`, plan 2026-10-26). Every test — passed, failed or timed out — also writes its **timeline chart**, `test-logs/traces/<file> <test title>.json` (not `test-results/`: Playwright empties that at the start of every spec run), built by the run-log reporter from the test's spans and the app's (`test-spans.jsonl` in the run's profile folder; lanes: the test's stages and waits, ERPNext calls named by method or caller, chaos delays named by the call they delayed): open it in Chrome DevTools' Performance panel (*Load profile…*) or ui.perfetto.dev |
 | `npm start` · `npm run start:chaos` | The app; the second delays ERPNext calls at random (a stress test, never in a release) |
